@@ -1951,6 +1951,38 @@ def override_findings(contract: Contract, today) -> list[Finding]:
     return findings
 
 
+def observed_supply_findings(contract: Contract, contract_path: Path, workflows_dir: Path,
+                             repo: str, records: list[ServiceRecord],
+                             now: datetime) -> list[Finding]:
+    """Declared registrations serving required lanes vs the jobs that ran.
+
+    Advisory by construction (INFO/WARN, never ERROR): the census walk can stop
+    early once every host is proven, and it covers one workflow, so an IDLE or
+    NOT_OBSERVED here is a prompt to look, not a verdict to page on.
+    """
+    if not contract.static_snapshot:
+        return []
+    try:
+        snapshot = static_audit.load_snapshot(
+            contract_path.resolve().parent / contract.static_snapshot)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [Finding(INFO, "observed-supply", "snapshot", f"unreadable: {exc}")]
+    in_repo = [reg for reg in snapshot.registrations if reg.repo == repo]
+    required = static_audit.required_registrations(contract, snapshot, workflows_dir, repo)
+    since = now - timedelta(hours=contract.lookback_hours)
+    verdicts, undeclared = static_audit.classify_observed(required, records, since, in_repo)
+    findings = []
+    for v in verdicts:
+        level = WARN if v.verdict == static_audit.NOT_OBSERVED else INFO
+        seen = f", last seen {v.last_seen}" if v.last_seen else ""
+        findings.append(Finding(level, "observed-supply", v.registration,
+                                f"{v.verdict}{seen}: {v.detail}"))
+    for v in undeclared:
+        findings.append(Finding(WARN, "observed-supply", v.registration,
+                                f"{v.verdict}, last seen {v.last_seen}: {v.detail}"))
+    return findings
+
+
 def run_static(contract: Contract, contract_path: Path, snapshot_path: Path | None,
                workflows_dir: Path, repo: str, today, as_json: bool) -> int:
     if snapshot_path is None:
@@ -2097,9 +2129,25 @@ def main(argv: list[str] | None = None) -> int:
         if not contract.hosts:
             service_records = None
 
+    # The observed-supply layer reads the records the host census already
+    # fetched; wrapping the provider keeps it to one crawl.
+    census: dict[str, Any] = {}
+    if service_records is not None:
+        provider = (service_records if callable(service_records)
+                    else static_service_records(service_records))
+
+        def service_records(now: datetime, _provider=provider):  # noqa: F811
+            census["now"] = now
+            census["result"] = _provider(now)
+            return census["result"]
+
     findings = check(contract, runners, variables, evidence, workflows_dir,
                      unread_scopes, queued_ages, service_records)
     findings.extend(override_findings(contract, today))
+    if "result" in census:
+        findings.extend(observed_supply_findings(
+            contract, args.contract, workflows_dir, args.repo,
+            census["result"][0], census["now"]))
     if profile_inputs or receipt_inputs or source_manifest:
         findings.extend(
             finding for finding in check_event_class_evidence(

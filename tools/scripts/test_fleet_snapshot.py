@@ -4,6 +4,8 @@
 The fake generator stands in for tartci's `macos_fleet_lanes.py
 advertised-labels`: each profile file holds the registrations it advertises
 as JSON, so a test adds or removes a machine by adding or deleting a file.
+tartci's published `fleet/advertised-labels.json`, when present, takes
+precedence over the generator.
 """
 
 from __future__ import annotations
@@ -109,6 +111,37 @@ class FleetSnapshot(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertIn("registration changed: hosta:pulp-gate/pulp-build-pr-head (workflows)",
                       proc.stdout)
+
+    def test_the_published_file_wins_over_the_generator(self):
+        self.assertEqual(self._run("--write").returncode, 0)
+        published = self.tartci / "fleet" / "advertised-labels.json"
+        published.parent.mkdir()
+        data = json.loads(self.snapshot.read_text())
+        data["registrations"].append(_reg("hostpub"))
+        published.write_text(json.dumps(data))
+        proc = self._run("--check")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("host added upstream: hostpub", proc.stdout)
+        self.assertIn("published fleet/advertised-labels.json", proc.stdout)
+
+    def test_a_malformed_published_file_is_unreadable_not_a_fallback(self):
+        (self.tartci / "fleet").mkdir()
+        (self.tartci / "fleet" / "advertised-labels.json").write_text('{"schema": "x"}')
+        proc = self._run("--check")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("UNREADABLE", proc.stderr)
+
+    def test_the_source_url_is_fetched(self):
+        self.assertEqual(self._run("--write").returncode, 0)
+        remote = Path(self._tmp.name) / "remote.json"
+        data = json.loads(self.snapshot.read_text())
+        data["registrations"] = data["registrations"][:1]
+        remote.write_text(json.dumps(data))
+        proc = subprocess.run([sys.executable, str(TOOL), "--source-url", remote.as_uri(),
+                               "--snapshot", str(self.snapshot), "--check"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+        self.assertIn("host removed upstream: hostb", proc.stdout)
 
     def test_a_tartci_without_the_generator_is_unreadable(self):
         (self.tartci / "scripts" / "macos_fleet_lanes.py").unlink()

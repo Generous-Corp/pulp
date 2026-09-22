@@ -1,0 +1,1907 @@
+{
+ "_comment": "Captured read-only with `ghapp api repos/Generous-Corp/pulp/actions/runs/<id>/jobs` on 2026-09-22 from 25 completed build.yml runs and one release-cli.yml run (35775293728), trimmed to the fields the observed-supply classifier reads. Values are real. Note the release-cli darwin legs ran on pulp-gate runners. Jobs never placed on a runner were cut to three examples.",
+ "jobs": [
+  {
+   "name": "classify",
+   "run_id": 35792120939,
+   "runner_name": "GitHub Actions 1000116411",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:23:48Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35792120939,
+   "runner_name": "GitHub Actions 1000116412",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:23:48Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35792120939,
+   "runner_name": "GitHub Actions 1000116413",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:24:02Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35792120939,
+   "runner_name": "studio-pulp-gate-01-42272-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T23:07:35Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35792120939,
+   "runner_name": "GitHub Actions 1000116414",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T23:07:58Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116254",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:57:52Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116255",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:57:46Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116260",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:58:07Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116269",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:10:30Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35789581095,
+   "runner_name": "studio-pulp-gate-slot2-02-175-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:36:36Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116484",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:36:41Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35789581095,
+   "runner_name": "GitHub Actions 1000116485",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:36:40Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35787726376,
+   "runner_name": "GitHub Actions 1000116071",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:37:30Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35787726376,
+   "runner_name": "GitHub Actions 1000116072",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:37:26Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35787726376,
+   "runner_name": "GitHub Actions 1000116082",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:37:42Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35787726376,
+   "runner_name": "GitHub Actions 1000116083",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:20:23Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35787726376,
+   "runner_name": "m1-pulp-gate-slot2-02-84935-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:58:35Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35787080241,
+   "runner_name": "GitHub Actions 1000116046",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:30:54Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35787080241,
+   "runner_name": "GitHub Actions 1000116047",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:30:57Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35787080241,
+   "runner_name": "GitHub Actions 1000116055",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:31:10Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35787080241,
+   "runner_name": "GitHub Actions 1000116057",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:57:04Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35787080241,
+   "runner_name": "m5-pulp-gate-slot2-02-55983-9",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:35:42Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35787079166,
+   "runner_name": "GitHub Actions 1000116054",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:30:57Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35787079166,
+   "runner_name": "GitHub Actions 1000116053",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:30:55Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35787079166,
+   "runner_name": "GitHub Actions 1000116056",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:31:12Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35787079166,
+   "runner_name": "m5-pulp-gate-01-67252-5",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:22:58Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35787079166,
+   "runner_name": "GitHub Actions 1000116058",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:02:14Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35786358900,
+   "runner_name": "GitHub Actions 1000116034",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:23:48Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35786358900,
+   "runner_name": "GitHub Actions 1000116033",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:23:49Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35786358900,
+   "runner_name": "GitHub Actions 1000116037",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:24:04Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35786358900,
+   "runner_name": "studio-pulp-gate-slot2-02-49566-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T22:07:16Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35786358900,
+   "runner_name": "GitHub Actions 1000116038",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:56:19Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000115990",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:06Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000115991",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:06Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000115995",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:22Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35780660400,
+   "runner_name": "m1-pulp-gate-01-62795-5",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:38:52Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000116001",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:43:27Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000116522",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:38:58Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35780660400,
+   "runner_name": "GitHub Actions 1000116521",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:38:58Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000115953",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:03Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000115954",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:03Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000115994",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:16Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35780656677,
+   "runner_name": "studio-pulp-gate-01-79651-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:21:24Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000116000",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:40:24Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000116384",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:21:32Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35780656677,
+   "runner_name": "GitHub Actions 1000116385",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T22:21:30Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35780581571,
+   "runner_name": "GitHub Actions 1000115925",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:23Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35780581571,
+   "runner_name": "GitHub Actions 1000115926",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:23Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35780581571,
+   "runner_name": "GitHub Actions 1000115935",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:36Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35780581571,
+   "runner_name": "studio-pulp-gate-slot2-02-68189-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T21:23:01Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35780581571,
+   "runner_name": "GitHub Actions 1000115936",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:01:35Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35780578198,
+   "runner_name": "GitHub Actions 1000115910",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:16Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35780578198,
+   "runner_name": "GitHub Actions 1000115914",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:23Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35780578198,
+   "runner_name": "GitHub Actions 1000115934",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:38Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35780578198,
+   "runner_name": "GitHub Actions 1000115938",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:01:08Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35780578198,
+   "runner_name": "m5-pulp-gate-slot2-02-65313-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:36:21Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35780579284,
+   "runner_name": "GitHub Actions 1000115922",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:17Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35780579284,
+   "runner_name": "GitHub Actions 1000115923",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:17Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35780579284,
+   "runner_name": "GitHub Actions 1000115933",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:29:36Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35780579284,
+   "runner_name": "GitHub Actions 1000115937",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:56:08Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35780579284,
+   "runner_name": "m1-pulp-gate-slot2-02-63022-3",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T21:46:48Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35779855891,
+   "runner_name": "GitHub Actions 1000115883",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:22:39Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35779855891,
+   "runner_name": "GitHub Actions 1000115882",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:22:41Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35779855891,
+   "runner_name": "GitHub Actions 1000115888",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:22:56Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35779855891,
+   "runner_name": "m1-pulp-gate-01-62795-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T20:36:26Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35779855891,
+   "runner_name": "GitHub Actions 1000115889",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:04:34Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35776358638,
+   "runner_name": "GitHub Actions 1000115870",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:50:40Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35776358638,
+   "runner_name": "GitHub Actions 1000115871",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:50:44Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35776358638,
+   "runner_name": "GitHub Actions 1000115872",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:51:00Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35776358638,
+   "runner_name": "studio-pulp-gate-slot2-02-79326-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:33:56Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35776358638,
+   "runner_name": "GitHub Actions 1000115873",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:25:36Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35775595081,
+   "runner_name": "GitHub Actions 1000115849",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:43:30Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35775595081,
+   "runner_name": "GitHub Actions 1000115847",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:43:32Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35775595081,
+   "runner_name": "GitHub Actions 1000115851",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:43:46Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35775595081,
+   "runner_name": "GitHub Actions 1000115852",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:26:53Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35775595081,
+   "runner_name": "studio-pulp-gate-01-96005-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T20:28:29Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35775223931,
+   "runner_name": "GitHub Actions 1000115904",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:27:26Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35775223931,
+   "runner_name": "GitHub Actions 1000115903",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:27:27Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35775223931,
+   "runner_name": "GitHub Actions 1000115905",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:27:41Z"
+  },
+  {
+   "name": "Windows (x64) [github-hosted]",
+   "run_id": 35775223931,
+   "runner_name": "GitHub Actions 1000115907",
+   "labels": [
+    "windows-2022"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T22:22:11Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35775223931,
+   "runner_name": "GitHub Actions 1000115906",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T21:24:31Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35774723756,
+   "runner_name": "GitHub Actions 1000115780",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:35:27Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35774723756,
+   "runner_name": "GitHub Actions 1000115785",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:35:17Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35774723756,
+   "runner_name": "GitHub Actions 1000115787",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:35:40Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35774723756,
+   "runner_name": "GitHub Actions 1000115788",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:35:45Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000115745",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:08:29Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000115746",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:08:36Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000115755",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:08:56Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35771738852,
+   "runner_name": "studio-pulp-gate-01-62257-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:18:01Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000115757",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:20:54Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000116026",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:18:07Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35771738852,
+   "runner_name": "GitHub Actions 1000116027",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:18:06Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000115707",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:07:43Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000115709",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:07:44Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000115734",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:08:19Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000115744",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:36:06Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35771620596,
+   "runner_name": "studio-pulp-gate-01-54214-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:50:25Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000116172",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:50:30Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35771620596,
+   "runner_name": "GitHub Actions 1000116173",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T21:50:29Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115655",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:06:40Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115656",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:06:40Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115679",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:06:53Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115688",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:20:41Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35771618129,
+   "runner_name": "m1-pulp-gate-slot2-02-94451-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:21:56Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115878",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:22:03Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35771618129,
+   "runner_name": "GitHub Actions 1000115879",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:22:00Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000115494",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:53:14Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000115496",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:53:12Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000115509",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:53:31Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000115510",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:03:10Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35770129246,
+   "runner_name": "studio-pulp-gate-01-24944-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:46:53Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000116017",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:46:58Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35770129246,
+   "runner_name": "GitHub Actions 1000116016",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:47:00Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115441",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:48:49Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115442",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:48:49Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115470",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:49:04Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35769641365,
+   "runner_name": "studio-pulp-gate-01-22274-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:42:42Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115475",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:13:21Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115839",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:42:47Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35769641365,
+   "runner_name": "GitHub Actions 1000115840",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:42:48Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115791",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:39:54Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115792",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:39:54Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115825",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:40:10Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115830",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:50:44Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35769537612,
+   "runner_name": "m1-pulp-gate-01-11436-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:24:24Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115892",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:24:29Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35769537612,
+   "runner_name": "GitHub Actions 1000115891",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:24:29Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115359",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:34Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115341",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:32Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115372",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:47Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115373",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:44:11Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35767700790,
+   "runner_name": "m1-pulp-gate-slot2-02-44863-5",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-pr-head"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:34:19Z"
+  },
+  {
+   "name": "linux",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115778",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:34:28Z"
+  },
+  {
+   "name": "windows",
+   "run_id": 35767700790,
+   "runner_name": "GitHub Actions 1000115777",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:34:26Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35767698284,
+   "runner_name": "GitHub Actions 1000115331",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:32Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35767698284,
+   "runner_name": "GitHub Actions 1000115332",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:32Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35767698284,
+   "runner_name": "GitHub Actions 1000115368",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:31:49Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35767698284,
+   "runner_name": "GitHub Actions 1000115374",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:06:05Z"
+  },
+  {
+   "name": "macos",
+   "run_id": 35767698284,
+   "runner_name": "m5-pulp-gate-01-86707-2",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:39:13Z"
+  },
+  {
+   "name": "classify",
+   "run_id": 35767599672,
+   "runner_name": "GitHub Actions 1000115309",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:30:38Z"
+  },
+  {
+   "name": "resolve-provider",
+   "run_id": 35767599672,
+   "runner_name": "GitHub Actions 1000115310",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:30:38Z"
+  },
+  {
+   "name": "protected-receipt-reuse",
+   "run_id": 35767599672,
+   "runner_name": "GitHub Actions 1000115314",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T18:30:53Z"
+  },
+  {
+   "name": "Windows (x64) [github-hosted]",
+   "run_id": 35767599672,
+   "runner_name": "GitHub Actions 1000115321",
+   "labels": [
+    "windows-2022"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T20:27:11Z"
+  },
+  {
+   "name": "Linux (x64) [github-hosted]",
+   "run_id": 35767599672,
+   "runner_name": "GitHub Actions 1000115322",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "failure",
+   "completed_at": "2026-09-22T19:22:26Z"
+  },
+  {
+   "name": "Resolve macOS runner \u2014 v0.871.1",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000115833",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T19:40:43Z"
+  },
+  {
+   "name": "CLI windows-arm64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000115837",
+   "labels": [
+    "windows-11-arm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:20:47Z"
+  },
+  {
+   "name": "CLI linux-x64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000115835",
+   "labels": [
+    "ubuntu-24.04"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:17:00Z"
+  },
+  {
+   "name": "CLI linux-arm64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000115838",
+   "labels": [
+    "ubuntu-24.04-arm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:11:48Z"
+  },
+  {
+   "name": "CLI windows-x64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000115836",
+   "labels": [
+    "windows-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:47Z"
+  },
+  {
+   "name": "CLI darwin-arm64",
+   "run_id": 35775293728,
+   "runner_name": "m5-pulp-gate-01-11674-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:17:31Z"
+  },
+  {
+   "name": "CLI darwin-x64",
+   "run_id": 35775293728,
+   "runner_name": "studio-pulp-gate-01-99552-1",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:02:51Z"
+  },
+  {
+   "name": "Smoke darwin-x64",
+   "run_id": 35775293728,
+   "runner_name": "m1-pulp-gate-slot2-02-63022-2",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:40:05Z"
+  },
+  {
+   "name": "Smoke windows-arm64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000116006",
+   "labels": [
+    "windows-11-arm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:31:07Z"
+  },
+  {
+   "name": "Smoke windows-x64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000116005",
+   "labels": [
+    "windows-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:59Z"
+  },
+  {
+   "name": "Smoke linux-arm64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000116007",
+   "labels": [
+    "ubuntu-24.04-arm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:31:05Z"
+  },
+  {
+   "name": "Smoke darwin-arm64",
+   "run_id": 35775293728,
+   "runner_name": "m1-pulp-gate-01-62795-3",
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:46:05Z"
+  },
+  {
+   "name": "Smoke linux-x64",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000116008",
+   "labels": [
+    "ubuntu-24.04"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:30:59Z"
+  },
+  {
+   "name": "release",
+   "run_id": 35775293728,
+   "runner_name": "GitHub Actions 1000116015",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "status": "completed",
+   "conclusion": "success",
+   "completed_at": "2026-09-22T20:49:53Z"
+  },
+  {
+   "name": "Pulp repository-isolation local proof",
+   "run_id": 35792120939,
+   "runner_name": null,
+   "labels": [
+    "self-hosted",
+    "macOS",
+    "ARM64",
+    "pulp-build",
+    "pulp-build-vm",
+    "pulp-build-merge-group"
+   ],
+   "status": "completed",
+   "conclusion": "skipped",
+   "completed_at": "2026-09-22T22:23:33Z"
+  },
+  {
+   "name": "Windows MIDI Services SDK compile-gate (advisory)",
+   "run_id": 35792120939,
+   "runner_name": null,
+   "labels": [
+    "windows-latest"
+   ],
+   "status": "completed",
+   "conclusion": "skipped",
+   "completed_at": "2026-09-22T22:23:48Z"
+  },
+  {
+   "name": "Windows MSVC release-path gate",
+   "run_id": 35792120939,
+   "runner_name": null,
+   "labels": [
+    "windows-latest"
+   ],
+   "status": "completed",
+   "conclusion": "skipped",
+   "completed_at": "2026-09-22T22:23:48Z"
+  }
+ ]
+}

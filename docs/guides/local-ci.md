@@ -2263,10 +2263,11 @@ serves nothing; that is what `--mode=report` exists for. The required macOS
 gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
 via the same `_event_projection` the live checker uses), not the raw variable,
 which still carries a label the event-class registrations deliberately omit.
-Nothing in Pulp names a machine: the snapshot is regenerated from every
-`profiles/*-macos-fleet.toml` in a tartci checkout (discovered by glob) by
-tartci's own generator, so adding or removing a host is a profile change in
-tartci plus a regeneration here.
+Nothing in Pulp names a machine: the snapshot is tartci's published
+`fleet/advertised-labels.json` (or, in a tartci that predates it, tartci's own
+generator run over every `profiles/*-macos-fleet.toml`, discovered by glob), so
+adding or removing a host is a profile change in tartci plus a regeneration
+here.
 
 ```bash
 python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --write   # regenerate
@@ -2285,6 +2286,50 @@ workflows, and repository from the snapshot, never tartci internals.
 release with `shipyard landing`; an older binary is reported as
 `shipyard landing unavailable (need >= 0.208.0; found ...)` with exit 2, never
 as a contract failure. `--landing-json FILE` needs no Shipyard at all.
+
+### Fact-checking declared supply
+
+Three layers, each answering a different question, so a disagreement names
+which side drifted. None of them lists a host: every one is derived from
+tartci's profiles or from observed runner names.
+
+1. **Declared (git).** What the checked-in fleet profiles say every runner
+   registration advertises. tartci publishes it as
+   `fleet/advertised-labels.json`; Pulp keeps a copy and checks it:
+
+   ```bash
+   python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check
+   python3 tools/scripts/fleet_snapshot.py --source-url --check   # tartci's published file on main
+   python3 tools/scripts/runner_topology_check.py --mode=static    # every lane vs declared supply
+   ```
+
+   With `--tartci`, the published file is used when present, otherwise tartci's
+   generator runs over every `profiles/*-macos-fleet.toml`. The hourly topology
+   sweep runs the `--check` against a fresh clone.
+2. **Installed (machines).** Whether each host actually runs the profile it
+   declares. This lives on the hosts, in tartci: `tartci fleet-macos
+   verify-supply` (installed vs declared) and `tartci fleet-macos
+   profile-drift`. Pulp cannot see it; a host whose installed profile drifted
+   reads REACHABLE in layer 1 and serves nothing.
+3. **Observed (GitHub).** Whether the declared registrations served jobs.
+   `runner_topology_check.py --mode=report` reads the jobs its host census
+   already fetched (no second crawl) and reports, per snapshot registration
+   serving a required lane, `OBSERVED` (with last seen), `NOT_OBSERVED` (jobs it
+   could have served ran elsewhere), or `IDLE` (no such demand in the window),
+   plus `UNDECLARED_OBSERVED` for a runner prefix whose jobs match no
+   registration by name (`<host_id>-<lane>-...`) and labels. tartci's
+   `scripts/supply_observed.py` answers the same question from its side.
+
+   ```bash
+   python3 tools/scripts/runner_topology_check.py --mode=report   # live; observed-supply lines
+   ```
+
+   These findings are INFO/WARN only and never a ctest: the census covers one
+   workflow and stops early once every host is proven, so `IDLE` is a prompt to
+   look, not a fault. Jobs are matched to a registration by GitHub's own rule
+   (job labels a subset of the runner's), not by the registration's minting
+   workflow list: release-cli's darwin legs were observed running on pulp-gate
+   runners.
 
 ### Routing overrides
 

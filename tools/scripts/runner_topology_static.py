@@ -504,3 +504,125 @@ def rows_json(rows: list[Row], statuses: list[OverrideStatus],
 
 def exit_code(rows: list[Row], override_findings: list[tuple[str, str, str]]) -> int:
     return 1 if any(row.blocking for row in rows) or override_findings else 0
+
+
+# ── Observed supply ─────────────────────────────────────────────────────
+#
+# The third layer. The snapshot says what the fleet DECLARES; the installed
+# profile on each host says what it RUNS (tartci's verify-supply); job history
+# says what actually SERVED. These pure functions judge the last one from the
+# jobs-API records the live checker's host census already fetched, so there is
+# no second crawler. A runner name is `<host_id>-<lane>-<slot...>` (tartci
+# fixes it), so the registration a job ran on is recovered from the name and
+# its labels, never from a host list.
+
+OBSERVED = "OBSERVED"
+NOT_OBSERVED = "NOT_OBSERVED"
+IDLE = "IDLE"
+UNDECLARED_OBSERVED = "UNDECLARED_OBSERVED"
+
+
+@dataclass
+class ObservedVerdict:
+    registration: str
+    verdict: str
+    last_seen: str | None
+    jobs: int
+    demand: int
+    detail: str
+
+
+def _lane_prefix(reg: Registration) -> str:
+    return f"{reg.host_id}-{reg.lane}-".lower()
+
+
+def attribute(record_name: str, record_labels: set[str],
+              registrations: list[Registration]) -> list[Registration]:
+    """Registrations a completed job's runner belonged to.
+
+    The runner name must start with `<host_id>-<lane>-`; when two lanes of a
+    host share a prefix (`pulp-gate` / `pulp-gate-x`) the longest wins. The
+    job's labels must be a subset of what the registration advertises
+    (GitHub's assignment rule), which is also what separates the event-class
+    registrations of one lane: a job carrying one class label matches only
+    that class. A job with no class label matches every class of its lane.
+    """
+    name = record_name.lower()
+    want = {label.lower() for label in record_labels}
+    candidates = [reg for reg in registrations if name.startswith(_lane_prefix(reg))]
+    if not candidates:
+        return []
+    longest = max(len(reg.lane) for reg in candidates)
+    return [reg for reg in candidates
+            if len(reg.lane) == longest and want and want <= reg.folded]
+
+
+def classify_observed(registrations: list[Registration], records: list[Any],
+                      since: Any, all_registrations: list[Registration]) -> tuple[
+                          list[ObservedVerdict], list[ObservedVerdict]]:
+    """(per-registration verdicts, undeclared observed runner prefixes).
+
+    `records` are ServiceRecord-shaped (runner_name, labels, completed_at).
+    `since` bounds the window. A registration is OBSERVED when a job in the
+    window ran on it; NOT_OBSERVED when jobs it could have served (labels a
+    subset of its advertised set) ran elsewhere and none ran on it; IDLE when
+    there was no such demand in the window at all.
+
+    A self-hosted job is UNDECLARED_OBSERVED when it ran on a runner no
+    registration in `all_registrations` accounts for, but carries a label from
+    this fleet's own vocabulary: any label some registration advertises that
+    not every registration shares. That derived scope keeps a new, undeclared
+    machine in view while leaving pools the snapshot never described (another
+    supervisor's Linux or Intel runners) out of it.
+    """
+    window = [r for r in records if r.completed_at is not None and r.completed_at >= since]
+    verdicts: list[ObservedVerdict] = []
+    for reg in registrations:
+        ran = [r for r in window if reg in attribute(r.runner_name, r.labels, all_registrations)]
+        could = [r for r in window if r.labels
+                 and {label.lower() for label in r.labels} <= reg.folded]
+        if ran:
+            last = max(r.completed_at for r in ran)
+            verdicts.append(ObservedVerdict(reg.handle, OBSERVED, last.isoformat(),
+                                            len(ran), len(could),
+                                            f"{len(ran)} job(s) in window"))
+        elif could:
+            elsewhere = sorted({r.runner_name.rsplit("-", 2)[0] for r in could})
+            verdicts.append(ObservedVerdict(reg.handle, NOT_OBSERVED, None, 0, len(could),
+                                            f"{len(could)} job(s) it could serve ran on "
+                                            f"{', '.join(elsewhere)}"))
+        else:
+            verdicts.append(ObservedVerdict(reg.handle, IDLE, None, 0, 0,
+                                            "no job it could serve in the window"))
+
+    shared = (set.intersection(*(reg.folded for reg in all_registrations))
+              if all_registrations else set())
+    vocabulary = {label for reg in all_registrations for label in reg.folded} - shared
+    undeclared: dict[str, list[Any]] = {}
+    for r in window:
+        labels = {label.lower() for label in r.labels}
+        if "self-hosted" not in labels or not (labels & vocabulary):
+            continue
+        if attribute(r.runner_name, r.labels, all_registrations):
+            continue
+        prefix = re.sub(r"(-\d+)+$", "", r.runner_name)
+        undeclared.setdefault(prefix, []).append(r)
+    extra = [ObservedVerdict(prefix, UNDECLARED_OBSERVED,
+                             max(r.completed_at for r in rs).isoformat(), len(rs), 0,
+                             f"ran {len(rs)} job(s) with {sorted(set().union(*(r.labels for r in rs)))} "
+                             "but matches no snapshot registration by name prefix and labels")
+             for prefix, rs in sorted(undeclared.items())]
+    return verdicts, extra
+
+
+def required_registrations(contract: Any, snapshot: Snapshot, workflows_dir: Path,
+                           repo: str) -> list[Registration]:
+    """Snapshot registrations that serve some required lane on declared supply."""
+    out: list[Registration] = []
+    for row in evaluate(contract, snapshot, workflows_dir, repo):
+        if row.severity != "required" or row.source != "expect" or row.verdict != REACHABLE:
+            continue
+        for reg in serving(row.labels, row.workflow, repo, snapshot):
+            if reg not in out:
+                out.append(reg)
+    return out

@@ -287,6 +287,95 @@ class Reachability(unittest.TestCase):
                              [("reuse.yml", None)])
 
 
+JOBS_FIXTURE = HERE / "fixtures" / "observed_supply_jobs.json"
+
+
+class ObservedSupply(unittest.TestCase):
+    """Declared registrations vs a real captured jobs-API response."""
+
+    def setUp(self):
+        self.snapshot = st.load_snapshot(SNAPSHOT)
+        self.in_repo = [r for r in self.snapshot.registrations if r.repo == REPO]
+        self.records = gate.parse_service_records(
+            json.loads(JOBS_FIXTURE.read_text())["jobs"])
+        self.now = max(r.completed_at for r in self.records if r.completed_at)
+        self.since = self.now - gate.timedelta(hours=720)
+        self.required = st.required_registrations(
+            gate.load_contract(CONTRACT), self.snapshot, WORKFLOWS, REPO)
+        self.gate_classes = {row["label"] for row in _raw()["event_class_v2"]["classes"]}
+
+    def _classify(self, regs=None, all_regs=None, records=None):
+        return st.classify_observed(regs if regs is not None else self.required,
+                                    records if records is not None else self.records,
+                                    self.since, all_regs if all_regs is not None else self.in_repo)
+
+    def test_every_gate_registration_is_observed_in_the_real_capture(self):
+        verdicts, undeclared = self._classify()
+        gate_regs = [r for r in self.required if r.class_label in self.gate_classes]
+        self.assertEqual(len(gate_regs), len(self.gate_classes) * len(
+            {r.host_id for r in gate_regs}))
+        by_handle = {v.registration: v for v in verdicts}
+        for reg in gate_regs:
+            self.assertEqual(by_handle[reg.handle].verdict, st.OBSERVED, reg.handle)
+            self.assertIsNotNone(by_handle[reg.handle].last_seen)
+        self.assertEqual(undeclared, [])
+
+    def test_slot_suffixed_runner_names_attribute_to_their_lane(self):
+        slot = next(r for r in self.records if "-slot2-" in r.runner_name
+                    and "self-hosted" in r.labels)
+        owners = st.attribute(slot.runner_name, slot.labels, self.in_repo)
+        self.assertTrue(owners)
+        self.assertTrue(all(slot.runner_name.startswith(f"{o.host_id}-{o.lane}-")
+                            for o in owners))
+
+    def test_a_class_label_selects_exactly_one_registration(self):
+        job = next(r for r in self.records if r.labels & self.gate_classes)
+        owners = st.attribute(job.runner_name, job.labels, self.in_repo)
+        self.assertEqual(len(owners), 1)
+        self.assertIn(owners[0].class_label, job.labels)
+
+    def test_a_machine_missing_from_the_snapshot_is_undeclared_observed(self):
+        gone = sorted({r.host_id for r in self.required
+                       if r.class_label in self.gate_classes})[0]
+        kept = [r for r in self.in_repo if r.host_id != gone]
+        _v, undeclared = self._classify(
+            regs=[r for r in self.required if r.host_id != gone], all_regs=kept)
+        self.assertTrue(undeclared)
+        self.assertTrue(all(u.verdict == st.UNDECLARED_OBSERVED for u in undeclared))
+        self.assertTrue(all(u.registration.startswith(f"{gone}-") for u in undeclared))
+
+    def test_a_declared_machine_with_demand_but_no_jobs_is_not_observed(self):
+        extra = _v2_gate_registrations("m7")
+        verdicts, _u = self._classify(regs=extra, all_regs=[*self.in_repo, *extra])
+        self.assertTrue(verdicts)
+        for v in verdicts:
+            self.assertEqual(v.verdict, st.NOT_OBSERVED, v.registration)
+            self.assertGreater(v.demand, 0)
+
+    def test_foreign_pools_are_out_of_the_undeclared_scope(self):
+        foreign = gate.ServiceRecord(
+            runner_name="linux-ephr-2117-12",
+            labels={"self-hosted", "Linux", "X64", "pulp-build-linux-x64"},
+            status="completed", completed_at=self.now)
+        _v, undeclared = self._classify(records=[*self.records, foreign])
+        self.assertEqual(undeclared, [])
+
+    def test_jobs_outside_the_window_do_not_count(self):
+        verdicts, _u = st.classify_observed(self.required, self.records,
+                                            self.now + gate.timedelta(hours=1), self.in_repo)
+        self.assertTrue(all(v.verdict == st.IDLE for v in verdicts))
+
+    def test_live_findings_are_advisory_never_errors(self):
+        findings = gate.observed_supply_findings(
+            gate.load_contract(CONTRACT), CONTRACT, WORKFLOWS, REPO, [], self.now)
+        self.assertTrue(findings)
+        self.assertFalse(any(f.level == gate.ERROR for f in findings))
+        findings = gate.observed_supply_findings(
+            gate.load_contract(CONTRACT), CONTRACT, WORKFLOWS, REPO, self.records, self.now)
+        self.assertFalse(any(f.level == gate.ERROR for f in findings))
+        self.assertTrue(any("OBSERVED, last seen" in f.detail for f in findings))
+
+
 class Overrides(unittest.TestCase):
     def setUp(self):
         self.raw = _raw()
