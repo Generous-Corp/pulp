@@ -1,6 +1,7 @@
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
+#include "detail/gpu_convolver_raw_trace_jsonl.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/runtime/trace.hpp>
@@ -254,7 +255,152 @@ SharedIoTraceRecord record(std::uint64_t sequence,
     value.set(SharedIoTraceStage::CompletionObserved, 1028 + sequence * 100);
     return value;
 }
+
+GpuConvolverRawManifest raw_manifest() {
+    GpuConvolverRawManifest value;
+    value.campaign_id = "test-campaign";
+    value.source_revision = std::string(40, 'a');
+    value.binary_sha256 = std::string(64, 'b');
+    value.machine_id = "test-machine";
+    value.machine_model = "test-model";
+    value.os_version = "test-os";
+    value.adapter_name = "test-adapter";
+    value.adapter_backend = "metal";
+    value.provider = "Dawn Metal";
+    value.provider_revision = std::string(40, 'c');
+    value.provider_asset_sha256 = std::string(64, 'd');
+    value.generated_utc = "2026-09-22T00:00:00Z";
+    value.build_flags = {"-O3", "-DNDEBUG"};
+    value.warmup_blocks = 2;
+    value.expected_trials = 3;
+    value.expected_matched_pairs = 1;
+    value.expected_staged_sync_trials = 1;
+    value.bootstrap_resamples = 100;
+    value.paced = true;
+    value.block_frames = 32;
+    value.sample_rate_hz = 48000;
+    value.channels = 2;
+    value.ir_frames = 257;
+    value.inflight_depth = 3;
+    value.lead_blocks = 2;
+    value.deadline_ns = 1000;
+    value.watchdog_ns = 2000;
+    return value;
+}
+
+SharedIoTraceRecord raw_terminal(std::uint64_t sequence) {
+    auto value = record(sequence);
+    value.transfer_counters_available = true;
+    value.cpu_detail_available = true;
+    value.worker_pack_copy_ns = 2;
+    value.event_processing_ns = 3;
+    value.retirement_ns = 4;
+    value.worker_other_ns = 5;
+    value.set(SharedIoTraceStage::RetirementObserved, 1040 + sequence * 100);
+    return value;
+}
+
+SharedIoTraceRecord raw_delivery(std::uint64_t sequence) {
+    SharedIoTraceRecord value;
+    value.kind = SharedIoTraceKind::Delivery;
+    value.generation = 3;
+    value.sequence = sequence;
+    value.output_eligible = true;
+    value.delivery = SharedIoDeliveryDisposition::GpuDelivered;
+    value.callback_timing_available = true;
+    value.callback_start_ns = 900 + sequence * 100;
+    value.callback_end_ns = 910 + sequence * 100;
+    value.result_visible_ns = 1050 + sequence * 100;
+    return value;
+}
 } // namespace
+
+TEST_CASE("strict P4 raw writer rejects unavailable callback timing before output",
+          "[gpu_audio][trace][raw]") {
+    const auto manifest = raw_manifest();
+    auto terminal = raw_terminal(0);
+    auto delivery = raw_delivery(0);
+    delivery.callback_timing_available = false;
+    const std::array records{terminal, delivery};
+    GpuConvolverRawTrial trial{
+        .trial_id = 1,
+        .pair_id = 0,
+        .path = GpuConvolverRawTrialPath::StagedSync,
+        .engine_id = 17,
+        .generation = 3,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = records,
+    };
+    auto staged = trial;
+    staged.trial_id = 2;
+    staged.pair_id = 1;
+    staged.path = GpuConvolverRawTrialPath::StagedAsync;
+    auto shared = staged;
+    shared.trial_id = 3;
+    shared.path = GpuConvolverRawTrialPath::SharedAsync;
+    std::array trials{trial, staged, shared};
+    std::ostringstream output;
+    REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
+    REQUIRE(output.str().empty());
+}
+
+TEST_CASE("strict P4 raw writer rejects duplicate terminal or delivery identities",
+          "[gpu_audio][trace][raw]") {
+    const auto manifest = raw_manifest();
+    const auto terminal = raw_terminal(0);
+    const auto delivery = raw_delivery(0);
+    const std::array duplicate_records{terminal, terminal, delivery};
+    GpuConvolverRawTrial trial{
+        .trial_id = 1,
+        .path = GpuConvolverRawTrialPath::StagedSync,
+        .engine_id = 17,
+        .generation = 3,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = duplicate_records,
+    };
+    auto staged = trial;
+    staged.trial_id = 2;
+    staged.pair_id = 1;
+    staged.path = GpuConvolverRawTrialPath::StagedAsync;
+    auto shared = staged;
+    shared.trial_id = 3;
+    shared.path = GpuConvolverRawTrialPath::SharedAsync;
+    std::array trials{trial, staged, shared};
+    std::ostringstream output;
+    REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
+    REQUIRE(output.str().empty());
+}
+
+TEST_CASE("strict shared P4 raw writer rejects named payload transfers",
+          "[gpu_audio][trace][raw]") {
+    auto manifest = raw_manifest();
+    auto terminal = raw_terminal(0);
+    terminal.transfer_counters.write_buffer_calls = 1;
+    auto delivery = raw_delivery(0);
+    const std::array records{terminal, delivery};
+    GpuConvolverRawTrial sync{
+        .trial_id = 1,
+        .path = GpuConvolverRawTrialPath::StagedSync,
+        .engine_id = 17,
+        .generation = 3,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = records,
+    };
+    GpuConvolverRawTrial staged = sync;
+    staged.trial_id = 2;
+    staged.pair_id = 1;
+    staged.path = GpuConvolverRawTrialPath::StagedAsync;
+    GpuConvolverRawTrial shared = staged;
+    shared.trial_id = 3;
+    shared.path = GpuConvolverRawTrialPath::SharedAsync;
+    std::array trials{sync, staged, shared};
+    std::ostringstream output;
+    REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
+    REQUIRE(output.str().empty());
+}
 
 TEST_CASE("GPU audio trace records require ordered timestamps and preserve unavailable GPU time",
           "[gpu_audio][trace]") {

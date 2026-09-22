@@ -4,8 +4,16 @@
 #include "detail/shared_io_trace.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 namespace pulp::gpu_audio {
+namespace {
+std::uint64_t monotonic_now_ns() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+} // namespace
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
@@ -180,21 +188,23 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
         return;
     }
     const auto sequence = callback_sequence_++;
+    const auto callback_start_ns = monotonic_now_ns();
     synchronous_.store(false, std::memory_order_release);
     if (n != block_size_ || input.num_channels() < channels_ || output.num_channels() < channels_ ||
         input.num_samples() < n || output.num_samples() < n) {
         process_invalid_position(output, sequence, false);
         return;
     }
-    process_realtime_position(input, output, n, sequence, true);
+    process_realtime_position(input, output, n, sequence, true, callback_start_ns);
 }
 
 void GpuAudioTransport::process_realtime_position(const audio::BufferView<const float>& input,
                                                   audio::BufferView<float>& output, uint32_t n,
                                                   std::uint64_t sequence,
-                                                  bool input_valid) noexcept {
+                                                  bool input_valid,
+                                                  std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
-        process_shared(input, output, n, sequence, input_valid);
+        process_shared(input, output, n, sequence, input_valid, callback_start_ns);
         return;
     }
 
@@ -276,12 +286,15 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
 
 void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
                                        audio::BufferView<float>& output, std::uint32_t n,
-                                       std::uint64_t sequence, bool input_valid) noexcept {
+                                       std::uint64_t sequence, bool input_valid,
+                                       std::uint64_t callback_start_ns) noexcept {
     using detail::SharedIoDeliveryDisposition;
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);
     const auto status =
-        realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence, input_valid);
+        realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence, input_valid,
+                              callback_start_ns);
+    const auto callback_end_ns = monotonic_now_ns();
     auto delivered = SharedIoDeliveryDisposition::GpuDelivered;
     if (status == detail::kRealtimeGpuPriming) {
         output.clear();
@@ -308,7 +321,9 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
         output.clear();
         delivered = SharedIoDeliveryDisposition::InvalidRejected;
     }
-    realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered));
+    const auto result_visible_ns = monotonic_now_ns();
+    realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered),
+                            callback_end_ns, result_visible_ns);
     if (wake_on_write_)
         wake_sem_.release();
 }
@@ -338,7 +353,8 @@ void GpuAudioTransport::process_invalid_position(audio::BufferView<float>& outpu
     if (offline)
         process_offline_position(zero_input, discarded_output, block_size_, sequence, false);
     else
-        process_realtime_position(zero_input, discarded_output, block_size_, sequence, false);
+        process_realtime_position(zero_input, discarded_output, block_size_, sequence, false,
+                                  monotonic_now_ns());
 }
 
 void GpuAudioTransport::process_offline_position(const audio::BufferView<const float>& input,
@@ -355,7 +371,7 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
         // A failed barrier retains its owner and stays CPU-only. The same
         // continuously primed fallback carries the RT/offline timeline.
-        process_shared(input, output, n, sequence, input_valid);
+        process_shared(input, output, n, sequence, input_valid, monotonic_now_ns());
         return;
     }
 

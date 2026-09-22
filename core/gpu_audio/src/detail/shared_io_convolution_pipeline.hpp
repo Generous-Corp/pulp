@@ -34,6 +34,7 @@ class SharedIoConvolutionPipeline {
         std::uint32_t fft_size = 0;
         std::uint32_t ir_length = 0;
         std::uint32_t lead_blocks = SharedIoStampedBridge::kLeadBlocks;
+        bool capture_callback_timing = false;
     };
 
     // Host/quiescent only. The two components receive one geometry and epoch
@@ -47,8 +48,9 @@ class SharedIoConvolutionPipeline {
     // Callback only. These functions perform bounded fixed-record copies and
     // atomics only: no GPU API, allocation, lock, wait, Objective-C, or Perfetto.
     Callback begin_callback(std::span<const float> samples) noexcept;
-    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept {
-        return bridge_.begin_callback(samples, sequence);
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence,
+                            std::uint64_t callback_start_ns = 0) noexcept {
+        return bridge_.begin_callback(samples, sequence, callback_start_ns);
     }
     void request_recovery(SharedIoRecoveryReason reason) noexcept {
         bridge_.request_recovery(reason);
@@ -57,8 +59,11 @@ class SharedIoConvolutionPipeline {
         return bridge_.recovery_reason();
     }
     bool complete_callback_delivery(const Callback& callback,
-                                    SharedIoDeliveryDisposition actual) noexcept {
-        return bridge_.complete_callback_delivery(callback, actual);
+                                    SharedIoDeliveryDisposition actual,
+                                    std::uint64_t callback_end_ns = 0,
+                                    std::uint64_t result_visible_ns = 0) noexcept {
+        return bridge_.complete_callback_delivery(callback, actual, callback_end_ns,
+                                                  result_visible_ns);
     }
     Delivery consume_output(const Callback&, std::span<float> output,
                             bool defer_delivery = false) noexcept;
