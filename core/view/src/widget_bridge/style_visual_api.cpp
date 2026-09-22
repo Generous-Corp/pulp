@@ -110,8 +110,14 @@ void BridgeRegistrars::register_widget_style_overflow_api(WidgetBridge& self) {
             (self.scroll_wrapper(id) ? static_cast<View*>(self.scroll_wrapper(id))
                                      : self.widget(id));
         if (!v) return choc::value::Value();
+        // CSS `auto` means "scroll when the content overflows", so it maps to
+        // the scroll container — the same mapping the design importer uses.
+        // Falling through to `hidden` made a script's `overflowY: auto` CLIP
+        // its content instead of scrolling it, which is worse than ignoring
+        // the declaration: the overflowing part became unreachable.
         if (mode == "visible")      v->set_overflow(View::Overflow::visible);
-        else if (mode == "scroll")  v->set_overflow(View::Overflow::scroll);
+        else if (mode == "scroll" || mode == "auto")
+            v->set_overflow(View::Overflow::scroll);
         else                        v->set_overflow(View::Overflow::hidden);
         return choc::value::Value();
     });
