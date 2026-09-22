@@ -1649,6 +1649,11 @@ public:
         // fragment alongside the primitive prelude.
         std::string sdf_expression;
         std::uint64_t topology_hash = 0;
+        // Parameters for a validated operator tree. The expression refers
+        // to pulp_leafN_* uniforms; keeping the values separate lets a
+        // same-topology update avoid recompiling the composed shader.
+        std::vector<NamedUniform> leaf_uniforms;
+        std::uint32_t leaf_count = 0;
     };
 
     struct ShaderDrawOptions {

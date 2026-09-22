@@ -304,7 +304,8 @@ static const char* kSDFShapeSkSL = R"(
 // the legacy source makes the two paths share exactly the same distances.
 static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
                                                const std::string& author_sksl,
-                                               const std::string& sdf_expression = {}) {
+                                               const std::string& sdf_expression = {},
+                                               std::uint32_t leaf_count = 0) {
     (void)shape;
     const std::string source(kSDFShapeSkSL);
     const auto main_at = source.find("half4 main(float2 coord)");
@@ -315,7 +316,22 @@ static std::string compose_sdf_geometry_shader(Canvas::SDFShape shape,
     for (std::size_t at = primitive_prelude.find("atan2("); at != std::string::npos;
          at = primitive_prelude.find("atan2(", at + 1))
         primitive_prelude.replace(at, 6, "atan(");
-    auto composed = primitive_prelude + R"(
+    std::string leaf_uniforms;
+    for (std::uint32_t i = 0; i < leaf_count; ++i) {
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_x;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_y;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_w;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_h;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_cornerRadius;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_innerRadius;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_arcStart;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_arcSweep;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_squirclePower;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_armWidth;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_bezierCX;\n";
+        leaf_uniforms += "uniform float pulp_leaf" + std::to_string(i) + "_bezierCY;\n";
+    }
+    auto composed = primitive_prelude + leaf_uniforms + R"(
 struct PulpGeom { float sdf; float2 grad; float2 pos; float2 uv; float coverage; };
 struct PulpFragment { half4 color; float strokeWidth; float sigma; };
 float pulp_smooth_union(float a, float b, float k) {
@@ -650,7 +666,8 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
     std::string composed = sksl;
     if (options.geometry && sksl.find("PulpFragment shade") != std::string::npos)
         composed = compose_sdf_geometry_shader(options.geometry->shape, sksl,
-                                               options.geometry->sdf_expression);
+                                               options.geometry->sdf_expression,
+                                               options.geometry->leaf_count);
     auto& cache = RuntimeEffectCache::instance();
     auto effect = cache.get_or_compile(composed);
     if (!effect) return false;
@@ -678,6 +695,16 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
         if (effect->findUniform("armWidth")) builder.uniform("armWidth") = style.arm_width;
         if (effect->findUniform("bezierCX")) builder.uniform("bezierCX") = style.bezier_cx;
         if (effect->findUniform("bezierCY")) builder.uniform("bezierCY") = style.bezier_cy;
+        for (const auto& uniform : options.geometry->leaf_uniforms) {
+            if (!effect->findUniform(uniform.name.c_str())) continue;
+            switch (uniform.count) {
+                case 1: builder.uniform(uniform.name.c_str()) = uniform.v[0]; break;
+                case 2: builder.uniform(uniform.name.c_str()) = SkV2{uniform.v[0], uniform.v[1]}; break;
+                case 3: builder.uniform(uniform.name.c_str()) = SkV3{uniform.v[0], uniform.v[1], uniform.v[2]}; break;
+                case 4: builder.uniform(uniform.name.c_str()) = SkV4{uniform.v[0], uniform.v[1], uniform.v[2], uniform.v[3]}; break;
+                default: break;
+            }
+        }
     }
     if (options.data_texture) {
         if (auto data_shader = make_shader_data_texture(options.data_texture)) {

@@ -159,58 +159,83 @@ std::string geometry_number(const choc::value::ValueView& node, const char* key,
     return out.str();
 }
 
-std::string emit_geometry_expression(const choc::value::ValueView& node,
-                                     std::string& error) {
+std::string emit_geometry_expression(
+    const choc::value::ValueView& node, std::string& error,
+    std::vector<canvas::Canvas::NamedUniform>* leaf_uniforms = nullptr,
+    std::uint32_t* leaf_index = nullptr) {
     if (node.hasObjectMember("shape")) {
         const auto shape = node["shape"].getWithDefault<std::string>("");
-        const auto x = geometry_number(node, "x", 0.0);
-        const auto y = geometry_number(node, "y", 0.0);
-        const auto w = geometry_number(node, "w", 0.0);
-        const auto h = geometry_number(node, "h", 0.0);
-        const auto px = "(p - float2((" + x + "+" + w + "*0.5)-resolution.x*0.5, (" +
-                        y + "+" + h + "*0.5)-resolution.y*0.5))";
+        const auto index = leaf_index ? (*leaf_index)++ : 0;
+        const auto prefix = "pulp_leaf" + std::to_string(index) + "_";
+        auto number = [&](const char* key, float fallback) {
+            const auto value = node.hasObjectMember(key)
+                                   ? static_cast<float>(node[key].getWithDefault<double>(fallback))
+                                   : fallback;
+            if (leaf_uniforms) {
+                canvas::Canvas::NamedUniform uniform;
+                uniform.name = prefix + key;
+                uniform.count = 1;
+                uniform.v[0] = value;
+                leaf_uniforms->push_back(std::move(uniform));
+            }
+            return value;
+        };
+        const auto x = number("x", 0.0f);
+        const auto y = number("y", 0.0f);
+        const auto w = number("w", 0.0f);
+        const auto h = number("h", 0.0f);
+        const auto corner_radius = number("cornerRadius", 0.0f);
+        const auto inner_radius = number("innerRadius", 0.5f);
+        const auto arc_start = number("arcStart", 0.0f);
+        const auto arc_sweep = number("arcSweep", 4.712f);
+        const auto squircle_power = number("squirclePower", 4.0f);
+        const auto arm_width = number("armWidth", 0.3f);
+        const auto bezier_cx = number("bezierCX", 0.0f);
+        const auto bezier_cy = number("bezierCY", -1.0f);
+        (void)x; (void)y; (void)w; (void)h; (void)corner_radius;
+        (void)inner_radius; (void)arc_start; (void)arc_sweep;
+        (void)squircle_power; (void)arm_width; (void)bezier_cx; (void)bezier_cy;
+        const auto px = "(p - float2((" + prefix + "x+" + prefix + "w*0.5)-resolution.x*0.5, (" +
+                        prefix + "y+" + prefix + "h*0.5)-resolution.y*0.5))";
         if (shape == "circle")
-            return "sdCircle(" + px + ", min(" + w + "," + h + ")*0.5)";
+            return "sdCircle(" + px + ", min(" + prefix + "w," + prefix + "h)*0.5)";
         if (shape == "rect")
-            return "sdBox(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+            return "sdBox(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5))";
         if (shape == "rounded_rect")
-            return "sdRoundBox(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
-                   geometry_number(node, "cornerRadius", 0.0) + ")";
+            return "sdRoundBox(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5), " +
+                   prefix + "cornerRadius)";
         if (shape == "diamond")
-            return "sdDiamond(" + px + ", min(" + w + "," + h + ")*0.5)";
+            return "sdDiamond(" + px + ", min(" + prefix + "w," + prefix + "h)*0.5)";
         if (shape == "squircle")
-            return "sdSquircle(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
-                   geometry_number(node, "squirclePower", 4.0) + ")";
+            return "sdSquircle(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5), " +
+                   prefix + "squirclePower)";
         if (shape == "triangle")
-            return "sdTriangle(" + px + ", min(" + w + "," + h + ")*0.5)";
+            return "sdTriangle(" + px + ", min(" + prefix + "w," + prefix + "h)*0.5)";
         if (shape == "ring")
-            return "sdRing(" + px + ", min(" + w + "," + h + ")*0.5, min(" + w + "," +
-                   h + ")*0.5*" + geometry_number(node, "innerRadius", 0.5) + ")";
+            return "sdRing(" + px + ", min(" + prefix + "w," + prefix + "h)*0.5, min(" + prefix + "w," +
+                   prefix + "h)*0.5*" + prefix + "innerRadius)";
         if (shape == "stadium")
-            return "sdStadium(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+            return "sdStadium(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5))";
         if (shape == "cross")
-            return "sdCross(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
-                   geometry_number(node, "armWidth", 0.3) + ")";
+            return "sdCross(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5), " +
+                   prefix + "armWidth)";
         if (shape == "flat_segment")
-            return "sdFlatSegment(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+            return "sdFlatSegment(" + px + ", float2(" + prefix + "w*0.5," + prefix + "h*0.5))";
         if (shape == "rounded_segment")
-            return "sdRoundedSegment(" + px + ", " + w + "*0.5, " + h + ")";
+            return "sdRoundedSegment(" + px + ", " + prefix + "w*0.5, " + prefix + "h)";
         if (shape == "flat_arc" || shape == "arc")
-            return "sdFlatArc(" + px + ", min(" + w + "," + h + ")*0.5, min(" + w + "," + h + ")*0.5*" +
-                   geometry_number(node, "innerRadius", 0.5) + ", " +
-                   geometry_number(node, "arcStart", 0.0) + ", " +
-                   geometry_number(node, "arcSweep", 4.712) + ")";
+            return "sdFlatArc(" + px + ", min(" + prefix + "w," + prefix + "h)*0.5, min(" + prefix + "w," + prefix + "h)*0.5*" +
+                   prefix + "innerRadius, " + prefix + "arcStart, " + prefix + "arcSweep)";
         if (shape == "quadratic_bezier")
-            return "sdQuadBezier(" + px + ", float2(-" + w + "*0.5,0), float2(" +
-                   geometry_number(node, "bezierCX", 0.0) + "*" + w + "*0.5," +
-                   geometry_number(node, "bezierCY", -1.0) + "*" + h + "*0.5), float2(" +
-                   w + "*0.5,0), " + h + ")";
+            return "sdQuadBezier(" + px + ", float2(-" + prefix + "w*0.5,0), float2(" +
+                   prefix + "bezierCX*" + prefix + "w*0.5," + prefix + "bezierCY*" + prefix + "h*0.5), float2(" +
+                   prefix + "w*0.5,0), " + prefix + "h)";
         error = "Unsupported shader geometry leaf shape '" + shape + "'";
         return {};
     }
     const auto op = node["op"].getWithDefault<std::string>("");
-    const auto left = emit_geometry_expression(node["children"][0], error);
-    const auto right = emit_geometry_expression(node["children"][1], error);
+    const auto left = emit_geometry_expression(node["children"][0], error, leaf_uniforms, leaf_index);
+    const auto right = emit_geometry_expression(node["children"][1], error, leaf_uniforms, leaf_index);
     if (!error.empty()) return {};
     if (op == "union") return "min(" + left + "," + right + ")";
     if (op == "intersect") return "max(" + left + "," + right + ")";
@@ -328,10 +353,13 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
         const auto validation = validate_geometry_tree(*args[1]);
         if (!validation.error.empty()) return shader_result(false, validation.error);
         std::string expression_error;
-        const auto expression = emit_geometry_expression(*args[1], expression_error);
-        if (!expression_error.empty()) return shader_result(false, expression_error);
         canvas::Canvas::ShaderGeometry geometry;
-        geometry.sdf_expression = expression;
+        std::uint32_t leaf_index = 0;
+        geometry.sdf_expression = emit_geometry_expression(*args[1], expression_error,
+                                                            &geometry.leaf_uniforms,
+                                                            &leaf_index);
+        if (!expression_error.empty()) return shader_result(false, expression_error);
+        geometry.leaf_count = leaf_index;
         geometry.topology_hash = validation.topology_hash;
         host->set_shader_geometry_spec(choc::json::toString(*args[1], false),
                                        validation.topology_hash);
