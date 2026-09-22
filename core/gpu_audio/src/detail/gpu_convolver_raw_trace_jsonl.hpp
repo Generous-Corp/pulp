@@ -102,8 +102,7 @@ inline bool hex_string(std::string_view value, std::size_t length) noexcept {
     if (value.size() != length)
         return false;
     return std::all_of(value.begin(), value.end(), [](const char character) {
-        return (character >= '0' && character <= '9') ||
-               (character >= 'a' && character <= 'f') ||
+        return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') ||
                (character >= 'A' && character <= 'F');
     });
 }
@@ -201,12 +200,11 @@ inline void observation(std::ostream& output, std::uint64_t value, std::string_v
     output << R"(,"relation":"direct","start_clock_domain":"monotonic",)"
               R"("start_observer":)";
     json_string(output, observer);
-    output << R"(,"timestamp_scope":"single_block","uncertainty_ns":0,"value_ns":)" << value
-           << '}';
+    output << R"(,"timestamp_scope":"single_block","uncertainty_ns":0,"value_ns":)" << value << '}';
 }
 
 inline void unavailable_observation(std::ostream& output, std::string_view observer,
-                                   std::string_view api_source) {
+                                    std::string_view api_source) {
     output << R"({"api_source":)";
     json_string(output, api_source);
     output << R"(,"availability":"unavailable","callback_mode":"non_realtime",)"
@@ -224,7 +222,7 @@ inline void unavailable_observation(std::ostream& output, std::string_view obser
 }
 
 inline bool duration(const SharedIoTraceRecord& record, SharedIoTraceStage begin,
-                    SharedIoTraceStage end, std::uint64_t& result) noexcept {
+                     SharedIoTraceStage end, std::uint64_t& result) noexcept {
     const auto value = shared_io_trace_duration(record, begin, end);
     if (!value.available)
         return false;
@@ -275,26 +273,22 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
     if (manifest.campaign != "screening" && manifest.campaign != "confirmation" &&
         manifest.campaign != "default" && manifest.campaign != "overload")
         return false;
-    for (const auto value : {std::string_view(manifest.campaign_id),
-                             std::string_view(manifest.machine_id),
-                             std::string_view(manifest.machine_model),
-                             std::string_view(manifest.os_version),
-                             std::string_view(manifest.adapter_name),
-                             std::string_view(manifest.adapter_backend),
-                             std::string_view(manifest.provider),
-                             std::string_view(manifest.generated_utc)}) {
+    for (const auto value :
+         {std::string_view(manifest.campaign_id), std::string_view(manifest.machine_id),
+          std::string_view(manifest.machine_model), std::string_view(manifest.os_version),
+          std::string_view(manifest.adapter_name), std::string_view(manifest.adapter_backend),
+          std::string_view(manifest.provider), std::string_view(manifest.generated_utc)}) {
         if (!nonempty(value))
             return false;
     }
-    if (!hex_string(manifest.source_revision, 40) ||
-        !hex_string(manifest.provider_revision, 40) ||
+    if (!hex_string(manifest.source_revision, 40) || !hex_string(manifest.provider_revision, 40) ||
         !hex_string(manifest.binary_sha256, 64) ||
-        !hex_string(manifest.provider_asset_sha256, 64) ||
-        manifest.build_flags.empty() || manifest.warmup_blocks == 0 ||
-        manifest.expected_trials == 0 || manifest.expected_matched_pairs == 0 ||
-        manifest.bootstrap_resamples < 100 || !manifest.paced || manifest.block_frames == 0 ||
-        manifest.sample_rate_hz == 0 || manifest.channels == 0 || manifest.ir_frames == 0 ||
-        manifest.inflight_depth == 0 || manifest.lead_blocks == 0 || manifest.deadline_ns == 0 ||
+        !hex_string(manifest.provider_asset_sha256, 64) || manifest.build_flags.empty() ||
+        manifest.warmup_blocks == 0 || manifest.expected_trials == 0 ||
+        manifest.expected_matched_pairs == 0 || manifest.bootstrap_resamples < 100 ||
+        !manifest.paced || manifest.block_frames == 0 || manifest.sample_rate_hz == 0 ||
+        manifest.channels == 0 || manifest.ir_frames == 0 || manifest.inflight_depth == 0 ||
+        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 ||
         manifest.watchdog_ns <= manifest.deadline_ns || !valid_load(manifest.load))
         return false;
     bool has_o3 = false;
@@ -368,8 +362,7 @@ inline bool merge_records(const GpuConvolverRawTrial& trial,
     return true;
 }
 
-inline bool raw_block_ready(GpuConvolverRawTrialPath path,
-                            const SharedIoTraceRecord& terminal,
+inline bool raw_block_ready(GpuConvolverRawTrialPath path, const SharedIoTraceRecord& terminal,
                             const SharedIoTraceRecord& delivery,
                             const GpuConvolverRawManifest& manifest) noexcept {
     if (terminal.generation != delivery.generation || terminal.sequence != delivery.sequence ||
@@ -403,16 +396,16 @@ inline bool raw_block_ready(GpuConvolverRawTrialPath path,
     if (delivery.callback_end_ns < delivery.callback_start_ns ||
         delivery.result_visible_ns < delivery.callback_end_ns)
         return false;
-    if (!duration(terminal, SharedIoTraceStage::WorkerEntry,
-                  SharedIoTraceStage::EncodeBegin, callback_cpu))
+    if (!duration(terminal, SharedIoTraceStage::WorkerEntry, SharedIoTraceStage::EncodeBegin,
+                  callback_cpu))
         return false;
     std::uint64_t ignored = 0;
     if (!duration(terminal, SharedIoTraceStage::EncodeBegin, SharedIoTraceStage::EncodeEnd,
                   ignored) ||
         !duration(terminal, SharedIoTraceStage::SubmitBegin, SharedIoTraceStage::SubmitEnd,
                   ignored) ||
-        !duration(terminal, SharedIoTraceStage::SubmitBegin,
-                  SharedIoTraceStage::CompletionObserved, ignored) ||
+        !duration(terminal, SharedIoTraceStage::SubmitBegin, SharedIoTraceStage::CompletionObserved,
+                  ignored) ||
         !duration(terminal, SharedIoTraceStage::CompletionObserved,
                   SharedIoTraceStage::RetirementObserved, ignored))
         return false;
@@ -451,14 +444,13 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
            << R"(,"gpu_terminal":")" << terminal_name(terminal.gpu_terminal)
            << R"(","late_completion":)"
            << (terminal.gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected ? "true"
-                                                                                         : "false")
+                                                                                     : "false")
            << R"(,"pair_id":)"
            << (trial.path == GpuConvolverRawTrialPath::StagedSync ? "null"
-                                                                   : std::to_string(trial.pair_id))
+                                                                  : std::to_string(trial.pair_id))
            << R"(,"path":")" << path_name(trial.path) << R"(","record_kind":"block",)"
            << R"("resync_drop":)"
-           << ((delivery.delivery_reason == SharedIoFallbackReason::SequenceGap) ? "true"
-                                                                                   : "false")
+           << ((delivery.delivery_reason == SharedIoFallbackReason::SequenceGap) ? "true" : "false")
            << R"(,"schema":"pulp.gpu-audio.p4.raw.v1","sequence":)" << terminal.sequence
            << R"(,"timings":{)";
     output << R"("callback_cpu":)";
@@ -480,8 +472,7 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
     observation(output, publish_to_consumable, "audio_callback",
                 "GpuAudioTransport::result_visible");
     output << R"(,"retirement_cpu":)";
-    observation(output, terminal.retirement_ns, observer,
-                "SharedIoConvolutionSession::retirement");
+    observation(output, terminal.retirement_ns, observer, "SharedIoConvolutionSession::retirement");
     output << R"(,"retirement_to_result_visible":)";
     std::uint64_t retirement_to_result = 0;
     if (terminal.has(SharedIoTraceStage::RetirementObserved) &&
@@ -490,13 +481,11 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
         retirement_to_result =
             delivery.result_visible_ns -
             terminal.cpu_ns[static_cast<std::size_t>(SharedIoTraceStage::RetirementObserved)];
-    observation(output, retirement_to_result, observer,
-                "GpuAudioTransport::result_visible");
+    observation(output, retirement_to_result, observer, "GpuAudioTransport::result_visible");
     output << R"(,"submit_cpu":)";
     observation(output, submit_cpu, observer, "SharedIoConvolutionSession::submit");
     output << R"(,"submit_to_completion":)";
-    observation(output, submit_to_completion, observer,
-                "SharedIoConvolutionSession::completion");
+    observation(output, submit_to_completion, observer, "SharedIoConvolutionSession::completion");
     output << R"(,"worker_end_to_end":)";
     std::uint64_t worker_end_to_end = 0;
     (void)duration(terminal, SharedIoTraceStage::WorkerEntry,
@@ -512,17 +501,17 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
            << R"(,"mapped_readback_memcpy_bytes":)"
            << terminal.transfer_counters.mapped_readback_memcpy_bytes
            << R"(,"mapped_readback_memcpy_calls":)"
-           << terminal.transfer_counters.mapped_readback_memcpy_calls
-           << R"(,"output_copy_bytes":)" << terminal.transfer_counters.output_copy_bytes
-           << R"(,"output_copy_calls":)" << terminal.transfer_counters.output_copy_calls
-           << R"(,"write_buffer_bytes":)" << terminal.transfer_counters.write_buffer_bytes
-           << R"(,"write_buffer_calls":)" << terminal.transfer_counters.write_buffer_calls
-           << R"(},"trial_id":)" << trial.trial_id << R"(,"watchdog_expiry":)"
+           << terminal.transfer_counters.mapped_readback_memcpy_calls << R"(,"output_copy_bytes":)"
+           << terminal.transfer_counters.output_copy_bytes << R"(,"output_copy_calls":)"
+           << terminal.transfer_counters.output_copy_calls << R"(,"write_buffer_bytes":)"
+           << terminal.transfer_counters.write_buffer_bytes << R"(,"write_buffer_calls":)"
+           << terminal.transfer_counters.write_buffer_calls << R"(},"trial_id":)" << trial.trial_id
+           << R"(,"watchdog_expiry":)"
            << (worker_pack_copy + encode_cpu + submit_cpu + submit_to_completion +
-                       completion_to_retirement >=
-                   manifest.watchdog_ns
-               ? "true"
-               : "false")
+                           completion_to_retirement >=
+                       manifest.watchdog_ns
+                   ? "true"
+                   : "false")
            << '}';
     return output.str();
 }
@@ -573,8 +562,7 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
             }
             ++ordinal;
         }
-        if (trial.path != GpuConvolverRawTrialPath::StagedSync &&
-            ordinal != manifest.block_frames)
+        if (trial.path != GpuConvolverRawTrialPath::StagedSync && ordinal != manifest.block_frames)
             return false;
         if (trial.path == GpuConvolverRawTrialPath::StagedAsync &&
             std::none_of(trial_records.begin(), trial_records.end(), [](const auto& item) {
@@ -589,7 +577,7 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
         body << R"({"schema":"pulp.gpu-audio.p4.raw.v1","record_kind":"trial_begin","trial_id":)"
              << trial.trial_id << R"(,"pair_id":)"
              << (trial.path == GpuConvolverRawTrialPath::StagedSync ? "null"
-                                                                     : std::to_string(trial.pair_id))
+                                                                    : std::to_string(trial.pair_id))
              << R"(,"path":")" << raw_writer_detail::path_name(trial.path) << R"(","load":")"
              << raw_writer_detail::load_name(manifest.load) << R"(","block_frames":)"
              << manifest.block_frames << R"(,"sample_rate_hz":)" << manifest.sample_rate_hz
@@ -598,8 +586,8 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
              << manifest.lead_blocks << R"(,"deadline_ns":)" << manifest.deadline_ns
              << R"(,"watchdog_ns":)" << manifest.watchdog_ns << "}\n";
         std::map<std::string, std::uint32_t> terminal_counts{
-            {"cancelled_teardown", 0}, {"completed", 0}, {"device_lost", 0},
-            {"late_rejected", 0}, {"provider_failure", 0}, {"stale_rejected", 0}};
+            {"cancelled_teardown", 0}, {"completed", 0},        {"device_lost", 0},
+            {"late_rejected", 0},      {"provider_failure", 0}, {"stale_rejected", 0}};
         std::map<std::string, std::uint32_t> delivery_counts{
             {"cpu_fallback", 0}, {"gpu", 0}, {"passthrough", 0}, {"priming", 0}, {"silence", 0}};
         std::string blocks_digest_input;
@@ -616,10 +604,9 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
         body << R"({"schema":"pulp.gpu-audio.p4.raw.v1","record_kind":"trial_end","trial_id":)"
              << trial.trial_id << R"(,"pair_id":)"
              << (trial.path == GpuConvolverRawTrialPath::StagedSync ? "null"
-                                                                     : std::to_string(trial.pair_id))
-             << R"(,"path":")" << raw_writer_detail::path_name(trial.path)
-             << R"(","block_count":)" << ordinal
-             << R"(,"blocks_sha256":)";
+                                                                    : std::to_string(trial.pair_id))
+             << R"(,"path":")" << raw_writer_detail::path_name(trial.path) << R"(","block_count":)"
+             << ordinal << R"(,"blocks_sha256":)";
         raw_writer_detail::json_string(body, pulp::runtime::sha256_hex(blocks_digest_input));
         body << R"(,"gpu_terminal_counts":{)";
         bool first_count = true;

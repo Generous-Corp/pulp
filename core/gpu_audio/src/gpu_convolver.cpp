@@ -498,11 +498,9 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         transfer_counters.map_async_calls =
             async_after.map_async_calls - async_before.map_async_calls;
         transfer_counters.mapped_readback_memcpy_calls =
-            async_after.mapped_readback_memcpy_calls -
-            async_before.mapped_readback_memcpy_calls;
+            async_after.mapped_readback_memcpy_calls - async_before.mapped_readback_memcpy_calls;
         transfer_counters.mapped_readback_memcpy_bytes =
-            async_after.mapped_readback_memcpy_bytes -
-            async_before.mapped_readback_memcpy_bytes;
+            async_after.mapped_readback_memcpy_bytes - async_before.mapped_readback_memcpy_bytes;
         (void)staged_trial_->set_transfer_counters(completion->id, transfer_counters);
         (void)staged_trial_->complete(
             completion->id,

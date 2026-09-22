@@ -71,8 +71,7 @@ bool SharedIoStampedBridge::release(Queue& queue, const Lease& lease) noexcept {
 }
 
 SharedIoStampedBridge::Callback
-SharedIoStampedBridge::begin_callback(std::span<const float> samples,
-                                      std::uint64_t sequence,
+SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint64_t sequence,
                                       std::uint64_t callback_start_ns) noexcept {
     if (!prepared_)
         return {};
@@ -271,9 +270,10 @@ void SharedIoStampedBridge::trace_delivery(Delivery delivery) noexcept {
     (void)trace_->publish_callback(record);
 }
 
-bool SharedIoStampedBridge::complete_callback_delivery(
-    const Callback& callback, SharedIoDeliveryDisposition actual,
-    std::uint64_t callback_end_ns, std::uint64_t result_visible_ns) noexcept {
+bool SharedIoStampedBridge::complete_callback_delivery(const Callback& callback,
+                                                       SharedIoDeliveryDisposition actual,
+                                                       std::uint64_t callback_end_ns,
+                                                       std::uint64_t result_visible_ns) noexcept {
     if (!delivery_pending_ || callback_open_ || !callback.valid() || callback.stamp != current_ ||
         actual == SharedIoDeliveryDisposition::None ||
         (actual == SharedIoDeliveryDisposition::Priming && trace_output_eligible_) ||

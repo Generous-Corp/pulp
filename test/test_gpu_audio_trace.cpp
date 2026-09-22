@@ -1,7 +1,7 @@
+#include "detail/gpu_convolver_raw_trace_jsonl.hpp"
 #include "detail/shared_io_convolution_session.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "detail/staged_async_trace_ledger.hpp"
-#include "detail/gpu_convolver_raw_trace_jsonl.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/runtime/trace.hpp>
@@ -403,8 +403,7 @@ TEST_CASE("strict shared P4 raw writer rejects named payload transfers",
     REQUIRE(output.str().empty());
 }
 
-TEST_CASE("strict P4 raw writer emits a complete campaign envelope",
-          "[gpu_audio][trace][raw]") {
+TEST_CASE("strict P4 raw writer emits a complete campaign envelope", "[gpu_audio][trace][raw]") {
     const auto manifest = raw_manifest();
     auto sync_terminal = raw_terminal(0);
     auto sync_delivery = raw_delivery(0);
@@ -456,8 +455,7 @@ TEST_CASE("strict P4 raw writer emits a complete campaign envelope",
     const std::array trials{sync, staged, shared};
     std::ostringstream output;
     REQUIRE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
-    REQUIRE(output.str().find("\"schema\":\"pulp.gpu-audio.p4.raw.v1\"") !=
-            std::string::npos);
+    REQUIRE(output.str().find("\"schema\":\"pulp.gpu-audio.p4.raw.v1\"") != std::string::npos);
     std::ofstream("/tmp/pulp-p4-raw-writer-test.jsonl") << output.str();
 }
 

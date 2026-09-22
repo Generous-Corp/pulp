@@ -200,8 +200,7 @@ void GpuAudioTransport::process(const audio::BufferView<const float>& input,
 
 void GpuAudioTransport::process_realtime_position(const audio::BufferView<const float>& input,
                                                   audio::BufferView<float>& output, uint32_t n,
-                                                  std::uint64_t sequence,
-                                                  bool input_valid,
+                                                  std::uint64_t sequence, bool input_valid,
                                                   std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
         process_shared(input, output, n, sequence, input_valid, callback_start_ns);
@@ -291,9 +290,8 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
     using detail::SharedIoDeliveryDisposition;
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);
-    const auto status =
-        realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence, input_valid,
-                              callback_start_ns);
+    const auto status = realtime_gpu_process_(realtime_gpu_context_, input, output, n, sequence,
+                                              input_valid, callback_start_ns);
     const auto callback_end_ns = monotonic_now_ns();
     auto delivered = SharedIoDeliveryDisposition::GpuDelivered;
     if (status == detail::kRealtimeGpuPriming) {
