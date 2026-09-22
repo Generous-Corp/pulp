@@ -433,6 +433,51 @@ class FixtureRepository(unittest.TestCase):
         self.assertIn("STALE", text)
         self.assertIn("leaf.txt", text)
 
+    def test_check_names_an_uncommitted_pinned_path_rather_than_blaming_the_contract(
+        self,
+    ) -> None:
+        """An uncommitted edit to a pinned path is not a contract violation.
+
+        The validator hashes the working tree, so editing a pinned path and not
+        committing it makes a CORRECT ledger report a stale identity: the pin
+        still equals the blob at HEAD and only the unstaged bytes differ.
+        `check` called that "contract violations regeneration cannot repair" --
+        false, because committing the path repairs it, and misleading, because
+        it sends the reader hunting a defect that is not there. `write` already
+        refuses the same state by name, and this suite already skips its own
+        generate cases for it rather than "red misleadingly on a developer's
+        local edits", so the knowledge existed everywhere except the command a
+        human actually runs.
+        """
+
+        handoff = self.write_fixture_handoff(
+            [build_row("leaf.txt", self.identity_for("leaf.txt"))]
+        )
+
+        # Control: on a clean tree this fixture must reach the contract branch.
+        # Without it the dirty assertions below could pass on a report that
+        # never rendered a verdict at all.
+        exit_code, clean = self.run_cli(handoff, "check")
+        self.assertEqual(exit_code, 1)
+        self.assertIn("every pinned identity matches", clean)
+        self.assertIn("contract violations regeneration cannot repair", clean)
+        self.assertNotIn("uncommitted", clean)
+
+        (self.root / "leaf.txt").write_text("edited, not committed\n", encoding="utf-8")
+
+        exit_code, text = self.run_cli(handoff, "check")
+        self.assertEqual(exit_code, 1, "the verdict itself must not change")
+        self.assertIn("uncommitted", text, "the dirty path is not reported")
+        self.assertIn("leaf.txt", text, "the dirty path is not named")
+        self.assertNotIn(
+            "contract violations regeneration cannot repair",
+            text,
+            "still asserts unrepairability for a state committing the path repairs",
+        )
+
+        _, machine = self.run_cli(handoff, "check", "--json")
+        self.assertEqual(json.loads(machine)["dirty_canonical_paths"], ["leaf.txt"])
+
     def test_a_stale_pin_failure_names_the_regenerate_command(self) -> None:
         """What an author reads has to carry the repair, not a verdict word.
 
