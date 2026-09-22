@@ -979,6 +979,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **import-roundtrip** — validate an import lane end to end
 - Check the importer's IR actually captured the UI text the reference shows. → `tools/import-validation/check_label_coverage.sh`
 - Check the import source-contract registry for drift. → `tools/import-validation/check-source-contracts.py`
+- Normalize a Canvas/SVG differential report into the stable receipt shape, so a browser run and a native run can be compared field-by-field instead of eyeballed. → `python3 -m tools.harness.differential`
 - Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever). → `tools/import-validation/live-host-pump-smoke.sh`
 - Validate the DESIGN.md import lane end to end. → `tools/import-validation/designmd-roundtrip.sh`
 - Validate the Figma Make runtime-import lane end to end before pushing. → `tools/import-validation/figma-roundtrip.sh`
@@ -989,6 +990,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Validate the Stitch import lane end to end. → `tools/import-validation/stitch-roundtrip.sh`
 - Validate the v0 import lane end to end. → `tools/import-validation/v0-roundtrip.sh`
 - A render "looks right" but you need to know it actually mounted and settled. → `tools/import-validation/semantic_probes.sh`
+- Prove the native text selection geometry actually agrees with the browser's, rather than trusting that it does. → `tools/import-design/browser_capture/text_diagnostics_native_proof.mjs`
 
 **harness** — coverage + deterministic visual harness
 - The visual-harness Dockerfile's Skia pin may have drifted from the manifest. → `tools/harness/visual/check_skia_pin.py`
