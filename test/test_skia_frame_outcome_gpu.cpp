@@ -101,6 +101,50 @@ TEST_CASE("a plain offscreen frame reports offscreen, not failed",
     REQUIRE_FALSE(f.skia->has_presentable_target());
 }
 
+TEST_CASE("an offscreen frame reaches its output without being presented",
+          "[gpu][skia][wah-2][submission-evidence]") {
+    // `offscreen` is the ONE outcome where the two questions a host asks of a
+    // frame give different answers, and both answers are correct:
+    //
+    //   damage retirement  — "were these pixels written where they belong?"
+    //                        Yes: for a host with no presentable surface by
+    //                        design, the offscreen target IS where they belong.
+    //   submission evidence — "did GPU work go toward the output the host
+    //                        intends?" For a host whose intended output is a
+    //                        native drawable, NO: an offscreen outcome there
+    //                        means the native surface was never created, so
+    //                        the present is a no-op and the window stays black
+    //                        while offscreen readback still returns a correct
+    //                        frame.
+    //
+    // Pinning the divergence on a LIVE surface keeps a host from collapsing the
+    // two onto `frame_reached_output()` and reporting evidence for a frame
+    // nobody can see.
+    auto f = make_offscreen_fixture();
+    if (!f.ready()) {
+        SKIP("Dawn/Graphite unavailable on this host — frame-outcome proof skipped.");
+    }
+
+    REQUIRE(f.gpu->begin_frame());
+    auto* canvas = f.skia->begin_frame();
+    REQUIRE(canvas != nullptr);
+    paint_something(*canvas);
+    const auto outcome = f.skia->end_frame();
+    f.gpu->end_frame();
+
+    REQUIRE(outcome == render::FrameOutcome::offscreen);
+    REQUIRE_FALSE(f.skia->has_presentable_target());
+    REQUIRE(render::frame_reached_output(outcome));
+    REQUIRE_FALSE(outcome == render::FrameOutcome::presented);
+
+    // Control: the divergence belongs to this outcome, not to the predicates
+    // in general — they agree on every other outcome, so a test that read
+    // "these two always disagree" would be measuring the wrong thing.
+    REQUIRE(render::frame_reached_output(render::FrameOutcome::presented));
+    REQUIRE_FALSE(render::frame_reached_output(render::FrameOutcome::recreate));
+    REQUIRE_FALSE(render::frame_reached_output(render::FrameOutcome::failed));
+}
+
 TEST_CASE("a captured frame still reaches its output",
           "[gpu][skia][wah-2]") {
     // read_current_rgba() flushes the recording mid-frame; end_frame()'s snap

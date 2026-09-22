@@ -521,9 +521,21 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                         frame.cache_provenance =
                             ControlGpuHealthProvider::CacheProvenance::fresh_process;
                         frame.trace_evidence_id = gpu_health_trace_id_;
-                        frame.missing_trace_categories = {
-                            "gpu_submission", "native_present_timing", "pipeline_compile",
-                            "resource_upload", "shader_identity", "source_identity"};
+                        // The host producer answers for the frame the adapter
+                        // just captured: capture_back_buffer_png() runs before
+                        // this lambda, so the query reads that exact frame's
+                        // outcome. Hosts without submission evidence keep the
+                        // WindowHost default of false, so an absent producer is
+                        // never read as evidence.
+                        frame.gpu_submission_observed =
+                            window_ && window_->last_frame_gpu_submission_observed();
+                        // "gpu_submission" is no longer listed: a host producer
+                        // now answers for it. This list only selects a
+                        // diagnostic string; it is not a pass gate, so dropping
+                        // the entry unblocks nothing.
+                        frame.missing_trace_categories = {"native_present_timing",
+                                                          "pipeline_compile", "resource_upload",
+                                                          "shader_identity", "source_identity"};
                         const auto* surface = window_ ? window_->gpu_surface() : nullptr;
                         if (!surface)
                             return frame;

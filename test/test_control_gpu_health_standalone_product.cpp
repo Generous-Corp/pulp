@@ -457,24 +457,37 @@ ProductResponse run_campaign(bool use_gpu, bool seed_blank = false) {
     return product;
 }
 
-bool authentic_capture(const choc::value::ValueView& detail) {
+// True when the published probe reports a host that observed the captured
+// frame's submission. A host without a submission producer leaves the
+// measurement absent rather than false, so both shapes are read here.
+bool submission_observed(const choc::value::ValueView& detail) {
+    const auto submitted = detail["health"]["probes"][0]["measurements"]["command_submitted"];
+    return submitted.isBool() && submitted.getBool();
+}
+
+// The capture half of the probe is host-independent: an authentic hardware
+// adapter, a completed readback, and content above the floor. The submit
+// stage is not -- it follows the window host's submission evidence, so the
+// caller says which stage it expects and this checks the matching event.
+bool authentic_capture(const choc::value::ValueView& detail, bool submitted) {
     const auto probe = detail["health"]["probes"][0];
     if (probe["adapter"]["status"].getString() != "authentic" ||
         probe["adapter"]["class"].getString() != "hardware" ||
         !probe["measurements"]["readback_completed"].getBool() ||
-        !probe["measurements"]["content_floor_passed"].getBool() ||
-        !probe["measurements"]["command_submitted"].isVoid())
+        !probe["measurements"]["content_floor_passed"].getBool())
         return false;
+    const std::string_view expected_code = submitted ? "gpu.submit.pass" : "gpu.submit.unverified";
+    const std::string_view expected_verdict = submitted ? "pass" : "unverified";
     for (const auto event : probe["events"])
-        if (event["code"].getString() == "gpu.submit.unverified" &&
-            event["verdict"].getString() == "unverified")
+        if (event["code"].getString() == expected_code &&
+            event["verdict"].getString() == expected_verdict)
             return true;
     return false;
 }
 
 } // namespace
 
-TEST_CASE("exact Standalone product instance publishes capture-only GPU health") {
+TEST_CASE("exact Standalone product instance publishes host-evidenced GPU health") {
     if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
         return;
     const auto product = run_campaign(true);
@@ -482,9 +495,14 @@ TEST_CASE("exact Standalone product instance publishes capture-only GPU health")
     const auto detail = choc::json::parse(product.detail_json);
 
     REQUIRE(detail["schema"].getString() == "pulp.gpu-health-read-result.v1");
-    REQUIRE(detail["health"]["verdict"].getString() == "unverified");
-    REQUIRE(detail["health"]["health_state"].getString() == "unverified");
-    REQUIRE(authentic_capture(detail));
+    // A host that observes the captured frame's submission publishes a
+    // passing submit stage; one that does not leaves it unverified. Which
+    // one a given host yields is a property of the host, so the expected
+    // aggregate is derived from the measurement rather than pinned.
+    const bool submitted = submission_observed(detail);
+    REQUIRE(detail["health"]["verdict"].getString() == (submitted ? "pass" : "unverified"));
+    REQUIRE(detail["health"]["health_state"].getString() == (submitted ? "healthy" : "unverified"));
+    REQUIRE(authentic_capture(detail, submitted));
 
     const auto startup = detail["startup"];
     REQUIRE(startup["status"].getString() == "incomplete");
@@ -558,7 +576,11 @@ TEST_CASE("CPU Standalone product cannot satisfy the authentic GPU capture gate"
     if (pulp::test::skip_when_sanitizer_perturbs_runtime_closure())
         return;
     const auto product = run_campaign(false);
-    REQUIRE_FALSE(authentic_capture(choc::json::parse(product.detail_json)));
+    const auto detail = choc::json::parse(product.detail_json);
+    // A CPU product fails the capture half outright -- no authentic hardware
+    // adapter -- so neither submit-stage expectation can rescue it.
+    REQUIRE_FALSE(authentic_capture(detail, /*submitted=*/false));
+    REQUIRE_FALSE(authentic_capture(detail, /*submitted=*/true));
 }
 
 TEST_CASE("exact Standalone product catches the seeded transparent first frame") {
