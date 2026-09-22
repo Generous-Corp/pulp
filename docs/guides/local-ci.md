@@ -5293,3 +5293,19 @@ Use `launchctl print`, never `launchctl list`, when checking any of this by
 hand: `list` renders a `KeepAlive` job in a crash loop as `- 0`, byte-identical
 to a healthy idle service, which is exactly how the M5 preamble runner stayed
 invisible through 3,684 respawns.
+
+## What the required `macos` check covers, per event
+
+| event | build | tests |
+|---|---|---|
+| `pull_request` | yes | **no** |
+| `merge_group` | yes | yes |
+| `push` / `workflow_dispatch` | yes | yes |
+
+The test phase is roughly forty percent of the gate, and every open pull request queues behind
+the same small pool of self-hosted macOS runners. Running the tests once, in the queue, against
+the commit that will actually land, keeps `main` fully protected and returns that time to the
+pull requests waiting for a slot.
+
+So a green `macos` on a pull request means it **built**. Test results arrive when the queue
+validates it.
