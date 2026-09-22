@@ -9,11 +9,11 @@
   ],
   "rationale": "Pulp's existing SkSL widget path already compiles and paints custom shaders, but agents cannot provide named uniforms, an explicit damage reach, or a reusable geometry chart. This additive slice carries validated scalar and vector uniform values plus reach through the retained widget host, and adds the Skia SDF chart contract with arc-length, signed cross-stroke distance, side, tangent, pixel scale, and validity. It preserves existing shader and fallback behavior, does not change generic framework authority or add an alternate renderer, and has no counterpart Vellum commit to backport. The capability is Pulp-only because Pulp still builds and ships this implementation independently.",
   "tests": [
-    "pulp-test-widget-bridge",
-    "pulp-test-canvas SDF chart shader",
-    "pulp-test-widget-bridge-animation",
     "Vellum freeze",
-    "Vellum trusted freeze"
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF chart shader",
+    "pulp-test-widget-bridge",
+    "pulp-test-widget-bridge-animation"
   ],
   "disposition": "pulp-only"
 }
