@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 88,
+  "inventory_version": 87,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 496,
-    "reviewed_headers": 208,
-    "legacy_unreviewed_headers": 288,
+    "reviewed_headers": 207,
+    "legacy_unreviewed_headers": 289,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 117,
       "capability_support": 44,
-      "infrastructure": 45,
-      "legacy_unreviewed": 288,
+      "infrastructure": 44,
+      "legacy_unreviewed": 289,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -62,8 +62,8 @@
       },
       "midi": {
         "public_headers": 50,
-        "reviewed_headers": 22,
-        "legacy_unreviewed_headers": 28,
+        "reviewed_headers": 21,
+        "legacy_unreviewed_headers": 29,
         "unsupported_headers": 0
       },
       "music": {
@@ -1200,7 +1200,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:c348a20011297911cb028596abb74c56a032b805fdf51653f7151b3c247668e7",
+      "fingerprint": "sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1651,11 +1651,11 @@
     {
       "domain": "midi",
       "source": "core/midi/include/pulp/midi/ump_conversion.hpp",
-      "fingerprint": "sha256:ce867f25f6a66e6764a8729df9e13cd0f37fd0f8f630e9d8ac219b3542f9891d",
+      "fingerprint": "sha256:43f1ec9ddadc0ce7921d04348a74b4c58b65d04cf7566145dea199988e10b179",
       "include": "pulp/midi/ump_conversion.hpp",
-      "disposition": "infrastructure",
+      "disposition": "legacy_unreviewed",
       "capability_keys": [],
-      "rationale": "Transport-boundary translation between a host or device MIDI 1.0 byte stream and the UMP sidecar; the CoreMIDI, WinRT, CLAP and AU adapters are its only callers and no capability kernel includes it."
+      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
     },
     {
       "domain": "midi",
