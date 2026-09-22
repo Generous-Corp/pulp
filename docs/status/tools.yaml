@@ -7,6 +7,7 @@ sweep:
   - tools/audio
   include_paths:
   - tools/scripts/ctest_nonruns.py
+  - tools/scripts/pr_flow_audit.py
   - tools/scripts/figma_import_diff.py
   - tools/scripts/gpu_trace_overhead_acceptance.py
   - tools/scripts/gpu_audio_p4_evidence.py
@@ -454,6 +455,24 @@ tools:
   caveat: Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source
     or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means
     the evidence could not be interpreted, not that CTest failed.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: pr-flow-audit
+  path: tools/scripts/pr_flow_audit.py
+  category: test-evidence
+  use_when: A backlog has stopped draining, or before assuming the fleet is starved — classify every open
+    PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical
+    fixes.
+  invocation: python3 tools/scripts/pr_flow_audit.py [--json] [--fix [--dry-run]] [--unstable-hours N]
+  inputs: Live GitHub state via the `gh`/`ghapp` CLI, plus the base branch's build workflow; `--snapshot`
+    replays a recorded sweep instead.
+  outputs: Every open PR in exactly one bucket with the evidence for it, conflicted-but-green PRs first
+    as the cheapest wins, and a `stalled_count=` handoff line.
+  caveat: Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against
+    the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own
+    commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix`
+    refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
   availability: always
   skill: ci
   docs: guides/local-ci.md
