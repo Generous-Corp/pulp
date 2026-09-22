@@ -419,6 +419,34 @@ Re-running it is idempotent: the counter a tree currently holds is not evidence
 of anything, so a tree already carrying a stale reservation is derived back
 down to what its material justifies.
 
+### The push gate runs `--check` for you — but only against a resolved base
+
+`gates.sh` and `.githooks/pre-push` both run `--check` before a push, whenever
+the diff touches an installed public header or a capability registry/manifest
+path. Both pass `PULP_AGENT_CAPABILITY_BASE_REF` set to a **resolved commit**,
+never the base's name, because a bare run resolves the *merge base* while CI
+forces the *base tip*, and those disagree: measured on one tree in one second,
+80 against the merge base and 82 against the tip — and 80 was exactly the
+number a branch had already carried into the merge queue. Reproduce a CI
+verdict the same way rather than trusting a bare local run.
+
+Two things the gate deliberately does not hide:
+
+- A base that does not resolve prints `SKIPPED` and says a skip is not a pass.
+  Nothing green is implied by silence there.
+- A branch touching none of those paths is skipped with its reason printed. It
+  cannot take a counter, so there is nothing to go stale.
+
+This matters more than the other push gates because the failure is
+**unrepairable after the fact**. The merge group is the only place that sees a
+stale counter, and a pull request that has entered the merge queue refuses a
+push with `GH006: … Branches that are queued for merging cannot be updated` —
+so the fix is locked out by the same queue that is about to reject the branch.
+Removing it from the queue is itself gated (`queue-removal-guard: refusing
+unaudited merge-queue removal`), which leaves waiting for eviction as the only
+unprivileged route. Fifteen seconds before the push replaces roughly an hour of
+merge-group time plus a queue lockout.
+
 **Commit the merge before you run it.** During an uncommitted merge the incoming
 tip is not yet an ancestor of `HEAD`, so base resolution steps back to the *merge
 base* — a commit that predates both sides — and the counter derived from it is
