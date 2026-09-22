@@ -727,11 +727,31 @@ struct ScopedAuV3HostWriting {
             }
         }
 
-        AUParameter *auParam = [AUParameterTree createParameterWithIdentifier:identifier
-            name:name address:address min:p.range.min max:p.range.max
-            unit:unit unitName:nil
-            flags:kAudioUnitParameterFlag_IsWritable | kAudioUnitParameterFlag_IsReadable
-            valueStrings:valueStrings dependentParameters:nil];
+        // Same three-attribute projection as the v2 adapter (see
+        // au_v2_common.cpp for why each AU flag is the matching one): a
+        // read-only parameter withholds IsWritable and gains MeterReadOnly, a
+        // hidden one takes the ExpertMode display hint, and a non-automatable
+        // one takes NonRealTime.
+        AudioUnitParameterOptions auFlags = kAudioUnitParameterFlag_IsReadable;
+        if (pulp::state::is_read_only_param(p))
+            auFlags |= kAudioUnitParameterFlag_MeterReadOnly;
+        else
+            auFlags |= kAudioUnitParameterFlag_IsWritable;
+        if (pulp::state::is_hidden_param(p))
+            auFlags |= kAudioUnitParameterFlag_ExpertMode;
+        if (!pulp::state::is_automatable_param(p))
+            auFlags |= kAudioUnitParameterFlag_NonRealTime;
+
+        AUParameter* auParam = [AUParameterTree createParameterWithIdentifier:identifier
+                                                                         name:name
+                                                                      address:address
+                                                                          min:p.range.min
+                                                                          max:p.range.max
+                                                                         unit:unit
+                                                                     unitName:nil
+                                                                        flags:auFlags
+                                                                 valueStrings:valueStrings
+                                                          dependentParameters:nil];
         auParam.value = p.range.default_value;
         [auParams addObject:auParam];
     }
