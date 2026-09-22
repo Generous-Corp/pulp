@@ -668,6 +668,10 @@ struct ScopedAuV3HostWriting {
         _currentPreset = currentPreset;
 #endif
     }
+}
+
+- (AURenderContextObserver)renderContextObserver {
+    auto* bridge = &_bridge;
     AURenderContextObserver observer = ^(const AudioUnitRenderContext *context) {
         // The OS calls this on the realtime render thread immediately before a
         // render whose workgroup changed. Copy only the host-owned workgroup
