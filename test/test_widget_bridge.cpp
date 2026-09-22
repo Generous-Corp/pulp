@@ -4856,6 +4856,29 @@ TEST_CASE("WidgetBridge validates bounded left leaning geometry trees",
     REQUIRE_FALSE(engine.evaluate("right.success").getWithDefault<bool>(true));
 }
 
+TEST_CASE("WidgetBridge accepts every bounded SDF leaf shape",
+          "[view][bridge][shader][sdf]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createKnob('knob', 'Drive', 0.5);
+        globalThis.results = [
+          'rect', 'circle', 'rounded_rect', 'diamond', 'squircle', 'triangle',
+          'arc', 'ring', 'stadium', 'cross', 'flat_segment', 'rounded_segment',
+          'flat_arc', 'quadratic_bezier'
+        ].map(function(shape) {
+          return setWidgetShaderGeometry('knob', { shape: shape, x: 0, y: 0, w: 40, h: 40 });
+        });
+    )");
+    const auto results = engine.evaluate("results");
+    REQUIRE(results.isArray());
+    REQUIRE(results.size() == 14);
+    for (std::uint32_t i = 0; i < results.size(); ++i)
+        REQUIRE(results[i]["success"].getWithDefault<bool>(false));
+}
+
 TEST_CASE("WidgetBridge publishes vector shader scope with neutral stale texel",
           "[view][bridge][shader][value-channel]") {
     ScriptEngine engine;

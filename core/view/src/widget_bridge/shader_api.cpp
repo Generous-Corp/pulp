@@ -42,9 +42,17 @@ parse_shader_geometry(const choc::value::ValueView& options) {
             {"rect", canvas::Canvas::SDFShape::rect},
             {"circle", canvas::Canvas::SDFShape::circle},
             {"rounded_rect", canvas::Canvas::SDFShape::rounded_rect},
+            {"diamond", canvas::Canvas::SDFShape::diamond},
+            {"squircle", canvas::Canvas::SDFShape::squircle},
+            {"triangle", canvas::Canvas::SDFShape::triangle},
             {"flat_arc", canvas::Canvas::SDFShape::flat_arc},
             {"ring", canvas::Canvas::SDFShape::ring},
             {"stadium", canvas::Canvas::SDFShape::stadium},
+            {"cross", canvas::Canvas::SDFShape::cross},
+            {"flat_segment", canvas::Canvas::SDFShape::flat_segment},
+            {"rounded_segment", canvas::Canvas::SDFShape::rounded_segment},
+            {"arc", canvas::Canvas::SDFShape::arc},
+            {"quadratic_bezier", canvas::Canvas::SDFShape::quadratic_bezier},
         };
         bool found = false;
         for (const auto& candidate : shapes) {
@@ -65,6 +73,10 @@ parse_shader_geometry(const choc::value::ValueView& options) {
         geometry.style.arc_start = number("arcStart", geometry.style.arc_start);
         geometry.style.arc_sweep = number("arcSweep", geometry.style.arc_sweep);
         geometry.style.inner_radius = number("innerRadius", geometry.style.inner_radius);
+        geometry.style.squircle_power = number("squirclePower", geometry.style.squircle_power);
+        geometry.style.arm_width = number("armWidth", geometry.style.arm_width);
+        geometry.style.bezier_cx = number("bezierCX", geometry.style.bezier_cx);
+        geometry.style.bezier_cy = number("bezierCY", geometry.style.bezier_cy);
     } else {
         return std::nullopt;
     }
@@ -164,11 +176,35 @@ std::string emit_geometry_expression(const choc::value::ValueView& node,
         if (shape == "rounded_rect")
             return "sdRoundBox(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
                    geometry_number(node, "cornerRadius", 0.0) + ")";
+        if (shape == "diamond")
+            return "sdDiamond(" + px + ", min(" + w + "," + h + ")*0.5)";
+        if (shape == "squircle")
+            return "sdSquircle(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
+                   geometry_number(node, "squirclePower", 4.0) + ")";
+        if (shape == "triangle")
+            return "sdTriangle(" + px + ", min(" + w + "," + h + ")*0.5)";
         if (shape == "ring")
             return "sdRing(" + px + ", min(" + w + "," + h + ")*0.5, min(" + w + "," +
                    h + ")*0.5*" + geometry_number(node, "innerRadius", 0.5) + ")";
         if (shape == "stadium")
             return "sdStadium(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+        if (shape == "cross")
+            return "sdCross(" + px + ", float2(" + w + "*0.5," + h + "*0.5), " +
+                   geometry_number(node, "armWidth", 0.3) + ")";
+        if (shape == "flat_segment")
+            return "sdFlatSegment(" + px + ", float2(" + w + "*0.5," + h + "*0.5))";
+        if (shape == "rounded_segment")
+            return "sdRoundedSegment(" + px + ", " + w + "*0.5, " + h + ")";
+        if (shape == "flat_arc" || shape == "arc")
+            return "sdFlatArc(" + px + ", min(" + w + "," + h + ")*0.5, min(" + w + "," + h + ")*0.5*" +
+                   geometry_number(node, "innerRadius", 0.5) + ", " +
+                   geometry_number(node, "arcStart", 0.0) + ", " +
+                   geometry_number(node, "arcSweep", 4.712) + ")";
+        if (shape == "quadratic_bezier")
+            return "sdQuadBezier(" + px + ", float2(-" + w + "*0.5,0), float2(" +
+                   geometry_number(node, "bezierCX", 0.0) + "*" + w + "*0.5," +
+                   geometry_number(node, "bezierCY", -1.0) + "*" + h + "*0.5), float2(" +
+                   w + "*0.5,0), " + h + ")";
         error = "Unsupported shader geometry leaf shape '" + shape + "'";
         return {};
     }
