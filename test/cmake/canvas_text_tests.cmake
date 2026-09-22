@@ -328,3 +328,9 @@ endif()
 # degenerate guard (a zero-width path scaled to a non-zero width is a division by
 # zero, and the "result" is a path of NaNs that renders as nothing, forever).
 pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
+
+# PathMeasure: arc length over a Path, and the trim built on it. Covers the
+# clamping contract a meter depends on, the zero-length cases that must report
+# no contour, and the requirement that trimming a cubic yields a cubic rather
+# than a polyline.
+pulp_add_test_suite(pulp-test-canvas-path-measure LIBRARIES pulp::canvas)
