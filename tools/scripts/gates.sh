@@ -117,6 +117,7 @@ SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
@@ -187,6 +188,23 @@ if [ -f "$SHIPYARD_LOCAL" ]; then
     if "$PYTHON" "$SHIPYARD_LOCAL" --repo-root "$ROOT"; then
         echo "  mac → local self-hosted runners (required 'macos' check will post)." >&2
     fi
+fi
+
+# ── 0c. vellum watch-event hint (ADVISORY) ─────────────────────────────────
+# The required `Vellum freeze` check demands a hand-authored watch event when a
+# change touches one of the pinned capability-family path globs — and the
+# trigger is PATHS, not intent, so a one-line edit under e.g.
+# `tools/import-design/**` qualifies with nothing in the diff to warn you.
+# Discovering that from CI costs a full round trip, which three pull requests
+# paid in one evening.
+#
+# ADVISORY BY CONSTRUCTION, and it must stay that way: the authoritative check
+# runs from a TRUSTED ROOT in two required GitHub contexts precisely so a
+# branch's own copy of the checker is not trusted, and CODEOWNERS locks the
+# events directory, the checker and its test. This only moves DISCOVERY
+# earlier; it never changes a required context and never sets `fail`.
+if [ -f "$VELLUM_HINT" ]; then
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
 fi
 
 # ── 1. skill-sync ──────────────────────────────────────────────────────────

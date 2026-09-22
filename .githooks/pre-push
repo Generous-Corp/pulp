@@ -161,6 +161,7 @@ YOGA_ORACLE_PIN="$ROOT/tools/scripts/check_yoga_oracle_pin.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
 CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 BASE="${PULP_PREPUSH_BASE:-origin/main}"
@@ -341,6 +342,21 @@ if [ -f "$COMPAT_AGG" ] && [ -f "$ROOT/compat.json" ] && [ -d "$ROOT/compat" ]; 
         1) fail=1 ;;
         *) echo "[pre-push] compat_aggregate: internal error" >&2 ;;
     esac
+fi
+
+# Vellum watch-event hint — ADVISORY: warns, never blocks, and is deliberately
+# not demotable because it has nothing to demote. The required `Vellum freeze`
+# check wants a hand-authored event under .github/vellum-expansion-watch-events/
+# whenever the pushed range touches a pinned capability-family path glob; the
+# trigger is the path list, not the diff's meaning, so an ordinary edit under a
+# watched tree qualifies with no warning anywhere else.
+#
+# The authoritative run stays in CI, executed from a trusted root rather than
+# from this branch's copy of the checker — that is the whole point of the gate,
+# and giving the branch's copy a local veto would undo it. This prints what CI
+# will say and the command that reproduces it, then gets out of the way.
+if [ -f "$VELLUM_HINT" ]; then
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
 fi
 
 # Docs-noise lint (advisory-demotable in v1). Forward-looking: scans added
