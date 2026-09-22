@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260921-pr8699-win-frame-timer-access",
+  "created_at": "2026-09-21T23:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a C++ access-specifier correction in the Windows plug-in view host for the watched render family. `pulp_pvh_wndproc` is a free function that dispatches three window messages to the host -- WM_PAINT to `handle_wm_paint`, the button messages to `handle_mouse_down`, and WM_TIMER to `handle_frame_timer` -- and the first two were public while the third sat after `private:`, so the WM_TIMER arm alone failed to compile with MSVC C2248 'cannot access private member'. The method moves to the end of the public section beside the siblings the same wndproc already calls; its body is byte-identical, so this is a pure relocation. It changes no renderer, canvas, Skia, Graphite, Dawn, or resource implementation authority, no frame-source policy, and no observable behavior: the frame gating (`should_dispatch_host_frame`), the teardown check that keeps a stale queued WM_TIMER from painting an orphaned child HWND, and the paint/invalidate path are all untouched. It is reported here only because the file sits under the watched render surface. The change is load-bearing for release delivery rather than for rendering: it was the sole compile error in `CLI windows-x64`, the `release` job is gated on that leg, and so every tag from v0.864.0 through v0.869.0 was cut with no published release and no distribution-eligible SDK for downstream plugins to pin.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "clang++ -std=c++20 -fsyntax-only on a minimal reproduction of the exact shape (anonymous-namespace class, method called from a free function in the same TU) with access as the only variable: NEGATIVE control private -> 'error: handle_frame_timer is a private member of (anonymous namespace)::Host' exit 1; POSITIVE control public -> exit 0; the public sibling compiles in both arms, mirroring why exactly one of three call sites failed",
+    "structural: method present exactly once, now ahead of `private:`, braces balanced 132/132 -- a Windows-only translation unit cannot be compiled on macOS, so the `CLI windows-x64` lane is the adjudicating gate"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
