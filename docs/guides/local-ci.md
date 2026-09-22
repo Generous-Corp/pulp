@@ -2187,6 +2187,9 @@ call to an operator.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
+- **`fleet-snapshot-selftest`** (ctest) — snapshot regeneration and `--check`
+  against a fake tartci checkout: a new profile file is picked up by glob, a
+  removed one fails `--check` by name.
 - **`runner-topology-static-selftest`** (ctest) — `--mode=static` on the real
   contract, workflows, and snapshot: the required gate must read `REACHABLE`,
   and a typo'd label must read `UNSERVED`.
@@ -2260,12 +2263,22 @@ serves nothing; that is what `--mode=report` exists for. The required macOS
 gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
 via the same `_event_projection` the live checker uses), not the raw variable,
 which still carries a label the event-class registrations deliberately omit.
-Regenerate the snapshot whenever a fleet profile changes lanes, labels, tiers,
-or workflows. The regenerate command recorded in the snapshot's
-`generated_from.regenerate`, `tartci fleet-macos advertised-labels`, is provided
-by tartci and is not in every tartci build yet; where it is missing, apply the
-`tartci.advertised-labels/v1` label rule to the checked-in profiles by hand and
-record the tartci commit in `generated_from.commit`. Pulp reads only labels,
+Nothing in Pulp names a machine: the snapshot is regenerated from every
+`profiles/*-macos-fleet.toml` in a tartci checkout (discovered by glob) by
+tartci's own generator, so adding or removing a host is a profile change in
+tartci plus a regeneration here.
+
+```bash
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --write   # regenerate
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check   # 1 = stale, 2 = unreadable
+```
+
+`--check` compares registrations only (provenance metadata is expected to
+move) and names every host, lane, or registration added, removed, or changed.
+`runner-topology-check.yml` runs it hourly against a fresh shallow clone of the
+public tartci repo on Python 3.12 (tomllib), and a stale snapshot joins the
+same finding and tracking issue as a live routing violation; a failed clone is
+reported as unreadable state (exit 2), never as green. Pulp reads only labels,
 workflows, and repository from the snapshot, never tartci internals.
 
 `decisions_contract.py --mode probe --live` needs Shipyard >= 0.208.0, the first

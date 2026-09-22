@@ -627,6 +627,10 @@ if(Python3_Interpreter_FOUND)
     # by the hourly sweep, never by a ctest that would redden unrelated PRs.
     add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
+    # Snapshot regeneration/freshness against a fake tartci checkout: profiles
+    # are discovered by glob, so adding or removing a machine needs no edit here.
+    add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}

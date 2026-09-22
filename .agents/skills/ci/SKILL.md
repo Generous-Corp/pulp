@@ -1809,7 +1809,10 @@ still needs `--mode=report`. Never judge the required gate by its raw variable:
 build.yml swaps `pulp-gate-fast` for an event-class label before dispatch, and
 the static mode projects that for you. A temporary lane value belongs in the
 contract's `overrides` array with an owner and an expiry; an expired override
-fails every mode.
+fails every mode. The snapshot names no host by hand: regenerate it with
+`tools/scripts/fleet_snapshot.py --tartci <checkout> --write` after any
+`profiles/*-macos-fleet.toml` change in tartci; the hourly topology sweep runs
+`--check` and files a stale snapshot on the same tracking issue.
 
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 

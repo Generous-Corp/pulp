@@ -22,7 +22,7 @@
     "snapshot": "fleet_advertised_labels.json",
     "covered_supervisors": ["tartci-macos-fleet"],
     "default_supervisor": "tartci-macos-fleet",
-    "_why": "The snapshot lists what each runner registration advertises (labels + the workflow names it mints for), generated from the fleet's checked-in macOS profiles. It says nothing about supply behind other supervisors (the Proxmox Linux pool, the native-Intel Mac mini), so a self-hosted lane declaring one of those is reported UNKNOWN rather than UNSERVED. Lanes that declare no supervisor are tartci macOS fleet lanes. The snapshot's regenerate command (`tartci fleet-macos advertised-labels`) is provided by tartci and is not in every tartci build; the label rule it implements is documented in docs/guides/local-ci.md."
+    "_why": "The snapshot lists what each runner registration advertises (labels + the workflow names it mints for), generated from the fleet's checked-in macOS profiles. It says nothing about supply behind other supervisors (the Proxmox Linux pool, the native-Intel Mac mini), so a self-hosted lane declaring one of those is reported UNKNOWN rather than UNSERVED. Lanes that declare no supervisor are tartci macOS fleet lanes. Hosts are never listed here: tools/scripts/fleet_snapshot.py regenerates the snapshot from every profiles/*-macos-fleet.toml in a tartci checkout (glob) via tartci's own generator, and runner-topology-check.yml runs its --check hourly against a fresh tartci clone so a stale snapshot is a tracked finding."
   },
   "overrides": [
     {

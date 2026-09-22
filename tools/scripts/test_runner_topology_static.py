@@ -72,6 +72,35 @@ def _for(rows, variable, source="expect"):
     return [r for r in rows if r.variable == variable and r.source == source]
 
 
+def _class_label(event: str) -> str:
+    spec = json.loads(CONTRACT.read_text())["event_class_v2"]
+    event = st.DISPATCH_EVENT_ALIASES.get(event, event)
+    return next(row["label"] for row in spec["classes"] if row["event"] == event)
+
+
+def _class_hosts(snapshot: st.Snapshot, label: str) -> list[str]:
+    return sorted({reg.host_id for reg in snapshot.registrations
+                   if reg.repo == REPO and reg.class_label == label})
+
+
+def _v2_gate_registrations(host: str) -> list[st.Registration]:
+    """What a new host's event-class gate lane advertises, built from the
+    contract's own event_class_v2 spec rather than copied from a real host."""
+    spec = json.loads(CONTRACT.read_text())["event_class_v2"]
+    base = next(l["expect"] for l in _raw()["lanes"] if l["variable"] == spec["variable"])
+    base = [label for label in base if label not in spec["omit_labels"]]
+    return [st.Registration(
+        profile=f"{host}-macos-fleet", host_id=host, lane=spec["lane_id"],
+        repo=spec["repo"], class_label=row["label"], labels=[*base, row["label"]],
+        workflows=[row["workflow"]]) for row in spec["classes"]]
+
+
+def _gate_rows(snapshot: st.Snapshot):
+    contract = gate.load_contract(CONTRACT)
+    return [r for r in st.evaluate(contract, snapshot, WORKFLOWS, REPO)
+            if r.variable == GATE and r.source == "expect"]
+
+
 def _snapshot(*regs: dict) -> st.Snapshot:
     return st.Snapshot([st.Registration(
         profile="p", host_id=r.get("host", "h"), lane=r.get("lane", "l"),
@@ -88,10 +117,14 @@ class RealConfig(unittest.TestCase):
             self.assertEqual(row.verdict, st.REACHABLE, (row.event, row.detail))
             self.assertEqual(row.workflow, "Build and Test")
             self.assertNotIn("pulp-gate-fast", row.labels)
-        # m1 and m5 serve the gate as well as m3; the contract's own profile
-        # list names only m3, so this reads supply from the snapshot.
-        hosts = {h.split(":")[0] for r in rows for h in r.detail[3:].split(", ")}
-        self.assertEqual(hosts, {"m1", "studio", "m5"})
+        # The serving hosts are whatever the snapshot declares, never a list
+        # written here: every host with a registration for that event's class
+        # label in this repo. The contract's own profile list is narrower.
+        snapshot = st.load_snapshot(SNAPSHOT)
+        for row in rows:
+            expected = _class_hosts(snapshot, _class_label(row.event))
+            self.assertTrue(expected, row.event)
+            self.assertEqual(row.served_by, expected, row.event)
 
     def test_raw_gate_variable_is_unserved_without_the_event_projection(self):
         # Negative control for the projection: the pre-dispatch selector still
@@ -108,9 +141,13 @@ class RealConfig(unittest.TestCase):
     def test_release_lane_is_reachable_on_declared_supply(self):
         rows = _for(_rows(), RELEASE)
         self.assertTrue(rows)
+        snapshot = st.load_snapshot(SNAPSHOT)
         for row in rows:
             self.assertEqual(row.verdict, st.REACHABLE, row.detail)
-            self.assertIn("m5:pulp-release", row.detail)
+            minting = sorted({reg.host_id for reg in snapshot.registrations
+                              if reg.repo == REPO and row.workflow in reg.workflows
+                              and set(row.labels) <= set(reg.labels)})
+            self.assertEqual(row.served_by, minting)
 
     def test_release_rollback_fallback_is_reported_unserved_but_not_blocking(self):
         rows = _for(_rows(), RELEASE, source="unset_fallback")
@@ -145,6 +182,43 @@ class RealConfig(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("DECLARED supply", proc.stdout)
         self.assertIn("REACHABLE", proc.stdout)
+
+
+class FleetScaling(unittest.TestCase):
+    """Adding or removing a machine must just work: no host is named in code."""
+
+    def setUp(self):
+        self.snapshot = st.load_snapshot(SNAPSHOT)
+        self.gate_hosts = sorted({h for r in _gate_rows(self.snapshot) for h in r.served_by})
+        self.assertGreaterEqual(len(self.gate_hosts), 2, "scaling tests need 2+ gate hosts")
+
+    def test_a_new_host_with_a_gate_lane_serves_the_gate(self):
+        snap = copy.deepcopy(self.snapshot)
+        new_host = "m7"
+        self.assertNotIn(new_host, self.gate_hosts)
+        snap.registrations.extend(_v2_gate_registrations(new_host))
+        for row in _gate_rows(snap):
+            self.assertEqual(row.verdict, st.REACHABLE, row.event)
+            self.assertIn(new_host, row.served_by, row.event)
+            self.assertEqual(row.served_by, sorted([*self.gate_hosts, new_host]))
+
+    def test_removing_one_host_leaves_the_gate_reachable_by_the_rest(self):
+        gone = self.gate_hosts[0]
+        snap = copy.deepcopy(self.snapshot)
+        snap.registrations = [r for r in snap.registrations if r.host_id != gone]
+        for row in _gate_rows(snap):
+            self.assertEqual(row.verdict, st.REACHABLE, row.event)
+            self.assertEqual(row.served_by, self.gate_hosts[1:])
+
+    def test_removing_every_gate_registration_fails_the_required_gate(self):
+        classes = {row["label"] for row in _raw()["event_class_v2"]["classes"]}
+        snap = copy.deepcopy(self.snapshot)
+        snap.registrations = [r for r in snap.registrations if r.class_label not in classes]
+        rows = _gate_rows(snap)
+        self.assertTrue(rows)
+        self.assertTrue(all(r.verdict == st.UNSERVED and r.blocking for r in rows))
+        contract = gate.load_contract(CONTRACT)
+        self.assertEqual(st.exit_code(st.evaluate(contract, snap, WORKFLOWS, REPO), []), 1)
 
 
 class Reachability(unittest.TestCase):

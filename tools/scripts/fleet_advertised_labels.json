@@ -2,13 +2,13 @@
   "schema": "tartci.advertised-labels/v1",
   "generated_from": {
     "repo": "danielraffel/tartci",
-    "commit": "b120ac03905c0073debc2b3465a46a3eff7a42db",
+    "commit": "2f3bc6214385e20718ee51fccafeca104387fa3c",
     "profiles": [
       "profiles/m1-macos-fleet.toml",
       "profiles/m3-macos-fleet.toml",
       "profiles/m5-macos-fleet.toml"
     ],
-    "regenerate": "tartci fleet-macos advertised-labels profiles/m1-macos-fleet.toml profiles/m3-macos-fleet.toml profiles/m5-macos-fleet.toml --json"
+    "regenerate": "python3 tools/scripts/fleet_snapshot.py --tartci <tartci checkout> --write (tartci: python3 scripts/macos_fleet_lanes.py advertised-labels profiles/*-macos-fleet.toml --json)"
   },
   "registrations": [
     {

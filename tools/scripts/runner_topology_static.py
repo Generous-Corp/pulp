@@ -109,6 +109,8 @@ class Row:
     labels: Any
     verdict: str
     detail: str
+    # Host ids of the registrations that serve this row (REACHABLE only).
+    served_by: list[str] = field(default_factory=list)
 
     @property
     def blocking(self) -> bool:
@@ -204,6 +206,20 @@ def label_carriers(labels: list[str], repo: str, snapshot: Snapshot) -> list[Reg
             if reg.repo == repo and want <= reg.folded]
 
 
+def serving(labels: list[str], workflow: str | None, repo: str,
+            snapshot: Snapshot) -> list[Registration]:
+    """Registrations that would pick up the job: labels, workflow, and repo."""
+    if workflow is None:
+        return []
+    return [reg for reg in label_carriers(labels, repo, snapshot)
+            if workflow in reg.workflows]
+
+
+def serving_hosts(labels: list[str], workflow: str | None, repo: str,
+                  snapshot: Snapshot) -> list[str]:
+    return sorted({reg.host_id for reg in serving(labels, workflow, repo, snapshot)})
+
+
 def reach(labels: list[str], workflow: str | None, repo: str,
           snapshot: Snapshot) -> tuple[str, str]:
     """Verdict for one dispatched label set from one workflow."""
@@ -213,9 +229,9 @@ def reach(labels: list[str], workflow: str | None, repo: str,
     want = {label.lower() for label in labels}
     in_repo = [reg for reg in snapshot.registrations if reg.repo == repo]
     carriers = label_carriers(labels, repo, snapshot)
-    serving = [reg for reg in carriers if workflow in reg.workflows]
-    if serving:
-        return REACHABLE, "by " + ", ".join(reg.handle for reg in serving)
+    served = serving(labels, workflow, repo, snapshot)
+    if served:
+        return REACHABLE, "by " + ", ".join(reg.handle for reg in served)
     if carriers:
         minted = sorted({name for reg in carriers for name in reg.workflows})
         return UNSERVED, (
@@ -303,7 +319,9 @@ def evaluate_lane(lane: Any, contract: Any, snapshot: Snapshot,
                 for event, labels, workflow in projected:
                     verdict, detail = reach(labels, workflow, repo, snapshot)
                     rows.append(Row(**base, event=event, workflow=workflow,
-                                    labels=labels, verdict=verdict, detail=detail))
+                                    labels=labels, verdict=verdict, detail=detail,
+                                    served_by=serving_hosts(labels, workflow, repo,
+                                                            snapshot)))
                 return
         if consumers is None:
             consumers = consuming_workflows(lane.variable, workflows_dir)
@@ -314,7 +332,8 @@ def evaluate_lane(lane: Any, contract: Any, snapshot: Snapshot,
         for _file, name in consumers:
             verdict, detail = reach(value, name, repo, snapshot)
             rows.append(Row(**base, event="*", workflow=name or _file,
-                            labels=value, verdict=verdict, detail=detail))
+                            labels=value, verdict=verdict, detail=detail,
+                            served_by=serving_hosts(value, name, repo, snapshot)))
 
     one("expect", lane.expect, project=True)
     # The unset fallback is dispatched verbatim by the consuming workflow; no

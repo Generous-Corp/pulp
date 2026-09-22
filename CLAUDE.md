@@ -2042,7 +2042,7 @@ stuck PR."
 #### Routing and landing digest (generated)
 
 <!-- generated:start id=ci-routing-digest -->
-Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `b120ac03905c`), never live service. Workflow-name matching, advisory lanes, and undeclared selector variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.
+Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `2f3bc6214385`), never live service. Workflow-name matching, advisory lanes, and undeclared selector variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.
 
 - `PULP_LOCAL_MACOS_RUNS_ON_JSON`: REACHABLE on merge_group, pull_request, workflow_dispatch by m1, m5, studio
 - `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
