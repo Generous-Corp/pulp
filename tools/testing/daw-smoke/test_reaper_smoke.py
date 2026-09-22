@@ -474,6 +474,88 @@ class EditorBuildMode(unittest.TestCase):
                              f"it must not drive the screen")
 
 
+class KeyboardRoutingMode(unittest.TestCase):
+    """The mode that proves which keys the DAW still receives.
+
+    Its whole value is the negative half — a plugin that silently swallows
+    Space looks correct from every vantage point inside the plugin — so these
+    cases pin that a missing signal reads as INCONCLUSIVE or FAIL and never as
+    a PASS, and that no synthetic key is posted until the editor is proven to
+    be the window it would land in.
+    """
+
+    def _args(self):
+        return argparse.Namespace(plugin_path=__file__, plugin_name="X",
+                                  format="clap", timeout=1)
+
+    def test_it_refuses_to_type_at_an_unproven_window(self):
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.portable = pathlib.Path(tempfile.mkdtemp())
+        (session.portable / "transport.txt").write_text("play=0 undo=")
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs, "_floating_editor_bounds",
+                               return_value=(0, 0, 400, 300)), \
+             mock.patch.object(rs, "_reaper_editor_is_front", return_value=False), \
+             mock.patch.object(rs, "_press") as press, \
+             mock.patch.object(rs.time, "sleep"):
+            code = rs.run_keyboard_routing_mode(pathlib.Path("/reaper"), self._args())
+        self.assertEqual(code, rs.EXIT_INCONCLUSIVE)
+        press.assert_not_called()
+
+    def test_no_transport_journal_is_never_a_pass(self):
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.portable = pathlib.Path(tempfile.mkdtemp())
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs, "_press") as press, \
+             mock.patch.object(rs.time, "sleep"):
+            code = rs.run_keyboard_routing_mode(pathlib.Path("/reaper"), self._args())
+        self.assertEqual(code, rs.EXIT_INCONCLUSIVE)
+        press.assert_not_called()
+
+    def test_a_swallowed_space_fails(self):
+        """The bug this mode exists for: the transport never moves."""
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.portable = pathlib.Path(tempfile.mkdtemp())
+        journal = session.portable / "transport.txt"
+        journal.write_text("play=0 undo=")
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs, "_floating_editor_bounds",
+                               return_value=(0, 0, 400, 300)), \
+             mock.patch.object(rs, "_reaper_editor_is_front", return_value=True), \
+             mock.patch.object(rs, "_press", return_value=True), \
+             mock.patch.object(rs.time, "sleep"):
+            code = rs.run_keyboard_routing_mode(pathlib.Path("/reaper"), self._args())
+        self.assertEqual(code, rs.EXIT_FAIL)
+
+    def test_a_refused_synthetic_key_is_a_skip_not_a_pass(self):
+        session = mock.MagicMock()
+        session.place_plugin.return_value = None
+        session.run_until_fx_shown.return_value = None
+        session.portable = pathlib.Path(tempfile.mkdtemp())
+        (session.portable / "transport.txt").write_text("play=0 undo=")
+        with mock.patch.object(rs, "ReaperSession", return_value=session), \
+             mock.patch.object(rs, "_floating_editor_bounds",
+                               return_value=(0, 0, 400, 300)), \
+             mock.patch.object(rs, "_reaper_editor_is_front", return_value=True), \
+             mock.patch.object(rs, "_press", return_value=False), \
+             mock.patch.object(rs.time, "sleep"):
+            code = rs.run_keyboard_routing_mode(pathlib.Path("/reaper"), self._args())
+        self.assertEqual(code, rs.EXIT_SKIP)
+
+    def test_the_lua_journals_the_hosts_own_state(self):
+        text = (rs.KEY_ROUTING_LUA).read_text()
+        for needed in ("GetPlayState", "Undo_CanUndo2", "PULP_DAW_SMOKE_JOURNAL",
+                       "TrackFX_Show"):
+            self.assertIn(needed, text,
+                          f"the keyboard-routing lua must read {needed}")
+
+
 class FormatIsAsked(unittest.TestCase):
     """--format has to decide which plugin REAPER inserts.
 

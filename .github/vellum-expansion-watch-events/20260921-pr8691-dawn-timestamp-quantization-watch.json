@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260921-pr8691-dawn-timestamp-quantization-watch",
+  "created_at": "2026-09-21T23:55:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Disables Dawn's `timestamp_quantization` toggle when timestamp queries are requested, so the GPU render-time metric reports the hardware's resolution rather than a masked one. Dawn defaults that toggle ON in native builds -- not only in Chrome -- and ANDs every resolved timestamp with 0xFFFF0000, truncating each endpoint to a multiple of 65536 ns. It exists to stop untrusted web content constructing a high-resolution timer, which buys a native host running its own shaders in its own process nothing. Measured on the reference machine, the identical workload resolves to 41.67 ns once the toggle is disabled, against a physical GPU jitter floor of roughly 0.3 to 3.6 microseconds, so the reported value was dominated by an artifact 18 to 200 times larger than the signal.\\n\\nThe same masking also broke the zero-sample guard in gpu_render_time.hpp: both endpoints truncate independently, so a frame faster than 65536 ns reports exactly 0 and is discarded as \"no sample\", which preferentially drops the fast frames and biases the retained value upward. That guard is correct again once quantization is off.\\n\\nThe family is crossed by two paths, core/render/src/gpu_surface_dawn.cpp and core/render/include/pulp/render/gpu_render_time.hpp, both render-backend selectors. The change alters no adapter selection, device creation, generic rendering, presentation, or ownership boundary; it adds one entry to the device descriptor's disabled-toggle list and corrects a header contract comment that described the path as a passthrough. Registered as watch-only: no authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-gpu-render-time (51 assertions; toggle policy seam, confirmed failing without the fix)",
+    "tools/scripts/vellum_freeze_check.py (change event recorded for the render-skia-dawn slice)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

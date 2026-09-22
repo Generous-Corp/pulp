@@ -186,6 +186,12 @@ pulp_add_test_suite(pulp-test-tracing-badge LIBRARIES pulp::view)
 # soft-skips without Dawn; foundation for CLAP/VST3 resize negotiation)
 # and the keyboard-focus host-etiquette contract (prior-responder
 # restore, host-grab ends text input — keeps Musical Typing alive).
+# Embedded-plugin key routing: which keys the editor consumes, and which it
+# must hand back to the DAW (transport, Musical Typing, host shortcuts). The
+# policy is portable, so this suite runs on every lane; the macOS NSView seam
+# that consumes it is pinned by the [host-forward] case below.
+pulp_add_test_suite(pulp-test-plugin-key-routing LIBRARIES pulp::view)
+
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-plugin-view-host-design-viewport
         test_plugin_view_host_design_viewport.mm
