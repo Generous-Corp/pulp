@@ -1254,6 +1254,18 @@ def cap_fixes(findings: list[Finding], max_fixes: int) -> tuple[list[Finding], i
     return fixable[:max_fixes], len(fixable) - max_fixes
 
 
+def _check_graphql(raw: str, what: str) -> None:
+    """Raise when a GraphQL response carries errors, whatever the exit status."""
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{what}: unreadable GraphQL response: {exc}") from exc
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    if errors:
+        message = str((errors[0] or {}).get("message") or errors[0])
+        raise ValueError(f"{what}: {message}")
+
+
 def apply_fix(finding: Finding, repo: str, gh_bin: str, dry_run: bool) -> str:
     """Perform one auto-fixable action. Only ever called for AUTO-FIXABLE."""
     if finding.bucket != AUTO_FIXABLE:
@@ -1267,7 +1279,13 @@ def apply_fix(finding: Finding, repo: str, gh_bin: str, dry_run: bool) -> str:
             "mutation($id:ID!){enablePullRequestAutoMerge("
             "input:{pullRequestId:$id,mergeMethod:MERGE}){clientMutationId}}"
         )
-        _gh(gh_bin, "api", "graphql", "-f", f"query={query}", "-f", f"id={node}")
+        # A GraphQL mutation can report its refusal in the response body
+        # rather than in the exit status, so a mutation that never happened
+        # would otherwise be reported as one that did.
+        _check_graphql(
+            _gh(gh_bin, "api", "graphql", "-f", f"query={query}", "-f", f"id={node}"),
+            f"arming #{number}",
+        )
         return f"armed auto-merge on #{number}"
     if finding.action == "update-branch":
         if dry_run:
@@ -1379,6 +1397,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.unstable_hours < 0:
         print("pr_flow_audit: --unstable-hours must be >= 0", file=sys.stderr)
+        return 2
+    if args.in_flight_hours < 0:
+        print("pr_flow_audit: --in-flight-hours must be >= 0", file=sys.stderr)
         return 2
     if args.fix and args.snapshot:
         print("pr_flow_audit: --fix needs live state, not a snapshot", file=sys.stderr)

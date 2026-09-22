@@ -583,6 +583,32 @@ class FailClosedTest(unittest.TestCase):
             mod._gh = original
 
 
+class GraphqlErrorTest(unittest.TestCase):
+    """A mutation that was refused in the response body is still a failure."""
+
+    def _arm(self, response):
+        original = mod._gh
+        mod._gh = lambda _b, *a: (
+            json.dumps({"node_id": "PR_x"}) if "graphql" not in a else response)
+        try:
+            return mod.apply_fix(
+                mod.Finding(1, "t", mod.AUTO_FIXABLE, "r", action="enable-auto-merge"),
+                REPO, "ghapp", dry_run=False)
+        finally:
+            mod._gh = original
+
+    def test_an_errors_payload_is_raised_not_reported_as_armed(self):
+        refused = json.dumps({"data": None, "errors": [
+            {"message": "Pull request is in clean status"}]})
+        with self.assertRaises(ValueError) as caught:
+            self._arm(refused)
+        self.assertIn("clean status", str(caught.exception))
+
+    def test_control_a_clean_response_arms(self):
+        ok = json.dumps({"data": {"enablePullRequestAutoMerge": {"clientMutationId": None}}})
+        self.assertIn("armed auto-merge", self._arm(ok))
+
+
 class FixBudgetTest(unittest.TestCase):
     """A wrong verdict mislabels a shape of PR, so the blast radius is capped."""
 
