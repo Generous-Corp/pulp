@@ -312,6 +312,32 @@ flattened buffer is note data. (SysEx Type 0x3 still routes through
 `UmpSysex7Reassembler`, above; per-note expression still goes through
 the MpeBuffer sidecar, not these converters.)
 
+### MIDI 2.0 program change is not shaped like CC or pressure
+
+In a MIDI 2.0 Channel Voice program change (status `0xC`) the program is
+the **top byte of word 1** — not a 32-bit data value scaled down like CC
+and pitch bend, and not a byte-2 index like a controller number. Word 0's
+**low byte is an option-flag field**, not a controller/note slot; bit 0 is
+Bank Valid. When it is set, word 1 also carries bank MSB (bits 15-8) and
+bank LSB (bits 7-0), each in the low 7 bits of its byte. Copying the shape
+of a neighbouring `case` in `ump_conversion.hpp` gets every one of those
+wrong. `ump_program_change_fields()` is the pure decode — read it rather
+than re-deriving the offsets.
+
+A bank-valid program change has **no single-message MIDI 1.0 equivalent**:
+it renders as three messages, CC 0 (bank MSB), CC 32 (bank LSB), then the
+program change, in that order because a MIDI 1.0 receiver latches the bank
+bytes and applies them on the following program change.
+`ump_to_midi1_event` has one `MidiEvent&` out-parameter, so it emits the
+program change only — the bank is reachable via
+`ump_program_change_fields()`, and `ump_to_midi1()` emits the full
+sequence. So **one UMP packet is not always one MIDI 1.0 event** when
+flattening: a bank-valid program change yields three.
+
+`ShortMessage` derives length from the status byte (`0xC0` → group 4 → 2
+bytes), so a converted program change is 2 bytes and its third byte is not
+part of the message. Assert `size()`, not just the bytes.
+
 ### UMP Session / Endpoint / VirtualEndpoint
 
 Pulp exposes a Pulp-native UMP transport surface in

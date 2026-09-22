@@ -78,6 +78,19 @@ struct MidiEvent {
             static_cast<uint8_t>((value >> 7) & 0x7F)), 0, 0.0};
     }
 
+    /// Create a Polyphonic Key Pressure (poly aftertouch) event.
+    ///
+    /// Distinct from channel pressure (status `0xD0`), which applies to every
+    /// sounding note on the channel: poly pressure targets one key.
+    /// @param note      Note number (0-127) the pressure applies to.
+    /// @param pressure  Pressure (0-127).
+    static MidiEvent poly_pressure(uint8_t channel, uint8_t note, uint8_t pressure) {
+        const auto status = static_cast<uint8_t>(0xA0 | (channel & 0x0F));
+        const auto note_byte = static_cast<uint8_t>(note & 0x7F);
+        const auto pressure_byte = static_cast<uint8_t>(pressure & 0x7F);
+        return {choc::midi::ShortMessage(status, note_byte, pressure_byte), 0, 0.0};
+    }
+
     /// Create a Program Change event.
     static MidiEvent program_change(uint8_t channel, uint8_t program) {
         const auto status = static_cast<uint8_t>(0xC0 | (channel & 0x0F));
@@ -90,6 +103,9 @@ struct MidiEvent {
     bool is_cc() const       { return message.isController(); }
     bool is_pitch_bend() const { return message.isPitchWheel(); }
     bool is_program_change() const { return message.isProgramChange(); }
+    bool is_poly_pressure() const {
+        return message.isAftertouch();
+    }
 
     /// MIDI channel (0-15).
     uint8_t channel() const  { return message.getChannel0to15(); }

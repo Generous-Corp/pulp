@@ -335,15 +335,57 @@ host query, that flagging a restart adds no allocation to `process()`,
 and that a tick queued past `terminate()` is a no-op (no UAF). The
 publisher `static_assert`s its atomics are always lock-free.
 
+### Marking the project dirty (`IComponentHandler2::setDirty`)
+
+Parameter edits reach the host through the parameter system, so the host
+already knows the project changed. State that lives *outside* that system does
+not: a loaded sample or impulse response, an imported wavetable, an editor-only
+setting carried in the plugin's own `getState` payload. With no signal, the
+host has no reason to think anything changed and a user can close the project
+and lose that work without ever seeing a save prompt.
+
+`Processor::flag_state_dirty()` raises that edge (an atomic, audio-thread-safe
+like the latency / tail / note-name flags, though the usual caller is the
+editor or a file load). The adapter republishes it as
+`IComponentHandler2::setDirty(true)` from the same main-thread drain that
+delivers `restartComponent`.
+
+Three things that are easy to get wrong:
+- **`setDirty` is on `IComponentHandler2`, not `IComponentHandler`.**
+  `getComponentHandler()` hands back the v1 interface, so it must be
+  re-queried: `FUnknownPtr<IComponentHandler2>(getComponentHandler())`. A host
+  that implements only v1 returns null.
+- **Consume the flag even when it cannot be delivered.** If the query returns
+  null and the edge stays latched, it fires against whatever handler the host
+  installs next — a dirty mark arriving long after the change that caused it.
+  The adapter consumes first, delivers second.
+- **The drain's early-out has to consider it.** `drain_pending_restart()`
+  returns early when the restart publisher is unarmed; a dirty edge with no
+  restart pending would never reach delivery through a host entrypoint if that
+  check did not also test `state_dirty_pending()`.
+
+Regression: `[vst3][state][dirty]`, which covers both the v2 host and the
+v1-only host that drops the edge.
+
 ### MIDI events
 
 VST3 delivers note-on / note-off through `IEventList`:
 
 ```
-Event::kNoteOnEvent  → MidiEvent::note_on
-Event::kNoteOffEvent → MidiEvent::note_off
+Event::kNoteOnEvent       → MidiEvent::note_on
+Event::kNoteOffEvent      → MidiEvent::note_off
+Event::kPolyPressureEvent → MidiEvent::poly_pressure   (status 0xA0)
 Event::kDataEvent (type=kMidiSysEx) → midi_in_.add_sysex_copy(bytes, size, sampleOffset, 0.0)
 ```
+
+**Poly (per-key) aftertouch is the exception to the `IMidiMapping` rule below**
+and is easy to miss for exactly that reason. `IMidiMapping`'s controller space
+is 130 slots per channel — 128 CCs plus *channel* aftertouch and pitch bend —
+and has no room for a message that carries a key number as well as a value. So
+VST3 gives poly pressure its own event type, and it must be decoded in the
+event loop next to the notes. `polyPressure.pressure` arrives normalized;
+the decode scales to 7-bit with rounding (`* 127 + 0.5`) so a host's exact
+`1.0` / `0.5` land on 127 / 64 rather than one step low.
 
 Non-note short MIDI (CC, mod wheel, sustain, pitch bend, channel
 aftertouch) is **not** delivered by Steinberg's event list — VST3 routes
@@ -405,8 +447,39 @@ Load-bearing constraints:
   run-to-run. The scratch is reserved by `reserve()`/`reserve_events()`, so the
   sort stays allocation-free on the audio thread.
 
-MIDI output mirrors the inverse: note_on / note_off in
-`midi_out_` are written back into `data.outputEvents`, with each event's
+**Inbound and outbound are NOT symmetric, and assuming they are is how the
+outbound side stayed notes-only.** Inbound controllers have no event
+representation at all and must come through `IMidiMapping` as parameter
+changes. Outbound has no such indirection: `kLegacyMIDICCOutEvent` (added in
+VST 3.6.12) goes straight onto `data.outputEvents` from the **processor**, like
+any other event — it is *not* routed through the controller, and it has nothing
+to do with `IMidiMapping`. The SDK's own `public.sdk/samples/vst/legacymidiccout`
+sample is the reference; `public.sdk/source/vst/vsteventshelper.h` has the
+`initLegacyMIDICCOutEvent` / `setPitchBendValue` helpers.
+
+One event type carries every non-note channel-voice message, discriminated by
+`midiCCOut.controlNumber` (`Vst::ControllerNumbers` in `ivstmidicontrollers.h`),
+with `value` / `value2` meaning something different per row — get this wrong and
+the message is silently delivered as garbage rather than dropped:
+
+| MIDI status | `controlNumber`        | `value`   | `value2`  |
+|-------------|------------------------|-----------|-----------|
+| `0xA0` poly pressure  | `kCtrlPolyPressure` (131) | key     | pressure |
+| `0xB0` control change | the CC number (0..127)    | CC value | —       |
+| `0xC0` program change | `kCtrlProgramChange` (130)| program  | —       |
+| `0xD0` channel pressure | `kAfterTouch` (128)     | pressure | —       |
+| `0xE0` pitch bend     | `kPitchBend` (129)        | **LSB**  | **MSB** |
+
+Pitch bend's split is the trap: `value` is the low 7 bits, `value2` the high 7
+— the opposite of the byte order a MIDI 1.0 reader reaches for first. SysEx is
+**not** carried outbound; that would need a `kDataEvent` with host-visible
+payload lifetime, and is not implemented. Regression:
+`[vst3][midi][midi-out][process]`.
+
+MIDI output mirrors the inverse: notes in
+`midi_out_` are written back into `data.outputEvents` as
+`kNoteOnEvent`/`kNoteOffEvent` and everything else as
+`kLegacyMIDICCOutEvent`, with each event's
 `Event.sampleOffset` set from the shared cross-format helper
 `detail::vst3_output_offset(me.sample_offset)` (identity for VST3 — the host
 clamps the signed offset). That helper lives in

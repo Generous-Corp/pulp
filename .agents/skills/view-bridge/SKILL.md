@@ -482,6 +482,29 @@ like every other Pulp ObjC class. ObjC class names are process-global, and an
 `NSApplication` delegate is the most dangerous kind to have shadowed across two
 co-loaded Pulp binaries.
 
+## Editor-only state changes must tell the host, or the user loses them
+
+A parameter edit from the editor reaches the host through the parameter system,
+so the host knows the project changed and will offer to save. Anything the
+editor changes *outside* that system leaves no such trace — a loaded sample or
+impulse response, an imported wavetable, a UI-only setting that rides in the
+plugin's own `getState` payload. The editor looks like it worked, the state
+round-trips correctly through save/load, and the user still loses the work by
+closing a project the host believed was clean.
+
+`Processor::flag_state_dirty()` raises that edge. It is an atomic with the same
+shape as `flag_latency_changed()` / `flag_note_names_changed()` — safe to call
+from `process()`, though an editor or a file load on the main thread is the
+usual caller. The adapter republishes it by whatever route the format
+sanctions; the VST3 adapter is wired (`IComponentHandler2::setDirty(true)`,
+delivered on its main-thread drain), CLAP's equivalent is
+`clap_host_state::mark_dirty`, and the other adapters do not consume the flag
+today — raising it there is harmless but inert.
+
+The habit worth forming: whenever an editor writes something that only exists
+in the plugin's own state payload, raise the flag in the same code path. It is
+cheap, and the failure it prevents is silent and unrecoverable.
+
 ## Secondary views
 
 ```cpp
