@@ -1131,8 +1131,7 @@ TEST_CASE("DesignIR parses camelCase source metadata and static HTML CSS assets"
     SECTION("literal Vite import.meta URL edges enter the asset manifest") {
         TempDir tmp("pulp-design-ir-vite-assets");
         write_text(tmp.path / "hero.png", "vite-image-bytes");
-        auto ir =
-            parse_claude_html(read_fixture("test/fixtures/imports/claude/vite-assets.html"));
+        auto ir = parse_claude_html(read_fixture("test/fixtures/imports/claude/vite-assets.html"));
 
         DesignIrAssetOptions options;
         options.base_directory = tmp.path;
