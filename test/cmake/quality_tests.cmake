@@ -968,6 +968,13 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    # CLAUDE.md's ci-routing-digest block is generated from runner_topology.json,
+    # the workflows, and the advertised-labels snapshot; a stale or hand-edited
+    # block fails here.
+    add_test(NAME ci-routing-digest-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ci_routing_digest.py" --check)
+    add_test(NAME ci-routing-digest-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ci_routing_digest.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
     # Presence checks over a rendered panel: every one of the five is proved in

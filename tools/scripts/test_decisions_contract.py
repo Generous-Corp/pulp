@@ -457,6 +457,32 @@ def test_probe_mode() -> None:
             check(proc.returncode == 2, f"validate rejects a probe with {why}")
 
 
+def test_claude_plugin_session_start_runs_the_pointer() -> None:
+    print("test_claude_plugin_session_start_runs_the_pointer")
+    hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+    commands = [h["command"] for group in hooks["hooks"]["SessionStart"]
+                for h in group["hooks"]]
+    pointer = [c for c in commands if "decisions-contract-pointer.sh" in c]
+    check(len(pointer) == 1, "Claude plugin SessionStart runs the decisions pointer")
+    if not pointer:
+        return
+    env = dict(os.environ, CLAUDE_PLUGIN_ROOT=str(REPO_ROOT))
+    proc = subprocess.run(["bash", "-c", pointer[0]], cwd=REPO_ROOT, env=env,
+                          capture_output=True, text=True, timeout=30)
+    check(proc.returncode == 0 and ".agents/contract.toml" in proc.stdout,
+          "pointer prints the contract location inside the repo")
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(["bash", "-c", pointer[0]], cwd=tmp, env=env,
+                              capture_output=True, text=True, timeout=30)
+        check(proc.returncode == 0 and proc.stdout == "" and proc.stderr == "",
+              "pointer is silent outside a checkout carrying the contract")
+        env_missing = dict(os.environ, CLAUDE_PLUGIN_ROOT=tmp)
+        proc = subprocess.run(["bash", "-c", pointer[0]], cwd=REPO_ROOT, env=env_missing,
+                              capture_output=True, text=True, timeout=30)
+        check(proc.returncode == 0 and proc.stdout == "" and proc.stderr == "",
+              "pointer is silent when the plugin script is missing")
+
+
 def main() -> int:
     test_shipped_contract_is_valid()
     test_surface_matches_and_noops()
@@ -468,6 +494,7 @@ def main() -> int:
     test_no_capable_interpreter_fails_loudly()
     test_candidate_list_matches_the_hook()
     test_probe_mode()
+    test_claude_plugin_session_start_runs_the_pointer()
     print()
     if _failures:
         print(f"FAILED: {len(_failures)} assertion(s)")
