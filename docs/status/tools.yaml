@@ -1,719 +1,770 @@
-# Pulp tool registry — the tools an agent or developer should REACH FOR
-# instead of hand-rolling one.
-#
-# Why this file exists: the tools below already existed and were already
-# documented, and an agent still hand-rolled PIL crop scripts to compare a
-# design render against its source. The docs weren't missing — they were
-# buried (line 1825 of a 2,699-line SKILL.md) and contradicted elsewhere.
-# So this manifest is the SOURCE OF TRUTH for "what tool already does this",
-# and the things generated FROM it are the delivery:
-#
-#   * the "Registered tools" digest in CLAUDE.md (always in context, read by
-#     both Claude Code and Codex via AGENTS.md) — generated, never hand-edited
-#   * the PostToolUse hand-roll interception hook
-#
-# Both are produced/validated by tools/scripts/tools_registry_check.py, which
-# also runs a COVERAGE SWEEP: every agent-invocable entry point under the swept
-# directories must appear here or in `exclude:` below. That invariant (the same
-# shape as skill_sync_check.py's "every skill dir MUST have an entry") is what
-# keeps the registry from quietly rotting into a lie.
-#
-# Field contract:
-#   name          stable id, kebab-case
-#   path          in-tree path that IS the tool (must exist)
-#   category      groups the digest
-#   use_when      ONE line, phrased as the need an agent will actually feel.
-#                 This is the matching surface — write the symptom, not the
-#                 implementation ("compare a render against its design source",
-#                 not "runs heuristics over a scene graph").
-#   invocation    canonical, copy-pasteable. Required unless availability=planned.
-#   inputs/outputs what it eats and what it leaves behind
-#   availability  always | optional-install | planned
-#   skill         owning .agents/skills/<name>/SKILL.md (authoritative guidance)
-#   docs          docs/ page (checked by tools/check-docs.sh)
-#   install       how to get it (optional-install only)
-#   pointer       where the design lives (planned only — NEVER an invocation:
-#                 the registry must never hand an agent a command for something
-#                 that isn't in the tree)
-
 schema_version: 1
-
-# Directories swept for unregistered entry points, plus an allowlisted subset of
-# tools/scripts (which holds 300+ files that are CI gates, not agent tools — so
-# it is opt-in by path rather than swept wholesale).
 sweep:
   include_dirs:
-    - tools/import-design
-    - tools/import-validation
-    - tools/harness
-    - tools/audio
+  - tools/import-design
+  - tools/import-validation
+  - tools/harness
+  - tools/audio
   include_paths:
-    - tools/scripts/ctest_nonruns.py
-    - tools/scripts/figma_import_diff.py
-    - tools/scripts/gpu_trace_overhead_acceptance.py
-    - tools/scripts/gpu_audio_p4_evidence.py
-    - tools/scripts/render-figma-import.sh
-
+  - tools/scripts/ctest_nonruns.py
+  - tools/scripts/pr_flow_audit.py
+  - tools/scripts/figma_import_diff.py
+  - tools/scripts/gpu_trace_overhead_acceptance.py
+  - tools/scripts/gpu_audio_p4_evidence.py
+  - tools/scripts/render-figma-import.sh
 tools:
-  # ── CI and test evidence ────────────────────────────────────────────────
-  - name: ctest-nonruns
-    path: tools/scripts/ctest_nonruns.py
-    category: test-evidence
-    use_when: Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift.
-    invocation: python3 tools/scripts/ctest_nonruns.py <current-ctest.junit.xml> [--baseline <known-good-ctest.junit.xml>] [--json]
-    inputs: One explicit CTest JUnit artifact and, optionally, a baseline artifact produced with a comparable selection.
-    outputs: Bounded Markdown or `pulp.ctest-nonruns.v2` JSON with input digests, status counts, non-run reasons, duplicate-safe status transitions, and tests present in only one artifact.
-    caveat: Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
-    availability: always
-    skill: ci
-    docs: guides/local-ci.md
-
-  - name: pr-flow-audit
-    path: tools/scripts/pr_flow_audit.py
-    category: test-evidence
-    use_when: A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes.
-    invocation: python3 tools/scripts/pr_flow_audit.py [--json] [--fix [--dry-run]] [--unstable-hours N]
-    inputs: Live GitHub state via the `gh`/`ghapp` CLI, plus the base branch's build workflow; `--snapshot` replays a recorded sweep instead.
-    outputs: Every open PR in exactly one bucket with the evidence for it, conflicted-but-green PRs first as the cheapest wins, and a `stalled_count=` handoff line.
-    caveat: Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
-    availability: always
-    skill: ci
-    docs: guides/local-ci.md
-
-  # ── Visual comparison — the tools the hand-roll incident was about ────────
-  - name: fidelity-diff
-    path: tools/import-design/fidelity_diff.py
-    category: visual-compare
-    use_when: Measure how close an imported+rendered design is to its Figma source, per node.
-    invocation: python3 tools/import-design/fidelity_diff.py --render <render.png> --scene <scene.pulp.json> [--json report.json]
-    inputs: A rendered PNG + the scene export (scene.pulp.json), and any per-widget reference PNGs named by its asset_manifest.
-    outputs: Named per-check pass/fail lines; a JSON report with --json.
-    caveat: Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong; a run where NOTHING measured reports SKIPPED and exits 3 (never OK), which is what fig-lane scenes produce today.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: montage
-    path: tools/import-design/montage.py
-    category: visual-compare
-    use_when: Stack reference vs render into ONE labeled image so a comparison is self-documenting.
-    invocation: 'python3 tools/import-design/montage.py --out compare.png ref.png:"Figma reference" render.png:"Pulp render"'
-    inputs: N images as path:Label pairs.
-    outputs: One montage PNG with a titled bar above each panel (labels ON by default — that is the point).
-    caveat: Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody looked at is decoration. It is the instrument of last resort precisely because a human is the only thing that reads it.
-    availability: always
-    skill: screenshot
-    docs: guides/importing-designs.md
-
-  - name: figma-import-diff
-    path: tools/scripts/figma_import_diff.py
-    category: visual-compare
-    use_when: See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview.
-    inputs: A reference PNG and a render PNG (positional).
-    invocation: python3 tools/scripts/figma_import_diff.py <reference.png> <render.png> [--out diff.png] [--threshold 16]
-    outputs: A 4-panel PNG (reference / render / pixel-diff / region-grid) + the worst regions ranked.
-    caveat: Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong. A busy diff can be a faithful import.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-pipeline-stages
-    path: tools/import-validation/check_pipeline_stages.py
-    category: visual-compare
-    use_when: Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting any fidelity number from the same panel.
-    invocation: python3 tools/import-validation/check_pipeline_stages.py <project>/build.design.pulp.json
-    inputs: A DesignIR JSON produced by an import or a generation.
-    outputs: One PASS/FAIL line per stage and a non-zero exit naming the stage that did not happen.
-    caveat: Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran at all, which is exactly the confusion this exists to end.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-agent-panel-invariants
-    path: tools/import-validation/check_agent_panel_invariants.py
-    category: visual-compare
-    use_when: Regression-guard the native design path — run it after touching capture, lowering or paint.
-    invocation: python3 tools/import-validation/check_agent_panel_invariants.py --repo . --panel test/fixtures/agent-panels/magneto --pack-css <pack.css> --pack-fonts <dir>
-    inputs: A saved agent-authored panel fixture and the design pack it links.
-    outputs: PASS lines for 100% native, text-is-text, capture-currency and paint order; exit 77 with a named reason when a dependency is missing.
-    caveat: Skips rather than fails without the importer or a design pack, so a green run is only meaningful if it printed PASS lines. A skip is not a pass.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: replay-agent-panel
-    path: tools/import-validation/replay-agent-panel.sh
-    category: visual-compare
-    use_when: Iterate on the RENDERER against real generated markup without paying for a model call each round.
-    invocation: bash tools/import-validation/replay-agent-panel.sh [panel-dir] [WxH]
-    inputs: A checked-in agent panel fixture; design pack via PULP_FORGE_REPO or PULP_REPLAY_PACK.
-    outputs: Gate result, fidelity score with a per-class failure table, and chrome.png / native.png / diff.png side by side.
-    caveat: Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled and every number is meaningless. Says so rather than scoring.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-panel-presence
-    path: tools/import-validation/check_panel_presence.py
-    category: visual-compare
-    use_when: Assert named elements are present in a rendered panel rather than eyeballing a screenshot.
-    invocation: python3 tools/import-validation/check_panel_presence.py --help
-    inputs: A rendered panel and the labels expected in it.
-    outputs: Present/absent per expected label.
-    caveat: Presence is not correctness — an element can be present, misplaced and unreadable.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: chrome-gradient-oracle
-    path: tools/import-validation/chrome_gradient_oracle.py
-    category: visual-compare
-    use_when: Get Chrome's own answer for a CSS gradient when the native paint disagrees.
-    invocation: python3 tools/import-validation/chrome_gradient_oracle.py --help
-    inputs: A CSS gradient declaration.
-    outputs: The rasterised stops Chrome produces, for comparison against Pulp's.
-    caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation, which is the target here but is not the CSS spec.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: diff-against-reference
-    path: tools/import-validation/diff_against_reference.py
-    category: visual-compare
-    use_when: Get one similarity score + verdict BEFORE showing the user any native screenshot.
-    invocation: python3 tools/import-validation/diff_against_reference.py <reference.png> <candidate.png> [--threshold 0.85]
-    inputs: Reference and candidate PNGs.
-    outputs: A 0.0..1.0 score and a verdict — below threshold means do NOT claim the import works.
-    caveat: POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design with every element in the wrong place scores identically to a correct one — same pixels, different arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is layout-parity's job.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-palette-health
-    path: tools/import-validation/check_palette_health.py
-    category: design-import
-    use_when: A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate.
-    invocation: python3 tools/import-validation/check_palette_health.py (--tokens <doc> | --artifact <ui.js> | --pack <dir> [--theme dark|light])
-    inputs: A DesignIR/browser-token document, an emitted UI script (its setColorToken calls), or a design-pack directory whose stylesheets are resolved.
-    outputs: Accent-ramp structure, named-hue survival, and per-tier text contrast against the quietest surface, as problems plus notes; exit 1 on any problem. --json emits the findings.
-    caveat: Judges declared token values, which are an upper bound — anything composited under the type (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support, so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and the emitted note names --accent-text as the unresolvable token rather than the --accent it failed on.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: diff-against-reference-regions
-    path: tools/import-validation/diff_against_reference_regions.py
-    category: visual-compare
-    use_when: A whole-image score is hiding a broken sub-region (empty canvas, broken chrome).
-    invocation: python3 tools/import-validation/diff_against_reference_regions.py <reference.png> <candidate.png>
-    inputs: Reference and candidate PNGs; regions as percent-of-window rects.
-    outputs: Per-region scores, so the harness fails on the first broken region instead of averaging it away.
-    caveat: Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: golden-regression
-    path: tools/import-validation/golden_regression.py
-    category: visual-compare
-    use_when: Prove an importer change didn't silently regress a design that already imported correctly.
-    invocation: python3 tools/import-validation/golden_regression.py --from <source> --file <design> --baseline <baseline.png>
-    inputs: A design source + a committed baseline render.
-    outputs: Tolerant/structural pass/fail (diff fraction + dilated edge agreement), not exact-pixel — AA noise would false-positive.
-    caveat: Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16 would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the import is right.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: verify-rendered-panel
-    path: tools/import-validation/verify_rendered_panel.py
-    category: visual-compare
-    use_when: Prove the emitted ui.js artifact renders like the importer output it claims to ship.
-    invocation: python3 tools/import-validation/verify_rendered_panel.py --artifact <ui.js> --reference <render.png> --tokens <tokens.json> --width <px> --height <px> [--scale 2]
-    inputs: Emitted UI artifact, importer reference render, design tokens, and the intended canvas dimensions.
-    outputs: Fail-closed similarity, foreign-colour, image-source, renderer-capability, and size verdicts with distinct exit codes.
-    caveat: Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: score-native-panel
-    path: tools/import-validation/score_native_panel.py
-    category: visual-compare
-    use_when: Attribute a natively rendered panel's failing pixels to the nodes that own them, against the Chromium capture that is its oracle.
-    invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render <composite.png> [--crop L,T,W,H] [--json-out <report.json>]
-    inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and one full-resolution render of the same panel.
-    outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, per-feature buckets, and distinct exit codes for calibration, size, and threshold failures.
-    caveat: A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: importer-differential-lab
-    path: tools/import-validation/importer_differential_lab.py
-    category: visual-compare
-    use_when: Measure whether the offline/native HTML importer is converging on Chromium without changing canonical import output.
-    invocation: python3 tools/import-validation/importer_differential_lab.py analyze-corpus --importer <pulp-import-design> --observer <pulp-design-ir-observe> --manifest test/fixtures/import-differential/manifest.json --output <dir>
-    inputs: Self-contained HTML fixtures or a versioned corpus manifest, plus built importer and DesignIR observer executables.
-    outputs: Separate browser and candidate evidence, layered per-fixture differential reports, visual overlays, corpus rankings, and timing measurements.
-    caveat: Development-only and advisory. Chromium remains authoritative, production native promotion is disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
-    availability: always
-    skill: import-design
-    docs: tools/importer-differential-lab.md
-
-  - name: layout-parity
-    path: tools/import-design/layout_parity.py
-    category: visual-compare
-    use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
-    invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
-    inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json sibling, which --dump-layout writes for you).
-    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px N blocks only above N px and reports the rest as advisory.
-    caveat: BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: material-audit
-    path: tools/import-design/material_audit.mjs
-    category: visual-compare
-    use_when: An import renders "wrong" but nothing failed, and you need to know whether a declared material property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you spend time on "is it drawn right?".
-    invocation: node tools/import-design/material_audit.mjs --fig <design.fig> --frame <name|guid> [--json report.json]
-    inputs: A local .fig (decoded in-process), or --dir pointing at a `fig_decode.mjs emit` output holding materials.json + scene.pulp.json. No reference image, no network, no Figma.
-    outputs: A declared-vs-emitted-vs-diagnosed count per property, then every SILENT DROP by node_id + property + declared-vs-emitted. Exit 1 on any silent drop. The invariant is `survived ∨ diagnosed-as-degraded ∨ known-unsupported` — anything else is the design saying something the import discarded without telling anyone.
-    caveat: PRESENCE only, never correctness. It proves a property SURVIVED to the envelope; it can say nothing about whether the value is right or renders right. A gradient emitted with a reversed axis, a shadow at the wrong offset, a blend mapped to the wrong CSS name — all pass. It also stops at the ENVELOPE, so a property the envelope carries and codegen later drops looks emitted from here. For "is it drawn right" use thumb-parity or a montage; for boxes use layout-parity.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: thumb-parity
-    path: tools/import-design/thumb_parity.py
-    category: visual-compare
-    use_when: Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory only — never a gate.
-    invocation: python3 tools/import-design/thumb_parity.py --fig <design.fig> --render <render.png> [--out-dir DIR] [--json report.json]
-    inputs: The source .fig (its embedded thumbnail.png plus meta.json's client_meta.render_coordinates ARE the reference and the exact transform) and our render PNG.
-    outputs: Worst-disagreeing blocks ranked by CIEDE2000, optional heatmap. Downscales OUR render to the thumbnail rather than upscaling the thumbnail, so two rasterizers converge instead of comparing anti-aliasing noise.
-    caveat: MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under ~3 design px. For geometry use layout-parity; for material survival use the material audit.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: render-figma-import
-    path: tools/scripts/render-figma-import.sh
-    category: visual-compare
-    use_when: Render an import at the design's OWN canvas size (a mismatched size voids every score).
-    invocation: bash tools/scripts/render-figma-import.sh <ui.js> <out.png>
-    inputs: A pulp-import-design output plus its sibling <ui.js>.meta.json.
-    outputs: A PNG rendered at the source design's root-frame size — no need to remember canvas dimensions.
-    caveat: It renders; it judges nothing. Producing a render is not evidence about it — the render is the INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  # ── Design import — getting a design INTO Pulp ────────────────────────────
-  - name: fig-decode
-    path: tools/import-design/fig_decode.mjs
-    category: design-import
-    use_when: Decode a local .fig file offline — no Figma desktop, no REST quota.
-    invocation: node tools/import-design/fig_decode.mjs emit <file.fig> --frame <guid|name> --out <dir>
-    inputs: A local .fig file. `outline` first to pick a frame; `emit` to decode it.
-    outputs: <dir>/scene.pulp.json + <dir>/assets/ — a figma-plugin export envelope pulp import-design consumes.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: figma-rest-export
-    path: tools/import-design/figma_rest_export.py
-    category: design-import
-    use_when: Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit.
-    invocation: python3 tools/import-design/figma_rest_export.py --url <figma-url> --out <dir> [--token <tok>]
-    inputs: A Figma file key/node or URL + an API token.
-    outputs: A figma-plugin-export-v1 envelope. WILL 429 on dense files — prefer the Figma desktop MCP or the Pulp Figma plugin when desktop is open.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: figma-rasterize-vector-frames
-    path: tools/import-design/figma_rasterize_vector_frames.py
-    category: design-import
-    use_when: A vector ILLUSTRATION group imported as a flat stack of boxes instead of art.
-    invocation: python3 tools/import-design/figma_rasterize_vector_frames.py --scene <scene.pulp.json> --assets-dir <dir> --out <scene.out.json>
-    inputs: A scene export whose vector groups were walked as layout containers.
-    outputs: A rewritten scene with those frames flattened to single PNGs.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: make-catalog-component
-    path: tools/import-design/make_catalog_component.py
-    category: design-import
-    use_when: Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget.
-    invocation: python3 tools/import-design/make_catalog_component.py --help
-    inputs: A Figma node (faithful-vector lane).
-    outputs: A DesignFrameView subclass rendering the embedded SVG 1:1 via SkSVGDOM, plus the CMake/catalog lines to paste.
-    availability: always
-    skill: import-design
-    docs: reference/design-import.md
-
-  - name: reembed-mtk
-    path: tools/import-design/reembed_mtk.py
-    category: design-import
-    use_when: Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically.
-    invocation: python3 tools/import-design/reembed_mtk.py --help
-    inputs: The MTK Figma nodes (187:15 typing, 187:349 piano).
-    outputs: Re-embedded SVG with the baked demo chord neutralized (the live overlay owns pressed-state lighting).
-    availability: always
-    skill: import-design
-    docs: reference/design-import.md
-
-  - name: jsx-transform
-    path: tools/import-design/jsx-runtime/jsx-transform.mjs
-    category: design-import
-    use_when: Transform JSX/React design output into the Pulp runtime-import lane.
-    invocation: node tools/import-design/jsx-runtime/jsx-transform.mjs --help
-    inputs: JSX source from a design export.
-    outputs: Pulp-consumable JS.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: jsx-contract-audit
-    path: tools/import-design/jsx-runtime/jsx-contract-audit.mjs
-    category: design-import
-    use_when: Audit the JSX runtime shim against the contract it promises importers.
-    invocation: node tools/import-design/jsx-runtime/jsx-contract-audit.mjs --help
-    inputs: The jsx-runtime shim surface.
-    outputs: Contract drift report.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: materialized-runtime-transform
-    path: tools/import-design/jsx-runtime/materialized-runtime-transform.mjs
-    category: design-import
-    use_when: Preserve executable React behavior behind a Chromium-computed DesignIR without making the behavior tree the visual authority.
-    invocation: node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs --help
-    inputs: A browser-capture materialized-document.json, its DesignIR, and an optional product-owned runtime prelude.
-    outputs: A self-contained native @pulp/react behavior bundle for ScriptedUiSession.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  # ── Import roundtrip lanes — end-to-end per source ────────────────────────
-  - name: roundtrip-figma
-    path: tools/import-validation/figma-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the Figma Make runtime-import lane end to end before pushing.
-    invocation: bash tools/import-validation/figma-roundtrip.sh
-    inputs: The in-tree Figma Make fixtures.
-    outputs: Parser/dispatch tests + a parser-emitted runtime render; screenshot comparison when a reference is available.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-designmd
-    path: tools/import-validation/designmd-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the DESIGN.md import lane end to end.
-    invocation: bash tools/import-validation/designmd-roundtrip.sh
-    inputs: The in-tree DESIGN.md fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-jsx
-    path: tools/import-validation/jsx-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the JSX/React import lane end to end.
-    invocation: bash tools/import-validation/jsx-roundtrip.sh
-    inputs: The in-tree JSX fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-pencil
-    path: tools/import-validation/pencil-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the Pencil (.pen) import lane end to end.
-    invocation: bash tools/import-validation/pencil-roundtrip.sh
-    inputs: The in-tree Pencil fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-rn
-    path: tools/import-validation/rn-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the React Native import lane end to end.
-    invocation: bash tools/import-validation/rn-roundtrip.sh
-    inputs: The in-tree RN fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-spectr
-    path: tools/import-validation/spectr-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the Spectr import lane end to end.
-    invocation: bash tools/import-validation/spectr-roundtrip.sh
-    inputs: The in-tree Spectr fixtures.
-    outputs: Parser + live in-process standalone PNG + render validation for the lane; capture does not require macOS Screen Recording permission.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-stitch
-    path: tools/import-validation/stitch-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the Stitch import lane end to end.
-    invocation: bash tools/import-validation/stitch-roundtrip.sh
-    inputs: The in-tree Stitch fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: roundtrip-v0
-    path: tools/import-validation/v0-roundtrip.sh
-    category: import-roundtrip
-    use_when: Validate the v0 import lane end to end.
-    invocation: bash tools/import-validation/v0-roundtrip.sh
-    inputs: The in-tree v0 fixtures.
-    outputs: Parser + render validation for the lane.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: semantic-probes
-    path: tools/import-validation/semantic_probes.sh
-    category: import-roundtrip
-    use_when: A render "looks right" but you need to know it actually mounted and settled.
-    invocation: bash tools/import-validation/semantic_probes.sh
-    inputs: A running Spectr import.
-    outputs: Semantic probes that catch silent runtime-import failures a pixel diff cannot see.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-label-coverage
-    path: tools/import-validation/check_label_coverage.sh
-    category: import-roundtrip
-    use_when: Check the importer's IR actually captured the UI text the reference shows.
-    invocation: bash tools/import-validation/check_label_coverage.sh <generated-ui.js> <reference-labels.txt> [--min-coverage 0.70]
-    inputs: Generated UI JS + one expected label per line.
-    outputs: Structural label-coverage assertion.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: live-host-pump-smoke
-    path: tools/import-validation/live-host-pump-smoke.sh
-    category: import-roundtrip
-    use_when: Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever).
-    invocation: bash tools/import-validation/live-host-pump-smoke.sh
-    inputs: A live host build.
-    outputs: Smoke assertion that the idle pump calls service_frame_callbacks().
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: check-source-contracts
-    path: tools/import-validation/check-source-contracts.py
-    category: import-roundtrip
-    use_when: Check the import source-contract registry for drift.
-    invocation: python3 tools/import-validation/check-source-contracts.py [--strict]
-    inputs: tools/import-validation/source-contracts.json.
-    outputs: Warn-only drift report (fails only with --strict).
-    availability: always
-    skill: import-design
-    docs: reference/design-import.md
-
-  # ── Web-compat + visual harness ──────────────────────────────────────────
-  - name: compat-verifier
-    path: tools/harness/verifier.py
-    category: harness
-    use_when: Check web-compat coverage — and that a `supported` claim is backed by a real test.
-    invocation: python3 -m tools.harness.verifier --help
-    inputs: compat.json + the per-surface adapters.
-    outputs: A coverage matrix; the evidence check fails an unbacked `supported` claim.
-    availability: always
-    skill: import-design
-    docs: guides/testing-advanced.md
-
-  - name: visual-harness-runner
-    path: tools/harness/visual/runner.py
-    category: harness
-    use_when: Run the deterministic visual layout snapshots.
-    invocation: python3 -m tools.harness.visual.runner --help
-    inputs: A visual spec.
-    outputs: Deterministic raster snapshots + diffs.
-    availability: always
-    skill: screenshot
-    docs: guides/testing-advanced.md
-
-  - name: visual-harness-docker-build
-    path: tools/harness/visual/docker-build.sh
-    category: harness
-    use_when: Build the visual-harness Docker image — use this, not a raw docker build.
-    invocation: bash tools/harness/visual/docker-build.sh
-    inputs: ci/visual-harness.Dockerfile.
-    outputs: The pinned linux/amd64 image, reusing the machine-local buildx cache.
-    availability: always
-    skill: screenshot
-    docs: guides/testing-advanced.md
-
-  - name: check-skia-pin
-    path: tools/harness/visual/check_skia_pin.py
-    category: harness
-    use_when: The visual-harness Dockerfile's Skia pin may have drifted from the manifest.
-    invocation: python3 tools/harness/visual/check_skia_pin.py
-    inputs: ci/visual-harness.Dockerfile + tools/deps/manifest.json.
-    outputs: Non-zero with a clear diff when the baked Skia tag/URL/SHA drifts from the canonical pin.
-    availability: always
-    skill: screenshot
-    docs: guides/testing-advanced.md
-
-  - name: visual-harness-raster-digest
-    path: tools/harness/visual/raster.py
-    category: harness
-    use_when: "A `kind: render` golden mismatches and you need to know WHICH host's bytes moved."
-    invocation: python3 tools/harness/visual/raster.py --fixture <fixture.json>
-    inputs: "A visual-harness `kind: render` fixture, plus the pinned skia-python wheel."
-    outputs: This host's platform key, byte count and SHA-256, printed whether the comparison passes or fails, so a mismatch is attributable to a host and a value.
-    caveat: Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than degrading to another rasterizer.
-    availability: always
-    skill: screenshot
-    docs: guides/testing-advanced.md
-
-  - name: gpu-trace-overhead-acceptance
-    path: tools/scripts/gpu_trace_overhead_acceptance.py
-    category: harness
-    use_when: Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling artifact pair.
-    invocation: python3 tools/scripts/gpu_trace_overhead_acceptance.py --help
-    inputs: An installed sibling pulp/pulp-mcp pair, one flushed .pftrace, and the SDK-matched trace_processor_shell.
-    outputs: Raw 5-warmup/30-paired/20-fresh-start samples, identity and digest provenance, p95/noise/confidence summaries, and semantic parity.
-    caveat: Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer call sites require separate compile-out, idle-session, and active-capture product trials.
-    availability: always
-    skill: trace-analysis
-    docs: validation/gpu-trace-overhead/README.md
-
-  # ── Audio measurement ─────────────────────────────────────────────────────
-  - name: gpu-audio-evidence
-    path: tools/scripts/gpu_audio_p4_evidence.py
-    category: audio
-    use_when: Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence.
-    invocation: python3 tools/scripts/gpu_audio_p4_evidence.py <raw.jsonl> --benchmark-binary <benchmark> --summary <summary.json> --csv <blocks.csv>
-    inputs: Raw campaign JSONL and the exact benchmark binary named by its digest.
-    outputs: Hash-bound summary and CSV with paired bootstrap intervals, timing provenance, and a row gate.
-    caveat: Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
-    availability: always
-    skill: audio-harness
-    docs: validation/gpu-audio-p4-evidence.md
-
-  - name: audio-validate
-    path: tools/cli/cmd_audio.cpp
-    category: audio
-    use_when: Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV.
-    invocation: pulp audio validate summarize <out.wav> [--json]
-    inputs: A rendered WAV (see `pulp run --audio-capture-rolling` for steady-state capture) or an artifact bundle.
-    outputs: "summarize: metrics; doctor: response/THD; compare: deterministic pass/fail null/spectral gate; assert: assertions.json verdicts."
-    availability: always
-    skill: audio-harness
-    docs: guides/audio-inspector.md
-
-  - name: audio-scope
-    path: tools/cli/cmd_audio.cpp
-    category: audio
-    use_when: Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG.
-    invocation: pulp audio scope --input-wav <out.wav> --json scope.json --png scope.png
-    inputs: A WAV.
-    outputs: Scope JSON and/or a PNG.
-    availability: always
-    skill: audio-harness
-    docs: guides/audio-inspector.md
-
-  - name: audio-render
-    path: tools/cli/cmd_audio.cpp
-    category: audio
-    use_when: Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics.
-    invocation: pulp audio render --help
-    inputs: A plugin bundle + declarative scenario flags (--param values are PLAIN domain, not normalized).
-    outputs: An int16/int24/float32 WAV + metrics JSON matching `validate summarize --json`.
-    availability: always
-    skill: audio-harness
-    docs: guides/audio-inspector.md
-
-  - name: audio-quality-lab
-    path: tools/audio/quality-lab
-    category: audio
-    use_when: Decide whether a DSP change made a sound WORSE — and at which timestamp.
-    invocation: python -m quality_lab.cli compare --reference <ref.wav> --candidate <cand.wav>
-    inputs: A reference WAV + a candidate WAV (or a synthetic case/degradation).
-    outputs: Per-artifact verdicts (transient smear, dulling, metallic HF, graininess) localized to a timestamp, with coverage/confidence.
-    availability: optional-install
-    install: pulp tool install audio-quality-lab   # python_pip via uv; also reachable as `pulp audio validate assert`
-    skill: audio-harness
-    docs: guides/audio-quality-lab.md
-
-  - name: heritage-calibration
-    path: tools/audio/heritage-calibration/heritage_calibration.py
-    category: audio
-    use_when: Build and verify blinded capture packs for a sampler heritage profile without recording machine identity.
-    invocation: python3 tools/audio/heritage-calibration/heritage_calibration.py --help
-    inputs: A validated heritage profile, the C1-C7 capture plan, rendered WAVs, and private provenance supplied by the profile author.
-    outputs: Packed captures, authenticated role assignments, measurements, and verification reports for the private listening workflow.
-    availability: always
-    skill: heritage-profile
-    docs: validation/sample-heritage/README.md
-
-  # ── Design-contract gates — what a screenshot comparison cannot see ────────
-  - name: check-contracts
-    path: tools/import-design/check_contracts.py
-    category: design-import
-    use_when: Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates.
-    invocation: python3 tools/import-design/check_contracts.py <panel.html> --system <design-system-dir> [--macros <macros.json>]
-    inputs: 'A panel HTML document, the design system directory supplying components.css and tokens.css, and optionally a JSON file of the macros the DSP pass produced, keyed "param" and "meter".'
-    outputs: Per-gate pass/fail lines naming the offending class or literal; non-zero exit on any violation.
-    caveat: 'Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.'
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-  - name: component-contract
-    path: tools/import-design/component_contract.py
-    category: design-import
-    use_when: Catch a panel that invents component classes or child parts the design system never defined.
-    invocation: python3 tools/import-design/component_contract.py <panel.html> --system <design-system-dir>
-    inputs: Panel HTML plus the design system directory whose components.css defines the real classes.
-    outputs: Each invented class, with the correct children offered as a correction.
-    caveat: Derives the contract from CSS rules, so a component nothing styles is a component it cannot police. Commented-out rules deliberately do not license a class.
-    availability: always
-    skill: import-design
-    docs: guides/importing-designs.md
-
-# ── On `availability: planned` ──────────────────────────────────────────────
-# There are deliberately NO planned entries right now. The schema supports them
-# (pointer required, invocation forbidden) and the tests cover those rules, but
-# a planned entry is only honest while the tool is genuinely absent — and on a
-# branch this active that window is short: both tools this registry was going to
-# list as planned (layout_parity.py, thumb_parity.py) were built while it was
-# being written. Add a planned entry when a tool is real work someone would
-# otherwise re-derive, and delete it the moment the tool lands. The coverage
-# sweep will force the registration either way.
-
-# Entry points under the swept directories that are deliberately NOT registry
-# tools. Every exclusion needs a reason — "it's noise" is not one.
+- name: audio-quality-lab
+  path: tools/audio/quality-lab
+  category: audio
+  use_when: Decide whether a DSP change made a sound WORSE — and at which timestamp.
+  invocation: python -m quality_lab.cli compare --reference <ref.wav> --candidate <cand.wav>
+  inputs: A reference WAV + a candidate WAV (or a synthetic case/degradation).
+  outputs: Per-artifact verdicts (transient smear, dulling, metallic HF, graininess) localized to a timestamp,
+    with coverage/confidence.
+  availability: optional-install
+  install: pulp tool install audio-quality-lab
+  skill: audio-harness
+  docs: guides/audio-quality-lab.md
+- name: audio-render
+  path: tools/cli/cmd_audio.cpp
+  category: audio
+  use_when: Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics.
+  invocation: pulp audio render --help
+  inputs: A plugin bundle + declarative scenario flags (--param values are PLAIN domain, not normalized).
+  outputs: An int16/int24/float32 WAV + metrics JSON matching `validate summarize --json`.
+  availability: always
+  skill: audio-harness
+  docs: guides/audio-inspector.md
+- name: audio-scope
+  path: tools/cli/cmd_audio.cpp
+  category: audio
+  use_when: Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG.
+  invocation: pulp audio scope --input-wav <out.wav> --json scope.json --png scope.png
+  inputs: A WAV.
+  outputs: Scope JSON and/or a PNG.
+  availability: always
+  skill: audio-harness
+  docs: guides/audio-inspector.md
+- name: audio-validate
+  path: tools/cli/cmd_audio.cpp
+  category: audio
+  use_when: Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV.
+  invocation: pulp audio validate summarize <out.wav> [--json]
+  inputs: A rendered WAV (see `pulp run --audio-capture-rolling` for steady-state capture) or an artifact
+    bundle.
+  outputs: 'summarize: metrics; doctor: response/THD; compare: deterministic pass/fail null/spectral gate;
+    assert: assertions.json verdicts.'
+  availability: always
+  skill: audio-harness
+  docs: guides/audio-inspector.md
+- name: gpu-audio-evidence
+  path: tools/scripts/gpu_audio_p4_evidence.py
+  category: audio
+  use_when: Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency,
+    transfer, and disposition evidence.
+  invocation: python3 tools/scripts/gpu_audio_p4_evidence.py <raw.jsonl> --benchmark-binary <benchmark>
+    --summary <summary.json> --csv <blocks.csv>
+  inputs: Raw campaign JSONL and the exact benchmark binary named by its digest.
+  outputs: Hash-bound summary and CSV with paired bootstrap intervals, timing provenance, and a row gate.
+  caveat: Validates recorded evidence only; does not run the product benchmark, authenticate provider/build
+    attestations, or assign a physical program verdict.
+  availability: always
+  skill: audio-harness
+  docs: validation/gpu-audio-p4-evidence.md
+- name: heritage-calibration
+  path: tools/audio/heritage-calibration/heritage_calibration.py
+  category: audio
+  use_when: Build and verify blinded capture packs for a sampler heritage profile without recording machine
+    identity.
+  invocation: python3 tools/audio/heritage-calibration/heritage_calibration.py --help
+  inputs: A validated heritage profile, the C1-C7 capture plan, rendered WAVs, and private provenance
+    supplied by the profile author.
+  outputs: Packed captures, authenticated role assignments, measurements, and verification reports for
+    the private listening workflow.
+  availability: always
+  skill: heritage-profile
+  docs: validation/sample-heritage/README.md
+- name: check-contracts
+  path: tools/import-design/check_contracts.py
+  category: design-import
+  use_when: Check agent-authored panel HTML before importing it — the one entry point that runs all three
+    contract gates.
+  invocation: python3 tools/import-design/check_contracts.py <panel.html> --system <design-system-dir>
+    [--macros <macros.json>]
+  inputs: A panel HTML document, the design system directory supplying components.css and tokens.css,
+    and optionally a JSON file of the macros the DSP pass produced, keyed "param" and "meter".
+  outputs: Per-gate pass/fail lines naming the offending class or literal; non-zero exit on any violation.
+  caveat: 'Static text analysis, so it proves the markup keeps its side of the contract — never that the
+    panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented
+    children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100%
+    identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and
+    says so) — a green run that checked two gates of three.'
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: check-palette-health
+  path: tools/import-validation/check_palette_health.py
+  category: design-import
+  use_when: A render matches its reference pixel for pixel and still reads wrong — a screaming accent,
+    a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the
+    source already had survives every visual gate.
+  invocation: python3 tools/import-validation/check_palette_health.py (--tokens <doc> | --artifact <ui.js>
+    | --pack <dir> [--theme dark|light])
+  inputs: A DesignIR/browser-token document, an emitted UI script (its setColorToken calls), or a design-pack
+    directory whose stylesheets are resolved.
+  outputs: Accent-ramp structure, named-hue survival, and per-tier text contrast against the quietest
+    surface, as problems plus notes; exit 1 on any problem. --json emits the findings.
+  caveat: Judges declared token values, which are an upper bound — anything composited under the type
+    (shadow, accent bloom) only lowers real contrast. parse_color has no color-mix()/relative-color support,
+    so a token defined that way is skipped rather than judged; ink-signal's light --accent is one, and
+    the emitted note names --accent-text as the unresolvable token rather than the --accent it failed
+    on.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: component-contract
+  path: tools/import-design/component_contract.py
+  category: design-import
+  use_when: Catch a panel that invents component classes or child parts the design system never defined.
+  invocation: python3 tools/import-design/component_contract.py <panel.html> --system <design-system-dir>
+  inputs: Panel HTML plus the design system directory whose components.css defines the real classes.
+  outputs: Each invented class, with the correct children offered as a correction.
+  caveat: Derives the contract from CSS rules, so a component nothing styles is a component it cannot
+    police. Commented-out rules deliberately do not license a class.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: fig-decode
+  path: tools/import-design/fig_decode.mjs
+  category: design-import
+  use_when: Decode a local .fig file offline — no Figma desktop, no REST quota.
+  invocation: node tools/import-design/fig_decode.mjs emit <file.fig> --frame <guid|name> --out <dir>
+  inputs: A local .fig file. `outline` first to pick a frame; `emit` to decode it.
+  outputs: <dir>/scene.pulp.json + <dir>/assets/ — a figma-plugin export envelope pulp import-design consumes.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: figma-rasterize-vector-frames
+  path: tools/import-design/figma_rasterize_vector_frames.py
+  category: design-import
+  use_when: A vector ILLUSTRATION group imported as a flat stack of boxes instead of art.
+  invocation: python3 tools/import-design/figma_rasterize_vector_frames.py --scene <scene.pulp.json> --assets-dir
+    <dir> --out <scene.out.json>
+  inputs: A scene export whose vector groups were walked as layout containers.
+  outputs: A rewritten scene with those frames flattened to single PNGs.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: figma-rest-export
+  path: tools/import-design/figma_rest_export.py
+  category: design-import
+  use_when: Pull a Figma frame headlessly (CI) — the LAST resort; local lanes have no rate limit.
+  invocation: python3 tools/import-design/figma_rest_export.py --url <figma-url> --out <dir> [--token
+    <tok>]
+  inputs: A Figma file key/node or URL + an API token.
+  outputs: A figma-plugin-export-v1 envelope. WILL 429 on dense files — prefer the Figma desktop MCP or
+    the Pulp Figma plugin when desktop is open.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: jsx-contract-audit
+  path: tools/import-design/jsx-runtime/jsx-contract-audit.mjs
+  category: design-import
+  use_when: Audit the JSX runtime shim against the contract it promises importers.
+  invocation: node tools/import-design/jsx-runtime/jsx-contract-audit.mjs --help
+  inputs: The jsx-runtime shim surface.
+  outputs: Contract drift report.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: jsx-transform
+  path: tools/import-design/jsx-runtime/jsx-transform.mjs
+  category: design-import
+  use_when: Transform JSX/React design output into the Pulp runtime-import lane.
+  invocation: node tools/import-design/jsx-runtime/jsx-transform.mjs --help
+  inputs: JSX source from a design export.
+  outputs: Pulp-consumable JS.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: make-catalog-component
+  path: tools/import-design/make_catalog_component.py
+  category: design-import
+  use_when: Turn a Figma node into a 1:1 catalog component instead of hand-painting a C++ widget.
+  invocation: python3 tools/import-design/make_catalog_component.py --help
+  inputs: A Figma node (faithful-vector lane).
+  outputs: A DesignFrameView subclass rendering the embedded SVG 1:1 via SkSVGDOM, plus the CMake/catalog
+    lines to paste.
+  availability: always
+  skill: import-design
+  docs: reference/design-import.md
+- name: materialized-runtime-transform
+  path: tools/import-design/jsx-runtime/materialized-runtime-transform.mjs
+  category: design-import
+  use_when: Preserve executable React behavior behind a Chromium-computed DesignIR without making the
+    behavior tree the visual authority.
+  invocation: node tools/import-design/jsx-runtime/materialized-runtime-transform.mjs --help
+  inputs: A browser-capture materialized-document.json, its DesignIR, and an optional product-owned runtime
+    prelude.
+  outputs: A self-contained native @pulp/react behavior bundle for ScriptedUiSession.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: reembed-mtk
+  path: tools/import-design/reembed_mtk.py
+  category: design-import
+  use_when: Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically.
+  invocation: python3 tools/import-design/reembed_mtk.py --help
+  inputs: The MTK Figma nodes (187:15 typing, 187:349 piano).
+  outputs: Re-embedded SVG with the baked demo chord neutralized (the live overlay owns pressed-state
+    lighting).
+  availability: always
+  skill: import-design
+  docs: reference/design-import.md
+- name: check-skia-pin
+  path: tools/harness/visual/check_skia_pin.py
+  category: harness
+  use_when: The visual-harness Dockerfile's Skia pin may have drifted from the manifest.
+  invocation: python3 tools/harness/visual/check_skia_pin.py
+  inputs: ci/visual-harness.Dockerfile + tools/deps/manifest.json.
+  outputs: Non-zero with a clear diff when the baked Skia tag/URL/SHA drifts from the canonical pin.
+  availability: always
+  skill: screenshot
+  docs: guides/testing-advanced.md
+- name: compat-verifier
+  path: tools/harness/verifier.py
+  category: harness
+  use_when: Check web-compat coverage — and that a `supported` claim is backed by a real test.
+  invocation: python3 -m tools.harness.verifier --help
+  inputs: compat.json + the per-surface adapters.
+  outputs: A coverage matrix; the evidence check fails an unbacked `supported` claim.
+  availability: always
+  skill: import-design
+  docs: guides/testing-advanced.md
+- name: gpu-trace-overhead-acceptance
+  path: tools/scripts/gpu_trace_overhead_acceptance.py
+  category: harness
+  use_when: Measure installed CLI/MCP GPU trace-analysis latency and prove both surfaces consume one sibling
+    artifact pair.
+  invocation: python3 tools/scripts/gpu_trace_overhead_acceptance.py --help
+  inputs: An installed sibling pulp/pulp-mcp pair, one flushed .pftrace, and the SDK-matched trace_processor_shell.
+  outputs: Raw 5-warmup/30-paired/20-fresh-start samples, identity and digest provenance, p95/noise/confidence
+    summaries, and semantic parity.
+  caveat: Measures offline analyzer overhead only. It cannot grade trace-producer capture cost; new producer
+    call sites require separate compile-out, idle-session, and active-capture product trials.
+  availability: always
+  skill: trace-analysis
+  docs: validation/gpu-trace-overhead/README.md
+- name: visual-harness-docker-build
+  path: tools/harness/visual/docker-build.sh
+  category: harness
+  use_when: Build the visual-harness Docker image — use this, not a raw docker build.
+  invocation: bash tools/harness/visual/docker-build.sh
+  inputs: ci/visual-harness.Dockerfile.
+  outputs: The pinned linux/amd64 image, reusing the machine-local buildx cache.
+  availability: always
+  skill: screenshot
+  docs: guides/testing-advanced.md
+- name: visual-harness-raster-digest
+  path: tools/harness/visual/raster.py
+  category: harness
+  use_when: 'A `kind: render` golden mismatches and you need to know WHICH host''s bytes moved.'
+  invocation: python3 tools/harness/visual/raster.py --fixture <fixture.json>
+  inputs: 'A visual-harness `kind: render` fixture, plus the pinned skia-python wheel.'
+  outputs: This host's platform key, byte count and SHA-256, printed whether the comparison passes or
+    fails, so a mismatch is attributable to a host and a value.
+  caveat: Reports a digest and adjudicates nothing — it holds no expectation, so it can never fail. It
+    rasterizes through the pinned skia-python wheel, NOT through `pulp::view::render_to_png`, so its bytes
+    say nothing about what the C++ renderer draws. Without the pinned wheel it exits non-zero rather than
+    degrading to another rasterizer.
+  availability: always
+  skill: screenshot
+  docs: guides/testing-advanced.md
+- name: visual-harness-runner
+  path: tools/harness/visual/runner.py
+  category: harness
+  use_when: Run the deterministic visual layout snapshots.
+  invocation: python3 -m tools.harness.visual.runner --help
+  inputs: A visual spec.
+  outputs: Deterministic raster snapshots + diffs.
+  availability: always
+  skill: screenshot
+  docs: guides/testing-advanced.md
+- name: check-label-coverage
+  path: tools/import-validation/check_label_coverage.sh
+  category: import-roundtrip
+  use_when: Check the importer's IR actually captured the UI text the reference shows.
+  invocation: bash tools/import-validation/check_label_coverage.sh <generated-ui.js> <reference-labels.txt>
+    [--min-coverage 0.70]
+  inputs: Generated UI JS + one expected label per line.
+  outputs: Structural label-coverage assertion.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: check-source-contracts
+  path: tools/import-validation/check-source-contracts.py
+  category: import-roundtrip
+  use_when: Check the import source-contract registry for drift.
+  invocation: python3 tools/import-validation/check-source-contracts.py [--strict]
+  inputs: tools/import-validation/source-contracts.json.
+  outputs: Warn-only drift report (fails only with --strict).
+  availability: always
+  skill: import-design
+  docs: reference/design-import.md
+- name: differential-contract
+  path: tools/harness/differential/__main__.py
+  category: import-roundtrip
+  use_when: Normalize a Canvas/SVG differential report into the stable receipt shape, so a browser run
+    and a native run can be compared field-by-field instead of eyeballed.
+  invocation: python3 -m tools.harness.differential --manifest <manifest.json> [--browser obs.json] [--native
+    obs.json]
+  inputs: A differential manifest plus optional browser and native adapter observation JSON.
+  outputs: A normalized report. It reshapes existing execution artifacts; it is not a second renderer
+    or a second comparison implementation.
+  cannot_see: It normalizes whatever the adapters already produced. A wrong or missing observation is
+    normalized just as faithfully as a right one, so a clean receipt is not evidence the capture was correct.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: live-host-pump-smoke
+  path: tools/import-validation/live-host-pump-smoke.sh
+  category: import-roundtrip
+  use_when: Confirm the live host really drives JS timers (setInterval/setTimeout not queuing forever).
+  invocation: bash tools/import-validation/live-host-pump-smoke.sh
+  inputs: A live host build.
+  outputs: Smoke assertion that the idle pump calls service_frame_callbacks().
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-designmd
+  path: tools/import-validation/designmd-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the DESIGN.md import lane end to end.
+  invocation: bash tools/import-validation/designmd-roundtrip.sh
+  inputs: The in-tree DESIGN.md fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-figma
+  path: tools/import-validation/figma-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the Figma Make runtime-import lane end to end before pushing.
+  invocation: bash tools/import-validation/figma-roundtrip.sh
+  inputs: The in-tree Figma Make fixtures.
+  outputs: Parser/dispatch tests + a parser-emitted runtime render; screenshot comparison when a reference
+    is available.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-jsx
+  path: tools/import-validation/jsx-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the JSX/React import lane end to end.
+  invocation: bash tools/import-validation/jsx-roundtrip.sh
+  inputs: The in-tree JSX fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-pencil
+  path: tools/import-validation/pencil-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the Pencil (.pen) import lane end to end.
+  invocation: bash tools/import-validation/pencil-roundtrip.sh
+  inputs: The in-tree Pencil fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-rn
+  path: tools/import-validation/rn-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the React Native import lane end to end.
+  invocation: bash tools/import-validation/rn-roundtrip.sh
+  inputs: The in-tree RN fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-spectr
+  path: tools/import-validation/spectr-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the Spectr import lane end to end.
+  invocation: bash tools/import-validation/spectr-roundtrip.sh
+  inputs: The in-tree Spectr fixtures.
+  outputs: Parser + live in-process standalone PNG + render validation for the lane; capture does not
+    require macOS Screen Recording permission.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-stitch
+  path: tools/import-validation/stitch-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the Stitch import lane end to end.
+  invocation: bash tools/import-validation/stitch-roundtrip.sh
+  inputs: The in-tree Stitch fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: roundtrip-v0
+  path: tools/import-validation/v0-roundtrip.sh
+  category: import-roundtrip
+  use_when: Validate the v0 import lane end to end.
+  invocation: bash tools/import-validation/v0-roundtrip.sh
+  inputs: The in-tree v0 fixtures.
+  outputs: Parser + render validation for the lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: semantic-probes
+  path: tools/import-validation/semantic_probes.sh
+  category: import-roundtrip
+  use_when: A render "looks right" but you need to know it actually mounted and settled.
+  invocation: bash tools/import-validation/semantic_probes.sh
+  inputs: A running Spectr import.
+  outputs: Semantic probes that catch silent runtime-import failures a pixel diff cannot see.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: text-diagnostics-native-proof
+  path: tools/import-design/browser_capture/text_diagnostics_native_proof.mjs
+  category: import-roundtrip
+  use_when: Prove the native text selection geometry actually agrees with the browser's, rather than trusting
+    that it does.
+  invocation: node tools/import-design/browser_capture/text_diagnostics_native_proof.mjs
+  inputs: A browser capture plus the native selection observation it is being compared against.
+  outputs: A comparison receipt; disagreement fails rather than being reported as a score.
+  cannot_see: 'It is opt-in and honest about what it cannot establish: unsupported glyph and fallback
+    claims are reported as such rather than asserted.'
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: ctest-nonruns
+  path: tools/scripts/ctest_nonruns.py
+  category: test-evidence
+  use_when: Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new
+    skips, recoveries, and population drift.
+  invocation: python3 tools/scripts/ctest_nonruns.py <current-ctest.junit.xml> [--baseline <known-good-ctest.junit.xml>]
+    [--json]
+  inputs: One explicit CTest JUnit artifact and, optionally, a baseline artifact produced with a comparable
+    selection.
+  outputs: Bounded Markdown or `pulp.ctest-nonruns.v2` JSON with input digests, status counts, non-run
+    reasons, duplicate-safe status transitions, and tests present in only one artifact.
+  caveat: Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source
+    or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means
+    the evidence could not be interpreted, not that CTest failed.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: pr-flow-audit
+  path: tools/scripts/pr_flow_audit.py
+  category: test-evidence
+  use_when: A backlog has stopped draining, or before assuming the fleet is starved — classify every open
+    PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical
+    fixes.
+  invocation: python3 tools/scripts/pr_flow_audit.py [--json] [--fix [--dry-run]] [--unstable-hours N]
+  inputs: Live GitHub state via the `gh`/`ghapp` CLI, plus the base branch's build workflow; `--snapshot`
+    replays a recorded sweep instead.
+  outputs: Every open PR in exactly one bucket with the evidence for it, conflicted-but-green PRs first
+    as the cheapest wins, and a `stalled_count=` handoff line.
+  caveat: Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against
+    the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own
+    commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix`
+    refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: check-agent-panel-invariants
+  path: tools/import-validation/check_agent_panel_invariants.py
+  category: visual-compare
+  use_when: Regression-guard the native design path — run it after touching capture, lowering or paint.
+  invocation: python3 tools/import-validation/check_agent_panel_invariants.py --repo . --panel test/fixtures/agent-panels/magneto
+    --pack-css <pack.css> --pack-fonts <dir>
+  inputs: A saved agent-authored panel fixture and the design pack it links.
+  outputs: PASS lines for 100% native, text-is-text, capture-currency and paint order; exit 77 with a
+    named reason when a dependency is missing.
+  caveat: Skips rather than fails without the importer or a design pack, so a green run is only meaningful
+    if it printed PASS lines. A skip is not a pass.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: check-panel-presence
+  path: tools/import-validation/check_panel_presence.py
+  category: visual-compare
+  use_when: Assert named elements are present in a rendered panel rather than eyeballing a screenshot.
+  invocation: python3 tools/import-validation/check_panel_presence.py --help
+  inputs: A rendered panel and the labels expected in it.
+  outputs: Present/absent per expected label.
+  caveat: Presence is not correctness — an element can be present, misplaced and unreadable.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: check-pipeline-stages
+  path: tools/import-validation/check_pipeline_stages.py
+  category: visual-compare
+  use_when: Prove each hop of the agent-HTML -> Chromium -> DesignIR pipeline actually ran, before trusting
+    any fidelity number from the same panel.
+  invocation: python3 tools/import-validation/check_pipeline_stages.py <project>/build.design.pulp.json
+  inputs: A DesignIR JSON produced by an import or a generation.
+  outputs: One PASS/FAIL line per stage and a non-zero exit naming the stage that did not happen.
+  caveat: Asserts MECHANISM, not quality. A panel can pass every stage and still render badly — that is
+    score-native-panel's job. Conversely a high similarity score says nothing about whether Chromium ran
+    at all, which is exactly the confusion this exists to end.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: chrome-gradient-oracle
+  path: tools/import-validation/chrome_gradient_oracle.py
+  category: visual-compare
+  use_when: Get Chrome's own answer for a CSS gradient when the native paint disagrees.
+  invocation: python3 tools/import-validation/chrome_gradient_oracle.py --help
+  inputs: A CSS gradient declaration.
+  outputs: The rasterised stops Chrome produces, for comparison against Pulp's.
+  caveat: Needs a local Chrome, like the rest of the browser-capture lane. The oracle is Chrome's interpretation,
+    which is the target here but is not the CSS spec.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: diff-against-reference
+  path: tools/import-validation/diff_against_reference.py
+  category: visual-compare
+  use_when: Get one similarity score + verdict BEFORE showing the user any native screenshot.
+  invocation: python3 tools/import-validation/diff_against_reference.py <reference.png> <candidate.png>
+    [--threshold 0.85]
+  inputs: Reference and candidate PNGs.
+  outputs: A 0.0..1.0 score and a verdict — below threshold means do NOT claim the import works.
+  caveat: POSITION-BLIND. The score is histogram cosine similarity (gross colour distribution), so a design
+    with every element in the wrong place scores identically to a correct one — same pixels, different
+    arrangement. It catches obviously-broken only. Never read a high score as 'laid out right'; that is
+    layout-parity's job.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: diff-against-reference-regions
+  path: tools/import-validation/diff_against_reference_regions.py
+  category: visual-compare
+  use_when: A whole-image score is hiding a broken sub-region (empty canvas, broken chrome).
+  invocation: python3 tools/import-validation/diff_against_reference_regions.py <reference.png> <candidate.png>
+  inputs: Reference and candidate PNGs; regions as percent-of-window rects.
+  outputs: Per-region scores, so the harness fails on the first broken region instead of averaging it
+    away.
+  caveat: Only the regions you hand it. Anything outside a declared rect is UNCHECKED, and the built-in
+    defaults are hand-authored percent rects for one specific design (Spectr) — pointing it at another
+    design silently scores the wrong boxes. Each region still scores by the position-blind metric above.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: fidelity-diff
+  path: tools/import-design/fidelity_diff.py
+  category: visual-compare
+  use_when: Measure how close an imported+rendered design is to its Figma source, per node.
+  invocation: python3 tools/import-design/fidelity_diff.py --render <render.png> --scene <scene.pulp.json>
+    [--json report.json]
+  inputs: A rendered PNG + the scene export (scene.pulp.json), and any per-widget reference PNGs named
+    by its asset_manifest.
+  outputs: Named per-check pass/fail lines; a JSON report with --json.
+  caveat: Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget
+    "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported
+    a near-perfect import as 832 failures. A high skip count means it checked little, not that little
+    was wrong; a run where NOTHING measured reports SKIPPED and exits 3 (never OK), which is what fig-lane
+    scenes produce today.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: figma-import-diff
+  path: tools/scripts/figma_import_diff.py
+  category: visual-compare
+  use_when: See WHERE a Figma reference and a Pulp render disagree, without eyeballing Preview.
+  inputs: A reference PNG and a render PNG (positional).
+  invocation: python3 tools/scripts/figma_import_diff.py <reference.png> <render.png> [--out diff.png]
+    [--threshold 16]
+  outputs: A 4-panel PNG (reference / render / pixel-diff / region-grid) + the worst regions ranked.
+  caveat: Exact-pixel differencing across two DIFFERENT rasterizers, so anti-aliasing and sub-pixel placement
+    register as real differences. Its ranking finds where to LOOK; it does not adjudicate right vs wrong.
+    A busy diff can be a faithful import.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: golden-regression
+  path: tools/import-validation/golden_regression.py
+  category: visual-compare
+  use_when: Prove an importer change didn't silently regress a design that already imported correctly.
+  invocation: python3 tools/import-validation/golden_regression.py --from <source> --file <design> --baseline
+    <baseline.png>
+  inputs: A design source + a committed baseline render.
+  outputs: Tolerant/structural pass/fail (diff fraction + dilated edge agreement), not exact-pixel — AA
+    noise would false-positive.
+  caveat: Compares against OUR OWN prior render, never the design. It is change-detection, not fidelity
+    — a baseline captured while the import was wrong stays green forever, and every bug found on 2026-07-16
+    would have passed it. Use it to prove you changed nothing you did not mean to; never to prove the
+    import is right.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: importer-differential-lab
+  path: tools/import-validation/importer_differential_lab.py
+  category: visual-compare
+  use_when: Measure whether the offline/native HTML importer is converging on Chromium without changing
+    canonical import output.
+  invocation: python3 tools/import-validation/importer_differential_lab.py analyze-corpus --importer <pulp-import-design>
+    --observer <pulp-design-ir-observe> --manifest test/fixtures/import-differential/manifest.json --output
+    <dir>
+  inputs: Self-contained HTML fixtures or a versioned corpus manifest, plus built importer and DesignIR
+    observer executables.
+  outputs: Separate browser and candidate evidence, layered per-fixture differential reports, visual overlays,
+    corpus rankings, and timing measurements.
+  caveat: Development-only and advisory. Chromium remains authoritative, production native promotion is
+    disabled, and the checked-in fixtures calibrate the lenses rather than proving general web equivalence.
+  availability: always
+  skill: import-design
+  docs: tools/importer-differential-lab.md
+- name: layout-parity
+  path: tools/import-design/layout_parity.py
+  category: visual-compare
+  use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
+  invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
+  inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json
+    sibling, which --dump-layout writes for you).
+  outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE
+    naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip
+    wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px
+    N blocks only above N px and reports the rest as advisory.
+  caveat: BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within
+    correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows)
+    nothing here helps; look at pixels.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: material-audit
+  path: tools/import-design/material_audit.mjs
+  category: visual-compare
+  use_when: An import renders "wrong" but nothing failed, and you need to know whether a declared material
+    property (stroke, shadow, blend, corner radius) reached the render at all. Run it FIRST on any fidelity
+    complaint — it is deterministic, needs no reference image, and answers "was it dropped?" before you
+    spend time on "is it drawn right?".
+  invocation: node tools/import-design/material_audit.mjs --fig <design.fig> --frame <name|guid> [--json
+    report.json]
+  inputs: A local .fig (decoded in-process), or --dir pointing at a `fig_decode.mjs emit` output holding
+    materials.json + scene.pulp.json. No reference image, no network, no Figma.
+  outputs: A declared-vs-emitted-vs-diagnosed count per property, then every SILENT DROP by node_id +
+    property + declared-vs-emitted. Exit 1 on any silent drop. The invariant is `survived ∨ diagnosed-as-degraded
+    ∨ known-unsupported` — anything else is the design saying something the import discarded without telling
+    anyone.
+  caveat: PRESENCE only, never correctness. It proves a property SURVIVED to the envelope; it can say
+    nothing about whether the value is right or renders right. A gradient emitted with a reversed axis,
+    a shadow at the wrong offset, a blend mapped to the wrong CSS name — all pass. It also stops at the
+    ENVELOPE, so a property the envelope carries and codegen later drops looks emitted from here. For
+    "is it drawn right" use thumb-parity or a montage; for boxes use layout-parity.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: montage
+  path: tools/import-design/montage.py
+  category: visual-compare
+  use_when: Stack reference vs render into ONE labeled image so a comparison is self-documenting.
+  invocation: python3 tools/import-design/montage.py --out compare.png ref.png:"Figma reference" render.png:"Pulp
+    render"
+  inputs: N images as path:Label pairs.
+  outputs: One montage PNG with a titled bar above each panel (labels ON by default — that is the point).
+  caveat: Nothing — it renders no verdict at all. Building a montage is not verifying one; a montage nobody
+    looked at is decoration. It is the instrument of last resort precisely because a human is the only
+    thing that reads it.
+  availability: always
+  skill: screenshot
+  docs: guides/importing-designs.md
+- name: render-figma-import
+  path: tools/scripts/render-figma-import.sh
+  category: visual-compare
+  use_when: Render an import at the design's OWN canvas size (a mismatched size voids every score).
+  invocation: bash tools/scripts/render-figma-import.sh <ui.js> <out.png>
+  inputs: A pulp-import-design output plus its sibling <ui.js>.meta.json.
+  outputs: A PNG rendered at the source design's root-frame size — no need to remember canvas dimensions.
+  caveat: It renders; it judges nothing. Producing a render is not evidence about it — the render is the
+    INPUT every checker above reads, and each of those has its own blind spot. Its one real guarantee
+    is size fidelity; render at any other size and every score downstream is measuring a reshaped design.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: replay-agent-panel
+  path: tools/import-validation/replay-agent-panel.sh
+  category: visual-compare
+  use_when: Iterate on the RENDERER against real generated markup without paying for a model call each
+    round.
+  invocation: bash tools/import-validation/replay-agent-panel.sh [panel-dir] [WxH]
+  inputs: A checked-in agent panel fixture; design pack via PULP_FORGE_REPO or PULP_REPLAY_PACK.
+  outputs: Gate result, fidelity score with a per-class failure table, and chrome.png / native.png / diff.png
+    side by side.
+  caveat: Needs a design pack for the fixture's stylesheet and fonts; without one the page imports unstyled
+    and every number is meaningless. Says so rather than scoring.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: score-native-panel
+  path: tools/import-validation/score_native_panel.py
+  category: visual-compare
+  use_when: Attribute a natively rendered panel's failing pixels to the nodes that own them, against the
+    Chromium capture that is its oracle.
+  invocation: python3 tools/import-validation/score_native_panel.py --capture <browser-capture-dir> --render
+    <composite.png> [--crop L,T,W,H] [--json-out <report.json>]
+  inputs: A browser-capture directory (browser.png plus dom-snapshot.json) and one full-resolution render
+    of the same panel.
+  outputs: Worst-node score, percent of ink-bearing nodes passing, area-weighted failing fraction, per-feature
+    buckets, and distinct exit codes for calibration, size, and threshold failures.
+  caveat: A blank render scores WELL against a dark design, so the area-weighted number is not a fidelity
+    measure without a companion coverage statistic; per-node scores are not yet usable as a gate.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: thumb-parity
+  path: tools/import-design/thumb_parity.py
+  category: visual-compare
+  use_when: Triage an import's GROSS colour against Figma's own raster, offline, with no API call. Advisory
+    only — never a gate.
+  invocation: python3 tools/import-design/thumb_parity.py --fig <design.fig> --render <render.png> [--out-dir
+    DIR] [--json report.json]
+  inputs: The source .fig (its embedded thumbnail.png plus meta.json's client_meta.render_coordinates
+    ARE the reference and the exact transform) and our render PNG.
+  outputs: Worst-disagreeing blocks ranked by CIEDE2000, optional heatmap. Downscales OUR render to the
+    thumbnail rather than upscaling the thumbnail, so two rasterizers converge instead of comparing anti-aliasing
+    noise.
+  caveat: MATERIAL-BLIND by construction. It compares block MEANS, so it cannot see any error that preserves
+    a region's mean — a flattened gradient matches its own mean exactly, 20%-vs-100% white thin strokes
+    average out, a soft shadow on a dark panel vanishes. At ~0.4x it also cannot resolve features under
+    ~3 design px. For geometry use layout-parity; for material survival use the material audit.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: verify-rendered-panel
+  path: tools/import-validation/verify_rendered_panel.py
+  category: visual-compare
+  use_when: Prove the emitted ui.js artifact renders like the importer output it claims to ship.
+  invocation: python3 tools/import-validation/verify_rendered_panel.py --artifact <ui.js> --reference
+    <render.png> --tokens <tokens.json> --width <px> --height <px> [--scale 2]
+  inputs: Emitted UI artifact, importer reference render, design tokens, and the intended canvas dimensions.
+  outputs: Fail-closed similarity, foreign-colour, image-source, renderer-capability, and size verdicts
+    with distinct exit codes.
+  caveat: Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it
+    does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 exclude:
-  - path: tools/import-design/browser_capture/capture.mjs
-    reason: Internal browser-capture runtime launched only by pulp-import-design, not a standalone tool an agent should invoke.
-  - path: tools/import-design/browser_capture/browser_process.mjs
-    reason: Internal browser-process lifecycle helper launched only by the capture runtime, including its private guardian subcommand; agents should invoke pulp-import-design instead.
-  - path: tools/import-design/fig/testdata/make_synthetic_fig.mjs
-    reason: Test-fixture generator for the fig decoder's own unit tests, not a tool an agent reaches for.
-  - path: tools/import-design/macro_contract.py
-    reason: Library module behind check-contracts; its __main__ runs the module's own self-tests rather than checking a panel, so invoking it directly proves nothing about your design.
-  - path: tools/import-design/token_contract.py
-    reason: Library module behind check-contracts; its __main__ runs the module's own self-tests rather than checking a panel, so invoking it directly proves nothing about your design.
+- path: tools/import-design/browser_capture/browser_process.mjs
+  reason: Internal browser-process lifecycle helper launched only by the capture runtime, including its
+    private guardian subcommand; agents should invoke pulp-import-design instead.
+- path: tools/import-design/browser_capture/capture.mjs
+  reason: Internal browser-capture runtime launched only by pulp-import-design, not a standalone tool
+    an agent should invoke.
+- path: tools/import-design/browser_capture/text_diagnostics.mjs
+  reason: Library module exporting buildTextDiagnostics; it is imported by text_diagnostics_native_proof.mjs
+    rather than run directly, so agents should invoke that proof instead.
+- path: tools/import-design/fig/testdata/make_synthetic_fig.mjs
+  reason: Test-fixture generator for the fig decoder's own unit tests, not a tool an agent reaches for.
+- path: tools/import-design/macro_contract.py
+  reason: Library module behind check-contracts; its __main__ runs the module's own self-tests rather
+    than checking a panel, so invoking it directly proves nothing about your design.
+- path: tools/import-design/token_contract.py
+  reason: Library module behind check-contracts; its __main__ runs the module's own self-tests rather
+    than checking a panel, so invoking it directly proves nothing about your design.

@@ -10,6 +10,12 @@ import statistics
 import sys
 from pathlib import Path
 
+# The development wrapper is invoked by path, so the repository root is not
+# otherwise guaranteed to be importable.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from .core import (
     LabError,
     TIMING_BUDGET_KEYS,
@@ -20,6 +26,7 @@ from .core import (
     write_json,
 )
 from .reports import format_corpus_summary, format_summary
+from tools.harness.differential.contract import normalize_report
 
 
 def positive_int(value: str) -> int:
@@ -51,7 +58,7 @@ def command_corpus(args: argparse.Namespace) -> int:
     if args.manifest:
         manifest_path = args.manifest.resolve()
         manifest = json.loads(manifest_path.read_text())
-        if manifest.get("schema") != "pulp-importer-differential-manifest-v1":
+        if manifest.get("schema") not in {"pulp-importer-differential-manifest-v1", "pulp-canvas-svg-differential-manifest-v1"}:
             print("importer_differential_lab: unsupported manifest schema",
                   file=sys.stderr)
             return 2
@@ -102,6 +109,33 @@ def command_corpus(args: argparse.Namespace) -> int:
     aggregate = aggregate_reports(reports, len(failures))
     aggregate["failures"] = failures
     write_json(output / "report.json", aggregate)
+    # P1-B consumes the existing execution artifacts; this is an additional
+    # stable receipt, never a second renderer or comparison implementation.
+    if args.manifest:
+        manifest_path = args.manifest.resolve()
+        manifest_doc = json.loads(manifest_path.read_text())
+        if manifest_doc.get("schema") == "pulp-canvas-svg-differential-manifest-v1":
+            browser_observations = {}
+            native_observations = {}
+            for report in reports:
+                fixture_id = (report.get("fixture") or {}).get("id")
+                if not fixture_id:
+                    continue
+                evidence = ["browser/browser.png", "browser/dom-snapshot.json"]
+                browser_observations[fixture_id] = {"status": "pass", "evidence": evidence}
+                findings = []
+                for classification in report.get("classifications", []):
+                    kind = classification.get("kind")
+                    mapping = {"dropped-material": "dropped-material", "geometry": "wrong-geometry", "visual": "wrong-pixels", "unsupported-behavior": "unsupported-behavior"}
+                    if kind in mapping:
+                        findings.append({"kind": mapping[kind], "message": classification.get("detail", kind)})
+                native_observations[fixture_id] = {
+                    "status": "fail" if findings else "pass",
+                    "findings": findings,
+                    "evidence": ["candidate/render.png", "comparison/report.json"] if not findings else ["comparison/report.json"],
+                }
+            contract = normalize_report(manifest_path, browser=browser_observations, native=native_observations)
+            (output / "differential-report.json").write_text(contract.to_json(), encoding="utf-8")
     (output / "summary.md").write_text(format_corpus_summary(aggregate))
     print(format_corpus_summary(aggregate))
     if failures:
