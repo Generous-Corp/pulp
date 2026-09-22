@@ -9694,3 +9694,22 @@ Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
 under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
+
+## The macOS gate is build-only on a pull request; tests run in the merge queue
+
+`build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
+The merge queue runs the same workflow on `merge_group` against the exact commit that will
+land, so `main` keeps full build-and-test protection while a pull request only pays for the
+build.
+
+Two consequences worth knowing:
+
+- **A green `macos` check on a pull request does not mean the tests passed.** It means the
+  build succeeded. The tests run when the pull request is validated in the queue.
+- **A test failure blocks in the queue rather than on the pull request.** Under `ALLGREEN`
+  grouping a red entry forces its neighbours in that batch to rebuild, so a genuinely broken
+  test is more expensive there than it was on the head. Fix a known-bad test before enqueueing
+  rather than letting the queue find it.
+
+This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
+the same file for longer.
