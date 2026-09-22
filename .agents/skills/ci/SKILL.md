@@ -1271,12 +1271,22 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    building**: it stays `in_progress`, goes on holding the group, and every newer
    head sits at `pending` with zero jobs.
 
+   Two readings that mislead here. A superseded run reporting `cancelled` with
+   `jobs.total_count` of **0** proves nothing about `cancel-in-progress`: GitHub
+   keeps at most one *pending* run per group and evicts the previous one
+   unconditionally, so those cancellations happen even when nothing else works.
+   And a self-hosted runner is rarely the culprit: a tartci macOS job that
+   receives a real cancellation cancels its step and completes in seconds.
+
    **Check the predecessor's `conclusion`, not its `status` or its timing** —
    that is the discriminating field:
    ```bash
    ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>" --jq '.status, .conclusion'
+   ghapp api "repos/Generous-Corp/pulp/actions/runs/<old-id>/jobs?per_page=100" \
+     --jq '[.jobs[] | select(.status != "completed")] | map(.name)'
    ```
-   A wedged predecessor reads `in_progress` / `cancelled`. Reading only `status`
+   A wedged predecessor reads `in_progress` / `cancelled`, and the second call
+   names the jobs still going after the cancel was delivered. Reading only `status`
    invites the wrong mechanism: an earlier revision of this entry claimed GitHub
    never cancels a queued predecessor, which is false — it is cancelled, it just
    does not stop.

@@ -655,10 +655,14 @@ if(Python3_Interpreter_FOUND)
     # gate on timing alone.
     set_tests_properties(gpu-handoff-provenance-selftest PROPERTIES TIMEOUT 300)
 
-    # The pin-freshness guard runs in tools/scripts/gates.sh, so its own cover
-    # is the only thing standing between a silent parser drift and a guard that
-    # waves every stale pin through. It shipped unregistered, which meant it
-    # existed without ever executing.
+    # The pin-freshness guard decides which changes to the ledger are the
+    # generator's and which are a human's, and both of its answers can fail
+    # silently: too permissive and the re-pin collisions come back, too strict
+    # and an editorial edit or an ownership-projection correction becomes
+    # unlandable. Its own cover is the only thing that distinguishes them, and
+    # it runs from gates.sh and the pre-push hook rather than a required CI
+    # job. It shipped unregistered once, which meant it existed without ever
+    # executing.
     add_test(NAME gpu-handoff-pin-freshness-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_handoff_pin_freshness.py")
 
