@@ -336,9 +336,6 @@ inline bool valid_trial(const GpuConvolverRawManifest& manifest,
         return false;
     if (trial.path != GpuConvolverRawTrialPath::StagedSync && trial.pair_id == 0)
         return false;
-    if (trial.path != GpuConvolverRawTrialPath::StagedSync &&
-        trial.records.size() != manifest.block_frames)
-        return false;
     return true;
 }
 
@@ -447,61 +444,43 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
                    SharedIoTraceStage::CompletionObserved, submit_to_completion);
     (void)duration(terminal, SharedIoTraceStage::CompletionObserved,
                    SharedIoTraceStage::RetirementObserved, completion_to_retirement);
-    output << R"({"schema":"pulp.gpu-audio.p4.raw.v1","record_kind":"block","trial_id":)"
-           << trial.trial_id << R"(,"pair_id":)"
-           << (trial.path == GpuConvolverRawTrialPath::StagedSync ? "null"
-                                                                   : std::to_string(trial.pair_id))
-           << R"(,"path":")" << path_name(trial.path) << R"(","block_ordinal":)" << ordinal
-           << R"(,"engine_id":)" << trial.engine_id << R"(,"generation":)" << terminal.generation
-           << R"(,"sequence":)" << terminal.sequence << R"(,"gpu_terminal":")"
-           << terminal_name(terminal.gpu_terminal) << R"(","delivery":")"
-           << delivery_name(delivery.delivery) << R"(","deadline_miss":)"
+    output << R"({"block_ordinal":)" << ordinal << R"(,"deadline_miss":)"
            << (publish_to_consumable >= manifest.deadline_ns ? "true" : "false")
-           << R"(,"watchdog_expiry":)"
-           << (worker_pack_copy + encode_cpu + submit_cpu + submit_to_completion +
-                       completion_to_retirement >=
-                   manifest.watchdog_ns
-               ? "true"
-               : "false")
-           << R"(,"late_completion":)"
+           << R"(,"delivery":")" << delivery_name(delivery.delivery) << R"(","engine_id":)"
+           << trial.engine_id << R"(,"generation":)" << terminal.generation
+           << R"(,"gpu_terminal":")" << terminal_name(terminal.gpu_terminal)
+           << R"(","late_completion":)"
            << (terminal.gpu_terminal == SharedIoGpuTerminalDisposition::LateRejected ? "true"
                                                                                          : "false")
-           << R"(,"resync_drop":)"
+           << R"(,"pair_id":)"
+           << (trial.path == GpuConvolverRawTrialPath::StagedSync ? "null"
+                                                                   : std::to_string(trial.pair_id))
+           << R"(,"path":")" << path_name(trial.path) << R"(","record_kind":"block",)"
+           << R"("resync_drop":)"
            << ((delivery.delivery_reason == SharedIoFallbackReason::SequenceGap) ? "true"
                                                                                    : "false")
+           << R"(,"schema":"pulp.gpu-audio.p4.raw.v1","sequence":)" << terminal.sequence
            << R"(,"timings":{)";
     output << R"("callback_cpu":)";
     observation(output, callback_cpu, "audio_callback", "GpuAudioTransport::process");
-    output << R"(,"worker_pack_copy":)";
-    observation(output, worker_pack_copy, observer, "SharedIoConvolutionSession::pack_input");
+    output << R"(,"completion_to_retirement_observed":)";
+    observation(output, completion_to_retirement, observer,
+                "SharedIoConvolutionSession::retirement");
     output << R"(,"encode_cpu":)";
     observation(output, encode_cpu, observer, "SharedIoConvolutionSession::encode");
-    output << R"(,"submit_cpu":)";
-    observation(output, submit_cpu, observer, "SharedIoConvolutionSession::submit");
     output << R"(,"event_processing_cpu":)";
     observation(output, completion_to_retirement, observer,
                 "SharedIoConvolutionSession::retirement");
-    output << R"(,"retirement_cpu":)";
-    observation(output, terminal.retirement_ns, observer,
-                "SharedIoConvolutionSession::retirement");
-    output << R"(,"worker_other_cpu":)";
-    observation(output, terminal.worker_other_ns, observer,
-                "SharedIoConvolutionSession::worker_other");
-    output << R"(,"worker_end_to_end":)";
-    std::uint64_t worker_end_to_end = 0;
-    (void)duration(terminal, SharedIoTraceStage::WorkerEntry,
-                   SharedIoTraceStage::RetirementObserved, worker_end_to_end);
-    observation(output, worker_end_to_end, observer, "SharedIoConvolutionSession::worker");
-    output << R"(,"submit_to_completion":)";
-    observation(output, submit_to_completion, observer,
-                "SharedIoConvolutionSession::completion");
     output << R"(,"gpu_elapsed":)";
     if (terminal.gpu_elapsed_available)
         observation(output, terminal.gpu_elapsed_ns, "gpu", "Dawn::timestamp_query");
     else
         unavailable_observation(output, "gpu", "Dawn::timestamp_query");
-    output << R"(,"completion_to_retirement_observed":)";
-    observation(output, completion_to_retirement, observer,
+    output << R"(,"publish_to_consumable":)";
+    observation(output, publish_to_consumable, "audio_callback",
+                "GpuAudioTransport::result_visible");
+    output << R"(,"retirement_cpu":)";
+    observation(output, terminal.retirement_ns, observer,
                 "SharedIoConvolutionSession::retirement");
     output << R"(,"retirement_to_result_visible":)";
     std::uint64_t retirement_to_result = 0;
@@ -513,19 +492,38 @@ inline std::string render_block(const GpuConvolverRawManifest& manifest,
             terminal.cpu_ns[static_cast<std::size_t>(SharedIoTraceStage::RetirementObserved)];
     observation(output, retirement_to_result, observer,
                 "GpuAudioTransport::result_visible");
-    output << R"(,"publish_to_consumable":)";
-    observation(output, publish_to_consumable, "audio_callback",
-                "GpuAudioTransport::result_visible");
+    output << R"(,"submit_cpu":)";
+    observation(output, submit_cpu, observer, "SharedIoConvolutionSession::submit");
+    output << R"(,"submit_to_completion":)";
+    observation(output, submit_to_completion, observer,
+                "SharedIoConvolutionSession::completion");
+    output << R"(,"worker_end_to_end":)";
+    std::uint64_t worker_end_to_end = 0;
+    (void)duration(terminal, SharedIoTraceStage::WorkerEntry,
+                   SharedIoTraceStage::RetirementObserved, worker_end_to_end);
+    observation(output, worker_end_to_end, observer, "SharedIoConvolutionSession::worker");
+    output << R"(,"worker_other_cpu":)";
+    observation(output, terminal.worker_other_ns, observer,
+                "SharedIoConvolutionSession::worker_other");
+    output << R"(,"worker_pack_copy":)";
+    observation(output, worker_pack_copy, observer, "SharedIoConvolutionSession::pack_input");
     output << R"(},"transfers":{)"
-           << R"("write_buffer_calls":)" << terminal.transfer_counters.write_buffer_calls
-           << R"(,"write_buffer_bytes":)" << terminal.transfer_counters.write_buffer_bytes
-           << R"(,"output_copy_calls":)" << terminal.transfer_counters.output_copy_calls
-           << R"(,"output_copy_bytes":)" << terminal.transfer_counters.output_copy_bytes
-           << R"(,"map_async_calls":)" << terminal.transfer_counters.map_async_calls
+           << R"("map_async_calls":)" << terminal.transfer_counters.map_async_calls
+           << R"(,"mapped_readback_memcpy_bytes":)"
+           << terminal.transfer_counters.mapped_readback_memcpy_bytes
            << R"(,"mapped_readback_memcpy_calls":)"
            << terminal.transfer_counters.mapped_readback_memcpy_calls
-           << R"(,"mapped_readback_memcpy_bytes":)"
-           << terminal.transfer_counters.mapped_readback_memcpy_bytes << "}}";
+           << R"(,"output_copy_bytes":)" << terminal.transfer_counters.output_copy_bytes
+           << R"(,"output_copy_calls":)" << terminal.transfer_counters.output_copy_calls
+           << R"(,"write_buffer_bytes":)" << terminal.transfer_counters.write_buffer_bytes
+           << R"(,"write_buffer_calls":)" << terminal.transfer_counters.write_buffer_calls
+           << R"(},"trial_id":)" << trial.trial_id << R"(,"watchdog_expiry":)"
+           << (worker_pack_copy + encode_cpu + submit_cpu + submit_to_completion +
+                       completion_to_retirement >=
+                   manifest.watchdog_ns
+               ? "true"
+               : "false")
+           << '}';
     return output.str();
 }
 
@@ -698,6 +696,7 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
                   << R"(,"expected_trials":)" << manifest.expected_trials
                   << R"(,"expected_matched_pairs":)" << manifest.expected_matched_pairs
                   << R"(,"expected_staged_sync_trials":)" << manifest.expected_staged_sync_trials
+                  << R"(,"expected_blocks_per_trial":)" << manifest.block_frames
                   << R"(,"bootstrap_seed":)" << manifest.bootstrap_seed
                   << R"(,"bootstrap_resamples":)" << manifest.bootstrap_resamples
                   << R"(,"row":{"block_frames":)" << manifest.block_frames

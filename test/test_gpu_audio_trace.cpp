@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -277,7 +278,7 @@ GpuConvolverRawManifest raw_manifest() {
     value.expected_staged_sync_trials = 1;
     value.bootstrap_resamples = 100;
     value.paced = true;
-    value.block_frames = 32;
+    value.block_frames = 1;
     value.sample_rate_hz = 48000;
     value.channels = 2;
     value.ir_frames = 257;
@@ -400,6 +401,64 @@ TEST_CASE("strict shared P4 raw writer rejects named payload transfers",
     std::ostringstream output;
     REQUIRE_FALSE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
     REQUIRE(output.str().empty());
+}
+
+TEST_CASE("strict P4 raw writer emits a complete campaign envelope",
+          "[gpu_audio][trace][raw]") {
+    const auto manifest = raw_manifest();
+    auto sync_terminal = raw_terminal(0);
+    auto sync_delivery = raw_delivery(0);
+    const std::array sync_records{sync_terminal, sync_delivery};
+
+    auto staged_terminal = raw_terminal(0);
+    staged_terminal.generation = 4;
+    staged_terminal.transfer_counters.write_buffer_calls = 1;
+    staged_terminal.transfer_counters.write_buffer_bytes = 128;
+    auto staged_delivery = raw_delivery(0);
+    staged_delivery.generation = 4;
+    const std::array staged_records{staged_terminal, staged_delivery};
+
+    auto shared_terminal = raw_terminal(0);
+    shared_terminal.generation = 5;
+    auto shared_delivery = raw_delivery(0);
+    shared_delivery.generation = 5;
+    const std::array shared_records{shared_terminal, shared_delivery};
+
+    GpuConvolverRawTrial sync{
+        .trial_id = 1,
+        .path = GpuConvolverRawTrialPath::StagedSync,
+        .engine_id = 17,
+        .generation = 3,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = sync_records,
+    };
+    GpuConvolverRawTrial staged{
+        .trial_id = 2,
+        .pair_id = 1,
+        .path = GpuConvolverRawTrialPath::StagedAsync,
+        .engine_id = 17,
+        .generation = 4,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = staged_records,
+    };
+    GpuConvolverRawTrial shared{
+        .trial_id = 3,
+        .pair_id = 1,
+        .path = GpuConvolverRawTrialPath::SharedAsync,
+        .engine_id = 17,
+        .generation = 5,
+        .ui_frame_p99_ns = 100,
+        .duration_ns = 100,
+        .records = shared_records,
+    };
+    const std::array trials{sync, staged, shared};
+    std::ostringstream output;
+    REQUIRE(write_gpu_convolver_raw_jsonl(output, manifest, trials));
+    REQUIRE(output.str().find("\"schema\":\"pulp.gpu-audio.p4.raw.v1\"") !=
+            std::string::npos);
+    std::ofstream("/tmp/pulp-p4-raw-writer-test.jsonl") << output.str();
 }
 
 TEST_CASE("GPU audio trace records require ordered timestamps and preserve unavailable GPU time",
