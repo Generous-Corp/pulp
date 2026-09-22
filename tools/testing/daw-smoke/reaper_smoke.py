@@ -12,6 +12,14 @@ WHY THIS EXISTS
 
 MODES  (--mode, default reload)
   editor-open        insert the plugin, open its editor, confirm it rendered
+    keyboard-routing   Open the editor, put it in front, and press keys AT it. Asserts
+                       from the HOST's own state — not the plugin's — that Space still
+                       reached the transport while the editor had the keyboard, and
+                       that a key the editor consumes did not also move the host. This
+                       is the half no headless test can reach: whether the editor
+                       consumed a key is invisible from inside the editor, and a plugin
+                       that silently swallows Space is indistinguishable from one that
+                       routes correctly until a musician presses it.
     reload             Hot-swap a watched DSP artifact (the original flow): seed
                        variant A, insert+float the FX, copy variant B over the
                        watched path, assert the reload was ACCEPTED + APPLIED.
@@ -81,6 +89,7 @@ EXIT_PASS, EXIT_FAIL, EXIT_SKIP, EXIT_INCONCLUSIVE = 0, 1, 2, 3
 HERE = Path(__file__).resolve().parent
 LUA = HERE / "insert_and_float.lua"
 SEQ_LOOP_LUA = HERE / "sequence_loop_seek.lua"
+KEY_ROUTING_LUA = HERE / "keyboard_routing.lua"
 
 # Default log markers for the live-plugin-swap mode. The success marker is
 # emitted by the host plugin's NodeLiveSwapPolicy::on_instance_swapped observer
@@ -792,6 +801,182 @@ def run_editor_build_mode(reaper: Path, args: argparse.Namespace) -> int:
         session.cleanup()
 
 
+def _reaper_editor_is_front(plugin_name: str) -> bool:
+    """Is REAPER's floating plugin editor the window a key would land in?
+
+    Two separate questions, both asked of the window server: is REAPER the
+    frontmost PROCESS, and is its frontmost WINDOW the plugin's editor. A
+    synthetic key is posted globally, so answering "probably" here is how a
+    harness types into a window that belongs to someone else.
+    """
+    _osa('tell application "REAPER" to activate')
+    time.sleep(1.5)
+    front = _osa('tell application "System Events" to get name of first '
+                 'process whose frontmost is true')
+    if front != "REAPER":
+        log(f"the frontmost process is {front or 'unknown'}, not REAPER")
+        return False
+    title = _osa('tell application "System Events" to tell process "REAPER" '
+                 'to get name of front window')
+    if plugin_name.casefold() not in title.casefold() and "fx:" not in title.casefold():
+        log(f"REAPER's front window is {title!r}, not the plugin editor")
+        return False
+    return True
+
+
+def _press(key_code: int, modifier: str = "") -> bool:
+    """Send one key press to whatever is frontmost, via the window server.
+
+    Returns False when macOS refused the synthetic event (no Accessibility
+    grant), so the caller can SKIP with a real reason instead of reading the
+    silence as a routing failure.
+    """
+    using = f" using {modifier}" if modifier else ""
+    r = subprocess.run(
+        ["osascript", "-e",
+         f'tell application "System Events" to key code {key_code}{using}'],
+        capture_output=True, text=True)
+    if r.returncode != 0:
+        log(f"the window server refused a synthetic key press: "
+            f"{r.stderr.strip() or 'unknown error'}")
+        return False
+    return True
+
+
+def _journal(path: Path) -> dict:
+    """The host's own state, as its running Lua last wrote it."""
+    try:
+        text = path.read_text(errors="replace").strip()
+    except OSError:
+        return {}
+    out = {}
+    for token in text.split(" ", 1):
+        if "=" in token:
+            k, v = token.split("=", 1)
+            out[k] = v
+    return out
+
+
+def _await_play_state(path: Path, want: int, seconds: float = 6.0) -> int | None:
+    """Wait for the host transport to report `want`; return what it settled on."""
+    deadline = time.time() + seconds
+    last = None
+    while time.time() < deadline:
+        time.sleep(0.25)
+        state = _journal(path).get("play")
+        if state is None:
+            continue
+        last = int(state) & 1
+        if last == want:
+            return last
+    return last
+
+
+def run_keyboard_routing_mode(reaper: Path, args: argparse.Namespace) -> int:
+    """Press keys at a real, focused plugin editor and ask the HOST what it got.
+
+    The failure this exists for is one-directional and silent. An editor that
+    consumes its own shortcuts is easy to verify and easy to get right; an
+    editor that ALSO swallows the keys it did not handle looks identical from
+    every vantage point inside the plugin, and the first report is a musician
+    saying the spacebar stopped working. Only the host can answer, and only
+    while the editor actually has the keyboard.
+    """
+    plugin = Path(os.path.expanduser(args.plugin_path))
+    bad = _validate_inputs([plugin])
+    if bad is not None:
+        return bad
+    if not KEY_ROUTING_LUA.exists():
+        log(f"missing REAPER script: {KEY_ROUTING_LUA} — FAIL")
+        return EXIT_FAIL
+
+    _announce(f'"{args.plugin_name}" ({args.format}) keyboard-routing smoke '
+              f'(it starts and stops the transport)', args.timeout)
+    session = ReaperSession(reaper, args)
+    status = session.portable / "status.txt"
+    journal = session.portable / "transport.txt"
+    try:
+        placed = session.place_plugin()
+        if placed is not None:
+            return placed
+        if status.exists():
+            status.unlink()
+
+        env = _common_env(args, status)
+        env["PULP_DAW_SMOKE_JOURNAL"] = str(journal)
+        not_shown = session.run_until_fx_shown(env, status, script=KEY_ROUTING_LUA)
+        if not_shown is not None:
+            return not_shown
+        time.sleep(5)  # let the editor settle and the journal start ticking
+
+        if not _journal(journal):
+            log("REAPER never wrote a transport journal — the smoke has no "
+                "instrument, so it reports nothing — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+
+        bounds = _floating_editor_bounds(args.plugin_name)
+        if bounds is None:
+            log("no floating editor window was measurable — INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        # A synthetic key goes to whatever is frontmost, so prove REAPER's
+        # editor is BEFORE sending one. On a shared machine a wrong guess is
+        # not a failed test; it is a Space and a ⌘Z typed into somebody's
+        # terminal.
+        if not _reaper_editor_is_front(args.plugin_name):
+            log("could not prove REAPER's plugin editor is the frontmost "
+                "window; refusing to send synthetic keys — INCONCLUSIVE, "
+                "not a routing verdict")
+            return EXIT_INCONCLUSIVE
+
+        # Baseline: the host must be stopped, or "Space started playback" is
+        # not a measurement.
+        if (_await_play_state(journal, 0, 3.0) or 0) != 0:
+            log("the host was already playing before any key was sent — "
+                "INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+
+        # THE positive control. Space, at a focused plugin editor, with
+        # nothing in the editor claiming it: the transport must move.
+        if not _press(49):
+            log("synthetic key presses are not permitted on this machine "
+                "(Accessibility) — SKIP. A SKIP is not a PASS.")
+            return EXIT_SKIP
+        if _await_play_state(journal, 1) != 1:
+            log("Space reached a focused plugin editor and the host transport "
+                "never moved — the editor swallowed it — FAIL")
+            return EXIT_FAIL
+        log("Space reached the host transport with the editor focused")
+
+        if not _press(49):
+            return EXIT_INCONCLUSIVE
+        if _await_play_state(journal, 0) != 0:
+            log("the transport started but a second Space did not stop it — "
+                "INCONCLUSIVE")
+            return EXIT_INCONCLUSIVE
+        log("a second Space stopped it again — the host owns the key both ways")
+
+        # The other half: a chord the editor claims must not ALSO move the
+        # host. Read from the host's undo history, which is what ⌘Z moves
+        # there, rather than from the plugin's own account of itself.
+        before = _journal(journal).get("undo", "")
+        if not _press(6, "command down"):   # 6 = Z
+            return EXIT_INCONCLUSIVE
+        time.sleep(2)
+        after = _journal(journal).get("undo", "")
+        if after != before:
+            log(f"⌘Z at the plugin editor moved the HOST's undo history "
+                f"({before!r} -> {after!r}) — the editor handed back a key it "
+                f"should own — FAIL")
+            return EXIT_FAIL
+        log("⌘Z did not reach the host's undo history")
+
+        session.terminate()
+        log("keyboard routing held in a real host — PASS.")
+        return EXIT_PASS
+    finally:
+        session.cleanup()
+
+
 def run_editor_open_mode(reaper: Path, args: argparse.Namespace) -> int:
     """Insert the plugin, open its editor, confirm it rendered.
 
@@ -1150,12 +1335,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="REAPER functional smoke for Pulp reload/editor/live-swap changes.")
     ap.add_argument("--mode",
                     choices=["reload", "live-plugin-swap", "sequence-loop-seek",
-                             "editor-open", "editor-build"],
+                             "editor-open", "editor-build", "keyboard-routing"],
                     default="reload",
                     help="reload (default) hot-swaps a watched DSP artifact; "
                          "live-plugin-swap drives a hosted plugin-instance swap; "
                          "sequence-loop-seek loops + seeks the transport and asserts an "
-                         "embedded sequence followed the host playhead with no dropout.")
+                         "embedded sequence followed the host playhead with no dropout; "
+                         "keyboard-routing presses keys at the focused editor and asserts "
+                         "from the host's own state which ones reached it.")
     ap.add_argument("--plugin-name", required=True,
                     help='FX name as REAPER lists it, e.g. "Pulp Hot-Reload Morph".')
     ap.add_argument("--format", choices=["vst3", "clap", "au"], default="vst3",
@@ -1222,7 +1409,7 @@ def validate_mode_args(ap: argparse.ArgumentParser, args: argparse.Namespace) ->
         ) if not v]
         if missing:
             ap.error("live-plugin-swap mode requires: " + ", ".join(missing))
-    elif args.mode in ("editor-open", "editor-build"):
+    elif args.mode in ("editor-open", "editor-build", "keyboard-routing"):
         # Needs nothing beyond the plugin itself: that is the point of it.
         pass
     else:  # sequence-loop-seek
@@ -1258,6 +1445,8 @@ def main() -> int:
         return run_editor_open_mode(reaper, args)
     if args.mode == "editor-build":
         return run_editor_build_mode(reaper, args)
+    if args.mode == "keyboard-routing":
+        return run_keyboard_routing_mode(reaper, args)
     return run_sequence_loop_seek_mode(reaper, args)
 
 
