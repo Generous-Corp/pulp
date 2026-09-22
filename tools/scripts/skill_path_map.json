@@ -124,11 +124,17 @@
       "paths": [
         "core/format/src/au_v2_adapter.cpp",
         "core/format/src/au_v2_instrument.cpp",
+        "core/format/src/au_v2_midi_processor.cpp",
+        "core/format/src/au_v2_common.cpp",
         "core/format/src/au_v2_cocoa_view.mm",
         "core/format/include/pulp/format/au_v2_adapter.hpp",
         "core/format/include/pulp/format/au_v2_instrument.hpp",
         "core/format/include/pulp/format/au_v2_entry.hpp",
         "core/format/include/pulp/format/au_v2_instrument_entry.hpp",
+        "core/format/include/pulp/format/au_v2_midi_effect_entry.hpp",
+        "core/format/include/pulp/format/au_v2_midi_processor.hpp",
+        "core/format/include/pulp/format/au_v2_common.hpp",
+        "core/format/include/pulp/format/detail/au_v2_editor_resize.hpp",
         "tools/cmake/PulpInfoPlist.au.in",
         "test/test_au_v2_*",
         "test/cmake/test_au_v2_*",
@@ -141,6 +147,8 @@
         "core/format/src/au_adapter.mm",
         "core/format/src/au_entry.mm",
         "core/format/src/au_audio_unit.h",
+        "core/format/src/au_view_controller_mac.mm",
+        "core/format/include/pulp/format/au_v3_entry.hpp",
         "core/format/src/au_view_controller_ios.mm",
         "core/format/src/ios_audio_session.cpp",
         "core/format/include/pulp/format/ios_audio_session.h",
@@ -193,6 +201,10 @@
     "clap": {
       "paths": [
         "core/format/src/clap_adapter.cpp",
+        "core/format/src/clap_note_name.cpp",
+        "core/format/src/clap_note_name.hpp",
+        "core/format/src/clap_remote_controls.cpp",
+        "core/format/src/clap_remote_controls.hpp",
         "core/format/include/pulp/format/clap_adapter.hpp",
         "core/format/include/pulp/format/clap_entry.hpp"
       ]
@@ -903,6 +915,8 @@
         "core/format/src/au_adapter.mm",
         "core/format/src/au_view_controller_ios.mm",
         "core/format/src/aax_effect_gui.cpp",
+        "core/format/src/au_view_controller_mac.mm",
+        "core/format/include/pulp/format/detail/au_v2_editor_resize.hpp",
         "core/format/include/pulp/format/aax_effect_gui.hpp",
         "core/format/include/pulp/format/aax_editor.hpp",
         "core/view/include/pulp/view/editor_bridge.hpp",
@@ -994,6 +1008,10 @@
     "vst3": {
       "paths": [
         "core/format/src/vst3_adapter.cpp",
+        "core/format/src/vst3_entry.hpp",
+        "core/format/src/vst3_factory.hpp",
+        "core/format/include/pulp/format/detail/vst3_bus_layout.hpp",
+        "core/format/include/pulp/format/detail/vst3_midi_mapping.hpp",
         "core/format/include/pulp/format/vst3_adapter.hpp",
         "core/format/include/pulp/format/vst3_entry.hpp",
         "tools/cmake/PulpInfoPlist.vst3.in"
