@@ -552,6 +552,10 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
                                               const std::string& author_sksl,
                                               const ShaderDrawOptions& options) {
     if (!canvas_ || author_sksl.empty()) return false;
+    if (!sdf_shape_has_chart(shape) &&
+        (author_sksl.find("PulpChart") != std::string::npos ||
+         author_sksl.find("pulp_chart") != std::string::npos))
+        return false;
     // Keep the chart prelude deliberately small and explicit. It is emitted
     // before the author function so the same source can be compiled at draw
     // time and by the bridge's normal SkSL compiler.

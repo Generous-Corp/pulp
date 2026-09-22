@@ -911,6 +911,22 @@ TEST_CASE("SDF chart is absent for non-band shapes",
 #endif
 }
 
+TEST_CASE("SDF chart draw rejects non-band geometry",
+          "[canvas][sdf][shader]") {
+#ifdef PULP_HAS_SKIA
+    auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(32, 32));
+    REQUIRE(surface != nullptr);
+    SkiaCanvas canvas(surface->getCanvas());
+    Canvas::SDFStyle style;
+    Canvas::ShaderDrawOptions options;
+    REQUIRE_FALSE(canvas.draw_sdf_shape_with_shader(
+        Canvas::SDFShape::circle, 0, 0, 32, 32, style,
+        "half4 shade(PulpChart g) { return half4(g.t); }", options));
+#else
+    SUCCEED("Skia chart draw probe requires PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF operator trees shade union subtract and intersect",
           "[canvas][sdf][shader][geometry]") {
 #ifdef PULP_HAS_SKIA
