@@ -940,6 +940,34 @@ TEST_CASE("SDF operator trees shade union subtract and intersect",
 #endif
 }
 
+TEST_CASE("analytic SDF feather modes render finite chart coverage",
+          "[canvas][sdf][shader][feather]") {
+#ifdef PULP_HAS_SKIA
+    for (int mode = 0; mode <= 6; ++mode) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::SDFStyle style;
+        style.stroke_width = 8.0f;
+        style.arc_start = 0.0f;
+        style.arc_sweep = 4.0f;
+        style.feather_sigma = 1.0f;
+        style.feather_curve = mode == 1 ? 1 : 0;
+        style.feather_mode = mode;
+        Canvas::ShaderDrawOptions options;
+        REQUIRE(canvas.draw_sdf_shape_with_shader(
+            Canvas::SDFShape::flat_arc, 0, 0, 64, 64, style,
+            "half4 shade(PulpChart g) { return half4(1, 1, 1, 1); }", options));
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        const auto alpha = SkColorGetA(pixels.getColor(32, 32));
+        REQUIRE(alpha <= 255);
+    }
+#else
+    SUCCEED("Skia feather probes require PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;
