@@ -13,6 +13,8 @@
 #include <pulp/inspect/control_manifest.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
 #include <pulp/inspect/control_sequencer_transport_executor.hpp>
+#include <pulp/inspect/control_sample_region_edit_executor.hpp>
+#include <pulp/inspect/control_sample_region_read_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
 #include <pulp/inspect/control_state_read_executor.hpp>
 #include <pulp/inspect/control_state_write_executor.hpp>
@@ -119,6 +121,11 @@ std::atomic<detail::StandaloneControlAuthorHooksFactory>& author_hooks_factory()
 
 std::atomic<detail::StandaloneTimelineDocumentSessionFactory>& timeline_document_session_factory() {
     static std::atomic<detail::StandaloneTimelineDocumentSessionFactory> factory{nullptr};
+    return factory;
+}
+
+std::atomic<detail::StandaloneSampleRegionTargetFactory>& sample_region_target_factory() {
+    static std::atomic<detail::StandaloneSampleRegionTargetFactory> factory{nullptr};
     return factory;
 }
 
@@ -303,6 +310,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
 
         processor_ = &processor;
         store_ = &store;
+        sample_region_target_ = detail::create_standalone_sample_region_target(
+            processor, store, sample_region_generation_);
         test_input_ = test_input;
         sample_rate_ = sample_rate;
         main_thread_ = std::this_thread::get_id();
@@ -351,6 +360,22 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     .state_generation = *generation,
                     .catalog_generation = store_->parameter_display_revision() + 1,
                     .is_sensitive = [](state::ParamID) { return false; }};
+            });
+        auto sample_region_read = make_control_sample_region_read_executor(
+            [this](const ControlAdmissionPlan& plan) {
+                if (!store_ || !sample_region_target_ ||
+                    !sample_region_target_->uses_state_store(*store_))
+                    return std::shared_ptr<ControlSampleRegionTarget>{};
+                sample_region_target_->set_preparation_context(sample_rate_, 0);
+                return sample_region_target_;
+            });
+        auto sample_region_edit = make_control_sample_region_edit_executor(
+            [this](const ControlAdmissionPlan& plan) {
+                if (!store_ || !sample_region_target_ ||
+                    !sample_region_target_->uses_state_store(*store_))
+                    return std::shared_ptr<ControlSampleRegionTarget>{};
+                sample_region_target_->set_preparation_context(sample_rate_, 0);
+                return sample_region_target_;
             });
         auto state_write = make_control_state_write_executor(
             [this](const ControlAdmissionPlan& plan)
@@ -456,6 +481,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return transport_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.sequencer/transport.loop.write@1")
                     return transport_write(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/sample-region.read@1")
+                    return sample_region_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/sample-region.edit@1")
+                    return sample_region_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
                 return unavailable_operation();
@@ -830,6 +859,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         store_ = nullptr;
         test_input_ = nullptr;
         sample_rate_ = 0.0;
+        sample_region_target_.reset();
+        sample_region_generation_ = {};
     }
 
     bool ready() const noexcept override {
@@ -895,6 +926,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     double sample_rate_ = 0.0;
     std::thread::id main_thread_;
     detail::StandaloneControlAuthorHooks author_hooks_;
+    std::shared_ptr<ControlSampleRegionTarget> sample_region_target_;
+    ControlSampleRegionGeneration sample_region_generation_;
 
     std::optional<std::uint64_t> stable_generation() const noexcept {
         if (!store_)
@@ -976,6 +1009,22 @@ std::optional<ControlTimelineDocumentSessionSource>
 create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan) {
     const auto factory = timeline_document_session_factory().load(std::memory_order_acquire);
     return factory ? factory(plan) : std::nullopt;
+}
+
+bool install_standalone_sample_region_target_factory(
+    StandaloneSampleRegionTargetFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneSampleRegionTargetFactory>(nullptr);
+    return sample_region_target_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
+}
+
+std::shared_ptr<ControlSampleRegionTarget>
+create_standalone_sample_region_target(format::Processor& processor, state::StateStore& store,
+                                       ControlSampleRegionGeneration& generation) {
+    const auto factory = sample_region_target_factory().load(std::memory_order_acquire);
+    return factory ? factory(processor, store, generation) : nullptr;
 }
 
 } // namespace detail

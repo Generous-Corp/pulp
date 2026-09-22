@@ -176,6 +176,17 @@ create_standalone_timeline_document_session_source(const ControlAdmissionPlan&) 
     return std::nullopt;
 }
 
+bool install_standalone_sample_region_target_factory(
+    StandaloneSampleRegionTargetFactory) noexcept {
+    return false;
+}
+
+std::shared_ptr<ControlSampleRegionTarget>
+create_standalone_sample_region_target(format::Processor&, state::StateStore&,
+                                       ControlSampleRegionGeneration&) {
+    return {};
+}
+
 } // namespace detail
 
 } // namespace pulp::inspect

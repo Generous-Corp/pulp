@@ -2,6 +2,7 @@
 
 #include <pulp/format/standalone_control_host.hpp>
 #include <pulp/inspect/control_host_development_executor.hpp>
+#include <pulp/inspect/control_sample_region_target.hpp>
 #include <pulp/inspect/control_timeline_document_session_executor.hpp>
 #include <pulp/state/sequencer_state_channel.hpp>
 
@@ -103,6 +104,19 @@ bool install_standalone_timeline_document_session_factory(
     StandaloneTimelineDocumentSessionFactory factory) noexcept;
 std::optional<ControlTimelineDocumentSessionSource>
 create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan);
+
+/// Installs the product-owned binding between a live Processor graph and the
+/// unified sample-region executors. The factory must return a target backed by
+/// the same graph and StateStore used by the processor instance.
+using StandaloneSampleRegionTargetFactory =
+    std::shared_ptr<ControlSampleRegionTarget> (*)(format::Processor&, state::StateStore&,
+                                                    ControlSampleRegionGeneration&);
+bool install_standalone_sample_region_target_factory(
+    StandaloneSampleRegionTargetFactory factory) noexcept;
+std::shared_ptr<ControlSampleRegionTarget>
+create_standalone_sample_region_target(format::Processor& processor,
+                                       state::StateStore& store,
+                                       ControlSampleRegionGeneration& generation);
 
 } // namespace detail
 
