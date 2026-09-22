@@ -79,6 +79,8 @@
 #include <pulp/format/state_restore_gate.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump.hpp>
+#include <pulp/midi/ump_buffer.hpp>
+#include <pulp/midi/ump_conversion.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/assert.hpp>
@@ -198,6 +200,18 @@ struct AUBridge {
     // thread. A single instance is fine: the render block feeds packets in
     // arrival order and the reassembler tracks one in-progress stream.
     midi::UmpSysex7Reassembler sysex_reassembler;
+
+    // Native MIDI 2.0 input. Populated only when the Processor declares
+    // `supports_ump`: the unit then reports kMIDIProtocol_2_0 from
+    // -AudioUnitMIDIProtocol, so the host translates its stream to MIDI 2.0
+    // and delivers it as AURenderEventMIDIEventList. UMP channel-voice packets
+    // are appended here at full resolution (16-bit velocity, 32-bit CC) and
+    // handed to the Processor via set_ump_input() for the duration of
+    // process(). Reserved + capacity-limited in allocateRenderResources so the
+    // render block never grows the vector. Mirrors the CLAP adapter's
+    // ump_buffer/ump_enabled pair.
+    midi::UmpBuffer ump_buffer;
+    bool ump_enabled = false;
 
     // MPE sidecar — mirrors the VST3/CLAP wiring. When the Processor opts into
     // MPE (effective_capabilities().supports_mpe), the render block runs midi_in
@@ -451,6 +465,16 @@ struct ScopedAuV3HostWriting {
         pulp::runtime::log_info("AU: MPE sidecar enabled for '{}'", desc.name);
     }
 
+    // Latch the UMP opt-in once, on the host thread. -AudioUnitMIDIProtocol
+    // reads it to tell the host which MIDI protocol to translate into, and the
+    // render block reads it to decide whether to publish the native UMP stream.
+    // Both must agree for every block of this unit's life, so it is captured
+    // here rather than re-derived per render.
+    _bridge.ump_enabled = desc.effective_capabilities().supports_ump;
+    if (_bridge.ump_enabled) {
+        pulp::runtime::log_info("AU: MIDI 2.0 (UMP) input enabled for '{}'", desc.name);
+    }
+
     // Create buses
     AVAudioFormat *format = [[AVAudioFormat alloc]
         initStandardFormatWithSampleRate:48000.0
@@ -545,6 +569,31 @@ struct ScopedAuV3HostWriting {
     return YES;
 }
 - (BOOL)canProcessInPlace { return YES; }
+
+// MPE capability advertisement. Logic (and any MPE-aware host) reads this to
+// decide whether to route an MPE zone's per-member-channel stream at all, so a
+// plug-in with the MPE sidecar wired but this property unanswered is never
+// offered MPE input. Bridged to the v2 kAudioUnitProperty_SupportsMPE.
+// `mpe.enabled` is the same descriptor opt-in the render block gates on, so
+// what the host is told and what the adapter does cannot drift.
+- (BOOL)supportsMPE {
+    return _bridge.mpe.enabled ? YES : NO;
+}
+
+// MIDI protocol negotiation. An AU that does not override this "will default to
+// receiving legacy MIDI" (AUAudioUnit.h), which folds 16-bit velocity and
+// 32-bit controller values down to 7 bits before the Processor ever sees them.
+// Declaring kMIDIProtocol_2_0 makes the host translate its stream to MIDI 2.0
+// and deliver it as AURenderEventMIDIEventList, which the render block decodes
+// into the UMP sidecar at full resolution.
+//
+// Gated on the descriptor opt-in: a plug-in that does not declare supports_ump
+// defers to super, so its delivery stays byte-for-byte what it is today.
+- (MIDIProtocolID)AudioUnitMIDIProtocol API_AVAILABLE(macos(12.0), ios(15.0), tvos(15.0)) {
+    if (_bridge.ump_enabled)
+        return kMIDIProtocol_2_0;
+    return [super AudioUnitMIDIProtocol];
+}
 
 // ── Presets ────────────────────────────────────────────────────────────────
 
@@ -900,6 +949,14 @@ struct ScopedAuV3HostWriting {
     _bridge.sysex_reassembler.reserve(
         pulp::format::au::AUBridge::kMaxSysexPayloadBytes);
 
+    // Same pre-reserve + capacity-limit discipline for the native UMP stream:
+    // past the bound add() drops and counts instead of growing on the audio
+    // thread. Reserved unconditionally so a host that toggles the opt-in
+    // between allocations never finds an unsized buffer.
+    _bridge.ump_buffer.reserve(pulp::format::au::AUBridge::kMaxEventsPerBlock);
+    _bridge.ump_buffer.set_realtime_capacity_limit(true);
+    _bridge.ump_buffer.clear();
+
     // Reserve the MPE expression buffer so the render block never allocates: one
     // inbound MIDI event can fan out to several expression events (note-on +
     // bend + pressure + timbre). Reset the tracker so a fresh render-resource
@@ -936,6 +993,7 @@ struct ScopedAuV3HostWriting {
     // Drop per-note expression state so a re-allocation does not route a stale
     // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).
     _bridge.mpe.reset();
+    _bridge.ump_buffer.clear();
     [super deallocateRenderResources];
 }
 
@@ -1210,6 +1268,7 @@ struct ScopedAuV3HostWriting {
             midi_in.clear_sysex();
             midi_out.clear();
             midi_out.clear_sysex();
+            bridge->ump_buffer.clear();
             const AURenderEvent* event = realtimeEventListHead;
             while (event) {
                 if (event->head.eventType == AURenderEventParameter ||
@@ -1258,6 +1317,18 @@ struct ScopedAuV3HostWriting {
                         me.sample_offset =
                             static_cast<int32_t>(event->head.eventSampleTime);
                         midi_in.add(me);
+                        // A host is free to keep using this transport even
+                        // after the unit reports kMIDIProtocol_2_0 — the
+                        // protocol governs MIDIEventList delivery, not whether
+                        // short MIDI stops. Promote to UMP here so an opted-in
+                        // Processor sees one union stream and never has to ask
+                        // which transport a note arrived on. Mirrors the CLAP
+                        // adapter, which converts its MIDI 1.0 events for the
+                        // same reason.
+                        if (bridge->ump_enabled) {
+                            bridge->ump_buffer.add(pulp::midi::midi1_event_to_ump2(me),
+                                                   me.sample_offset);
+                        }
                     }
                 } else if (event->head.eventType == AURenderEventMIDIEventList) {
                     // AUMIDIEventList delivers UMP-encoded events. The
@@ -1310,10 +1381,40 @@ struct ScopedAuV3HostWriting {
                             // type-0x3 (Data/SysEx7) feeds the reassembler.
                             pulp::midi::walk_ump_packet(
                                 pkt->words, static_cast<uint32_t>(pkt->wordCount),
-                                [&](uint8_t mt, const uint32_t* mw, uint32_t) {
+                                [&](uint8_t mt, const uint32_t* mw, uint32_t mwc) {
                                     if (mt == 0x3) {
                                         reassembler.feed_packet(mw[0], mw[1],
                                                                 emit, &ctx);
+                                        return;
+                                    }
+                                    // System (0x1), MIDI 1.0 channel voice
+                                    // (0x2) and MIDI 2.0 channel voice (0x4).
+                                    // Every other type (utility/JR timestamps,
+                                    // 128-bit data) has no Processor-visible
+                                    // representation yet and is skipped by its
+                                    // true word length, not re-read.
+                                    if (mt != 0x1 && mt != 0x2 && mt != 0x4)
+                                        return;
+                                    pulp::midi::UmpPacket packet;
+                                    packet.word_count = static_cast<int>(mwc);
+                                    for (uint32_t k = 0; k < mwc && k < packet.words.size(); ++k)
+                                        packet.words[k] = mw[k];
+                                    // Native UMP for a Processor that asked for
+                                    // it: 16-bit velocity and 32-bit controller
+                                    // values survive intact.
+                                    if (bridge->ump_enabled)
+                                        bridge->ump_buffer.add(packet, ctx.sample_offset);
+                                    // MIDI 1.0 projection regardless, so the
+                                    // MidiBuffer the Processor already reads —
+                                    // and the MPE sidecar that runs off it —
+                                    // see the same notes. Packets with no MIDI
+                                    // 1.0 equivalent (per-note bend / per-note
+                                    // CC) return false and reach an opted-in
+                                    // Processor through the UMP buffer only.
+                                    pulp::midi::MidiEvent me;
+                                    if (pulp::midi::ump_to_midi1_event(packet, me)) {
+                                        me.sample_offset = ctx.sample_offset;
+                                        midi_in.add(me);
                                     }
                                 });
                             pkt = reinterpret_cast<const MIDIEventPacket*>(
@@ -1530,8 +1631,19 @@ struct ScopedAuV3HostWriting {
         if (!bridge->mpe.run(*bridge->processor, midi_in)) {
             midi_in.clear();
             midi_in.clear_sysex();
+            // Drop the native stream with the MIDI 1.0 one. Leaving it would
+            // hand the Processor notes through ump_input() that were
+            // deliberately suppressed on the buffer beside it.
+            bridge->ump_buffer.clear();
             ctx.reset_requested = true;
         }
+
+        // Publish the native MIDI 2.0 stream for the duration of process().
+        // Detached (null) when the Processor did not opt in, so ump_input()
+        // reads exactly as it does without this adapter path. Set every block
+        // rather than once at allocation: the pointer must not outlive a
+        // teardown that clears the buffer.
+        bridge->processor->set_ump_input(bridge->ump_enabled ? &bridge->ump_buffer : nullptr);
 
         bridge->processor->set_param_events(&bridge->param_events);
         {

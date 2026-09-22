@@ -29,6 +29,7 @@ target_sources(pulp-view-core PRIVATE
     src/view_lifecycle.cpp
     src/view_paint.cpp
     src/repaint_damage.cpp
+    src/host_drag_coalescer.cpp
     src/pointer_coalescer.cpp
     src/overlay_dismissal.cpp
     src/plugin_key_routing.cpp
@@ -187,6 +188,7 @@ target_sources(pulp-view-script PRIVATE
     src/widget_bridge/value_channel_binding_service.cpp
     src/widget_bridge/storage_assets_api.cpp
     src/widget_bridge/shader_api.cpp
+    src/widget_bridge/retained_shader_geometry.cpp
     src/widget_bridge/svg_api.cpp
     src/widget_bridge/theme_api.cpp
     src/widget_bridge/tokens_api.cpp

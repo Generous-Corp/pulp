@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260921-sdf-shading-substrate-watch",
+  "created_at": "2026-09-21T22:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record the additive Pulp shader-uniform and damage-reach bridge landing. The change consumes the existing SkSL canvas and widget surfaces, adds no new backend or authority boundary, and keeps the Pulp implementation and fallback behavior intact while the transferred rendering slice remains under watch.",
+  "tests": [
+    "pulp-test-widget-bridge",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

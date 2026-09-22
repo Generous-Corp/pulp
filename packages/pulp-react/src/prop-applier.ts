@@ -415,6 +415,36 @@ function emitSvgLineGeometry(id: string, props: Record<string, unknown>): void {
     call('setSvgLine', id, x1, y1, x2, y2);
 }
 
+const shaderUniformSnapshots = new Map<string, string>();
+
+function applyShaderProp(id: string, type: string, value: unknown): boolean {
+    if (type !== 'Knob' && type !== 'Fader' && type !== 'Toggle') return false;
+    if (value === null || value === undefined) {
+        call('clearWidgetShader', id);
+        shaderUniformSnapshots.delete(id);
+        return true;
+    }
+    if (typeof value !== 'object') return true;
+    const shader = value as {
+        sksl?: unknown;
+        geometry?: unknown;
+        uniforms?: Record<string, number | number[]>;
+        reach?: unknown;
+    };
+    if (typeof shader.sksl !== 'string' || shader.sksl.length === 0) return true;
+    call('setWidgetShader', id, shader.sksl, {
+        geometry: shader.geometry,
+        reach: typeof shader.reach === 'number' ? shader.reach : 0,
+    });
+    const uniforms = shader.uniforms ?? {};
+    const encoded = JSON.stringify(uniforms);
+    if (shaderUniformSnapshots.get(id) !== encoded) {
+        call('setWidgetShaderUniforms', id, uniforms);
+        shaderUniformSnapshots.set(id, encoded);
+    }
+    return true;
+}
+
 /// Apply a single prop to its corresponding bridge setter.
 ///
 /// Thin dispatcher over the per-domain handler modules. Each
@@ -435,6 +465,8 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // added per-prop here if a regression appears.
         return;
     }
+
+    if (key === 'shader' && applyShaderProp(id, type, value)) return;
 
     // SvgRect / SvgLine geometry props collide with View flex props
     // (width/height) and event/positioning props (x/y), so dispatch on

@@ -161,6 +161,10 @@ struct TestVst3Config {
     bool add_bypass_param = false;
     bool mutate_gain_in_process = false;
     bool emit_midi_out = false;
+    // When set, the test processor emits one of every NON-note channel-voice
+    // message the outbound path can carry, so a test can assert each reaches
+    // the host's event list as a LegacyMIDICCOutEvent with its payload intact.
+    bool emit_midi_controllers_out = false;
     // When set, the test processor calls push_output_param_event() twice from
     // process() — at output_offset_1 and output_offset_2 — exercising the
     // sample-accurate output-parameter drain path.
@@ -433,6 +437,27 @@ void TestVst3Processor::process(
         auto note = pulp::midi::MidiEvent::note_on(1, 64, 100);
         note.sample_offset = 7;
         midi_out.add(note);
+    }
+    if (config_.emit_midi_controllers_out) {
+        auto cc = pulp::midi::MidiEvent::cc(3, 74, 99);
+        cc.sample_offset = 1;
+        midi_out.add(cc);
+        auto bend = pulp::midi::MidiEvent::pitch_bend(4, 12000);
+        bend.sample_offset = 2;
+        midi_out.add(bend);
+        // Channel pressure (status 0xD0) has no MidiEvent factory; the value
+        // rides in the first data byte.
+        pulp::midi::MidiEvent pressure{choc::midi::ShortMessage(static_cast<uint8_t>(0xD0 | 5),
+                                                                static_cast<uint8_t>(88),
+                                                                static_cast<uint8_t>(0)),
+                                       3, 0.0};
+        midi_out.add(pressure);
+        auto poly = pulp::midi::MidiEvent::poly_pressure(6, 61, 77);
+        poly.sample_offset = 4;
+        midi_out.add(poly);
+        auto program = pulp::midi::MidiEvent::program_change(7, 42);
+        program.sample_offset = 5;
+        midi_out.add(program);
     }
 }
 
@@ -4068,6 +4093,33 @@ struct MidiControllerSetup {
 
         REQUIRE(processor.process(data) == Steinberg::kResultOk);
     }
+
+    // Drive one process() block carrying `events` on the input event bus.
+    void run_events(Steinberg::Vst::IEventList& events) {
+        constexpr int kFrames = 16;
+        std::array<float, kFrames> in_l{};
+        std::array<float, kFrames> in_r{};
+        std::array<float, kFrames> out_l{};
+        std::array<float, kFrames> out_r{};
+        float* main_inputs[2] = {in_l.data(), in_r.data()};
+        float* main_outputs[2] = {out_l.data(), out_r.data()};
+        Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+        audio_inputs[0].numChannels = 2;
+        audio_inputs[0].channelBuffers32 = main_inputs;
+        Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+        audio_outputs[0].numChannels = 2;
+        audio_outputs[0].channelBuffers32 = main_outputs;
+
+        Steinberg::Vst::ProcessData data{};
+        data.numSamples = kFrames;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = audio_inputs;
+        data.outputs = audio_outputs;
+        data.inputEvents = &events;
+
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    }
 };
 
 }  // namespace
@@ -5687,4 +5739,268 @@ TEST_CASE("VST3 checkSizeConstraint aspect-locked behavior is unchanged (regress
     REQUIRE(fixed_view.checkSizeConstraint(&rf) == Steinberg::kResultTrue);
     REQUIRE(rf.getWidth() == 400);
     REQUIRE(rf.getHeight() == 300);
+}
+
+// A host component handler that also implements IComponentHandler2, so a test
+// can observe the setDirty(true) the adapter raises for non-parameter state
+// changes. CapturingComponentHandler above deliberately implements only the v1
+// interface and doubles as the negative control (a host with no setDirty).
+class DirtyRecordingComponentHandler final : public Steinberg::Vst::IComponentHandler,
+                                             public Steinberg::Vst::IComponentHandler2 {
+  public:
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID,
+                                              Steinberg::Vst::ParamValue) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override {
+        return Steinberg::kResultOk;
+    }
+
+    Steinberg::tresult PLUGIN_API setDirty(Steinberg::TBool state) override {
+        ++set_dirty_calls;
+        last_dirty_state = state != 0;
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API requestOpenEditor(Steinberg::FIDString) override {
+        return Steinberg::kNotImplemented;
+    }
+    Steinberg::tresult PLUGIN_API startGroupEdit() override {
+        return Steinberg::kNotImplemented;
+    }
+    Steinberg::tresult PLUGIN_API finishGroupEdit() override {
+        return Steinberg::kNotImplemented;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler2::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler2*>(this);
+            return Steinberg::kResultTrue;
+        }
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1;
+    }
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1;
+    }
+
+    int set_dirty_calls = 0;
+    bool last_dirty_state = false;
+};
+
+TEST_CASE("VST3 forwards non-note MIDI output as legacy MIDI CC out events",
+          "[vst3][midi][midi-out][process]") {
+    // VST3's outbound event list carries notes natively and everything else as
+    // a single kLegacyMIDICCOutEvent discriminated by `controlNumber`. Assert
+    // each message arrives with its payload intact — not merely that some event
+    // was emitted — because a wrong controlNumber or a swapped value/value2 is
+    // exactly the failure a count-only assertion would pass.
+    TestVst3Config config;
+    config.emit_midi_controllers_out = true;
+    config.descriptor.accepts_midi = true;
+    config.descriptor.produces_midi = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 16;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    constexpr int kFrames = 16;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* main_inputs[2] = {in_l.data(), in_r.data()};
+    float* main_outputs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers audio_inputs[1]{};
+    audio_inputs[0].numChannels = 2;
+    audio_inputs[0].channelBuffers32 = main_inputs;
+    Steinberg::Vst::AudioBusBuffers audio_outputs[1]{};
+    audio_outputs[0].numChannels = 2;
+    audio_outputs[0].channelBuffers32 = main_outputs;
+
+    Steinberg::Vst::EventList output_events(8);
+
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = audio_inputs;
+    data.outputs = audio_outputs;
+    data.outputEvents = &output_events;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+    REQUIRE(output_events.getEventCount() == 5);
+    auto event_at = [&](Steinberg::int32 index) {
+        Steinberg::Vst::Event e{};
+        REQUIRE(output_events.getEvent(index, e) == Steinberg::kResultOk);
+        REQUIRE(e.type == Steinberg::Vst::Event::kLegacyMIDICCOutEvent);
+        return e;
+    };
+
+    // Control change: the CC number IS the control number, value carries data2.
+    const auto cc = event_at(0);
+    REQUIRE(cc.sampleOffset == 1);
+    REQUIRE(cc.midiCCOut.controlNumber == Steinberg::Vst::kCtrlFilterResonance);
+    REQUIRE(cc.midiCCOut.channel == 3);
+    REQUIRE(cc.midiCCOut.value == 99);
+    REQUIRE(cc.midiCCOut.value2 == 0);
+
+    // Pitch bend: 14-bit, value = LSB and value2 = MSB (12000 = 0x2EE0).
+    const auto bend = event_at(1);
+    REQUIRE(bend.sampleOffset == 2);
+    REQUIRE(bend.midiCCOut.controlNumber == Steinberg::Vst::kPitchBend);
+    REQUIRE(bend.midiCCOut.channel == 4);
+    REQUIRE(bend.midiCCOut.value == (12000 & 0x7F));
+    REQUIRE(bend.midiCCOut.value2 == ((12000 >> 7) & 0x7F));
+    const int rebuilt_bend = bend.midiCCOut.value | (bend.midiCCOut.value2 << 7);
+    REQUIRE(rebuilt_bend == 12000);
+
+    // Channel pressure rides kAfterTouch with the value in `value`.
+    const auto pressure = event_at(2);
+    REQUIRE(pressure.sampleOffset == 3);
+    REQUIRE(pressure.midiCCOut.controlNumber == Steinberg::Vst::kAfterTouch);
+    REQUIRE(pressure.midiCCOut.channel == 5);
+    REQUIRE(pressure.midiCCOut.value == 88);
+
+    // Poly pressure packs BOTH the key and the pressure: value = key.
+    const auto poly = event_at(3);
+    REQUIRE(poly.sampleOffset == 4);
+    REQUIRE(poly.midiCCOut.controlNumber == Steinberg::Vst::kCtrlPolyPressure);
+    REQUIRE(poly.midiCCOut.channel == 6);
+    REQUIRE(poly.midiCCOut.value == 61);
+    REQUIRE(poly.midiCCOut.value2 == 77);
+
+    const auto program = event_at(4);
+    REQUIRE(program.sampleOffset == 5);
+    REQUIRE(program.midiCCOut.controlNumber == Steinberg::Vst::kCtrlProgramChange);
+    REQUIRE(program.midiCCOut.channel == 7);
+    REQUIRE(program.midiCCOut.value == 42);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 decodes poly key pressure input into a MIDI 1.0 message", "[vst3][midi][process]") {
+    // Poly aftertouch is the one channel-voice message VST3 delivers as its own
+    // event type: IMidiMapping's controller space covers CC plus channel
+    // aftertouch and pitch bend only, so it has to be decoded alongside notes.
+    MidiControllerSetup s;
+
+    Steinberg::Vst::EventList input_events(4);
+    Steinberg::Vst::Event poly{};
+    poly.type = Steinberg::Vst::Event::kPolyPressureEvent;
+    poly.sampleOffset = 9;
+    poly.polyPressure.channel = 5;
+    poly.polyPressure.pitch = 67;
+    poly.polyPressure.pressure = 0.5f;
+    poly.polyPressure.noteId = -1;
+    REQUIRE(input_events.addEvent(poly) == Steinberg::kResultOk);
+
+    s.run_events(input_events);
+
+    REQUIRE(s.test_processor->last_midi_in_size == 1);
+    const auto& me = s.test_processor->last_midi_in_events.at(0);
+    REQUIRE(me.is_poly_pressure());
+    REQUIRE(me.channel() == 5);
+    REQUIRE(me.note() == 67);
+    REQUIRE(me.velocity() == static_cast<uint8_t>(0.5f * 127.0f + 0.5f)); // 64
+    REQUIRE(me.sample_offset == 9);
+    // A poly-pressure message is three bytes with status 0xA0 — distinct from
+    // channel pressure (0xD0), which would collapse per-key data to the channel.
+    REQUIRE(me.size() == 3);
+    REQUIRE((me.data()[0] & 0xF0) == 0xA0);
+
+    REQUIRE(s.processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 marks the host project dirty for non-parameter state changes",
+          "[vst3][state][dirty]") {
+    // Editor-only / plugin-owned state never travels through the parameter
+    // system, so nothing tells the host the project changed and a close can
+    // silently discard the work. The adapter republishes the Processor's
+    // state-dirty edge as IComponentHandler2::setDirty(true) on the main
+    // thread.
+    ScopedMainThreadBackend backend;
+    TestVst3Config config;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    DirtyRecordingComponentHandler handler;
+    REQUIRE(processor.setComponentHandler(&handler) == Steinberg::kResultOk);
+
+    // No pending edge: a drain must not manufacture a dirty call.
+    REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(handler.set_dirty_calls == 0);
+
+    test_processor->flag_state_dirty();
+    REQUIRE(test_processor->state_dirty_pending());
+
+    // Any main-thread host entrypoint drains it.
+    REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(handler.set_dirty_calls == 1);
+    REQUIRE(handler.last_dirty_state);
+
+    // The edge is consumed, not latched: a second drain is silent.
+    REQUIRE_FALSE(test_processor->state_dirty_pending());
+    REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(handler.set_dirty_calls == 1);
+
+    // Raising it again delivers again.
+    test_processor->flag_state_dirty();
+    REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(handler.set_dirty_calls == 2);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 consumes a state-dirty edge a v1-only host cannot receive",
+          "[vst3][state][dirty]") {
+    // CapturingComponentHandler implements IComponentHandler only. The edge
+    // cannot be delivered, but it must still be consumed — a latched dirty
+    // would fire against whatever handler the host installs next, long after
+    // the change that caused it.
+    ScopedMainThreadBackend backend;
+    reset_test_processor(TestVst3Config{});
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    CapturingComponentHandler v1_only;
+    REQUIRE(processor.setComponentHandler(&v1_only) == Steinberg::kResultOk);
+
+    test_processor->flag_state_dirty();
+    REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE_FALSE(test_processor->state_dirty_pending());
+    REQUIRE(v1_only.restart_calls == 0);
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }

@@ -55,9 +55,16 @@ GIT_TIMEOUT_SECONDS = 30
 # exhaustive per-row check lives in the handoff validator, which reads every row.
 PROBE_LIMIT = 8
 
+# Locally, `git fetch --unshallow` is the only remedy that works, and it heals
+# every worktree at once because linked worktrees inherit the graft from the
+# shared object store. hydrate_gpu_provenance_commits.py is NOT a local peer: it
+# unshallows only when an exact GITHUB_REF is present, so outside Actions it
+# exits with "shallow checkout lacks an exact GITHUB_REF to hydrate" — a dead end
+# that never names the working command.
 REMEDY = (
-    "run `git fetch --unshallow` (or tools/scripts/hydrate_gpu_provenance_commits.py "
-    "in CI), then re-run"
+    "run `git fetch --unshallow` (this heals every worktree sharing the object "
+    "store); in CI, tools/scripts/hydrate_gpu_provenance_commits.py does it from "
+    "the workflow ref. Then re-run"
 )
 
 

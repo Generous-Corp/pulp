@@ -556,8 +556,10 @@ private:
     // change is delivered without depending on an incidental host query.
     std::shared_ptr<std::atomic<bool>> poll_active_;
 
-    // Main-thread drain of restart_publisher_: if a restart is pending, call
-    // componentHandler->restartComponent(flags) here (never from process()).
+    // Main-thread drain of the two deferred host callbacks this adapter owns:
+    // restart_publisher_ (componentHandler->restartComponent(flags)) and the
+    // Processor's state-dirty flag (IComponentHandler2::setDirty). Neither may
+    // be called from process().
     // Driven by (a) a paced self-rescheduling poll on the host main thread while
     // the component is active and (b) main-thread host entrypoints the adapter
     // already receives (getLatencySamples / getTailSamples / setActive / getState).
@@ -565,6 +567,12 @@ private:
     // call is marshaled there. All paths run off the audio thread only.
     void drain_pending_restart();
     void deliver_pending_restart();
+    // Delivers the Processor's state-dirty edge as IComponentHandler2::setDirty.
+    // Main-thread only; a host that predates IComponentHandler2, or that does not
+    // implement it, simply drops the edge (the flag is still consumed).
+    void deliver_pending_dirty();
+    // Both of the above, in order. Every main-thread delivery path calls this.
+    void deliver_pending_host_notifications();
 
     // Start / stop the paced main-thread poll loop. start is idempotent; stop
     // relies on poll_active_ going false so the next scheduled tick does not

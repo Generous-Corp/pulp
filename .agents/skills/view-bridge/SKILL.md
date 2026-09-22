@@ -482,6 +482,29 @@ like every other Pulp ObjC class. ObjC class names are process-global, and an
 `NSApplication` delegate is the most dangerous kind to have shadowed across two
 co-loaded Pulp binaries.
 
+## Editor-only state changes must tell the host, or the user loses them
+
+A parameter edit from the editor reaches the host through the parameter system,
+so the host knows the project changed and will offer to save. Anything the
+editor changes *outside* that system leaves no such trace — a loaded sample or
+impulse response, an imported wavetable, a UI-only setting that rides in the
+plugin's own `getState` payload. The editor looks like it worked, the state
+round-trips correctly through save/load, and the user still loses the work by
+closing a project the host believed was clean.
+
+`Processor::flag_state_dirty()` raises that edge. It is an atomic with the same
+shape as `flag_latency_changed()` / `flag_note_names_changed()` — safe to call
+from `process()`, though an editor or a file load on the main thread is the
+usual caller. The adapter republishes it by whatever route the format
+sanctions; the VST3 adapter is wired (`IComponentHandler2::setDirty(true)`,
+delivered on its main-thread drain), CLAP's equivalent is
+`clap_host_state::mark_dirty`, and the other adapters do not consume the flag
+today — raising it there is harmless but inert.
+
+The habit worth forming: whenever an editor writes something that only exists
+in the plugin's own state payload, raise the flag in the same code path. It is
+cheap, and the failure it prevents is silent and unrecoverable.
+
 ## Secondary views
 
 ```cpp
@@ -717,6 +740,52 @@ returns `nullptr` by default, so a processor that declares nothing costs nothing
 `BindingOutcome::unknown_value_channel`; it does NOT fall back to a parameter of
 the same name. Resolving across the two would bind a meter to the wrong signal
 and look like it worked.
+
+## Drag input is held per presented frame — do not dispatch raw AppKit events
+
+Both macOS plug-in editor hosts (`MacPluginViewHost` CPU, `MacGpuPluginViewHost`
+GPU, in `core/view/platform/mac/plugin_view_host_mac.mm`) run a CVDisplayLink,
+so `-mouseDragged:` HOLDS its sample in a `pulp::view::HostDragCoalescer` and
+the link callback releases at most one per presented frame. A pointer device
+emits samples at its own rate; the editor presents at the display's, or slower
+when a frame is expensive, and every extra sample between two frames costs a
+full delivery — hit test, handler invocation (entering the JS engine for a
+scripted UI), and an invalidation whose only effect is to re-dirty an
+already-dirty surface. None of it reaches the screen.
+
+Four rules ride with this. They live in `host_drag_coalescer.hpp` so a host
+supplies only delivery, and a new host gets them by construction:
+
+- **One dirty signal per HELD RUN, not per event.** `pulp_plugin_mouse_drag`
+  returns whether to arm a repaint; it is true exactly on the idle→pending
+  edge. That one request both marks the surface dirty and keeps the display
+  link's dispatch gate open, which is all a flush needs. Calling
+  `request_repaint()` / `-setNeedsDisplay:` per sample is precisely the
+  O(events) cost coalescing removes.
+- **Flush before any handoff.** A gesture-recognizer claim and `-mouseUp:` both
+  END the captured target's bracket, so motion held from before them belongs
+  inside it and must be delivered while the capture still resolves. Flushing
+  after the reset drops it; not flushing strands it until a later frame hands it
+  to a target whose gesture already ended.
+- **A relative movement delta must be SUMMED across merged samples.** The
+  surviving sample's absolute position is already the whole displacement, but
+  `pointer.movement_x/y` is per-event. Keeping only the survivor's delta
+  shortens every relative drag in proportion to how many samples merged — it
+  reads as "the knob feels sluggish", never as dropped input.
+- **A lost opt-in is invisible.** `HostDragCoalescer` fails safe: with no frame
+  driver running it dispatches immediately, so a host that starts a driver
+  without calling `-setCoalescePointerInput:YES` simply runs at the old rate —
+  no crash, no log, no red test. Both link callbacks therefore assert
+  `-coalescingPointerInput` out loud once per process. If you add a third frame
+  driver, opt it in there, not in whichever start function you happened to edit.
+
+What you can measure: `HostDragCoalescer::stats()` carries `raw_samples`,
+`delivered_samples`, `merged_samples` and `flushes`, and the same quantities go
+out as the `state` trace counters `raw_drag_samples`, `delivered_drag_samples`,
+`pointer_samples_merged` and `pointer_coalescer_flushes` — the same names the
+standalone window host emits, so one query covers both. The plug-in hosts still
+emit no `frame` / `paint` / `gpu_acquire` spans, so a trace cannot profile their
+frame loop; these counters are pointer-path evidence only.
 
 ## Common pitfalls
 

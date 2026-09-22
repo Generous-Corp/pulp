@@ -579,6 +579,26 @@ The sequencer registries are wired into both:
 - **`negative_capability_check.py`** — the compile-refusal registry. Whole-tree
   and sub-second. A ctest already covered it, which meant it was only reachable
   from a full build; the local lane now fails in under a second instead.
+- **`agent_capability_manifest.py --check`** — the installed public surface and
+  the two counters a branch reserves while the base keeps moving. Diff-scoped to
+  installed public headers and the capability registry/manifest, ~15s when it
+  runs, and it prints its reason when it skips. Both surfaces pass
+  `PULP_AGENT_CAPABILITY_BASE_REF` as a **resolved commit**: a bare run takes the
+  *merge base* while CI forces the *base tip*, and the two have disagreed by
+  enough to send a branch into the merge queue holding a counter another branch
+  had already taken.
+
+  This one is worth the seconds even though it is the second-slowest here,
+  because it is the only local gate whose failure **cannot be repaired after the
+  push**. Nothing but the merge group sees a stale counter, and a pull request
+  already in the merge queue refuses a push with `GH006: … Branches that are
+  queued for merging cannot be updated`. So the repair is locked out by the
+  queue that is about to reject the branch, and dequeuing is separately gated
+  (`queue-removal-guard: refusing unaudited merge-queue removal`) — leaving
+  "wait for the eviction" as the only unprivileged route. The silent shape is
+  the common one: two branches holding the same counter write byte-identical
+  constant lines, so git merges them without a conflict and each passes
+  `--check` alone.
 
 A `--repo-root` is required for the refusal registry; it defaults to a path two
 levels up from the script, which is not the worktree when the hook runs.
@@ -9732,3 +9752,22 @@ Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
 under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
+
+## The macOS gate is build-only on a pull request; tests run in the merge queue
+
+`build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
+The merge queue runs the same workflow on `merge_group` against the exact commit that will
+land, so `main` keeps full build-and-test protection while a pull request only pays for the
+build.
+
+Two consequences worth knowing:
+
+- **A green `macos` check on a pull request does not mean the tests passed.** It means the
+  build succeeded. The tests run when the pull request is validated in the queue.
+- **A test failure blocks in the queue rather than on the pull request.** Under `ALLGREEN`
+  grouping a red entry forces its neighbours in that batch to rebuild, so a genuinely broken
+  test is more expensive there than it was on the head. Fix a known-bad test before enqueueing
+  rather than letting the queue find it.
+
+This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
+the same file for longer.
