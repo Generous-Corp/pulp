@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <choc/text/choc_JSON.h>
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
@@ -98,6 +99,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_transform: return "set_transform";
         case CanvasDrawCmd::Type::clip: return "clip";
         case CanvasDrawCmd::Type::draw_image: return "draw_image";
+        case CanvasDrawCmd::Type::draw_sdf: return "draw_sdf";
         case CanvasDrawCmd::Type::set_line_dash: return "set_line_dash";
         case CanvasDrawCmd::Type::put_image_data: return "put_image_data";
         case CanvasDrawCmd::Type::set_shadow_color: return "set_shadow_color";
@@ -733,6 +735,65 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                                  cmd.x + 4, cmd.y + cmd.h / 2);
                 canvas.restore();
             }
+            break;
+        }
+
+        case CanvasDrawCmd::Type::draw_sdf: {
+            canvas::Canvas::ShaderGeometry geometry;
+            float gx = cmd.x, gy = cmd.y, gw = cmd.w, gh = cmd.h;
+            try {
+                const auto spec = choc::json::parse(cmd.text);
+                const auto shape = spec.hasObjectMember("shape")
+                                       ? spec["shape"].getWithDefault<std::string>("rect")
+                                       : "rect";
+                if (shape == "circle") geometry.shape = canvas::Canvas::SDFShape::circle;
+                else if (shape == "rounded_rect") geometry.shape = canvas::Canvas::SDFShape::rounded_rect;
+                else if (shape == "diamond") geometry.shape = canvas::Canvas::SDFShape::diamond;
+                else if (shape == "squircle") geometry.shape = canvas::Canvas::SDFShape::squircle;
+                else if (shape == "triangle") geometry.shape = canvas::Canvas::SDFShape::triangle;
+                else if (shape == "arc") geometry.shape = canvas::Canvas::SDFShape::arc;
+                else if (shape == "flat_arc") geometry.shape = canvas::Canvas::SDFShape::flat_arc;
+                else if (shape == "ring") geometry.shape = canvas::Canvas::SDFShape::ring;
+                else if (shape == "stadium") geometry.shape = canvas::Canvas::SDFShape::stadium;
+                else if (shape == "cross") geometry.shape = canvas::Canvas::SDFShape::cross;
+                else if (shape == "flat_segment") geometry.shape = canvas::Canvas::SDFShape::flat_segment;
+                else if (shape == "rounded_segment") geometry.shape = canvas::Canvas::SDFShape::rounded_segment;
+                else if (shape == "quadratic_bezier") geometry.shape = canvas::Canvas::SDFShape::quadratic_bezier;
+                gx = spec.hasObjectMember("x") ? static_cast<float>(spec["x"].getWithDefault<double>(gx)) : gx;
+                gy = spec.hasObjectMember("y") ? static_cast<float>(spec["y"].getWithDefault<double>(gy)) : gy;
+                gw = spec.hasObjectMember("w") ? static_cast<float>(spec["w"].getWithDefault<double>(gw)) : gw;
+                gh = spec.hasObjectMember("h") ? static_cast<float>(spec["h"].getWithDefault<double>(gh)) : gh;
+                geometry.style.stroke_width = spec.hasObjectMember("strokeWidth")
+                    ? static_cast<float>(spec["strokeWidth"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.corner_radius = spec.hasObjectMember("cornerRadius")
+                    ? static_cast<float>(spec["cornerRadius"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.inner_radius = spec.hasObjectMember("innerRadius")
+                    ? static_cast<float>(spec["innerRadius"].getWithDefault<double>(0.5)) : 0.5f;
+                geometry.style.arc_start = spec.hasObjectMember("arcStart")
+                    ? static_cast<float>(spec["arcStart"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.arc_sweep = spec.hasObjectMember("arcSweep")
+                    ? static_cast<float>(spec["arcSweep"].getWithDefault<double>(4.712)) : 4.712f;
+                geometry.style.squircle_power = spec.hasObjectMember("squirclePower")
+                    ? static_cast<float>(spec["squirclePower"].getWithDefault<double>(4.0)) : 4.0f;
+                geometry.style.arm_width = spec.hasObjectMember("armWidth")
+                    ? static_cast<float>(spec["armWidth"].getWithDefault<double>(0.3)) : 0.3f;
+                geometry.style.bezier_cx = spec.hasObjectMember("bezierCX")
+                    ? static_cast<float>(spec["bezierCX"].getWithDefault<double>(0.0)) : 0.0f;
+                geometry.style.bezier_cy = spec.hasObjectMember("bezierCY")
+                    ? static_cast<float>(spec["bezierCY"].getWithDefault<double>(-1.0)) : -1.0f;
+            } catch (...) {
+                // The bridge validates JSON before recording; a malformed
+                // retained command degrades to the normal rect fallback.
+            }
+            canvas::Canvas::ShaderDrawOptions options;
+            options.named_uniforms = cmd.shader_uniforms;
+            options.geometry = cmd.shader_geometry;
+            if (!cmd.shader_sksl.empty()) {
+                if (!options.geometry) options.geometry = geometry;
+                if (canvas.draw_with_sksl(cmd.shader_sksl, gx, gy, gw, gh, options))
+                    break;
+            }
+            canvas.draw_sdf_shape(geometry.shape, gx, gy, gw, gh, geometry.style);
             break;
         }
 

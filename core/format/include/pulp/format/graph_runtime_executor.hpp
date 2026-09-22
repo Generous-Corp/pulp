@@ -119,6 +119,7 @@ struct GraphRuntimeNodeBinding {
     audio::AudioProcessLoadMeasurer* load = nullptr;
     AudioRateModulationDelivery audio_rate_modulation_delivery =
         AudioRateModulationDelivery::LegacyParameterEvents;
+    bool preserve_parameter_events = false;
 };
 
 /// Control-thread-built graph snapshot for GraphRuntimeExecutor.

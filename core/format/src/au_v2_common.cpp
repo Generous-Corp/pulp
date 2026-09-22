@@ -123,9 +123,32 @@ OSStatus fill_parameter_info(const state::StateStore& store,
     const auto* param = store.info(static_cast<state::ParamID>(param_id));
     if (!param) return kAudioUnitErr_InvalidParameter;
 
-    out_info.flags = kAudioUnitParameterFlag_IsWritable
-                   | kAudioUnitParameterFlag_IsReadable
-                   | kAudioUnitParameterFlag_HasCFNameString;
+    out_info.flags = kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_HasCFNameString;
+
+    // AU has no single "hidden"/"readonly"/"automatable" triple, so each
+    // attribute maps to the flag whose documented meaning matches:
+    //
+    //  * read-only  — withhold IsWritable (the host's only write path, and so
+    //                 also its automation path) and add MeterReadOnly, which
+    //                 AudioUnitProperties.h defines for exactly this
+    //                 display-only, plugin-published value.
+    //  * hidden     — ExpertMode, documented as "the parameter is obscure
+    //                 (hint to UI to only display in expert mode)". AU has no
+    //                 true hide, so this is a hint, not a guarantee.
+    //  * non-automatable — NonRealTime, documented as "changing the parameter
+    //                 in real-time will cause a glitch or otherwise
+    //                 undesirable effect", which is the reason a parameter
+    //                 should not be driven by an automation lane.
+    if (state::is_read_only_param(*param))
+        out_info.flags |= kAudioUnitParameterFlag_MeterReadOnly;
+    else
+        out_info.flags |= kAudioUnitParameterFlag_IsWritable;
+
+    if (state::is_hidden_param(*param))
+        out_info.flags |= kAudioUnitParameterFlag_ExpertMode;
+
+    if (!state::is_automatable_param(*param))
+        out_info.flags |= kAudioUnitParameterFlag_NonRealTime;
 
     const ParamGroupProjection groups(store.all_groups());
     if (groups.find(param->group_id)) {
@@ -180,6 +203,28 @@ OSStatus fill_parameter_clump_property_info(const state::StateStore& store,
         return kAudioUnitErr_InvalidProperty;
     out_size = sizeof(AudioUnitParameterNameInfo);
     out_writable = false;
+    return noErr;
+}
+
+OSStatus fill_supports_mpe_property_info(bool supports_mpe, AudioUnitScope scope, UInt32& out_size,
+                                         bool& out_writable) {
+    if (scope != kAudioUnitScope_Global)
+        return kAudioUnitErr_InvalidScope;
+    if (!supports_mpe)
+        return kAudioUnitErr_InvalidProperty;
+    out_size = sizeof(UInt32);
+    out_writable = false;
+    return noErr;
+}
+
+OSStatus fill_supports_mpe(bool supports_mpe, AudioUnitScope scope, void* out_data) {
+    if (scope != kAudioUnitScope_Global)
+        return kAudioUnitErr_InvalidScope;
+    if (!supports_mpe)
+        return kAudioUnitErr_InvalidProperty;
+    if (!out_data)
+        return kAudioUnitErr_InvalidProperty;
+    *static_cast<UInt32*>(out_data) = 1;
     return noErr;
 }
 

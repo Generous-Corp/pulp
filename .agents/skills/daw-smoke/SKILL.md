@@ -61,6 +61,25 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
   synthetic clicks — see the gotcha below. The verdict is the generator's own success
   line plus the file it names, scraped from the plugin's log; never "the click
   appeared to land."
+- **`keyboard-routing`** — press keys AT a focused plugin editor and ask the HOST
+  what it received. Keyboard routing has two halves, and only one of them can be
+  tested from inside the plugin: that the editor consumes its own shortcuts. The
+  half that breaks is the other one — an editor that also swallows the keys it
+  did NOT handle looks identical from every vantage point in the plugin, and the
+  first report is a musician saying the spacebar stopped working. `keyboard_routing.lua`
+  journals `GetPlayState` + `Undo_CanUndo2` to `PULP_DAW_SMOKE_JOURNAL` on a
+  defer pump, so the verdict is the HOST's own state: Space at a focused editor
+  must start the transport and a second Space must stop it, and a ⌘Z the editor
+  owns must NOT move REAPER's undo history. Refuses to post a synthetic key until
+  `_reaper_editor_is_front` proves REAPER is the frontmost process AND its front
+  window is the plugin editor — a global key event posted at a guess lands in
+  somebody else's terminal on a shared machine. A macOS Accessibility refusal is
+  a SKIP with that reason, never a PASS. Its decision logic is unit-tested
+  against a synthetic journal (including the swallowed-Space FAIL), so the
+  scoring is proven without REAPER. The DAW-free mirrors are
+  `test/test_plugin_key_routing.cpp` (the shared policy) and the
+  `[host-forward]` case in `test_plugin_view_host_key_focus.mm` (the real
+  `PulpPluginView` seam, counting what reaches the host view).
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,

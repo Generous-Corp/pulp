@@ -53,19 +53,21 @@ describe('WidgetBridge ↔ @pulp/react JSX-reachability contract', () => {
 
     describe('prop: tags are fully reachable from JSX', () => {
         for (const r of tagged.filter((t) => t.jsx.startsWith('prop:'))) {
-            it(`${r.name} (${r.jsx})`, () => {
-                // The generated mock-allowlist must expose the fn.
-                expect(allowlisted(r.name), `${r.name} missing from generated mock allowlist`).toBe(true);
-                // prop-applier must dispatch to it
-                expect(dispatched(r.name), `${r.name} has no prop-applier call()`).toBe(true);
-                // types.ts must declare the prop on a Props interface
-                const prop = r.jsx.split('.')[1];
-                expect(prop, `malformed prop tag ${r.jsx}`).toBeTruthy();
-                expect(
-                    types.includes(`${prop}?:`),
-                    `prop '${prop}' (for ${r.name}) not declared in types.ts`,
-                ).toBe(true);
-            });
+            for (const tag of r.jsx.split('|')) {
+                it(`${r.name} (${tag})`, () => {
+                    // The generated mock-allowlist must expose the fn.
+                    expect(allowlisted(r.name), `${r.name} missing from generated mock allowlist`).toBe(true);
+                    // prop-applier must dispatch to it
+                    expect(dispatched(r.name), `${r.name} has no prop-applier call()`).toBe(true);
+                    // types.ts must declare the prop on a Props interface
+                    const prop = tag.split('.')[1];
+                    expect(prop, `malformed prop tag ${r.jsx}`).toBeTruthy();
+                    expect(
+                        types.includes(`${prop}?:`),
+                        `prop '${prop}' (for ${r.name}) not declared in types.ts`,
+                    ).toBe(true);
+                });
+            }
         }
     });
 

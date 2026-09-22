@@ -709,8 +709,93 @@ def termination_boundary_tests() -> None:
             raise AssertionError("live Windows Job descendants exceeded the final bound")
 
 
+def incomplete_diagnostics_tests() -> None:
+    """Cover v1_evidence.validate_incomplete_diagnostics_artifact.
+
+    The validator guards a timer-calibration receipt against a diagnostics
+    artifact that is absent, unbound, tampered with, or self-inconsistent. Each
+    rejection below is paired with the accepting case, so a validator that
+    refused everything would fail this just as loudly as one that accepted it.
+    """
+    with tempfile.TemporaryDirectory(prefix="pulp-calib-diag-") as directory:
+        cell = Path(directory).resolve()
+        diagnostics = {
+            "schema": "pulp.gpu-dpr-calibration-diagnostics.v1",
+            "failure_class": "timer_quantization",
+            "baseline_median_ns": 65536,
+        }
+        payload = json.dumps(diagnostics).encode("utf-8")
+        (cell / "diagnostics.json").write_bytes(payload)
+
+        def receipt_for(**overrides: Any) -> dict[str, Any]:
+            base = {
+                "diagnostics": copy.deepcopy(diagnostics),
+                "diagnostics_artifact": {
+                    "schema": "pulp.gpu-dpr-diagnostics-artifact.v1",
+                    "path": "diagnostics.json",
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+            }
+            base.update(overrides)
+            return base
+
+        def expect_reject(receipt: dict[str, Any], label: str) -> None:
+            try:
+                v1_evidence.validate_incomplete_diagnostics_artifact(receipt, cell)
+            except v1_evidence.EvidenceError:
+                return
+            raise AssertionError(f"calibration diagnostics accepted {label}")
+
+        # Positive control: a well-formed receipt must pass, otherwise every
+        # rejection below would be vacuous.
+        v1_evidence.validate_incomplete_diagnostics_artifact(receipt_for(), cell)
+
+        no_binding = receipt_for()
+        del no_binding["diagnostics_artifact"]
+        expect_reject(no_binding, "a receipt with no artifact binding")
+
+        wrong_schema = receipt_for()
+        wrong_schema["diagnostics_artifact"]["schema"] = "pulp.something-else.v1"
+        expect_reject(wrong_schema, "an unrecognized binding schema")
+
+        wrong_digest = receipt_for()
+        wrong_digest["diagnostics_artifact"]["sha256"] = "0" * 64
+        expect_reject(wrong_digest, "a digest that does not match the bytes")
+
+        malformed_digest = receipt_for()
+        malformed_digest["diagnostics_artifact"]["sha256"] = "not-hex"
+        expect_reject(malformed_digest, "a malformed digest")
+
+        drifted = receipt_for()
+        drifted["diagnostics"]["failure_class"] = "something_else"
+        expect_reject(drifted, "receipt diagnostics that differ from the artifact")
+
+        (cell / "bad.json").write_bytes(b"{not json")
+        not_json = receipt_for()
+        not_json["diagnostics_artifact"]["path"] = "bad.json"
+        not_json["diagnostics_artifact"]["sha256"] = hashlib.sha256(b"{not json").hexdigest()
+        expect_reject(not_json, "an artifact that is not valid JSON")
+
+        unsupported = copy.deepcopy(diagnostics)
+        unsupported["schema"] = "pulp.gpu-dpr-calibration-diagnostics.v99"
+        unsupported_payload = json.dumps(unsupported).encode("utf-8")
+        (cell / "v99.json").write_bytes(unsupported_payload)
+        expect_reject(
+            receipt_for(
+                diagnostics=unsupported,
+                diagnostics_artifact={
+                    "schema": "pulp.gpu-dpr-diagnostics-artifact.v1",
+                    "path": "v99.json",
+                    "sha256": hashlib.sha256(unsupported_payload).hexdigest(),
+                },
+            ),
+            "an unsupported diagnostics schema",
+        )
+
+
 def main() -> int:
     termination_boundary_tests()
+    incomplete_diagnostics_tests()
     manifest, scenario = small_manifest()
     with tempfile.TemporaryDirectory(prefix="pulp-a4-v2-files-") as directory:
         root = Path(directory).resolve()
@@ -1200,7 +1285,8 @@ def main() -> int:
         "forged_state_key=pass crash_consistent_state=pass "
         "frame_rederive=pass gpu_calibration=pass runtime_input=pass "
         "fixed_a3_daw_identity=pass caller_draft=pass "
-        "git_blob_type_head=pass live_receipt=pass"
+        "git_blob_type_head=pass live_receipt=pass "
+        "incomplete_diagnostics=pass"
     )
     return 0
 

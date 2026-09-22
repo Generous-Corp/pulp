@@ -380,6 +380,30 @@ if(APPLE AND PULP_HAS_AUSDK)
         TEST_PREFIX "lifecycle::"
         PROPERTIES LABELS lifecycle)
 
+    # AU projection of the shared hidden / read-only / non-automatable
+    # ParamInfo attributes — the v2 AudioUnitParameterInfo flags from the real
+    # GetParameterInfo entry point, and the v3 AUParameter.flags on the tree a
+    # host observes. Compiles au_adapter.mm for the AUv3 half, mirroring the
+    # plugin-state target above.
+    add_executable(pulp-test-au-param-visibility
+        test_au_param_visibility.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-param-visibility PRIVATE
+        pulp::format
+        ausdk
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-param-visibility PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-param-visibility)
+
     # AU v2 instrument (aumu) render-path RT-safety guard. Drives
     # PulpAUInstrument::Render for one steady-state block under
     # ScopedRtProcessProbe. Links the RT interposition trap TU and sets

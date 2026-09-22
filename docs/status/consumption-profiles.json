@@ -98,22 +98,22 @@
           {
             "exported_as": "Pulp::view",
             "closure_node_count": 73,
-            "public_header_count": 214
+            "public_header_count": 216
           },
           {
             "exported_as": "Pulp::view-native",
             "closure_node_count": 73,
-            "public_header_count": 214
+            "public_header_count": 216
           },
           {
             "exported_as": "Pulp::view-script",
             "closure_node_count": 72,
-            "public_header_count": 214
+            "public_header_count": 216
           },
           {
             "exported_as": "Pulp::view-core",
             "closure_node_count": 71,
-            "public_header_count": 214
+            "public_header_count": 216
           },
           {
             "exported_as": "Pulp::gpu-audio",
@@ -5082,7 +5082,7 @@
             ]
           },
           "public_headers": {
-            "count": 214,
+            "count": 216,
             "roots": [
               "core/view/include"
             ],
@@ -5203,7 +5203,7 @@
             ]
           },
           "public_headers": {
-            "count": 214,
+            "count": 216,
             "roots": [
               "core/view/include"
             ],
@@ -5343,7 +5343,7 @@
             ]
           },
           "public_headers": {
-            "count": 214,
+            "count": 216,
             "roots": [
               "core/view/include"
             ],
@@ -5465,7 +5465,7 @@
             ]
           },
           "public_headers": {
-            "count": 214,
+            "count": 216,
             "roots": [
               "core/view/include"
             ],

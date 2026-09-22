@@ -117,6 +117,8 @@ SHIPYARD_WATCHDOG_TEST="$ROOT/tools/scripts/test_shipyard_pr_watchdog.py"
 SEQ_EXPOSURE="$ROOT/tools/scripts/sequencer_exposure_check.py"
 NEG_CAPABILITY="$ROOT/tools/scripts/negative_capability_check.py"
 LABEL_EXCLUSION="$ROOT/tools/scripts/ctest_label_exclusion_guard.py"
+VELLUM_HINT="$ROOT/tools/scripts/vellum_watch_preflight.py"
+CAPABILITY_CONTRACT="$ROOT/tools/scripts/agent_capability_manifest.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -186,6 +188,23 @@ if [ -f "$SHIPYARD_LOCAL" ]; then
     if "$PYTHON" "$SHIPYARD_LOCAL" --repo-root "$ROOT"; then
         echo "  mac → local self-hosted runners (required 'macos' check will post)." >&2
     fi
+fi
+
+# ── 0c. vellum watch-event hint (ADVISORY) ─────────────────────────────────
+# The required `Vellum freeze` check demands a hand-authored watch event when a
+# change touches one of the pinned capability-family path globs — and the
+# trigger is PATHS, not intent, so a one-line edit under e.g.
+# `tools/import-design/**` qualifies with nothing in the diff to warn you.
+# Discovering that from CI costs a full round trip, which three pull requests
+# paid in one evening.
+#
+# ADVISORY BY CONSTRUCTION, and it must stay that way: the authoritative check
+# runs from a TRUSTED ROOT in two required GitHub contexts precisely so a
+# branch's own copy of the checker is not trusted, and CODEOWNERS locks the
+# events directory, the checker and its test. This only moves DISCOVERY
+# earlier; it never changes a required context and never sets `fail`.
+if [ -f "$VELLUM_HINT" ]; then
+    "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" || true
 fi
 
 # ── 1. skill-sync ──────────────────────────────────────────────────────────
@@ -748,6 +767,57 @@ if [ -f "$LABEL_EXCLUSION" ]; then
     echo "" >&2
     echo "▸ ctest label-exclusion guard (a suite must reach the gate or coverage)" >&2
     if ! "$PYTHON" "$LABEL_EXCLUSION"; then
+        fail=1
+    fi
+fi
+
+
+# ── 19. agent-capability contract ──────────────────────────────────────────
+# The installed public surface and its capability manifest are versioned by two
+# counters that a branch RESERVES and the base keeps moving. Nothing else here
+# catches a stale reservation, and the failure is unusually expensive: it is
+# detectable only in the merge group, ~52 minutes in, and a PR that has entered
+# the merge queue CANNOT be repaired — pushing to a queued branch is refused
+# with GH006, so the fix is locked out by the same queue that will reject it.
+#
+# The worst shape is silent. Two branches can hold the same
+# SURFACE_INVENTORY_VERSION over different surfaces; the counter lines are
+# byte-identical, so git merges them without a conflict and each branch passes
+# --check on its own. Only a run against the CURRENT base sees it.
+#
+# The base must be passed explicitly. A bare local run resolves `merge_base`
+# while CI forces `exact_base`, and the two disagree: measured on one tree in
+# one second, 80 against the merge base and 82 against the base tip — and 80
+# was exactly the doomed number a PR had already carried into the queue.
+#
+# Cost ~15s. Repair is `tools/scripts/agent_capability_rederive.py`, which
+# resolves the protected tip rather than picking an integer by hand.
+capability_paths_touched() {
+    git diff --name-only "$1"...HEAD 2>/dev/null | grep -qE \
+        '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'
+}
+
+if [ -f "$CAPABILITY_CONTRACT" ]; then
+    echo "" >&2
+    echo "▸ agent-capability contract (counters re-derived against the current base)" >&2
+    capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"
+    if [ -z "$capability_base" ]; then
+        echo "agent-capabilities: SKIPPED — base '$BASE' does not resolve to a commit." >&2
+        echo "  A skip is not a pass. Fetch the base and re-run." >&2
+    elif ! capability_paths_touched "$capability_base"; then
+        echo "agent-capabilities: skipped — no installed public header and no capability" >&2
+        echo "  registry/manifest path changed against $BASE. A branch that adds no surface" >&2
+        echo "  cannot take a counter, so there is nothing here to go stale." >&2
+    elif ! PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
+            "$PYTHON" "$CAPABILITY_CONTRACT" --check; then
+        echo "" >&2
+        echo "  Re-derive rather than choosing a number:" >&2
+        echo "    PULP_AGENT_CAPABILITY_BASE_REF=$capability_base \\" >&2
+        echo "      python3 tools/scripts/agent_capability_rederive.py" >&2
+        echo "  If it lands on an integer an open branch already claimed, skip past it:" >&2
+        echo "  reset the generated artifacts to the base FIRST, then set the higher" >&2
+        echo "  constant and --write. Bumping the constant after a re-derive fails the" >&2
+        echo "  opposite rule ('changed without a surface change')." >&2
         fail=1
     fi
 fi

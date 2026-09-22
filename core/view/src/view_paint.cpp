@@ -592,9 +592,11 @@ void View::apply_overflow_clip(canvas::Canvas& canvas) {
     // opted into. Default is overflow:visible (CSS default)
     // so absolutely-positioned popover/dropdown children that extend
     // outside the parent's content bounds still paint. `scroll` clips
-    // the painted box like `hidden` per CSS spec — we don't have a
-    // scrollbar layer yet, but the layout-side overflow propagation
-    // is wired through Yoga so descendants measure correctly.
+    // the painted box like `hidden` per CSS spec; it additionally offsets
+    // its children by the scroll position, so this clip is what keeps the
+    // scrolled-away content from painting over the surrounding UI. A
+    // scrollbar layer is still ScrollView's job — a bare `overflow: scroll`
+    // container scrolls by wheel without painting chrome.
     if (overflow_ == Overflow::hidden || overflow_ == Overflow::scroll) {
         // Marker overflow tolerance. Common imported-design pattern: an XY pad
         // or similar drag-driven widget sets overflow:hidden on the container
@@ -1715,14 +1717,38 @@ void View::paint_children_in_order(canvas::Canvas& canvas) {
     // ScopedNoAlloc region, so that per-frame allocation is a real-time-safety
     // violation. Only fall back to the allocating sorted copy when z-index
     // actually reorders siblings.
+    //
+    // An `overflow: scroll` container paints each child translated by
+    // child_paint_offset(child) — the SAME function View::hit_test subtracts
+    // before descending, so a scrolled child cannot paint in one place and
+    // respond in another. The offset is per-child rather than one translate
+    // around the loop because it is not uniform: a `position: sticky` child
+    // stays pinned while its siblings scroll.
+    const bool offsets_children = applies_child_paint_offset();
+    const auto paint_child = [&](View* child) {
+        if (!offsets_children) {
+            child->paint_all(canvas);
+            return;
+        }
+        const Point offset = child_paint_offset(*child);
+        if (offset.x == 0.0f && offset.y == 0.0f) {
+            child->paint_all(canvas);
+            return;
+        }
+        canvas.save();
+        canvas.translate(offset.x, offset.y);
+        child->paint_all(canvas);
+        canvas.restore();
+    };
+
     if (children_in_z_order()) {
         for (const auto& child : children_) {
-            child->paint_all(canvas);
+            paint_child(child.get());
         }
     } else {
         auto paint_order = sorted_children_by_z_index();
         for (View* child : paint_order) {
-            child->paint_all(canvas);
+            paint_child(child);
         }
     }
 }

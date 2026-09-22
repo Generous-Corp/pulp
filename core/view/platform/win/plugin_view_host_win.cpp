@@ -603,6 +603,33 @@ public:
             design_viewport_w_, design_viewport_h_, design_top_align_);
     }
 
+    void handle_frame_timer() {
+        // KillTimer cannot remove a WM_TIMER already queued by the host loop.
+        // Teardown must therefore be checked at dispatch time as well as at
+        // detach, so a stale callback cannot paint an orphaned child HWND.
+        if (!attached_.load(std::memory_order_acquire))
+            return;
+        // The Windows plug-in host is embedded in a DAW-owned message loop, so
+        // WM_TIMER is the portable frame source available to this HWND. Gate
+        // the UI-thread work before walking the tree; static editors therefore
+        // pay no frame-clock or render cost after their first paint.
+        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
+                                        static_cast<bool>(idle_callback_)))
+            return;
+
+        const auto now =
+            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        const bool dirty = needs_repaint_;
+        needs_repaint_ = false;
+        const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_, now, dirty);
+        continuous_frames_ = tick.continuous;
+        if (tick.should_render) {
+            advance_host_frame(&root_, frame_clock_, tick.dt);
+            paint_or_invalidate();
+        }
+    }
+
 private:
     View& root_;
     Size size_;        // LOGICAL (DPI-independent) size; layout coordinate space
@@ -651,34 +678,6 @@ private:
         needs_repaint_ = false;
         continuous_frames_ = false;
     }
-
-    void handle_frame_timer() {
-        // KillTimer cannot remove a WM_TIMER already queued by the host loop.
-        // Teardown must therefore be checked at dispatch time as well as at
-        // detach, so a stale callback cannot paint an orphaned child HWND.
-        if (!attached_.load(std::memory_order_acquire))
-            return;
-        // The Windows plug-in host is embedded in a DAW-owned message loop, so
-        // WM_TIMER is the portable frame source available to this HWND. Gate
-        // the UI-thread work before walking the tree; static editors therefore
-        // pay no frame-clock or render cost after their first paint.
-        if (!should_dispatch_host_frame(frame_pump_, needs_repaint_, continuous_frames_,
-                                        static_cast<bool>(idle_callback_)))
-            return;
-
-        const auto now =
-            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
-                .count();
-        const bool dirty = needs_repaint_;
-        needs_repaint_ = false;
-        const auto tick = begin_host_frame(&root_, frame_clock_, frame_pump_, now, dirty);
-        continuous_frames_ = tick.continuous;
-        if (tick.should_render) {
-            advance_host_frame(&root_, frame_clock_, tick.dt);
-            paint_or_invalidate();
-        }
-    }
-
     // Window-space mapping lives in win_pointer_input.hpp so the signed-word
     // unpack and the physical→logical divide are unit-tested off Windows (the
     // required CI gate is macOS). Only the design-viewport transform, which

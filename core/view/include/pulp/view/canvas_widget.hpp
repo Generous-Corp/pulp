@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -142,6 +143,9 @@ struct CanvasDrawCmd {
         clip,                      // intersect clip with current path
         // Image
         draw_image,
+        // SDF shader draw. `text` stores the geometry JSON and
+        // `shader_sksl` stores optional structured SkSL.
+        draw_sdf,
         // Canvas2D API coverage
         set_line_dash,             ///< pattern in `gradient_positions`, phase in `extra`
         put_image_data,            ///< RGBA pixels in `text` (binary), int_val=width, x2=height (as int)
@@ -172,6 +176,9 @@ struct CanvasDrawCmd {
     canvas::Color color{255, 255, 255, 255};
     float extra = 0;            // radius, line width, font size, angle
     std::string text;           // for fill_text, set_font family
+    std::string shader_sksl;
+    std::vector<canvas::Canvas::NamedUniform> shader_uniforms;
+    std::optional<canvas::Canvas::ShaderGeometry> shader_geometry;
     int int_val = 0;            // for enum values (text align, baseline, blend mode, cap, join)
     std::vector<canvas::Color> gradient_colors;    // for gradient stops
     std::vector<float> gradient_positions;          // gradient stop positions
