@@ -829,7 +829,16 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 
     // Register Pulp parameters with the VST3 parameter system
     for (const auto& param : store_.all_params()) {
-        int32 flags = ParameterInfo::kCanAutomate;
+        // Automation is opt-out: an ordinary parameter keeps the kCanAutomate
+        // it has always carried, and only a parameter declared non-automatable
+        // (or read-only, which the host must not write) withholds it.
+        int32 flags = 0;
+        if (state::is_automatable_param(param))
+            flags |= ParameterInfo::kCanAutomate;
+        if (state::is_hidden_param(param))
+            flags |= ParameterInfo::kIsHidden;
+        if (state::is_read_only_param(param))
+            flags |= ParameterInfo::kIsReadOnly;
 
         int32 step_count = 0;
         if (state::is_discrete_param(param)) {

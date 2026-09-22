@@ -4,17 +4,19 @@
 
 #ifdef PULP_VST3_GUI
 
-#include <pulp/format/vst3_plug_view.hpp>
-#include <pulp/format/vst3_adapter.hpp>
-#include <pulp/format/gpu_host_select.hpp>
-#include <pulp/format/editor_idle_pump.hpp>
-#include <pulp/runtime/log.hpp>
-#include <pulp/view/input_events.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pluginterfaces/base/keycodes.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <pluginterfaces/base/keycodes.h>
+#include <pulp/format/editor_idle_pump.hpp>
+#include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/vst3_plug_view.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/view/input_events.hpp>
+#include <pulp/view/plugin_key_routing.hpp>
+#include <pulp/view/text_editor.hpp>
 #include <utility>
 
 namespace pulp::format::vst3 {
@@ -278,16 +280,40 @@ tresult PLUGIN_API PulpPlugView::onKeyDown(char16 key, int16 keyCode, int16 modi
     if ((modifiers & (kCommandKey | kControlKey)) != 0) return kResultFalse;
     view::View* root = bridge_.view();
     if (!root) return kResultFalse;
-    // Per-root focus slot (never allocate from the key path). Only a focused
-    // TEXT field consumes Space; with none focused the host keeps transport.
-    auto* state = root->existing_interaction();
-    auto* te = state ? dynamic_cast<view::TextEditor*>(state->focused_input) : nullptr;
-    if (!te) return kResultFalse;
-    view::TextInputEvent ev;
-    ev.text = " ";
-    te->on_text_input(ev);
-    root->request_repaint();
-    return kResultTrue;
+
+    // Who consumes it is the shared policy's answer — the same one the macOS
+    // NSView seam asks — so an open overlay, a focused non-text widget, and a
+    // focused text field all behave identically across formats.
+    view::PluginKeyOffer offer;
+    offer.key.key = view::KeyCode::space;
+    offer.key.modifiers =
+        static_cast<std::uint16_t>((modifiers & kShiftKey) != 0 ? view::kModShift : 0);
+    offer.key.is_down = true;
+    // A single delivery point, so this is the only place the root hook is
+    // consulted for this press — unlike the NSView seam, where AppKit offers
+    // the same key twice and -performKeyEquivalent: owns the hook.
+    offer.offer_global_hook = true;
+    switch (view::route_plugin_key(*root, offer)) {
+    case view::PluginKeyDisposition::consumed:
+        root->request_repaint();
+        return kResultTrue;
+    case view::PluginKeyDisposition::insert_as_text: {
+        // VST3 hands over a key, not a composed character, and there is no IME
+        // seam on this path — insert the one character Space stands for.
+        auto* te = dynamic_cast<view::TextEditor*>(view::plugin_key_focus(*root));
+        if (!te)
+            return kResultFalse;
+        view::TextInputEvent ev;
+        ev.text = " ";
+        te->on_text_input(ev);
+        root->request_repaint();
+        return kResultTrue;
+    }
+    case view::PluginKeyDisposition::forward_to_host:
+        break;
+    }
+    // Nothing claimed it: the host keeps transport.
+    return kResultFalse;
 }
 
 tresult PLUGIN_API PulpPlugView::onSize(ViewRect* newSize) {

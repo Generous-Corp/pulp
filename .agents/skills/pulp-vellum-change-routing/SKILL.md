@@ -245,6 +245,17 @@ run against an unclean checkout, and it refuses to emit anything
 `gpu_recipe_catalog.py` would reject, so the fail-closed validator stays the
 authority on acceptance.
 
+`check` reads the **working tree**, so an uncommitted edit to a pinned path
+makes a correct ledger look broken. The pin still equals the blob at `HEAD` and
+only the unstaged bytes differ, but the validator hashes what is on disk, so the
+row is reported `stale`. `check` now says which paths are uncommitted before it
+renders any verdict, and stops calling that state a contract violation
+"regeneration cannot repair" — committing the path repairs it, so the old
+wording was false as well as misleading. If `check` is red while
+`git status` shows a pinned path modified, commit or restore it and re-run
+before looking for a defect. `--json` carries the same fact as
+`dirty_canonical_paths`.
+
 Do not hand-edit these rows. Hand editing is what turned a one-row correction
 into dozens of stale identities: the rows are denormalized, one path can appear
 in several packages, and a path's owning revision moves whenever any commit
