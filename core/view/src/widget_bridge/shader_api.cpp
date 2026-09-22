@@ -25,6 +25,30 @@ choc::value::Value shader_result(bool success, const std::string& error) {
     return result;
 }
 
+std::optional<int> declared_uniform_arity(const std::string& sksl,
+                                          const std::string& name) {
+    static const std::regex declaration(
+        R"(\buniform\s+(float|float2|float3|float4|half|half2|half3|half4)\s+([A-Za-z_][A-Za-z0-9_]*))");
+    for (std::sregex_iterator it(sksl.begin(), sksl.end(), declaration), end;
+         it != end; ++it) {
+        if ((*it)[2].str() != name) continue;
+        const auto type = (*it)[1].str();
+        return type.back() >= '2' && type.back() <= '4'
+                   ? static_cast<int>(type.back() - '0')
+                   : 1;
+    }
+    return std::nullopt;
+}
+
+bool reserved_shader_uniform(std::string_view name) {
+    if (name.rfind("pulp_", 0) == 0) return true;
+    static constexpr std::string_view fixed[] = {
+        "resolution", "value", "time", "accentColor", "bgColor",
+        "trackColor", "fillColor", "thumbColor",
+    };
+    return std::find(std::begin(fixed), std::end(fixed), name) != std::end(fixed);
+}
+
 std::optional<canvas::Canvas::ShaderGeometry>
 parse_shader_geometry(const choc::value::ValueView& options) {
     if (!options.isObject() || !options.hasObjectMember("geometry")) return std::nullopt;
@@ -412,6 +436,25 @@ void BridgeRegistrars::register_shader_widget_api(WidgetBridge& self) {
             uniforms.push_back(std::move(u));
         });
         if (!valid) return shader_result(false, failure);
+        // Once a shader is installed, validate the complete batch against
+        // its declarations before replacing any previously bound values.
+        // Uniform writes made before installation remain deferred and are
+        // intentionally accepted for the existing bridge workflow.
+        if (!host->custom_shader().empty()) {
+            for (const auto& uniform : uniforms) {
+                if (reserved_shader_uniform(uniform.name))
+                    return shader_result(false, "Uniform '" + uniform.name + "' is reserved");
+                const auto arity = declared_uniform_arity(host->custom_shader(), uniform.name);
+                if (!arity)
+                    return shader_result(false, "Shader does not declare uniform '" + uniform.name + "'");
+                if (*arity != uniform.count)
+                    return shader_result(false, "Uniform '" + uniform.name + "' expects " +
+                                         std::to_string(*arity) + " component(s)");
+                for (int i = 0; i < uniform.count; ++i)
+                    if (!std::isfinite(uniform.v[i]))
+                        return shader_result(false, "Uniform '" + uniform.name + "' contains a non-finite value");
+            }
+        }
         host->set_shader_uniforms(std::move(uniforms));
         self.request_repaint();
         return shader_result(true, "");
