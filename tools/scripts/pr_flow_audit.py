@@ -46,12 +46,36 @@ workflow, where the step is skipped. Measured directly: an affected PR's
 `refs/pull/N/merge` still carried the pre-change workflow hours after base had
 moved on, while the PR touched no workflow file at all.
 
+Queue membership is read, never inferred
+---------------------------------------
+GitHub CONSUMES a pull request's auto-merge request when the queue takes it, so
+a queued PR reports `auto_merge: null` — the same value as one that was never
+armed. Membership therefore comes from GraphQL (`isInMergeQueue`,
+`mergeQueueEntry`), and two further states that are also pure absences in REST
+are read from the timeline: a PR the queue EJECTED, which returns to `clean`
+with a null auto-merge request, and one a human deliberately disarmed. Re-arming
+either is a mutation that undoes somebody's decision — and under ALLGREEN
+grouping, re-enqueueing a known-bad PR fails the innocent PRs batched with it.
+A queued PR also reports its mergeable state as UNKNOWN for as long as it sits
+there, so membership is settled before state is consulted.
+
 Fail closed
 -----------
 A false "nothing to do" is the failure mode being eliminated, so it must be
 impossible to emit. Any PR whose state cannot be established — API error, absent
-checks, unparseable or ambiguous workflow condition — is reported UNKNOWN with
-the reason, and `--fix` refuses to touch it.
+checks, unparseable or ambiguous workflow condition, an unreadable queue
+membership — is reported UNKNOWN with the reason, and `--fix` refuses to touch
+it. A condition that depends on the outcome of its own run (`!cancelled()`) is
+undecidable rather than false, because false is the direction that produces a
+mutation.
+
+Mutating is opt-in and capped
+-----------------------------
+`--fix` reports what it would do; `--apply` is what performs it, and
+`--max-fixes` bounds how many. A classifier bug does not mislabel one PR, it
+mislabels a shape of PR, so the blast radius of a wrong verdict is the whole
+backlog unless something bounds it. A fix that FAILED exits non-zero; findings
+alone never do.
 """
 
 from __future__ import annotations
@@ -67,17 +91,40 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-import yaml
-
 # The workflow that owns the required gate, and the event a pull request runs
 # under. Both are inputs to reachability, not assertions about any step.
 DEFAULT_WORKFLOW = ".github/workflows/build.yml"
 PULL_REQUEST_EVENT = "pull_request"
 DEFAULT_GATE = "macos"
 DEFAULT_UNSTABLE_HOURS = 6.0
+# How long a check may sit pending before it stops counting as progress. The
+# required macOS gate is served by a small pool and queues for hours by design,
+# so this is deliberately generous: it catches a wedge, not a queue.
+DEFAULT_IN_FLIGHT_HOURS = 24.0
+# The most mutations one sweep may perform. A classifier bug that mislabels a
+# whole backlog then costs three actions, not forty.
+DEFAULT_MAX_FIXES = 3
 
 # Conclusions that leave a check with nothing outstanding.
 GREEN = {"success", "skipped", "neutral"}
+
+# A job conclusion that is not a rejection of the change. `cancelled` in
+# particular is somebody freeing the one required-gate runner on purpose;
+# replaying it undoes their decision.
+NOT_A_REJECTION = {"cancelled", "skipped", "stale", "action_required", "timed_out", "neutral"}
+
+STATUS_FUNCTIONS = ("success", "failure", "cancelled", "always")
+
+# The two outcome assignments every condition is evaluated under. A step that
+# is reachable in EITHER can still execute. Pinning every status function to
+# True instead makes `!cancelled()` — the standard "run even after a failure"
+# idiom — evaluate False, which reports a step that genuinely failed as one a
+# fresh run would never reach, and that verdict points at `update-branch`.
+_OUTCOME_ASSIGNMENTS = (
+    {"success": True, "failure": False, "cancelled": False, "always": True},
+    {"success": False, "failure": True, "cancelled": False, "always": True},
+    {"success": False, "failure": False, "cancelled": True, "always": True},
+)
 PENDING_STATUS = {"queued", "in_progress", "pending", "waiting", "requested"}
 
 # Bucket names, used as both report headings and JSON values.
@@ -179,8 +226,26 @@ class _Parser:
     def parse_unary(self) -> Any:
         if self.peek() == ("op", "!"):
             self.take()
-            return not _truthy(self.parse_unary())
+            start = self.pos
+            value = self.parse_unary()
+            if self._spans_status_function(start, self.pos):
+                # Whether the negation holds depends on the outcome of the very
+                # run the step sits in, so no fixed assignment answers it. The
+                # dangerous direction is a False here: it reads as "a fresh run
+                # never reaches this step", which points --fix at update-branch
+                # for a step that genuinely failed.
+                raise WorkflowError(
+                    "negated status function: reachability depends on the run's "
+                    "own outcome and cannot be decided statically"
+                )
+            return not _truthy(value)
         return self.parse_comparison()
+
+    def _spans_status_function(self, start: int, end: int) -> bool:
+        return any(
+            kind == "name" and value in STATUS_FUNCTIONS
+            for kind, value in self.tokens[start:end]
+        )
 
     def parse_comparison(self) -> Any:
         left = self.parse_primary()
@@ -233,9 +298,11 @@ def _strip_wrappers(expr: str) -> str:
 def evaluate_condition(expr: str | bool | None, *, event_name: str, runner_os: str) -> bool:
     """Evaluate a step `if:` for one event and runner OS.
 
-    An absent condition means the step always runs. Status functions are pinned
-    to the branch that makes the step run at all — the question being asked is
-    "could this step execute under this event", not "did it".
+    An absent condition means the step always runs. The question is "could this
+    step execute under this event", not "did it", so the condition is evaluated
+    once per outcome assignment (success path and failure path) and the step is
+    reachable when either says so. A negated status function is decided by
+    neither and raises WorkflowError rather than resolving to a guess.
     """
     if expr is None:
         return True
@@ -244,19 +311,13 @@ def evaluate_condition(expr: str | bool | None, *, event_name: str, runner_os: s
     text = _strip_wrappers(expr)
     if not text:
         return True
-    context = {
-        "values": {
-            "github.event_name": event_name,
-            "runner.os": runner_os,
-        },
-        "functions": {
-            "success": True,
-            "failure": True,
-            "always": True,
-            "cancelled": True,
-        },
-    }
-    return _truthy(_Parser(_tokenize(text), context).parse())
+    tokens = _tokenize(text)
+    values = {"github.event_name": event_name, "runner.os": runner_os}
+    for functions in _OUTCOME_ASSIGNMENTS:
+        context = {"values": values, "functions": dict(functions)}
+        if _truthy(_Parser(list(tokens), context).parse()):
+            return True
+    return False
 
 
 def is_consequence_condition(expr: str | bool | None) -> bool:
@@ -293,12 +354,31 @@ class StepCondition:
     ambiguous: bool = False
 
 
-def parse_workflow_steps(text: str) -> dict[str, StepCondition]:
-    """Map step name -> condition for every named step in a workflow."""
+def _load_workflow(text: str) -> Any:
+    """Parse a workflow document, or say why reachability is undecidable.
+
+    PyYAML is imported here rather than at module scope because stock CI
+    runners do not carry it, and this module is also loaded by a ctest that
+    must run on those runners. Its absence is not a crash and not a default:
+    it fails closed, exactly like an unparseable condition, so every verdict
+    that needed the workflow degrades to UNKNOWN.
+    """
     try:
-        document = yaml.safe_load(text)
+        import yaml
+    except ImportError as exc:
+        raise WorkflowError(
+            "PyYAML is not installed, so workflow reachability cannot be "
+            "evaluated"
+        ) from exc
+    try:
+        return yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise WorkflowError(f"workflow is not valid YAML: {exc}") from exc
+
+
+def parse_workflow_steps(text: str) -> dict[str, StepCondition]:
+    """Map step name -> condition for every named step in a workflow."""
+    document = _load_workflow(text)
     if not isinstance(document, dict):
         raise WorkflowError("workflow root is not a mapping")
     jobs = document.get("jobs")
@@ -342,9 +422,14 @@ class StepVerdict:
 
 
 def classify_failing_step(
-    name: str, steps: dict[str, StepCondition]
+    name: str, steps: dict[str, StepCondition], *, runner_os: str = "macOS"
 ) -> StepVerdict:
-    """Decide whether a failing step would block a fresh pull_request run."""
+    """Decide whether a failing step would block a fresh pull_request run.
+
+    `runner_os` is the OS of the job the step actually ran in, not the gate's
+    nominal platform: a condition like `runner.os != 'Windows'` answers
+    differently per job, so judging a Linux step under macOS inverts it.
+    """
     condition = steps.get(name)
     if condition is None:
         # Absent from the base workflow means either that base removed the step
@@ -367,7 +452,7 @@ def classify_failing_step(
             decidable=False,
         )
     if not evaluate_condition(
-        condition.expr, event_name=PULL_REQUEST_EVENT, runner_os="macOS"
+        condition.expr, event_name=PULL_REQUEST_EVENT, runner_os=runner_os
     ):
         return StepVerdict(
             name, False, f"not reachable for {PULL_REQUEST_EVENT}: if: {condition.expr}"
@@ -416,11 +501,41 @@ def _gate_check(pr: dict[str, Any], gate: str) -> dict[str, Any] | None:
     return sorted(runs, key=lambda c: str(c.get("started_at") or ""))[-1]
 
 
-def _any_work_in_flight(pr: dict[str, Any]) -> bool:
-    return any(
-        str(c.get("status") or "").lower() in PENDING_STATUS
+def _pending_checks(pr: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        c
         for c in pr.get("checks") or []
-    )
+        if str(c.get("status") or "").lower() in PENDING_STATUS
+    ]
+
+
+def _work_in_flight(
+    pr: dict[str, Any],
+    required: list[str],
+    now: datetime,
+    in_flight_hours: float,
+) -> tuple[bool, list[dict[str, Any]]]:
+    """Is real work running, and which pending checks are no longer evidence of it?
+
+    "Something is pending" is not the same as "this PR is moving". A stuck
+    advisory lane pends forever and would mark every wedged PR MOVING, which is
+    precisely the silence this tool exists to break. Two narrowings, in order of
+    strength: when the required contexts are known, only a pending REQUIRED
+    context counts; and in either case a check pending longer than the flight
+    window has stopped being evidence of progress.
+    """
+    pending = _pending_checks(pr)
+    if not pending:
+        return False, []
+    if required:
+        pending = [c for c in pending if str(c.get("name") or "") in required]
+        if not pending:
+            return False, []
+    fresh, stale = [], []
+    for check in pending:
+        age = _hours_since(check.get("started_at"), now)
+        (stale if age is not None and age >= in_flight_hours else fresh).append(check)
+    return bool(fresh), stale
 
 
 def _hours_since(value: str | None, now: datetime) -> float | None:
@@ -443,6 +558,8 @@ def classify_pr(
     *,
     gate: str = DEFAULT_GATE,
     unstable_hours: float = DEFAULT_UNSTABLE_HOURS,
+    in_flight_hours: float = DEFAULT_IN_FLIGHT_HOURS,
+    required: list[str] | None = None,
 ) -> Finding:
     """Place one PR in exactly one bucket.
 
@@ -463,6 +580,21 @@ def classify_pr(
         base.reason = "collection error: " + "; ".join(str(e) for e in pr["errors"])
         return base
 
+    if pr.get("in_merge_queue") is None:
+        # Queue membership is not inferable from `auto_merge`: GitHub CONSUMES
+        # the auto-merge request on enqueue, so a queued PR reports
+        # auto_merge=null and is indistinguishable from one never armed. A
+        # collector that did not read it must not let the arming branch run.
+        base.reason = "merge-queue membership could not be read"
+        return base
+
+    if pr.get("in_merge_queue"):
+        base.bucket = MOVING
+        base.reason = "in the merge queue" + (
+            f" ({pr['merge_queue_state']})" if pr.get("merge_queue_state") else ""
+        )
+        return base
+
     state = str(pr.get("mergeable_state") or "").lower()
     if not state or state == "unknown":
         base.reason = "GitHub has not computed a mergeable state yet"
@@ -474,9 +606,31 @@ def classify_pr(
         base.action = "author marks ready for review"
         return base
 
-    if pr.get("in_merge_queue"):
-        base.bucket = MOVING
-        base.reason = "in the merge queue"
+    # An ejected PR returns to `clean` with a null auto-merge request, which
+    # reads identically to "never armed". Re-arming it re-enqueues the same
+    # failure every sweep, each cycle consuming a queue slot and, under
+    # ALLGREEN grouping, failing the innocent PRs batched with it.
+    ejected = pr.get("ejected_from_queue")
+    if ejected:
+        base.bucket = NEEDS_HUMAN
+        base.reason = (
+            "the merge queue ejected it"
+            + (f" at {ejected.get('at')}" if ejected.get("at") else "")
+            + " — re-arming would re-enqueue the same failure"
+        )
+        base.action = "find why the batch failed before re-arming"
+        base.detail = {"ejected_from_queue": ejected}
+        return base
+
+    batch = pr.get("merge_group_failure")
+    if batch:
+        base.bucket = NEEDS_HUMAN
+        base.reason = (
+            f"its merge-queue batch failed (run {batch.get('run_id')}) and it is "
+            "no longer in the queue"
+        )
+        base.action = "attribute the batch failure before re-arming"
+        base.detail = {"merge_group_failure": batch}
         return base
 
     checks = pr.get("checks")
@@ -484,9 +638,19 @@ def classify_pr(
         base.reason = "check runs could not be read"
         return base
 
-    if _any_work_in_flight(pr):
+    moving, stale_pending = _work_in_flight(pr, required or [], now, in_flight_hours)
+    if moving:
         base.bucket = MOVING
         base.reason = "a check is queued or running"
+        return base
+    if stale_pending:
+        names = ", ".join(str(c.get("name")) for c in stale_pending)
+        base.bucket = NEEDS_HUMAN
+        base.reason = (
+            f"pending for over {in_flight_hours:g}h with no progress: {names}"
+        )
+        base.action = "cancel or re-dispatch the wedged check"
+        base.detail = {"stale_pending": [str(c.get("name")) for c in stale_pending]}
         return base
 
     gate_run = _gate_check(pr, gate)
@@ -519,25 +683,54 @@ def classify_pr(
         return base
 
     if gate_conclusion and gate_conclusion not in GREEN:
-        if steps is None:
+        if gate_conclusion in NOT_A_REJECTION:
+            # Somebody stopped this run, most often to free the single
+            # required-gate runner. Re-dispatching it reverses their decision
+            # and takes the runner straight back.
+            base.bucket = NEEDS_HUMAN
             base.reason = (
-                f"{gate} failed, and reachability is undecidable: {workflow_error}"
+                f"the {gate} gate was {gate_conclusion} rather than failing — "
+                "replaying it would undo whoever stopped it"
             )
+            base.action = f"decide whether {gate} should be re-dispatched"
+            base.detail = {"gate_conclusion": gate_conclusion}
             return base
         failed_steps = pr.get("gate_failed_steps")
         if failed_steps is None:
             base.reason = f"{gate} failed but its steps could not be read"
             return base
         if not failed_steps:
-            # The job reported failure while no step did: the run was lost
-            # rather than the change rejected. Replaying it is exactly right.
+            # "No failing step" only means the run was LOST when the job really
+            # did fail. A cancelled job also reports zero failing steps — it
+            # carries none at all — and replaying that is the mutation this
+            # branch must never make, so the job's own conclusion is required.
+            job_conclusion = str(pr.get("gate_job_conclusion") or "").lower()
+            if job_conclusion != "failure":
+                base.reason = (
+                    f"{gate} is {gate_conclusion} with no failing step, and its "
+                    f"job conclusion is {job_conclusion or 'unknown'} — a lost run "
+                    "cannot be distinguished from a stopped one"
+                )
+                base.detail = {"gate_job_conclusion": job_conclusion}
+                return base
             base.bucket = AUTO_FIXABLE
             base.reason = f"{gate} failed with no failing step — the run was lost"
             base.action = "rerun-failed-jobs"
             base.detail = {"run_id": gate_run.get("run_id")}
             return base
+        # Only now does the workflow matter: every remaining verdict asks
+        # whether a fresh run would still reach a named step.
+        if steps is None:
+            base.reason = (
+                f"{gate} failed, and reachability is undecidable: {workflow_error}"
+            )
+            return base
+        runner_os = str(pr.get("gate_runner_os") or "macOS")
         try:
-            verdicts = [classify_failing_step(s, steps) for s in failed_steps]
+            verdicts = [
+                classify_failing_step(s, steps, runner_os=runner_os)
+                for s in failed_steps
+            ]
         except WorkflowError as exc:
             base.reason = f"{gate} failed, and reachability is undecidable: {exc}"
             return base
@@ -573,6 +766,21 @@ def classify_pr(
     # The gate is green. What is left is a state problem, not a test problem.
     armed = bool(pr.get("auto_merge"))
     if state in ("clean", "behind") and not armed:
+        # "Never armed" and "a human turned it off" are the same absence in the
+        # API. Only the timeline tells them apart, and the distinction is the
+        # whole decision here: with required_approving_review_count=0, arming
+        # IS merging, so re-arming a PR somebody deliberately disarmed merges
+        # work they were holding back.
+        disabled_by = pr.get("auto_merge_disabled_by")
+        if disabled_by:
+            base.bucket = NEEDS_HUMAN
+            base.reason = (
+                f"mergeable ({state}) but {disabled_by} turned auto-merge off — "
+                "re-arming it would merge work somebody was holding"
+            )
+            base.action = f"ask {disabled_by} whether it should merge"
+            base.detail = {"auto_merge_disabled_by": disabled_by}
+            return base
         base.bucket = AUTO_FIXABLE
         base.reason = f"mergeable ({state}) but auto-merge was never armed"
         base.action = "enable-auto-merge"
@@ -591,7 +799,10 @@ def classify_pr(
             if str(c.get("conclusion") or "").lower() not in GREEN
             and str(c.get("status") or "").lower() == "completed"
         ]
-        age = _hours_since(pr.get("updated_at"), now)
+        # updated_at is bumped by any comment, including a bot's, so a chatty
+        # PR could never accrue the threshold. The last CI activity is what the
+        # window is actually about.
+        age = _hours_since(pr.get("last_ci_at") or pr.get("updated_at"), now)
         if age is not None and age >= unstable_hours:
             base.bucket = NEEDS_HUMAN
             base.reason = (
@@ -642,6 +853,7 @@ def analyze(snapshot: dict[str, Any], now: datetime, **kwargs: Any) -> list[Find
         except WorkflowError as exc:
             steps = None
             workflow_error = str(exc)
+    kwargs.setdefault("required", snapshot.get("required_contexts") or [])
     findings = [
         classify_pr(pr, steps, workflow_error, now, **kwargs)
         for pr in snapshot.get("prs") or []
@@ -665,8 +877,180 @@ def _gh_json(gh_bin: str, path: str) -> Any:
     return json.loads(_gh(gh_bin, "api", "-H", "Accept: application/vnd.github+json", path))
 
 
+_PR_QUERY = """
+query($owner:String!,$name:String!,$base:String!,$cursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequests(states:OPEN,first:50,baseRefName:$base,after:$cursor){
+      pageInfo{hasNextPage endCursor}
+      nodes{
+        number title isDraft updatedAt mergeStateStatus
+        isInMergeQueue
+        mergeQueueEntry{state position}
+        autoMergeRequest{mergeMethod}
+        headRefOid
+      }
+    }
+  }
+}
+"""
+
+# Timeline events that decide whether an absent auto-merge request is an
+# omission or a decision, and whether the queue threw this PR out.
+_QUEUE_EVENTS = ("added_to_merge_queue", "removed_from_merge_queue")
+_ARM_EVENTS = ("auto_merge_enabled", "auto_merge_disabled")
+
+
+def _graphql(gh_bin: str, query: str, **variables: Any) -> Any:
+    args = ["api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is None:
+            continue
+        args += ["-f", f"{key}={value}"]
+    return json.loads(_gh(gh_bin, *args))
+
+
+def _paginate(gh_bin: str, path: str, key: str | None = None) -> tuple[list[Any], int | None]:
+    """Read every page of a REST listing.
+
+    Returns the items and, when the endpoint reports one, its `total_count`, so
+    the caller can prove nothing was silently dropped. A single per_page=100
+    read looks complete at exactly the point it stops being complete.
+    """
+    items: list[Any] = []
+    total: int | None = None
+    page = 1
+    sep = "&" if "?" in path else "?"
+    while True:
+        payload = _gh_json(gh_bin, f"{path}{sep}per_page=100&page={page}")
+        if key is None:
+            batch = payload
+        else:
+            batch = payload.get(key) or []
+            if total is None and isinstance(payload.get("total_count"), int):
+                total = payload["total_count"]
+        if not isinstance(batch, list):
+            raise ValueError(f"{path}: expected a list, got {type(batch).__name__}")
+        items.extend(batch)
+        if len(batch) < 100:
+            return items, total
+        page += 1
+        if page > 20:
+            raise ValueError(f"{path}: refusing to page past 2000 items")
+
+
+def _required_contexts(gh_bin: str, repo: str, base: str) -> list[str]:
+    """The contexts branch protection or an active ruleset actually requires.
+
+    Empty is a legitimate answer (and is what classic protection returns for a
+    ruleset-governed branch), so callers must treat it as "unknown", never as
+    "nothing is required".
+    """
+    names: list[str] = []
+    try:
+        checks = _gh_json(
+            gh_bin, f"repos/{repo}/branches/{base}/protection/required_status_checks"
+        )
+        names += [str(c) for c in checks.get("contexts") or []]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, AttributeError):
+        pass
+    try:
+        for ruleset in _gh_json(gh_bin, f"repos/{repo}/rulesets") or []:
+            if str(ruleset.get("enforcement")) != "active":
+                continue
+            detail = _gh_json(gh_bin, f"repos/{repo}/rulesets/{ruleset.get('id')}")
+            for rule in detail.get("rules") or []:
+                if rule.get("type") != "required_status_checks":
+                    continue
+                params = rule.get("parameters") or {}
+                names += [
+                    str(c.get("context"))
+                    for c in params.get("required_status_checks") or []
+                    if c.get("context")
+                ]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, AttributeError, TypeError):
+        pass
+    return sorted(set(names))
+
+
+def _merge_group_failures(gh_bin: str, repo: str) -> dict[int, dict[str, Any]]:
+    """Latest merge_group run outcome per PR number, read from its queue branch.
+
+    A queue branch is `gh-readonly-queue/<base>/pr-<N>-<sha>`, so one listing
+    attributes every recent batch outcome to the PRs that were in it.
+    """
+    payload = _gh_json(
+        gh_bin,
+        f"repos/{repo}/actions/runs?event=merge_group&status=completed&per_page=100",
+    )
+    runs = payload.get("workflow_runs") or []
+    latest: dict[int, dict[str, Any]] = {}
+    for run in runs:
+        branch = str(run.get("head_branch") or "")
+        created = str(run.get("created_at") or "")
+        for match in re.finditer(r"pr-(\d+)-", branch):
+            number = int(match.group(1))
+            if created >= str(latest.get(number, {}).get("at") or ""):
+                latest[number] = {
+                    "at": created,
+                    "run_id": run.get("id"),
+                    "conclusion": str(run.get("conclusion") or "").lower(),
+                    "head_branch": branch,
+                }
+    return latest
+
+
+def _timeline_signals(gh_bin: str, repo: str, number: int) -> dict[str, Any]:
+    """Queue ejection and deliberate disarming, read from the PR timeline.
+
+    Both are absences in the REST payload — an ejected PR and a disarmed one
+    both report `auto_merge: null` — so only the ordered event history can tell
+    either apart from "nothing ever happened".
+    """
+    events, _ = _paginate(gh_bin, f"repos/{repo}/issues/{number}/timeline")
+    last_queue: dict[str, Any] | None = None
+    last_arm: dict[str, Any] | None = None
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("event") or "")
+        if kind in _QUEUE_EVENTS:
+            last_queue = event
+        elif kind in _ARM_EVENTS:
+            last_arm = event
+    signals: dict[str, Any] = {"ejected_from_queue": None, "auto_merge_disabled_by": None}
+    if last_queue is not None and str(last_queue.get("event")) == "removed_from_merge_queue":
+        signals["ejected_from_queue"] = {
+            "at": last_queue.get("created_at"),
+            "actor": ((last_queue.get("actor") or {}).get("login")),
+        }
+    if last_arm is not None and str(last_arm.get("event")) == "auto_merge_disabled":
+        actor = (last_arm.get("actor") or {}).get("login")
+        # A bot disabling auto-merge is the mechanism doing its job (the queue
+        # consumes the request on enqueue); only a person disabling it is a
+        # decision this tool must not overturn.
+        if actor and str((last_arm.get("actor") or {}).get("type") or "").lower() != "bot":
+            signals["auto_merge_disabled_by"] = str(actor)
+    return signals
+
+
+def _runner_os(job: dict[str, Any]) -> str:
+    """The OS a job actually ran on, from its runs-on labels or its name."""
+    haystack = " ".join(
+        [str(job.get("name") or ""), *[str(l) for l in job.get("labels") or []]]
+    ).lower()
+    if "windows" in haystack:
+        return "Windows"
+    if "ubuntu" in haystack or "linux" in haystack:
+        return "Linux"
+    return "macOS"
+
+
 def collect(
-    repo: str, gh_bin: str, gate: str, workflow_path: str, base: str = "main"
+    repo: str,
+    gh_bin: str,
+    gate: str,
+    workflow_path: str,
+    base: str = "main",
 ) -> dict[str, Any]:
     """Build a snapshot. Every read that fails is recorded, never defaulted."""
     snapshot: dict[str, Any] = {
@@ -676,6 +1060,7 @@ def collect(
         "collected_at": datetime.now(timezone.utc).isoformat(),
         "prs": [],
         "errors": [],
+        "required_contexts": [],
     }
 
     # The workflow a FRESH pull_request run would use is the one on the base
@@ -688,75 +1073,129 @@ def collect(
         snapshot["workflow_error"] = f"could not read {workflow_path}: {str(exc)[:200]}"
         snapshot["errors"].append({"stage": "workflow", "error": str(exc)[:200]})
 
+    snapshot["required_contexts"] = _required_contexts(gh_bin, repo, base)
+
     try:
-        listing = _gh_json(gh_bin, f"repos/{repo}/pulls?state=open&per_page=100")
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        batches = _merge_group_failures(gh_bin, repo)
+    except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError, AttributeError) as exc:
+        batches = {}
+        snapshot["errors"].append({"stage": "merge_group", "error": str(exc)[:200]})
+
+    # Queue membership only exists in GraphQL. REST cannot answer it, and
+    # `auto_merge` is not a proxy: enqueueing CONSUMES the auto-merge request.
+    nodes: list[dict[str, Any]] = []
+    cursor: str | None = None
+    owner, _, name = repo.partition("/")
+    try:
+        while True:
+            page = _graphql(
+                gh_bin, _PR_QUERY, owner=owner, name=name, base=base, cursor=cursor
+            )
+            block = page["data"]["repository"]["pullRequests"]
+            nodes.extend(block.get("nodes") or [])
+            if not (block.get("pageInfo") or {}).get("hasNextPage"):
+                break
+            cursor = block["pageInfo"]["endCursor"]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError) as exc:
         snapshot["errors"].append({"stage": "pulls", "error": str(exc)[:200]})
         return snapshot
 
-    for item in listing:
-        number = item.get("number")
+    for node in nodes:
+        number = node.get("number")
         record: dict[str, Any] = {
             "number": number,
-            "title": item.get("title"),
+            "title": node.get("title"),
             "errors": [],
+            "mergeable_state": str(node.get("mergeStateStatus") or "").lower(),
+            "auto_merge": node.get("autoMergeRequest") is not None,
+            "draft": bool(node.get("isDraft")),
+            "head_sha": node.get("headRefOid"),
+            "updated_at": node.get("updatedAt"),
+            "in_merge_queue": bool(node.get("isInMergeQueue")),
+            "merge_queue_state": ((node.get("mergeQueueEntry") or {}) or {}).get("state"),
         }
-        try:
-            detail = _gh_json(gh_bin, f"repos/{repo}/pulls/{number}")
-            record.update(
-                {
-                    "mergeable_state": detail.get("mergeable_state"),
-                    "auto_merge": detail.get("auto_merge") is not None,
-                    "draft": bool(detail.get("draft")),
-                    "head_sha": (detail.get("head") or {}).get("sha"),
-                    "updated_at": detail.get("updated_at"),
-                }
-            )
-        except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
-            record["errors"].append(f"pull detail: {str(exc)[:160]}")
-            snapshot["prs"].append(record)
-            continue
 
         sha = record.get("head_sha")
         try:
-            runs = _gh_json(
+            runs, total = _paginate(
                 gh_bin,
-                f"repos/{repo}/commits/{sha}/check-runs?per_page=100&filter=latest",
+                f"repos/{repo}/commits/{sha}/check-runs?filter=latest",
+                "check_runs",
             )
+            if total is not None and len(runs) != total:
+                raise ValueError(
+                    f"check-run listing is truncated: {len(runs)} of {total}"
+                )
             record["checks"] = [
                 {
                     "name": c.get("name"),
                     "status": c.get("status"),
                     "conclusion": c.get("conclusion"),
                     "started_at": c.get("started_at"),
+                    "completed_at": c.get("completed_at"),
                     "run_id": _run_id_from(c),
+                    "job_id": _job_id_from(c),
                 }
-                for c in runs.get("check_runs") or []
+                for c in runs
             ]
-        except (subprocess.CalledProcessError, json.JSONDecodeError, AttributeError) as exc:
+            stamps = [
+                str(c.get("completed_at") or c.get("started_at") or "")
+                for c in record["checks"]
+            ]
+            record["last_ci_at"] = max([s for s in stamps if s], default=None)
+        except (subprocess.CalledProcessError, json.JSONDecodeError, AttributeError, ValueError) as exc:
             record["errors"].append(f"check runs: {str(exc)[:160]}")
             snapshot["prs"].append(record)
             continue
 
+        if not record["in_merge_queue"]:
+            batch = batches.get(int(number or 0))
+            superseded = batch is not None and str(record.get("last_ci_at") or "") > str(
+                batch.get("at") or ""
+            )
+            if (
+                batch
+                and not superseded
+                and batch.get("conclusion") not in ("success", "skipped", None)
+            ):
+                record["merge_group_failure"] = batch
+            try:
+                record.update(_timeline_signals(gh_bin, repo, int(number)))
+            except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError, TypeError) as exc:
+                record["errors"].append(f"timeline: {str(exc)[:160]}")
+                snapshot["prs"].append(record)
+                continue
+
         gate_run = _gate_check(record, gate)
         if gate_run and str(gate_run.get("conclusion") or "").lower() not in GREEN:
             run_id = gate_run.get("run_id")
+            job_id = gate_run.get("job_id")
             if run_id is None:
                 record["errors"].append("gate check has no workflow run id")
+            elif job_id is None:
+                # Without the job id the steps cannot be attributed, and
+                # sweeping every failed job in the run blames the gate for
+                # another leg's failure. Refuse rather than approximate.
+                record["errors"].append("gate check has no job id in details_url")
             else:
                 try:
-                    jobs = _gh_json(
-                        gh_bin, f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+                    jobs, _ = _paginate(
+                        gh_bin, f"repos/{repo}/actions/runs/{run_id}/jobs", "jobs"
                     )
-                    failed: list[str] = []
-                    for job in jobs.get("jobs") or []:
-                        if str(job.get("conclusion") or "").lower() != "failure":
-                            continue
-                        for step in job.get("steps") or []:
-                            if str(step.get("conclusion") or "").lower() == "failure":
-                                failed.append(str(step.get("name")))
-                    record["gate_failed_steps"] = failed
-                except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+                    job = next((j for j in jobs if j.get("id") == job_id), None)
+                    if job is None:
+                        record["errors"].append(
+                            f"gate job {job_id} is absent from run {run_id}"
+                        )
+                    else:
+                        record["gate_job_conclusion"] = job.get("conclusion")
+                        record["gate_runner_os"] = _runner_os(job)
+                        record["gate_failed_steps"] = [
+                            str(step.get("name"))
+                            for step in job.get("steps") or []
+                            if str(step.get("conclusion") or "").lower() == "failure"
+                        ]
+                except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError) as exc:
                     record["errors"].append(f"gate jobs: {str(exc)[:160]}")
         snapshot["prs"].append(record)
 
@@ -774,6 +1213,19 @@ def _run_id_from(check: dict[str, Any]) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _job_id_from(check: dict[str, Any]) -> int | None:
+    """Recover the Actions JOB id a check run belongs to.
+
+    Steps must be harvested from this job alone. A run holds every platform
+    leg, so sweeping all its failed jobs attributes another leg's failure to
+    the gate — and that misattribution defeats exactly the case this tool was
+    written for, where the gate's own failing step is the whole question.
+    """
+    url = str(check.get("details_url") or "")
+    match = re.search(r"/actions/runs/\d+/job/(\d+)", url)
+    return int(match.group(1)) if match else None
+
+
 # --------------------------------------------------------------------------
 # Fix actions
 # --------------------------------------------------------------------------
@@ -787,6 +1239,19 @@ def select_fixable(findings: list[Finding]) -> list[Finding]:
     here, and `apply_fix` refuses them again independently.
     """
     return [f for f in findings if f.bucket == AUTO_FIXABLE]
+
+
+def cap_fixes(findings: list[Finding], max_fixes: int) -> tuple[list[Finding], int]:
+    """The fixable findings this sweep may act on, and how many it withheld.
+
+    A classifier bug does not mislabel one PR, it mislabels a shape of PR — so
+    the blast radius of a wrong verdict is the whole backlog. Capping turns
+    that into a handful of actions a human can still read and undo.
+    """
+    fixable = select_fixable(findings)
+    if max_fixes < 0 or len(fixable) <= max_fixes:
+        return fixable, 0
+    return fixable[:max_fixes], len(fixable) - max_fixes
 
 
 def apply_fix(finding: Finding, repo: str, gh_bin: str, dry_run: bool) -> str:
@@ -881,8 +1346,29 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--snapshot", default="", help="read a recorded snapshot instead of the API")
     ap.add_argument("--snapshot-out", default="", help="write the collected snapshot here")
     ap.add_argument("--json", action="store_true", help="emit findings as JSON on stdout")
-    ap.add_argument("--fix", action="store_true", help="perform AUTO-FIXABLE actions")
-    ap.add_argument("--dry-run", action="store_true", help="with --fix, print without mutating")
+    ap.add_argument("--fix", action="store_true", help="act on AUTO-FIXABLE findings")
+    ap.add_argument(
+        "--apply",
+        action="store_true",
+        help="with --fix, actually mutate. Without it --fix only reports what it would do.",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="explicit no-mutation mode (the default; kept so intent can be stated)",
+    )
+    ap.add_argument(
+        "--max-fixes",
+        type=int,
+        default=DEFAULT_MAX_FIXES,
+        help="most mutations one sweep may perform (-1 for no cap)",
+    )
+    ap.add_argument(
+        "--in-flight-hours",
+        type=float,
+        default=DEFAULT_IN_FLIGHT_HOURS,
+        help="hours a check may pend before it stops counting as progress",
+    )
     ap.add_argument(
         "--unstable-hours",
         type=float,
@@ -909,16 +1395,30 @@ def main(argv: list[str] | None = None) -> int:
 
     now = datetime.now(timezone.utc)
     findings = analyze(
-        snapshot, now, gate=args.gate, unstable_hours=args.unstable_hours
+        snapshot,
+        now,
+        gate=args.gate,
+        unstable_hours=args.unstable_hours,
+        in_flight_hours=args.in_flight_hours,
     )
 
     applied: list[str] = []
+    failures = 0
     if args.fix:
-        for finding in select_fixable(findings):
+        # Mutating is opt-in. A tool whose default run can merge pull requests
+        # is one nobody can safely put on a timer.
+        dry_run = not args.apply or args.dry_run
+        selected, withheld = cap_fixes(findings, args.max_fixes)
+        for finding in selected:
             try:
-                applied.append(apply_fix(finding, args.repo, args.gh, args.dry_run))
+                applied.append(apply_fix(finding, args.repo, args.gh, dry_run))
             except (subprocess.CalledProcessError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                failures += 1
                 applied.append(f"#{finding.number}: FAILED — {str(exc)[:160]}")
+        if withheld:
+            applied.append(
+                f"withheld {withheld} further fix(es): --max-fixes={args.max_fixes}"
+            )
 
     if args.json:
         payload = {
@@ -941,9 +1441,11 @@ def main(argv: list[str] | None = None) -> int:
     # The machine-readable handoff line. Under --json it goes to stderr so
     # stdout stays a single parseable document.
     print(f"stalled_count={stalled}", file=sys.stderr if args.json else sys.stdout)
-    # Exit 0 regardless of findings: the caller decides what to do with them.
-    # An auditor that reddens its own run is an auditor nobody keeps green.
-    return 0
+    # Findings alone never redden the run: an auditor that fails on what it was
+    # built to find is one nobody keeps green. A fix that FAILED is different —
+    # it means a mutation this tool chose to make did not happen, and a caller
+    # that cannot see that has no way to know the sweep left work undone.
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
