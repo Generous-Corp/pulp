@@ -911,6 +911,35 @@ TEST_CASE("SDF chart is absent for non-band shapes",
 #endif
 }
 
+TEST_CASE("SDF operator trees shade union subtract and intersect",
+          "[canvas][sdf][shader][geometry]") {
+#ifdef PULP_HAS_SKIA
+    auto render = [](const std::string& expression, int probe_x = 32) {
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(64, 64));
+        REQUIRE(surface != nullptr);
+        SkiaCanvas canvas(surface->getCanvas());
+        Canvas::ShaderGeometry geometry;
+        geometry.sdf_expression = expression;
+        Canvas::ShaderDrawOptions options;
+        options.geometry = geometry;
+        REQUIRE(canvas.draw_with_sksl(
+            "PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1,1,1,1), 0, 0); }",
+            0, 0, 64, 64, options));
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        return static_cast<unsigned>(SkColorGetA(pixels.getColor(probe_x, 32)));
+    };
+    REQUIRE(render("pulp_smooth_union(sdCircle(p - float2(-7, 0), 5), sdCircle(p - float2(7, 0), 5), 16)") > 200);
+    REQUIRE(render("min(sdCircle(p - float2(-7, 0), 5), sdCircle(p - float2(7, 0), 5))") == 0);
+    REQUIRE(render("max(sdCircle(p, 18), -sdCircle(p, 8))") == 0);
+    REQUIRE(render("max(sdCircle(p, 18), -sdCircle(p, 8))", 47) > 200);
+    REQUIRE(render("max(sdCircle(p, 12), sdBox(p, float2(8, 20)))", 39) > 200);
+    REQUIRE(render("max(sdCircle(p, 12), sdBox(p, float2(8, 20)))", 42) == 0);
+#else
+    SUCCEED("Skia raster operator probes require PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     RecordingCanvas rc;
     Canvas::SDFStyle style;
