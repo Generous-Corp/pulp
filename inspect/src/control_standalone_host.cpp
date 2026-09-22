@@ -464,7 +464,9 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
              gpu_health_read = std::move(gpu_health_read),
              transport_read = std::move(fenced_transport_read),
              transport_write = std::move(fenced_transport_write),
-             timeline_document_session = std::move(timeline_document_session)](
+             timeline_document_session = std::move(timeline_document_session),
+             sample_region_read = std::move(sample_region_read),
+             sample_region_edit = std::move(sample_region_edit)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
