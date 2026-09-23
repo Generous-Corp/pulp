@@ -166,8 +166,8 @@ class RealtimeHookNode : public GpuAudioNode {
         return node->next_sequence;
     }
 
-    static void delivered_realtime(void* self, std::uint64_t sequence,
-                                   std::uint8_t disposition, std::uint64_t /*callback_end_ns*/,
+    static void delivered_realtime(void* self, std::uint64_t sequence, std::uint8_t disposition,
+                                   std::uint64_t /*callback_end_ns*/,
                                    std::uint64_t /*result_visible_ns*/) noexcept {
         auto* node = static_cast<RealtimeHookNode*>(self);
         ++node->delivery_calls;
