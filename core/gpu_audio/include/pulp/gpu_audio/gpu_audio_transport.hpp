@@ -132,6 +132,11 @@ class GpuAudioTransport {
     GpuAudioCapabilityReport capability_report() const noexcept;
 
   private:
+    using TrialDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
+                                     std::uint64_t) noexcept;
+    friend bool configure_gpu_audio_transport_trial_observer(GpuAudioTransport&, void*,
+                                                             TrialDeliveryFn) noexcept;
+
     GpuAudioNode* node_ = nullptr;
     // Derived from the node descriptor + config at prepare(); authoritative for
     // the RT path so it never calls the (allocating) descriptor().
@@ -153,6 +158,9 @@ class GpuAudioTransport {
     void process_offline_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
     void process_invalid_position(audio::BufferView<float>&, std::uint64_t, bool offline) noexcept;
+    void publish_trial_delivery(std::uint64_t sequence, std::uint8_t disposition,
+                                std::uint64_t callback_end_ns,
+                                std::uint64_t result_visible_ns) noexcept;
 
     audio::PlanarAudioRingBuffer input_ring_;
     audio::PlanarAudioRingBuffer output_ring_;
@@ -226,6 +234,12 @@ class GpuAudioTransport {
     // realtime path stays lock-free.
     std::atomic<bool> synchronous_{false};
     std::mutex pump_mutex_;
+
+    // Host-only P4 trial observer. The observer is installed before the
+    // callback starts and must itself be realtime-safe. The default runtime
+    // path leaves it null, so this adds no hot-path work for normal users.
+    void* trial_observer_context_ = nullptr;
+    TrialDeliveryFn trial_observer_ = nullptr;
 };
 
 } // namespace pulp::gpu_audio

@@ -1,5 +1,6 @@
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
+#include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_trace.hpp"
 
@@ -14,6 +15,24 @@ std::uint64_t monotonic_now_ns() noexcept {
                                           .count());
 }
 } // namespace
+
+void GpuAudioTransport::publish_trial_delivery(std::uint64_t sequence, std::uint8_t disposition,
+                                               std::uint64_t callback_end_ns,
+                                               std::uint64_t result_visible_ns) noexcept {
+    if (trial_observer_ != nullptr)
+        trial_observer_(trial_observer_context_, sequence, disposition, callback_end_ns,
+                        result_visible_ns);
+}
+
+bool configure_gpu_audio_transport_trial_observer(
+    GpuAudioTransport& transport, void* context,
+    GpuAudioTransportTrialDeliveryFn observer) noexcept {
+    if (transport.trial_observer_ != nullptr || context == nullptr || observer == nullptr)
+        return false;
+    transport.trial_observer_context_ = context;
+    transport.trial_observer_ = observer;
+    return true;
+}
 
 bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     release();
@@ -175,6 +194,8 @@ void GpuAudioTransport::release() noexcept {
     realtime_gpu_service_ = nullptr;
     realtime_gpu_fence_ = nullptr;
     realtime_gpu_delivered_ = nullptr;
+    trial_observer_context_ = nullptr;
+    trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
     channels_ = block_size_ = latency_blocks_ = ring_blocks_ = 0;
@@ -206,6 +227,13 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
         process_shared(input, output, n, sequence, input_valid, callback_start_ns);
         return;
     }
+
+    const auto publish_delivery = [&](std::uint8_t disposition) noexcept {
+        if (input_valid && trial_observer_ != nullptr) {
+            const auto callback_end_ns = monotonic_now_ns();
+            publish_trial_delivery(sequence, disposition, callback_end_ns, monotonic_now_ns());
+        }
+    };
 
     // Hand the input block to the worker as a WHOLE block (all-or-nothing) so
     // the ring stays block-aligned — a partial write would split a block and
@@ -258,16 +286,24 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
         node_->prime_fallback(input, n);
 
     // Read the latency-delayed output produced earlier by the worker.
-    if (output_ring_.read(output, n))
+    if (output_ring_.read(output, n)) {
+        const auto disposition = sequence < latency_blocks_
+                                     ? detail::SharedIoDeliveryDisposition::Priming
+                                     : detail::SharedIoDeliveryDisposition::GpuDelivered;
+        publish_delivery(static_cast<std::uint8_t>(disposition));
         return;
+    }
 
     // Miss: the worker has not produced this block in time. Substitute per the
     // policy and record the debt so the late wet block is dropped once it lands.
     miss_blocks_.fetch_add(1, std::memory_order_relaxed);
     ++blocks_owed_;
+    std::uint8_t delivery =
+        static_cast<std::uint8_t>(detail::SharedIoDeliveryDisposition::SilenceDelivered);
     switch (miss_policy_) {
     case MissPolicy::Silence:
         output.clear();
+        delivery = static_cast<std::uint8_t>(detail::SharedIoDeliveryDisposition::SilenceDelivered);
         break;
     case MissPolicy::PassthroughDry:
         for (uint32_t c = 0; c < channels_; ++c) {
@@ -276,11 +312,16 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
             for (uint32_t i = 0; i < n; ++i)
                 dst[i] = src[i];
         }
+        delivery =
+            static_cast<std::uint8_t>(detail::SharedIoDeliveryDisposition::PassthroughDelivered);
         break;
     case MissPolicy::CpuFallback:
         node_->process_cpu_fallback(input, output, n);
+        delivery =
+            static_cast<std::uint8_t>(detail::SharedIoDeliveryDisposition::CpuFallbackDelivered);
         break;
     }
+    publish_delivery(delivery);
 }
 
 void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
