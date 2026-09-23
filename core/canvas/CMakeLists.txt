@@ -13,6 +13,7 @@ target_sources(pulp-canvas PRIVATE
     # frame) that the immediate-mode Canvas builder cannot express. It is
     # Skia-free on purpose: it is a value, so it must exist in every build
     # config, including the ones with no GPU backend at all.
+    src/drawlist_format.cpp
     src/path.cpp
     src/recording_canvas.cpp
     src/svg.cpp

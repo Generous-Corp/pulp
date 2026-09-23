@@ -328,3 +328,9 @@ endif()
 # degenerate guard (a zero-width path scaled to a non-zero width is a division by
 # zero, and the "result" is a path of NaNs that renders as nothing, forever).
 pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
+
+# Drawlist formatting: a recorded drawlist as diffable text. Covers the
+# completeness choices (every float slot, opaque black, HDR colour as floats)
+# and the two defect classes the pixel scorers document as invisible to them --
+# position and material.
+pulp_add_test_suite(pulp-test-canvas-drawlist-format LIBRARIES pulp::canvas)
