@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-pr8758-control-enrollment-identity-watch",
+  "created_at": "2026-09-23T15:28:23Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that giving a control E2E test an identity its broker already trusts crosses the visual-proof-harness selector without changing anything the family is about. ControlBrokerDaemon derives its trusted-client set by statically inspecting pulp, pulp-cpp and pulp-mcp at fixed paths around the configured executable and admits an enrolling peer only when its executable_identity and publisher_id match one of them. The sample-region control E2E is itself the enrolling client, and it staged the real CLI into that slot, so the set held the CLI's identity rather than the client's and enroll returned enrollment-denied. The fix aliases the test binary into a candidate the broker inspects and nothing else probes, copied without re-signing because an ad-hoc identifier derives from the basename; this mirrors the sibling aggregate E2E, which already stages its own binary the same way. Authorization is unchanged: the broker still trusts only binaries whose identity it statically verified. No detector, threshold, fixture, proof artifact or harness behaviour changes. The test was latent because the sample-region control hosts are gated on PULP_ENABLE_GPU and it had never run under a GPU-off configure. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-control-sample-region-e2e",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
