@@ -698,6 +698,14 @@ inline int write_bundle_ttl(const char* bundle_dir, const char* binary_name) noe
     if (bundle_dir == nullptr || binary_name == nullptr || g_factory == nullptr || g_uri == nullptr)
         return 1;
 
+    // The store is declared before the Processor so it is destroyed AFTER it,
+    // the same ordering PulpLv2Instance states and for the same reason:
+    // Processor::state() dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor
+    // is about to join. Locals are destroyed in reverse declaration order, so
+    // swapping these two hands that thread a freed store.
+    state::StateStore store;
+
     auto processor = g_factory();
     if (!processor)
         return 2;
@@ -706,7 +714,6 @@ inline int write_bundle_ttl(const char* bundle_dir, const char* binary_name) noe
     // define_parameters() decides the control ports, so both must run before
     // either file is emitted or the manifest describes a different plugin from
     // the one the host will load.
-    state::StateStore store;
     processor->set_state_store(&store);
     processor->define_parameters(store);
     const auto descriptor = processor->descriptor();
