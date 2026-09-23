@@ -44,6 +44,7 @@ class SharedIoStampedBridge {
         // capacity slot keeps the callback producer from colliding with the
         // lead window while a result is in flight.
         std::uint32_t lead_blocks = kLeadBlocks;
+        bool capture_callback_timing = false;
     };
     enum class Admission : std::uint8_t { Accepted, Full, CpuOnly, Invalid, SequenceExhausted };
     struct Callback {
@@ -93,14 +94,17 @@ class SharedIoStampedBridge {
     // ingress or while GPU delivery is disabled. Finish each callback's output
     // before beginning another callback; fallback priming belongs to the owner.
     Callback begin_callback(std::span<const float> samples) noexcept {
-        return begin_callback(samples, next_sequence_);
+        return begin_callback(samples, next_sequence_, 0);
     }
-    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept;
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence,
+                            std::uint64_t callback_start_ns = 0) noexcept;
     void request_recovery(SharedIoRecoveryReason reason) noexcept;
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return recovery_reason_.load(std::memory_order_acquire);
     }
-    bool complete_callback_delivery(const Callback&, SharedIoDeliveryDisposition) noexcept;
+    bool complete_callback_delivery(const Callback&, SharedIoDeliveryDisposition,
+                                    std::uint64_t callback_end_ns = 0,
+                                    std::uint64_t result_visible_ns = 0) noexcept;
     Claim claim_output(const Callback&) noexcept;
     Delivery finish_output(const Lease&, std::span<float> output) noexcept;
     Delivery consume_output(const Callback&, std::span<float> output, bool* finalized = nullptr,
@@ -159,6 +163,7 @@ class SharedIoStampedBridge {
     Queue ingress_, egress_;
     SharedIoTraceRecorder* trace_ = nullptr;
     SharedIoTelemetry* trace_telemetry_ = nullptr;
+    bool capture_callback_timing_ = false;
     std::uint64_t epoch_first_sequence_ = 0; // changes only while callback is quiescent
     bool defer_delivery_ = false;
     bool delivery_pending_ = false;
@@ -171,6 +176,7 @@ class SharedIoStampedBridge {
     std::optional<Stamp> finalized_;  // worker/offline pump only
     std::uint64_t next_sequence_ = 0; // callback only
     Stamp current_;
+    std::uint64_t callback_start_ns_ = 0;
     bool callback_open_ = false;
     std::size_t sample_count_ = 0;
     std::uint32_t capacity_ = 0;
