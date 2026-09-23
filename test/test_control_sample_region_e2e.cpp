@@ -493,6 +493,6 @@ TEST_CASE("sample-region control reaches editable and frozen products through CL
     management.disconnect();
     daemon.stop();
 #else
-    SUCCEED("sample-region broker E2E is macOS-only");
+    SKIP("sample-region broker E2E is macOS-only");
 #endif
 }
