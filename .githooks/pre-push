@@ -542,15 +542,12 @@ fi
 # sub-second; PULP_DISABLE_PREPUSH_GATES=1 demotes it like the rest.
 if [ -f "$GPU_PIN_FRESHNESS" ]; then
     run_gate_captured "$PYTHON" "$GPU_PIN_FRESHNESS" --base "$BASE" --root "$ROOT" --mode=report
-    case $? in
+    gate_rc=$?; case $gate_rc in
         0) ;;
         1) fail=1 ;;
         # 2 is "git could not answer, so nothing was checked" — not a pass.
-        # Leaving it unmapped would land it in the message below, which prints
-        # a line and lets the push through, restoring the blind spot one layer
-        # out from the script that just closed it.
         2) fail=1 ;;
-        *) echo "[pre-push] gpu_handoff_pin_freshness: internal error" >&2 ;;
+        *) gate_could_not_run "gpu_handoff_pin_freshness" "$gate_rc"; fail=1 ;;
     esac
 fi
 
@@ -669,10 +666,10 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
     elif git diff --name-only "$capability_base"...HEAD 2>/dev/null | grep -qE '^(core/[^/]+/include/|tools/scripts/agent_capability_|tools/agent-capabilities/|docs/status/agent-capabilit)'; then
         run_gate_captured env PULP_AGENT_CAPABILITY_BASE_REF="$capability_base" \
             "$PYTHON" "$CAPABILITY_CONTRACT" --check
-        case $? in
+        gate_rc=$?; case $gate_rc in
             0) ;;
             1) echo "[pre-push] agent-capability contract: the surface or its counters are stale against $BASE. Re-derive rather than picking a number — \`PULP_AGENT_CAPABILITY_BASE_REF=$capability_base python3 tools/scripts/agent_capability_rederive.py\`. Landing this unfixed costs a merge-group eviction AND locks the branch against the repair." >&2; fail=1 ;;
-            *) echo "[pre-push] agent_capability_manifest --check: internal error" >&2 ;;
+            *) gate_could_not_run "agent_capability_manifest" "$gate_rc"; fail=1 ;;
         esac
     fi
 fi

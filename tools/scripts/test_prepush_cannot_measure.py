@@ -46,8 +46,12 @@ def check_structure(failures: list[str]) -> int:
         r'^\s*\*\) gate_could_not_run "([\w-]+)" "\$gate_rc"; fail=1 ;;$',
         source, re.M,
     )
+    # `[^"]+`, not `[\w-]+`: a gate whose label carries arguments, e.g.
+    # "agent_capability_manifest --check", contains a space and slipped the
+    # narrower class entirely — a fall-open branch this scan could not see,
+    # which is the exact blind spot the file exists to close.
     fall_open = re.findall(
-        r'^\s*\*\) echo "\[pre-push\] ([\w-]+): internal error', source, re.M
+        r'^\s*\*\) echo "\[pre-push\] ([^"]+?): internal error', source, re.M
     )
 
     # Control, on the TOTAL of both halves. A regex that silently stopped
