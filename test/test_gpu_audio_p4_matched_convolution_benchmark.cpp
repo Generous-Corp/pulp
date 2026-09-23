@@ -192,10 +192,17 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
     std::vector<float> output(static_cast<std::size_t>(kChannels) * kFrames);
     std::vector<const float*> input_ptrs(kChannels);
     std::vector<float*> output_ptrs(kChannels);
+    std::vector<float> tail_input(static_cast<std::size_t>(kChannels) * kFrames, 0.0f);
     auto next_callback = std::chrono::steady_clock::now();
-    for (std::uint32_t block = 0; block < kBlocks; ++block) {
+    // The transport's lead latency means the final two measured GPU requests
+    // become deliverable only after two additional callback positions. Drive
+    // those positions with zero input, then retain only identities from the
+    // measured window below.
+    for (std::uint32_t block = 0; block < kBlocks + kLeadBlocks; ++block) {
         for (std::uint32_t channel = 0; channel < kChannels; ++channel) {
-            input_ptrs[channel] = input[channel].data() + static_cast<std::size_t>(block) * kFrames;
+            input_ptrs[channel] =
+                block < kBlocks ? input[channel].data() + static_cast<std::size_t>(block) * kFrames
+                                : tail_input.data() + static_cast<std::size_t>(channel) * kFrames;
             output_ptrs[channel] = output.data() + static_cast<std::size_t>(channel) * kFrames;
         }
         BufferView<const float> input_view(input_ptrs.data(), kChannels, kFrames);
@@ -234,6 +241,17 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
                 result.delivery_records.push_back(record);
         }
     }
+    const auto measured_record = [](const SharedIoTraceRecord& record) noexcept {
+        return record.sequence < kBlocks;
+    };
+    result.records.erase(
+        std::remove_if(result.records.begin(), result.records.end(),
+                       [&](const auto& record) { return !measured_record(record); }),
+        result.records.end());
+    result.delivery_records.erase(
+        std::remove_if(result.delivery_records.begin(), result.delivery_records.end(),
+                       [&](const auto& record) { return !measured_record(record); }),
+        result.delivery_records.end());
     result.records_valid = result.available && !result.records.empty() &&
                            !result.delivery_records.empty() &&
                            std::all_of(result.records.begin(), result.records.end(),
