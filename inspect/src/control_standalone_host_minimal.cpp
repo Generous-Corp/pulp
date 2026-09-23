@@ -56,18 +56,17 @@ class MinimalStandaloneControlHost final : public format::StandaloneControlHost 
 
         store_ = &store;
         const auto state_read = make_control_state_read_executor(
-            [this](const ControlAdmissionPlan& plan)
-                -> std::optional<ControlStateReadSource> {
+            [this](const ControlAdmissionPlan& plan) -> std::optional<ControlStateReadSource> {
                 const auto generation = stable_generation();
                 if (!generation)
                     return std::nullopt;
-                return ControlStateReadSource{
-                    .registration_id = plan.registration_id,
-                    .host_tier = ControlHostTier::Standalone,
-                    .store = store_,
-                    .state_generation = *generation,
-                    .catalog_generation = store_->parameter_display_revision() + 1,
-                    .is_sensitive = [](state::ParamID) { return false; }};
+                return ControlStateReadSource{.registration_id = plan.registration_id,
+                                              .host_tier = ControlHostTier::Standalone,
+                                              .store = store_,
+                                              .state_generation = *generation,
+                                              .catalog_generation =
+                                                  store_->parameter_display_revision() + 1,
+                                              .is_sensitive = [](state::ParamID) { return false; }};
             });
         connection_ = std::make_unique<ControlHostConnection>(
             ControlHostConnectionConfig{
@@ -77,8 +76,7 @@ class MinimalStandaloneControlHost final : public format::StandaloneControlHost 
                 .write_timeout = 3s,
                 .frame_read_timeout = 3s,
             },
-            [state_read](const ControlAdmissionPlan& plan,
-                         const ControlRequestEnvelope& request,
+            [state_read](const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                          const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
                     return state_read(plan, request, context);
@@ -136,13 +134,11 @@ std::unique_ptr<format::StandaloneControlHost> make_control_standalone_host() {
 
 namespace detail {
 
-bool install_standalone_control_author_hooks_factory(
-    StandaloneControlAuthorHooksFactory) noexcept {
+bool install_standalone_control_author_hooks_factory(StandaloneControlAuthorHooksFactory) noexcept {
     return false;
 }
 
-StandaloneControlAuthorHooks
-create_standalone_control_author_hooks(format::Processor&) {
+StandaloneControlAuthorHooks create_standalone_control_author_hooks(format::Processor&) {
     return {};
 }
 
@@ -156,13 +152,12 @@ create_standalone_sequencer_state_channel(format::Processor&) {
     return {};
 }
 
-bool install_standalone_runtime_evaluator_factory(
-    StandaloneRuntimeEvaluatorFactory) noexcept {
+bool install_standalone_runtime_evaluator_factory(StandaloneRuntimeEvaluatorFactory) noexcept {
     return false;
 }
 
-std::shared_ptr<RuntimeEvaluator>
-create_standalone_runtime_evaluator(format::Processor&, format::ViewBridge&) {
+std::shared_ptr<RuntimeEvaluator> create_standalone_runtime_evaluator(format::Processor&,
+                                                                      format::ViewBridge&) {
     return {};
 }
 
@@ -176,8 +171,7 @@ create_standalone_timeline_document_session_source(const ControlAdmissionPlan&) 
     return std::nullopt;
 }
 
-bool install_standalone_sample_region_target_factory(
-    StandaloneSampleRegionTargetFactory) noexcept {
+bool install_standalone_sample_region_target_factory(StandaloneSampleRegionTargetFactory) noexcept {
     return false;
 }
 

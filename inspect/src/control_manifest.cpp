@@ -561,10 +561,8 @@ ControlManifestValidation validate_control_manifest_detailed(const ControlManife
     }
     if (manifest.profile == ControlBuildProfile::SupportDiagnostics) {
         constexpr std::array allowed{
-            InspectorCapability::SessionDescribe,
-            InspectorCapability::StateRead,
-            InspectorCapability::GpuHealthRead,
-            InspectorCapability::DiagnosticsRead,
+            InspectorCapability::SessionDescribe, InspectorCapability::StateRead,
+            InspectorCapability::GpuHealthRead,   InspectorCapability::DiagnosticsRead,
             InspectorCapability::LogsRead,
         };
         for (const auto capability : manifest.capabilities) {
@@ -782,8 +780,7 @@ validate_control_artifact_bytes(std::string_view bytes,
         return {false, "production-stripped artifact contains capability implementation"};
     std::string runtime_eval_marker = "PULP_INSPECT_RUNTIME_EVAL_";
     runtime_eval_marker += "HIGH_RISK_COMPONENT_V1";
-    if (contains(runtime_eval_marker) !=
-        expectation.runtime_eval_included)
+    if (contains(runtime_eval_marker) != expectation.runtime_eval_included)
         return {false, "runtime evaluation marker mismatch"};
     return {true, {}};
 }
