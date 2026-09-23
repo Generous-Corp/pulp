@@ -594,3 +594,22 @@ SELECT COUNT(*) FROM slice WHERE name = 'js_trace_force_closed_unbalanced_scope'
 
 Its positive control is the counter track `js_trace_unbalanced_scopes`, which
 carries the leaked depth as a value rather than a count of incidents.
+
+## Check the category is populated before trusting a zero
+
+`trace.hpp` declares ten categories, and not all of them emit. On
+`origin/main` the `canvas` category has three emit sites, none inside
+`core/canvas`, so a `WHERE category GLOB 'canvas'` filter returns no rows —
+which looks identical to "the canvas did no work".
+
+Pair any per-category question with a control that must return rows:
+
+```sql
+-- the finding
+SELECT COUNT(*) AS n FROM slice WHERE category GLOB 'canvas';
+-- the control: a category known to be populated
+SELECT COUNT(*) AS n FROM slice WHERE category GLOB 'gpu';
+```
+
+Control non-zero and finding zero means the instrumentation is absent, not
+the work. Report the gap; do not report a timing verdict.

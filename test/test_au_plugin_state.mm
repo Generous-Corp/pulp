@@ -2208,6 +2208,12 @@ TEST_CASE("AU v2 fails closed for malformed ProcessBufferLists topology",
     SECTION("null active-bus pointer") {
         output.list.mBuffers[0].mData = nullptr;
     }
+    SECTION("null active main-input storage") {
+        input.list.mBuffers[1].mData = nullptr;
+    }
+    SECTION("undersized main-input storage") {
+        input.list.mBuffers[1].mDataByteSize = sizeof(float);
+    }
 
     AudioUnitRenderActionFlags flags = 0;
     REQUIRE(effect.ProcessBufferLists(

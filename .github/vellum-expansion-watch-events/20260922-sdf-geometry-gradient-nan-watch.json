@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260922-sdf-geometry-gradient-nan-watch",
+  "created_at": "2026-09-22T22:28:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The single changed line that selects this family is the gradient normalization inside pulp_geom() in core/canvas/src/skia_canvas_shaders.cpp. It guards a divide-by-zero at an exact distance-field extremum so the fragment's gradient is a defined zero rather than NaN. No backend, renderer, asset path or authority boundary changes, and no non-degenerate fragment changes value, while the transferred rendering slice remains under watch.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF geometry gradient stays finite at a field extremum",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

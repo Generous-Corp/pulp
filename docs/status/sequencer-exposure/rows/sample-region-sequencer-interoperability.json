@@ -21,10 +21,27 @@
       ]
     },
     {
+      "path": "core/host/src/signal_graph.cpp",
+      "needles": [
+        "connect_audio_rate_modulation"
+      ]
+    },
+    {
+      "path": "examples/sample-region-allpass/README.md",
+      "needles": [
+        "ordinary host-owned `StateStore`",
+        "parameter 2901",
+        "same Processor rather than"
+      ]
+    },
+    {
       "path": "test/test_sample_region_sequencer.cpp",
       "needles": [
         "S4 timeline automation reaches an authored ProcessorNode",
         "S4 graph modulation reaches the same authored ProcessorNode parameter",
+        "S4 audio-rate modulation follows a piecewise coefficient oracle and removal restores base",
+        "S4 reloaded route projects through the existing timeline and graph authorities",
+        "S4 exposure row and example retain the existing authority boundaries",
         "kSequencerParam = 2901"
       ]
     }

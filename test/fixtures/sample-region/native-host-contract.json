@@ -1,0 +1,71 @@
+{
+  "schema": "pulp.sample-region.native-host-contract.v1",
+  "packet": "PKT-F4-01",
+  "acceptance": "PUB-04",
+  "plugin": {
+    "name": "Sample Region Allpass",
+    "bundle_id": "com.pulp.sample-region-allpass",
+    "version": "1.0.0",
+    "audio": {
+      "input_channels": 1,
+      "output_channels": 1,
+      "reported_latency_samples": 0
+    },
+    "parameters": [
+      {
+        "id": 2901,
+        "key": "coefficient",
+        "name": "Allpass coefficient",
+        "minimum": -0.99,
+        "maximum": 0.99,
+        "default": 0.5,
+        "step": 0.0
+      }
+    ],
+    "native_identity": {
+      "au": {
+        "type": "aufx",
+        "subtype": "SrAp",
+        "manufacturer": "Pulp"
+      },
+      "vst3": {
+        "fuid": "50554C50-53414D50-52454749-4F4E414C"
+      },
+      "clap": {
+        "id": "com.pulp.sample-region-allpass"
+      }
+    }
+  },
+  "required_proof": {
+    "signed_installed_package": true,
+    "parameter_identity_and_order": true,
+    "automation": true,
+    "state_save_reload": true,
+    "audio_render": true,
+    "plugin_reload": true,
+    "zero_reported_pdc": true,
+    "formats": [
+      "au",
+      "vst3",
+      "clap"
+    ],
+    "host_observed_parameter_identity": true,
+    "host_automation_observation": true,
+    "state_chunk_hash_reload": true,
+    "canonical_processed_audio": true,
+    "negative_controls": true
+  },
+  "artifacts": {
+    "targets": [
+      "SampleRegionAllpass_Core",
+      "SampleRegionAllpass_VST3",
+      "SampleRegionAllpass_CLAP",
+      "SampleRegionAllpass_AU"
+    ],
+    "bundles": {
+      "au": "Sample Region Allpass.component",
+      "vst3": "Sample Region Allpass.vst3",
+      "clap": "Sample Region Allpass.clap"
+    }
+  }
+}
