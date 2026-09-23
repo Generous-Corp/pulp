@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -433,6 +436,57 @@ class TreeIsCleanTest(unittest.TestCase):
 
     def test_default_targets_are_all_bounded(self):
         self.assertEqual(guard.main(["build_parallelism_guard.py"]), 0)
+
+
+class EmptyScanIsNotACleanScanTest(unittest.TestCase):
+    """A scan that matched nothing must FAIL, not report OK.
+
+    The guard used to print "OK - 0 build surface(s) bounded" and exit 0 when
+    its sweep matched nothing. That is the reading a broken instrument gives:
+    pointed at the wrong tree, a checkout without the build surfaces, a moved
+    REPO_ROOT. "I could not measure" is not "it is fine", and the OK line made
+    the two indistinguishable.
+    """
+
+    def _run(self, argv: list[str], cwd: Path) -> tuple[int, str]:
+        proc = subprocess.run(
+            [sys.executable, "-B", str(HERE / "build_parallelism_guard.py"), *argv],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        return proc.returncode, proc.stdout + proc.stderr
+
+    def test_empty_tree_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            empty = Path(td) / "tools" / "scripts"
+            empty.mkdir(parents=True)
+            shutil.copy2(HERE / "build_parallelism_guard.py", empty)
+            proc = subprocess.run(
+                [sys.executable, "-B", str(empty / "build_parallelism_guard.py")],
+                cwd=td, capture_output=True, text=True,
+            )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("CANNOT MEASURE", proc.stdout + proc.stderr)
+        # The old false green must not reappear in any form.
+        self.assertNotIn("OK — 0 build surface(s)", proc.stdout)
+
+    def test_named_path_that_does_not_exist_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            rc, out = self._run([str(Path(td) / "nope.sh")], Path(td))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("CANNOT MEASURE", out)
+
+    def test_control_real_repo_still_passes(self) -> None:
+        """The non-zero control: the real tree must still scan and pass.
+
+        Without this, a guard that failed unconditionally would satisfy the two
+        assertions above while gating nothing.
+        """
+        root = HERE.parents[1]
+        rc, out = self._run([], root)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("build surface(s) bounded", out)
+        count = int(out.split("OK — ")[1].split(" build surface")[0])
+        self.assertGreater(count, 100, f"scan collapsed to {count} surfaces: {out}")
 
 
 if __name__ == "__main__":

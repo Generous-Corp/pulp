@@ -9,6 +9,16 @@ Authoritative gate for CI; also runs as a local pre-push hook (advisory)
 and from agent hooks in hint mode. Source of truth for the whole family.
 See tools/scripts/versioning.json and tools/scripts/skill_path_map.json.
 
+Exit codes (the caller MUST distinguish these):
+
+    0  the gate ran and the check PASSED
+    1  the gate ran and the check FAILED — a real verdict to act on
+    2  the gate COULD NOT RUN: its config was missing or unreadable, so it
+       checked nothing. This is not a pass. A caller that treats 2 as a pass
+       reports a false green — which is exactly how a missing version bump
+       once rode to main with no tag and no release. "I could not measure"
+       is not "it is fine".
+
 Uses JSON (not YAML) for zero-dependency execution on PEP-668 Python.
 """
 
@@ -238,7 +248,10 @@ def render_report(
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Skill-sync gate")
+    parser = argparse.ArgumentParser(
+        description="Skill-sync gate",
+        epilog="exit codes: 0 = ran and passed; 1 = ran and FAILED; 2 = COULD NOT RUN (config missing/unreadable — it checked nothing, which is NOT a pass)",
+    )
     parser.add_argument("--base", default="origin/main",
                         help="Diff base (default: origin/main)")
     parser.add_argument("--head", default="HEAD",
