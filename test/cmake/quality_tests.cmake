@@ -457,6 +457,38 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # Queue-cascade guards. A break that reaches main is amplified by the merge
+    # queue: every batch inherits it, fails, ejects its innocent entries, and
+    # the next batch pays again. These four cover the rules that stop that.
+    #
+    # ctest-gate-args-selftest pins the event-dependent ctest decisions AND
+    # asserts build.yml still calls them, because a decision module that is
+    # correct but unreferenced reads exactly like one that works.
+    add_test(NAME ctest-gate-args-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ctest_gate_args.py")
+    set_tests_properties(ctest-gate-args-selftest PROPERTIES TIMEOUT 120)
+
+    # build-matrix-contract keeps the macOS leg unconditional (a push to main is
+    # the only lane that runs the full macOS suite against main) and compiles
+    # every Python heredoc embedded in the workflow's YAML block scalars, where
+    # a mis-indented edit still loads as YAML and fails only at job runtime.
+    add_test(NAME build-matrix-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_build_matrix_contract.py")
+    set_tests_properties(build-matrix-contract PROPERTIES TIMEOUT 120)
+
+    # gate-suite-executed-selftest keeps a receipt-reuse green distinguishable
+    # from a real one. Both report through the same `macos` check name.
+    add_test(NAME gate-suite-executed-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_suite_executed.py")
+    set_tests_properties(gate-suite-executed-selftest PROPERTIES TIMEOUT 120)
+
+    # queue-batch-attribute-selftest guards the REFUSAL as hard as the finding:
+    # naming the wrong PR sends someone to fix an innocent branch while the real
+    # break stays on main.
+    add_test(NAME queue-batch-attribute-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
+    set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
+
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
     # lane provably CANNOT see: at -O3 each TU inlines its own copy so the A/B

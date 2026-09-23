@@ -1014,8 +1014,12 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+- Before reasoning from a green `macos` check — decide whether that green means the suite ran and passed, or that a bootstrap/receipt-reuse job claimed the context without running anything. → `tools/scripts/gate_suite_executed.py`
+  - ⚠ **Cannot see:** Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step without updating it would make a real run look void.
 - A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes. → `tools/scripts/pr_flow_audit.py`
   - ⚠ **Cannot see:** Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+- A merge_group batch failed and you need the PR that actually owns the failing tests — the batch's own branch name is NOT the culprit, because a batch contains every entry ahead of it. → `tools/scripts/queue_batch_attribute.py`
+  - ⚠ **Cannot see:** Attribution is NAME-SHAPED — it matches a test name against changed file paths, so a test whose name does not resemble its owning file is invisible to it. Below the confidence threshold it reports LIKELY PRE-EXISTING ON MAIN and names nobody; read that as "look at main", never as "no culprit exists". It reads the macos job's log, so a batch whose macos gate never ran the suite yields nothing.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
