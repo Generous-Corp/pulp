@@ -1790,6 +1790,10 @@ jobs:
             --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
+          # Expanded unquoted on the ctest line below, where an empty value must
+          # disappear rather than become an empty argument. Default it so the
+          # bare expansion is safe under `set -u`.
+          stop_on_failure="${stop_on_failure:-}"
           echo "ctest gate args: label_exclude=$label_exclude stop_on_failure=${stop_on_failure:-<none>}"
           exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
           if [ "${RUNNER_OS}" = "macOS" ]; then
@@ -2349,7 +2353,7 @@ jobs:
             echo '```'
             echo "python3 tools/scripts/gate_suite_executed.py --run-id <run-id>"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
 
   macos-merge-group:
@@ -2407,7 +2411,7 @@ jobs:
             echo '```'
             echo "python3 tools/scripts/gate_suite_executed.py --run-id <run-id>"
             echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
 
   linux:
