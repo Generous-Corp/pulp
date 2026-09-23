@@ -548,6 +548,13 @@ public:
         uint64_t map_resolves = 0;
         uint64_t expired = 0;
         uint64_t failed = 0;
+        uint64_t write_buffer_calls = 0;
+        uint64_t write_buffer_bytes = 0;
+        uint64_t output_copy_calls = 0;
+        uint64_t output_copy_bytes = 0;
+        uint64_t map_async_calls = 0;
+        uint64_t mapped_readback_memcpy_calls = 0;
+        uint64_t mapped_readback_memcpy_bytes = 0;
     };
 
     virtual AsyncStats async_stats() const = 0;

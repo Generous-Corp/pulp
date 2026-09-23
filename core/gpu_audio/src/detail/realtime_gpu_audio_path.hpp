@@ -18,9 +18,10 @@ inline constexpr std::uint32_t kRealtimeGpuServiceInactive =
 
 using RealtimeGpuProcessFn = std::uint8_t (*)(void*, const audio::BufferView<const float>&,
                                               audio::BufferView<float>&, std::uint32_t,
-                                              std::uint64_t, bool) noexcept;
+                                              std::uint64_t, bool, std::uint64_t) noexcept;
 using RealtimeGpuServiceFn = std::uint32_t (*)(void*, std::uint64_t) noexcept;
-using RealtimeGpuDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t) noexcept;
+using RealtimeGpuDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
+                                       std::uint64_t) noexcept;
 using RealtimeGpuSequenceFn = std::uint64_t (*)(void*) noexcept;
 using RealtimeGpuFenceFn = bool (*)(void*) noexcept;
 
