@@ -9,7 +9,10 @@
 //
 // Build-time only, run against a module this build just produced.
 
-#include <dlfcn.h>
+// pulp/host/dl_shim.hpp, not <dlfcn.h>: Windows does not ship that header, and
+// the shim is the repository's existing answer to the same break -- it is
+// header-only, so this driver still links nothing out of Pulp.
+#include <pulp/host/dl_shim.hpp>
 
 #include <cstdio>
 #include <cstring>
@@ -37,8 +40,13 @@ int main(int argc, char** argv) {
     // RTLD_LOCAL: the module stays private to this process, so loading two
     // plugins in one build cannot cross-bind their static state.
     void* handle = dlopen(module_path, RTLD_NOW | RTLD_LOCAL);
-    if (handle == nullptr)
-        return fail("cannot load module", dlerror());
+    if (handle == nullptr) {
+        // The shim's dlerror() is a stub on Windows, so the path is the only
+        // thing that makes a load failure there diagnosable.
+        const char* detail = dlerror();
+        return fail(detail != nullptr ? "cannot load module" : "cannot load module (no detail)",
+                    detail != nullptr ? detail : module_path);
+    }
 
     // dlsym returning null is indistinguishable from a symbol whose value is
     // null, so clear the error and read it back rather than testing the result.
