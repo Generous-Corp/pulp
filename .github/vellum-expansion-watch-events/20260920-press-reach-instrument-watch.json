@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260920-press-reach-instrument-watch",
+  "created_at": "2026-09-20T12:05:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses both families only through their broad core/view/** and test/** selectors. Every source file in this change is under core/view or test: core/view/include/pulp/view/press_reach.hpp (new), core/view/src/press_reach.cpp (new), core/view/include/pulp/view/view.hpp (one declaration), core/view/include/pulp/view/pointer_dispatch.hpp (one comment), test/test_press_reach.cpp (new), plus three CMake source-list edits and one skill note. Nothing under core/canvas or core/render is touched, no Skia, Dawn, or render-backend selector is crossed, no design-system asset changes, no importer, DesignIR, or design-source decoding behaviour changes, and no packaging or asset-resolution behaviour changes.\n\nThe change adds a reachability instrument. Nothing in the repo could ask whether a press at the rect a control PAINTS actually reaches that control. The checks that exist compare a control's own hit rect against its own painted rect, which sees only a defect a control commits against itself; the expensive defect is the one an ancestor commits. A wrapper whose box collapses to zero seals off a subtree of correctly sized, correctly wired controls, and every one of them still passes a self-vs-self comparison, because Rect::contains is half-open and a zero-area box admits no point. Such a subtree stays apparently alive only through the symmetric ~500px slack View::hit_test grants an overflow:visible child, measured from the wrapper's in-flow position rather than from where the control paints. That combination shipped in a downstream app and every gate was green.\n\nreach_of_press resolves without delivering -- no handler runs, no overlay is dismissed, no state moves -- and reproduces the existing dispatch's own handler walk rather than defining a second one. rect_in_root composes a root-space rect and verifies it by round-tripping through point_to_local, returning std::nullopt rather than a guess when a transform on the path makes the additive walk wrong. audit_press_reach reports a census beside its findings, so a clean audit over zero examined targets is legible as the blind run it is. View::simulate_context_click delegates to route_context_press so the right-button press has one policy, and exists because simulate_click with button = right opens no menu and its name does not say so.\n\nOne existing declaration comment is corrected: dispatch_context_menu's doc still claimed the callback does not bubble, which 20260913-context-menu-arming-and-bubbling made false. The declaration and behaviour are unchanged.\n\nNo rendering, paint, layout, or asset behaviour changes; no bridge function is removed or re-signatured; no generated artifact or manifest row moves. Registered watch-only so the families' coverage stays honest about a change that crossed their selectors. No authority moves, no accepted expansion boundary moves, and no Vellum artifact changes.",
+  "tests": [
+    "./build/test/pulp-test-press-reach (new suite: 11 cases, each positive assertion paired with a negative control on the same instrument and tree)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD",
+    "python3 tools/scripts/vellum_freeze_check.py --base origin/main --head HEAD",
+    "tools/scripts/gates.sh origin/main (green)"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

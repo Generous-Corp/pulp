@@ -192,6 +192,38 @@ stat-then-reopen flow over the caller-controlled path.
 
 ---
 
+## A declared category is not a populated one
+
+`trace.hpp` declares ten categories — `dsp`, `dsp.node`, `render`, `layout`,
+`canvas`, `text`, `js`, `gpu`, `state`, `io`. **Declared is not the same as
+emitted, and the difference reads as a finding.**
+
+Measured on `origin/main`: `render` has 7 emit sites and `gpu` has 10, but
+**`canvas` has 3 — all of them in `core/view` window hosts, and none in
+`core/canvas` itself.** So a trace contains essentially no Canvas-2D drawing
+events, and the category description ("Canvas 2D drawing") promises something
+the data does not carry.
+
+This is the vacuous-zero trap in its most expensive form, because the query
+succeeds:
+
+```sql
+-- Returns 0 rows today. That is NOT "canvas drawing is free".
+SELECT SUM(dur) FROM slice
+  JOIN track ON slice.track_id = track.id
+ WHERE slice.category GLOB 'canvas';
+```
+
+Before concluding that a subsystem costs nothing, **pair the question with a
+control on a category you know is populated** (`gpu` or `render`). If your
+target returns zero and the control returns rows, you have measured an
+instrumentation gap, not a fast subsystem. Say that, and stop — do not report
+a performance verdict about a subsystem the trace cannot see.
+
+Where canvas cost actually shows up today: inside the `render` frame scopes
+and the `gpu` submit/present slices that contain it, aggregated. That tells
+you a frame was expensive; it cannot tell you which draw calls made it so.
+
 ## The investigation protocol
 
 ### 1. Keep a chain-of-evidence scratchpad

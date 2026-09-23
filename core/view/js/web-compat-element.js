@@ -437,11 +437,45 @@ function __replayAriaAttributes__(el) {
     // writes its role before the node is mounted, so without this the claim
     // never happens and the panel is left to the CSS-shape inference, which
     // claims click-through by design.
+    //
+    // `data-overlay-parent` and `aria-owns` join them because they qualify that
+    // same claim: they name the overlay a lifted submenu stacks on. A claim
+    // replayed without the declaration it was written with dismisses the menu
+    // the submenu belongs to, which is exactly the shape the declaration
+    // exists to prevent — so the name has to be readable by the time the
+    // replayed claim happens, not one mutation later.
     if ((el._attributes["aria-haspopup"] !== undefined
          || el._attributes["role"] !== undefined
-         || el._attributes["aria-modal"] !== undefined)
+         || el._attributes["aria-modal"] !== undefined
+         || el._attributes["data-overlay-parent"] !== undefined
+         || el._attributes["aria-owns"] !== undefined)
         && el.style && el.style._reevaluateOverlay) {
         el.style._reevaluateOverlay();
+    }
+    // A menu mounted AFTER the submenu it owns: the submenu already claimed,
+    // reading no declaration, so its claim has to be re-evaluated now.
+    __pulpReevaluateOwnedOverlays__(el);
+}
+
+// Re-evaluate the overlay claim of every element an `aria-owns` names.
+//
+// `aria-owns` is written on the MENU and names its lifted submenu, so the
+// element whose CLAIM the declaration changes is not the element the attribute
+// landed on. Re-evaluating only the owner would leave the submenu claiming as a
+// rival menu, which is the whole defect the declaration exists to fix. Cheap
+// and idempotent: `_reevaluateOverlay` skips the bridge entirely when nothing
+// it reads has moved.
+function __pulpReevaluateOwnedOverlays__(el) {
+    if (!el || !el.getAttribute) return;
+    var owns = el.getAttribute("aria-owns");
+    if (owns == null || owns === "") return;
+    if (typeof document === "undefined" || !document.getElementById) return;
+    var tokens = String(owns).trim().split(/\s+/);
+    for (var i = 0; i < tokens.length; ++i) {
+        if (!tokens[i]) continue;
+        var owned = document.getElementById(tokens[i]);
+        if (owned && owned !== el && owned.style && owned.style._reevaluateOverlay)
+            owned.style._reevaluateOverlay();
     }
 }
 
@@ -1073,6 +1107,11 @@ Element.prototype.setAttribute = function(name, value) {
         && this.style._reevaluateOverlay) {
         this.style._reevaluateOverlay();
     }
+    // `aria-owns` declares which lifted submenu belongs to this overlay, so the
+    // claim it changes is the OWNED element's, not this one's. It also has no
+    // branch in the exclusive chain below, so it is handled here for the same
+    // reason `role` is.
+    if (name === "aria-owns") __pulpReevaluateOwnedOverlays__(this);
     if (name === "id") this.id = value;
     else if (name === "class") this.className = value;
     else if (name.indexOf("data-") === 0) {
@@ -1081,7 +1120,12 @@ Element.prototype.setAttribute = function(name, value) {
         // auto-overlay heuristic. Re-evaluate now
         // so the bridge sees the claim/release immediately rather than
         // waiting for an unrelated style mutation to drive it.
-        if ((name === "data-overlay" || name === "data-overlay-trigger") &&
+        // `data-overlay-parent` names the overlay a lifted submenu stacks on.
+        // It is not itself a claim, but it qualifies one, and a claim that
+        // lands before the name is readable has already dismissed the menu the
+        // submenu belongs to.
+        if ((name === "data-overlay" || name === "data-overlay-trigger" ||
+             name === "data-overlay-parent") &&
             this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }
@@ -1244,11 +1288,26 @@ Element.prototype.removeAttribute = function(name) {
         && this.style && this.style._reevaluateOverlay) {
         this.style._reevaluateOverlay();
     }
+    // Withdrawing `aria-owns` withdraws the declaration, so the panel it named
+    // goes back to claiming as an ordinary overlay. Read from `was`, because
+    // the attribute is already gone from this element.
+    if (name === "aria-owns" && was !== undefined
+        && typeof document !== "undefined" && document.getElementById) {
+        var ownedTokens = String(was).trim().split(/\s+/);
+        for (var oi = 0; oi < ownedTokens.length; ++oi) {
+            if (!ownedTokens[oi]) continue;
+            var formerlyOwned = document.getElementById(ownedTokens[oi]);
+            if (formerlyOwned && formerlyOwned !== this && formerlyOwned.style
+                && formerlyOwned.style._reevaluateOverlay)
+                formerlyOwned.style._reevaluateOverlay();
+        }
+    }
     if (name.indexOf("data-") === 0) {
         delete this._dataset[_camelCase(name.slice(5))];
         // Clearing `data-overlay` may release the auto-claim if no CSS shape
         // still satisfies the heuristic.
-        if ((name === "data-overlay" || name === "data-overlay-trigger") &&
+        if ((name === "data-overlay" || name === "data-overlay-trigger" ||
+             name === "data-overlay-parent") &&
             was !== undefined && this.style && this.style._reevaluateOverlay) {
             this.style._reevaluateOverlay();
         }

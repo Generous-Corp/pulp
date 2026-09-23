@@ -1014,6 +1014,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+- A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes. → `tools/scripts/pr_flow_audit.py`
+  - ⚠ **Cannot see:** Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -2017,6 +2019,19 @@ App-authored and its trigger was evaluated exactly as documented, correctly
 refusing on `branches: [main]`.) Also note a run's `pull_requests[]` array can
 be **empty** on a genuine `pull_request` run, so never filter on it — key on
 `head_sha` + `event`;
+(1b) if a run **does** exist on the head SHA but sits `pending` with **zero
+jobs**, the trigger admitted the PR and a superseded run is still holding the
+`build-<ref>` concurrency group. The required check is absent because its JOB
+was never created, not because the trigger refused — so a `synchronize` push
+only stacks another run behind the same squatter. Do **not** push. Sweep the
+repo instead (`actions/runs?status=pending` and `?status=queued`, filter
+`name=="Build and Test"`, group by `head_branch`), confirm the live head with
+`git ls-remote origin refs/heads/<branch>`, then force-cancel the run on the
+*stale* head — the one that still has jobs:
+`ghapp api --method POST 'repos/Generous-Corp/pulp/actions/runs/<id>/force-cancel'`.
+Plain `/cancel` returns an empty `{}` either way and will not move a run whose
+jobs were never assigned, so read the run status back instead of trusting the
+response;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
 VERSION line — re-merge `main`); (3) only then verify capacity from queue age,
 host supervisor/lease state, and an exact repository-visible job assignment.

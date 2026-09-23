@@ -1464,3 +1464,246 @@ TEST_CASE("a press inside a parent menu closes only the submenu above it",
 
     menu->release_overlay();
 }
+
+// ── A lifted submenu names the overlay it stacks on ───────────────────────
+//
+// The parent-chain test above recognises a submenu by its POSITION IN THE
+// TREE, and a submenu placed to escape its menu's box is not in that position:
+// `position: fixed`, a portal, or a returned fragment all emit the panel as a
+// SIBLING of the menu it belongs to. So the panel reads as a rival menu, the
+// menu underneath is dismissed the moment the submenu opens, and every row on
+// both of them goes with it. `claim_overlay(stacks_on)` lets the claim name the
+// overlay it belongs to, which is a fact the tree does not carry.
+//
+// Each case below is paired with the control that must still dismiss, because
+// a test that only proves stacking works cannot fail the way this bug fails.
+
+TEST_CASE("a lifted sibling submenu that names its menu stacks on it",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    // Deliberately siblings under the root, not parent/child: this is what a
+    // `position: fixed` submenu looks like once it is laid out off the root.
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* submenu =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    // Siblings, so no parent-chain walk from the submenu can ever reach the
+    // menu. This is the shape the tree cannot describe.
+    REQUIRE(menu->parent() == &root);
+    REQUIRE(submenu->parent() == &root);
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+
+    menu->claim_overlay();
+    submenu->claim_overlay(menu);
+
+    REQUIRE_FALSE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 2);
+    REQUIRE(root.interaction().active_overlay == submenu);
+    REQUIRE(View::active_overlay_ == submenu);
+
+    // The point of stacking rather than replacing: closing the submenu hands
+    // the menu back, so the next Escape or outside press acts on it.
+    submenu->dismiss_claimed_overlay();
+    REQUIRE_FALSE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu);
+
+    menu->release_overlay();
+}
+
+TEST_CASE("a lifted sibling that names nothing still dismisses the open menu",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    // Byte-for-byte the geometry of the case above. The ONLY difference is
+    // that this claim names no parent, and it must behave exactly as it did
+    // before naming existed: an unrelated menu cannot silently appear on top
+    // of whatever happened to be open. Extending the model must not remove
+    // that protection.
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* rival =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+
+    menu->claim_overlay();
+    rival->claim_overlay();
+
+    REQUIRE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == rival);
+
+    rival->release_overlay();
+}
+
+TEST_CASE("naming an overlay that is not open dismisses the open one",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* never_open =
+        add_child_at(root, std::make_unique<TestView>(), {500.0f, 100.0f, 200.0f, 300.0f});
+    View* rival =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+
+    menu->claim_overlay();
+    // A name is honoured only against the TOP OF THIS ROOT'S STACK, so a view
+    // that never claimed can never be that top. A stale, misspelled, or
+    // already-closed name therefore falls back to the undeclared behaviour
+    // instead of becoming a licence to sit on top of a stranger.
+    rival->claim_overlay(never_open);
+
+    REQUIRE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == rival);
+
+    rival->release_overlay();
+}
+
+TEST_CASE("naming an overlay open in another root leaves both roots intact",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root_a;
+    root_a.set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+    TestView root_b;
+    root_b.set_bounds({0.0f, 0.0f, 400.0f, 300.0f});
+
+    View* menu_a =
+        add_child_at(root_a, std::make_unique<TestView>(), {10.0f, 10.0f, 100.0f, 100.0f});
+    View* rival_a =
+        add_child_at(root_a, std::make_unique<TestView>(), {150.0f, 10.0f, 100.0f, 100.0f});
+    View* menu_b =
+        add_child_at(root_b, std::make_unique<TestView>(), {10.0f, 10.0f, 100.0f, 100.0f});
+
+    bool a_dismissed = false;
+    menu_a->on_overlay_dismissed = [&a_dismissed]() { a_dismissed = true; };
+    bool b_dismissed = false;
+    menu_b->on_overlay_dismissed = [&b_dismissed]() { b_dismissed = true; };
+
+    menu_a->claim_overlay();
+    menu_b->claim_overlay();
+
+    // Two Pulp editors in one host process. Naming the OTHER editor's open
+    // overlay must neither stack across realms nor reach into that realm's
+    // stack: the name is resolved against this view's own root, so it simply
+    // does not match and the local rival is dismissed as usual.
+    rival_a->claim_overlay(menu_b);
+
+    REQUIRE(a_dismissed);
+    REQUIRE_FALSE(b_dismissed);
+    REQUIRE(root_a.overlay_depth() == 1);
+    REQUIRE(root_a.interaction().active_overlay == rival_a);
+    REQUIRE(root_b.overlay_depth() == 1);
+    REQUIRE(root_b.interaction().active_overlay == menu_b);
+
+    rival_a->release_overlay();
+    menu_b->release_overlay();
+}
+
+TEST_CASE("naming itself is not a declaration and dismisses the open menu",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* rival =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+
+    menu->claim_overlay();
+    rival->claim_overlay(rival);
+
+    REQUIRE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == rival);
+
+    rival->release_overlay();
+}
+
+TEST_CASE("two lifted submenus of one menu replace each other and keep it open",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* first =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    View* second =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 280.0f, 180.0f, 120.0f});
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+    bool first_dismissed = false;
+    first->on_overlay_dismissed = [&first_dismissed]() { first_dismissed = true; };
+
+    menu->claim_overlay();
+    first->claim_overlay(menu);
+    REQUIRE(root.overlay_depth() == 2);
+
+    // The sweep stops AT the named overlay, so everything above it still
+    // closes: two submenus of one menu remain mutually exclusive while the
+    // menu they belong to survives both.
+    second->claim_overlay(menu);
+    REQUIRE(first_dismissed);
+    REQUIRE_FALSE(menu_dismissed);
+    REQUIRE(root.overlay_depth() == 2);
+    REQUIRE(root.interaction().active_overlay == second);
+
+    second->dismiss_claimed_overlay();
+    REQUIRE(root.overlay_depth() == 1);
+    REQUIRE(root.interaction().active_overlay == menu);
+
+    menu->release_overlay();
+}
+
+TEST_CASE("a real child of a lifted submenu still stacks by descent",
+          "[view][overlay][stack][lifted]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* submenu =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    View* inner =
+        add_child_at(*submenu, std::make_unique<TestView>(), {10.0f, 10.0f, 80.0f, 40.0f});
+
+    bool menu_dismissed = false;
+    menu->on_overlay_dismissed = [&menu_dismissed]() { menu_dismissed = true; };
+    bool submenu_dismissed = false;
+    submenu->on_overlay_dismissed = [&submenu_dismissed]() { submenu_dismissed = true; };
+
+    menu->claim_overlay();
+    submenu->claim_overlay(menu);
+    // Naming is an ADDITIONAL way to nest, not a replacement: a claim that
+    // really does descend from the open overlay keeps nesting with no name at
+    // all, and the two compose into one three-deep stack.
+    inner->claim_overlay();
+
+    REQUIRE_FALSE(menu_dismissed);
+    REQUIRE_FALSE(submenu_dismissed);
+    REQUIRE(root.overlay_depth() == 3);
+    REQUIRE(root.interaction().active_overlay == inner);
+
+    inner->dismiss_claimed_overlay();
+    REQUIRE(root.interaction().active_overlay == submenu);
+    submenu->dismiss_claimed_overlay();
+    REQUIRE(root.interaction().active_overlay == menu);
+    menu->release_overlay();
+}

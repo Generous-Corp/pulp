@@ -1872,7 +1872,7 @@ std::size_t View::overlay_depth() const {
     return s ? s->overlay_stack.size() : 0;
 }
 
-void View::claim_overlay() {
+void View::claim_overlay(const View* stacks_on) {
     // Close every overlay this claim is not allowed to sit on top of.
     //
     // A claim that DESCENDS from the open overlay is a submenu and stacks on
@@ -1881,6 +1881,20 @@ void View::claim_overlay() {
     // "open submenu B and submenu A stays on screen". Re-claiming a view that
     // is already open closes only the submenus above it.
     //
+    // `stacks_on` is the second way to nest, for a submenu whose position
+    // lifts it out of its menu's subtree: a `position: fixed` panel is a
+    // SIBLING of the menu it belongs to, so no parent-chain walk can ever
+    // recognise it and the menu underneath is dismissed as a rival. Naming the
+    // overlay states the relationship the tree cannot.
+    //
+    // The name is checked against `overlay_stack.back()`, which is why it
+    // cannot become a way around the descendant rule: the only thing a claim
+    // can stop the sweep at is an overlay that is ALREADY THE TOP of its own
+    // root's stack. A name that is closed, that names a view in another hosted
+    // editor's root, or that names this view is simply never that top — the
+    // sweep runs to completion and the rival is dismissed, exactly as it is
+    // for an undeclared claim.
+    //
     // Re-resolves the state block every pass because `on_overlay_dismissed` is
     // author code: it may unmount the popover it is closing, open a
     // replacement, or tear down the whole editor realm.
@@ -1888,7 +1902,8 @@ void View::claim_overlay() {
         RootInteractionState* s = existing_interaction();
         if (s == nullptr || s->overlay_stack.empty()) break;
         View* const top = s->overlay_stack.back();
-        if (top == this || is_overlay_descendant_of(top)) break;
+        if (top == this || top == stacks_on || is_overlay_descendant_of(top))
+            break;
         if (!detach_overlay(*s, top)) break;
         // Fired AFTER the pop, matching dismiss_claimed_overlay(), so a
         // callback that claims a replacement is not immediately undone.

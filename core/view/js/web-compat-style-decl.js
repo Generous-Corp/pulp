@@ -18,6 +18,10 @@ function CSSStyleDeclaration(el) {
     // adding/removing data-overlay while the CSS shape already claimed)
     // re-claims instead of silently keeping the stale value.
     this._autoOverlayConsume = false;
+    // Declared-parent widget id last sent with that claim, for the same
+    // reason: an author who moves a lifted submenu from one menu to another
+    // must re-claim against the new one rather than keep nesting on the old.
+    this._autoOverlayParent = "";
     // Whether this element is currently marked as an overlay TRIGGER (the
     // control that opens a popover, not the popover). Tracked so the bridge
     // call happens only on a transition.
@@ -41,6 +45,47 @@ function CSSStyleDeclaration(el) {
 // positives (decorative absolutely-positioned badges with z-index 1
 // must NOT auto-claim because a claim hijacks click routing).
 var _PULP_AUTO_OVERLAY_Z_INDEX_THRESHOLD = 10;
+
+// Resolve the overlay an author declared this one STACKS ON, as the widget id
+// `claimOverlay` speaks, or "" when nothing was declared.
+//
+// `data-overlay-parent` is read first and names the parent by DOM id. An id
+// that resolves to no element is forwarded verbatim so a caller holding a raw
+// widget id can use the same attribute; a name that resolves to no widget
+// either is treated natively as no declaration at all, so a typo or a stale id
+// degrades to the ordinary claim rather than to a surprise.
+//
+// `aria-owns` states the same relationship from the other end, and is the
+// attribute ARIA provides for exactly this case: a parent/child relationship
+// the DOM hierarchy cannot represent. Reading it means a document that lifted a
+// submenu out of its menu's subtree AND described that for assistive technology
+// needs no Pulp-specific attribute. Gated on the element having an `id`,
+// because that is what an owner can name -- so the reverse scan never runs for
+// the overwhelming majority of overlays, which have no id at all.
+function _resolveOverlayParent(el) {
+    var declared = el._dataset ? el._dataset.overlayParent : null;
+    if ((declared == null || declared === "") && el.getAttribute)
+        declared = el.getAttribute("data-overlay-parent");
+    if (declared != null && declared !== "") {
+        var named = (typeof document !== "undefined" && document.getElementById)
+            ? document.getElementById(String(declared)) : null;
+        return (named && named !== el && named._id) ? named._id : String(declared);
+    }
+
+    var ownId = el.getAttribute ? el.getAttribute("id") : "";
+    if (ownId == null || ownId === "") return "";
+    if (typeof document === "undefined" || !document.querySelectorAll) return "";
+    var owners = document.querySelectorAll("[aria-owns]") || [];
+    for (var i = 0; i < owners.length; ++i) {
+        var owner = owners[i];
+        if (owner === el || !owner.getAttribute) continue;
+        var owns = owner.getAttribute("aria-owns");
+        if (owns == null || owns === "") continue;
+        if (String(owns).trim().split(/\s+/).indexOf(ownId) < 0) continue;
+        if (owner._id) return owner._id;
+    }
+    return "";
+}
 
 // re-evaluate the auto-overlay heuristic for
 // this element. Called whenever `position`, `zIndex`, or the
@@ -132,6 +177,33 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
         this._autoOverlayTrigger = isTrigger;
     }
 
+    // The overlay this one STACKS ON, when the author declared it.
+    //
+    // `View::claim_overlay()` nests a claim only when it descends from the
+    // open overlay, and a submenu placed to escape its menu's box does not: a
+    // `position: fixed` panel is emitted as a SIBLING of the menu it belongs
+    // to, so the parent-chain walk cannot see the relationship and the menu
+    // underneath is dismissed as a rival, taking the submenu's own rows with
+    // it. Neither half of the claim above can supply the missing fact --
+    // `position: fixed` is what CAUSES the problem and `role="menu"` is true of
+    // both panels -- so it has to be declared.
+    //
+    // Two spellings, both STATEMENTS an author writes deliberately:
+    //
+    //   * `data-overlay-parent="<id>"` on the submenu, Pulp's own vocabulary
+    //     and the direct counterpart of `data-overlay` / `data-overlay-trigger`;
+    //   * `aria-owns="<submenu id>"` on the MENU, which is precisely what ARIA
+    //     provides for a parent/child relationship the DOM hierarchy cannot
+    //     represent -- the same document that already earned the `role="menu"`
+    //     claim by describing itself for assistive technology gets this for
+    //     free.
+    //
+    // Deliberately never inferred. The CSS-shape branch does not supply a
+    // parent and neither does a bare `role="menu"`, because an inferred parent
+    // would be exactly the "nest on whatever happened to be open" bypass the
+    // descendant rule exists to prevent.
+    var overlayParentId = shouldClaim ? _resolveOverlayParent(el) : "";
+
     // Consume the dismissing press only on the EXPLICIT author opt-in.
     // `data-overlay="true"` is a direct statement that the element is a
     // popover — the same statement @pulp/react's `<View overlay>` prop makes,
@@ -144,14 +216,18 @@ CSSStyleDeclaration.prototype._reevaluateOverlay = function() {
     var consume = hinted;
 
     if (shouldClaim && (!this._autoOverlayClaimed ||
-                        this._autoOverlayConsume !== consume)) {
-        if (typeof claimOverlay === "function") claimOverlay(el._id, consume);
+                        this._autoOverlayConsume !== consume ||
+                        this._autoOverlayParent !== overlayParentId)) {
+        if (typeof claimOverlay === "function")
+            claimOverlay(el._id, consume, overlayParentId);
         this._autoOverlayClaimed = true;
         this._autoOverlayConsume = consume;
+        this._autoOverlayParent = overlayParentId;
     } else if (!shouldClaim && this._autoOverlayClaimed) {
         if (typeof releaseOverlay === "function") releaseOverlay(el._id);
         this._autoOverlayClaimed = false;
         this._autoOverlayConsume = false;
+        this._autoOverlayParent = "";
     }
 };
 
