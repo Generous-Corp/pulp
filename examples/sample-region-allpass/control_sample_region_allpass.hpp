@@ -35,11 +35,12 @@ inline void stop(int) {
 }
 
 inline std::shared_ptr<inspect::ControlSampleRegionTarget>
-editable_target(format::Processor& processor, state::StateStore& store) {
+editable_target(format::Processor& processor, state::StateStore& store,
+                inspect::ControlSampleRegionGeneration& target_generation) {
     auto* allpass = dynamic_cast<SampleRegionAllpassProcessor*>(&processor);
     if (!allpass || !allpass->ready())
         return {};
-    return inspect::ControlSampleRegionTarget::editable(allpass->graph(), store, generation);
+    return inspect::ControlSampleRegionTarget::editable(allpass->graph(), store, target_generation);
 }
 
 inline std::unique_ptr<format::Processor> create_frozen() {
@@ -81,11 +82,12 @@ inline std::unique_ptr<format::Processor> create_frozen() {
 }
 
 inline std::shared_ptr<inspect::ControlSampleRegionTarget>
-frozen_target(format::Processor& processor, state::StateStore& store) {
+frozen_target(format::Processor& processor, state::StateStore& store,
+              inspect::ControlSampleRegionGeneration& target_generation) {
     if (&processor != frozen_processor || !admitted_plan || !frozen_prepared)
         return {};
     auto target = inspect::ControlSampleRegionTarget::frozen(
-        *admitted_plan, store, generation,
+        *admitted_plan, store, target_generation,
         [](std::uint32_t id, int maximum) {
             for (const auto& proof : admitted_proofs)
                 if (proof.region_id == id && maximum == block_size)

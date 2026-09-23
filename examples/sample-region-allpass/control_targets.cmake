@@ -1,10 +1,15 @@
-if(TARGET sample-region-allpass-core AND TARGET pulp::inspect-standalone-runtime)
+# The full standalone control host is the GPU-backed macOS implementation;
+# non-Apple/minimal hosts deliberately fail closed and cannot make these
+# product capabilities reachable. Do not emit a shipping manifest for them.
+if(TARGET sample-region-allpass-core AND TARGET pulp::inspect-standalone-runtime
+   AND APPLE AND PULP_ENABLE_GPU AND NOT IOS AND NOT PULP_IOS)
     set(_control_source_dir "${CMAKE_CURRENT_LIST_DIR}")
     foreach(_kind IN ITEMS editable frozen)
         set(_target sample-region-allpass-control-${_kind})
         add_executable(${_target} "${_control_source_dir}/control_${_kind}_standalone.cpp")
         target_link_libraries(${_target} PRIVATE
-            sample-region-allpass-core pulp::inspect-standalone-runtime pulp::format)
+            sample-region-allpass-core pulp::inspect-standalone-runtime pulp::standalone
+            pulp::format)
         set(_capabilities
             dev.pulp.instance/read@1
             dev.pulp.session/control@1
