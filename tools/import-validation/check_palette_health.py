@@ -110,6 +110,17 @@ TEXT_BARS = {
 
 ACCENT_TEXT_BAR = 4.5
 
+# Vienot 1999, row-major 3x3, applied in LINEAR RGB. One definition shared by
+# the display path and the metric path so they cannot drift.
+_CVD_MATRICES = {
+    "protan": (0.11238, 0.88762, 0.00000,
+               0.11238, 0.88762, 0.00000,
+               0.00401, -0.00401, 1.00000),
+    "deutan": (0.29275, 0.70725, 0.00000,
+               0.29275, 0.70725, 0.00000,
+               -0.02234, 0.02234, 1.00000),
+}
+
 # CIEDE2000 distance below which two simulated status colours can no longer
 # carry a distinction by colour alone.
 #
@@ -398,14 +409,7 @@ def simulate_cvd(color: tuple[int, int, int, float],
     and a simulation that is quietly wrong is worse than one that is missing:
     it would let a palette pass a check that never actually looked.
     """
-    matrices = {
-        "protan": (0.11238, 0.88762, 0.00000,
-                   0.11238, 0.88762, 0.00000,
-                   0.00401, -0.00401, 1.00000),
-        "deutan": (0.29275, 0.70725, 0.00000,
-                   0.29275, 0.70725, 0.00000,
-                   -0.02234, 0.02234, 1.00000),
-    }
+    matrices = _CVD_MATRICES
     if kind not in matrices:
         raise ValueError(
             f"simulate_cvd supports 'protan' and 'deutan', not {kind!r}. "
@@ -414,15 +418,33 @@ def simulate_cvd(color: tuple[int, int, int, float],
             f"and two half-plane projections), not another 3x3 matrix — "
             f"Vienot's own authors document their tritan matrix as inaccurate.")
     m = matrices[kind]
-    lin = [srgb_to_linear(c / 255.0) for c in color[:3]]
-    out = []
-    for row in range(3):
-        v = m[row * 3] * lin[0] + m[row * 3 + 1] * lin[1] + m[row * 3 + 2] * lin[2]
-        out.append(severity * v + (1.0 - severity) * lin[row])
+    out = _simulate_linear(color, kind, severity)
     encoded = tuple(
         max(0, min(255, round(linear_to_srgb(max(0.0, min(1.0, v))) * 255.0)))
         for v in out)
     return (encoded[0], encoded[1], encoded[2], color[3])
+
+
+def _simulate_linear(color: tuple[int, int, int, float],
+                     kind: str,
+                     severity: float = 1.0) -> tuple[float, float, float]:
+    """The simulation without the 8-bit round-trip, for the metric path.
+
+    Quantising to 8 bits before measuring costs ~0.5 dE00 of jitter, which is
+    not academic here: the shipped light theme has pairs at 10.6 and 10.8
+    against a bar of 10.0, so rounding alone could flip those verdicts.
+    `simulate_cvd` still returns an sRGB colour, because that is what a caller
+    wanting to SHOW the simulation needs; measurement uses this instead.
+    """
+    matrices = _CVD_MATRICES
+    if kind not in matrices:
+        raise ValueError(f"simulate_cvd supports {sorted(matrices)}, not {kind!r}")
+    m = matrices[kind]
+    lin = [srgb_to_linear(c / 255.0) for c in color[:3]]
+    return tuple(  # type: ignore[return-value]
+        severity * (m[r * 3] * lin[0] + m[r * 3 + 1] * lin[1] + m[r * 3 + 2] * lin[2])
+        + (1.0 - severity) * lin[r]
+        for r in range(3))
 
 
 def srgb_to_linear(c: float) -> float:
@@ -435,7 +457,11 @@ def linear_to_srgb(c: float) -> float:
 
 def _to_lab(color: tuple[int, int, int, float]) -> tuple[float, float, float]:
     """sRGB to CIE L*a*b* (D65), for a perceptual difference."""
-    r, g, b = (srgb_to_linear(c / 255.0) for c in color[:3])
+    return _lab_from_linear(*(srgb_to_linear(c / 255.0) for c in color[:3]))
+
+
+def _lab_from_linear(r: float, g: float, b: float) -> tuple[float, float, float]:
+    """Linear RGB to CIE L*a*b* (D65). The metric path enters here."""
     x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
     y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 1.00000
     z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
@@ -460,8 +486,14 @@ def delta_e(a: tuple[int, int, int, float],
     fourth and passed another on a 0.1 margin — inside the noise floor of
     8-bit rounding.
     """
-    l1, a1, b1 = _to_lab(a)
-    l2, a2, b2 = _to_lab(b)
+    return _delta_e_lab(_to_lab(a), _to_lab(b))
+
+
+def _delta_e_lab(first: tuple[float, float, float],
+                 second: tuple[float, float, float]) -> float:
+    """CIEDE2000 between two Lab triples, so callers can skip the 8-bit hop."""
+    l1, a1, b1 = first
+    l2, a2, b2 = second
 
     c1 = math.hypot(a1, b1)
     c2 = math.hypot(a2, b2)
@@ -537,9 +569,9 @@ def check_status_cvd(tokens: dict[str, str]) -> tuple[list[str], list[str]]:
         for second in names[i + 1:]:
             normal = delta_e(resolved[first], resolved[second])
             for kind in ("protan", "deutan"):
-                a = simulate_cvd(resolved[first], kind)
-                b = simulate_cvd(resolved[second], kind)
-                simulated = delta_e(a, b)
+                simulated = _delta_e_lab(
+                    _lab_from_linear(*_simulate_linear(resolved[first], kind)),
+                    _lab_from_linear(*_simulate_linear(resolved[second], kind)))
                 retained = 100.0 * simulated / normal if normal > 0 else 0.0
                 if simulated < CVD_DELTA_E_BAR:
                     problems.append(

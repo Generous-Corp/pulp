@@ -392,6 +392,28 @@ class ColourVision(unittest.TestCase):
         self.assertGreaterEqual(self.worst("#ff0000", "#00ff00"),
                                 cph.CVD_DELTA_E_BAR)
 
+    def test_the_metric_path_does_not_round_through_8_bits(self) -> None:
+        # simulate_cvd() returns an sRGB colour because a caller showing the
+        # simulation needs one, but quantising before measuring adds error to
+        # a bar the shipped light theme sits ~0.6 from. Measured on that pack
+        # the difference is 0.01-0.22 dE00 -- small, and still a third of the
+        # remaining margin, so the metric uses the unrounded linear path.
+        a, b = cph.parse_color("#FF5C4D"), cph.parse_color("#3FCF77")
+        exact = cph._delta_e_lab(
+            cph._lab_from_linear(*cph._simulate_linear(a, "deutan")),
+            cph._lab_from_linear(*cph._simulate_linear(b, "deutan")))
+        rounded = cph.delta_e(cph.simulate_cvd(a, "deutan"),
+                              cph.simulate_cvd(b, "deutan"))
+        self.assertNotAlmostEqual(exact, rounded, places=6)
+        self.assertLess(abs(exact - rounded), 1.0)
+
+    def test_simulating_then_measuring_agrees_with_the_display_path(self) -> None:
+        # The two paths must not diverge in KIND, only in precision: one
+        # definition of the matrices, shared.
+        self.assertEqual(sorted(cph._CVD_MATRICES), ["deutan", "protan"])
+        grey = cph.parse_color("#808080")
+        self.assertEqual(cph.simulate_cvd(grey, "protan"), grey)
+
     def test_a_hue_only_palette_is_reported(self) -> None:
         tokens = dict(HEALTHY)
         tokens.update({"success": "#2e7d32", "danger": "#d32f2f",
