@@ -73,8 +73,7 @@ def variant(**overrides: str) -> dict[str, str]:
 
 def problems_of(tokens: dict[str, str]) -> list[str]:
     found: list[str] = []
-    for check in (cph.check_accent_ramp, cph.check_hue_family,
-                  cph.check_text_contrast):
+    for check in cph.ENFORCING_CHECKS:
         found += check(tokens)[0]
     return found
 
@@ -320,6 +319,99 @@ class CommandLine(unittest.TestCase):
             [sys.executable, str(SCRIPT), "--tokens", "/nonexistent/tokens.json"],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, cph.EX_INPUT, result.stderr)
+
+
+class ColourVision(unittest.TestCase):
+    """The colour-vision lane, pinned in both directions.
+
+    The bar sits in a narrow gap between two populations, so it is pinned
+    against BOTH: palettes designed to survive colour blindness must pass,
+    and the red/green pairs designers actually reach for must fail. A bar
+    calibrated against only one side is how the first attempt at this check
+    ended up rejecting the reference standard.
+    """
+
+    # Okabe-Ito, the canonical CVD-safe qualitative palette.
+    OKABE_ITO = ("#E69F00", "#56B4E9", "#009E73", "#F0E442",
+                 "#0072B2", "#D55E00", "#CC79A7")
+
+    def worst(self, first: str, second: str) -> float:
+        a, b = cph.parse_color(first), cph.parse_color(second)
+        assert a is not None and b is not None
+        return min(cph.delta_e(cph.simulate_cvd(a, kind),
+                               cph.simulate_cvd(b, kind))
+                   for kind in ("protan", "deutan"))
+
+    def test_simulation_leaves_greys_alone(self) -> None:
+        # Red-green deficiency is a hue confusion; it cannot move an
+        # achromatic colour. If this drifts, the matrix is being applied in
+        # the wrong space.
+        grey = cph.parse_color("#808080")
+        self.assertEqual(cph.simulate_cvd(grey, "protan"), grey)
+        self.assertEqual(cph.simulate_cvd(grey, "deutan"), grey)
+
+    def test_zero_severity_is_the_identity(self) -> None:
+        red = cph.parse_color("#d32f2f")
+        self.assertEqual(cph.simulate_cvd(red, "protan", 0.0), red)
+
+    def test_simulation_preserves_alpha(self) -> None:
+        self.assertEqual(cph.simulate_cvd((211, 47, 47, 0.5), "deutan")[3], 0.5)
+
+    def test_protanopia_darkens_red(self) -> None:
+        # The physical signature of a missing L cone: red loses luminance.
+        red = cph.parse_color("#ff0000")
+        self.assertLess(cph.simulate_cvd(red, "protan")[0], red[0])
+
+    def test_delta_e_is_zero_for_identical_colours(self) -> None:
+        c = cph.parse_color("#3FCF77")
+        self.assertAlmostEqual(cph.delta_e(c, c), 0.0, places=6)
+
+    def test_a_designed_cvd_safe_palette_clears_the_bar(self) -> None:
+        # The positive control. A bar that rejects Okabe-Ito is not
+        # calibrated, whatever else it catches.
+        worst = min(self.worst(a, b)
+                    for i, a in enumerate(self.OKABE_ITO)
+                    for b in self.OKABE_ITO[i + 1:])
+        self.assertGreaterEqual(worst, cph.CVD_DELTA_E_BAR,
+                                f"Okabe-Ito worst pair {worst:.1f} is under "
+                                f"the {cph.CVD_DELTA_E_BAR} bar")
+
+    def test_traffic_light_pairs_are_caught(self) -> None:
+        # The negative control, using the red/green pairs real products ship.
+        for first, second, name in (("#d32f2f", "#2e7d32", "Material 700/800"),
+                                    ("#e53935", "#43a047", "Material 600/600"),
+                                    ("#ff3b30", "#34c759", "iOS system")):
+            with self.subTest(name):
+                self.assertLess(self.worst(first, second), cph.CVD_DELTA_E_BAR)
+
+    def test_a_pair_separated_by_lightness_survives(self) -> None:
+        # Pure red against pure green passes, and should: after simulation
+        # they differ enormously in LIGHTNESS, which no red-green deficiency
+        # removes. Pinning this stops someone "fixing" the check to fail
+        # every red/green pair on principle.
+        self.assertGreaterEqual(self.worst("#ff0000", "#00ff00"),
+                                cph.CVD_DELTA_E_BAR)
+
+    def test_a_hue_only_palette_is_reported(self) -> None:
+        tokens = dict(HEALTHY)
+        tokens.update({"success": "#2e7d32", "danger": "#d32f2f",
+                       "warning": "#f9a825", "info": "#1565c0"})
+        found, _ = cph.check_status_cvd(tokens)
+        self.assertTrue(any("success" in p and "danger" in p for p in found),
+                        found)
+
+    def test_the_lane_is_advisory_unless_promoted(self) -> None:
+        # The contract the CLI depends on: the colour-vision check is in
+        # CHECKS but not in ENFORCING_CHECKS, so a finding reports rather
+        # than blocking until --strict-cvd.
+        self.assertIn(cph.check_status_cvd, cph.CHECKS)
+        self.assertNotIn(cph.check_status_cvd, cph.ENFORCING_CHECKS)
+
+    def test_every_check_is_routed(self) -> None:
+        # The drift this file already warned about: a new check must land in
+        # exactly one lane, never in neither.
+        self.assertEqual(set(cph.CHECKS),
+                         set(cph.ENFORCING_CHECKS) | set(cph.ADVISORY_CHECKS))
 
 
 class ShippedPack(unittest.TestCase):
