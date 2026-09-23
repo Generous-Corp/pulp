@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-pr8755-library-validation-wgpu-watch",
+  "created_at": "2026-09-23T10:10:33Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that unlinking an unused GPU dylib from ad-hoc library-validated test fixtures crosses the visual-proof-harness selector without changing anything the family is about. The control trusted-host E2E fixture and the two sample-region control hosts were ad-hoc signed with --options library while transitively linking libwgpu_native.dylib. Ad-hoc signing carries no Team ID and library validation admits only platform-signed or same-Team libraries, so dyld refused the load and killed each binary at exec with 134. The process never answered the preflight challenge and the launcher reported preflight_rejected, so one dead child failed a cluster of control, inspector and daemon E2E tests. Because the link is decided at configure time from a machine-wide FetchContent cache rather than by any source change, it began failing on gate VMs while main stayed byte-identical. The fix drops the unused wgpu link and keeps the library-validation flag, which control_trusted_host_inventory requires and a test asserts. No detector, threshold, fixture, proof artifact or harness behaviour changes: otool -L shows the wgpu reference gone and the binaries execute instead of dying at load. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-control-trusted-host-e2e",
+    "pulp-test-control-phase15-aggregate-e2e",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
