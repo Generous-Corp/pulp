@@ -1130,10 +1130,14 @@ jobs:
             echo "macos_reused=$macos_reused"
           } >> "$GITHUB_OUTPUT"
 
-  # Protected pushes normally omit macOS. Allocate this independent leg only
-  # when the authenticated before/after diff changed the A2T receipt. Merge
-  # groups instead retain the required native macOS leg above. Neither path can
-  # publish the PR-only attestation authority.
+  # A push carries the macOS matrix leg, which runs these same verify-only
+  # steps -- but only when the push changed a native build input. This
+  # independent leg covers the gap: a push that changed the A2T receipt and
+  # nothing native skips the matrix entirely, and the receipt still has to be
+  # verified. When both run the verification is simply performed twice, which
+  # is harmless because neither can publish the attestation. That authority is
+  # PR-only and gated twice over: `classify` sets the issue flag only for a
+  # pull_request, and the issuer itself refuses any other event.
   a2t-protected-event:
     needs: [resolve-provider, classify]
     if: >-
