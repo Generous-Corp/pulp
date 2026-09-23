@@ -2684,6 +2684,26 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     return kResultOk;
 }
 
+tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id,
+                                                         ParamValue value) {
+    const auto result = SingleComponentEffect::setParamNormalized(id, value);
+    if (result != kResultOk) return result;
+    // Mirror the accepted value into the StateStore on the calling (main)
+    // thread. process_decode_input_parameters() still applies the host's
+    // parameter queue during process(); this only guarantees that a write the
+    // host has already acknowledged is observable to getState() before any
+    // audio block runs. Registered hidden controllers are MIDI mappings rather
+    // than plug-in parameters and must not be written into the store.
+    if (!is_registered_controller(static_cast<state::ParamID>(id))) {
+        // The same guard setState() uses: a host-originated write must not be
+        // echoed back at the host as editor automation.
+        const ScopedHostParameterWrite host_write;
+        store_.set_normalized(static_cast<state::ParamID>(id),
+                              static_cast<float>(value));
+    }
+    return result;
+}
+
 tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
     // getState runs on the main thread — another opportunity to flush a
     // pending restart (alongside the paced poll and the latency/tail queries).
