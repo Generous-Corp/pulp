@@ -1012,6 +1012,64 @@ something being installed: pair the provisioning step with one non-skippable
 test that asserts the provisioning worked. The install step reports that it ran;
 only the test reports that it landed.
 
+## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
+
+Every gate script here fails closed on its own: a missing or unreadable config
+exits **2**, having checked nothing. The hook then threw that away. Each gate's
+catch-all branch was
+
+```sh
+case $? in
+    0) ;;
+    1) fail=1 ;;
+    *) echo "[pre-push] <gate>: internal error" >&2 ;;   # prints, does NOT set fail
+esac
+```
+
+so any exit code above 1 printed a line and fell through **as a pass**. A gate
+that could not find its config reported SUCCESS, which is indistinguishable in
+the output from a gate that ran and was happy. That false green let a missing
+version bump ride: no tag, no release.
+
+The exit-code contract every Pulp gate now follows, and every caller must
+honour:
+
+| code | meaning | caller must |
+|------|---------|-------------|
+| 0 | ran, check passed | continue |
+| 1 | ran, check FAILED | block — a real verdict |
+| 2+ | **could NOT run** — config missing/unreadable, empty corpus, crash | **block** |
+
+`.githooks/lib/gate-output.sh` exports `gate_could_not_run`; every catch-all
+branch routes through it and sets `fail=1`. The gate's status is captured into
+`$gate_rc` *before* `case` consumes `$?` — a branch that reads a bare `$?`
+inside the `case` gets the wrong value, so `test_prepush_cannot_measure.py`
+asserts the capture count equals the branch count.
+
+Two things are worth knowing before you touch this:
+
+* **`format_changed` is the one deliberate exemption.** It is advisory by
+  contract and carries its own documented `3) SKIPPED` branch for a machine
+  with no clang-format. The test pins it as the single exemption by name, so a
+  future gate quietly adopting the old fall-open shape is a test failure rather
+  than a silent drift.
+* **Adding a gate means adding its blocking branch.** The test's control counts
+  *both* halves (blocking + fall-open) and fails if the total drops below 20 —
+  a regex that stopped matching would otherwise report "nothing falls open"
+  over zero coverage, which is the same false green one level up.
+
+The sibling shape is a gate whose *corpus* comes back empty.
+`build_parallelism_guard` printed `OK — 0 build surface(s) bounded` and exited
+0 when its sweep matched nothing — the reading it gives when pointed at the
+wrong tree. An empty scan is not a clean scan; it now exits 2 naming what it
+searched. When you write a whole-tree gate, decide explicitly what a zero means
+and assert a floor.
+
+Shipyard carries the same two scripts and had the same hook shape. Its copies
+additionally hard-coded Pulp's `tools/scripts/versioning.json`, so a bare
+invocation in *that* repo never found its config at all; they now resolve
+`scripts/versioning.json` first and name every path searched on failure.
+
 ## An opt-in CMake flag hides tests more completely than any label
 
 A `LABELS "slow"` exclusion at least leaves the test visible in a ctest listing.
