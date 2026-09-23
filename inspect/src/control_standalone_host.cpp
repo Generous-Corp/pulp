@@ -11,6 +11,8 @@
 #include <pulp/inspect/control_installed_host.hpp>
 #include <pulp/inspect/control_main_thread_executor.hpp>
 #include <pulp/inspect/control_manifest.hpp>
+#include <pulp/inspect/control_sample_region_edit_executor.hpp>
+#include <pulp/inspect/control_sample_region_read_executor.hpp>
 #include <pulp/inspect/control_sequencer_state_executor.hpp>
 #include <pulp/inspect/control_sequencer_transport_executor.hpp>
 #include <pulp/inspect/control_standalone_ui_adapter.hpp>
@@ -33,8 +35,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -85,7 +87,9 @@ extern "C" PULP_CONTROL_COMPONENT_MARKER const volatile char
         "PULP_INSPECT_CAPABILITY_TELEMETRY_STREAM_V1\0"
         "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_READ_V1\0"
         "PULP_INSPECT_CAPABILITY_SEQUENCER_TRANSPORT_WRITE_V1\0"
-        "PULP_INSPECT_CAPABILITY_TIMELINE_DOCUMENT_SESSION_V1";
+        "PULP_INSPECT_CAPABILITY_TIMELINE_DOCUMENT_SESSION_V1\0"
+        "PULP_INSPECT_CAPABILITY_GRAPH_SAMPLE_REGION_READ_V1\0"
+        "PULP_INSPECT_CAPABILITY_GRAPH_SAMPLE_REGION_EDIT_V1";
 
 #undef PULP_CONTROL_COMPONENT_MARKER
 
@@ -119,6 +123,11 @@ std::atomic<detail::StandaloneControlAuthorHooksFactory>& author_hooks_factory()
 
 std::atomic<detail::StandaloneTimelineDocumentSessionFactory>& timeline_document_session_factory() {
     static std::atomic<detail::StandaloneTimelineDocumentSessionFactory> factory{nullptr};
+    return factory;
+}
+
+std::atomic<detail::StandaloneSampleRegionTargetFactory>& sample_region_target_factory() {
+    static std::atomic<detail::StandaloneSampleRegionTargetFactory> factory{nullptr};
     return factory;
 }
 
@@ -192,9 +201,15 @@ class HeadlessViewWindow final : public view::WindowHost {
   public:
     explicit HeadlessViewWindow(view::View& root) : root_(root) {}
 
-    void show() override { visible_ = true; }
-    void hide() override { visible_ = false; }
-    bool is_visible() const override { return visible_; }
+    void show() override {
+        visible_ = true;
+    }
+    void hide() override {
+        visible_ = false;
+    }
+    bool is_visible() const override {
+        return visible_;
+    }
     void repaint() override {}
     void set_close_callback(std::function<void()> callback) override {
         close_ = std::move(callback);
@@ -210,7 +225,9 @@ class HeadlessViewWindow final : public view::WindowHost {
         auto result = view::capture_view(root_, size.width, size.height, 1.0f);
         return result.ok ? std::move(result.png) : std::vector<std::uint8_t>{};
     }
-    bool supports_back_buffer_capture() const override { return true; }
+    bool supports_back_buffer_capture() const override {
+        return true;
+    }
 
   private:
     view::View& root_;
@@ -275,8 +292,8 @@ ControlExecutionOutcome unavailable_operation() {
 class CanonicalStandaloneControlHost final : public format::StandaloneControlHost {
   public:
     bool start(format::Processor& processor, state::StateStore& store,
-               format::detail::StandaloneTestInputHost* test_input,
-               double sample_rate, format::StandaloneControlUiMode ui_mode) override {
+               format::detail::StandaloneTestInputHost* test_input, double sample_rate,
+               format::StandaloneControlUiMode ui_mode) override {
         std::optional<ControlHostBootstrapRecord> bootstrap;
         std::optional<ControlManifest> manifest;
         if (pending_bootstrap_ && pending_manifest_) {
@@ -303,6 +320,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
 
         processor_ = &processor;
         store_ = &store;
+        sample_region_target_ = detail::create_standalone_sample_region_target(
+            processor, store, sample_region_generation_);
         test_input_ = test_input;
         sample_rate_ = sample_rate;
         main_thread_ = std::this_thread::get_id();
@@ -333,28 +352,40 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         queue_ = std::make_shared<MainThreadQueue>();
         rpc_ = std::make_shared<InspectorMainThreadRpc>(
             InspectorMainThreadRpc::Config{2s, 64},
-            [queue = queue_](std::function<void()> task) {
-                return queue->post(std::move(task));
-            },
+            [queue = queue_](std::function<void()> task) { return queue->post(std::move(task)); },
             [thread = main_thread_] { return std::this_thread::get_id() == thread; });
 
         auto state_read = make_control_state_read_executor(
-            [this](const ControlAdmissionPlan& plan)
-                -> std::optional<ControlStateReadSource> {
+            [this](const ControlAdmissionPlan& plan) -> std::optional<ControlStateReadSource> {
                 const auto generation = stable_generation();
                 if (!generation)
                     return std::nullopt;
-                return ControlStateReadSource{
-                    .registration_id = plan.registration_id,
-                    .host_tier = ControlHostTier::Standalone,
-                    .store = store_,
-                    .state_generation = *generation,
-                    .catalog_generation = store_->parameter_display_revision() + 1,
-                    .is_sensitive = [](state::ParamID) { return false; }};
+                return ControlStateReadSource{.registration_id = plan.registration_id,
+                                              .host_tier = ControlHostTier::Standalone,
+                                              .store = store_,
+                                              .state_generation = *generation,
+                                              .catalog_generation =
+                                                  store_->parameter_display_revision() + 1,
+                                              .is_sensitive = [](state::ParamID) { return false; }};
+            });
+        auto sample_region_read =
+            make_control_sample_region_read_executor([this](const ControlAdmissionPlan& plan) {
+                if (!store_ || !sample_region_target_ ||
+                    !sample_region_target_->uses_state_store(*store_))
+                    return std::shared_ptr<ControlSampleRegionTarget>{};
+                sample_region_target_->set_preparation_context(sample_rate_, 0);
+                return sample_region_target_;
+            });
+        auto sample_region_edit =
+            make_control_sample_region_edit_executor([this](const ControlAdmissionPlan& plan) {
+                if (!store_ || !sample_region_target_ ||
+                    !sample_region_target_->uses_state_store(*store_))
+                    return std::shared_ptr<ControlSampleRegionTarget>{};
+                sample_region_target_->set_preparation_context(sample_rate_, 0);
+                return sample_region_target_;
             });
         auto state_write = make_control_state_write_executor(
-            [this](const ControlAdmissionPlan& plan)
-                -> std::optional<ControlStateWriteTarget> {
+            [this](const ControlAdmissionPlan& plan) -> std::optional<ControlStateWriteTarget> {
                 const auto generation = stable_generation();
                 if (!generation)
                     return std::nullopt;
@@ -369,20 +400,20 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             gpu_health_evidence_id_ = random_evidence_id();
             if (const auto trace_id = random_evidence_id())
                 gpu_health_trace_id_ = "trace-" + *trace_id;
-            gpu_health_provider_ = std::make_shared<ControlGpuHealthProvider>(
-                ControlGpuHealthProvider::Config{
+            gpu_health_provider_ =
+                std::make_shared<ControlGpuHealthProvider>(ControlGpuHealthProvider::Config{
                     .pulp_build_id = manifest->build_id,
                     .gpu_evidence_id = gpu_health_evidence_id_,
                     .trace_evidence_id = gpu_health_trace_id_,
                     .seed_blank_first_frame =
                         std::getenv("PULP_GPU_HEALTH_SEED_BLANK_FRAME") != nullptr});
-            if (!gpu_health_provider_->begin_editor_open(
-                    ControlGpuHealthProvider::CacheState::cold, editor_open_requested_at))
+            if (!gpu_health_provider_->begin_editor_open(ControlGpuHealthProvider::CacheState::cold,
+                                                         editor_open_requested_at))
                 return false;
         }
         auto gpu_health_read = make_control_gpu_health_read_executor(
-            [provider = gpu_health_provider_](const ControlAdmissionPlan& plan)
-                -> std::optional<ControlGpuHealthReadSource> {
+            [provider = gpu_health_provider_](
+                const ControlAdmissionPlan& plan) -> std::optional<ControlGpuHealthReadSource> {
                 if (!provider)
                     return std::nullopt;
                 return ControlGpuHealthReadSource{
@@ -393,8 +424,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             });
         sequencer_channel_ = detail::create_standalone_sequencer_state_channel(processor);
         auto sequencer_target =
-            [this](const ControlAdmissionPlan& plan)
-            -> std::optional<ControlSequencerStateTarget> {
+            [this](const ControlAdmissionPlan& plan) -> std::optional<ControlSequencerStateTarget> {
             if (!sequencer_channel_)
                 return std::nullopt;
             return ControlSequencerStateTarget{.registration_id = plan.registration_id,
@@ -439,7 +469,9 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
              gpu_health_read = std::move(gpu_health_read),
              transport_read = std::move(fenced_transport_read),
              transport_write = std::move(fenced_transport_write),
-             timeline_document_session = std::move(timeline_document_session)](
+             timeline_document_session = std::move(timeline_document_session),
+             sample_region_read = std::move(sample_region_read),
+             sample_region_edit = std::move(sample_region_edit)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")
@@ -456,6 +488,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     return transport_read(plan, request, context);
                 if (request.operation_id == "dev.pulp.sequencer/transport.loop.write@1")
                     return transport_write(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/sample-region.read@1")
+                    return sample_region_read(plan, request, context);
+                if (request.operation_id == "dev.pulp.graph/sample-region.edit@1")
+                    return sample_region_edit(plan, request, context);
                 if (request.operation_id == "dev.pulp.timeline/document-session@1")
                     return timeline_document_session(plan, request, context);
                 return unavailable_operation();
@@ -492,8 +528,7 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         view::motion::Coordinator::instance().bind(frame_clock_);
         last_frame_tick_ = std::chrono::steady_clock::now();
         if (author_hooks_.motion_cost_probe)
-            view::motion::CostAttributor::instance().set_probe(
-                author_hooks_.motion_cost_probe);
+            view::motion::CostAttributor::instance().set_probe(author_hooks_.motion_cost_probe);
         motion_ = std::make_unique<MotionInspector>(*root_);
         if (needs_ui) {
             if (!window_) {
@@ -509,42 +544,43 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             if (gpu_health_provider_) {
                 gpu_health_view_adapter_ = ControlGpuHealthViewAdapter::create({
                     .provider = gpu_health_provider_,
-                    .capture_back_buffer_png = [this] {
-                        return window_ ? window_->capture_back_buffer_png()
-                                       : std::vector<std::uint8_t>{};
-                    },
-                    .frame_evidence = [this] {
-                        ControlGpuHealthProvider::FrameObservation frame;
-                        frame.lifecycle_id = gpu_health_lifecycle_id_;
-                        frame.observed_cache_state =
-                            ControlGpuHealthProvider::CacheState::cold;
-                        frame.cache_provenance =
-                            ControlGpuHealthProvider::CacheProvenance::fresh_process;
-                        frame.trace_evidence_id = gpu_health_trace_id_;
-                        // The host producer answers for the frame the adapter
-                        // just captured: capture_back_buffer_png() runs before
-                        // this lambda, so the query reads that exact frame's
-                        // outcome. Hosts without submission evidence keep the
-                        // WindowHost default of false, so an absent producer is
-                        // never read as evidence.
-                        frame.gpu_submission_observed =
-                            window_ && window_->last_frame_gpu_submission_observed();
-                        // "gpu_submission" is no longer listed: a host producer
-                        // now answers for it. This list only selects a
-                        // diagnostic string; it is not a pass gate, so dropping
-                        // the entry unblocks nothing.
-                        frame.missing_trace_categories = {"native_present_timing",
-                                                          "pipeline_compile", "resource_upload",
-                                                          "shader_identity", "source_identity"};
-                        const auto* surface = window_ ? window_->gpu_surface() : nullptr;
-                        if (!surface)
-                            return frame;
-                        const auto adapter = surface->adapter_info();
-                        using SurfaceAdapterType = render::GpuSurface::AdapterType;
-                        using ControlAdapterType =
-                            ControlGpuHealthProvider::AdapterIdentity::Type;
-                        const auto adapter_type = [type = adapter.adapter_type] {
-                            switch (type) {
+                    .capture_back_buffer_png =
+                        [this] {
+                            return window_ ? window_->capture_back_buffer_png()
+                                           : std::vector<std::uint8_t>{};
+                        },
+                    .frame_evidence =
+                        [this] {
+                            ControlGpuHealthProvider::FrameObservation frame;
+                            frame.lifecycle_id = gpu_health_lifecycle_id_;
+                            frame.observed_cache_state = ControlGpuHealthProvider::CacheState::cold;
+                            frame.cache_provenance =
+                                ControlGpuHealthProvider::CacheProvenance::fresh_process;
+                            frame.trace_evidence_id = gpu_health_trace_id_;
+                            // The host producer answers for the frame the adapter
+                            // just captured: capture_back_buffer_png() runs before
+                            // this lambda, so the query reads that exact frame's
+                            // outcome. Hosts without submission evidence keep the
+                            // WindowHost default of false, so an absent producer is
+                            // never read as evidence.
+                            frame.gpu_submission_observed =
+                                window_ && window_->last_frame_gpu_submission_observed();
+                            // "gpu_submission" is no longer listed: a host producer
+                            // now answers for it. This list only selects a
+                            // diagnostic string; it is not a pass gate, so dropping
+                            // the entry unblocks nothing.
+                            frame.missing_trace_categories = {"native_present_timing",
+                                                              "pipeline_compile", "resource_upload",
+                                                              "shader_identity", "source_identity"};
+                            const auto* surface = window_ ? window_->gpu_surface() : nullptr;
+                            if (!surface)
+                                return frame;
+                            const auto adapter = surface->adapter_info();
+                            using SurfaceAdapterType = render::GpuSurface::AdapterType;
+                            using ControlAdapterType =
+                                ControlGpuHealthProvider::AdapterIdentity::Type;
+                            const auto adapter_type = [type = adapter.adapter_type] {
+                                switch (type) {
                                 case SurfaceAdapterType::integrated_gpu:
                                     return ControlAdapterType::integrated_gpu;
                                 case SurfaceAdapterType::discrete_gpu:
@@ -553,21 +589,21 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                                     return ControlAdapterType::cpu;
                                 case SurfaceAdapterType::unknown:
                                     return ControlAdapterType::unknown;
-                            }
-                            return ControlAdapterType::unknown;
-                        }();
-                        frame.adapter = ControlGpuHealthProvider::AdapterIdentity{
-                            .available = adapter.available,
-                            .native_bridge = adapter.native_bridge,
-                            .type = adapter_type,
-                            .null_backend = adapter.null_backend,
-                            .backend = adapter.backend_type,
-                            .name = adapter.name,
-                            .vendor = adapter.vendor,
-                            .architecture = adapter.architecture,
-                        };
-                        return frame;
-                    },
+                                }
+                                return ControlAdapterType::unknown;
+                            }();
+                            frame.adapter = ControlGpuHealthProvider::AdapterIdentity{
+                                .available = adapter.available,
+                                .native_bridge = adapter.native_bridge,
+                                .type = adapter_type,
+                                .null_backend = adapter.null_backend,
+                                .backend = adapter.backend_type,
+                                .name = adapter.name,
+                                .vendor = adapter.vendor,
+                                .architecture = adapter.architecture,
+                            };
+                            return frame;
+                        },
                 });
                 if (!gpu_health_view_adapter_)
                     return false;
@@ -588,9 +624,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                 ControlInstalledHostUiConfig ui_config{
                     .manifest = *manifest,
                     .runtime_evaluator = evaluator_,
-                    .redact_runtime_eval_result = [](std::string_view) {
-                        return std::optional<std::string>{R"({"redacted":true})"};
-                    },
+                    .redact_runtime_eval_result =
+                        [](std::string_view) {
+                            return std::optional<std::string>{R"({"redacted":true})"};
+                        },
                 };
                 if (needs_ui_targets)
                     ui_config.make_targets = [this](const ControlHostOpenResult& binding)
@@ -647,11 +684,10 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     }
                     page.next_sequence = next;
                     for (const auto& entry : entries) {
-                        page.entries.push_back({
-                            .sequence = entry.seq,
-                            .level = entry.level.substr(0, 32),
-                            .message = entry.message.substr(
-                                0, kControlDevelopmentMaximumTextBytes)});
+                        page.entries.push_back({.sequence = entry.seq,
+                                                .level = entry.level.substr(0, 32),
+                                                .message = entry.message.substr(
+                                                    0, kControlDevelopmentMaximumTextBytes)});
                     }
                     return page;
                 };
@@ -677,68 +713,73 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                     auto json = view::ViewInspector::to_json(*selected);
                     if (!request.include_geometry) {
                         try {
-                            json = choc::json::toString(
-                                without_geometry(choc::json::parse(json)), false);
+                            json = choc::json::toString(without_geometry(choc::json::parse(json)),
+                                                        false);
                         } catch (...) {
                             return std::nullopt;
                         }
                     }
-                    return ControlUiObservation{
-                        .tree_json = std::move(json),
-                        .generation = root_->root_structure_generation(),
-                        .node_count = count};
+                    return ControlUiObservation{.tree_json = std::move(json),
+                                                .generation = root_->root_structure_generation(),
+                                                .node_count = count};
                 },
-                .read_diagnostics = [this] {
-                    std::vector<ControlDiagnosticItem> items;
-                    if (test_input_) {
-                        const auto transport = test_input_->transport_snapshot();
-                        items.push_back({
-                            .id = "standalone.test-input",
-                            .severity = ControlDiagnosticSeverity::Info,
-                            .message = "transport=" +
-                                       std::string(transport.playing ? "playing" : "stopped") +
-                                       ", midi_overflow_count=" +
-                                       std::to_string(test_input_->midi_overflow_count())});
-                    }
-                    if (author_hooks_.diagnostics) {
-                        auto author = author_hooks_.diagnostics();
-                        items.insert(items.end(), std::make_move_iterator(author.begin()),
-                                     std::make_move_iterator(author.end()));
-                    }
-                    return items;
-                },
+                .read_diagnostics =
+                    [this] {
+                        std::vector<ControlDiagnosticItem> items;
+                        if (test_input_) {
+                            const auto transport = test_input_->transport_snapshot();
+                            items.push_back(
+                                {.id = "standalone.test-input",
+                                 .severity = ControlDiagnosticSeverity::Info,
+                                 .message = "transport=" +
+                                            std::string(transport.playing ? "playing" : "stopped") +
+                                            ", midi_overflow_count=" +
+                                            std::to_string(test_input_->midi_overflow_count())});
+                        }
+                        if (author_hooks_.diagnostics) {
+                            auto author = author_hooks_.diagnostics();
+                            items.insert(items.end(), std::make_move_iterator(author.begin()),
+                                         std::make_move_iterator(author.end()));
+                        }
+                        return items;
+                    },
                 .read_logs = std::move(read_logs),
-                .apply_test_note = [this](const ControlTestNoteInput& input) {
-                    if (!test_input_)
-                        return TestInputApplyResult::failure(
-                            "test_input_unavailable", "standalone test input is unavailable");
-                    return test_input_result(test_input_->inject_note({
-                        .kind = input.note_on
-                                    ? format::detail::StandaloneTestMidiKind::NoteOn
-                                    : format::detail::StandaloneTestMidiKind::NoteOff,
-                        .channel = static_cast<std::uint8_t>(input.channel + 1),
-                        .note = input.note,
-                        .velocity = static_cast<std::uint8_t>(
-                            std::lround(std::clamp(input.velocity, 0.0, 1.0) * 127.0))}));
-                },
-                .apply_test_transport = [this](const ControlTestTransportInput& input) {
-                    if (!test_input_ || !std::isfinite(sample_rate_) || sample_rate_ <= 0.0)
-                        return TestInputApplyResult::failure(
-                            "test_input_unavailable", "standalone transport input is unavailable");
-                    const auto samples = input.position_beats * 60.0 / input.tempo_bpm * sample_rate_;
-                    if (!std::isfinite(samples) || samples < 0.0 ||
-                        samples > static_cast<double>(std::numeric_limits<std::int64_t>::max()))
-                        return TestInputApplyResult::failure(
-                            "invalid_argument", "transport position exceeds the host range");
-                    return test_input_result(test_input_->update_transport({
-                        .playing = input.playing,
-                        .position_samples = static_cast<std::int64_t>(std::llround(samples)),
-                        .tempo_bpm = input.tempo_bpm}));
-                },
-                .release_test_input = [this](TestInputReleaseReason) {
-                    if (test_input_)
-                        test_input_->release_test_input();
-                },
+                .apply_test_note =
+                    [this](const ControlTestNoteInput& input) {
+                        if (!test_input_)
+                            return TestInputApplyResult::failure(
+                                "test_input_unavailable", "standalone test input is unavailable");
+                        return test_input_result(test_input_->inject_note(
+                            {.kind = input.note_on
+                                         ? format::detail::StandaloneTestMidiKind::NoteOn
+                                         : format::detail::StandaloneTestMidiKind::NoteOff,
+                             .channel = static_cast<std::uint8_t>(input.channel + 1),
+                             .note = input.note,
+                             .velocity = static_cast<std::uint8_t>(
+                                 std::lround(std::clamp(input.velocity, 0.0, 1.0) * 127.0))}));
+                    },
+                .apply_test_transport =
+                    [this](const ControlTestTransportInput& input) {
+                        if (!test_input_ || !std::isfinite(sample_rate_) || sample_rate_ <= 0.0)
+                            return TestInputApplyResult::failure(
+                                "test_input_unavailable",
+                                "standalone transport input is unavailable");
+                        const auto samples =
+                            input.position_beats * 60.0 / input.tempo_bpm * sample_rate_;
+                        if (!std::isfinite(samples) || samples < 0.0 ||
+                            samples > static_cast<double>(std::numeric_limits<std::int64_t>::max()))
+                            return TestInputApplyResult::failure(
+                                "invalid_argument", "transport position exceeds the host range");
+                        return test_input_result(test_input_->update_transport(
+                            {.playing = input.playing,
+                             .position_samples = static_cast<std::int64_t>(std::llround(samples)),
+                             .tempo_bpm = input.tempo_bpm}));
+                    },
+                .release_test_input =
+                    [this](TestInputReleaseReason) {
+                        if (test_input_)
+                            test_input_->release_test_input();
+                    },
                 .apply_authoring = author_hooks_.apply_authoring,
             };
         }
@@ -830,6 +871,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
         store_ = nullptr;
         test_input_ = nullptr;
         sample_rate_ = 0.0;
+        sample_region_target_.reset();
+        sample_region_generation_ = {};
     }
 
     bool ready() const noexcept override {
@@ -895,6 +938,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
     double sample_rate_ = 0.0;
     std::thread::id main_thread_;
     detail::StandaloneControlAuthorHooks author_hooks_;
+    std::shared_ptr<ControlSampleRegionTarget> sample_region_target_;
+    ControlSampleRegionGeneration sample_region_generation_;
 
     std::optional<std::uint64_t> stable_generation() const noexcept {
         if (!store_)
@@ -919,13 +964,11 @@ bool install_standalone_control_author_hooks_factory(
     if (!factory)
         return false;
     auto expected = static_cast<StandaloneControlAuthorHooksFactory>(nullptr);
-    return author_hooks_factory().compare_exchange_strong(expected, factory,
-                                                          std::memory_order_release,
-                                                          std::memory_order_relaxed);
+    return author_hooks_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
 }
 
-StandaloneControlAuthorHooks
-create_standalone_control_author_hooks(format::Processor& processor) {
+StandaloneControlAuthorHooks create_standalone_control_author_hooks(format::Processor& processor) {
     const auto factory = author_hooks_factory().load(std::memory_order_acquire);
     return factory ? factory(processor) : StandaloneControlAuthorHooks{};
 }
@@ -935,9 +978,8 @@ bool install_standalone_sequencer_state_channel_factory(
     if (!factory)
         return false;
     auto expected = static_cast<StandaloneSequencerStateChannelFactory>(nullptr);
-    return sequencer_channel_factory().compare_exchange_strong(expected, factory,
-                                                               std::memory_order_release,
-                                                               std::memory_order_relaxed);
+    return sequencer_channel_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
 }
 
 std::shared_ptr<state::SequencerStateChannel>
@@ -951,14 +993,12 @@ bool install_standalone_runtime_evaluator_factory(
     if (!factory)
         return false;
     auto expected = static_cast<StandaloneRuntimeEvaluatorFactory>(nullptr);
-    return evaluator_factory().compare_exchange_strong(expected, factory,
-                                                       std::memory_order_release,
+    return evaluator_factory().compare_exchange_strong(expected, factory, std::memory_order_release,
                                                        std::memory_order_relaxed);
 }
 
-std::shared_ptr<RuntimeEvaluator>
-create_standalone_runtime_evaluator(format::Processor& processor,
-                                    format::ViewBridge& bridge) {
+std::shared_ptr<RuntimeEvaluator> create_standalone_runtime_evaluator(format::Processor& processor,
+                                                                      format::ViewBridge& bridge) {
     const auto factory = evaluator_factory().load(std::memory_order_acquire);
     return factory ? factory(processor, bridge) : nullptr;
 }
@@ -976,6 +1016,22 @@ std::optional<ControlTimelineDocumentSessionSource>
 create_standalone_timeline_document_session_source(const ControlAdmissionPlan& plan) {
     const auto factory = timeline_document_session_factory().load(std::memory_order_acquire);
     return factory ? factory(plan) : std::nullopt;
+}
+
+bool install_standalone_sample_region_target_factory(
+    StandaloneSampleRegionTargetFactory factory) noexcept {
+    if (!factory)
+        return false;
+    auto expected = static_cast<StandaloneSampleRegionTargetFactory>(nullptr);
+    return sample_region_target_factory().compare_exchange_strong(
+        expected, factory, std::memory_order_release, std::memory_order_relaxed);
+}
+
+std::shared_ptr<ControlSampleRegionTarget>
+create_standalone_sample_region_target(format::Processor& processor, state::StateStore& store,
+                                       ControlSampleRegionGeneration& generation) {
+    const auto factory = sample_region_target_factory().load(std::memory_order_acquire);
+    return factory ? factory(processor, store, generation) : nullptr;
 }
 
 } // namespace detail

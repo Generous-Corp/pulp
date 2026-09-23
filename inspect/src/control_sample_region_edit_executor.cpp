@@ -1,0 +1,30 @@
+#include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/inspect/control_sample_region_edit_executor.hpp>
+#include <utility>
+
+namespace pulp::inspect {
+ControlOperationExecutor
+make_control_sample_region_edit_executor(ControlSampleRegionTargetResolver resolve) {
+    return [resolve = std::move(resolve)](
+               const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
+               const ControlExecutionContext& context) -> ControlExecutionOutcome {
+        if (!resolve || request.operation_id != "dev.pulp.graph/sample-region.edit@1" ||
+            request.operation_version != 1 ||
+            request.registration_id != plan.registration_id.value || !context.checkpoint)
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::InvalidRequest,
+                               .explanation = "region executor request binding is invalid"}};
+        if (events::MainThreadDispatcher::has_backend() &&
+            !events::MainThreadDispatcher::is_main_thread())
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::HostUnavailable,
+                               .explanation = "region control requires the host main thread"}};
+        const auto target = resolve(plan);
+        if (!target || !target->can_edit())
+            return {.terminal_state = ControlReceiptState::Failed,
+                    .result = {.result_code = ControlResultCode::HostUnavailable,
+                               .explanation = "exact region provider is unavailable"}};
+        return target->edit(plan, request, context);
+    };
+}
+} // namespace pulp::inspect

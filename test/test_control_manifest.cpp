@@ -33,8 +33,8 @@ bool schema_strings_are_bounded(choc::value::ValueView value) {
     if (value.isObject()) {
         const auto type = value["type"];
         if (type.isString() && type.getString() == "string" &&
-            !value.hasObjectMember("maxLength") &&
-            !value.hasObjectMember("pattern") && !value.hasObjectMember("enum"))
+            !value.hasObjectMember("maxLength") && !value.hasObjectMember("pattern") &&
+            !value.hasObjectMember("enum"))
             return false;
         for (std::uint32_t index = 0; index < value.size(); ++index) {
             if (!schema_strings_are_bounded(value.getObjectMemberAt(index).value))
@@ -300,6 +300,10 @@ TEST_CASE("control registry projects capability and operation metadata",
     INFO("registry digest: " << registry_digest);
     REQUIRE(registry_digest == kControlRegistryDigest);
     REQUIRE(registry.find("dev.pulp.state/parameter-gesture@1") != std::string::npos);
+    REQUIRE(registry.find("dev.pulp.graph/sample-region.read@1") != std::string::npos);
+    REQUIRE(registry.find("dev.pulp.graph/sample-region.edit@1") != std::string::npos);
+    REQUIRE(registry.find("offending_connection") != std::string::npos);
+    REQUIRE(registry.find("set_finite_constant") != std::string::npos);
     REQUIRE(registry.find("\"risk\":\"mutating\"") != std::string::npos);
     REQUIRE(registry.find("\"risk\":\"high-risk-mutation\"") != std::string::npos);
     REQUIRE(registry.find("\"risk\":\"critical\"") != std::string::npos);
@@ -338,7 +342,7 @@ TEST_CASE("control registry projects capability and operation metadata",
             CHECK(operation.receipt_binding.receipt_id_field == "receipt_id");
         }
     }
-    CHECK(receipt_binding_count == 11);
+    CHECK(receipt_binding_count == 12);
     std::set<std::string_view> operation_ids;
     std::set<std::string_view> schema_ids;
     for (const auto& operation : control_operation_registry()) {
@@ -364,10 +368,8 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::UiInput) {
             CHECK(operation.input_schema_json.find("\"view_generation\"") !=
                   std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"const\":\"text\"") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"maxLength\":4096") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"const\":\"text\"") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maxLength\":4096") != std::string_view::npos);
         }
         if (operation.capability == InspectorCapability::AuthoringTweaks) {
             CHECK(operation.input_schema_json.find("\"propertyNames\"") != std::string_view::npos);
@@ -380,8 +382,8 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::CaptureImage) {
             CHECK(operation.input_schema_json.find("\"oneOf\"") != std::string_view::npos);
             CHECK(operation.input_schema_json.find("\"const\":\"node\"") != std::string_view::npos);
-            CHECK(operation.output_schema_json.find("\"redaction_state\":{\"const\":\"redacted\"}") !=
-                  std::string_view::npos);
+            CHECK(operation.output_schema_json.find(
+                      "\"redaction_state\":{\"const\":\"redacted\"}") != std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"width\":{\"maximum\":1048576") !=
                   std::string_view::npos);
         }
@@ -397,8 +399,7 @@ TEST_CASE("control registry projects capability and operation metadata",
         if (operation.capability == InspectorCapability::GpuHealthRead) {
             CHECK(operation.id == "dev.pulp.gpu/health.read@1");
             CHECK(operation.result_kind == "response");
-            CHECK(operation.input_schema_json.find("\"properties\":{}") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"properties\":{}") != std::string_view::npos);
             CHECK(operation.output_schema_json.find(
                       "\"schema\": { \"const\": \"pulp.gpu-health-read-result.v1\" }") !=
                   std::string_view::npos);
@@ -417,10 +418,8 @@ TEST_CASE("control registry projects capability and operation metadata",
                   std::string_view::npos);
             CHECK(operation.output_schema_json.find("audio-enable-metering") !=
                   std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"maximum\":4096") !=
-                  std::string_view::npos);
-            CHECK(operation.input_schema_json.find("\"maximum\":64") !=
-                  std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":4096") != std::string_view::npos);
+            CHECK(operation.input_schema_json.find("\"maximum\":64") != std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"trace_id\"") != std::string_view::npos);
             CHECK(operation.output_schema_json.find("\"redacted\":{\"const\":true}") !=
                   std::string_view::npos);
