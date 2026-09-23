@@ -69,6 +69,8 @@ availability.
 | `dev.pulp.sequencer/transport.loop.read@1` (`sequencer.transport.loop.read`) | yes | yes | Fenced main-thread sensitive read of the live `MasterTransport` accepted loop-control state: loop endpoints, enabled flag, transport running state, and the loop-state sequence. A reset, failed prepare, or transport that has never prepared refuses `HostUnavailable` rather than reporting a loop no transport has accepted |
 | `dev.pulp.sequencer/transport.loop.write@1` (`sequencer.transport.loop.write`) | no | yes | Grant-controlled fenced main-thread receipt operation with action-discriminated `set-range`/`set-enabled` input. Endpoints arrive already snapped and are never snapped for the caller; the receipt carries the transport's own acceptance, and every `TransportError` maps to its own distinct refusal message |
 | `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | no | yes | Controller-gated background executor opens, applies, diffs, undoes, and redoes one exact-instance `timeline::DocumentSession`; the broker projects the session's own `CommandAuthority`/`ConflictCode` verdict rather than re-deciding it, refuses a writer profile escalation to `trusted`, and carries optimistic `expected_revision` plus `idempotency_key` replay through unchanged |
+| `dev.pulp.graph/sample-region.read@1` (`graph.sample-region.read`) | yes | yes | Host-main bounded read of prepared sample-region summaries and, when requested, the closed structural definition. |
+| `dev.pulp.graph/sample-region.edit@1` (`graph.sample-region.edit`) | no | yes | Develop-only host-main transaction over one private prepared topology candidate; lease, generation, proof, cancellation, and atomic publication are required. |
 | `dev.pulp.unavailable/operation@1` (`unavailable`) | no | no | Filesystem/editor-launch operations remain unavailable by policy |
 <!-- END GENERATED capability-matrix -->
 
@@ -111,6 +113,8 @@ executor on the target host fails closed.
 | `dev.pulp.runtime/reload@1` | `dev.pulp.runtime/reload@1` (`runtime.reload`) | `receipt` |
 | `dev.pulp.runtime/evaluate@1` | `dev.pulp.runtime/evaluate@1` (`runtime.eval`) | `receipt` |
 | `dev.pulp.timeline/document-session@1` | `dev.pulp.timeline/document-session@1` (`timeline.document.session`) | `receipt` |
+| `dev.pulp.graph/sample-region.read@1` | `dev.pulp.graph/sample-region.read@1` (`graph.sample-region.read`) | `response` |
+| `dev.pulp.graph/sample-region.edit@1` | `dev.pulp.graph/sample-region.edit@1` (`graph.sample-region.edit`) | `receipt` |
 | `dev.pulp.artifact/read@1` | `dev.pulp.artifact/read@1` (`artifact.read`) | `artifact-chunk` |
 | `dev.pulp.sequencer/state.read@1` | `dev.pulp.sequencer/state.read@1` (`sequencer.state.read`) | `response` |
 | `dev.pulp.sequencer/state.edit@1` | `dev.pulp.sequencer/state.edit@1` (`sequencer.state.edit`) | `receipt` |

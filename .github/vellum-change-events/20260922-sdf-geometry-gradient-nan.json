@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260922-sdf-geometry-gradient-nan",
+  "kind": "change",
+  "created_at": "2026-09-22T22:28:13Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "pulp_geom() normalized its central-difference gradient without guarding a zero-length result. At an exact extremum of the distance field both differences cancel, so normalize() divides by zero and the fragment's gradient becomes NaN, propagating into any author expression derived from it. The change returns a zero direction there instead, matching the substrate's existing rule that degeneracy yields a defined neutral rather than a NaN. It is a correctness fix inside the existing Skia shader composer: no API, no authority boundary, no alternate renderer, and no change to any non-degenerate fragment. The capability is Pulp-only because Pulp still builds and ships this implementation independently and there is no counterpart Vellum commit to backport from.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF geometry gradient stays finite at a field extremum",
+    "tools/scripts/confirm_failure.sh"
+  ],
+  "disposition": "pulp-only"
+}

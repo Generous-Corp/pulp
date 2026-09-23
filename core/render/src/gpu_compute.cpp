@@ -1521,6 +1521,8 @@ public:
         const uint32_t mul_wg = ((batch * n) + 255u) / 256u;         // batched pairs
 
         queue_.WriteBuffer(plan.buf_a, 0, in_complex, big);
+        ++stats_->write_buffer_calls;
+        stats_->write_buffer_bytes += big;
 
         wgpu::CommandEncoderDescriptor enc_desc{};
         auto encoder = device_.CreateCommandEncoder(&enc_desc);
@@ -3126,6 +3128,8 @@ public:
                           ts ? dev_ts_qs_ : wgpu::QuerySet{});
         wgpu::Buffer& inv_buf = (plan.log2n & 1u) ? plan.buf_b : plan.buf_a;
         encoder.CopyBufferToBuffer(inv_buf, 0, readback_buf, 0, big);
+        ++stats_->output_copy_calls;
+        stats_->output_copy_bytes += big;
         if (ts) {
             encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
             encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, ts_buf, 0, ts_bytes);
@@ -3258,6 +3262,8 @@ public:
             }
 
             std::memcpy(req->dest, data, req->size);
+            ++stats_->mapped_readback_memcpy_calls;
+            stats_->mapped_readback_memcpy_bytes += req->size;
             req->buffer.Unmap();
             if (pool_) pool_->release(req->buffer);
             complete(*req, ReadbackStatus::Success, req->size);
@@ -4208,6 +4214,7 @@ private:
         // inferred later from a completion status — a map can resolve and still
         // complete Expired, and the browser stats block reports what the GPU
         // actually did.
+        ++stats_->map_async_calls;
         buffer.MapAsync(wgpu::MapMode::Read, 0, size,
             kAsyncCallbackMode,
             [req, stats = std::weak_ptr<AsyncStats>(stats_)](

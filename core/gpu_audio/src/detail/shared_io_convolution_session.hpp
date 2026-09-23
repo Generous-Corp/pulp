@@ -72,8 +72,10 @@ class SharedIoConvolutionSession {
     // Callback only: fixed bridge records and the executor watermark, with no
     // provider/program/plan access.
     Callback begin_callback(std::span<const float> samples) noexcept;
-    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence) noexcept {
-        return prepared_ ? pipeline_.begin_callback(samples, sequence) : Callback{};
+    Callback begin_callback(std::span<const float> samples, std::uint64_t sequence,
+                            std::uint64_t callback_start_ns = 0) noexcept {
+        return prepared_ ? pipeline_.begin_callback(samples, sequence, callback_start_ns)
+                         : Callback{};
     }
     void request_recovery(SharedIoRecoveryReason reason) noexcept {
         pipeline_.request_recovery(reason);
@@ -81,9 +83,11 @@ class SharedIoConvolutionSession {
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return pipeline_.recovery_reason();
     }
-    bool complete_callback_delivery(const Callback& callback,
-                                    SharedIoDeliveryDisposition actual) noexcept {
-        return pipeline_.complete_callback_delivery(callback, actual);
+    bool complete_callback_delivery(const Callback& callback, SharedIoDeliveryDisposition actual,
+                                    std::uint64_t callback_end_ns = 0,
+                                    std::uint64_t result_visible_ns = 0) noexcept {
+        return pipeline_.complete_callback_delivery(callback, actual, callback_end_ns,
+                                                    result_visible_ns);
     }
     Delivery consume_output(const Callback&, std::span<float> output,
                             bool defer_delivery = false) noexcept;

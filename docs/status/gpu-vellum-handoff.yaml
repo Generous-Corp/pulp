@@ -451,8 +451,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/view/platform/mac/window_host_mac.mm",
           "state": "pulp-owned-retained",
-          "revision": "0f6842ef3372e05b63eca8e49f07a26bee849a07",
-          "object_id": "98ec0a3282ad6881a4e2cdca7f85dc0f2c56f6ee",
+          "revision": "a8c7a1ab73f6c445131fbd45fe1c1609ad3653a1",
+          "object_id": "a7531128b0f97f8ad6fd085a695876536b7e275a",
           "object_type": "blob"
         },
         {
@@ -662,16 +662,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
           "state": "pulp-owned-retained",
-          "revision": "0f1ca156abb02184e8846e58baba41d2848ee4fc",
-          "object_id": "391a1cfdcbf6dc255803fc60c2cc2cc5305d7e71",
+          "revision": "23f3a9f23b2365ada61b09bec3bcaebf026893be",
+          "object_id": "1eca0c289c7b6b09f236765b39e67d958e75db80",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
           "state": "pulp-owned-retained",
-          "revision": "72dc09c78b7413d5cfd906909b340709e262e489",
-          "object_id": "e3e83922fd878e82735232e709536359afc365f9",
+          "revision": "bc2d0400732cd6a9f9b4e8f5fe0de49a70dc9c51",
+          "object_id": "690da712c63c2d7229215530d50743a040a872a7",
           "object_type": "blob"
         },
         {
@@ -710,8 +710,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_view_adapter.cpp",
           "state": "pulp-owned-retained",
-          "revision": "76dcfda55488594867735e16bd703c05d3dc3b04",
-          "object_id": "127b356f4b2cdf87beef2d08f3014d8eb8fb3972",
+          "revision": "bc2d0400732cd6a9f9b4e8f5fe0de49a70dc9c51",
+          "object_id": "1154c1367d50bf86c93a75ef7b77580afed554a3",
           "object_type": "blob"
         },
         {
@@ -734,16 +734,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "cf9990cc445e10a8de43732342e32cec0a4da78a",
-          "object_id": "37a52a586e2c3c7c180446f0dcc1fd808a75aa2f",
+          "revision": "75c99ea7f47be2ee74bc4559f30255e594d93eec",
+          "object_id": "1ea0d37754a7d46bf2a64a9cb1325717d8df35fc",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_standalone_product.cpp",
           "state": "pulp-owned-retained",
-          "revision": "37183e139792809225c83edb2293870239906856",
-          "object_id": "7bec427230a3c178a0999c65d03bc9646b702448",
+          "revision": "23f3a9f23b2365ada61b09bec3bcaebf026893be",
+          "object_id": "0a0f35314e687ce0a660199a3a4c65a121944590",
           "object_type": "blob"
         },
         {
@@ -2027,8 +2027,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "core/render/src/skia_surface.cpp",
           "state": "framework-authoritative-transferred-compatibility",
-          "revision": "929941dfe689f18eb6e12c36e559180e638bab0a",
-          "object_id": "fb58828d9dc222b794016bca9c2c99ff6a81787e",
+          "revision": "1e021eb56079586031216f895541bd48f52fd7df",
+          "object_id": "dc0af5c051bb022b958ccfa52a6f7e0166797ccd",
           "object_type": "blob"
         },
         {
@@ -2751,8 +2751,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/skia-gpu-build/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "72dc09c78b7413d5cfd906909b340709e262e489",
-          "object_id": "c56c11cae6b17fc2e128530aec5f65ad021b2138",
+          "revision": "02e5610a5c302d6b63870bf45eed278d6452ab57",
+          "object_id": "c9a2e052cccae0ae0c84a84d6e56072f6b0a1347",
           "object_type": "blob"
         },
         {
@@ -2775,8 +2775,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/view-bridge/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "f6fae2aed2cee6a7ce41bf043e971d834dbc68f0",
-          "object_id": "60a950a880d28366d546e031068cdb3b34f537dc",
+          "revision": "db480719f9979cbc9a3a1cd8dc9e637168171f52",
+          "object_id": "ffab7fd7ed2ac1d27f7c9c82b590c82ab8e4a8a7",
           "object_type": "blob"
         },
         {
@@ -2791,8 +2791,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "docs/validation/gpu-first-visible-a3-acceptance.md",
           "state": "pulp-owned-retained",
-          "revision": "0f1ca156abb02184e8846e58baba41d2848ee4fc",
-          "object_id": "391a1cfdcbf6dc255803fc60c2cc2cc5305d7e71",
+          "revision": "23f3a9f23b2365ada61b09bec3bcaebf026893be",
+          "object_id": "1eca0c289c7b6b09f236765b39e67d958e75db80",
           "object_type": "blob"
         }
       ],

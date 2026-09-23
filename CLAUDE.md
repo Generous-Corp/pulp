@@ -1014,6 +1014,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+- A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes. → `tools/scripts/pr_flow_audit.py`
+  - ⚠ **Cannot see:** Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.

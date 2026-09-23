@@ -3,6 +3,7 @@
 #include "allpass_graph.hpp"
 #include <pulp/format/processor.hpp>
 #include <string_view>
+#include <vector>
 
 namespace pulp::examples {
 
@@ -48,6 +49,7 @@ class SampleRegionAllpassProcessor final : public format::Processor {
     host::SignalGraph graph_;
     std::unique_ptr<host::SignalGraph::PreparedTopologyEdit> initial_edit_;
     std::string error_;
+    std::vector<float> input_alias_scratch_;
     int max_buffer_size_ = 0;
     bool initialized_ = false;
     bool ready_ = false;

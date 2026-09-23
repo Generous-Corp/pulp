@@ -29,13 +29,23 @@ case "${1:-inventory}" in
     : "${T1_INSTANCE_ID:?set T1_INSTANCE_ID before running t1-parameter-gesture}"
     pulp control call --instance "${T1_INSTANCE_ID}" dev.pulp.state/parameter-gesture@1 --profile develop --params '{"parameter_id":1,"normalized_value":0.5,"idempotency_key":"phase11-example-gesture"}' --json
     ;;
+  sample-region-read)
+    # T1: Read one prepared sample region definition and proof from an exact instance.
+    : "${T1_INSTANCE_ID:?set T1_INSTANCE_ID before running sample-region-read}"
+    pulp control call --instance "${T1_INSTANCE_ID}" dev.pulp.graph/sample-region.read@1 --profile inspect-readonly --params '{"include_definition":true}' --json
+    ;;
+  sample-region-edit)
+    # T1: Apply one bounded sample-region graph edit after broker-owned develop consent.
+    : "${T1_INSTANCE_ID:?set T1_INSTANCE_ID before running sample-region-edit}"
+    pulp control call --instance "${T1_INSTANCE_ID}" dev.pulp.graph/sample-region.edit@1 --profile develop --params '{"region_id":1,"expected_graph_generation":1,"actions":[{"op":"set_finite_constant","node_id":1,"value":0.5}]}' --json
+    ;;
   revoke)
     # management: Revoke a broker-issued grant owned by this authenticated client.
     : "${GRANT_ID:?set GRANT_ID before running revoke}"
     pulp control revoke --grant "${GRANT_ID}" --json
     ;;
   *)
-    echo "usage: $0 {inventory|status|t0-offline-render|t1-state-read|t1-parameter-gesture|revoke}" >&2
+    echo "usage: $0 {inventory|status|t0-offline-render|t1-state-read|t1-parameter-gesture|sample-region-read|sample-region-edit|revoke}" >&2
     exit 2
     ;;
 esac
