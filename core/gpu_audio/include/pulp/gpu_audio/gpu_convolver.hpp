@@ -205,10 +205,13 @@ class GpuConvolver : public GpuAudioNode {
                                                    const audio::BufferView<const float>& input,
                                                    audio::BufferView<float>& output,
                                                    std::uint32_t n, std::uint64_t sequence,
-                                                   bool input_valid) noexcept;
+                                                   bool input_valid,
+                                                   std::uint64_t callback_start_ns) noexcept;
     static std::uint32_t service_realtime_shared_io(void* self, std::uint64_t now_ns) noexcept;
     static bool fence_realtime_shared_io(void* self) noexcept;
-    static void complete_realtime_shared_io(void*, std::uint64_t, std::uint8_t) noexcept;
+    static void complete_realtime_shared_io(void*, std::uint64_t, std::uint8_t,
+                                            std::uint64_t callback_end_ns,
+                                            std::uint64_t result_visible_ns) noexcept;
     static std::uint64_t next_realtime_shared_io_sequence(void*) noexcept;
     bool has_realtime_shared_io() const noexcept;
 
@@ -235,6 +238,7 @@ class GpuConvolver : public GpuAudioNode {
     bool trial_configured_ = false;
     bool trial_enable_trace_ = false;
     bool trial_capture_admissions_ = false;
+    bool trial_capture_callback_timing_ = false;
     std::uint32_t trial_success_stride_ = 1;
     std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
     std::uint64_t trial_completion_wait_ns_ = 0;

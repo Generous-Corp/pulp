@@ -284,7 +284,22 @@ target_compile_definitions(pulp-test-control-trusted-host-e2e PRIVATE
 add_dependencies(pulp-test-control-trusted-host-e2e
     pulp-control-trusted-host-e2e-fixture)
 if(APPLE)
-    target_link_options(pulp-control-trusted-host-e2e-fixture PRIVATE LINKER:-dead_strip)
+    # -dead_strip_dylibs is load-bearing, not an optimisation. This target is
+    # ad-hoc signed with --options library below, and library validation admits
+    # only platform-signed or same-Team-ID libraries. An ad-hoc signature has no
+    # Team ID, so ANY third-party dylib reaching the link makes the binary
+    # unexecutable: dyld refuses it at exec ("different Team IDs") and the
+    # process dies before main(). -dead_strip removes unused CODE but never an
+    # LC_LOAD_DYLIB entry, so it does not prevent this on its own.
+    #
+    # That is not hypothetical. pulp::inspect-runtime links pulp::host PUBLIC,
+    # which reaches pulp::render and libwgpu_native.dylib. Whether wgpu is
+    # present is decided at configure time from the machine-wide FetchContent
+    # cache, so the fixture built fine for months and then began dying at exec
+    # with no source change - taking every control E2E test that spawns it with
+    # it, because a fixture that cannot start never answers its preflight.
+    target_link_options(pulp-control-trusted-host-e2e-fixture PRIVATE
+        LINKER:-dead_strip LINKER:-dead_strip_dylibs)
     find_program(_pulp_trusted_host_e2e_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-control-trusted-host-e2e-fixture POST_BUILD
         COMMAND "${_pulp_trusted_host_e2e_codesign}" --force --sign - --options library
@@ -385,6 +400,15 @@ target_link_libraries(pulp-test-control-host-preflight PRIVATE
     pulp::inspect-control Catch2::Catch2WithMain)
 add_dependencies(pulp-test-control-host-preflight pulp-control-host-preflight-fixture)
 if(APPLE)
+    # Same library-validation contract as the trusted-host fixture above: both
+    # of these are ad-hoc signed with --options library, so neither may carry a
+    # third-party dylib. They link the narrower pulp::inspect-control today and
+    # are not currently affected, but the signing choice is what creates the
+    # hazard, so the guard belongs with it rather than with the symptom.
+    target_link_options(pulp-test-control-host-preflight PRIVATE
+        LINKER:-dead_strip_dylibs)
+    target_link_options(pulp-control-host-preflight-fixture PRIVATE
+        LINKER:-dead_strip_dylibs)
     find_program(_pulp_preflight_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-test-control-host-preflight POST_BUILD
         COMMAND "${_pulp_preflight_test_codesign}" --force --sign - --options library

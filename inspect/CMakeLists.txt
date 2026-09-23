@@ -155,6 +155,14 @@ target_link_libraries(pulp-inspect-runtime
     PRIVATE
         pulp::tool-gpu-health-model)
 
+if(TARGET pulp::host)
+    target_sources(pulp-inspect-runtime PRIVATE
+        src/control_sample_region_target.cpp
+        src/control_sample_region_read_executor.cpp
+        src/control_sample_region_edit_executor.cpp)
+    target_link_libraries(pulp-inspect-runtime PUBLIC pulp::host)
+endif()
+
 # The canonical ordinary-Standalone host bridge is isolated from both the base
 # Standalone archive and every production-stripped plugin artifact. Only an
 # explicitly control-enabled executable links this archive and installs its
@@ -174,6 +182,11 @@ target_include_directories(pulp-inspect-standalone-runtime
         $<INSTALL_INTERFACE:include>)
 target_link_libraries(pulp-inspect-standalone-runtime
     PUBLIC pulp::inspect-runtime pulp::format)
+
+if(TARGET pulp::host)
+    target_compile_definitions(pulp-inspect-standalone-runtime PRIVATE
+        PULP_HAS_SAMPLE_REGION_CONTROL=1)
+endif()
 
 # Exact-target UI capture/input remains an optional adapter so the common
 # control runtime does not acquire a renderer dependency.

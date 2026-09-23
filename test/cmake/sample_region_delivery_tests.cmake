@@ -27,3 +27,7 @@ endif()
 if(TARGET pulp-test-lv2-adapter AND TARGET sample-region-allpass-core)
     target_link_libraries(pulp-test-lv2-adapter PRIVATE sample-region-allpass-core)
 endif()
+
+# Inspector sample-region control proofs share this already included manifest so
+# the test/CMakeLists hub remains untouched while its path is owned elsewhere.
+include("${CMAKE_CURRENT_LIST_DIR}/sample_region_control_tests.cmake")

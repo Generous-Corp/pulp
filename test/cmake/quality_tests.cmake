@@ -806,6 +806,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME pr-check-triage-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_check_triage.py")
 
+    # PR flow audit: the bucket classifier that decides whether an open PR is
+    # moving, mechanically recoverable, or waiting on a human — including the
+    # workflow-condition evaluation that tells a failure at a step which no
+    # longer runs for `pull_request` apart from one that still does, and the
+    # fail-closed rule that keeps --fix away from anything undetermined.
+    add_test(NAME pr-flow-audit-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_flow_audit.py")
+
     # Decisions contract: assert the shipped .agents/contract.toml is always
     # schema-valid (a broken contract must fail the build, not CI).
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
