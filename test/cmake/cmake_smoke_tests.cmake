@@ -504,6 +504,15 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-output PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        # A gate that cannot run must block, never pass: the hook used to
+        # print "internal error" on any exit code above 1 and continue, so a
+        # gate that could not find its config reported success.
+        add_test(NAME prepush-cannot-measure
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_cannot_measure.py)
+        set_tests_properties(prepush-cannot-measure PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
         add_test(NAME prepush-gate-supervisor
             COMMAND ${PULP_PYTHON3_FOR_TESTS}
                 ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_gate_supervisor.py)
