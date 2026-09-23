@@ -6176,7 +6176,7 @@
           "path": "inspect/include/pulp/inspect/control_registry_digest.inc",
           "needles": [
             "PULP_CONTROL_REGISTRY_DIGEST_V1",
-            "fbeb069e682ae85827f48354b3dc43032fb1515cac483108cacc889d5b07e809"
+            "f402b3a0e12ecd0417669029d27353c46a7d114e47f32443cba616fe8960c99e"
           ]
         }
       ],
@@ -8852,7 +8852,7 @@
               "kind": "test",
               "path": "test/test_control_manifest.cpp",
               "needles": [
-                "CHECK(receipt_binding_count == 11);"
+                "CHECK(receipt_binding_count == 12);"
               ]
             },
             {
