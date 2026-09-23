@@ -27,6 +27,7 @@ bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
     sample_count_ = count;
     capacity_ = config.capacity;
     lead_blocks_ = config.lead_blocks;
+    capture_callback_timing_ = config.capture_callback_timing;
     next_sequence_ = first_sequence;
     prepared_ = true;
     return activate_epoch(epoch);
@@ -70,8 +71,8 @@ bool SharedIoStampedBridge::release(Queue& queue, const Lease& lease) noexcept {
 }
 
 SharedIoStampedBridge::Callback
-SharedIoStampedBridge::begin_callback(std::span<const float> samples,
-                                      std::uint64_t sequence) noexcept {
+SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint64_t sequence,
+                                      std::uint64_t callback_start_ns) noexcept {
     if (!prepared_)
         return {};
     if (callback_open_ || delivery_pending_ || samples.size() != sample_count_) {
@@ -89,6 +90,7 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples,
         return {{}, Admission::SequenceExhausted};
     current_ = {delivery_epoch(), next_sequence_++};
     callback_open_ = true;
+    callback_start_ns_ = capture_callback_timing_ ? callback_start_ns : 0;
     observed_delivery_ = Delivery::Invalid;
     if (trace_telemetry_)
         trace_telemetry_->record_callback_block(false);
@@ -268,8 +270,10 @@ void SharedIoStampedBridge::trace_delivery(Delivery delivery) noexcept {
     (void)trace_->publish_callback(record);
 }
 
-bool SharedIoStampedBridge::complete_callback_delivery(
-    const Callback& callback, SharedIoDeliveryDisposition actual) noexcept {
+bool SharedIoStampedBridge::complete_callback_delivery(const Callback& callback,
+                                                       SharedIoDeliveryDisposition actual,
+                                                       std::uint64_t callback_end_ns,
+                                                       std::uint64_t result_visible_ns) noexcept {
     if (!delivery_pending_ || callback_open_ || !callback.valid() || callback.stamp != current_ ||
         actual == SharedIoDeliveryDisposition::None ||
         (actual == SharedIoDeliveryDisposition::Priming && trace_output_eligible_) ||
@@ -320,6 +324,13 @@ bool SharedIoStampedBridge::complete_callback_delivery(
         }
     }
     record.reason = record.delivery_reason;
+    if (capture_callback_timing_ && callback_start_ns_ != 0 &&
+        callback_end_ns >= callback_start_ns_ && result_visible_ns >= callback_end_ns) {
+        record.callback_start_ns = callback_start_ns_;
+        record.callback_end_ns = callback_end_ns;
+        record.result_visible_ns = result_visible_ns;
+        record.callback_timing_available = true;
+    }
     (void)trace_->publish_callback(record);
     return true;
 }

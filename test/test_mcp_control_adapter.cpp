@@ -65,10 +65,11 @@ class FakeTransport final : public ControlClientTransport {
         if (const auto* offer = std::get_if<ControlNegotiationOffer>(&envelope->payload)) {
             record_timeout("negotiate", timeout);
             state_->offer = *offer;
-            return encoded_response(ControlEnvelope{.payload = ControlNegotiationResult{
-                                                        .status = ControlNegotiationStatus::Accepted,
-                                                        .selected_version = kControlProtocolVersion,
-                                                        .features = {"artifacts", "cancellation", "progress", "receipts"}}});
+            return encoded_response(ControlEnvelope{
+                .payload = ControlNegotiationResult{
+                    .status = ControlNegotiationStatus::Accepted,
+                    .selected_version = kControlProtocolVersion,
+                    .features = {"artifacts", "cancellation", "progress", "receipts"}}});
         }
         if (const auto* request = std::get_if<ControlRequestEnvelope>(&envelope->payload)) {
             record_timeout("request", timeout);
@@ -77,9 +78,9 @@ class FakeTransport final : public ControlClientTransport {
                 std::unique_lock lock(state_->request_mutex);
                 state_->request_started = true;
                 state_->request_condition.notify_all();
-                if (!state_->request_condition.wait_for(
-                        lock, pulp::test::kProgressDeadline,
-                        [&] { return state_->cancellation_seen; })) {
+                if (!state_->request_condition.wait_for(lock, pulp::test::kProgressDeadline, [&] {
+                        return state_->cancellation_seen;
+                    })) {
                     return {.error_code = "cancellation-timeout",
                             .explanation = "test transport did not observe cancellation"};
                 }
@@ -95,17 +96,19 @@ class FakeTransport final : public ControlClientTransport {
             const auto detail = request->operation_id == "dev.pulp.trace/session-control@1"
                                     ? R"({"active":true,"compiled_in":true,"ok":true})"
                                     : R"({"generation":1,"parameters":[]})";
-            return encoded_response(ControlEnvelope{.payload = ControlReceiptEnvelope{
-                                                        .request_id = request->request_id,
-                                                        .receipt_id = "receipt-1",
-                                                        .operation_id = request->operation_id,
-                                                        .operation_version = request->operation_version,
-                                                        .state = revoked ? ControlReceiptState::CompletedAfterRevocation
-                                                                         : ControlReceiptState::Completed,
-                                                        .result_code = revoked ? std::optional{ControlResultCode::CompletedAfterRevocation}
-                                                                               : std::nullopt,
-                                                        .explanation = revoked ? "grant revoked while applying" : "",
-                                                        .detail_json = detail}});
+            return encoded_response(ControlEnvelope{
+                .payload = ControlReceiptEnvelope{
+                    .request_id = request->request_id,
+                    .receipt_id = "receipt-1",
+                    .operation_id = request->operation_id,
+                    .operation_version = request->operation_version,
+                    .state = revoked ? ControlReceiptState::CompletedAfterRevocation
+                                     : ControlReceiptState::Completed,
+                    .result_code = revoked
+                                       ? std::optional{ControlResultCode::CompletedAfterRevocation}
+                                       : std::nullopt,
+                    .explanation = revoked ? "grant revoked while applying" : "",
+                    .detail_json = detail}});
         }
         if (const auto* cancel = std::get_if<ControlCancelEnvelope>(&envelope->payload)) {
             {
@@ -113,13 +116,13 @@ class FakeTransport final : public ControlClientTransport {
                 state_->cancellation_seen = true;
             }
             state_->request_condition.notify_all();
-            return encoded_response(ControlEnvelope{.payload = ControlReceiptEnvelope{
-                                                        .request_id = cancel->request_id,
-                                                        .receipt_id = "receipt-cancel",
-                                                        .operation_id = "dev.pulp.state/read@1",
-                                                        .state = ControlReceiptState::Running,
-                                                        .explanation = "cancellation requested",
-                                                        .detail_json = "{}"}});
+            return encoded_response(ControlEnvelope{
+                .payload = ControlReceiptEnvelope{.request_id = cancel->request_id,
+                                                  .receipt_id = "receipt-cancel",
+                                                  .operation_id = "dev.pulp.state/read@1",
+                                                  .state = ControlReceiptState::Running,
+                                                  .explanation = "cancellation requested",
+                                                  .detail_json = "{}"}});
         }
         return {.error_code = "unexpected", .explanation = "unexpected envelope"};
     }
@@ -132,7 +135,8 @@ class FakeTransport final : public ControlClientTransport {
         ControlArtifactMetadata metadata;
         metadata.artifact_id = std::string(artifact_id);
         metadata.lineage.producer_registration_id = "registration-1";
-        metadata.lineage.instance_id = state_->artifact_wrong_instance ? "instance-2" : "instance-1";
+        metadata.lineage.instance_id =
+            state_->artifact_wrong_instance ? "instance-2" : "instance-1";
         metadata.lineage.publication_id = "publication-1";
         metadata.sha256 = std::string(64, 'a');
         metadata.byte_size = state_->artifact_chunked ? 6 : 3;
@@ -164,9 +168,10 @@ class FakeSession final : public ControlMcpSession {
     explicit FakeSession(std::shared_ptr<FakeState> state)
         : state_(std::move(state)), transport_(state_) {}
 
-    ControlClientTransport& transport() override { return transport_; }
-    ControlManagementResult manage(std::string_view command,
-                                   std::string_view params_json,
+    ControlClientTransport& transport() override {
+        return transport_;
+    }
+    ControlManagementResult manage(std::string_view command, std::string_view params_json,
                                    std::chrono::milliseconds timeout) override {
         if (state_->timeout_step_advance > std::chrono::milliseconds::zero()) {
             state_->timeout_steps.emplace_back(std::string(command), timeout);
@@ -175,21 +180,24 @@ class FakeSession final : public ControlMcpSession {
         if (command == "instances") {
             if (state_->inventory_session_error_once) {
                 state_->inventory_session_error_once = false;
-                return {.status_id = "session-superseded",
-                        .explanation = "test session expired"};
+                return {.status_id = "session-superseded", .explanation = "test session expired"};
             }
             if (state_->inventory_empty_until_launch && !state_->installed_host_launched)
                 return {.status_id = "completed",
                         .data_json = R"({"schema":"pulp.control.instances.v1","instances":[]})"};
-            return {.status_id = "completed",
-                    .data_json = R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"dev.pulp.fixture","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1"}]})"};
+            return {
+                .status_id = "completed",
+                .data_json =
+                    R"({"schema":"pulp.control.instances.v1","instances":[{"instance_id":"instance-1","plugin_id":"dev.pulp.fixture","profile":"developer-local","publication_id":"publication-1","registration_id":"registration-1","session_id":"session-1"}]})"};
         }
         if (command == "host-prepare-installed") {
             const auto params = choc::json::parse(params_json);
             REQUIRE(params["host_id"].getString() == "ordinary-standalone");
             ++state_->installed_host_prepares;
-            return {.status_id = "prepared",
-                    .data_json = R"({"schema":"pulp.control.host-prepare-installed.v1","host_id":"ordinary-standalone","inventory_id":"inventory-1"})"};
+            return {
+                .status_id = "prepared",
+                .data_json =
+                    R"({"schema":"pulp.control.host-prepare-installed.v1","host_id":"ordinary-standalone","inventory_id":"inventory-1"})"};
         }
         if (command == "host-launch") {
             const auto params = choc::json::parse(params_json);
@@ -197,7 +205,8 @@ class FakeSession final : public ControlMcpSession {
             ++state_->installed_host_launches;
             state_->installed_host_launched = true;
             return {.status_id = "launched",
-                    .data_json = R"({"schema":"pulp.control.host-launch.v1","inventory_id":"inventory-1"})"};
+                    .data_json =
+                        R"({"schema":"pulp.control.host-launch.v1","inventory_id":"inventory-1"})"};
         }
         if (command == "grant-request") {
             ++state_->grant_requests;
@@ -207,22 +216,28 @@ class FakeSession final : public ControlMcpSession {
                 state_->grant_authorities.push_back(
                     "operation:" + std::string(params["operation_id"].getString()));
             else if (params.hasObjectMember("profile"))
-                state_->grant_authorities.push_back(
-                    "profile:" + std::string(params["profile"].getString()));
+                state_->grant_authorities.push_back("profile:" +
+                                                    std::string(params["profile"].getString()));
             if (params.hasObjectMember("operation_id") &&
                 params["operation_id"].getString() == "dev.pulp.runtime/evaluate@1")
                 return {.status_id = "consent-required",
                         .explanation = "broker-owned consent is required"};
-            return {.status_id = "granted",
-                    .data_json = R"({"schema":"pulp.control.grant.v1","grant_id":"grant-1","instance_id":"instance-1"})"};
+            return {
+                .status_id = "granted",
+                .data_json =
+                    R"({"schema":"pulp.control.grant.v1","grant_id":"grant-1","instance_id":"instance-1"})"};
         }
         if (command == "revoke")
             return {.status_id = "revoked",
                     .data_json = R"({"schema":"pulp.control.revoke.v1","grant_id":"grant-1"})"};
         return {.status_id = "invalid-request", .explanation = "unsupported"};
     }
-    std::string_view client_id() const override { return "client-1"; }
-    void set_progress_sink(ProgressSink sink) override { state_->progress = std::move(sink); }
+    std::string_view client_id() const override {
+        return "client-1";
+    }
+    void set_progress_sink(ProgressSink sink) override {
+        state_->progress = std::move(sink);
+    }
 
   private:
     std::shared_ptr<FakeState> state_;
@@ -277,7 +292,8 @@ TEST_CASE("control MCP bindings are generated from every canonical operation",
         auto suffix = std::string(operation.id.substr(std::string_view("dev.pulp.").size()));
         suffix.resize(suffix.size() - 2);
         for (auto& character : suffix)
-            if (!std::isalnum(static_cast<unsigned char>(character))) character = '_';
+            if (!std::isalnum(static_cast<unsigned char>(character)))
+                character = '_';
         if (capability_is_grantable(operation.capability) ||
             operation.capability == InspectorCapability::ArtifactRead) {
             REQUIRE(tools.find("\"name\":\"pulp_control_" + suffix + "\"") != std::string::npos);
@@ -288,8 +304,9 @@ TEST_CASE("control MCP bindings are generated from every canonical operation",
         }
     }
     REQUIRE(tools.find("\"required\":[\"instance_id\",\"input\"]") != std::string::npos);
-    REQUIRE(tools.find("\"oneOf\":[{\"required\":[\"profile\"]},{\"required\":[\"operation_id\"]}]") !=
-            std::string::npos);
+    REQUIRE(
+        tools.find("\"oneOf\":[{\"required\":[\"profile\"]},{\"required\":[\"operation_id\"]}]") !=
+        std::string::npos);
 }
 
 TEST_CASE("sequencer transport loop operations reach the generic MCP catalog",
@@ -358,8 +375,8 @@ TEST_CASE("control MCP grant requests accept exactly one authority selector",
     CHECK(state->grant_authorities ==
           std::vector<std::string>{"operation:dev.pulp.runtime/evaluate@1"});
 
-    const auto missing = adapter.call_tool(
-        "pulp_control_grant_request", R"({"instance_id":"instance-1"})");
+    const auto missing =
+        adapter.call_tool("pulp_control_grant_request", R"({"instance_id":"instance-1"})");
     CHECK(missing.find("exactly one of profile or operation_id") != std::string::npos);
     const auto conflicting = adapter.call_tool(
         "pulp_control_grant_request",
@@ -371,9 +388,10 @@ TEST_CASE("control MCP and CLI semantics produce the same canonical service requ
           "[mcp][control][parity][progress][negotiation]") {
     auto state = std::make_shared<FakeState>();
     std::vector<std::string> notifications;
-    ControlMcpAdapter adapter(factory(state),
-                              [&](std::string value) { notifications.push_back(std::move(value)); });
-    const auto result = adapter.call_tool("pulp_control_state_read", state_read_args(), "progress-1");
+    ControlMcpAdapter adapter(
+        factory(state), [&](std::string value) { notifications.push_back(std::move(value)); });
+    const auto result =
+        adapter.call_tool("pulp_control_state_read", state_read_args(), "progress-1");
     REQUIRE(result.find("\"isError\":true") == std::string::npos);
     REQUIRE(result.find("\"generation\"") != std::string::npos);
     REQUIRE(result.find("\"progress\"") != std::string::npos);
@@ -395,12 +413,13 @@ TEST_CASE("control MCP and CLI semantics produce the same canonical service requ
     CHECK(state->request->operation_version == 1);
     CHECK(control_request_hash(*state->request) == state->request->request_hash);
 
-    for (const auto malformed : {
-             R"({"instance_id":"instance-1","grant_id":7,"input":{"include_catalog":false,"include_sensitive":false}})",
-             R"({"instance_id":"instance-1","request_id":false,"input":{"include_catalog":false,"include_sensitive":false}})",
-             R"({"instance_id":"instance-1","timeout_ms":"3000","input":{"include_catalog":false,"include_sensitive":false}})",
-             R"({"instance_id":"instance-1","expected_state_generation":"1","input":{"include_catalog":false,"include_sensitive":false}})",
-             R"({"instance_id":"instance-1","unexpected":true,"input":{"include_catalog":false,"include_sensitive":false}})"}) {
+    for (
+        const auto malformed :
+        {R"({"instance_id":"instance-1","grant_id":7,"input":{"include_catalog":false,"include_sensitive":false}})",
+         R"({"instance_id":"instance-1","request_id":false,"input":{"include_catalog":false,"include_sensitive":false}})",
+         R"({"instance_id":"instance-1","timeout_ms":"3000","input":{"include_catalog":false,"include_sensitive":false}})",
+         R"({"instance_id":"instance-1","expected_state_generation":"1","input":{"include_catalog":false,"include_sensitive":false}})",
+         R"({"instance_id":"instance-1","unexpected":true,"input":{"include_catalog":false,"include_sensitive":false}})"}) {
         const auto rejected = adapter.call_tool("pulp_control_state_read", malformed);
         REQUIRE(rejected.find("invalid-arguments") != std::string::npos);
     }
@@ -409,8 +428,7 @@ TEST_CASE("control MCP and CLI semantics produce the same canonical service requ
 TEST_CASE("control MCP automatic grants map every explicit profile to canonical authority",
           "[mcp][control][grant][profile]") {
     const auto ui_input = [](std::string_view profile) {
-        return std::string(R"({"instance_id":"instance-1","profile":")") +
-               std::string(profile) +
+        return std::string(R"({"instance_id":"instance-1","profile":")") + std::string(profile) +
                R"(","input":{"kind":"focus","target_id":"root","view_generation":"view-1","event":{"focused":true}}})";
     };
 
@@ -430,8 +448,7 @@ TEST_CASE("control MCP automatic grants map every explicit profile to canonical 
 
     auto invalid_state = std::make_shared<FakeState>();
     ControlMcpAdapter invalid_adapter(factory(invalid_state));
-    const auto invalid = invalid_adapter.call_tool(
-        "pulp_control_ui_input", ui_input("unknown"));
+    const auto invalid = invalid_adapter.call_tool("pulp_control_ui_input", ui_input("unknown"));
     REQUIRE(invalid.find("invalid-arguments") != std::string::npos);
     REQUIRE(invalid_state->grant_authorities.empty());
 }
@@ -476,8 +493,7 @@ TEST_CASE("control MCP stops when the shared operation deadline is exhausted",
     REQUIRE_FALSE(state->request.has_value());
 }
 
-TEST_CASE("control MCP cold session cannot reset the inventory budget",
-          "[mcp][control][timeout]") {
+TEST_CASE("control MCP cold session cannot reset the inventory budget", "[mcp][control][timeout]") {
     auto state = std::make_shared<FakeState>();
     state->timeout_step_advance = std::chrono::milliseconds(100);
     ControlMcpAdapter adapter(factory(state), {}, [state] { return state->timeout_clock; });
@@ -525,8 +541,8 @@ TEST_CASE("control MCP reports revocation during a call and supports cancellatio
     });
     {
         std::unique_lock lock(state->request_mutex);
-        REQUIRE(state->request_condition.wait_for(
-            lock, std::chrono::seconds(1), [&] { return state->request_started; }));
+        REQUIRE(state->request_condition.wait_for(lock, std::chrono::seconds(1),
+                                                  [&] { return state->request_started; }));
     }
     const auto opens_before_invalid_cancel = state->session_opens;
     const auto invalid_cancel = adapter.call_tool(
@@ -554,24 +570,23 @@ TEST_CASE("control MCP resources preserve broker artifact ACLs",
     const auto listed = adapter.resources_list_payload();
     REQUIRE(listed.find("pulp-control://instances/instance-1") != std::string::npos);
 
-    const auto allowed = adapter.resource_read_payload(
-        "pulp-control://artifacts/instance-1/artifact-1");
+    const auto allowed =
+        adapter.resource_read_payload("pulp-control://artifacts/instance-1/artifact-1");
     REQUIRE(allowed.find("\"blob\":\"YWJj\"") != std::string::npos);
-    REQUIRE(state->offer->mandatory_features ==
-            std::vector<std::string>{"artifacts", "receipts"});
+    REQUIRE(state->offer->mandatory_features == std::vector<std::string>{"artifacts", "receipts"});
     state->artifact_chunked = true;
-    const auto assembled = adapter.resource_read_payload(
-        "pulp-control://artifacts/instance-1/artifact-1");
+    const auto assembled =
+        adapter.resource_read_payload("pulp-control://artifacts/instance-1/artifact-1");
     REQUIRE(assembled.find("\"blob\":\"YWJjZGVm\"") != std::string::npos);
     state->artifact_chunked = false;
     state->artifact_wrong_instance = true;
-    const auto mismatched = adapter.resource_read_payload(
-        "pulp-control://artifacts/instance-1/artifact-1");
+    const auto mismatched =
+        adapter.resource_read_payload("pulp-control://artifacts/instance-1/artifact-1");
     REQUIRE(mismatched.find("artifact-instance-mismatch") != std::string::npos);
     state->artifact_wrong_instance = false;
     state->artifact_allowed = false;
-    const auto denied = adapter.resource_read_payload(
-        "pulp-control://artifacts/instance-1/artifact-1");
+    const auto denied =
+        adapter.resource_read_payload("pulp-control://artifacts/instance-1/artifact-1");
     REQUIRE(denied.find("unauthorized") != std::string::npos);
     REQUIRE(denied.find("\"isError\":true") != std::string::npos);
 }
@@ -595,26 +610,22 @@ TEST_CASE("MCP protocol advertises control resources and removed Inspector tools
     const auto initialize = pulp_mcp::server::handle_request(
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"resources":{"subscribe":true}}}})");
     REQUIRE(initialize.find("\"resources\":{\"subscribe\":false") != std::string::npos);
-    const auto tools = pulp_mcp::server::handle_request(
-        R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})");
+    const auto tools =
+        pulp_mcp::server::handle_request(R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})");
     REQUIRE(tools.find("pulp_control_state_read") != std::string::npos);
     REQUIRE(tools.find("pulp_control_gpu_health_read") != std::string::npos);
     REQUIRE(tools.find("pulp_control_runtime_evaluate") != std::string::npos);
-    const auto gpu_health =
-        tools.find("\"name\":\"pulp_control_gpu_health_read\"");
+    const auto gpu_health = tools.find("\"name\":\"pulp_control_gpu_health_read\"");
     REQUIRE(gpu_health != std::string::npos);
-    REQUIRE(tools.find("\"readOnlyHint\":true", gpu_health) !=
-            std::string::npos);
-    REQUIRE(tools.find("\"idempotentHint\":true", gpu_health) !=
-            std::string::npos);
-    REQUIRE(tools.find("pulp.gpu-health-read-result.v1", gpu_health) !=
-            std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":true", gpu_health) != std::string::npos);
+    REQUIRE(tools.find("\"idempotentHint\":true", gpu_health) != std::string::npos);
+    REQUIRE(tools.find("pulp.gpu-health-read-result.v1", gpu_health) != std::string::npos);
     const auto state_read = tools.find("\"name\":\"pulp_control_state_read\"");
     const auto gesture = tools.find("\"name\":\"pulp_control_state_parameter_gesture\"");
     REQUIRE(tools.find("\"idempotentHint\":true", state_read) < gesture);
     REQUIRE(tools.find("\"idempotentHint\":false", gesture) != std::string::npos);
-    for (const auto removed : {"pulp_inspect_set_param", "pulp_inspect_evaluate",
-                               "pulp_inspect_screenshot"})
+    for (const auto removed :
+         {"pulp_inspect_set_param", "pulp_inspect_evaluate", "pulp_inspect_screenshot"})
         REQUIRE(tools.find(std::string("\"name\":\"") + removed + "\"") == std::string::npos);
     const auto templates = pulp_mcp::server::handle_request(
         R"({"jsonrpc":"2.0","id":3,"method":"resources/templates/list"})");
@@ -623,6 +634,26 @@ TEST_CASE("MCP protocol advertises control resources and removed Inspector tools
         R"({"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"pulp-control://unknown"}})");
     REQUIRE(resource_error.find("\"error\":{") != std::string::npos);
     REQUIRE(resource_error.find("\"result\":") == std::string::npos);
+    reset_control_mcp_session_factory_for_test();
+}
+
+TEST_CASE("MCP dynamically projects sample-region operations from the control registry",
+          "[mcp][control][sample-region][schema]") {
+    auto state = std::make_shared<FakeState>();
+    set_control_mcp_session_factory_for_test(factory(state));
+    const auto tools =
+        pulp_mcp::server::handle_request(R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
+    INFO(tools);
+    const auto read = tools.find("\"name\":\"pulp_control_graph_sample_region_read\"");
+    const auto edit = tools.find("\"name\":\"pulp_control_graph_sample_region_edit\"");
+    REQUIRE(read != std::string::npos);
+    REQUIRE(edit != std::string::npos);
+    REQUIRE(tools.find("dev.pulp.graph/sample-region.read@1", read) != std::string::npos);
+    REQUIRE(tools.find("dev.pulp.graph/sample-region.edit@1", edit) != std::string::npos);
+    REQUIRE(tools.find("\"additionalProperties\":false", read) != std::string::npos);
+    REQUIRE(tools.find("\"additionalProperties\":false", edit) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":true", read) != std::string::npos);
+    REQUIRE(tools.find("\"readOnlyHint\":false", edit) != std::string::npos);
     reset_control_mcp_session_factory_for_test();
 }
 

@@ -145,9 +145,11 @@ class GpuAudioTransport {
 
     void reset_staged_transport_state() noexcept;
     void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
-                        std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+                        std::uint32_t, std::uint64_t, bool input_valid,
+                        std::uint64_t callback_start_ns) noexcept;
     void process_realtime_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
-                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
+                                   std::uint32_t, std::uint64_t, bool input_valid,
+                                   std::uint64_t callback_start_ns) noexcept;
     void process_offline_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
     void process_invalid_position(audio::BufferView<float>&, std::uint64_t, bool offline) noexcept;
@@ -208,10 +210,11 @@ class GpuAudioTransport {
     void* realtime_gpu_context_ = nullptr;
     std::uint8_t (*realtime_gpu_process_)(void*, const audio::BufferView<const float>&,
                                           audio::BufferView<float>&, std::uint32_t, std::uint64_t,
-                                          bool) noexcept = nullptr;
+                                          bool, std::uint64_t) noexcept = nullptr;
     std::uint32_t (*realtime_gpu_service_)(void*, std::uint64_t) noexcept = nullptr;
     bool (*realtime_gpu_fence_)(void*) noexcept = nullptr;
-    void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t) noexcept = nullptr;
+    void (*realtime_gpu_delivered_)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
+                                    std::uint64_t) noexcept = nullptr;
     std::uint64_t callback_sequence_ = 0; // one monotonic RT/offline callback timeline
     bool realtime_gpu_fenced_for_offline_ = false;
 
