@@ -515,9 +515,18 @@ private:
     // the host's extra channels.
     int native_in_ = 0;
     int native_out_ = 0;
+    // Descriptor contract cached during setupProcessing(); process() must not
+    // materialize the by-value descriptor on the audio thread.
+    bool descriptor_main_mono_ = false;
     bool silence_unsupported_active_ = false;
     bool native_f64_enabled_ = false;
     Steinberg::int32 selected_sample_size_ = Steinberg::Vst::kSample32;
+    // setupProcessing() may be followed by setActive(false)/setActive(true)
+    // during an offline host render. Keep the prepared contract so activation
+    // can restore Processor-owned scratch and DSP state after release().
+    PrepareContext prepared_context_{};
+    Processor::BusesLayout prepared_layout_{};
+    bool has_prepared_context_ = false;
 
     // Block size the processor's scratch buffers were prepared for in
     // setupProcessing() (setup.maxSamplesPerBlock). process() clamps an
