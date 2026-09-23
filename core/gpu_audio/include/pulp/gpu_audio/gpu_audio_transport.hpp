@@ -133,7 +133,7 @@ class GpuAudioTransport {
 
   private:
     using TrialDeliveryFn = void (*)(void*, std::uint64_t, std::uint8_t, std::uint64_t,
-                                     std::uint64_t) noexcept;
+                                     std::uint64_t, std::uint64_t) noexcept;
     friend bool configure_gpu_audio_transport_trial_observer(GpuAudioTransport&, void*,
                                                              TrialDeliveryFn) noexcept;
 
@@ -159,7 +159,7 @@ class GpuAudioTransport {
                                   std::uint32_t, std::uint64_t, bool input_valid) noexcept;
     void process_invalid_position(audio::BufferView<float>&, std::uint64_t, bool offline) noexcept;
     void publish_trial_delivery(std::uint64_t sequence, std::uint8_t disposition,
-                                std::uint64_t callback_end_ns,
+                                std::uint64_t callback_start_ns, std::uint64_t callback_end_ns,
                                 std::uint64_t result_visible_ns) noexcept;
 
     audio::PlanarAudioRingBuffer input_ring_;

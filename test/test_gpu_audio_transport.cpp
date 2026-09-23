@@ -330,6 +330,7 @@ struct TrialDeliveryCapture {
     struct Entry {
         std::uint64_t sequence = 0;
         std::uint8_t disposition = 0;
+        std::uint64_t callback_start_ns = 0;
         std::uint64_t callback_end_ns = 0;
         std::uint64_t result_visible_ns = 0;
     };
@@ -337,12 +338,13 @@ struct TrialDeliveryCapture {
     std::uint32_t count = 0;
 
     static void observe(void* context, std::uint64_t sequence, std::uint8_t disposition,
-                        std::uint64_t callback_end_ns, std::uint64_t result_visible_ns) noexcept {
+                        std::uint64_t callback_start_ns, std::uint64_t callback_end_ns,
+                        std::uint64_t result_visible_ns) noexcept {
         auto& capture = *static_cast<TrialDeliveryCapture*>(context);
         if (capture.count >= capture.entries.size())
             return;
         capture.entries[capture.count++] =
-            Entry{sequence, disposition, callback_end_ns, result_visible_ns};
+            Entry{sequence, disposition, callback_start_ns, callback_end_ns, result_visible_ns};
     }
 };
 
@@ -373,6 +375,8 @@ TEST_CASE("GpuAudioTransport trial observer records staged callback delivery",
         const auto expected = i < L ? detail::SharedIoDeliveryDisposition::Priming
                                     : detail::SharedIoDeliveryDisposition::GpuDelivered;
         CHECK(capture.entries[i].disposition == static_cast<std::uint8_t>(expected));
+        CHECK(capture.entries[i].callback_start_ns != 0);
+        CHECK(capture.entries[i].callback_end_ns >= capture.entries[i].callback_start_ns);
         CHECK(capture.entries[i].callback_end_ns != 0);
         CHECK(capture.entries[i].result_visible_ns >= capture.entries[i].callback_end_ns);
     }

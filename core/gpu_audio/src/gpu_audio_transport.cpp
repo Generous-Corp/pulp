@@ -17,11 +17,12 @@ std::uint64_t monotonic_now_ns() noexcept {
 } // namespace
 
 void GpuAudioTransport::publish_trial_delivery(std::uint64_t sequence, std::uint8_t disposition,
+                                               std::uint64_t callback_start_ns,
                                                std::uint64_t callback_end_ns,
                                                std::uint64_t result_visible_ns) noexcept {
     if (trial_observer_ != nullptr)
-        trial_observer_(trial_observer_context_, sequence, disposition, callback_end_ns,
-                        result_visible_ns);
+        trial_observer_(trial_observer_context_, sequence, disposition, callback_start_ns,
+                        callback_end_ns, result_visible_ns);
 }
 
 bool configure_gpu_audio_transport_trial_observer(
@@ -231,7 +232,8 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     const auto publish_delivery = [&](std::uint8_t disposition) noexcept {
         if (input_valid && trial_observer_ != nullptr) {
             const auto callback_end_ns = monotonic_now_ns();
-            publish_trial_delivery(sequence, disposition, callback_end_ns, monotonic_now_ns());
+            publish_trial_delivery(sequence, disposition, callback_start_ns, callback_end_ns,
+                                   monotonic_now_ns());
         }
     };
 
