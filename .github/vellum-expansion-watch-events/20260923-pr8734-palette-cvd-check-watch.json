@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-pr8734-palette-cvd-check-watch",
+  "created_at": "2026-09-23T18:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that adding a colour-vision lane to the palette-health checker crosses three families' selectors without changing anything any of them is about. Status colour in an audio UI carries meaning by hue, and every existing check in this tool is blind to a hue collision by construction, because contrast is a luminance measure: a red/green pair can clear its contrast bar against the surface and still be one colour to the roughly 8 percent of men with a red-green deficiency. The change adds a Vienot 1999 dichromat simulation applied in linear RGB, measures the four status roles pairwise in CIEDE2000, and reports rather than blocks until --strict-cvd, because the bar sits in a narrow gap between palettes designed to survive CVD and the traffic-light pairs products ship, and because this tool also judges imported third-party designs where a red/green status hue is the designer's choice rather than a Pulp defect. Tritanopia is deliberately absent and the call raises instead of pretending, since modelling it correctly needs Brettel 1997. visual-proof-harness and design-output-and-packaging are each crossed by exactly the same two files, tools/import-validation/check_palette_health.py and its stdlib selftest tools/import-validation/test_check_palette_health.py, under the tools/import-validation/** selector. design-source-ingest is crossed by exactly one file, .agents/skills/import-design/SKILL.md, which documents the new lane and why it is advisory. No importer, DesignIR schema, browser capture path, renderer, backend, codegen output, fixture, packaging artifact or Vellum-owned source changes, and no existing check's verdict moves: the two shipped design packs are unaffected because the new lane reports by default. The remaining change, a licensing-reference row crediting libDaltonLens for the published matrices and correcting an earlier ctx credit, touches no watched selector. Registered as watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "palette-health-selftest",
+    "python3 tools/import-validation/test_check_palette_health.py",
+    "vellum-expansion-watch",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <origin/main SHA> --head <HEAD SHA>"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
