@@ -447,7 +447,10 @@ fn startup_view_admits_an_untagged_cohort_only_when_nothing_is_tagged() {
     // The untagged cohort exists, and it is gated on the absence of evidence
     // anywhere in the capture. Gating on `identified_candidates` instead would
     // miss probe, readback and health spans, which are not startup candidates.
-    assert!(STARTUP_SQL.contains("), unidentified_candidates AS ("));
+    assert!(STARTUP_SQL
+        .as_bytes()
+        .windows(b"), unidentified_candidates AS (".len())
+        .any(|window| window == b"), unidentified_candidates AS ("));
     assert!(STARTUP_SQL.contains("), admitted_candidates AS ("));
     assert!(STARTUP_SQL.contains("FROM unidentified_candidates"));
     assert!(STARTUP_SQL.contains("), trace_evidence AS ("));
