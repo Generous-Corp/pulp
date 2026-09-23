@@ -185,6 +185,44 @@ TEST_CASE("GpuConvolver rejects empty IR", "[gpu_audio][convolver][gpu]") {
     REQUIRE_FALSE(node.prepare());
 }
 
+TEST_CASE("GpuConvolver provider policy is immutable and fail-closed",
+          "[gpu_audio][convolver][provider-policy]") {
+    constexpr uint32_t BS = 32;
+    const std::vector<float> ir{1.0f};
+
+    GpuConvolver staged(1, BS, 48000, ir);
+    REQUIRE(staged.set_provider_policy(GpuConvolver::ProviderPolicy::StagedOnly));
+    REQUIRE(staged.provider_policy() == GpuConvolver::ProviderPolicy::StagedOnly);
+    REQUIRE(staged.prepare());
+    REQUIRE_FALSE(staged.set_provider_policy(GpuConvolver::ProviderPolicy::Auto));
+
+    GpuAudioTransport staged_transport;
+    REQUIRE(staged_transport.prepare(&staged, {.ring_blocks = 8}));
+    const auto staged_report = staged_transport.capability_report();
+    REQUIRE(staged_report.prepared);
+    REQUIRE(staged_report.path == GpuAudioExecutionPath::Staged);
+    REQUIRE(staged_report.provider == GpuAudioProvider::Unknown);
+
+    GpuConvolver shared(1, BS, 48000, ir);
+    REQUIRE(shared.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired));
+    const bool prepared = shared.prepare();
+    if (!prepared) {
+        // No exact authenticated shared provider is a valid result on hosts
+        // without the opt-in Dawn/Metal configuration. It must not silently
+        // become staged or standalone execution.
+        GpuAudioTransport rejected_transport;
+        const auto rejected = rejected_transport.capability_report();
+        REQUIRE_FALSE(rejected.prepared);
+    } else {
+        GpuAudioTransport shared_transport;
+        REQUIRE(shared_transport.prepare(&shared, {.ring_blocks = 8}));
+        const auto report = shared_transport.capability_report();
+        REQUIRE(report.prepared);
+        REQUIRE(report.path == GpuAudioExecutionPath::SharedMemory);
+        REQUIRE(report.provider == GpuAudioProvider::Dawn);
+    }
+}
+
 TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
           "[gpu_audio][convolver][realtime-path]") {
 #if PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER

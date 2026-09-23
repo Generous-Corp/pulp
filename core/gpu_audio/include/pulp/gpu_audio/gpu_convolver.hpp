@@ -55,6 +55,17 @@ bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceR
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
   public:
+    /// Host-thread selection for the provider used during the next prepare().
+    /// The default preserves the existing behavior: use the authenticated
+    /// shared Dawn path when enabled and fall back to staged/CPU execution.
+    /// Selection is immutable while prepared and never changes from the audio
+    /// callback.
+    enum class ProviderPolicy : std::uint8_t {
+        Auto,
+        StagedOnly,
+        SharedRequired,
+    };
+
     /// Default worker/round-trip latency, in host blocks. A constructed node may
     /// select another positive lead for a controlled campaign; the selected value
     /// is reported as PDC and shared by the bridge and CPU fallback.
@@ -66,6 +77,13 @@ class GpuConvolver : public GpuAudioNode {
     GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                  std::vector<float> impulse_response, uint32_t latency_blocks);
     ~GpuConvolver() override;
+
+    /// Select the provider policy for the next prepare(). Returns false when
+    /// called after preparation; callers must quiesce and release the node
+    /// before selecting a new policy. SharedRequired fails preparation unless
+    /// the exact authenticated shared provider is available.
+    bool set_provider_policy(ProviderPolicy policy) noexcept;
+    ProviderPolicy provider_policy() const noexcept { return provider_policy_; }
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
@@ -231,6 +249,7 @@ class GpuConvolver : public GpuAudioNode {
     // Fixed before prepare(); this value is shared by descriptor PDC, the
     // shared-I/O bridge lead, and the CPU fallback delay.
     uint32_t latency_blocks_ = kLatencyBlocks;
+    ProviderPolicy provider_policy_ = ProviderPolicy::Auto;
     std::vector<float> ir_;
     uint32_t fft_size_ = 0;
     std::uint8_t trial_requested_path_ = 0; // detail::SharedIoRequest::Auto

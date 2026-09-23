@@ -66,6 +66,13 @@ GpuConvolver::GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t samp
 
 GpuConvolver::~GpuConvolver() = default;
 
+bool GpuConvolver::set_provider_policy(ProviderPolicy policy) noexcept {
+    if (prepared_)
+        return false;
+    provider_policy_ = policy;
+    return true;
+}
+
 namespace detail {
 bool configure_gpu_convolver_trial(GpuConvolver& convolver,
                                    const GpuConvolverTrialConfig& config) noexcept {
@@ -182,7 +189,22 @@ bool GpuConvolver::prepare() {
     init_fallback();
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    const auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+    auto requested_path = static_cast<detail::SharedIoRequest>(trial_requested_path_);
+    // Diagnostic trial configuration is deliberately authoritative when it is
+    // present. Normal SDK callers use the public host-only policy below.
+    if (!trial_configured_) {
+        switch (provider_policy_) {
+        case ProviderPolicy::Auto:
+            requested_path = detail::SharedIoRequest::Auto;
+            break;
+        case ProviderPolicy::StagedOnly:
+            requested_path = detail::SharedIoRequest::RequireStaged;
+            break;
+        case ProviderPolicy::SharedRequired:
+            requested_path = detail::SharedIoRequest::RequireSharedHostPointer;
+            break;
+        }
+    }
 #endif
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -250,6 +272,22 @@ bool GpuConvolver::prepare() {
             shared_io_.reset();
         }
     }
+#endif
+
+    // A required shared provider is a fail-closed contract. Do not silently
+    // create the legacy standalone device or report an apparently prepared
+    // node when authenticated shared storage was unavailable.
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    const bool shared_provider_ready =
+        shared_io_ && shared_io_->session && shared_io_->session->prepared();
+    if (!trial_configured_ && provider_policy_ == ProviderPolicy::SharedRequired &&
+        !shared_provider_ready) {
+        gpu_.reset();
+        return false;
+    }
+#else
+    if (!trial_configured_ && provider_policy_ == ProviderPolicy::SharedRequired)
+        return false;
 #endif
 
     // Shared-I/O owns the live Dawn provider path. Do not also create the legacy
