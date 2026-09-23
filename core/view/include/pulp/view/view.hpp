@@ -633,6 +633,13 @@ public:
     /// the delivery verbs' rule and skip the button-less legacy channels.
     void simulate_click(Point root_pos, const SimulatedPointer& pointer);
 
+    /// Dispatch a synthetic CONTEXT (right-button) press the way the platform
+    /// hosts do, via `route_context_press`. Returns true when a view claimed
+    /// the menu. NOT the same as `simulate_click` with `button = right`, which
+    /// delivers through the ordinary mouse channels and opens no menu; see
+    /// `press_reach.hpp` for why that asymmetry gets its own verb.
+    bool simulate_context_click(Point root_pos);
+
     // Dispatch a synthetic drag from start to end
     void simulate_drag(Point start, Point end, int steps = 10);
 

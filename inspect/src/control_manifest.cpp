@@ -3,6 +3,7 @@
 #include <pulp/runtime/crypto.hpp>
 
 #include "control_gpu_health_read_result_schema.hpp"
+#include "control_sample_region_schemas.hpp"
 
 #include <choc/text/choc_JSON.h>
 
@@ -136,6 +137,12 @@ constexpr auto kControlOperations = std::to_array<ControlOperationDescriptor>({
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"additionalProperties":false,"properties":{"action":{"const":"open"},"project":{"maxLength":1024,"minLength":1,"type":"string"},"writer_profile":{"enum":["proposal","editor"]}},"required":["action","project"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"const":"apply"},"commands":{"maxLength":1048576,"minLength":1,"type":"string"},"expected_revision":{"minimum":0,"type":"integer"},"idempotency_key":{"maxLength":128,"minLength":1,"type":"string"},"session_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["action","session_id","commands"],"type":"object"},{"additionalProperties":false,"properties":{"action":{"enum":["diff","undo","redo"]},"session_id":{"maxLength":256,"minLength":1,"type":"string"}},"required":["action","session_id"],"type":"object"}]})",
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"action":{"enum":["open","apply","diff","undo","redo"]},"applied":{"type":"boolean"},"diff":{"maxLength":1048576,"type":"string"},"receipt_id":{"maxLength":128,"minLength":1,"type":"string"},"replayed":{"type":"boolean"},"revision":{"minimum":0,"type":"integer"},"session_id":{"maxLength":256,"minLength":1,"type":"string"},"writer_profile":{"enum":["proposal","editor"]}},"required":["receipt_id","action","session_id","revision","applied","replayed","writer_profile"],"type":"object"})",
         "receipt"),
+    PULP_OPERATION(GraphSampleRegionRead, "graph/sample-region.read",
+                   detail::kSampleRegionReadInputSchema, detail::kSampleRegionReadOutputSchema,
+                   "response"),
+    PULP_RECEIPT_OPERATION(GraphSampleRegionEdit, "graph/sample-region.edit",
+                           detail::kSampleRegionEditInputSchema,
+                           detail::kSampleRegionEditOutputSchema, "receipt"),
     PULP_OPERATION(
         ArtifactRead, "artifact/read",
         R"({"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"artifact_id":{"maxLength":128,"minLength":1,"type":"string"},"max_bytes":{"maximum":1048576,"minimum":1,"type":"integer"},"offset":{"maximum":9007199254740991,"minimum":0,"type":"integer"}},"required":["artifact_id","offset","max_bytes"],"type":"object"})",
@@ -554,10 +561,8 @@ ControlManifestValidation validate_control_manifest_detailed(const ControlManife
     }
     if (manifest.profile == ControlBuildProfile::SupportDiagnostics) {
         constexpr std::array allowed{
-            InspectorCapability::SessionDescribe,
-            InspectorCapability::StateRead,
-            InspectorCapability::GpuHealthRead,
-            InspectorCapability::DiagnosticsRead,
+            InspectorCapability::SessionDescribe, InspectorCapability::StateRead,
+            InspectorCapability::GpuHealthRead,   InspectorCapability::DiagnosticsRead,
             InspectorCapability::LogsRead,
         };
         for (const auto capability : manifest.capabilities) {
@@ -775,8 +780,7 @@ validate_control_artifact_bytes(std::string_view bytes,
         return {false, "production-stripped artifact contains capability implementation"};
     std::string runtime_eval_marker = "PULP_INSPECT_RUNTIME_EVAL_";
     runtime_eval_marker += "HIGH_RISK_COMPONENT_V1";
-    if (contains(runtime_eval_marker) !=
-        expectation.runtime_eval_included)
+    if (contains(runtime_eval_marker) != expectation.runtime_eval_included)
         return {false, "runtime evaluation marker mismatch"};
     return {true, {}};
 }

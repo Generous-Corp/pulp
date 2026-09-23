@@ -1,7 +1,9 @@
 #include "allpass_processor.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/runtime/log.hpp>
 
 namespace pulp::examples {
 
@@ -153,12 +155,14 @@ void SampleRegionAllpassProcessor::prepare(const format::PrepareContext& context
         return;
     }
     max_buffer_size_ = context.max_buffer_size;
+    input_alias_scratch_.assign(static_cast<std::size_t>(max_buffer_size_), 0.0f);
     error_.clear();
     ready_ = true;
 }
 
 void SampleRegionAllpassProcessor::release() {
     ready_ = false;
+    input_alias_scratch_.clear();
     initial_edit_.reset();
     graph_.release();
 }
@@ -174,7 +178,24 @@ void SampleRegionAllpassProcessor::process(audio::BufferView<float>& output,
         output.clear();
         return;
     }
-    graph_.process(output, input, context.num_samples, context);
+    // REAPER supplies in-place AU/VST3 buffers for this mono effect. The
+    // routed graph clears its output bus before copying AudioInput, so an
+    // aliased input would be erased before the graph sees it. Preserve the
+    // input in prepare-sized scratch (matching BakedGraphProcessor's in-place
+    // contract) before entering the graph; this remains allocation-free on the
+    // render thread and leaves separate-buffer hosts on the direct path.
+    const float* input_ptr = input.channel_ptr(0);
+    float* output_ptr = output.channel_ptr(0);
+    const auto frames = static_cast<std::size_t>(context.num_samples);
+    const bool overlaps = output_ptr < input_ptr + frames && input_ptr < output_ptr + frames;
+    if (overlaps) {
+        std::copy_n(input_ptr, frames, input_alias_scratch_.data());
+        const std::array<const float*, 1> safe_ptrs{input_alias_scratch_.data()};
+        const audio::BufferView<const float> safe_input(safe_ptrs.data(), 1, context.num_samples);
+        graph_.process(output, safe_input, context.num_samples);
+    } else {
+        graph_.process(output, input, context.num_samples);
+    }
 }
 
 std::unique_ptr<format::Processor> create_sample_region_allpass() {

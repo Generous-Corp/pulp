@@ -89,6 +89,85 @@ required.
 The dashboard supports per-file drilldown (click any file in the tree
 view) and historical trend graphs.
 
+## Codecov operating contract
+
+This section records the coverage behavior that must remain true when the
+workflow or Codecov configuration changes. The workflow is intentionally
+advisory: ordinary pull requests run the macOS producer only, while pushes to
+`main`, the scheduled refresh, and an explicit `workflow_dispatch` run the
+full native matrix. The scheduled refresh runs three times per day in its own
+non-cancelling concurrency group. This keeps normal builds fast while ensuring
+that a cancelled or failed push does not become the dashboard's only recent
+state.
+
+The dashboard is built from independent producer uploads. A complete refresh
+has these reliable receipts for the same commit and workflow attempt:
+
+- `os-macos` native Cobertura
+- `os-linux` native Cobertura
+- `python-tools` Python Cobertura (produced by the Linux leg)
+- `apple-swift` when the Apple source lane is applicable
+- `android-kotlin`
+- `pulp-react`
+
+Windows is best effort and does not determine whether a refresh is accepted as
+complete. A successful workflow conclusion alone is not proof of coverage;
+the receipt artifacts and the Codecov commit API are the evidence. A transport
+failure must leave the previous dashboard data intact and visible as stale,
+never replace it with a misleading partial aggregate.
+
+The upload path is deliberately split into layers:
+
+1. `scripts/run_coverage.sh`, `run_python_coverage.py`, and the Apple/Android
+   producers validate that each report exists, parses, and has source lines.
+2. `.github/actions/upload-codecov-report/action.yml` uploads one named report
+   and publishes an immutable receipt artifact only after the uploader returns
+   success.
+3. `.github/workflows/coverage-upload-watchdog.yml` checks the exact SHA and
+   attempt receipts, then confirms that Codecov processed that SHA. It is an
+   advisory alarm, not a merge dependency.
+
+When investigating a dashboard regression, start with the exact commit rather
+than the moving `main` page:
+
+```bash
+curl -fsS \
+  https://api.codecov.io/api/v2/github/Generous-Corp/repos/pulp/commits/<sha>
+```
+
+Then inspect the matching Coverage workflow run and its receipt artifacts. Do
+not infer broad native coverage from React/Android uploads or from a green
+workflow that never produced the Linux/macOS reports.
+
+Linux coverage defaults to `ubuntu-latest`. For a controlled refresh, the
+workflow accepts `linux_runner_selector_json` or the repository variable
+`PULP_COVERAGE_LINUX_RUNS_ON_JSON`; the selector is resolved in
+`tools/scripts/resolve_runs_on.py`. A dedicated clean Linux VM on the Proxmox
+MacPro is a valid reliability improvement if it is registered as a GitHub
+runner, has the same LLVM/Python dependencies and disk budget, and can reach
+GitHub and Codecov. Trial it with a manual dispatch first; only make it the
+repository default after one complete refresh produces the required receipts.
+Do not hard-code a host label in this document.
+
+When changing coverage behavior, update the workflow comments, this contract,
+`codecov.yml`, and the receipt/config contract tests in the same change. The
+machine-facing sources are authoritative in this order:
+
+1. `.github/workflows/coverage.yml`
+2. `.github/actions/upload-codecov-report/action.yml`
+3. `.github/workflows/coverage-upload-watchdog.yml`
+4. `codecov.yml` and `tools/scripts/coverage_config.json`
+5. this guide and the focused contract tests
+
+Run the cheap drift checks before shipping a change:
+
+```bash
+python3 tools/scripts/test_coverage_surface_contract.py
+python3 tools/scripts/test_codecov_config.py
+python3 tools/scripts/test_codecov_components.py
+python3 tools/scripts/test_codecov_upload_contract.py
+```
+
 ## Axes
 
 Codecov splits each upload along three axes so you can cross-filter —

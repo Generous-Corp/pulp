@@ -3548,6 +3548,68 @@ TEST_CASE("VST3 fails closed for a null active output channel pointer",
     REQUIRE(test_processor->process_count == 0);
 }
 
+// A strict mono Processor accepted on a stereo host bus is prepared at its
+// declared mono width, so the adapter's per-channel silence scratch is one
+// channel wide while the host presents two. A host that leaves the surplus
+// channel unbacked drives the adapter down the substitution path for a channel
+// index the scratch does not have.
+TEST_CASE("VST3 mono effect on a stereo host bus tolerates an unbacked surplus input channel",
+          "[vst3][process][mono-compat][malformed-layout]") {
+    TestVst3Config config;
+    config.descriptor.input_buses = {{"Audio In", 1}};
+    config.descriptor.output_buses = {{"Audio Out", 1}};
+    reset_test_processor(config);
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    auto* test_processor = TestVst3Processor::g_last_processor;
+    REQUIRE(test_processor != nullptr);
+
+    Steinberg::Vst::SpeakerArrangement io[1] = {SpeakerArr::kStereo};
+    REQUIRE(processor.setBusArrangements(io, 1, io, 1) == Steinberg::kResultTrue);
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 4;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+    // The Processor keeps its declared mono prepare width.
+    REQUIRE(test_processor->last_prepare.input_channels == 1);
+
+    constexpr int kFrames = 4;
+    std::array<float, kFrames> in_l{{0.1f, 0.2f, 0.3f, 0.4f}};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    out_l.fill(9.0f);
+    out_r.fill(9.0f);
+    // Channel 1 of the input is declared by the host but carries no storage.
+    float* ins[2] = {in_l.data(), nullptr};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+
+    Steinberg::Vst::ProcessData data{};
+    data.symbolicSampleSize = Steinberg::Vst::kSample32;
+    data.numSamples = kFrames;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+
+    REQUIRE(processor.process(data) == Steinberg::kResultOk);
+    REQUIRE(test_processor->process_count == 1);
+    // The Processor sees only the channel it was prepared for.
+    REQUIRE(test_processor->last_input_channels == 1);
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_r[i], WithinAbs(0.0f, 1e-6f));
+    }
+}
+
 TEST_CASE("VST3 fails closed for malformed host bus topology",
           "[vst3][process][multi-out][malformed-layout]") {
     TestVst3Config config;

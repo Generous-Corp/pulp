@@ -353,6 +353,14 @@ required native gate has already gone green. `view_lifecycle.cpp` (the
 `DispatchLease` / `View::retire` mutation gate every `View` hook call site now
 takes) is listed in both for exactly this reason.
 
+A sharper form of the same trap: a `View::` MEMBER function whose definition
+lives outside `view.cpp`. The declaration sits in `view.hpp`, which the web
+target already compiles, so nothing looks missing — but the definition is in a
+TU the web source list may not name, and wasm-ld reports it only when something
+calls it. `press_reach.cpp` defines `View::simulate_context_click` and is listed
+in both files for this reason. The rule: if the symbol is `View::something`,
+grep the web list before assuming `view.cpp` carries it.
+
 Same shape as the font list below: whenever a list is duplicated for the web
 target, the web copy is the one that silently rots.
 
