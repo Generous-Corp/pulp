@@ -8,11 +8,11 @@
 #include <pulp/canvas/recording_canvas.hpp>
 
 using pulp::canvas::Color;
-using pulp::canvas::DrawCommand;
-using pulp::canvas::RecordingCanvas;
 using pulp::canvas::draw_command_name;
+using pulp::canvas::DrawCommand;
 using pulp::canvas::format_command;
 using pulp::canvas::format_commands;
+using pulp::canvas::RecordingCanvas;
 
 namespace {
 
@@ -20,10 +20,9 @@ bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("a command formats as its name and its whole payload",
-          "[canvas][drawlist-format]") {
+TEST_CASE("a command formats as its name and its whole payload", "[canvas][drawlist-format]") {
     DrawCommand c;
     c.type = DrawCommand::Type::fill_rect;
     c.f[0] = 10.0f;
@@ -36,16 +35,14 @@ TEST_CASE("a command formats as its name and its whole payload",
     CHECK(contains(line, "10.000 20.000 100.000 50.000"));
 }
 
-TEST_CASE("every float slot is printed, including the zeros",
-          "[canvas][drawlist-format]") {
+TEST_CASE("every float slot is printed, including the zeros", "[canvas][drawlist-format]") {
     // Printing only the slots a command "uses" would need a per-command arity
     // table, and a wrong entry there would HIDE a parameter rather than fail.
     DrawCommand c;
     c.type = DrawCommand::Type::save;
     const std::string line = format_command(c);
     int zeros = 0;
-    for (size_t i = line.find("0.000"); i != std::string::npos;
-         i = line.find("0.000", i + 1)) {
+    for (size_t i = line.find("0.000"); i != std::string::npos; i = line.find("0.000", i + 1)) {
         ++zeros;
     }
     CHECK(zeros >= 6);
@@ -55,7 +52,7 @@ TEST_CASE("colour prints as floats so an HDR channel is not truncated",
           "[canvas][drawlist-format]") {
     DrawCommand c;
     c.type = DrawCommand::Type::set_fill_color;
-    c.color = Color::rgba(2.5f, 0.0f, 0.0f, 1.0f);  // above 1.0 on purpose
+    c.color = Color::rgba(2.5f, 0.0f, 0.0f, 1.0f); // above 1.0 on purpose
 
     const std::string line = format_command(c);
     // Hex would have clamped or wrapped this into a plausible wrong colour.
@@ -63,8 +60,7 @@ TEST_CASE("colour prints as floats so an HDR channel is not truncated",
     CHECK_FALSE(contains(line, "#"));
 }
 
-TEST_CASE("opaque black is printed rather than treated as absent",
-          "[canvas][drawlist-format]") {
+TEST_CASE("opaque black is printed rather than treated as absent", "[canvas][drawlist-format]") {
     // {0,0,0,1} is the struct default AND a colour a command can legitimately
     // carry, so skipping it as "unset" would hide a real value.
     DrawCommand c;
@@ -87,8 +83,7 @@ TEST_CASE("text is quoted and escaped so it cannot forge a second command",
     CHECK(contains(line, "\\n"));
 }
 
-TEST_CASE("the variable-length payload is reported by size",
-          "[canvas][drawlist-format]") {
+TEST_CASE("the variable-length payload is reported by size", "[canvas][drawlist-format]") {
     DrawCommand c;
     c.type = DrawCommand::Type::set_line_dash;
     c.floats = {4.0f, 2.0f, 4.0f};
@@ -106,7 +101,8 @@ TEST_CASE("a drawlist formats one command per line", "[canvas][drawlist-format]"
 
     size_t lines = 0;
     for (char ch : text) {
-        if (ch == '\n') ++lines;
+        if (ch == '\n')
+            ++lines;
     }
     CHECK(lines == rc.commands().size());
 }
@@ -134,8 +130,7 @@ TEST_CASE("the format sees position, which a histogram comparison cannot",
     swapped.fill_rect(50.0f, 50.0f, 10.0f, 10.0f);
     swapped.fill_rect(0.0f, 0.0f, 10.0f, 10.0f);
 
-    CHECK(format_commands(correct.commands())
-          != format_commands(swapped.commands()));
+    CHECK(format_commands(correct.commands()) != format_commands(swapped.commands()));
 }
 
 TEST_CASE("the format sees material, which a block-mean comparison cannot",
@@ -160,8 +155,7 @@ TEST_CASE("every command type has a distinct name", "[canvas][drawlist-format]")
     // them apart.
     std::vector<std::string> seen;
     for (int i = 0; i <= static_cast<int>(DrawCommand::Type::draw_sksl); ++i) {
-        const auto name = std::string(
-            draw_command_name(static_cast<DrawCommand::Type>(i)));
+        const auto name = std::string(draw_command_name(static_cast<DrawCommand::Type>(i)));
         CHECK_FALSE(name.empty());
         CHECK(name != "unknown");
         for (const auto& previous : seen) {

@@ -62,4 +62,4 @@ std::string format_command(const DrawCommand& command);
 /// newline. An empty drawlist formats as an empty string.
 std::string format_commands(const std::vector<DrawCommand>& commands);
 
-}  // namespace pulp::canvas
+} // namespace pulp::canvas

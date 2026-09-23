@@ -53,20 +53,19 @@ std::unique_ptr<pulp::view::View> make_layered_scene() {
 
 std::string read_all(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) return {};
-    return std::string((std::istreambuf_iterator<char>(in)),
-                       std::istreambuf_iterator<char>());
+    if (!in)
+        return {};
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("painting a compositing layer emits into the canvas category",
           "[tracing][canvas][view]") {
     auto root = make_layered_scene();
 
-    const auto out = (std::filesystem::temp_directory_path() /
-                      "pulp-canvas-layer-trace.pftrace")
-                         .string();
+    const auto out =
+        (std::filesystem::temp_directory_path() / "pulp-canvas-layer-trace.pftrace").string();
     std::error_code ec;
     std::filesystem::remove(out, ec);
 
@@ -114,9 +113,8 @@ TEST_CASE("a scene with no effects emits no layer span", "[tracing][canvas][view
     root->set_bounds({0.0f, 0.0f, 240.0f, 120.0f});
     root->set_background_color(pulp::canvas::Color::rgba8(18, 18, 24, 255));
 
-    const auto out = (std::filesystem::temp_directory_path() /
-                      "pulp-canvas-nolayer-trace.pftrace")
-                         .string();
+    const auto out =
+        (std::filesystem::temp_directory_path() / "pulp-canvas-nolayer-trace.pftrace").string();
     std::error_code ec;
     std::filesystem::remove(out, ec);
 

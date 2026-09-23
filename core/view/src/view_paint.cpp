@@ -409,8 +409,8 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // expensive canvas op (O(pixels x radius)) and there are tens per frame,
     // not thousands, so instrumenting them is bounded by construction.
     if (needs_backdrop_layer) {
-        PULP_TRACE_BEGIN_ARGS("canvas", "backdrop_layer", "w", bounds_.width,
-                              "h", bounds_.height, "blur", backdrop_blur());
+        PULP_TRACE_BEGIN_ARGS("canvas", "backdrop_layer", "w", bounds_.width, "h", bounds_.height,
+                              "blur", backdrop_blur());
     }
 
     // Compositing layer for opacity, blur, or post-effects.
@@ -557,8 +557,8 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
     // each would multiply cardinality without telling you anything the count
     // does not. Nests inside the backdrop span above, matching the save order.
     if (layers_pushed > 0) {
-        PULP_TRACE_BEGIN_ARGS("canvas", "effect_layer", "layers", layers_pushed,
-                              "w", layer_w, "h", layer_h, "blur", filter_blur());
+        PULP_TRACE_BEGIN_ARGS("canvas", "effect_layer", "layers", layers_pushed, "w", layer_w, "h",
+                              layer_h, "blur", filter_blur());
     }
     return state;
 }
@@ -574,7 +574,8 @@ void View::pop_effect_layers(canvas::Canvas& canvas,
     // Closed AFTER the restores, so the span contains the compositing work
     // rather than just the bookkeeping. Balances the BEGIN in
     // push_effect_layers; both run on the paint thread.
-    if (layers.layers_pushed > 0) PULP_TRACE_END("canvas");
+    if (layers.layers_pushed > 0)
+        PULP_TRACE_END("canvas");
 
     // End backdrop-filter layer. Composites the widget's own
     // opacity layer over the blurred parent backdrop.

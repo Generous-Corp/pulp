@@ -9856,6 +9856,37 @@ under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
 
+## A test added to the tracing lane needs THREE edits, or it silently never runs
+
+`.github/workflows/tracing-build.yml` is the only lane that configures
+`-DPULP_TRACING=ON`. Everywhere else the macros expand to `((void)0)`, so a
+test that asserts on span content does not fail there — it takes whatever
+OFF-contract branch it has and passes.
+
+That lane does **not** build the whole test tree. It names its targets:
+
+```yaml
+cmake --build build --target pulp-test-tracing pulp-test-tracing-session ...
+```
+
+and then names its binaries again in the run step. So adding a tracing
+assertion means editing **three** places — the CMake registration, the
+workflow's `--target` list, and the workflow's run step. Miss either workflow
+edit and the test compiles nowhere that matters and executes nowhere at all.
+
+It also configures `-DPULP_ENABLE_GPU=OFF`, so a tracing test that needs GPU
+capture will `SKIP` there even when it is built. A tracing assertion that
+depends on the GPU therefore has no lane at all: OFF everywhere else, skipped
+here.
+
+**The tell is the assertion count, not the exit code.** A suite reporting
+`3 assertions in 1 test case` where you wrote ten `REQUIRE`s has taken the
+compile-out path; it says "All tests passed" either way. Check the count
+against what you wrote before believing a tracing test ran — and prefer
+driving the path under test through a backend-agnostic seam (a
+`RecordingCanvas` rather than a GPU surface) so the assertion can live in the
+one lane that compiles tracing in.
+
 ## The macOS gate is build-only on a pull request; tests run in the merge queue
 
 `build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
