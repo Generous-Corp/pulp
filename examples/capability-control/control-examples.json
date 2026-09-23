@@ -41,6 +41,22 @@
       "mcp": {"tool": "pulp_control_state_parameter_gesture", "arguments": {"instance_id": "${T1_INSTANCE_ID}", "profile": "develop", "input": {"parameter_id": 1, "normalized_value": 0.5, "idempotency_key": "phase11-example-gesture"}}}
     },
     {
+      "id": "sample-region-read",
+      "tier": "T1",
+      "description": "Read one prepared sample region definition and proof from an exact instance.",
+      "requires": ["T1_INSTANCE_ID"],
+      "cli": ["pulp", "control", "call", "--instance", "${T1_INSTANCE_ID}", "dev.pulp.graph/sample-region.read@1", "--profile", "inspect-readonly", "--params", "{\"include_definition\":true}", "--json"],
+      "mcp": {"tool": "pulp_control_graph_sample_region_read", "arguments": {"instance_id": "${T1_INSTANCE_ID}", "profile": "inspect-readonly", "input": {"include_definition": true}}}
+    },
+    {
+      "id": "sample-region-edit",
+      "tier": "T1",
+      "description": "Apply one bounded sample-region graph edit after broker-owned develop consent.",
+      "requires": ["T1_INSTANCE_ID"],
+      "cli": ["pulp", "control", "call", "--instance", "${T1_INSTANCE_ID}", "dev.pulp.graph/sample-region.edit@1", "--profile", "develop", "--params", "{\"region_id\":1,\"expected_graph_generation\":1,\"actions\":[{\"op\":\"set_finite_constant\",\"node_id\":1,\"value\":0.5}]}", "--json"],
+      "mcp": {"tool": "pulp_control_graph_sample_region_edit", "arguments": {"instance_id": "${T1_INSTANCE_ID}", "profile": "develop", "input": {"region_id": 1, "expected_graph_generation": 1, "actions": [{"op": "set_finite_constant", "node_id": 1, "value": 0.5}]}}}
+    },
+    {
       "id": "revoke",
       "tier": "management",
       "description": "Revoke a broker-issued grant owned by this authenticated client.",

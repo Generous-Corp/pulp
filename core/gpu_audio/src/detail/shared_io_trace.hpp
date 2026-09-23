@@ -21,6 +21,7 @@ enum class SharedIoTraceStage : std::uint8_t {
     SubmitBegin,
     SubmitEnd,
     CompletionObserved,
+    RetirementObserved,
     Count,
 };
 inline constexpr std::size_t kSharedIoTraceStageCount =
@@ -61,6 +62,17 @@ enum class SharedIoDeliveryDisposition : std::uint8_t {
 
 enum class SharedIoTraceKind : std::uint8_t { Terminal, Eligible, Delivery, Recovery };
 
+struct SharedIoTransferCounters {
+    std::uint64_t write_buffer_calls = 0;
+    std::uint64_t write_buffer_bytes = 0;
+    std::uint64_t output_copy_calls = 0;
+    std::uint64_t output_copy_bytes = 0;
+    std::uint64_t map_async_calls = 0;
+    std::uint64_t mapped_readback_memcpy_calls = 0;
+    std::uint64_t mapped_readback_memcpy_bytes = 0;
+};
+static_assert(std::is_trivially_copyable_v<SharedIoTransferCounters>);
+
 struct SharedIoTraceRecord {
     SharedIoTraceKind kind = SharedIoTraceKind::Terminal;
     std::uint64_t next_generation = 0;
@@ -81,6 +93,20 @@ struct SharedIoTraceRecord {
     bool output_eligible = false;
     std::uint64_t gpu_elapsed_ns = 0;
     bool gpu_elapsed_available = false;
+    std::uint64_t callback_start_ns = 0;
+    std::uint64_t callback_end_ns = 0;
+    std::uint64_t result_visible_ns = 0;
+    bool callback_timing_available = false;
+    // These spans are supplied by the host-only campaign seam. They remain
+    // unavailable for the ordinary diagnostic recorder until the benchmark
+    // explicitly instruments the corresponding worker regions.
+    std::uint64_t worker_pack_copy_ns = 0;
+    std::uint64_t event_processing_ns = 0;
+    std::uint64_t retirement_ns = 0;
+    std::uint64_t worker_other_ns = 0;
+    bool cpu_detail_available = false;
+    SharedIoTransferCounters transfer_counters{};
+    bool transfer_counters_available = false;
 
     void set(SharedIoTraceStage stage, std::uint64_t time_ns) noexcept {
         const auto i = static_cast<std::size_t>(stage);

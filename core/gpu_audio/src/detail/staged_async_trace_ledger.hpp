@@ -54,6 +54,16 @@ class StagedAsyncTraceLedger {
         return true;
     }
 
+    bool set_transfer_counters(std::uint64_t request_id,
+                               const SharedIoTransferCounters& counters) noexcept {
+        auto it = entries_.find(request_id);
+        if (it == entries_.end())
+            return false;
+        it->second.record.transfer_counters = counters;
+        it->second.record.transfer_counters_available = true;
+        return true;
+    }
+
     bool complete(std::uint64_t request_id, CompletionStatus status, std::uint64_t now_ns) {
         auto it = entries_.find(request_id);
         if (it == entries_.end() || !it->second.submitted)
@@ -259,6 +269,11 @@ class StagedAsyncTrialState {
             return false;
         }
         return true;
+    }
+
+    bool set_transfer_counters(std::uint64_t request_id,
+                               const SharedIoTransferCounters& counters) noexcept {
+        return ledger_.set_transfer_counters(request_id, counters);
     }
 
     bool complete(std::uint64_t request_id, StagedAsyncTraceLedger::CompletionStatus status,
