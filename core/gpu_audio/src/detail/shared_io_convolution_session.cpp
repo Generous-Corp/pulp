@@ -121,6 +121,8 @@ void SharedIoConvolutionSession::trace_admit(SharedIoSlotLedger::SlotToken token
     slot.record.generation = token.preparation_epoch;
     slot.record.sequence = token.stream_sequence;
     slot.record.gpu_work_admitted = true;
+    if (config_.active_path == SharedIoPath::SharedHostPointer)
+        slot.record.transfer_counters_available = true;
     // Admission begins at the actual physical input lease. Callback time is
     // intentionally unavailable: the callback never reads a diagnostic clock.
     slot.record.set(SharedIoTraceStage::Scheduled, trace_now_ns());
@@ -149,6 +151,7 @@ void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken to
     trace_telemetry_.record_retired(disposition ==
                                     SharedIoGpuTerminalDisposition::CompletedAccepted);
     auto& record = slot.record;
+    record.set(SharedIoTraceStage::RetirementObserved, trace_now_ns());
     record.gpu_terminal = disposition;
     record.gpu_reason = record.reason = reason;
     switch (disposition) {
