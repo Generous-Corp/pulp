@@ -124,12 +124,19 @@ int main() {
         if (block > 2 && output.channel(0)[0] != static_cast<float>((block - 2) * 2)) return 12;
     }
     if (transport.stats().miss_blocks != 0 || node.gpu_calls != 4) return 13;
+    // Start a fresh, caller-pumped transport so the fallback assertion cannot
+    // consume a wet block left queued by the lifecycle loop above. With two
+    // latency-prime blocks, the third process without pump() must miss.
+    transport.release();
+    if (!node.prepare() || !transport.prepare(&node, {.ring_blocks = 8})) return 14;
     std::fill(input.channel(0).begin(), input.channel(0).end(), 3.0f);
     auto in = static_cast<const Buffer<float>&>(input).view();
     auto out = output.view();
     transport.process(in, out, 32);
+    transport.process(in, out, 32);
+    transport.process(in, out, 32);
     if (output.channel(0)[0] != -3.0f || transport.stats().miss_blocks != 1 ||
-        node.fallback_calls == 0) return 14;
+        node.fallback_calls == 0) return 15;
     return 0;
 }
 ]=])
