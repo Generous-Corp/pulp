@@ -155,12 +155,25 @@ target_link_libraries(pulp-inspect-runtime
     PRIVATE
         pulp::tool-gpu-health-model)
 
+# Sample-region control drives a hosted SignalGraph, so it is a separate adapter
+# archive: the shared control runtime must not acquire the plugin-host
+# dependency merely by existing. The installed control SDK contract forbids
+# pulp::host anywhere in pulp::inspect-runtime's link interface, and a PRIVATE
+# link would still surface there as $<LINK_ONLY:pulp::host>. Only the
+# control-enabled Standalone bridge links this archive.
 if(TARGET pulp::host)
-    target_sources(pulp-inspect-runtime PRIVATE
+    add_library(pulp-inspect-sample-region-runtime
         src/control_sample_region_target.cpp
         src/control_sample_region_read_executor.cpp
         src/control_sample_region_edit_executor.cpp)
-    target_link_libraries(pulp-inspect-runtime PUBLIC pulp::host)
+    add_library(pulp::inspect-sample-region-runtime ALIAS
+        pulp-inspect-sample-region-runtime)
+    target_include_directories(pulp-inspect-sample-region-runtime
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+    target_link_libraries(pulp-inspect-sample-region-runtime
+        PUBLIC pulp::inspect-runtime pulp::host)
 endif()
 
 # The canonical ordinary-Standalone host bridge is isolated from both the base
@@ -186,6 +199,8 @@ target_link_libraries(pulp-inspect-standalone-runtime
 if(TARGET pulp::host)
     target_compile_definitions(pulp-inspect-standalone-runtime PRIVATE
         PULP_HAS_SAMPLE_REGION_CONTROL=1)
+    target_link_libraries(pulp-inspect-standalone-runtime
+        PUBLIC pulp::inspect-sample-region-runtime)
 endif()
 
 # Exact-target UI capture/input remains an optional adapter so the common
@@ -319,6 +334,7 @@ foreach(_pulp_eval_free_target IN ITEMS
         pulp-inspect-control
         pulp-inspect-client
         pulp-inspect-runtime
+        pulp-inspect-sample-region-runtime
         pulp-inspect-offline-runtime
         pulp-inspect-telemetry
         pulp-inspect-authoring
@@ -335,5 +351,31 @@ foreach(_pulp_eval_free_target IN ITEMS
     endif()
 endforeach()
 unset(_pulp_eval_free_target)
+unset(_pulp_private_links)
+unset(_pulp_public_links)
+
+# Configure-time dependency proof: the installed control SDK targets must stay
+# free of the plugin-host archive. The installed-consumer smoke enforces the
+# same contract, but only on a GPU macOS build tree; this fails closed on every
+# platform that configures. A PRIVATE link is rejected too: on a static archive
+# it still reaches the consumer as $<LINK_ONLY:pulp::host>.
+foreach(_pulp_host_free_target IN ITEMS
+        pulp-inspect-protocol
+        pulp-inspect-control
+        pulp-inspect-client
+        pulp-inspect-runtime)
+    if(TARGET ${_pulp_host_free_target})
+        get_target_property(_pulp_private_links ${_pulp_host_free_target} LINK_LIBRARIES)
+        get_target_property(_pulp_public_links ${_pulp_host_free_target} INTERFACE_LINK_LIBRARIES)
+        if("${_pulp_private_links};${_pulp_public_links}" MATCHES
+           "pulp::host|pulp-host")
+            message(FATAL_ERROR
+                "${_pulp_host_free_target} must not depend on pulp-host; "
+                "host-backed control belongs in pulp-inspect-sample-region-runtime "
+                "or another adapter archive")
+        endif()
+    endif()
+endforeach()
+unset(_pulp_host_free_target)
 unset(_pulp_private_links)
 unset(_pulp_public_links)
