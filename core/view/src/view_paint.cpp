@@ -403,6 +403,15 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
         }
     }
     state.backdrop_pushed = needs_backdrop_layer;
+    // Spans the whole backdrop layer, because the cost lands at restore() --
+    // that is when the blurred parent surface is composited -- not here at
+    // save(). Ended in pop_effect_layers, after that restore. Layers are the
+    // expensive canvas op (O(pixels x radius)) and there are tens per frame,
+    // not thousands, so instrumenting them is bounded by construction.
+    if (needs_backdrop_layer) {
+        PULP_TRACE_BEGIN_ARGS("canvas", "backdrop_layer", "w", bounds_.width,
+                              "h", bounds_.height, "blur", backdrop_blur());
+    }
 
     // Compositing layer for opacity, blur, or post-effects.
     // Both the outset box-shadow and the overflow clip must be pushed after
@@ -543,6 +552,14 @@ View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
         if (layers_pushed == 0) layers_pushed = 1;
     }
     state.layers_pushed = layers_pushed;
+    // One span for the group rather than one per layer: an EffectChain can
+    // push several, and the count is an argument you can query on, so a span
+    // each would multiply cardinality without telling you anything the count
+    // does not. Nests inside the backdrop span above, matching the save order.
+    if (layers_pushed > 0) {
+        PULP_TRACE_BEGIN_ARGS("canvas", "effect_layer", "layers", layers_pushed,
+                              "w", layer_w, "h", layer_h, "blur", filter_blur());
+    }
     return state;
 }
 
@@ -554,11 +571,17 @@ void View::pop_effect_layers(canvas::Canvas& canvas,
     // assuming one.
     for (int i = 0; i < layers.layers_pushed; ++i)
         canvas.restore();
+    // Closed AFTER the restores, so the span contains the compositing work
+    // rather than just the bookkeeping. Balances the BEGIN in
+    // push_effect_layers; both run on the paint thread.
+    if (layers.layers_pushed > 0) PULP_TRACE_END("canvas");
 
     // End backdrop-filter layer. Composites the widget's own
     // opacity layer over the blurred parent backdrop.
-    if (layers.backdrop_pushed)
+    if (layers.backdrop_pushed) {
         canvas.restore();
+        PULP_TRACE_END("canvas");
+    }
 }
 
 void View::paint_outset_shadows(canvas::Canvas& canvas) {
