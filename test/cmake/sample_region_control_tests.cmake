@@ -35,6 +35,31 @@ function(_pulp_register_sample_region_control_e2e)
             "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/pulp-mcp"
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-sample-region-e2e>"
             "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/pulp-control-broker"
+        # Management-client alias. ControlBrokerDaemon derives its trusted-client
+        # set by statically inspecting `pulp`, `pulp-cpp` and `pulp-mcp` at fixed
+        # paths around the configured executable, then admits an enrolling peer
+        # only when the peer's (executable_identity, publisher_id) matches one of
+        # them. This test IS the enrolling client, so its own identity has to be
+        # in that set or `authorize_client` rejects it and enroll returns
+        # "enrollment-denied". The daemon's executable_path must equal the running
+        # executable, so the search is anchored on this directory and cannot be
+        # redirected.
+        #
+        # The alias goes to the `<bin>/../tools/cli/pulp-cpp` candidate, NOT to a
+        # sibling of the staged CLI: the Rust CLI resolves its C++ delegate via
+        # current_exe().parent(), so a `pulp-cpp` beside the staged `pulp` would
+        # shadow the real delegate and break the `control` subcommands this test
+        # drives. Nothing probes this nested path except the broker.
+        #
+        # Copied, never re-signed: ad-hoc signing derives the identifier from the
+        # basename, so re-signing under another name would change the very
+        # identity the alias exists to carry. Same reasoning as the
+        # `stage_signed_binary(..., false)` aliases in
+        # test_control_phase15_aggregate_e2e.cpp.
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/../tools/cli"
+        COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-sample-region-e2e>"
+            "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/../tools/cli/pulp-cpp"
         VERBATIM)
     catch_discover_tests(pulp-test-control-sample-region-e2e
         PROPERTIES TIMEOUT 180 LABELS "inspect;control;sample-region;e2e")
