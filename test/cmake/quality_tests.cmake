@@ -662,9 +662,10 @@ if(Python3_Interpreter_FOUND)
 
     # The sibling suite mocks subprocess wholesale, so it proves the candidate
     # order and the fall-through without ever asking git whether those refs
-    # resolve. This drives real git against a genuinely shallow clone whose
-    # refs/pull/<n>/merge is absent -- the production condition the fallback
-    # exists for -- and also asserts an unreachable commit still fails closed.
+    # resolve. This drives real git against genuinely shallow clones in the two
+    # shapes production produces -- an absent refs/pull/<n>/merge, and a
+    # merge-queue branch deleted while its own run is still going -- and also
+    # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
 
