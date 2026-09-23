@@ -15,12 +15,17 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# The POSIX label set is computed by this module rather than written inline in
+# the workflow, so assert against the module the workflow actually calls.
+sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+import ctest_gate_args  # noqa: E402
 BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 BUILD_MACOS_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-macos.yml"
 COVERAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "coverage.yml"
@@ -51,7 +56,11 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn('cmake --build "$PULP_BUILD_DIR" --config Release', text)
         self.assertIn('ctest --test-dir "$PULP_BUILD_DIR"', text)
         self.assertIn('ctest --test-dir "%PULP_BUILD_DIR%"', text)
-        self.assertIn('label_exclude="validation|slow', text)
+        # The POSIX label set is no longer written inline: build.yml computes
+        # it (and the merge_group stop-on-failure flag) from one tested module.
+        # Assert the wiring, since an unreferenced module cannot gate anything.
+        self.assertIn("tools/ci/ctest_gate_args.py", text)
+        self.assertIn('-LE "$label_exclude"', text)
         self.assertIn(
             'set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine',
             text,
@@ -72,25 +81,30 @@ class WorkflowBuildDirTests(unittest.TestCase):
         """
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
-        # Deliberately single-line (`[^\n]*`): build.yml has other
-        # `event_name == pull_request` guards, and a DOTALL match would span
-        # from the first of them to this one and read the wrong label set.
-        posix_condition = re.search(
-            r'if \[ "\$\{\{ github\.event_name \}\}" = "pull_request" \][^\n]*\n'
-            r'\s*label_exclude="(?P<labels>[^"]+)"\n',
-            text,
-        )
-        self.assertIsNotNone(
-            posix_condition, "reduced-ctest condition not found in build.yml"
-        )
-        guard = posix_condition.group(0)
+        # build.yml must still reach the module that decides this; otherwise
+        # the rules below are true of a file nothing calls.
+        self.assertIn("tools/ci/ctest_gate_args.py", text)
+
+        posix_label_sets = {}
         for event in ("pull_request", "workflow_dispatch", "merge_group"):
             with self.subTest(event=event, shell="posix"):
-                self.assertIn(f'= "{event}"', guard)
-        posix_labels = set(posix_condition.group("labels").split("|"))
-        self.assertLessEqual(
-            {"validation", "slow", "performance", "bench", "quality-lab"},
-            posix_labels,
+                labels = set(
+                    ctest_gate_args.label_exclude(event, "macOS").split("|")
+                )
+                self.assertLessEqual(
+                    {"validation", "slow", "performance", "bench", "quality-lab"},
+                    labels,
+                )
+                posix_label_sets[event] = labels
+
+        # The three gating events must agree with each other, which is the
+        # property this test exists to hold.
+        self.assertEqual(len(set(map(frozenset, posix_label_sets.values()))), 1)
+        posix_labels = posix_label_sets["pull_request"]
+
+        # `push` on a GitHub-hosted runner deliberately keeps the heavier set.
+        self.assertNotIn(
+            "slow", ctest_gate_args.label_exclude("push", "Linux").split("|")
         )
 
         for event in ("pull_request", "workflow_dispatch", "merge_group"):
