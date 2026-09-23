@@ -381,7 +381,13 @@ PulpGeom pulp_geom(float2 coord) {
                          pulp_shape_distance(p - float2(e, 0.0)),
                          pulp_shape_distance(p + float2(0.0, e)) -
                          pulp_shape_distance(p - float2(0.0, e))) / (2.0 * e);
-    return PulpGeom(d, normalize(grad), p, coord / resolution,
+    // At an exact extremum of the field the central differences cancel and
+    // grad is exactly zero; normalize() would divide by zero and yield NaN for
+    // that fragment. A zero direction is the honest answer there — the field
+    // has no gradient — and it keeps every author expression finite.
+    float gradLen = length(grad);
+    float2 gradDir = gradLen > 0.0 ? grad / gradLen : float2(0.0);
+    return PulpGeom(d, gradDir, p, coord / resolution,
                     1.0 - smoothstep(-1.0, 1.0, d));
 }
 )" + author_sksl + R"(

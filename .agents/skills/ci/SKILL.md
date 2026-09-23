@@ -1315,6 +1315,44 @@ skill for the full banner contract and override knobs
 (`PULP_SKEW_CHECK_DISABLE`, `PULP_SKEW_CHECK_CACHE`). Release-discovery
 Slice 6 (#551).
 
+## A backlog that stopped draining: audit every PR before diagnosing any one
+
+CI is reactive. It runs when a PR is pushed or enqueued, and nothing asks "is
+anything stuck that should not be?" — so a backlog can stall with the fleet
+idle, and no check anywhere turns red. Before diagnosing a single PR, or
+concluding the pool is saturated, classify the whole set:
+
+```bash
+python3 tools/scripts/pr_flow_audit.py            # read-only report
+python3 tools/scripts/pr_flow_audit.py --json     # same verdicts, machine-readable
+python3 tools/scripts/pr_flow_audit.py --fix --dry-run   # what --fix would do
+```
+
+Every open PR lands in exactly one bucket — MOVING, AUTO-FIXABLE, NEEDS-HUMAN,
+or UNKNOWN — against one rule: a PR must either have work in flight or be
+waiting on a named human decision, and anything else is a leak. Conflicted PRs
+that already hold a green `macos` are printed first, because they have paid for
+the ~40-minute gate and only the conflict stands between them and the queue.
+
+Two things about it are worth knowing before you trust or extend it:
+
+- **It never certifies health.** UNKNOWN is a real verdict, `--fix` refuses to
+  touch it, and a sweep whose collection errored says so instead of reporting a
+  clean backlog. A run with UNKNOWNs in it has not been fully audited.
+- **A re-run cannot clear a failure at a step that no longer runs.** Re-running
+  replays the workflow file from the run's own commit, and that run reached the
+  step, so it reaches it again. Only a fresh merge commit picks up the current
+  workflow, which is why the action for that case is `update-branch` rather than
+  `rerun-failed-jobs`. A PR's `refs/pull/N/merge` can still carry a superseded
+  workflow hours after base moved on, even when the PR touches no workflow file,
+  so reading the PR's own merge ref answers a different question than reading
+  base.
+
+Reachability is evaluated by parsing the base branch's `build.yml` and testing
+each failing step's `if:` against the `pull_request` event — never by matching a
+step name, which would rot at the next workflow edit and reintroduce exactly the
+stall the tool exists to catch.
+
 ## Diagnosing a slow / stuck PR — investigate before assuming runner saturation
 
 When a PR sits without merging, don't ASSUME "the macOS CI pool is saturated"

@@ -1062,7 +1062,6 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     if (all_common_layouts) {
         natively_supported = processor_->is_bus_layout_supported(proposal);
     }
-
     // Apply channel counts to the AudioBus objects the parent registered
     // from descriptor() during initialize(). setArrangement is the VST3
     // SDK's canonical in-place mutator for a bus's channel layout.
@@ -1073,18 +1072,37 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
             if (auto* bus = FCast<AudioBus>(audioOutputs.at(i))) bus->setArrangement(outputs[i]);
     };
 
+    const bool mono_effect_stereo_compat =
+        numIns == 1 && numOuts == 1 && desc.input_buses.size() == 1 &&
+        desc.output_buses.size() == 1 && desc.input_buses[0].default_channels == 1 &&
+        desc.output_buses[0].default_channels == 1 && inputs[0] == SpeakerArr::kStereo &&
+        outputs[0] == SpeakerArr::kStereo;
+
     if (!natively_supported) {
+        // REAPER negotiates a stereo main bus for mono effects even when the
+        // track is mono. Preserve the processor's strict mono prepare contract
+        // while accepting that host shape through the existing silence
+        // accommodation: process channel zero and clear the surplus channel.
         // When the arrangement is a mono/stereo layout the processor
         // explicitly vetoed, honor that veto. It encodes a real contract
         // such as linked main/sidechain channel counts or stereo-only
         // output, and there are no extra channels the silence
         // accommodation could neutralize.
-        if (all_empty_mono_stereo) {
+        if (all_empty_mono_stereo && !mono_effect_stereo_compat) {
             runtime::log_info(
                 "VST3 setBusArrangements: rejected processor-vetoed empty/mono/stereo "
                 "layout ({} in / {} out buses) — honoring is_bus_layout_supported",
                 numIns, numOuts);
             return kResultFalse;
+        }
+
+        if (mono_effect_stereo_compat) {
+            apply_arrangements();
+            silence_unsupported_active_ = true;
+            runtime::log_info(
+                "VST3 setBusArrangements: accepted stereo host shape for strict mono effect "
+                "via channel-zero compatibility");
+            return kResultTrue;
         }
 
         // An explicit layout list is an exact host-facing contract. Do not
@@ -1121,6 +1139,15 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
         return kResultTrue;
     }
 
+    // Some hosts report the stereo arrangement as natively supported even
+    // though the Processor's declared contract is strict mono. Keep the
+    // negotiated arrangement, but still clamp processing to channel zero.
+    if (mono_effect_stereo_compat) {
+        apply_arrangements();
+        silence_unsupported_active_ = true;
+        return kResultTrue;
+    }
+
     silence_unsupported_active_ = false;
     apply_arrangements();
     runtime::log_info(
@@ -1143,6 +1170,8 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     // must remain prepared at its descriptor-default safe width and process()
     // clamps/zeros the surplus channels.
     auto desc = processor_->descriptor();
+    descriptor_main_mono_ =
+        desc.default_input_channels() == 1 && desc.default_output_channels() == 1;
     int in_ch = desc.default_input_channels();
     int out_ch = desc.default_output_channels();
     if (!silence_unsupported_active_) {
@@ -1194,8 +1223,29 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
         prepared_layout.outputs.push_back(channels);
     }
 
+    // A host may renegotiate a retained stereo shape after the adapter has
+    // accepted it for channel-zero compatibility. Do not pass that shape into
+    // a strict mono Processor::prepare(): ask the Processor's layout contract
+    // and fall back to its descriptor-default width when the negotiated shape
+    // is unsupported. process() performs the corresponding channel clamp.
+    if (!processor_->is_bus_layout_supported(prepared_layout)) {
+        in_ch = desc.default_input_channels();
+        out_ch = desc.default_output_channels();
+        prepared_layout.inputs.clear();
+        prepared_layout.outputs.clear();
+        for (const auto& bus : desc.input_buses)
+            prepared_layout.inputs.push_back(bus.default_channels);
+        for (const auto& bus : desc.output_buses)
+            prepared_layout.outputs.push_back(bus.default_channels);
+        ctx.input_channels = in_ch;
+        ctx.output_channels = out_ch;
+    }
+
     processor_->prepare(ctx);
     processor_->prepare_f64_fallback_scratch(ctx, prepared_layout);
+    prepared_context_ = ctx;
+    prepared_layout_ = prepared_layout;
+    has_prepared_context_ = true;
     native_f64_enabled_ = desc.effective_capabilities().supports_f64_audio;
     selected_sample_size_ = setup.symbolicSampleSize == kSample64 ? kSample64 : kSample32;
 
@@ -1421,6 +1471,10 @@ void PulpVst3Processor::schedule_restart_poll_tick() {
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
+    if (state && processor_ && has_prepared_context_) {
+        processor_->prepare(prepared_context_);
+        processor_->prepare_f64_fallback_scratch(prepared_context_, prepared_layout_);
+    }
     if (!state && processor_) {
         processor_->release();
         // Drop any per-note expression state so a re-activation does not route
@@ -1590,6 +1644,7 @@ void PulpVst3Processor::process_decode_input_parameters(ProcessData& data) {
 
 bool PulpVst3Processor::process_validate_layout(
     ProcessData& data, bool host_f64, int original_num_samples) {
+    const bool descriptor_main_mono = descriptor_main_mono_;
     const auto zero_host_outputs = [&] {
         if (!data.outputs) return;
         for (int32 b = 0; b < data.numOutputs; ++b) {
@@ -1612,21 +1667,70 @@ bool PulpVst3Processor::process_validate_layout(
                        : 0);
         }
     };
-    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus,
-                                       AudioBus* declared_bus) {
-        if (!declared_bus) return false;
+    const auto host_bus_is_valid = [&](const AudioBusBuffers& host_bus, AudioBus* declared_bus,
+                                       bool allow_mono_stereo_compat, bool input_bus) {
+        if (!declared_bus)
+            return false;
         const int expected_channels = static_cast<int>(
             SpeakerArr::getChannelCount(declared_bus->getArrangement()));
-        if (host_bus.numChannels == 0) return true;
-        if (host_bus.numChannels != expected_channels) return false;
+        // A declared audio bus with zero host channels is not a usable
+        // ProcessData layout.  Accept zero only for a genuinely channel-less
+        // optional bus; otherwise reject before wiring zero-channel views into
+        // the Processor (which otherwise renders silence while appearing
+        // successful to the host).
+        if (host_bus.numChannels == 0)
+            return input_bus || expected_channels == 0;
+        // REAPER may keep a stereo track bus around while routing a declared
+        // mono plug-in through channel zero.  Treat that host shape as a
+        // supported compatibility layout; process_wire_buffers clamps the
+        // Processor view to its prepared mono arrangement and the surplus
+        // host channel is explicitly cleared before publication.
+        // A strict mono descriptor may be observed with either side of the
+        // host's retained mono/stereo handoff.  Keep the descriptor contract
+        // authoritative: only the single main bus may transition 1 <-> 2,
+        // and the processor remains prepared at its descriptor-declared mono
+        // width.  process_wire_buffers clears any surplus host output channel.
+        const bool mono_width_transition =
+            allow_mono_stereo_compat && descriptor_main_mono &&
+            // setBusArrangements may have accepted REAPER's retained stereo
+            // shape, making expected_channels appear to be 2 here. The
+            // Processor descriptor remains the authority: its strict mono
+            // view must still be clamped to channel zero.
+            ((expected_channels == 1 && host_bus.numChannels == 2) ||
+             (expected_channels == 2 && host_bus.numChannels == 1) ||
+             (expected_channels == 2 && host_bus.numChannels == 2));
+        if (host_bus.numChannels != expected_channels && !mono_width_transition)
+            return false;
+        // REAPER can retain the stereo ProcessData shape after negotiating a
+        // mono arrangement.  Mark the same channel-zero accommodation used
+        // by setBusArrangements() so the strict mono Processor never receives
+        // the host's surplus channel during that transition.
+        if (mono_width_transition)
+            silence_unsupported_active_ = true;
+        // Hosts may publish a silent input bus with no backing channel
+        // pointers. Treat that as zero input so stateful processors continue
+        // their tails; output storage remains mandatory. The wiring phase
+        // substitutes adapter-owned zero buffers for these channels.
         if (host_f64) {
-            if (!host_bus.channelBuffers64) return false;
-            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
-                if (!host_bus.channelBuffers64[ch]) return false;
+            if (!input_bus && !host_bus.channelBuffers64)
+                return false;
+            if (!input_bus && host_bus.channelBuffers64) {
+                const int required =
+                    allow_mono_stereo_compat && descriptor_main_mono ? 1 : host_bus.numChannels;
+                for (int32 ch = 0; ch < required; ++ch)
+                    if (!host_bus.channelBuffers64[ch])
+                        return false;
+            }
         } else {
-            if (!host_bus.channelBuffers32) return false;
-            for (int32 ch = 0; ch < host_bus.numChannels; ++ch)
-                if (!host_bus.channelBuffers32[ch]) return false;
+            if (!input_bus && !host_bus.channelBuffers32)
+                return false;
+            if (!input_bus && host_bus.channelBuffers32) {
+                const int required =
+                    allow_mono_stereo_compat && descriptor_main_mono ? 1 : host_bus.numChannels;
+                for (int32 ch = 0; ch < required; ++ch)
+                    if (!host_bus.channelBuffers32[ch])
+                        return false;
+            }
         }
         return true;
     };
@@ -1638,8 +1742,8 @@ bool PulpVst3Processor::process_validate_layout(
         (data.numOutputs > 0 && !data.outputs);
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numInputs; ++b) {
-            if (!host_bus_is_valid(
-                    data.inputs[b], FCast<AudioBus>(audioInputs.at(b)))) {
+            if (!host_bus_is_valid(data.inputs[b], FCast<AudioBus>(audioInputs.at(b)),
+                                   b == 0 && data.numInputs == 1, true)) {
                 malformed_layout = true;
                 break;
             }
@@ -1647,8 +1751,8 @@ bool PulpVst3Processor::process_validate_layout(
     }
     if (!malformed_layout) {
         for (int32 b = 0; b < data.numOutputs; ++b) {
-            if (!host_bus_is_valid(
-                    data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)))) {
+            if (!host_bus_is_valid(data.outputs[b], FCast<AudioBus>(audioOutputs.at(b)),
+                                   b == 0 && data.numOutputs == 1, false)) {
                 malformed_layout = true;
                 break;
             }
@@ -1669,8 +1773,10 @@ void PulpVst3Processor::process_wire_buffers(
     // Processor::set_sidechain(). Additional input buses beyond index 1
     // are ignored because the Processor API exposes a single sidechain
     // slot.
-    if (data.numInputs > 0 && data.inputs[0].numChannels > 0) {
+    if (data.numInputs > 0) {
         in_channels = data.inputs[0].numChannels;
+        if (in_channels == 0)
+            in_channels = native_in_;
         if (host_f64) {
             in_channels = (std::min)(
                 in_channels, static_cast<int>(f64_input_scratch_.size()));
@@ -1685,18 +1791,43 @@ void PulpVst3Processor::process_wire_buffers(
                 input_ptrs_[ch] = nullptr;
             } else if (boundary_f64) {
                 auto* dst = f64_input_scratch_[static_cast<std::size_t>(ch)].data();
-                const double* src = data.inputs[0].channelBuffers64
-                    ? data.inputs[0].channelBuffers64[ch]
-                    : nullptr;
+                const double* src =
+                    data.inputs[0].numChannels > ch && data.inputs[0].channelBuffers64
+                        ? data.inputs[0].channelBuffers64[ch]
+                        : nullptr;
                 input64_ptrs_[ch] = src;
+                if (!src)
+                    std::fill_n(dst, num_samples, 0.0f);
                 boundary::copy_f64_to_f32(src, dst,
                                           static_cast<std::uint32_t>(num_samples));
-                input_ptrs_[ch] = src ? dst : nullptr;
+                input_ptrs_[ch] = dst;
             } else {
                 input64_ptrs_[ch] = nullptr;
-                input_ptrs_[ch] = data.inputs[0].channelBuffers32
-                    ? data.inputs[0].channelBuffers32[ch]
-                    : nullptr;
+                auto* src = data.inputs[0].numChannels > ch && data.inputs[0].channelBuffers32
+                                ? data.inputs[0].channelBuffers32[ch]
+                                : nullptr;
+                if (src) {
+                    input_ptrs_[ch] = src;
+                } else {
+                    // The f32 path does not clamp in_channels to the scratch
+                    // width (only the f64 path above does), and the scratch is
+                    // sized to the PREPARED input width — which is narrower
+                    // than the host width whenever a strict mono Processor is
+                    // accepted on a stereo host bus. Index it defensively and
+                    // reuse channel zero's zeros for any surplus host channel:
+                    // the Processor view is clamped to the prepared width, so a
+                    // surplus channel is never read, but its pointer must still
+                    // be in-bounds and non-null.
+                    const auto idx = static_cast<std::size_t>(ch);
+                    if (!f64_input_scratch_.empty()) {
+                        auto& silent =
+                            f64_input_scratch_[idx < f64_input_scratch_.size() ? idx : 0];
+                        std::fill_n(silent.begin(), num_samples, 0.0f);
+                        input_ptrs_[ch] = silent.data();
+                    } else {
+                        input_ptrs_[ch] = nullptr;
+                    }
+                }
             }
         }
     }
@@ -2132,9 +2263,74 @@ void PulpVst3Processor::process_publish_restart_flags() {
 
 tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (!processor_) return kInternalError;
-    const bool host_f64 = data.symbolicSampleSize == kSample64 ||
-                          (data.symbolicSampleSize != kSample32 &&
-                           selected_sample_size_ == kSample64);
+    bool host_f64 = data.symbolicSampleSize == kSample64 ||
+                    (data.symbolicSampleSize != kSample32 && selected_sample_size_ == kSample64);
+    // Some hosts (notably REAPER during a retained mono/stereo bus handoff)
+    // keep symbolicSampleSize at kSample64 while exposing the actual audio
+    // through channelBuffers32. The arrays themselves can remain non-null
+    // while individual 64-bit channel entries are null after the first
+    // callback, so selecting on the array pointer alone makes every later
+    // block fail closed in process_validate_layout and appear as silence.
+    // Select the ABI from complete per-channel storage; if neither ABI is
+    // complete, retain the advertised choice so validation still fails closed.
+    const auto bus_has_storage = [](const AudioBusBuffers& bus, bool f64) {
+        if (bus.numChannels == 0)
+            return true;
+        if (f64) {
+            if (!bus.channelBuffers64)
+                return false;
+            for (int32 ch = 0; ch < bus.numChannels; ++ch)
+                if (!bus.channelBuffers64[ch])
+                    return false;
+        } else {
+            if (!bus.channelBuffers32)
+                return false;
+            for (int32 ch = 0; ch < bus.numChannels; ++ch)
+                if (!bus.channelBuffers32[ch])
+                    return false;
+        }
+        return true;
+    };
+    if (host_f64) {
+        bool f64_complete = true;
+        bool f32_complete = true;
+        // ProcessData may advertise buses while omitting the corresponding
+        // array during a host-side bus handoff. Treat that shape as an
+        // incomplete ABI and let process_validate_layout fail closed; do not
+        // dereference a null bus array while selecting the sample format.
+        if (data.inputs != nullptr && data.outputs != nullptr) {
+            for (int32 b = 0; b < data.numInputs; ++b) {
+                f64_complete = f64_complete && bus_has_storage(data.inputs[b], true);
+                f32_complete = f32_complete && bus_has_storage(data.inputs[b], false);
+            }
+            for (int32 b = 0; b < data.numOutputs; ++b) {
+                f64_complete = f64_complete && bus_has_storage(data.outputs[b], true);
+                f32_complete = f32_complete && bus_has_storage(data.outputs[b], false);
+            }
+        } else {
+            // Skip the per-bus probes; layout validation owns the deterministic
+            // zero-output response for this malformed block.
+            f64_complete = false;
+            f32_complete = false;
+        }
+        // REAPER can advertise kSample64 while supplying the real stream in
+        // complete f32 buffers.  A Processor without native f64 support must
+        // consume that f32 stream; otherwise the advertised f64 arrays remain
+        // zero and the adapter renders only the initial impulse callback.
+        // Prefer the ABI explicitly selected by symbolicSampleSize whenever
+        // its channel storage is complete. Some hosts expose non-null f32
+        // aliases while actually rendering through the selected f64 buffers;
+        // demoting solely because the Processor lacks native f64 would consume
+        // those aliases and turn the host stream into silence. Fall back to
+        // f32 only when the advertised f64 storage is incomplete.
+        // A f32-only Processor must consume the complete f32 stream when a
+        // host retains a stale/non-rendered f64 alias alongside it. REAPER's
+        // mono handoff has exactly this shape: both channel arrays are
+        // allocated, but only the f32 stream carries the rendered input.
+        // Native f64 Processors continue to honor the negotiated f64 ABI.
+        if (f32_complete && !f64_complete)
+            host_f64 = false;
+    }
     const bool native_f64 = host_f64 && native_f64_enabled_;
     const bool boundary_f64 = host_f64 && !native_f64;
 
@@ -2158,7 +2354,6 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // back as clean silence rather than garbage.
     const int32 original_num_samples = num_samples;
     num_samples = clamp_block_to_prepared_max(num_samples, max_block_size_);
-
     if (!process_validate_layout(data, host_f64, original_num_samples)) {
         return kResultOk;
     }
@@ -2195,10 +2390,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                 std::memset(output_ptrs_[ch], 0, sizeof(float) * num_samples);
             }
         }
-        proc_in  = (in_channels  < native_in_)  ? in_channels  : native_in_;
-        proc_out = (out_channels < native_out_) ? out_channels : native_out_;
+        const int descriptor_in = native_in_;
+        const int descriptor_out = native_out_;
+        proc_in = (in_channels < descriptor_in) ? in_channels : descriptor_in;
+        proc_out = (out_channels < descriptor_out) ? out_channels : descriptor_out;
     }
-
     audio::BufferView<const float> input_view(
         const_cast<const float* const*>(input_ptrs_.data()),
         proc_in, num_samples);
@@ -2406,7 +2602,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     // buffer to the processor for the duration of this process() call. Events
     // stay sample-ordered because midi_in_ was just sorted. Mirrors the CLAP
     // adapter's set_mpe_input contract; clears per block, allocation-free.
-    if (!mpe_.run(*processor_, midi_in_)) {
+    const bool mpe_ok = mpe_.run(*processor_, midi_in_);
+    if (!mpe_ok) {
         midi_in_.clear();
         midi_in_.clear_sysex();
         note_id_map_clear();
@@ -2415,6 +2612,12 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 
     // Wrap the plugin call in a ScopedNoAlloc so debug hooks can flag a
     // plugin that allocates on the audio thread.
+    // A strict mono Processor accepted through REAPER's stereo compatibility
+    // shape can still be rendered by a host that selected f64 buffers. Route
+    // that one case through the Processor's prepared f64 fallback so its
+    // channel-zero view stays direct, rather than relying on the adapter's
+    // widened host scratch/writeback path. Native f64 processors and ordinary
+    // negotiated layouts retain their existing paths.
     {
         pulp::runtime::ScopedNoAlloc no_alloc_guard;
         if (native_f64) {
@@ -2423,7 +2626,6 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
         }
     }
-
     // VST3 puts the obligation to declare output silence on the plugin, and a
     // host is free to propagate its input silenceFlags into the output buffers
     // it hands us. A Processor may synthesize output from silence — a
@@ -2439,10 +2641,11 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (boundary_f64) {
         if (data.numOutputs > 0 && data.outputs[0].channelBuffers64) {
             for (int ch = 0; ch < out_channels; ++ch) {
-                boundary::copy_f32_to_f64(
-                    output_ptrs_[ch],
-                    data.outputs[0].channelBuffers64[ch],
-                    static_cast<std::uint32_t>(num_samples));
+                if (data.outputs[0].channelBuffers64[ch]) {
+                    boundary::copy_f32_to_f64(output_ptrs_[ch],
+                                              data.outputs[0].channelBuffers64[ch],
+                                              static_cast<std::uint32_t>(num_samples));
+                }
             }
         }
         for (std::size_t b = 1; b < routed_output_buses; ++b) {
@@ -2464,7 +2667,6 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             }
         }
     }
-
     // Return trigger / momentary params (panic, reset, tap) to their default
     // now that the Processor has observed this block. Done before the
     // output-change scan below so the host records the auto-reset as automation.
