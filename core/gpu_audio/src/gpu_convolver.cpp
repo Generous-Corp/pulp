@@ -78,6 +78,7 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_configured_ = true;
     convolver.trial_enable_trace_ = config.enable_trace;
     convolver.trial_capture_admissions_ = config.capture_admissions;
+    convolver.trial_capture_callback_timing_ = config.capture_callback_timing;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
     convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
@@ -227,7 +228,9 @@ bool GpuConvolver::prepare() {
                                                   .block_size = block_,
                                                   .fft_size = fft_size_,
                                                   .ir_length = static_cast<uint32_t>(ir_.size()),
-                                                  .lead_blocks = latency_blocks_},
+                                                  .lead_blocks = latency_blocks_,
+                                                  .capture_callback_timing =
+                                                      trial_capture_callback_timing_},
                                      .slots = kSharedIoSlots,
                                      .sample_rate = sample_rate_,
                                      .trace = {.success_stride = trial_success_stride_,
@@ -285,7 +288,8 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
                                                       const audio::BufferView<const float>& input,
                                                       audio::BufferView<float>& output,
                                                       std::uint32_t n, std::uint64_t sequence,
-                                                      bool input_valid) noexcept {
+                                                      bool input_valid,
+                                                      std::uint64_t callback_start_ns) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     auto* convolver = static_cast<GpuConvolver*>(self);
     if (convolver == nullptr || !convolver->prepared_ || !convolver->shared_io_ ||
@@ -307,7 +311,8 @@ std::uint8_t GpuConvolver::process_realtime_shared_io(void* self,
     }
 
     const auto callback = state.session->begin_callback(
-        std::span<const float>(state.callback_input.data(), state.callback_input.size()), sequence);
+        std::span<const float>(state.callback_input.data(), state.callback_input.size()), sequence,
+        callback_start_ns);
     state.callback = callback;
     const auto delivery = state.session->consume_output(
         callback, std::span<float>(state.callback_output.data(), state.callback_output.size()),
@@ -371,7 +376,9 @@ bool GpuConvolver::fence_realtime_shared_io(void* self) noexcept {
 }
 
 void GpuConvolver::complete_realtime_shared_io(void* self, std::uint64_t sequence,
-                                               std::uint8_t disposition) noexcept {
+                                               std::uint8_t disposition,
+                                               std::uint64_t callback_end_ns,
+                                               std::uint64_t result_visible_ns) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     auto* convolver = static_cast<GpuConvolver*>(self);
     if (!convolver || !convolver->shared_io_ || !convolver->shared_io_->session)
@@ -379,7 +386,8 @@ void GpuConvolver::complete_realtime_shared_io(void* self, std::uint64_t sequenc
     auto& state = *convolver->shared_io_;
     if (state.callback.valid() && state.callback.stamp.sequence == sequence)
         (void)state.session->complete_callback_delivery(
-            state.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition));
+            state.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition),
+            callback_end_ns, result_visible_ns);
 #endif
 }
 
@@ -471,11 +479,29 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
             output.clear();
             return;
         }
+        const auto async_before = gpu_->async_stats();
         // GpuCompute guarantees that poll_readbacks() resolves every request at
         // success or at its deadline, so this worker loop is bounded by the
         // provider deadline rather than an unbounded wait on GPU progress.
         while (!completion->done)
             (void)gpu_->poll_readbacks();
+        const auto async_after = gpu_->async_stats();
+        detail::SharedIoTransferCounters transfer_counters;
+        transfer_counters.write_buffer_calls =
+            async_after.write_buffer_calls - async_before.write_buffer_calls;
+        transfer_counters.write_buffer_bytes =
+            async_after.write_buffer_bytes - async_before.write_buffer_bytes;
+        transfer_counters.output_copy_calls =
+            async_after.output_copy_calls - async_before.output_copy_calls;
+        transfer_counters.output_copy_bytes =
+            async_after.output_copy_bytes - async_before.output_copy_bytes;
+        transfer_counters.map_async_calls =
+            async_after.map_async_calls - async_before.map_async_calls;
+        transfer_counters.mapped_readback_memcpy_calls =
+            async_after.mapped_readback_memcpy_calls - async_before.mapped_readback_memcpy_calls;
+        transfer_counters.mapped_readback_memcpy_bytes =
+            async_after.mapped_readback_memcpy_bytes - async_before.mapped_readback_memcpy_bytes;
+        (void)staged_trial_->set_transfer_counters(completion->id, transfer_counters);
         (void)staged_trial_->complete(
             completion->id,
             completion->status == render::GpuCompute::ReadbackStatus::Success
