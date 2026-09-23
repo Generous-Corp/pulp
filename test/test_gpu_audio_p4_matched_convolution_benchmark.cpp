@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -238,9 +239,30 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
                            std::all_of(result.records.begin(), result.records.end(),
                                        [](const auto& record) { return record.valid(); });
     if (result.records_valid) {
+        using Identity = std::pair<std::uint64_t, std::uint64_t>;
+        std::set<Identity> terminal_ids;
+        std::set<Identity> delivery_ids;
+        for (const auto& record : result.records) {
+            if (record.kind == SharedIoTraceKind::Terminal &&
+                !terminal_ids.emplace(record.generation, record.sequence).second) {
+                result.records_valid = false;
+                break;
+            }
+        }
+        for (const auto& delivery : result.delivery_records) {
+            if (!delivery_ids.emplace(delivery.generation, delivery.sequence).second) {
+                result.records_valid = false;
+                break;
+            }
+        }
+        if (result.records_valid && terminal_ids != delivery_ids)
+            result.records_valid = false;
+
         std::vector<SharedIoTraceRecord> matched;
         matched.reserve(result.records.size() + result.delivery_records.size());
         for (const auto& terminal : result.records) {
+            if (!result.records_valid)
+                break;
             if (terminal.kind != SharedIoTraceKind::Terminal)
                 continue;
             const auto it = std::find_if(result.delivery_records.begin(),
