@@ -1,6 +1,6 @@
 ---
 name: lv2
-description: LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep.
+description: LV2 format adapter for Pulp — the Turtle manifest the build emits by asking the module to describe itself, port indices as a saved-session wire format with one shared layout, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep.
 ---
 
 # LV2 Skill
@@ -41,67 +41,71 @@ and this page deliberately does not restate it so the two cannot drift.
 | Host side (Pulp *loading* an LV2 plugin) | `core/host/src/plugin_slot_lv2.cpp`, `core/host/src/scanner.cpp` — see the `hosting` skill |
 | Tests | `test/test_lv2_adapter.cpp`, `test/test_lv2_rt.cpp`, `test/test_lv2_host_discovery.cpp` |
 
-## Check this first: the Turtle is generated but never written
+## The bundle describes itself, and the module is what describes it
 
-`generate_plugin_ttl()` and `generate_manifest_ttl()` have **no caller outside
-the test suite**. `_pulp_add_lv2` compiles the shared object into
-`<name>.lv2/` and stops; the comment directly above it says the directory
-contains "the .so and .ttl files", and nothing in the build, the install rules,
-or the CLI writes one.
+`_pulp_add_lv2` emits `manifest.ttl` and `<binary>.ttl` into the bundle as a
+POST_BUILD step. Before that existed, `generate_plugin_ttl()` and
+`generate_manifest_ttl()` had **no caller outside the test suite**: the build
+compiled the shared object into `<name>.lv2/` and stopped, while the comment
+above it claimed the directory held "the .so and .ttl files". A host discovers
+plugins by reading `manifest.ttl`, so every bundle this tree produced was not a
+plugin that loaded badly — it was not a plugin at all, silently.
 
-An LV2 host discovers plugins by reading `manifest.ttl` in each bundle. A
-bundle with no manifest is not a plugin that loads badly — it is not a plugin
-at all. So until a build step emits both files:
+**The description comes from the module, not from CMake.** The port layout is
+the plugin descriptor's and the control ports are its parameters', so a build
+script that emitted Turtle itself would be a second source of truth for a wire
+format the host and `connect_port()` must agree on exactly. Instead the
+`PULP_LV2_PLUGIN` macro exports `pulp_lv2_write_bundle_ttl`, and
+`tools/lv2-ttlgen` dlopens the module that was just built and asks it. One
+driver serves every target because it links nothing from the plugin.
 
-- Every property the generator emits — port declarations,
-  `lv2:reportsLatency`, feature and extension declarations — is unreachable in
-  a shipped bundle, however carefully it is written and tested.
-- Every TTL test is asserting on a string the build discards. They are real
-  tests of a real function; they are not evidence that any host sees it.
+Consequences worth knowing:
 
-The same disease has a second, smaller case inside the generator itself. A
-comment in each LV2 header describes the atom output port as "sized by
-`lv2:minimumSize` in the TTL" — and for months the generator emitted no such
-property, so a host sized that buffer with its own default and nothing said
-otherwise. **A claim in a comment is not a claim in the output.** When the
-artifact is generated text, the only honest check is one that reads the
-generated text.
-
-Two things kept this invisible for a long time, and both are worth knowing
-because they generalise:
-
-- **No example requests LV2.** There are 68 `FORMATS` declarations under
-  `examples/` and not one names it, so no ordinary build in this tree produces
-  a bundle through `_pulp_add_lv2` at all. The only `.lv2` directory any build
-  here creates is the host-discovery fixture, whose `plugin.ttl` is **hand-
-  written Turtle inside `test/cmake/core_audio_platform_format_tests.cmake`** —
-  so that test cannot catch generator drift either. It was built to exercise
-  the loader, and it does exactly that and nothing more.
-- **`pulp create` still offers it.** On a non-macOS, non-Windows host the
+- **It is host-side.** Cross-compiling, iOS and Android skip the driver, and
+  `_pulp_add_lv2` then emits a loud CMake warning rather than a bundle that
+  looks finished. A bundle without a manifest is indistinguishable from a
+  working one until a host fails to list it.
+- **`generate_manifest_ttl()` points `rdfs:seeAlso` at `<binary-stem>.ttl`.**
+  The description has to land on exactly that name, or a host reads the
+  manifest, follows the pointer and finds nothing — which looks to a user
+  exactly like a plugin that does not exist.
+- **A claim in a comment is not a claim in the output.** Each LV2 header
+  described the atom output port as "sized by `lv2:minimumSize` in the TTL"
+  while the generator emitted no such property for months, so hosts used their
+  own default. When the artifact is generated text, the only honest check is
+  one that reads the generated text.
+- **No example requests LV2.** 68 `FORMATS` declarations under `examples/` and
+  none names it, so no ordinary build here exercises `_pulp_add_lv2`. That is
+  why the end-to-end coverage is a dedicated fixture
+  (`test/native_components/lv2_ttl_fixture_plugin.cpp`) that runs the *same*
+  POST_BUILD invocation and is read back through `pulp::host`'s own discovery —
+  a test that called the generator directly would prove the generator works and
+  nothing about whether the build ever runs it.
+- **`pulp create` still offers LV2.** On a non-macOS, non-Windows host the
   default format list in `experimental/pulp-rs/src/cmd/create_formats.rs`
-  includes LV2, and the scaffold drops in an `lv2_entry.cpp`. A user who takes
-  the default gets a target that builds cleanly and produces nothing a host
-  can find.
+  includes it and the scaffold drops in an `lv2_entry.cpp`.
 
-Before changing anything in the generator, decide whether you are improving
-text somebody will read or text nothing emits. If you need the bundle to work,
-the missing build step is the work.
+## Port indices are a wire format — one definition, and it is load-bearing
 
-## Port indices are a wire format, in two places, shared by nobody
-
-The port layout is written down twice and cross-checked by nothing:
-
-- `generate_plugin_ttl()` emits `lv2:index N` in one order.
-- `connect_port()` re-derives the same order arithmetically from
-  `num_audio_inputs`, `num_audio_outputs` and `num_params`.
+`Lv2PortLayout` (`core/format/include/pulp/format/lv2_adapter.hpp`) is the
+single definition. `generate_plugin_ttl()` builds one to emit `lv2:index N`,
+and `connect_port()` classifies a host-supplied index through the same type's
+`kind_of()` / `slot_of()`. Do not re-derive the order anywhere else.
 
 The order is: every audio input channel, every audio output channel, one
 control port per parameter, the atom input port *if* `accepts_midi`, the atom
 output port *if* `produces_midi`, then the latency output control port, always
-last. There is no shared constant, no generated table, and no test that
-compares the two. Change one without the other and the host hands a `float*`
-to a slot the adapter reads as an `LV2_Atom_Sequence` — a type confusion that
-compiles, links and loads.
+last. It was genuinely written twice once, with nothing comparing them; the
+failure that shape produces is the host handing a `float*` to a slot the
+adapter reads as an `LV2_Atom_Sequence` — a type confusion that compiles, links
+and loads. `test_lv2_bundle_discovery_e2e.cpp` is what now compares the emitted
+indices against the reader, on a real built bundle.
+
+`kind_of()` checks both ends of every range and answers `None` for a negative
+or past-the-end index, so `connect_port()` cannot land outside an array;
+`instantiate()` additionally refuses a descriptor wider than `kMaxChannels`
+rather than dropping ports one at a time, because a dropped connection renders
+as silence and reads as a DSP fault instead of a declaration fault.
 
 Worse, **the index is the host's saved wire format.** Hosts store a session's
 port connections by index, not by symbol. Inserting a port renumbers every port
