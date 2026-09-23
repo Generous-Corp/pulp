@@ -61,6 +61,7 @@ struct GpuConvolverTrialConfig {
     std::uint64_t generation = 1;
     bool enable_trace = false;
     bool capture_admissions = false;
+    bool capture_callback_timing = false;
     std::uint32_t success_stride = 1;
     DawnSharedIoProvider::CompletionPolicy completion_policy =
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
