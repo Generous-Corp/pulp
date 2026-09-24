@@ -42,6 +42,9 @@ commands:
       - name: --allow-tracing
         kind: flag
         description: Required with `--trace --install`; acknowledges that a tracing-enabled build is being copied into the user's plug-in folders. Rejected without `--trace`.
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON`. A fresh `pulp build` configure leaves the example projects off for a faster dev build; an existing build dir keeps its setting, and `--examples` reconfigures one that has them off."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
@@ -2521,6 +2524,9 @@ commands:
       - name: --target
         kind: option
         description: Pass --target to cmake --build
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON` before the first build (a fresh dev configure leaves the example projects off). `--design` implies it, because pulp-design-tool lives under `examples/`."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
@@ -2569,6 +2575,9 @@ commands:
       - name: --target
         kind: option
         description: Pass --target to cmake --build
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON` before the first build (a fresh dev configure leaves the example projects off)."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)

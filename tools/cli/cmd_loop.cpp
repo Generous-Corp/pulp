@@ -63,6 +63,7 @@ void print_help() {
         "  --target T                        Pass --target T to cmake --build\n"
         "  --all                             Build every target and run every test\n"
         "                                    (default: only those affected by the diff)\n"
+        "  --examples                        Configure the source checkout with example projects\n"
         "  --no-watch                        Set/clear focus state and exit (no watch)\n"
         "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
         "  -h, --help                        Show this help\n\n"
@@ -109,6 +110,7 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool build_all = false;
     bool run_validate = false;
     bool allow_unsupported_sdk = false;
+    bool examples = false;
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
@@ -167,6 +169,8 @@ int cmd_loop(const std::vector<std::string>& args) {
             build_all = true;
         } else if (a == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
+        } else if (a == "--examples") {
+            examples = true;
         } else if (a == "--run") {
             if (missing_value(args, i)) {
                 std::cerr << "pulp loop: --run requires a value\n";
@@ -315,10 +319,15 @@ int cmd_loop(const std::vector<std::string>& args) {
     // project's normal build configuration.
     if (!fs::exists(build_dir / "CMakeCache.txt")
         || (!standalone_mode
-            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))
+        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir))) {
         std::cout << "Project not configured. Configuring + building first...\n";
         std::vector<std::string> bootstrap_args;
         if (allow_unsupported_sdk) bootstrap_args.push_back("--allow-unsupported-sdk");
+        if (examples) bootstrap_args.push_back("--examples");
+        // The bootstrap build focuses like this command would; an explicit
+        // target or --all here means the bootstrap builds everything.
+        if (build_all || build_args_name_target(build_args)) bootstrap_args.push_back("--all");
         int rc = cmd_build(bootstrap_args);
         if (rc != 0) return rc;
     }
@@ -329,14 +338,8 @@ int cmd_loop(const std::vector<std::string>& args) {
     // that finds the query already in place produces.
     const bool focus = focused_build_applicable(project_root, standalone_mode, build_args, build_all);
     if (focus) {
-        ensure_codemodel_query(build_dir);
-        if (!codemodel_reply_available(build_dir)) {
-            std::cout << "Configuring once to record the CMake codemodel that focused builds select from\n";
-            std::string configure_cmd = "cmake -S " + shell_quote(project_root.string())
-                                      + " -B " + shell_quote(build_dir.string());
-            int crc = run_with_spinner(configure_cmd, "Configuring");
-            if (crc != 0) return crc;
-        }
+        int crc = ensure_codemodel_reply(project_root, build_dir, !standalone_mode, examples);
+        if (crc != 0) return crc;
     }
     const auto selection = select_for_rebuild(project_root, build_dir, focus, "");
 

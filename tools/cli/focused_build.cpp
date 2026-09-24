@@ -3,6 +3,7 @@
 // share one implementation; this file runs it and reads the files it writes.
 #include "focused_build.hpp"
 
+#include "cli_common.hpp"
 #include "shell_quote.hpp"
 
 #include <cstdlib>
@@ -78,6 +79,20 @@ bool codemodel_reply_available(const fs::path& build_dir) {
         }
     }
     return false;
+}
+
+int ensure_codemodel_reply(const fs::path& project_root, const fs::path& build_dir,
+                           bool source_checkout, bool examples) {
+    ensure_codemodel_query(build_dir);
+    if (codemodel_reply_available(build_dir)) {
+        return 0;
+    }
+    std::cout << "Configuring once to record the CMake codemodel that focused builds select from\n";
+    std::string configure_cmd = "cmake -B " + shell_quote(build_dir.string()) + " -S "
+                              + shell_quote(project_root.string())
+                              + configure_default_flags(build_dir, source_checkout, examples);
+    append_windows_visual_studio_generator_args(configure_cmd);
+    return run_with_spinner(configure_cmd, "Configuring");
 }
 
 FocusedSelection select_affected(const fs::path& project_root, const fs::path& build_dir) {

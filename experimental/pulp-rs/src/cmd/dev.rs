@@ -55,6 +55,8 @@ pub struct DevArgs {
     pub all: bool,
     /// `true` when the user asked for `--help` — prints usage and exits 0.
     pub wants_help: bool,
+    /// `--examples` — configure a source checkout with examples on.
+    pub examples: bool,
 }
 
 /// Print the C++ parity usage banner to `out`.
@@ -76,6 +78,7 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --target T             Pass --target T to cmake --build\n\
         \x20 --all                  Build every target and run every test (default: only\n\
         \x20                        those affected by the working diff)\n\
+        \x20 --examples             Configure a source checkout with example projects\n\
         \x20 -- args...             Arguments passed to the launched app\n\n\
         Note: pulp-rs does not yet implement the watch loop. A single\n\
         build pass runs; use the C++ binary for live-reload workflows.\n";
@@ -117,12 +120,16 @@ pub fn parse_args(args: &[String]) -> DevArgs {
             out.run_tests = true;
         } else if a == "--validate" {
             out.run_validate = true;
+        } else if a == "--examples" {
+            out.examples = true;
         } else if a == "--run" && i + 1 < args.len() {
             i += 1;
             out.launch_target = Some(args[i].clone());
         } else if a == "--design" && i + 1 < args.len() {
             i += 1;
             out.design_script = Some(args[i].clone());
+            // pulp-design-tool lives under examples/.
+            out.examples = true;
             // Match C++: enqueue `--target pulp-design-tool` onto build_args.
             out.build_args.push("--target".to_owned());
             out.build_args.push("pulp-design-tool".to_owned());
@@ -177,6 +184,7 @@ pub fn run<S: Spawner>(
     let build_req = orchestrate::BuildArgs {
         passthrough: build_tail,
         all: args.all,
+        examples: args.examples,
         ..orchestrate::BuildArgs::default()
     };
     let rc = orchestrate::build_with(&proj, &build_req, spawner, out)?;

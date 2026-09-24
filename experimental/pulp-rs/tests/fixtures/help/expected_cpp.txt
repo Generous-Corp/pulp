@@ -23,6 +23,7 @@ Commands:
   upgrade        Update the CLI to the latest version
   version        Show, bump, or check version info
   dev            Unified dev loop: watch, build, test, run
+  affected       Targets and tests affected by the working diff
   loop           Leveraged-prototype focus marker + watch loop
   inspect        Read static inspector profiles or audit an artifact offline
   control        Authenticated local capability control

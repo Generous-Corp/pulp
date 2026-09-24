@@ -4,6 +4,26 @@ if(NOT EXISTS "${ARTIFACT}" OR NOT EXISTS "${MANIFEST}" OR
         "control shipping scan requires ARTIFACT, MANIFEST, and SHIPPING_MANIFEST")
 endif()
 
+# The persisted-stamp edge passes its stamp here. A stamp strictly newer than
+# the artifact, both manifests, and this scanner means the artifact's POST_BUILD
+# scan already covered these exact inputs and wrote the report, so a second
+# scan would only repeat it. `IS_NEWER_THAN` is true on equal timestamps, so a
+# tie always rescans.
+if(SKIP_IF_FRESH_STAMP AND EXISTS "${SKIP_IF_FRESH_STAMP}"
+   AND REPORT AND EXISTS "${REPORT}")
+    set(_pulp_scan_stamp_fresh TRUE)
+    foreach(_pulp_scan_input IN ITEMS
+            "${ARTIFACT}" "${MANIFEST}" "${SHIPPING_MANIFEST}"
+            "${CMAKE_CURRENT_LIST_FILE}")
+        if("${_pulp_scan_input}" IS_NEWER_THAN "${SKIP_IF_FRESH_STAMP}")
+            set(_pulp_scan_stamp_fresh FALSE)
+        endif()
+    endforeach()
+    if(_pulp_scan_stamp_fresh)
+        return()
+    endif()
+endif()
+
 file(READ "${ARTIFACT}" _binary HEX)
 file(READ "${MANIFEST}" _manifest)
 file(READ "${SHIPPING_MANIFEST}" _shipping_manifest)

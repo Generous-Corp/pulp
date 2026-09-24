@@ -104,6 +104,9 @@ pub struct BuildArgs {
     /// the native one. `wam` (Emscripten → AudioWorklet) or `wclap` (wasi-sdk
     /// → CLAP-in-WebAssembly). `None` builds the native plugin formats.
     pub web_format: Option<String>,
+    /// `--examples` — configure a source checkout with
+    /// `-DPULP_BUILD_EXAMPLES=ON`. A fresh dev configure leaves examples off.
+    pub examples: bool,
 }
 
 /// Parse `pulp-rs build` flags.
@@ -157,6 +160,7 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--allow-tracing" => out.allow_tracing = true,
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
+            "--examples" => out.examples = true,
             // `--format <fmt>` / `-f <fmt>` consume the next token as the value.
             "--format" | "-f" => {
                 if i + 1 < args.len() {
@@ -206,6 +210,9 @@ fn build_delegate_argv(args: &BuildArgs) -> Vec<String> {
         }
         if let Some(engine) = &args.js_engine {
             synthesized.push(format!("--js-engine={engine}"));
+        }
+        if args.examples {
+            synthesized.push("--examples".to_owned());
         }
         synthesized.extend(args.passthrough.clone());
         synthesized
@@ -376,6 +383,12 @@ fn build_with_dependency_policy<S: Spawner>(
     } else {
         proj.is_configured()
     };
+    let existing_cache = std::fs::read_to_string(build_dir.join("CMakeCache.txt")).ok();
+    let examples_requested_but_off = args.examples
+        && !proj.standalone
+        && existing_cache
+            .as_deref()
+            .is_some_and(|cache| cmake_cache_value(cache, "PULP_BUILD_EXAMPLES") == Some("OFF"));
     // Focused builds select from the CMake file-API codemodel, which only a
     // configure that finds the query already in place produces.
     let focus = affected::build_enabled(proj, args.all, &args.passthrough);
@@ -383,8 +396,9 @@ fn build_with_dependency_policy<S: Spawner>(
         affected::ensure_query(&build_dir)?;
     }
 
-    let mut needs_configure =
-        !configured || (!proj.standalone && !proj.checkout_dependencies_enabled());
+    let mut needs_configure = !configured
+        || (!proj.standalone && !proj.checkout_dependencies_enabled())
+        || examples_requested_but_off;
     if focus && !needs_configure && !affected::reply_available(&build_dir) {
         writeln!(
             out,
@@ -425,6 +439,16 @@ fn build_with_dependency_policy<S: Spawner>(
         }
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
+        }
+        let build_type_env = std::env::var("PULP_BUILD_TYPE").ok();
+        for arg in configure_default_args(&ConfigureDefaults {
+            existing_cache: existing_cache.as_deref(),
+            ninja_available: !cfg!(windows) && crate::proc::which("ninja").is_some(),
+            build_type_env: build_type_env.as_deref(),
+            examples: args.examples,
+            source_checkout: !proj.standalone,
+        }) {
+            cfg = cfg.arg(arg);
         }
         writeln!(out, "Configuring {}", proj.root.display()).map_err(io_err)?;
         let rc = spawner.run(&cfg)?;
@@ -505,6 +529,75 @@ fn build_with_dependency_policy<S: Spawner>(
         return spawner.run(&test);
     }
     Ok(rc)
+}
+
+/// Build type a configure pins when `PULP_BUILD_TYPE` is unset. An unset
+/// `CMAKE_BUILD_TYPE` under a single-config generator compiles with no
+/// optimization and no `NDEBUG`, which makes a JS/GPU UI feel broken.
+pub const DEFAULT_BUILD_TYPE: &str = "Release";
+
+/// Inputs to [`configure_default_args`], gathered from the environment by the
+/// caller so the decision itself stays a pure function.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ConfigureDefaults<'a> {
+    /// Text of the build dir's `CMakeCache.txt`, or `None` for a fresh dir.
+    pub existing_cache: Option<&'a str>,
+    /// Whether `ninja` is usable for a fresh configure.
+    pub ninja_available: bool,
+    /// Value of `PULP_BUILD_TYPE`, if set.
+    pub build_type_env: Option<&'a str>,
+    /// `--examples` was passed.
+    pub examples: bool,
+    /// The project is the Pulp source checkout (not a standalone product).
+    pub source_checkout: bool,
+}
+
+/// Value of `NAME:TYPE=value` in a `CMakeCache.txt`, if present.
+#[must_use]
+pub fn cmake_cache_value<'a>(cache: &'a str, name: &str) -> Option<&'a str> {
+    cache.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        let (key_name, _ty) = key.split_once(':')?;
+        (key_name == name).then_some(value.trim())
+    })
+}
+
+/// Generator, build-type, and examples arguments for a `pulp build` configure.
+///
+/// - Generator: `-G Ninja` only for a fresh build dir. `CMake` refuses to switch
+///   the generator of an existing cache, so an existing dir keeps whatever it
+///   was created with.
+/// - Build type: an explicit `PULP_BUILD_TYPE` always applies; otherwise
+///   [`DEFAULT_BUILD_TYPE`] fills a fresh dir or a cache whose build type is
+///   empty, and an existing non-empty build type is left alone.
+/// - Examples (source checkout only): `--examples` turns them on; a fresh dev
+///   configure turns them off. An existing cache keeps its setting.
+#[must_use]
+pub fn configure_default_args(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
+    let mut args = Vec::new();
+    let fresh = inputs.existing_cache.is_none();
+    if fresh && inputs.ninja_available {
+        args.push("-G".to_owned());
+        args.push("Ninja".to_owned());
+    }
+    let explicit = inputs.build_type_env.map(str::trim).filter(|v| !v.is_empty());
+    let cached = inputs
+        .existing_cache
+        .and_then(|cache| cmake_cache_value(cache, "CMAKE_BUILD_TYPE"))
+        .filter(|v| !v.is_empty());
+    match (explicit, cached) {
+        (Some(bt), _) => args.push(format!("-DCMAKE_BUILD_TYPE={bt}")),
+        (None, None) => args.push(format!("-DCMAKE_BUILD_TYPE={DEFAULT_BUILD_TYPE}")),
+        (None, Some(_)) => {}
+    }
+    if inputs.source_checkout {
+        if inputs.examples {
+            args.push("-DPULP_BUILD_EXAMPLES=ON".to_owned());
+        } else if fresh {
+            args.push("-DPULP_BUILD_EXAMPLES=OFF".to_owned());
+        }
+    }
+    args
 }
 
 /// The `pulp trace …` commands the traced-build epilogue points at, as argv
@@ -2425,6 +2518,190 @@ mod tests {
         let err = build_with(&proj, &args, &spawner, &mut out).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
         assert!(spawner.calls.borrow().is_empty());
+    }
+
+    // ── configure defaults: generator, build type, examples ─────────────
+
+    fn defaults(inputs: ConfigureDefaults<'_>) -> Vec<String> {
+        configure_default_args(&inputs)
+    }
+
+    #[test]
+    fn fresh_source_configure_pins_ninja_release_and_examples_off() {
+        let args = defaults(ConfigureDefaults {
+            ninja_available: true,
+            source_checkout: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            args,
+            [
+                "-G",
+                "Ninja",
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DPULP_BUILD_EXAMPLES=OFF"
+            ]
+        );
+    }
+
+    #[test]
+    fn fresh_configure_without_ninja_leaves_generator_to_cmake() {
+        let args = defaults(ConfigureDefaults {
+            ninja_available: false,
+            source_checkout: true,
+            ..Default::default()
+        });
+        assert!(!args.iter().any(|a| a == "-G"), "{args:?}");
+        assert!(args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"));
+    }
+
+    #[test]
+    fn build_type_env_overrides_the_release_default() {
+        let args = defaults(ConfigureDefaults {
+            ninja_available: true,
+            build_type_env: Some("Debug"),
+            ..Default::default()
+        });
+        assert!(args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Debug"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"));
+        // An empty value is "unset", not an empty build type.
+        let args = defaults(ConfigureDefaults {
+            build_type_env: Some(""),
+            ..Default::default()
+        });
+        assert!(args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{args:?}");
+    }
+
+    #[test]
+    fn existing_cache_keeps_its_generator_build_type_and_examples() {
+        let cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n\
+                     CMAKE_BUILD_TYPE:STRING=Debug\n\
+                     PULP_BUILD_EXAMPLES:BOOL=ON\n";
+        let args = defaults(ConfigureDefaults {
+            existing_cache: Some(cache),
+            ninja_available: true,
+            source_checkout: true,
+            ..Default::default()
+        });
+        assert!(args.is_empty(), "an existing dir must not be flipped: {args:?}");
+    }
+
+    #[test]
+    fn existing_cache_with_empty_build_type_gets_release() {
+        let cache = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=\n";
+        let args = defaults(ConfigureDefaults {
+            existing_cache: Some(cache),
+            ninja_available: true,
+            source_checkout: true,
+            ..Default::default()
+        });
+        assert_eq!(args, ["-DCMAKE_BUILD_TYPE=Release"]);
+    }
+
+    #[test]
+    fn examples_flag_opts_in_and_standalone_projects_never_get_the_option() {
+        let on = defaults(ConfigureDefaults {
+            existing_cache: Some("PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n"),
+            examples: true,
+            source_checkout: true,
+            ..Default::default()
+        });
+        assert_eq!(on, ["-DPULP_BUILD_EXAMPLES=ON"]);
+        let standalone = defaults(ConfigureDefaults {
+            ninja_available: true,
+            examples: true,
+            source_checkout: false,
+            ..Default::default()
+        });
+        assert!(
+            !standalone.iter().any(|a| a.starts_with("-DPULP_BUILD_EXAMPLES")),
+            "{standalone:?}"
+        );
+    }
+
+    #[test]
+    fn cmake_cache_value_reads_typed_entries() {
+        let cache = "// comment\nCMAKE_BUILD_TYPE:STRING=Release\nFOO:BOOL=ON\n";
+        assert_eq!(cmake_cache_value(cache, "CMAKE_BUILD_TYPE"), Some("Release"));
+        assert_eq!(cmake_cache_value(cache, "FOO"), Some("ON"));
+        assert_eq!(cmake_cache_value(cache, "MISSING"), None);
+    }
+
+    #[test]
+    fn parse_build_args_captures_examples() {
+        let a = parse_build_args(&["--examples".to_owned()]);
+        assert!(a.examples);
+        assert!(a.passthrough.is_empty(), "--examples must not reach cmake --build");
+    }
+
+    #[test]
+    fn fresh_source_build_configures_with_release_and_examples_off() {
+        let _env = EnvVarGuard::set_many(&[("PULP_BUILD_TYPE", None)]);
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        build_with_dependency_policy(&proj, &BuildArgs::default(), &spawner, &mut out, true)
+            .unwrap();
+        let calls = spawner.calls.borrow();
+        let cfg = &calls[0];
+        assert_eq!(cfg.program, "cmake");
+        assert!(cfg.args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{:?}", cfg.args);
+        assert!(cfg.args.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=OFF"), "{:?}", cfg.args);
+    }
+
+    #[test]
+    fn examples_flag_reconfigures_a_cache_that_has_examples_off() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = standalone_project(td.path());
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n",
+        )
+        .unwrap();
+        // A standalone project ignores --examples: no reconfigure.
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = BuildArgs { examples: true, ..Default::default() };
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(spawner.calls.borrow().len(), 1);
+
+        // A source checkout whose cache is otherwise complete: only the
+        // examples request can trigger a reconfigure.
+        let td = tempfile::tempdir().unwrap();
+        source_tree_fixture(td.path());
+        std::fs::create_dir_all(td.path().join("external/vst3sdk/pluginterfaces")).unwrap();
+        let proj = ActiveProject::new(td.path().to_path_buf(), false);
+        std::fs::create_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            "PULP_BUILD_EXAMPLES:BOOL=OFF\n\
+             CMAKE_BUILD_TYPE:STRING=Release\n\
+             PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n\
+             PULP_HAS_VST3:INTERNAL=ON\n\
+             PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=OFF\n\
+             PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract-v1\n",
+        )
+        .unwrap();
+        assert!(proj.checkout_dependencies_enabled(), "fixture cache must be complete");
+        // Control: without --examples the complete cache builds directly.
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with_dependency_policy(&proj, &BuildArgs::default(), &spawner, &mut out, true)
+            .unwrap();
+        assert_eq!(spawner.calls.borrow().len(), 1);
+        assert!(spawner.calls.borrow()[0].args.iter().any(|a| a == "--build"));
+
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        build_with_dependency_policy(&proj, &args, &spawner, &mut out, true).unwrap();
+        let calls = spawner.calls.borrow();
+        let cfg = &calls[0];
+        assert_eq!(cfg.program, "cmake");
+        assert!(cfg.args.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=ON"), "{:?}", cfg.args);
+        assert!(!cfg.args.iter().any(|a| a == "-G"), "{:?}", cfg.args);
     }
 
     #[test]

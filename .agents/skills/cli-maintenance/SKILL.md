@@ -788,6 +788,29 @@ for the delegated branches. The same split bites status output: a `pulp status`
 line added only to the Rust fallback never reaches installed users, because
 installed status delegates to `pulp-cpp status`.
 
+### Configure defaults live in two parsers — change both
+
+A fresh `pulp build` configure (and the `cmd_build` bootstrap that `pulp dev` /
+`pulp loop` run) passes `-G Ninja` when ninja is on PATH,
+`-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}`, and, in the source checkout,
+`-DPULP_BUILD_EXAMPLES=OFF` unless `--examples`. The rules are one pure
+function per language: `configure_default_args` in `orchestrate.rs` and
+`pulp::cli::configure_default_args` in `tools/cli/configure_defaults.hpp`
+(shared by `cmd_build`, `ensure_repo_build_configured`, dev, and loop). They
+must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
+`build_configure_argv` shell-out in `tests/orchestrate_parity_test.rs`;
+`pulp-test-cli-configure-defaults`). Two traps:
+
+- **Never pass `-G` to an existing build dir.** CMake errors on a generator
+  change. The functions only emit `-G` when there is no `CMakeCache.txt`, and
+  only fill an *empty* cached build type — an explicit `PULP_BUILD_TYPE` is the
+  one way to change a non-empty one.
+- **A command that needs an example target must ask for it.** Examples are off
+  in a fresh dev tree, so anything that builds `pulp-design-tool` (or another
+  `examples/` target) passes `examples=true` / `--examples`; `pulp design` and
+  `pulp dev --design` do. Forgetting it reads as "unknown target", not as a
+  configure problem.
+
 ### `pulp status` — build-governance tier line
 
 `pulp status` reports the active host-resource governance tier via a

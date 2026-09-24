@@ -46,6 +46,12 @@ bool ensure_codemodel_query(const fs::path& build_dir);
 // True once a configure has answered the codemodel query.
 bool codemodel_reply_available(const fs::path& build_dir);
 
+// Configure `build_dir` once, with the CLI's default configure flags
+// (generator, build type, examples), when no codemodel reply exists yet.
+// Returns cmake's exit code; 0 without a configure when the reply is present.
+int ensure_codemodel_reply(const fs::path& project_root, const fs::path& build_dir,
+                           bool source_checkout, bool examples);
+
 // Run the selector against the working diff and read back its verdict. An
 // unavailable selection (script missing, failed, unreadable) means build all.
 FocusedSelection select_affected(const fs::path& project_root, const fs::path& build_dir);

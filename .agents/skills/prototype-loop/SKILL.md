@@ -109,6 +109,8 @@ FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' 
 - **Focused green is not landing green.** Pre-push and Shipyard still build
   `all`; run `pulp build --all && pulp test --all` before `shipyard pr`.
 
+A fresh source-checkout configure leaves the example projects off (`-DPULP_BUILD_EXAMPLES=OFF`) and pins Ninja + Release, like `pulp build`. When the prototype lives under `examples/`, pass `pulp loop --examples` so the first configure (or a reconfigure of a tree that has examples off) includes it.
+
 `--no-watch` flips state and exits without entering the watch loop — this is what tests use, and it's also useful when you want the marker but plan to drive builds yourself.
 
 ## Step 4 — Local prototype via ar-swap
