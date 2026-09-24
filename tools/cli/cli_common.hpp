@@ -14,6 +14,7 @@
 #include "cli_sdk.hpp"      // impl: cli_sdk.cpp
 #include "cli_aax.hpp"      // impl: cli_common.cpp / cli_doctor_helpers.cpp
 #include "cli_watch.hpp"    // impl: cli_common.cpp
+#include "configure_defaults.hpp"
 #include "shell_quote.hpp"
 
 #include <pulp/runtime/system.hpp>
@@ -132,8 +133,7 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
 // for a configure of `build_dir` (see configure_defaults.hpp for the rules).
 std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
                                     bool examples);
-// True when `build_dir`'s cache records PULP_BUILD_EXAMPLES=OFF.
-bool build_dir_has_examples_off(const fs::path& build_dir);
+using pulp::cli::build_dir_has_examples_off;
 void append_windows_visual_studio_generator_args(std::string& cmd);
 #ifdef __APPLE__
 bool checkout_supports_au(const fs::path& repo_root);

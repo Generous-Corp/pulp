@@ -658,57 +658,26 @@ bool checkout_supports_au(const fs::path& repo_root) {
 }
 #endif
 
-namespace {
-std::optional<std::string> read_cmake_cache(const fs::path& build_dir) {
-    std::ifstream in(build_dir / "CMakeCache.txt", std::ios::binary);
-    if (!in) return std::nullopt;
-    std::ostringstream text;
-    text << in.rdbuf();
-    return text.str();
-}
-}  // namespace
-
 std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
                                     bool examples) {
-    pulp::cli::ConfigureDefaults inputs;
-    inputs.existing_cache = read_cmake_cache(build_dir);
 #ifdef _WIN32
-    // Windows keeps the Visual Studio generator this CLI selects explicitly.
-    inputs.ninja_available = false;
+    const bool ninja = false;  // Windows keeps the Visual Studio generator.
 #else
-    inputs.ninja_available = !find_executable_in_path("ninja").empty();
+    const bool ninja = !find_executable_in_path("ninja").empty();
 #endif
-    if (const char* bt = std::getenv("PULP_BUILD_TYPE")) inputs.build_type_env = std::string(bt);
-    inputs.examples = examples;
-    inputs.source_checkout = source_checkout;
     std::string flags;
-    for (const auto& arg : pulp::cli::configure_default_args(inputs)) {
+    for (const auto& arg : pulp::cli::configure_default_args_for(build_dir, source_checkout, examples, ninja))
         flags += " " + shell_quote(arg);
-    }
     return flags;
-}
-
-bool build_dir_has_examples_off(const fs::path& build_dir) {
-    auto cache = read_cmake_cache(build_dir);
-    return cache && pulp::cli::cmake_cache_value(*cache, "PULP_BUILD_EXAMPLES") == "OFF";
 }
 
 int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir,
                                  bool examples) {
-    bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
-
-    if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
-        auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
-        auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
-        if (cmake_time > cache_time) needs_configure = true;
-    }
-    if (!needs_configure && examples && build_dir_has_examples_off(build_dir)) {
-        needs_configure = true;
-    }
-
+    const auto cache = build_dir / "CMakeCache.txt";
+    const bool needs_configure = !fs::exists(cache)
+        || fs::last_write_time(project_root / "CMakeLists.txt") > fs::last_write_time(cache)
+        || (examples && build_dir_has_examples_off(build_dir));
     if (!needs_configure) return 0;
-    // `PULP_BUILD_TYPE=Debug pulp …` opts into a debuggable build; otherwise a
-    // fresh dir (or one with an empty build type) is configured Release.
     std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root)
                               + configure_default_flags(build_dir, /*source_checkout=*/true, examples);
     append_windows_visual_studio_generator_args(configure_cmd);

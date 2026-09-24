@@ -17,30 +17,22 @@ Debug build of a JS-scripted GPU UI is dramatically slower than its
 Release equivalent (no -O3, no NDEBUG, asserts live, no inlining of
 canvas / Skia / Yoga / QuickJS) — slow enough that a UX-perceived
 regression in a Debug build is almost always the build type, not the
-code. A fresh `pulp build` / `pulp dev` / `pulp loop` configure passes
-`-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}` (plus `-G Ninja` when ninja
-is on PATH, and `-DPULP_BUILD_EXAMPLES=OFF` unless `--examples`), and the root
-`CMakeLists.txt` turns an empty build type into Release for single-config
-generators. Match that convention when reaching for raw `cmake` too.
+code. A fresh `pulp build`/`dev`/`loop` configure passes `-G Ninja` (when on
+PATH), `-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}`, and, in the source
+checkout, `-DPULP_BUILD_EXAMPLES=OFF` unless `--examples` (`pulp design` and
+`pulp dev --design` turn them on); root CMake turns an empty build type into
+Release. An EXISTING dir keeps its generator and any non-empty cached build
+type (a Debug dir stays Debug until you pass `PULP_BUILD_TYPE=Release`).
 
 Rules of thumb:
-- **Default**: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`. Use
-  `pulp build` (the CLI) when possible. On an EXISTING build dir it keeps the
-  cached generator and a non-empty cached build type (it only fills an empty
-  one), so a dir that was configured Debug stays Debug until you pass
-  `PULP_BUILD_TYPE=Release` or reconfigure explicitly.
-- **Examples are off in a fresh dev build**: `pulp build --examples` (or
-  `-DPULP_BUILD_EXAMPLES=ON`) when you need an example plug-in/app;
-  `pulp design` and `pulp dev --design` turn them on for the design tool.
+- **Default**: `pulp build`, or `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`.
 - **Flip to Debug only when**: stepping in a debugger, capturing fresh
   `runtime::log_info` traces, repro'ing a sanitizer hit, or running
   `validate-build.sh` for a clean detached reconfigure pass. Restore
   Release immediately when the investigation ends.
-- **Reconfigure gotcha**: a bare `cmake -S . -B build` (no build-type
-  flag) usually preserves the cache value, BUT something in the
-  shipyard / pre-push gate / rebase paths can silently reset the cache
-  to Debug. Pass `-DCMAKE_BUILD_TYPE=Release` every reconfigure, or
-  use `pulp build`.
+- **Reconfigure gotcha**: shipyard / pre-push / rebase paths can silently
+  reset a cache to Debug, and `pulp build` keeps a non-empty cached type. Pass
+  `-DCMAKE_BUILD_TYPE=Release` (or `PULP_BUILD_TYPE=Release pulp build`).
 - **Verify before reporting a build is Release**: BOTH
   `grep '^CMAKE_BUILD_TYPE' build/CMakeCache.txt` (should print
   `Release`) AND `grep '^CXX_FLAGS '

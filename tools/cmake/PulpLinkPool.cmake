@@ -14,8 +14,13 @@
 set(PULP_LINK_JOBS "" CACHE STRING
     "Concurrent link steps under Ninja (empty: derive from RAM, 0: unpooled)")
 
-# One link slot per this many GiB of physical RAM, clamped to [2, 8].
-set(_PULP_LINK_GIB_PER_JOB 12)
+# One link slot per 2 GiB of physical RAM, clamped to [2, 8]. A test-program
+# link peaks near 0.45 GiB RSS, so 2 GiB a slot leaves room for the compiles
+# running beside it; an 8 GiB gate VM gets 4 slots, the same as its governed
+# -j, so the pool never throttles a build that memory can already hold. The
+# upper clamp bounds the memory-bandwidth contention a wide link phase causes
+# on a large host.
+set(_PULP_LINK_GIB_PER_JOB 2)
 set(_PULP_LINK_MIN_JOBS 2)
 set(_PULP_LINK_MAX_JOBS 8)
 

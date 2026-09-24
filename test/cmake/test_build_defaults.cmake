@@ -19,6 +19,10 @@ project(BuildDefaultsFixture LANGUAGES CXX)
 include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpDefaultBuildType.cmake\")
 include(\"${PULP_SOURCE_DIR}/tools/cmake/PulpLinkPool.cmake\")
 add_executable(fixture_exe main.cpp)
+foreach(_ram_mib IN ITEMS 2048 8192 16384 98304)
+    pulp_link_pool_default_depth(\${_ram_mib} _depth)
+    file(APPEND \"\${CMAKE_BINARY_DIR}/link-depths.txt\" \"\${_ram_mib}=\${_depth};\")
+endforeach()
 ")
 
 function(_configure name out_ok)
@@ -84,6 +88,13 @@ _ninja_text(ninja-default _text)
 string(REGEX MATCH "pool pulp_link\n  depth = ([0-9]+)" _decl "${_text}")
 if(NOT _decl OR CMAKE_MATCH_1 LESS 2 OR CMAKE_MATCH_1 GREATER 8)
     message(FATAL_ERROR "derived pulp_link depth is missing or outside [2, 8]: '${_decl}'")
+endif()
+
+# The RAM-derived depth: 2 GiB a slot, clamped to [2, 8]. An 8 GiB gate VM
+# must get 4 slots, matching its governed -j, so the pool never throttles it.
+file(READ "${FIXTURE_DIR}/ninja-default/link-depths.txt" _depths)
+if(NOT _depths STREQUAL "2048=2;8192=4;16384=8;98304=8;")
+    message(FATAL_ERROR "unexpected RAM-derived link depths: ${_depths}")
 endif()
 
 # An explicit build type is left alone.

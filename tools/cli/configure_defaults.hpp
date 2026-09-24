@@ -7,7 +7,11 @@
 // CMake. The Rust CLI's `configure_default_args` applies the same rules; keep
 // the two in step.
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -94,6 +98,35 @@ inline std::vector<std::string> configure_default_args(const ConfigureDefaults& 
         }
     }
     return args;
+}
+
+// Text of `build_dir`'s CMakeCache.txt, or nullopt when it has none.
+inline std::optional<std::string> read_cmake_cache(const std::filesystem::path& build_dir) {
+    std::ifstream in(build_dir / "CMakeCache.txt", std::ios::binary);
+    if (!in) return std::nullopt;
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+// True when `build_dir`'s cache records PULP_BUILD_EXAMPLES=OFF.
+inline bool build_dir_has_examples_off(const std::filesystem::path& build_dir) {
+    const auto cache = read_cmake_cache(build_dir);
+    return cache && cmake_cache_value(*cache, "PULP_BUILD_EXAMPLES") == "OFF";
+}
+
+// configure_default_args for a real build dir: reads its cache and
+// PULP_BUILD_TYPE. The caller decides whether ninja is usable.
+inline std::vector<std::string> configure_default_args_for(
+    const std::filesystem::path& build_dir, bool source_checkout, bool examples,
+    bool ninja_available) {
+    ConfigureDefaults inputs;
+    inputs.existing_cache = read_cmake_cache(build_dir);
+    inputs.ninja_available = ninja_available;
+    if (const char* bt = std::getenv("PULP_BUILD_TYPE")) inputs.build_type_env = std::string(bt);
+    inputs.examples = examples;
+    inputs.source_checkout = source_checkout;
+    return configure_default_args(inputs);
 }
 
 }  // namespace pulp::cli
