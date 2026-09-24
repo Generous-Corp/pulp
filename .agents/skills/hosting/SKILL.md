@@ -530,6 +530,19 @@ save/reopen render proof beside the legacy caller-owned route controls.
     `estimate_generated_graph_work_units`) — because those public entry points do
     not lock; their suffix documents the internal contract only. (`node_load_mu_`
     is a different mutex and is correctly taken with a plain `lock_guard`.)
+  - **`compile_()` is a mutator, so every caller holds the lock — including
+    the test hook.** Since sample-region quotienting made the executable
+    topology a private copy, `compile_()` writes each authored node's
+    `transport_sensitive` readback into `nodes_` through `node_mut_locked_`.
+    `prepare()`, `prepare_swap()`, and `PreparedTopologyEdit::prepare()` already
+    hold `GraphMutationLock` around it; `compile_snapshot_for_test` did not, and
+    the two tests built on it aborted in every Debug build for a week while the
+    Release gate — which compiles the assertion out — stayed green. Never hold
+    the mutex when calling that hook (non-recursive), and never call `compile_()`
+    bare. `test_signal_graph_prepared_swap.cpp` has a build-type-independent
+    probe: a custom type's latency query runs inside `compile_()` and a second
+    thread's `node_gain()` must be unable to complete until the hook returns.
+    When a lock assertion is the suspect, run the Debug build, not Release.
   - **`CompiledGraph::routed` groups what is only ever valid together.** Each
     `RoutedPath` (`routed.serial`, `routed.parallel`) owns its own `snapshot`,
     `pool`, `plugin_ctx`, `custom_ctx`, and `valid` flag — driving one path's
