@@ -16,7 +16,8 @@
 #    which it always can — see read_config_value below.)
 #
 # Usage:
-#   tools/scripts/local_diff_cover.sh                      # whole tree (slow, matches CI)
+#   tools/scripts/local_diff_cover.sh                      # targets the diff reaches (default)
+#   PULP_DIFF_COVER_SELECT=all tools/scripts/local_diff_cover.sh   # whole tree (slow)
 #   tools/scripts/local_diff_cover.sh pulp-test-state      # targeted (fast)
 #   PULP_DIFF_COVER_CTEST_REGEX='State|WidgetBridge' tools/scripts/local_diff_cover.sh pulp-test-state
 #   PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh   # bypass
@@ -41,8 +42,11 @@
 #      the user's main CMake cache (Coverage requires Clang +
 #      PULP_ENABLE_COVERAGE=ON which conflicts with the default debug
 #      build's settings).
-#   4. Build either user-supplied targets, or `all` if none given.
-#   5. Run the test binaries (ctest) under LLVM_PROFILE_FILE.
+#   4. Build user-supplied targets; with none given, build the targets the
+#      diff reaches (tools/scripts/diff_cover_targets.py over the CMake File
+#      API codemodel), or `all` when that mapping is ambiguous.
+#   5. Run the test binaries (ctest) under LLVM_PROFILE_FILE — only the tests
+#      whose command runs a built target when the build was narrowed.
 #   6. Convert llvm-cov export → Cobertura XML using the same
 #      lcov_cobertura.py path scripts/run_coverage.sh uses.
 #   7. Run diff-cover with --fail-under from the JSON.
@@ -78,6 +82,7 @@ if [[ "${DIFF_COVER_TEST_JOBS}" -gt 8 ]]; then DIFF_COVER_TEST_JOBS=8; fi
 run_coverage_ctest() {
     local build_dir="$1"
     local test_regex="${2:-}"
+    local tests_file="${3:-}"
     # Match scripts/run_coverage.sh and the primary CI lanes: enough parallelism
     # to avoid launching nearly 19k discovered Catch2 cases serially, without
     # oversubscribing memory on M1/M3 or SSH/self-hosted builders.
@@ -92,6 +97,8 @@ run_coverage_ctest() {
     if [ -n "${test_regex}" ]; then
         echo "[local_diff_cover] limiting ctest to regex: ${test_regex}" >&2
         args+=(-R "${test_regex}")
+    elif [ -n "${tests_file}" ]; then
+        args+=(--tests-from-file "${tests_file}")
     fi
     ctest "${args[@]}"
 }
@@ -192,6 +199,25 @@ acquire_build_cov_lock() {
     # lock instead of stranding a pid-less one no later run could reclaim.
     trap release_build_cov_lock EXIT
     echo "$$" > "${BUILD_COV_LOCK}/pid"
+}
+
+# The likely tier runs a guessed subset of tests. Fewer tests can only cover
+# fewer lines, so its pass stands for the closure; its shortfall does not. Widen
+# once to every transitive consumer, reusing the objects already built (the
+# identity is recorded so the re-run keeps this build-cov). The re-run pins the
+# closure tier, so it cannot widen again.
+widen_if_likely() {
+    if [ "${plan_tier}" != "likely" ] || [ "${DIFF_COVER_SELECT}" != "affected" ]; then
+        return 0
+    fi
+    if [ "$(coverage_build_identity)" = "${COVERAGE_BUILD_IDENTITY_START}" ]; then
+        printf '%s\n' "${COVERAGE_BUILD_IDENTITY_START}" > "${BUILD_ID_FILE}"
+    fi
+    echo ""
+    echo "[local_diff_cover] likely tests: $1 — widening to every consumer of the changed targets"
+    release_build_cov_lock
+    trap - EXIT
+    exec env PULP_DIFF_COVER_SELECT=closure bash "${BASH_SOURCE[0]}"
 }
 
 # A coverage build is only reusable when it was produced by this worktree's
@@ -699,6 +725,41 @@ if [ "${COMPARE_REF_READY}" = "1" ] && diff_cover_has_no_coverable_lines "${COMP
     echo "[local_diff_cover] skipped: exact diff has no potentially coverable C/C++ lines" >&2
     exit 0
 fi
+# Target selection. The default narrows the build and the CTest run to the part
+# of the graph the diff reaches; PULP_DIFF_COVER_SELECT=all restores the whole
+# tree. A diff whose native changes all sit under ignored trees or
+# diff_cover_excludes gives diff-cover nothing to measure, so no build can
+# change its verdict and the gate skips here, before any configure.
+DIFF_COVER_SELECT="${PULP_DIFF_COVER_SELECT:-affected}"
+DIFF_COVER_TARGETS_PY="${REPO_ROOT}/tools/scripts/diff_cover_targets.py"
+case "${DIFF_COVER_SELECT}" in
+    affected|closure|all) ;;
+    *)
+        echo "[local_diff_cover] invalid PULP_DIFF_COVER_SELECT='${DIFF_COVER_SELECT}' (want affected|closure|all)" >&2
+        exit 1
+        ;;
+esac
+diff_cover_plan() {
+    local tier="likely"
+    [ "${DIFF_COVER_SELECT}" = "closure" ] && tier="closure"
+    python3 "${DIFF_COVER_TARGETS_PY}" plan --repo "${REPO_ROOT}" \
+        --build-dir "${BUILD_DIR}" --base "${COMPARE_BRANCH}" --config "${CONFIG_JSON}" \
+        --tier "${tier}"
+}
+plan_field() {
+    python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("\n".join(v) if isinstance(v,list) else (v or ""))' "$1" "$2"
+}
+if [ "${DIFF_COVER_SELECT}" != "all" ]; then
+    _early_plan="$(mktemp "${TMPDIR:-/tmp}/pulp-diff-cover-plan.XXXXXX")"
+    if diff_cover_plan > "${_early_plan}" 2>/dev/null \
+        && [ "$(plan_field "${_early_plan}" mode)" = "none" ]; then
+        echo "[local_diff_cover] skipped: $(plan_field "${_early_plan}" reason)" >&2
+        rm -f "${_early_plan}"
+        exit 0
+    fi
+    rm -f "${_early_plan}"
+fi
+
 if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
     exit 10
 fi
@@ -781,6 +842,10 @@ acquire_build_cov_lock
 prepare_coverage_build_identity
 
 echo "=== Configuring coverage build in ${BUILD_DIR} ==="
+# The target selector reads the codemodel; the query must exist before
+# configure for CMake to write the reply.
+mkdir -p "${BUILD_DIR}/.cmake/api/v1/query"
+: > "${BUILD_DIR}/.cmake/api/v1/query/codemodel-v2"
 
 # Pick the right Clang driver per platform — clang-cl on Windows accepts
 # MSVC-style flags from bundled deps; plain clang fails on /W3 etc.
@@ -891,6 +956,35 @@ if echo "${changed_for_importer}" | grep -qE "${HOSTED_SLOT_PATHS_REGEX}"; then
     hosted_slot_diff_touched=1
 fi
 
+SELECTED_TESTS_FILE=""
+DIFF_COVER_PLAN_FILE="${BUILD_DIR}/coverage/diff-cover-plan.json"
+plan_tier=""
+if [ "$#" -eq 0 ] && [ "${DIFF_COVER_SELECT}" != "all" ]; then
+    mkdir -p "${BUILD_DIR}/coverage"
+    if ! diff_cover_plan > "${DIFF_COVER_PLAN_FILE}"; then
+        echo '{"mode": "all", "reason": "selector crashed"}' > "${DIFF_COVER_PLAN_FILE}"
+    fi
+    plan_mode="$(plan_field "${DIFF_COVER_PLAN_FILE}" mode)"
+    plan_reason="$(plan_field "${DIFF_COVER_PLAN_FILE}" reason)"
+    plan_tier="$(plan_field "${DIFF_COVER_PLAN_FILE}" tier)"
+    if [ "${plan_mode}" = "none" ]; then
+        echo "[local_diff_cover] skipped: ${plan_reason}" >&2
+        exit 0
+    fi
+    if [ "${plan_mode}" = "targeted" ]; then
+        echo "[local_diff_cover] FOCUSED coverage build: ${plan_reason}" >&2
+        echo "[local_diff_cover]   plan: ${DIFF_COVER_PLAN_FILE}  (PULP_DIFF_COVER_SELECT=all for the whole tree)" >&2
+        plan_targets=()
+        while IFS= read -r t; do
+            [ -n "${t}" ] && plan_targets+=("${t}")
+        done < <(plan_field "${DIFF_COVER_PLAN_FILE}" targets)
+        set -- "${plan_targets[@]}"
+        SELECTED_TESTS_FILE="${BUILD_DIR}/coverage/selected-tests.txt"
+    else
+        echo "[local_diff_cover] target selection fell back to ALL targets: ${plan_reason}" >&2
+    fi
+fi
+
 if [ "$#" -gt 0 ]; then
     BUILD_TARGETS=("$@")
     # Targeted build that touches importer CLI source: ensure the importer
@@ -946,9 +1040,27 @@ find "${PROFRAW_DIR}" -name '*.profraw' -type f -delete
 # step below already handles thousands of shards and says so.
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
 
+if [ -n "${SELECTED_TESTS_FILE}" ] && [ -z "${PULP_DIFF_COVER_CTEST_REGEX:-}" ]; then
+    if selected_count="$(python3 "${DIFF_COVER_TARGETS_PY}" tests --build-dir "${BUILD_DIR}" \
+            --plan "${DIFF_COVER_PLAN_FILE}" --out "${SELECTED_TESTS_FILE}")"; then
+        echo "[local_diff_cover] ${selected_count} CTest name(s) run a built target: ${SELECTED_TESTS_FILE}" >&2
+        if [ "${selected_count}" = "0" ]; then
+            echo "[local_diff_cover] no CTest runs the changed targets — their changed lines will read uncovered" >&2
+        fi
+    else
+        echo "[local_diff_cover] test selection failed; running every built test" >&2
+        SELECTED_TESTS_FILE=""
+    fi
+fi
+
 echo "=== Running tests ==="
-run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" || \
-    echo "[local_diff_cover] WARN: ctest exited non-zero — generating partial report" >&2
+if [ -n "${SELECTED_TESTS_FILE}" ] && [ -z "${PULP_DIFF_COVER_CTEST_REGEX:-}" ] \
+    && [ "${selected_count:-0}" = "0" ]; then
+    : # Nothing selected: the report still carries the built owners' lines.
+else
+    run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}" "${SELECTED_TESTS_FILE}" || \
+        echo "[local_diff_cover] WARN: ctest exited non-zero — generating partial report" >&2
+fi
 
 # Second ctest pass for the importer CLI cases. ctest's `-R` takes a single
 # regex, so when the run above was narrowed by PULP_DIFF_COVER_CTEST_REGEX the
@@ -980,7 +1092,11 @@ echo "=== Merging profiles ==="
 MERGE_LOG="${BUILD_DIR}/coverage/llvm-profdata-merge.log"
 PROFILE_SHARDS=$(find "${PROFRAW_DIR}" -maxdepth 1 -name 'pulp-*.profraw' -type f | wc -l | tr -d ' ')
 if [[ "${PROFILE_SHARDS}" -eq 0 ]]; then
+    widen_if_likely "no raw profile shards were produced"
     echo "[local_diff_cover] no raw profile shards were produced" >&2
+    if [ -n "${SELECTED_TESTS_FILE}" ]; then
+        echo "[local_diff_cover] (focused run: no selected CTest ran; PULP_DIFF_COVER_SELECT=all runs the whole suite)" >&2
+    fi
     exit 1
 fi
 # Do not pipe this through xargs. A full suite creates far more profile paths
@@ -1169,8 +1285,15 @@ if [ "${rc}" -eq 0 ]; then
     exit 0
 fi
 
+widen_if_likely "diff coverage fell short of ${THRESHOLD}%"
+
 echo ""
 echo "[local_diff_cover] FAIL — diff coverage below ${THRESHOLD}%."
 echo "[local_diff_cover] HTML report: ${HTML_REPORT}"
+if [ -n "${SELECTED_TESTS_FILE}" ]; then
+    echo "[local_diff_cover] This was a FOCUSED run (plan: ${DIFF_COVER_PLAN_FILE}). A test that reaches"
+    echo "[local_diff_cover] the change only through an undeclared runtime path is not selected;"
+    echo "[local_diff_cover] confirm with the whole suite: PULP_DIFF_COVER_SELECT=all"
+fi
 echo "[local_diff_cover] To bypass for this push: PULP_SKIP_DIFF_COVER=1"
 exit 1

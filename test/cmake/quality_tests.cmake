@@ -1001,6 +1001,16 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
 
+        # The diff-coverage target selector: changed file -> owning CMake
+        # targets -> consumers, the no-measurable-line skip, the fall-back to
+        # every target, and the one-shot widening from the likely tier. Drives
+        # the real helper and script against throwaway repos and hand-written
+        # File API replies; no compiler involved.
+        add_test(NAME diff-cover-targets-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_diff_cover_targets
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(diff-cover-targets-selftest PROPERTIES TIMEOUT 180)
+
         # The two build-directory reapers. Both DELETE directories, so their
         # gates are the thing under test: each builds a throwaway git
         # repository with real worktrees in every state its gate
