@@ -20,12 +20,13 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA = "pulp.protected-validation-receipt/v1"
+SCHEMA = "pulp.protected-validation-receipt/v2"
 DECISION_SCHEMA = "pulp.protected-merge-reuse-decision/v1"
 DOMAIN = b"pulp-protected-validation-receipt-v1\0"
 POLICY_PATHS = (
@@ -33,6 +34,19 @@ POLICY_PATHS = (
     ".agents/contract.toml",
     "tools/scripts/classify_changes.py",
     "tools/scripts/protected_merge_receipt.py",
+)
+
+
+# The test selection a merge group itself runs. A receipt stands in for that
+# run, so it must record the same selection: a narrower tier (an include label,
+# an include regex, or more excluded labels) is evidence about a different test
+# set and can never be reused as full validation.
+REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+MIN_SELECTED_PERCENT = 80
+SELECTION_KEYS = ("label_exclude", "exclude_regex", "label_include", "include_regex")
+VALIDATION_KEYS = (
+    "conclusion", "ctest_exit", "selection", "inventory_count", "selected",
+    "passed", "skipped", "failed", "selected_digest", "results_digest",
 )
 
 
@@ -102,7 +116,7 @@ def _sha256_file(path: Path) -> str:
     return hasher.hexdigest()
 
 
-def artifact_identity(build_dir: Path, ctest_json: Path | None = None) -> dict[str, Any]:
+def ctest_inventory(build_dir: Path, ctest_json: Path | None = None) -> dict[str, Any]:
     if ctest_json is None:
         result = subprocess.run(
             ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
@@ -118,7 +132,10 @@ def artifact_identity(build_dir: Path, ctest_json: Path | None = None) -> dict[s
             raise ReceiptError("CTest inventory is not valid JSON") from error
     else:
         inventory = json.loads(ctest_json.read_text(encoding="utf-8"))
+    return inventory
 
+
+def artifact_identity(build_dir: Path, inventory: dict[str, Any]) -> dict[str, Any]:
     paths: set[Path] = set()
     commands: list[dict[str, Any]] = []
     for test in inventory.get("tests", []):
@@ -154,6 +171,144 @@ def artifact_identity(build_dir: Path, ctest_json: Path | None = None) -> dict[s
     }
     identity["digest"] = digest(identity)
     return identity
+
+
+def _inventory_names(inventory: dict[str, Any]) -> list[str]:
+    names = []
+    for test in inventory.get("tests", []):
+        name = test.get("name")
+        if not isinstance(name, str) or not name:
+            raise ReceiptError("CTest inventory contains an unnamed test")
+        names.append(name)
+    return names
+
+
+def _read_json(path: Path, label: str) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReceiptError(f"{label} is unavailable or not valid JSON") from error
+
+
+def _junit_results(path: Path) -> dict[str, str]:
+    """Map each executed test name to passed, skipped, or failed.
+
+    CTest writes one <testcase> per selected test with ``status`` set to run,
+    fail, notrun, or disabled; a SKIP_RETURN_CODE skip is ``notrun`` with a
+    <skipped> child.
+    """
+    try:
+        root = ElementTree.parse(path).getroot()
+    except (OSError, ElementTree.ParseError) as error:
+        raise ReceiptError("CTest JUnit report is unavailable or malformed") from error
+    results: dict[str, str] = {}
+    for case in root.iter("testcase"):
+        name = case.get("name")
+        if not name:
+            raise ReceiptError("CTest JUnit report contains an unnamed test")
+        if name in results:
+            raise ReceiptError(f"CTest JUnit report lists a test twice: {name}")
+        status = case.get("status", "")
+        if status == "fail" or case.find("failure") is not None or case.find("error") is not None:
+            results[name] = "failed"
+        elif status in ("notrun", "disabled") or case.find("skipped") is not None:
+            results[name] = "skipped"
+        elif status == "run":
+            results[name] = "passed"
+        else:
+            raise ReceiptError(f"CTest JUnit status is unrecognized for {name}: {status!r}")
+    return results
+
+
+def validation_evidence(
+    *,
+    exit_code_path: Path,
+    selection_path: Path,
+    selected_json: Path,
+    junit_path: Path,
+    inventory_names: list[str],
+) -> dict[str, Any]:
+    """Derive the validation record from what the test step actually produced."""
+    try:
+        exit_text = exit_code_path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise ReceiptError("CTest exit status is unavailable") from error
+    if exit_text != "0":
+        raise ReceiptError(f"CTest did not exit cleanly (exit {exit_text or 'unknown'})")
+
+    selection = _read_json(selection_path, "CTest selection")
+    if not isinstance(selection, dict):
+        raise ReceiptError("CTest selection is malformed")
+    _require_exact_keys(selection, SELECTION_KEYS, "CTest selection")
+    selected = _inventory_names(_read_json(selected_json, "CTest selected inventory"))
+    if not selected:
+        raise ReceiptError("CTest selection contains no tests")
+    if len(set(selected)) != len(selected):
+        raise ReceiptError("CTest selection lists a test twice")
+    unknown = set(selected) - set(inventory_names)
+    if unknown:
+        raise ReceiptError("CTest selection names tests absent from the built inventory")
+
+    results = _junit_results(junit_path)
+    if set(results) != set(selected):
+        raise ReceiptError("CTest JUnit report does not cover exactly the selected tests")
+    counts = {state: 0 for state in ("passed", "skipped", "failed")}
+    for state in results.values():
+        counts[state] += 1
+    if counts["failed"]:
+        raise ReceiptError(f"CTest JUnit report records {counts['failed']} failed tests")
+
+    record = {
+        "conclusion": "success",
+        "ctest_exit": 0,
+        "selection": selection,
+        "inventory_count": len(inventory_names),
+        "selected": len(selected),
+        "passed": counts["passed"],
+        "skipped": counts["skipped"],
+        "failed": 0,
+        "selected_digest": digest(sorted(selected)),
+        "results_digest": digest(sorted(results.items())),
+    }
+    check_validation(record)
+    return record
+
+
+def check_validation(record: Any) -> None:
+    """Reject any validation record that is not a full, passing test run."""
+    if not isinstance(record, dict):
+        raise ReceiptError("receipt does not record successful validation")
+    _require_exact_keys(record, VALIDATION_KEYS, "validation")
+    if record["conclusion"] != "success" or type(record["ctest_exit"]) is not int or record["ctest_exit"] != 0:
+        raise ReceiptError("receipt does not record successful validation")
+    counts = [record[key] for key in ("inventory_count", "selected", "passed", "skipped", "failed")]
+    if any(type(value) is not int or value < 0 for value in counts):
+        raise ReceiptError("validation counts are malformed")
+    if record["failed"] != 0:
+        raise ReceiptError("receipt records failed tests")
+    if record["selected"] == 0 or record["passed"] == 0:
+        raise ReceiptError("receipt records no executed tests")
+    if record["passed"] + record["skipped"] != record["selected"]:
+        raise ReceiptError("receipt results do not account for every selected test")
+    if record["selected"] > record["inventory_count"]:
+        raise ReceiptError("receipt selects more tests than were built")
+    # The merge-group selection only removes a few labelled and quarantined
+    # tests from the built inventory (about 1% on macOS). A run that selected
+    # far fewer is a different, narrower test set.
+    if record["selected"] * 100 < record["inventory_count"] * MIN_SELECTED_PERCENT:
+        raise ReceiptError("receipt selection covers too little of the built test inventory")
+    selection = record["selection"]
+    if not isinstance(selection, dict):
+        raise ReceiptError("receipt selection is malformed")
+    _require_exact_keys(selection, SELECTION_KEYS, "receipt selection")
+    if selection["label_include"] or selection["include_regex"]:
+        raise ReceiptError("receipt records a narrowed test tier, not full validation")
+    if selection["label_exclude"] != REQUIRED_LABEL_EXCLUDE:
+        raise ReceiptError("receipt excludes a different label set than the merge group runs")
+    for key in ("selected_digest", "results_digest"):
+        value = record[key]
+        if not isinstance(value, str) or len(value) != 64:
+            raise ReceiptError("validation digests are malformed")
 
 
 def _version(command: list[str]) -> str:
@@ -221,7 +376,16 @@ def issue(args: argparse.Namespace) -> dict[str, Any]:
             "validated checkout is neither the exact head nor the exact base+head merge"
         )
     policy = policy_identity(repo, checkout["sha"])
-    artifact = artifact_identity(args.build_dir.resolve(), args.ctest_json)
+    build_dir = args.build_dir.resolve()
+    inventory = ctest_inventory(build_dir, args.ctest_json)
+    artifact = artifact_identity(build_dir, inventory)
+    validation = validation_evidence(
+        exit_code_path=args.ctest_exit_file,
+        selection_path=args.ctest_selection,
+        selected_json=args.ctest_selected_json,
+        junit_path=args.ctest_junit,
+        inventory_names=_inventory_names(inventory),
+    )
     body = {
         "schema": SCHEMA,
         "repository": args.repository,
@@ -236,7 +400,7 @@ def issue(args: argparse.Namespace) -> dict[str, Any]:
         "policy": policy,
         "toolchain": toolchain_identity(args.target, args.build_dir.resolve()),
         "artifact": artifact,
-        "validation": {"conclusion": "success", "ctest_exit": 0},
+        "validation": validation,
     }
     body["receipt_digest"] = digest(body)
     return body
@@ -268,8 +432,7 @@ def verify_receipt(receipt: dict[str, Any], args: argparse.Namespace) -> dict[st
         raise ReceiptError("repository or workflow identity changed")
     if receipt["target"] != args.target:
         raise ReceiptError("target identity changed")
-    if receipt["validation"] != {"conclusion": "success", "ctest_exit": 0}:
-        raise ReceiptError("receipt does not record successful validation")
+    check_validation(receipt["validation"])
     if not str(receipt["run_id"]).isdigit() or not str(receipt["run_attempt"]).isdigit():
         raise ReceiptError("workflow run identity is malformed")
 
@@ -436,6 +599,10 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--run-attempt", required=True)
     create.add_argument("--build-dir", type=Path, required=True)
     create.add_argument("--ctest-json", type=Path)
+    create.add_argument("--ctest-exit-file", type=Path, required=True)
+    create.add_argument("--ctest-selection", type=Path, required=True)
+    create.add_argument("--ctest-selected-json", type=Path, required=True)
+    create.add_argument("--ctest-junit", type=Path, required=True)
     create.add_argument("--output", type=Path, required=True)
 
     verify = subparsers.add_parser("verify", parents=[common])

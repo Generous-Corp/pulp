@@ -357,6 +357,22 @@ context, and never execute the candidate's verifier as the authority.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
+### A reused merge-group receipt must carry test evidence, not a verdict
+
+A merge group can skip `macos`/`linux` entirely by reusing the pull-request
+run's protected-validation receipt. The job then reads as validated even
+though nothing ran in the group. A receipt that *states* success
+(`{"conclusion": "success", "ctest_exit": 0}` written as a constant), checked
+by a verifier comparing against that same constant, is circular: it stays
+green after the pull-request run stops running tests, and red code lands
+behind a green gate. Receipts carry the CTest selection, the selected
+inventory, JUnit per-test results and the recorded exit status. They are
+issued only when the `ctest` step ran and succeeded, and a narrowed tier (an
+include label or regex) can never be reused. When changing which tests a
+pull-request run executes, check `tools/scripts/test_build_workflow.py` and
+`tools/scripts/test_protected_merge_receipt.py` (both run from
+`workflow-lint.yml`).
+
 ### A green ctest job proves nothing about a label its event excludes
 
 `build.yml` computes `label_exclude` from the event, and the two values are far
