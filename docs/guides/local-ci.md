@@ -1208,14 +1208,18 @@ entry. Installing into a different interpreter would leave every one of them
 skipping while the install step reported success, so a missing cache entry
 fails the step outright instead of falling back.
 
-It installs `tools/motion/visual/requirements.lock`, the hash-pinned
-resolution of `requirements.txt`, under `--require-hashes`, so every run
-installs the same bytes and a new upstream release cannot change a gate verdict.
+It first asks `pip install --dry-run --no-index` whether the declared floor in
+`requirements.txt` is already satisfied, and stops there with no network
+contact when it is (see "The required gate must not need a third-party service
+at run time"). Only when something is missing does it install
+`tools/motion/visual/requirements.lock`, the hash-pinned resolution of
+`requirements.txt`, under `--require-hashes`, so every install lays down the
+same bytes and a new upstream release cannot change a gate verdict.
 Regenerate the lock (command in its header) whenever `requirements.txt`
 changes; `tools/scripts/test_visual_python_deps_step.py` fails if a declared
 distribution is not pinned and hashed there.
 
-Where the bytes come from, in order:
+When an install is needed, the bytes come from, in order:
 
 1. A tartci gate guest whose host keeps a pip wheelhouse gets
    `TARTCI_PIP_WHEELHOUSE` in its job environment, and the step installs from

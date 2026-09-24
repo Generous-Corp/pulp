@@ -1089,7 +1089,9 @@ from the declared file (`tools/motion/visual/requirements.txt`, which
 `tools/deps/manifest.json` already carries and audits) rather than from a
 hand-listed pair read off a skip line.
 
-**CI installs the lock, not the ranges.** `build.yml` installs
+**CI installs the lock, not the ranges.** After the no-network
+`--dry-run --no-index` satisfied check (which still runs first and ends the
+step when the floor is already met), `build.yml` installs
 `tools/motion/visual/requirements.lock` — the `pip-compile --generate-hashes`
 resolution of `requirements.txt` — under `--require-hashes`. Adding a
 requirement means regenerating the lock (command in its header);
