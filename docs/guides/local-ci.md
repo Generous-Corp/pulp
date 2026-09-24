@@ -1479,12 +1479,14 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
 
-## Cache-warming runs on `main`
+## Runs on `main`: cache warming and main's health
 
 `build.yml` triggers on `push: branches: [main]` in addition to
-`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing —
-it exists solely to **publish the GitHub-hosted Linux/Windows ccache and
-FetchContent caches** that PR runs restore from.
+`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing.
+It does two jobs: it **publishes the GitHub-hosted Linux/Windows ccache and
+FetchContent caches** that PR runs restore from, and it **runs the full macOS
+suite against the commit that actually landed**, which is the only place that
+happens.
 
 It is needed because of how GitHub's cloud cache is scoped: a cache entry
 written by a PR run is visible only to that PR's own ref, so PR runs can never
@@ -1496,20 +1498,43 @@ Each trigger runs a deliberately different slice of the matrix:
 
 | | PR run | `merge_group` run | `push: main` cache run |
 |---|---|---|---|
-| macOS matrix leg | yes | yes | **no** — omitted by `resolve-provider` |
+| macOS matrix leg | yes | yes | **yes** — main's health detector |
 | Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
 | Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
 | `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
-| required direct `macos` context | yes | yes | no |
+| required direct `macos` context | yes | yes | no — descriptive name, gates nothing |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
-The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
-serve the one required check in this repo, and those machines keep ccache and
-FetchContent on local disk between jobs. Scheduling a macOS leg on a push would
-put the required gate's runners under load to save a cache that is never
-uploaded — strictly a cost. For the same reason the two `Save …` steps are
-scoped `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which
-is narrower than the restore side on purpose.
+### Why the macOS leg runs on push
+
+The push lane carries macOS because nothing else proves main is healthy.
+A pull-request head does not run the suite at all (the `Test (non-Windows)`
+step is gated `github.event_name != 'pull_request'`), and a merge group
+validates a synthetic merge commit rather than the commit that lands. So
+without the push leg, main's macOS health is simply unknown, and a break on
+main first surfaces when a queued batch inherits it, roughly forty minutes
+later, reported against a batch whose name is not the culprit. Because a merge
+queue re-forms a batch after each failure, every subsequent batch inherits the
+same break and pays the same forty minutes.
+
+Running it on push moves that detection onto the merge commit that caused it,
+where attribution is free.
+
+The cost is bounded rather than unlimited. Push runs share the
+`refs/heads/main` concurrency group, so consecutive merges serialize and at
+most one push macOS leg is ever in flight: the steady-state draw on the
+self-hosted Macs is one lane. The leg also keeps its descriptive matrix name on
+push instead of claiming the required `macos` context, so it detects without
+gating. Caches are still saved only from GitHub-hosted Linux and Windows: the
+two `Save …` steps stay scoped
+`runner.environment == 'github-hosted' && runner.os != 'macOS'`, which is
+narrower than the restore side on purpose, because the self-hosted Macs keep
+ccache and FetchContent on local disk between jobs.
+
+`tools/ci/test_build_matrix_contract.py` (ctest `build-matrix-contract`) pins
+this: it asserts over the parsed syntax tree that the macOS matrix entry is
+appended unconditionally, so re-gating it on the event name fails a test rather
+than quietly restoring the blind spot.
 
 Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
@@ -1617,6 +1642,90 @@ single queued job. The workflow derives the actual worker from that fenced
 name before checkout; an ordinary CI label or an unknown name fails closed.
 The pending exact-head status remains the durable obligation while every Mac
 is offline, so its age alone never creates a duplicate model invocation.
+
+## A merge_group batch stops at the first failing test
+
+The full suite is roughly 21,764 tests. A batch that has one failing test is
+already unlandable, so the remaining tests prove nothing the first failure did
+not, and a merge queue multiplies the waste: every batch inherits a broken
+base, every platform lane pays it, and each re-formed batch pays again. One
+observed cascade had its leader fail at test 101 and spend about eighteen more
+minutes proving it, across three lanes and more than ten consecutive batches.
+
+So `merge_group` runs ctest with `--stop-on-failure`, and no other lane does.
+The push lane deliberately runs to completion, because it is the only place the
+full macOS suite ever runs against main and its completeness is the point: it
+reports every failing test, which is what
+`tools/scripts/queue_batch_attribute.py` reads to attribute a batch.
+
+`--stop-on-failure` composes with the existing `--repeat until-pass:2` rather
+than defeating it. ctest stops only after the retries are exhausted, so a
+single flake still self-heals and only a test that fails every attempt ends the
+run. Under `-j8` the stop is bounded by the parallel width: the tests already
+in flight finish, so a suite failing at test 101 runs about 8 more, not 21,663.
+
+Both event-dependent ctest decisions (this flag, and the label set) live in
+`tools/ci/ctest_gate_args.py` so they are stated once and tested.
+`tools/ci/test_ctest_gate_args.py` (ctest `ctest-gate-args-selftest`) pins the
+rules AND asserts `build.yml` still calls the module and still passes both
+outputs to ctest, because a decision module that is correct but unreferenced
+reads exactly like one that works.
+
+The label set follows the same split. `performance`, `bench` and `quality-lab`
+are relative-timing tests that survive steady load but not the load variance of
+a Studio running concurrent build VMs, so they are excluded wherever the suite
+runs on the shared self-hosted Macs. That now includes the push lane, which is
+why a push macOS leg does not reintroduce those flakes as false alarms about
+main.
+
+## A green `macos` check does not always mean the suite ran
+
+The required `macos` context is reported by more than one job. It can come from
+the macOS matrix leg, which builds and tests, or from a bootstrap job that
+claims the name without running anything, because the change touched no native
+build input or because an earlier run's protected receipt was reused. Both look
+identical in the checks list.
+
+A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
+`Complete job`) reporting success. Reading one of those as evidence that the
+suite passed has already sent an investigation in the wrong direction for
+hours.
+
+Two things address it. Each bootstrap job now writes a banner into its own job
+summary stating that no build and no test step ran, and why, so the void case
+is legible from the check itself rather than only from its step count. And
+`tools/scripts/gate_suite_executed.py` answers the question directly:
+
+```bash
+# executed / built-but-untested / not-executed, per `macos` job
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
+
+# exit nonzero unless the suite genuinely ran, for use in a script
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
+```
+
+It classifies by the steps that actually ran, not by the conclusion, so it
+separates a real pass from a claimed one. It answers only whether the suite
+ran: an `executed` verdict on a failing job is still `executed`.
+
+## Attributing a failed batch to the PR that caused it
+
+A merge_group batch is named for one pull request but contains every entry
+ahead of it, so the run title names a branch that is usually not the culprit.
+
+```bash
+# defaults to the most recent failed merge_group run
+python3 tools/scripts/queue_batch_attribute.py [<run-id>]
+```
+
+It extracts the failing ctest names from the batch's macos job and maps each to
+the pull request whose files own it. Below its confidence threshold it reports
+`LIKELY PRE-EXISTING ON MAIN` and names nobody, which is the case that matters
+most: naming the wrong pull request sends someone to fix an innocent branch
+while the real break stays on main, failing every batch that forms. When it
+reports that, check main's own health first, which is what the push macOS leg
+above exists to tell you.
+
 
 ## Exact PR receipts on an unchanged merge-group candidate
 
@@ -5361,3 +5470,35 @@ pull requests waiting for a slot.
 
 So a green `macos` on a pull request means it **built**. Test results arrive when the queue
 validates it.
+
+### The required gate must not need a third-party service at run time
+
+`build.yml`'s `Install visual-analysis Python dependencies` step installs the
+declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
+`visual-python-deps-present` ctest stays answerable. It used to pass
+`--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
+already met* — turning "pypi.org is reachable from this VM" into a precondition
+of the **required** `macos` check.
+
+On 2026-09-23 that precondition failed. Ephemeral VMs on one host refused
+CONNECT to pypi.org (`Tunnel connection failed: 403 Forbidden`), so the step
+died at 21 of 41 and took out every merge_group batch that happened to land
+there, while the identical batch passed on a host whose VMs could reach it.
+The queue stopped merging and the cause looked like a PR defect, because the
+batch is named after one PR.
+
+The step now checks with `pip install --dry-run --no-index` first and only
+reaches the network when the set is genuinely missing. Two consequences worth
+keeping in mind:
+
+- **Pre-provisioning the wheels into the golden image now works.** Before this
+  change it did not: `--upgrade` contacted the index regardless, so a fully
+  provisioned VM still needed PyPI.
+- **A missing dependency is still fatal**, just at the right place. The
+  `visual-python-deps-present` ctest is the proof, and it names what is absent.
+  Making the install non-fatal instead would produce the failure mode this
+  check exists to prevent — seven ctests silently skipping, which reads as green.
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is unreachable. If it can, that is a fleet-wide
+outage waiting on someone else's uptime.

@@ -287,6 +287,35 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
     )
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_LV2)
     _pulp_attach_control_shipping(${target} ${target}_LV2 LV2)
+
+    # A host discovers a plugin by reading manifest.ttl out of the bundle, so a
+    # bundle carrying only the shared object is not a plugin -- nothing finds
+    # it, and nothing reports that. The comment above has described this
+    # directory as containing .ttl files since it was written; this is what
+    # makes that true.
+    #
+    # The description comes from the module, not from CMake: the port layout is
+    # the plugin descriptor's and the control ports are its parameters', so
+    # guessing them here would be a second source of truth for a wire format
+    # the host and the adapter must agree on exactly. pulp-lv2-ttlgen dlopens
+    # the module that was just built and asks it.
+    if(TARGET pulp-lv2-ttlgen)
+        add_custom_command(TARGET ${target}_LV2 POST_BUILD
+            COMMAND pulp-lv2-ttlgen
+                "$<TARGET_FILE:${target}_LV2>"
+                "$<TARGET_FILE_DIR:${target}_LV2>"
+                "$<TARGET_FILE_NAME:${target}_LV2>"
+            COMMENT "Describing ${name}.lv2 for host discovery (manifest.ttl)"
+            VERBATIM
+        )
+    else()
+        # Cross-compiling, or a consumer build where the driver was not
+        # configured. Say so: a bundle without a manifest looks identical to a
+        # working one until a host silently fails to list it.
+        message(WARNING
+            "pulp_add_plugin(${target}): LV2 bundle will carry no manifest.ttl because "
+            "pulp-lv2-ttlgen is unavailable (cross-compiling?). No host can discover it.")
+    endif()
 endfunction()
 
 # ── Internal: AAX target ────────────────────────────────────────────────

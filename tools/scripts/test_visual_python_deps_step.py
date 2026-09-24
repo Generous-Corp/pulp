@@ -70,12 +70,16 @@ class VisualPythonDepsStepTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = _step_script()
 
-    def _run(self, cache_body: str, *, pep668: bool = False):
+    def _run(self, cache_body: str, *, pep668: bool = False,
+             satisfied: bool = False):
         """Run the step with a fixture cache. Returns (proc, argv_lines).
 
         `cache_body` may contain {py}, replaced by the stub interpreter's path.
         With pep668, the stub refuses a plain --user install the way a
         Homebrew/Debian interpreter does, exercising the step's fallback.
+        With satisfied, the stub answers the `--dry-run --no-index` probe
+        successfully, standing in for a VM that already carries the wheels —
+        the case where the step must not reach the network at all.
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -84,6 +88,14 @@ class VisualPythonDepsStepTest(unittest.TestCase):
             argv_log = tmp_path / "argv.log"
 
             stub = tmp_path / "stub-python3"
+            # The step probes with `--dry-run --no-index` before installing.
+            # Default: report NOT satisfied, so the install paths below stay
+            # exercised. With satisfied=True the probe succeeds and the step
+            # must stop there.
+            probe = (
+                'case " $* " in *" --no-index "*) exit %d ;; esac\n'
+                % (0 if satisfied else 1)
+            )
             refuse = (
                 'case " $* " in *" --break-system-packages "*) exit 0 ;; esac\nexit 1\n'
                 if pep668
@@ -96,6 +108,7 @@ class VisualPythonDepsStepTest(unittest.TestCase):
                     printf '%s\\n' "$*" >> {argv_log}
                     """
                 )
+                + probe
                 + refuse,
                 encoding="utf-8",
             )
@@ -168,9 +181,29 @@ class VisualPythonDepsStepTest(unittest.TestCase):
             "_Python3_EXECUTABLE:INTERNAL={py}", pep668=True
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(len(invocations), 2, invocations)
-        self.assertNotIn("--break-system-packages", invocations[0])
-        self.assertIn("--break-system-packages", invocations[1])
+        # Assert the SHAPE of the install attempts, not a raw count: the
+        # `--no-index` probe runs first and is not an install.
+        installs = [i for i in invocations if "--no-index" not in i]
+        self.assertEqual(len(installs), 2, invocations)
+        self.assertNotIn("--break-system-packages", installs[0])
+        self.assertIn("--break-system-packages", installs[1])
+
+    def test_an_already_satisfied_set_never_reaches_the_index(self) -> None:
+        """The poka-yoke: a provisioned VM must not need PyPI to be reachable.
+
+        A required gate that fetches from a third-party service fails whenever
+        that service is unreachable from the runner, which on 2026-09-23 took
+        out every merge_group batch landing on one host while the same batch
+        passed on another.
+        """
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", satisfied=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        probes = [i for i in invocations if "--no-index" in i]
+        installs = [i for i in invocations if "--no-index" not in i]
+        self.assertEqual(len(probes), 1, invocations)
+        self.assertEqual(installs, [], "a satisfied set must install nothing")
 
     def test_the_declared_requirements_file_exists(self) -> None:
         """The step installs by path; a rename must break here, not in CI."""

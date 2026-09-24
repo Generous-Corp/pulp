@@ -203,6 +203,17 @@ catch_discover_tests(pulp-test-widget-promotion
 # Web-compat preludes shipped for bundled-React imports
 # (nodeType / nodeName, observer no-ops, scheduler shims). Uses
 # WidgetBridge to evaluate the same prelude stack the runtime ships.
+# Keyboard navigation for a menu no trigger owns. The popup owner's roving
+# cursor was reachable only through an `aria-haspopup` trigger, so a context
+# menu -- summoned at coordinates, owned by nothing -- got no cursor and
+# ignored arrow keys. Adoption is gated, and most of this binary is the
+# negative controls for that gate: nothing open, a trigger-owned menu, two
+# open menus, an empty menu, and the explicit opt-out.
+add_executable(pulp-test-web-compat-menu-keynav test_web_compat_menu_keynav.cpp)
+target_link_libraries(pulp-test-web-compat-menu-keynav PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-web-compat-menu-keynav
+    PROPERTIES LABELS "view")
+
 add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
 target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
 # Bound-pump test runs the 1M-job cap; budget headroom for slow CI runners.

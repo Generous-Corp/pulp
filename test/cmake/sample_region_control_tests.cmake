@@ -1,6 +1,6 @@
-if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect-runtime AND TARGET pulp::host)
+if(PULP_ENABLE_INSPECTOR AND TARGET pulp::inspect-sample-region-runtime)
     pulp_add_test_suite(pulp-test-control-sample-region
-        LIBRARIES pulp::inspect-runtime pulp::host
+        LIBRARIES pulp::inspect-sample-region-runtime
         TIMEOUT 60)
 endif()
 
@@ -82,8 +82,9 @@ function(_pulp_register_sample_region_control_e2e)
     #
     # Drop `validation` once line 214 is fixed. Do not delete the test and do not
     # weaken the assertion.
+    pulp_scaled_test_timeout(_pulp_sample_region_e2e_timeout 180)
     catch_discover_tests(pulp-test-control-sample-region-e2e
-        PROPERTIES TIMEOUT 180
+        PROPERTIES TIMEOUT "${_pulp_sample_region_e2e_timeout}"
         LABELS "inspect;control;sample-region;e2e;validation")
 endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_register_sample_region_control_e2e)

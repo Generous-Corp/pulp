@@ -321,7 +321,8 @@ class CacheSaveScopeTests(unittest.TestCase):
 
     The local self-hosted Macs keep ccache + FetchContent on disk between
     jobs. Round-tripping those multi-GB caches through GitHub's cloud cache
-    would slow down the one required gate in the repo to no benefit.
+    would slow down the one required gate in the repo to no benefit. The macOS
+    leg still RUNS on a push, as main's health detector; it just saves nothing.
     """
 
     @classmethod
@@ -359,12 +360,32 @@ class CacheSaveScopeTests(unittest.TestCase):
                 # non-macOS runners to the save path.
                 self.assertNotIn("runner.os != 'macOS' ||", condition)
 
-    def test_macos_leg_is_dropped_from_the_push_matrix(self) -> None:
-        # A push run exists only to publish Linux/Windows caches. Scheduling a
-        # macOS leg would put the required gate's self-hosted runners under
-        # load for a build whose cache is never saved.
-        self.assertIn('if EVENT_NAME not in PUSH_ONLY_CACHE_EVENTS:', self.text)
-        self.assertIn('PUSH_ONLY_CACHE_EVENTS = ("push",)', self.text)
+    def test_macos_leg_runs_on_the_push_matrix(self) -> None:
+        # A push run publishes the Linux/Windows caches AND carries macOS,
+        # because nothing else runs the full macOS suite against main: a
+        # pull-request head skips the test step and a merge group validates a
+        # synthetic merge commit. Dropping the leg again would restore the
+        # window in which a break on main is invisible until a queued batch
+        # inherits it and reports against an innocent entry.
+        #
+        # The draw is bounded rather than unlimited: push runs share the
+        # refs/heads/main concurrency group, so consecutive merges serialize.
+        self.assertNotIn("PUSH_ONLY_CACHE_EVENTS", self.text)
+        self.assertNotIn("macOS leg omitted", self.text)
+        # tools/ci/test_build_matrix_contract.py asserts the same contract over
+        # the parsed syntax tree, which a differently-spelled event guard
+        # cannot slip past.
+
+    def test_push_macos_leg_does_not_claim_the_required_context(self) -> None:
+        # The push leg detects; it must not gate. The matrix child renames
+        # itself to the required `macos` context only for the events whose
+        # branch protection consumes it.
+        self.assertIn(
+            "(github.event_name == 'pull_request' || github.event_name == "
+            "'workflow_dispatch' || github.event_name == 'merge_group') && "
+            "matrix.key == 'macos' && 'macos'",
+            self.text,
+        )
 
     def test_reporting_aliases_and_extra_gates_skip_push_runs(self) -> None:
         # Linux/Windows aliases skip cache-warming pushes. Native macOS now

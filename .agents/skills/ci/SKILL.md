@@ -55,6 +55,83 @@ dynamically loaded dependency, trace, or source,
 or produces noncanonical verifier output fails the required check. Linux and
 Windows remain advisory and do not produce this authority.
 
+## A merge queue amplifies a broken base instead of catching it
+
+The merge queue's failure mode is not that it misses a break. It is that it
+inherits one and repeats it. A batch validates `main` plus its entries, so a
+break already on `main` fails every batch, ejects the innocent entries,
+re-forms, and fails again. One observed cascade ran ten-plus consecutive
+batches over seven hours with zero merges, each ~40 minutes, each reporting
+against a batch name that was not the culprit.
+
+Three facts make that possible, and all three are worth knowing before you
+diagnose a stalled queue:
+
+**A pull-request head does not run the test suite at all.** The `Test
+(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
+in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
+the PR head. So "the PR was green" never meant its tests passed.
+
+**`main`'s macOS health is measured only on push.** The macOS matrix leg now
+runs on `push: main` for exactly this reason: a merge group validates a
+synthetic merge commit, so without the push leg nothing ever runs the full
+macOS suite against a commit that is actually on `main`. If you are asking
+"is main broken?", look at the push run for the merge commit, not at a batch.
+The leg keeps its descriptive matrix name on push rather than claiming the
+required `macos` context, so it detects without gating.
+
+**A batch stops at its first failing test.** `merge_group` runs ctest with
+`--stop-on-failure`; no other lane does. It composes with `--repeat
+until-pass:2` rather than defeating it — ctest stops only once the retries are
+exhausted, so a flake still self-heals — and under `-j8` the stop is bounded by
+the parallel width, so a few extra tests finish. Do not read a batch's short
+test list as the complete set of what is broken; the push lane is the one that
+reports every failure.
+
+Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
+tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
+calls it.
+
+## A green `macos` check can mean nothing ran
+
+The required `macos` context is reported by more than one job: the macOS matrix
+leg, which builds and tests, and bootstrap jobs that claim the name without
+running anything — when no native input changed, or when a protected receipt is
+reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+bootstrap step, `Complete job`). In the checks list it is indistinguishable
+from a real pass, and reasoning from one as evidence that the suite passed has
+already cost hours of wrong conclusions.
+
+Ask the run instead of the colour:
+
+```bash
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
+# executed | built-but-untested | not-executed, with the step count
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
+# exits nonzero unless the suite genuinely ran
+```
+
+Each bootstrap job also writes a banner into its own job summary saying no
+build and no test step ran. A step count near three on a `macos` job is the
+tell.
+
+## A failed batch's branch name is not the culprit
+
+A merge_group batch is NAMED for one pull request but CONTAINS every entry
+ahead of it. Blaming the name sends someone to fix an innocent branch while the
+real break keeps failing every batch that forms.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
+```
+
+It maps each failing ctest to the pull request whose files own it. Below its
+confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
+read that as "go look at main's own push run", never as "no culprit exists".
+Because it reads the macos job's log, a batch whose macos gate never ran the
+suite yields nothing, which is the previous section's problem wearing a
+different hat.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
@@ -1320,6 +1397,61 @@ points at a force-pushed-away commit — between the force-push and the next
 `git fetch --prune` — keeps that commit reachable, so the gate would pass it.
 That window is narrow and does not touch the shape the gate is for: a commit
 amended before its first push was never on any remote ref.
+
+## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
+
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
+`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
+0.1s and ~2s, no build tree, no configure. The required gate already runs them
+as ctests, so this adds no coverage; it moves *when* you find out.
+
+That timing is the whole point. A batch is main plus every entry ahead of it, so
+a bad test registration does not fail only its author: it fails the batch, ejects
+PRs that did nothing wrong, and the queue re-forms on the same failure until
+somebody reads a log. A single literal `TIMEOUT` inside `catch_discover_tests`
+has held eighteen PRs this way, and `catch_discover_timeout_guard.py` names the
+exact file and line in a tenth of a second.
+
+What each one refuses:
+
+- **A literal `TIMEOUT` in a `catch_discover_tests` block.** The budget must be
+  a scaled variable, because a literal is not widened on the instrumented lanes
+  and the test is killed at an uninstrumented budget:
+
+      pulp_scaled_test_timeout(_pulp_<name>_timeout <seconds>)
+      catch_discover_tests(<target>
+          PROPERTIES TIMEOUT "${_pulp_<name>_timeout}")
+
+  Prior art: `test/cmake/app_audio_host_tests.cmake`,
+  `test/cmake/character_delay_tests.cmake`. The guard honours an inline
+  `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
+  since the skip marker evades the thing the guard exists to catch.
+
+- **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
+  `return` at the top of a case leaves it PASSING, so the suite's pass count is
+  identical whether the lane ran or the precondition vanished. Use `SKIP()`.
+  `tools/scripts/check_skip_not_pass.json` is a frozen ledger whose `sites`
+  counts may shrink and never grow — a count that has DROPPED is an error, so
+  lower it in the same change or delete the entry at zero.
+
+Diff-scoped, like the unbounded-wait lint: a violation is fatal only when it sits
+on a path the push changes, and one elsewhere is reported without failing. That
+keeps a pre-existing backlog on the base from blocking every developer's push. It
+is reported rather than swallowed because a violation on the base still reds the
+required gate for whoever owns it.
+
+Two traps when running these by hand:
+
+- **Run them against a ref, not a working tree.** A checkout parked on an old
+  branch may not even contain the scripts, and the resulting "not found" reads
+  as a clean run. Use `git archive <ref> | tar -x -C "$(mktemp -d)"` and assert
+  a non-zero extracted file count.
+- **Extract the WHOLE tree for `check_skip_not_pass`.** It reports a ledger entry
+  as "listed in the ledger but not scanned" when the file is merely absent from
+  your extraction, which looks like a real finding and is not.
+
+`PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
+run as ctests on the required gate.
 
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
@@ -9932,3 +10064,43 @@ Two consequences worth knowing:
 
 This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
 the same file for longer.
+
+## A required gate step that fetches from the internet is a fleet-wide outage waiting to happen
+
+`build.yml`'s `Install visual-analysis Python dependencies` step passed
+`--upgrade`. pip then asks the index for a newer wheel **even when the
+requirement is already satisfied**, so "pypi.org is reachable from this VM"
+became a precondition of the **required** `macos` check — 21 steps before any
+test runs.
+
+On 2026-09-23 it failed exactly that way:
+
+```
+error: externally-managed-environment
+Tunnel connection failed: 403 Forbidden   ->  /simple/numpy/   (x5 retries)
+ERROR: No matching distribution found for numpy>=1.24
+```
+
+**The tell that it was infrastructure, not a PR:** the same step was `failure`
+on two `m5-pulp-gate-*` runners and `success` on `studio-pulp-gate-*` for
+comparable batches. Both *hosts* reach pypi.org fine (HTTP 200 from a login
+shell) — the refusal is inside the ephemeral VM's egress, so it follows the
+host that mints the VM, not the diff. A merge_group batch is named after one
+PR, so this reads as that PR being broken when it is a host property.
+
+Two rules follow, and they generalise past this step:
+
+- **Check before you fetch.** `pip install --dry-run --no-index` answers
+  "already satisfied?" without touching the network, so the happy path has no
+  external dependency at all. This is also what makes pre-provisioning wheels
+  into the golden image *work* — with `--upgrade` a fully provisioned VM still
+  contacted the index.
+- **Do not make the install non-fatal to "fix" it.** Seven ctests import these
+  modules and SKIP when they are missing, and a ctest SKIP reads exactly like a
+  PASS. The failure belongs at the non-skippable `visual-python-deps-present`
+  check, which can name what is absent; an install step cannot distinguish
+  "absent" from "unreachable".
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is down. If it can, you have handed the merge queue
+to someone else's uptime.
