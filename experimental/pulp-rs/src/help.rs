@@ -140,6 +140,10 @@ pub const COMMANDS: &[Entry] = &[
         summary: "Unified dev loop: watch, build, test, run",
     },
     Entry {
+        name: "affected",
+        summary: "Targets and tests affected by the working diff",
+    },
+    Entry {
         name: "loop",
         summary: "Leveraged-prototype focus marker + watch loop",
     },

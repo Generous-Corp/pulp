@@ -93,8 +93,9 @@ and Ubuntu do not support AAX.
 Configure and build the project. Auto-detects when CMake reconfiguration is needed. Works with both repo-based and standalone projects.
 
 ```bash
-pulp build                    # Build all targets
-pulp build --target PulpGain_VST3  # Build specific target
+pulp build                    # Build the targets affected by your diff (source checkout)
+pulp build --all              # Build every target — do this before opening a PR
+pulp build --target PulpGain_VST3  # Build specific target (always wins over the selector)
 pulp build -j8                # Parallel jobs
 pulp build --watch            # Build and watch for changes
 pulp build --watch --test     # Build, watch, run tests on change
@@ -115,6 +116,8 @@ pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+In a Pulp source checkout `pulp build` is **focused by default**: it builds only the targets the working diff affects, selected by [`pulp affected`](#affected). The banner names the selection (`FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' before opening a PR`) and a full build is one flag away. `--all`, an explicit `--target`, or `PULP_BUILD_FOCUS=0` restore the full build; `--install` and `--validate` always build everything because every bundle must exist. The selector falls back to `all` (and says why) when the diff is empty, touches the build system, cannot be mapped, or exceeds ~40% of all targets. Standalone SDK projects are never focused. The first focused build in an existing build directory configures once to record the CMake file-API codemodel. The pre-push hook and Shipyard keep building `all`, so a focused green run is a development signal, not a landing gate.
 
 `--format wam|wclap` (short: `-f`) builds a **web plugin format** instead of the native plugins, using a separate toolchain and build directory so it never collides with the native `build/`:
 
@@ -153,11 +156,32 @@ On Windows, `pulp build` also selects a Visual Studio generator automatically wh
 Run the test suite via CTest. Builds first if no build directory exists. Works with both repo-based and standalone projects.
 
 ```bash
-pulp test                     # Run all tests
-pulp test -R Gain             # Run tests matching "Gain"
+pulp test                     # Run the tests affected by your diff (source checkout)
+pulp test --all               # Run every test — do this before opening a PR
+pulp test -R Gain             # Run tests matching "Gain" (a filter always wins)
 ```
 
 Extra arguments are passed through to `ctest`.
+
+In a Pulp source checkout `pulp test` runs only the CTest tests whose programs the working diff affects (see [`pulp affected`](#affected)), passed to `ctest --tests-from-file` as literal names so Catch2 cases with duplicate display names are never regex-guessed. `--all`, any ctest selection flag (`-R`, `-E`, `-L`, `-I`, `--tests-from-file`), or `PULP_BUILD_FOCUS=0` runs the full suite. When nothing maps to the diff it says so and exits 0 without running ctest.
+
+### affected
+
+**Status**: usable
+
+Print the CMake targets and CTest tests affected by the working diff. This is the selection `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` use by default in a source checkout; exposing it lets agents and hooks build or test exactly that set.
+
+```bash
+pulp affected                 # Banner + target list + test count
+pulp affected --json          # Machine-readable: mode, reason, targets, tests, totals
+pulp affected --base main     # Branch base for the committed part of the diff
+pulp affected --file core/view/src/widgets.cpp   # Ask about a specific file instead of git
+pulp affected --threshold 0.6 # Fall back to all above this fraction of targets
+```
+
+The diff is the branch's merge-base with `--base` (default `$PULP_AFFECTED_BASE`, else `origin/main`) plus staged, unstaged, and untracked files. Mapping rules, in order: a build-system change (`CMakeLists.txt`, `*.cmake`) newer than the recorded codemodel means `all` (CMake regenerates the codemodel on every configure, so after one build has regenerated it the change maps normally); a compiled source maps to the targets listing it in the CMake file-API codemodel; a header maps to the targets whose objects include it, read from `ninja -t deps` or the Makefile `.o.d` files (without a database it widens to the owning directory's targets plus their direct dependents); each changed source or header with stem `S` also selects the test programs whose sources are `test_S.cpp` or `test_S_*.cpp`; a changed executable, bundle, or utility also selects the test programs that depend on it directly (`add_dependencies`); CTest tests are selected when their command runs an artifact of a selected target or names a changed file, and a selected test's `FIXTURES_REQUIRED` pulls in the fixture's setup tests and the targets that build them. An empty diff, an unmapped C/C++ file, a missing codemodel reply, or a selection above the threshold falls back to `all` with the reason in the banner.
+
+The selector writes the CMake file-API query (`.cmake/api/v1/query/codemodel-v2`) into the build directory when it is missing; the next configure records the codemodel. Outputs land in `build/.pulp/affected/` (`selection.json`, `targets.txt`, `tests.txt`, `banner.txt`). The projection lives in `tools/scripts/changed_surface_inventory.py`, the changed-surface module Shipyard's exact-head plan already reads its CTest inventory and codemodel through: it reuses that module's ctest loader and gate corpus filter (the `validation|slow|performance|bench|quality-lab` label and `AudioWorkgroup` name exclusions), its codemodel reader, and the `families` declared under `[targets.mac.changed_surface_selection]` in `.shipyard/config.toml` (a family's `tests`, `extended_tests`, and `build_targets` are added when a changed path matches its `paths`). `tools/scripts/affected_targets.py` is the thin command behind `pulp affected`. Shipyard's plan remains fail-closed and merge-authoritative; the projection is best-effort by design, widening to `all` where the plan would refuse.
 
 When `pulp test` triggers a cold-start build (no `build/CMakeCache.txt`), the FetchContent cache preflight from `pulp doctor --caches` runs first and aborts with a clear remediation message on any unhealthy entry — same gate `pulp build` applies, same `PULP_SKIP_CACHE_PREFLIGHT=1` bypass.
 
@@ -2192,6 +2216,8 @@ Traced SDKs are development artifacts: `sdk-provenance.json` records
 
 Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
 
+In a source checkout the build and test steps are focused on the working diff by default (see [`pulp affected`](#affected)); `--all` builds every target and runs every test, `--target` and `--test-filter` always win, and a watch loop re-selects before every rebuild.
+
 The live watch/relaunch loop is implemented by the C++ delegate (`pulp-cpp`).
 Normal installed/source builds ship the Rust `pulp` front end with that sibling
 delegate, so `pulp dev` forwards to the full watch loop when `pulp-cpp` is
@@ -2235,6 +2261,8 @@ Flags:
 **Status**: experimental
 
 Leveraged-prototype focus mode. `pulp loop` is the explicit "I'm in single-platform iteration mode" marker. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling can read the advisory focus marker when it needs platform-specific behavior; `pulp loop` itself does not rewrite the build graph.
+
+In a source checkout the build and test steps are focused on the working diff by default (see [`pulp affected`](#affected)); `--all` builds every target and runs every test, `--target` and `--test-filter` always win, and a watch loop re-selects before every rebuild.
 
 ```bash
 pulp loop                           # Enter focus mode on the auto-detected host

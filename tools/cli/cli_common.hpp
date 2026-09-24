@@ -14,6 +14,7 @@
 #include "cli_sdk.hpp"      // impl: cli_sdk.cpp
 #include "cli_aax.hpp"      // impl: cli_common.cpp / cli_doctor_helpers.cpp
 #include "cli_watch.hpp"    // impl: cli_common.cpp
+#include "focused_build.hpp" // impl: focused_build.cpp
 #include "shell_quote.hpp"
 
 #include <pulp/runtime/system.hpp>

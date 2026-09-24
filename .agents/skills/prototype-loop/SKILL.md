@@ -83,6 +83,32 @@ pulp loop --off                 # restore cross-platform mode
 
 The CLI persists `[loop] focus_platform = "..."` in `~/.pulp/config.toml`. Subsequent invocations stay pinned until explicitly cleared.
 
+The watch loop is also **focused on the working diff by default**: before every
+rebuild it re-runs the affected-target selector (`pulp affected`, script
+`tools/scripts/affected_targets.py`) and passes `cmake --build --target` only
+the targets that own the diff plus their companion test programs
+(`test_<stem>*.cpp`), following `add_dependencies` and CTest fixture edges. With
+`--test` it runs only those tests via `ctest --tests-from-file`. A one-line
+`.cpp` edit in `core/view` rebuilds `pulp-view-core` + `pulp-test-widgets` in
+seconds instead of relinking ~1,400 programs. The banner it prints is the
+contract:
+
+```
+FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' before opening a PR
+```
+
+- `pulp loop --all` (and `pulp dev --all`, `pulp build --all`) restores the full
+  build; `--target` and `--test-filter` always win; `PULP_BUILD_FOCUS=0`
+  disables focus for a shell.
+- The selector falls back to `all` and says why for an empty diff, a
+  build-system change, an unmapped C/C++ file, or a selection above ~40% of the
+  target graph. Header edits focus only when a dependency database exists
+  (`ninja -t deps` or Makefile `.o.d` files).
+- The first focused run in an existing build dir configures once (~80 s) to
+  record the CMake file-API codemodel it selects from.
+- **Focused green is not landing green.** Pre-push and Shipyard still build
+  `all`; run `pulp build --all && pulp test --all` before `shipyard pr`.
+
 `--no-watch` flips state and exits without entering the watch loop — this is what tests use, and it's also useful when you want the marker but plan to drive builds yourself.
 
 ## Step 4 — Local prototype via ar-swap

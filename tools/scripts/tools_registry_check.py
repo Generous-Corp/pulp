@@ -64,6 +64,7 @@ CATEGORY_ORDER = [
     "import-roundtrip",
     "harness",
     "audio",
+    "build",
 ]
 
 CATEGORY_BLURB = {
@@ -72,6 +73,7 @@ CATEGORY_BLURB = {
     "import-roundtrip": "validate an import lane end to end",
     "harness": "coverage + deterministic visual harness",
     "audio": "prove what the audio actually did",
+    "build": "build and test only what a diff touches",
 }
 
 

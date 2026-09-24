@@ -85,6 +85,7 @@ int cmd_build(const std::vector<std::string>& args) {
     bool allow_unsupported_sdk = false;
     // Item 7.4b: install after build (with validation gate by default).
     bool install_mode = false;
+    bool build_all = false;
     bool skip_validation = false;
     bool trace_mode = false;
     bool allow_tracing_install = false;
@@ -105,6 +106,10 @@ int cmd_build(const std::vector<std::string>& args) {
         }
         if (arg == "--install") {
             install_mode = true;
+            continue;
+        }
+        if (arg == "--all") {
+            build_all = true;
             continue;
         }
         if (arg == "--skip-validation") {
@@ -307,8 +312,27 @@ int cmd_build(const std::vector<std::string>& args) {
         build_cmd += " " + arg;
     }
 
+    // Focused build: --install and --validate need every bundle, so they keep
+    // the full build; everything else builds the targets the diff affects.
+    const bool focus = !install_mode && !watch_validate
+                       && focused_build_applicable(project_root, standalone_mode,
+                                                   passthrough_args, build_all);
+    FocusedSelection selection;
+    if (focus) {
+        ensure_codemodel_query(build_dir);
+        if (!codemodel_reply_available(build_dir)) {
+            std::cout << "Configuring once to record the CMake codemodel that focused builds select from\n";
+            std::string reconfigure_cmd = "cmake -S " + shell_quote(project_root.string())
+                                        + " -B " + shell_quote(build_dir.string());
+            int crc = run_with_spinner(reconfigure_cmd, "Configuring");
+            if (crc != 0) return crc;
+        }
+        selection = select_for_rebuild(project_root, build_dir, true, "");
+        build_cmd = focused_build_command(build_cmd, selection);
+    }
+
     pulp_debug("cmd_build: run build (cmake --build)");
-    int rc = run_with_spinner(
+    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
         apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
                                    lease.jobs(),
                                    lease.active()),
@@ -407,6 +431,7 @@ int cmd_build(const std::vector<std::string>& args) {
     opts.run_tests = watch_test;
     opts.test_filter = test_filter;
     opts.run_validate = watch_validate;
+    opts.focus = focus;
     opts.build_jobs = capped_build.jobs;
     opts.build_qos = lease.qos();
     opts.build_watchdog = lease.active();

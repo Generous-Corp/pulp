@@ -61,8 +61,15 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 # Or preferred for repo + example builds:
 ./build/pulp build
 
-# Build everything (takes its job count from the host build governor)
+# Build only what your diff affects (the default in a source checkout);
+# takes its job count from the host build governor
 ./build/pulp build
+
+# Build everything — do this before opening a PR
+./build/pulp build --all
+
+# Show the targets + tests the working diff maps to
+./build/pulp affected --json
 
 # Run all tests
 ctest --test-dir build --output-on-failure
@@ -164,6 +171,30 @@ literal is a silent ceiling that survives a VM resize, a core count is the melt.
 For a cold task, use `pulp authority list` and then query an exact ID or alias;
 the command points to the native authority without duplicating its capability
 rows.
+
+### Focused builds are the default in a source checkout
+
+`pulp build`, `pulp dev`, `pulp loop`, and `pulp test` build and run only what
+the working diff affects (a `widgets.cpp` edit: `pulp-view-core` +
+`pulp-test-widgets` in seconds, versus 578 s for `all` at -j2). The selection
+is the build-target projection in `tools/scripts/changed_surface_inventory.py`
+(Shipyard's changed-surface module), surfaced as `pulp affected [--json]`:
+sources map to owning targets (file-API codemodel), headers through the
+generator's dependency database, stems to `test_<stem>*.cpp` programs, plus
+`add_dependencies`, CTest fixture, and `.shipyard/config.toml` family edges.
+It prints one loud line before building:
+
+```
+FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' before opening a PR
+```
+
+`--all` restores the full build, an explicit `--target` wins, and
+`PULP_BUILD_FOCUS=0` disables focus. The projection widens to `all` (saying
+why) for an empty diff, a build-system file newer than the recorded codemodel,
+an unmapped C/C++ file, or >40% of the graph; `PULP_AFFECTED_BASE` overrides
+the `origin/main` base. **Focused green is not landing green:** pre-push and
+Shipyard still build `all`, so run `pulp build --all` before opening a PR.
+Full rules: `docs/reference/cli.md#affected`.
 
 ### Non-interactive signing + notarization (no keychain / 1Password prompt)
 
@@ -1010,6 +1041,9 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
+
+**build** — build and test only what a diff touches
+- Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py). → `pulp affected`
 
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`

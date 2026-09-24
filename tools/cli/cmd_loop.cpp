@@ -10,6 +10,7 @@
 // scripts fail gently, but they only print diagnostics today.
 
 #include "cli_common.hpp"
+#include "focused_build.hpp"
 #include "tartci_lease.hpp"
 
 #include <cstdlib>
@@ -60,6 +61,8 @@ void print_help() {
         "  --validate                        Run quick plugin dlopen validation after build\n"
         "  --run TARGET                      Launch TARGET from build dir, relaunch on rebuild\n"
         "  --target T                        Pass --target T to cmake --build\n"
+        "  --all                             Build every target and run every test\n"
+        "                                    (default: only those affected by the diff)\n"
         "  --no-watch                        Set/clear focus state and exit (no watch)\n"
         "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
         "  -h, --help                        Show this help\n\n"
@@ -103,6 +106,7 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool status_only = false;
     bool no_watch = false;
     bool run_tests = false;
+    bool build_all = false;
     bool run_validate = false;
     bool allow_unsupported_sdk = false;
     bool after_separator = false;
@@ -159,6 +163,8 @@ int cmd_loop(const std::vector<std::string>& args) {
             run_tests = true;
         } else if (a == "--validate") {
             run_validate = true;
+        } else if (a == "--all") {
+            build_all = true;
         } else if (a == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
         } else if (a == "--run") {
@@ -317,10 +323,28 @@ int cmd_loop(const std::vector<std::string>& args) {
         if (rc != 0) return rc;
     }
 
+
+    // Focused build: select the targets the working diff affects. The
+    // selector reads the CMake file-API codemodel, which only a configure
+    // that finds the query already in place produces.
+    const bool focus = focused_build_applicable(project_root, standalone_mode, build_args, build_all);
+    if (focus) {
+        ensure_codemodel_query(build_dir);
+        if (!codemodel_reply_available(build_dir)) {
+            std::cout << "Configuring once to record the CMake codemodel that focused builds select from\n";
+            std::string configure_cmd = "cmake -S " + shell_quote(project_root.string())
+                                      + " -B " + shell_quote(build_dir.string());
+            int crc = run_with_spinner(configure_cmd, "Configuring");
+            if (crc != 0) return crc;
+        }
+    }
+    const auto selection = select_for_rebuild(project_root, build_dir, focus, "");
+
     // Initial build
     std::string build_cmd = "cmake --build " + build_dir.string();
     for (auto& arg : capped_build.args) build_cmd += " " + arg;
-    int rc = run_with_spinner(
+    build_cmd = focused_build_command(build_cmd, selection);
+    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
         apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
                                    lease.jobs(),
                                    lease.active()),
@@ -336,6 +360,7 @@ int cmd_loop(const std::vector<std::string>& args) {
     opts.run_tests = run_tests;
     opts.test_filter = test_filter;
     opts.run_validate = run_validate;
+    opts.focus = focus;
     opts.launch_target = launch_target;
     opts.launch_args = launch_args;
     opts.build_jobs = capped_build.jobs;

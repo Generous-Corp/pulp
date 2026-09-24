@@ -278,6 +278,41 @@ the generated graph, not the CMake text —
 `grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
 build/CMakeFiles/Makefile2` must print a line.
 
+### Build-shaped commands consult the focused-build selector
+
+`pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
+default to building/testing only what the working diff affects. One projection
+serves both binaries: `project_working_diff()` in
+`tools/scripts/changed_surface_inventory.py` (the Shipyard changed-surface
+module, extended with the build-target projection so there is one codemodel
+reader, one ctest loader, and one gate corpus filter), driven by the thin CLI
+`tools/scripts/affected_targets.py` (surfaced as `pulp affected`), which writes
+`selection.json` / `targets.txt` / `tests.txt` / `banner.txt` into
+`<build>/.pulp/affected/`; the Rust side reads them through
+`experimental/pulp-rs/src/cmd/affected.rs` (`build_enabled`, `select`,
+`tests_file`), the C++ delegate through `tools/cli/focused_build.{hpp,cpp}`
+(`focused_build_applicable`, `select_affected`, `focused_build_command`), and
+`WatchOptions::focus` makes the shared `watch_loop` re-select before every
+rebuild. Keep the two sides in step:
+
+- A flag that must bypass focus (`--all`, `--target`, `--install`,
+  `--validate`, a ctest filter) has to be recognised on BOTH parsers, because
+  `pulp build --watch` / `pulp dev` delegate the raw tail to `pulp-cpp`.
+- The selector needs the CMake file-API reply. Both sides write the stateless
+  `codemodel-v2` query and configure once when the reply is missing; a new
+  build-dir layout (e.g. `--trace` → `build-trace/`) must pass its real build
+  dir to `select`, not `proj.build_dir`.
+- Catch2 test names carry no executable prefix, so test selection is literal
+  names via `ctest --tests-from-file`, never a regex built from target names.
+- Tests: `tools/scripts/test_affected_targets.py` (synthetic codemodel, ctest
+  `affected-targets-selftest`) covers the rules; the Rust `orchestrate::tests`
+  focused-vs-`--all` cases assert the spawned `cmake`/`ctest` argv. Because the
+  projection shares `changed_surface_inventory.py` with Shipyard's exact-head
+  plan, also run `test_changed_surface_policy.py` and
+  `test_run_changed_surface_tests.py` after touching it, and never change the
+  `EXCLUDED_*` filter constants from the projection side: they are pinned by
+  `.shipyard/changed-surface-inventory.json`.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source

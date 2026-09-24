@@ -1070,12 +1070,13 @@ int watch_loop(const WatchOptions& opts) {
         std::cout << "\n" << color::yellow() << "Change detected"
                   << color::reset() << ": " << first_changed << "\n";
 
-        // Build
+        const auto selection = select_for_rebuild(opts.root, opts.build_dir, opts.focus, "  ");
         std::string build_cmd = "cmake --build " + opts.build_dir.string();
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
-        int rc = run_with_spinner(apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, build_qos),
-                                                             build_jobs, opts.build_watchdog || loop_lease.active()),
-                                  "Rebuilding");
+        build_cmd = apply_agent_build_qos(focused_build_command(build_cmd, selection), build_qos);
+        int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
+            apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active()),
+            "Rebuilding");
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()
@@ -1084,12 +1085,11 @@ int watch_loop(const WatchOptions& opts) {
             continue;
         }
 
-        // Tests
+        // Tests (an explicit --test-filter wins over the selection)
         if (opts.run_tests) {
-            std::string test_cmd = "ctest --test-dir " + opts.build_dir.string()
-                                 + " --output-on-failure";
-            if (!opts.test_filter.empty()) test_cmd += " -R " + shell_quote(opts.test_filter);
-            int trc = run_with_spinner(test_cmd, "Testing");
+            std::string test_cmd = "ctest --test-dir " + opts.build_dir.string() + " --output-on-failure";
+            const bool run_ctest = focused_test_selection(test_cmd, opts.test_filter, selection, "  ");
+            int trc = run_ctest ? run_with_spinner(test_cmd, "Testing") : 0;
             if (trc != 0) {
                 std::cout << color::red() << "Tests failed." << color::reset()
                           << " Watching for more changes...\n";

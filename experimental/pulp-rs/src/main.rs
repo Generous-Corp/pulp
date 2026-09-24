@@ -78,6 +78,9 @@ enum Command {
     /// Run `ctest --output-on-failure`.
     Test(TestArgs),
 
+    /// Print the targets and tests affected by the working diff.
+    Affected(PkgTailArgs),
+
     /// Launch a standalone binary from the build tree.
     Run(RunArgs),
 
@@ -873,6 +876,11 @@ fn real_main() -> Result<(), ExitCode> {
                 &argv,
                 "pulp render is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
             ))
+        }
+        Command::Affected(args) => {
+            let cwd = read_cwd()?;
+            let spawner = pulp_rs::proc::SystemSpawner;
+            map_exit(cmd::affected::run_cmd(&cwd, &args.tail, &spawner, &mut out))
         }
         Command::Dev(args) => {
             let parsed = cmd::dev::parse_args(&args.tail);
