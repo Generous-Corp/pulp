@@ -2,7 +2,7 @@
   "schema": "pulp.gpu-handoff-provenance-receipt.v1",
   "generator": "tools/scripts/gpu_handoff_provenance.py",
   "handoff_path": "docs/status/gpu-vellum-handoff.yaml",
-  "source_commit": "df3a6520745fa8ec473a30060a87b84df00e49d1",
+  "source_commit": "6ce8c2624489ca6b84aa4af2d16c293c87c82b25",
   "source_repository": "Generous-Corp/pulp",
   "canonical_path_count": 93,
   "canonical_paths": [
@@ -101,5 +101,5 @@
     "tools/scripts/verify_gpu_probe_acceptance.py"
   ],
   "canonical_path_sha256": "bc8e34815631274bd26dcfc7f62ff7c8344a3a4158c9b058e4096288a971aabd",
-  "handoff_sha256": "e18051c04e243a82a9c69814385f65b2c50d90f8493728d0ab59beb9e56d1ea4"
+  "handoff_sha256": "b69746543f5d6821480f13d902c932776ca835356bd5930b94edc3a1664e72df"
 }

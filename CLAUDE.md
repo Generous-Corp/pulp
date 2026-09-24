@@ -1012,6 +1012,12 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
+**build-speed** — measure build, gate and merge-queue speed
+- Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
+  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+- Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before and after a build-system change. → `tools/scripts/build_time_report.py blast-radius`
+  - ⚠ **Cannot see:** Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not counted) and says so. It touches each file and restores its mtime, so do not run it against a tree another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
+
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
@@ -1457,8 +1463,8 @@ Before pushing a PR, run a local diff-coverage check to catch the same
 roundtrip on coverage-only failures.
 
 ```bash
-# Whole-tree (slow, matches CI)
-tools/scripts/local_diff_cover.sh
+# Focused: only targets/tests the diff reaches (pre-push runs this)
+tools/scripts/local_diff_cover.sh   # PULP_DIFF_COVER_SELECT=all: whole tree
 
 # Targeted build (fast — builds only named test targets)
 tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
