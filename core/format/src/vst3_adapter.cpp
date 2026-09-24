@@ -2684,10 +2684,10 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     return kResultOk;
 }
 
-tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id,
-                                                         ParamValue value) {
+tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue value) {
     const auto result = SingleComponentEffect::setParamNormalized(id, value);
-    if (result != kResultOk) return result;
+    if (result != kResultOk)
+        return result;
     // Mirror the accepted value into the StateStore on the calling (main)
     // thread. process_decode_input_parameters() still applies the host's
     // parameter queue during process(); this only guarantees that a write the
@@ -2698,8 +2698,7 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id,
         // The same guard setState() uses: a host-originated write must not be
         // echoed back at the host as editor automation.
         const ScopedHostParameterWrite host_write;
-        store_.set_normalized(static_cast<state::ParamID>(id),
-                              static_cast<float>(value));
+        store_.set_normalized(static_cast<state::ParamID>(id), static_cast<float>(value));
     }
     return result;
 }

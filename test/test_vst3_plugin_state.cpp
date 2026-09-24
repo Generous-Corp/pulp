@@ -26,9 +26,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <string>
@@ -6085,8 +6085,8 @@ TEST_CASE("VST3 host parameter write reaches serialized state without process",
         VectorStream stream;
         REQUIRE(processor.getState(&stream) == Steinberg::kResultOk);
         const std::vector<std::uint8_t> bytes = stream.take();
-        const auto magic = std::search(bytes.begin(), bytes.end(),
-                                       kStoreMagicBytes.begin(), kStoreMagicBytes.end());
+        const auto magic = std::search(bytes.begin(), bytes.end(), kStoreMagicBytes.begin(),
+                                       kStoreMagicBytes.end());
         REQUIRE(magic != bytes.end());
         const std::size_t base = static_cast<std::size_t>(magic - bytes.begin());
         std::uint32_t count = 0;
@@ -6112,17 +6112,14 @@ TEST_CASE("VST3 host parameter write reaches serialized state without process",
     // Deliberately not the default and not a value any other path writes, so a
     // pass cannot come from the store already holding it.
     constexpr Steinberg::Vst::ParamValue kWritten = 0.42066666;
-    REQUIRE(processor.getParamNormalized(
-                static_cast<Steinberg::Vst::ParamID>(kGainParamId))
-            != Catch::Approx(kWritten).margin(1e-5));
-    REQUIRE(processor.setParamNormalized(
-                static_cast<Steinberg::Vst::ParamID>(kGainParamId), kWritten)
-            == Steinberg::kResultOk);
+    REQUIRE(processor.getParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId)) !=
+            Catch::Approx(kWritten).margin(1e-5));
+    REQUIRE(processor.setParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId),
+                                         kWritten) == Steinberg::kResultOk);
 
     // The host side acknowledged the write.
-    CHECK(processor.getParamNormalized(
-              static_cast<Steinberg::Vst::ParamID>(kGainParamId))
-          == Catch::Approx(kWritten).margin(1e-5));
+    CHECK(processor.getParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId)) ==
+          Catch::Approx(kWritten).margin(1e-5));
 
     // No process() call. A stale store serializes the OLD value here, which is
     // what makes a host save-before-next-audio-block render the wrong value.

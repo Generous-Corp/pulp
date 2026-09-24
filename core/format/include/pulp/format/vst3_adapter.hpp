@@ -280,8 +280,8 @@ public:
     // Without this it only arrives via the process() parameter queue, so a host
     // that writes a parameter and saves before the next audio block serializes
     // a stale value.
-    Steinberg::tresult PLUGIN_API setParamNormalized(
-        Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value) override;
+    Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID id,
+                                                     Steinberg::Vst::ParamValue value) override;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
 
