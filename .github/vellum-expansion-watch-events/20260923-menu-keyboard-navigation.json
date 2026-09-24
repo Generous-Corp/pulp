@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-menu-keyboard-navigation",
+  "created_at": "2026-09-23T06:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record keyboard navigation for a trigger-less menu in the web-compat prelude, for the watched ingest and render families. The popup owner in `web-compat-document.js` already implemented a roving cursor -- ArrowUp/ArrowDown step, Home/End jump, Enter activates, Escape dismisses, the stepped row marked `data-pulp-popup-active=\"true\"` -- but it could only be entered through an `aria-haspopup` TRIGGER. A context menu is summoned at coordinates and is owned by no trigger, so no state was built and arrow keys did nothing inside one, while header dropdowns in the same document navigated correctly; menu rows also carry no tabIndex, so an app's own per-row key handlers were unreachable because nothing could give a row keyboard focus. An open `role=\"menu\"` is now adopted on the first arrow and driven by the SAME state machine. This changes how an imported document's menu responds to keys; it does not change how a design is captured or ingested, what any captured metadata MEANS, or any transferred renderer, canvas, Skia, Graphite, Dawn or resource implementation authority. Adoption is gated on exactly one unowned, non-empty, non-opted-out menu being open, so an arrow key that no popup consumes still reaches the app and is still forwarded to the DAW by the host.",
+  "tests": [
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <main> --head HEAD",
+    "pulp-test-web-compat-menu-keynav: 8 cases / 11 assertions, all passing. Positive: ArrowDown seeds a cursor on a trigger-less role=menu, ArrowUp enters at the last row, a second ArrowDown steps exactly one row and never leaves two cursors marked.",
+    "Negative controls, which are most of the binary: nothing open -> no adoption and the key is reported un-prevented, so it stays available to the app and the DAW; a trigger-owned menu -> untouched, dropdowns unchanged; two unowned menus open -> refused rather than guessed; a menu with no rows -> not adopted; data-pulp-popup-default=\"off\" -> honored.",
+    "ctest -R \"combo|dropdown|popup|web.compat|overlay\": 102 passed, 0 failed (includes pulp-test-web-compat-overlay and pulp-test-overlay-routing, built for this run)."
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

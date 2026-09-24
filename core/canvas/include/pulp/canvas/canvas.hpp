@@ -1432,9 +1432,17 @@ public:
     }
 
     /// Draw a shape through an author-supplied geometry chart shader. The
-    /// shader must define `half4 shade(PulpChart g)`. `g.valid` is zero for
-    /// shapes without a chart (and for degenerate geometry); callers must not
-    /// interpret chart fields when it is zero.
+    /// shader must define `half4 shade(PulpChart g)`.
+    ///
+    /// A shape whose chart is not implemented is refused here rather than
+    /// drawn, and the refusal names the shape; `flat_arc` is the shape the
+    /// chart is derived for. `g.valid` is zero for degenerate geometry — a
+    /// zero sweep, or an inner radius that does not leave a band — and
+    /// callers must not interpret chart fields when it is zero.
+    ///
+    /// `g.px` is one device pixel expressed in the same units as `g.d`, taken
+    /// from `backing_scale()`, so `2.0 * g.px` is two device pixels at any
+    /// backing scale rather than only at 1x.
     virtual bool draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
                                              float w, float h,
                                              const SDFStyle& style,

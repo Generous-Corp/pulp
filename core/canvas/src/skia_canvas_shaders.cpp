@@ -65,19 +65,33 @@
 
 namespace pulp::canvas {
 
-static bool sdf_shape_has_chart(Canvas::SDFShape shape) {
+static const char* sdf_shape_name(Canvas::SDFShape shape) {
     switch (shape) {
-        case Canvas::SDFShape::arc:
-        case Canvas::SDFShape::ring:
-        case Canvas::SDFShape::stadium:
-        case Canvas::SDFShape::flat_segment:
-        case Canvas::SDFShape::rounded_segment:
-        case Canvas::SDFShape::flat_arc:
-        case Canvas::SDFShape::quadratic_bezier:
-            return true;
-        default:
-            return false;
+        case Canvas::SDFShape::rect: return "rect";
+        case Canvas::SDFShape::circle: return "circle";
+        case Canvas::SDFShape::rounded_rect: return "rounded_rect";
+        case Canvas::SDFShape::arc: return "arc";
+        case Canvas::SDFShape::diamond: return "diamond";
+        case Canvas::SDFShape::squircle: return "squircle";
+        case Canvas::SDFShape::triangle: return "triangle";
+        case Canvas::SDFShape::ring: return "ring";
+        case Canvas::SDFShape::stadium: return "stadium";
+        case Canvas::SDFShape::cross: return "cross";
+        case Canvas::SDFShape::flat_segment: return "flat_segment";
+        case Canvas::SDFShape::rounded_segment: return "rounded_segment";
+        case Canvas::SDFShape::flat_arc: return "flat_arc";
+        case Canvas::SDFShape::quadratic_bezier: return "quadratic_bezier";
     }
+    return "unknown";
+}
+
+// The set of shapes that actually emit a usable chart, which is exactly the
+// set main() marks `valid`. Advertising a shape here that main() then reports
+// invalid would trade a precise install-time error for a silent zero at every
+// fragment, which is the failure mode the chart's absence rule exists to
+// prevent.
+static bool sdf_shape_has_chart(Canvas::SDFShape shape) {
+    return shape == Canvas::SDFShape::flat_arc;
 }
 
 namespace {
@@ -460,6 +474,8 @@ uniform float reach;
 uniform float featherSigma;
 uniform float featherCurve;
 uniform float featherMode;
+// Device pixels per local canvas unit, from Canvas::backing_scale().
+uniform float pixelScale;
 uniform float leaf0; uniform float leaf1; uniform float leaf2; uniform float leaf3;
 uniform float leaf4; uniform float leaf5; uniform float leaf6; uniform float leaf7;
 uniform float leaf8; uniform float leaf9; uniform float leaf10; uniform float leaf11;
@@ -523,8 +539,10 @@ half4 main(float2 coord) {
     float d = abs(length(p) - (outer + inner) * 0.5) - (outer - inner) * 0.5;
     float t = clamp((diff + halfSweep) / max(2.0 * halfSweep, 0.0001), 0.0, 1.0);
     float2 tan = float2(-sin(angle), cos(angle));
-    PulpChart g = PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan,
-                            1.0,
+    // px is one device pixel measured in the same units as d, so an author
+    // writing `2.0 * g.px` gets two device pixels at any backing scale.
+    float px = 1.0 / max(pixelScale, 0.0001);
+    PulpChart g = PulpChart(t, d, d < 0.0 ? -1.0 : 1.0, tan, px,
                             (shapeType > 11.5 && shapeType < 12.5 &&
                              arcSweep > 0.0 && outer > inner) ? 1.0 : 0.0);
     half4 shaded = shade(g);
@@ -579,7 +597,9 @@ std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sk
     if (!sdf_shape_has_chart(shape) &&
         (sksl.find("PulpChart") != std::string::npos ||
          sksl.find("pulp_chart") != std::string::npos))
-        return "Shape has no stroke chart (t/d/side); chart shaders exist only for band shapes";
+        return std::string("Shape '") + sdf_shape_name(shape) +
+               "' has no stroke chart (t/d/side); chart shaders require a band "
+               "shape whose chart is implemented (flat_arc)";
     std::string error;
     const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
     const auto source = structured
@@ -620,6 +640,8 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
     builder.uniform("featherSigma") = style.feather_sigma;
     builder.uniform("featherCurve") = static_cast<float>(style.feather_curve);
     builder.uniform("featherMode") = static_cast<float>(style.feather_mode);
+    // Ignored by the geometry composer, which declares no pixelScale.
+    builder.uniform("pixelScale") = backing_scale();
     for (const auto& named : options.named_uniforms) {
         if (!effect->findUniform(named.name.c_str()) || named.count < 1 || named.count > 4) continue;
         auto slot = builder.uniform(named.name.c_str());

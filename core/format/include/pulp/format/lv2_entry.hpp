@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <span>
 #include <vector>
@@ -682,6 +683,64 @@ inline void cleanup(LV2_Handle handle) {
     }
 }
 
+// ── Offline bundle description ──────────────────────────────────────────
+//
+// A host discovers a plugin by reading `manifest.ttl` from the bundle, so a
+// bundle that carries only the shared object is not a plugin: nothing finds it
+// and the failure is silent. The generators for both files already live in
+// `lv2_adapter.cpp`, and describing the plugin needs the plugin — the port
+// layout comes from its descriptor and the control ports from its parameters —
+// so the module describes ITSELF rather than a build script guessing.
+//
+// Exported so one driver can dlopen any Pulp LV2 module and ask it. Offline
+// only: called by the build, never by a host, never on the audio thread.
+inline int write_bundle_ttl(const char* bundle_dir, const char* binary_name) noexcept {
+    if (bundle_dir == nullptr || binary_name == nullptr || g_factory == nullptr || g_uri == nullptr)
+        return 1;
+
+    // The store is declared before the Processor so it is destroyed AFTER it,
+    // the same ordering PulpLv2Instance states and for the same reason:
+    // Processor::state() dereferences a pointer to this store, and a Processor
+    // may read it from its destructor or from a worker thread that destructor
+    // is about to join. Locals are destroyed in reverse declaration order, so
+    // swapping these two hands that thread a freed store.
+    state::StateStore store;
+
+    auto processor = g_factory();
+    if (!processor)
+        return 2;
+
+    // Same order instantiate() uses: the descriptor decides the port layout and
+    // define_parameters() decides the control ports, so both must run before
+    // either file is emitted or the manifest describes a different plugin from
+    // the one the host will load.
+    processor->set_state_store(&store);
+    processor->define_parameters(store);
+    const auto descriptor = processor->descriptor();
+
+    const std::string dir(bundle_dir);
+    const std::string binary(binary_name);
+    const auto stem = binary.substr(0, binary.rfind('.'));
+
+    std::ofstream manifest(dir + "/manifest.ttl", std::ios::binary | std::ios::trunc);
+    if (!manifest)
+        return 3;
+    manifest << lv2_adapter::generate_manifest_ttl(g_uri, binary);
+    if (!manifest.flush())
+        return 3;
+
+    // `generate_manifest_ttl` points rdfs:seeAlso at <stem>.ttl, so the
+    // description has to land on exactly that name or the host reads the
+    // manifest, follows the pointer, and finds nothing.
+    std::ofstream plugin(dir + "/" + stem + ".ttl", std::ios::binary | std::ios::trunc);
+    if (!plugin)
+        return 4;
+    plugin << lv2_adapter::generate_plugin_ttl(descriptor, store, g_uri);
+    if (!plugin.flush())
+        return 4;
+    return 0;
+}
+
 // The LV2 descriptor
 inline LV2_Descriptor g_lv2_descriptor = {nullptr, // URI — set at static init
                                           instantiate, connect_port, activate,      run,
@@ -691,21 +750,24 @@ inline LV2_Descriptor g_lv2_descriptor = {nullptr, // URI — set at static init
 
 // ── PULP_LV2_PLUGIN Macro ───────────────────────────────────────────────
 
-#define PULP_LV2_PLUGIN(factory_fn, plugin_uri)                                 \
-    namespace {                                                                  \
-    struct PulpLv2Init {                                                         \
-        PulpLv2Init() {                                                          \
-            pulp::format::lv2_generic::g_factory = factory_fn;                   \
-            pulp::format::lv2_generic::g_uri = plugin_uri;                       \
-            pulp::format::lv2_generic::g_lv2_descriptor.URI = plugin_uri;        \
-        }                                                                        \
-    } s_lv2_init;                                                                \
-    }                                                                            \
-                                                                                 \
-    extern "C" {                                                                 \
-    LV2_SYMBOL_EXPORT                                                            \
-    const LV2_Descriptor* lv2_descriptor(uint32_t index) {                       \
-        return (index == 0) ? &pulp::format::lv2_generic::g_lv2_descriptor       \
-                            : nullptr;                                           \
-    }                                                                            \
+#define PULP_LV2_PLUGIN(factory_fn, plugin_uri)                                                    \
+    namespace {                                                                                    \
+    struct PulpLv2Init {                                                                           \
+        PulpLv2Init() {                                                                            \
+            pulp::format::lv2_generic::g_factory = factory_fn;                                     \
+            pulp::format::lv2_generic::g_uri = plugin_uri;                                         \
+            pulp::format::lv2_generic::g_lv2_descriptor.URI = plugin_uri;                          \
+        }                                                                                          \
+    } s_lv2_init;                                                                                  \
+    }                                                                                              \
+                                                                                                   \
+    extern "C" {                                                                                   \
+    LV2_SYMBOL_EXPORT                                                                              \
+    const LV2_Descriptor* lv2_descriptor(uint32_t index) {                                         \
+        return (index == 0) ? &pulp::format::lv2_generic::g_lv2_descriptor : nullptr;              \
+    }                                                                                              \
+    LV2_SYMBOL_EXPORT                                                                              \
+    int pulp_lv2_write_bundle_ttl(const char* bundle_dir, const char* binary) {                    \
+        return pulp::format::lv2_generic::write_bundle_ttl(bundle_dir, binary);                    \
+    }                                                                                              \
     }

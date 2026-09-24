@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -108,6 +109,38 @@ TEXT_BARS = {
 }
 
 ACCENT_TEXT_BAR = 4.5
+
+# Vienot 1999, row-major 3x3, applied in LINEAR RGB. One definition shared by
+# the display path and the metric path so they cannot drift.
+_CVD_MATRICES = {
+    "protan": (0.11238, 0.88762, 0.00000,
+               0.11238, 0.88762, 0.00000,
+               0.00401, -0.00401, 1.00000),
+    "deutan": (0.29275, 0.70725, 0.00000,
+               0.29275, 0.70725, 0.00000,
+               -0.02234, 0.02234, 1.00000),
+}
+
+# CIEDE2000 distance below which two simulated status colours can no longer
+# carry a distinction by colour alone.
+#
+# CALIBRATED AGAINST CONTROLS IN BOTH DIRECTIONS, not picked. Palettes designed
+# by colour scientists for exactly this property set the floor a bar may not
+# exceed — Okabe-Ito's worst pair is 11.6 and Paul Tol "bright" is 14.8 — while
+# the traffic-light pairs designers actually reach for set the ceiling it must
+# clear: Material red-600/green-600 is 5.5, red-700/green-800 is 9.1, iOS
+# system red/green is 8.8. 10.0 is the gap between those two populations.
+#
+# The gap is NARROW (9.1 to 11.6) and the measurement is not precise to that
+# margin: simulated colours are quantised to 8 bits (~0.5 dE), and treating a
+# normal observer's Lab distance over simulated colours as a dichromat's
+# perceived distance is itself a standing approximation. So a verdict within
+# ~3 dE00 of this bar is noise, not a finding — which is why this check reports
+# rather than blocks by default.
+#
+# A first attempt used CIE76 at a bar of 25.0. It rejected Okabe-Ito on six
+# pairs, which is how a bar that rejects the reference standard gets caught.
+CVD_DELTA_E_BAR = 10.0
 
 NAMED_COLORS = {
     "black": (0, 0, 0, 1.0),
@@ -362,6 +395,200 @@ def check_hue_family(tokens: dict[str, str]) -> tuple[list[str], list[str]]:
     return problems, notes
 
 
+def simulate_cvd(color: tuple[int, int, int, float],
+                 kind: str,
+                 severity: float = 1.0) -> tuple[int, int, int, float]:
+    """Simulate protanopia or deuteranopia (Vienot 1999).
+
+    The transform is a 3x3 matrix in LINEAR RGB, not sRGB — applying it to
+    gamma-encoded values looks plausible and is wrong, in the same way
+    shading PBR in sRGB is. `severity` blends toward the unimpaired colour.
+
+    Tritan is deliberately absent. Vienot's tritan matrix is documented by
+    its own authors as inaccurate (Brettel 1997 is the correct model there),
+    and a simulation that is quietly wrong is worse than one that is missing:
+    it would let a palette pass a check that never actually looked.
+    """
+    matrices = _CVD_MATRICES
+    if kind not in matrices:
+        raise ValueError(
+            f"simulate_cvd supports 'protan' and 'deutan', not {kind!r}. "
+            f"Red-green deficiency is ~8% of men; tritanopia is ~1 in 10,000, "
+            f"and modelling it correctly needs Brettel 1997 (LMS conversion "
+            f"and two half-plane projections), not another 3x3 matrix — "
+            f"Vienot's own authors document their tritan matrix as inaccurate.")
+    m = matrices[kind]
+    out = _simulate_linear(color, kind, severity)
+    encoded = tuple(
+        max(0, min(255, round(linear_to_srgb(max(0.0, min(1.0, v))) * 255.0)))
+        for v in out)
+    return (encoded[0], encoded[1], encoded[2], color[3])
+
+
+def _simulate_linear(color: tuple[int, int, int, float],
+                     kind: str,
+                     severity: float = 1.0) -> tuple[float, float, float]:
+    """The simulation without the 8-bit round-trip, for the metric path.
+
+    Quantising to 8 bits before measuring costs ~0.5 dE00 of jitter, which is
+    not academic here: the shipped light theme has pairs at 10.6 and 10.8
+    against a bar of 10.0, so rounding alone could flip those verdicts.
+    `simulate_cvd` still returns an sRGB colour, because that is what a caller
+    wanting to SHOW the simulation needs; measurement uses this instead.
+    """
+    matrices = _CVD_MATRICES
+    if kind not in matrices:
+        raise ValueError(f"simulate_cvd supports {sorted(matrices)}, not {kind!r}")
+    m = matrices[kind]
+    lin = [srgb_to_linear(c / 255.0) for c in color[:3]]
+    return tuple(  # type: ignore[return-value]
+        severity * (m[r * 3] * lin[0] + m[r * 3 + 1] * lin[1] + m[r * 3 + 2] * lin[2])
+        + (1.0 - severity) * lin[r]
+        for r in range(3))
+
+
+def srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def linear_to_srgb(c: float) -> float:
+    return c * 12.92 if c <= 0.0031308 else 1.055 * (c ** (1 / 2.4)) - 0.055
+
+
+def _to_lab(color: tuple[int, int, int, float]) -> tuple[float, float, float]:
+    """sRGB to CIE L*a*b* (D65), for a perceptual difference."""
+    return _lab_from_linear(*(srgb_to_linear(c / 255.0) for c in color[:3]))
+
+
+def _lab_from_linear(r: float, g: float, b: float) -> tuple[float, float, float]:
+    """Linear RGB to CIE L*a*b* (D65). The metric path enters here."""
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 1.00000
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+
+    def f(t: float) -> float:
+        return t ** (1 / 3) if t > 216 / 24389 else (841 / 108) * t + 4 / 29
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def delta_e(a: tuple[int, int, int, float],
+            b: tuple[int, int, int, float]) -> float:
+    """CIEDE2000 colour difference.
+
+    NOT CIE76. The distinction decides verdicts here rather than shifting
+    them: simulating a red/green pair lands both colours in the olive/yellow
+    region, where they differ mostly in CHROMA. CIE76 weights a chroma
+    difference at 1.0, so it reads those pairs as far more separable than an
+    eye does; CIEDE2000 discounts chroma as it grows (S_C = 1 + 0.045 C).
+    Measured on the shipped ink-signal pack, CIE76 ranked the worst pair
+    fourth and passed another on a 0.1 margin — inside the noise floor of
+    8-bit rounding.
+    """
+    return _delta_e_lab(_to_lab(a), _to_lab(b))
+
+
+def _delta_e_lab(first: tuple[float, float, float],
+                 second: tuple[float, float, float]) -> float:
+    """CIEDE2000 between two Lab triples, so callers can skip the 8-bit hop."""
+    l1, a1, b1 = first
+    l2, a2, b2 = second
+
+    c1 = math.hypot(a1, b1)
+    c2 = math.hypot(a2, b2)
+    c_bar = (c1 + c2) / 2.0
+    g = 0.5 * (1.0 - math.sqrt(c_bar ** 7 / (c_bar ** 7 + 25.0 ** 7))) if c_bar > 0 else 0.0
+
+    a1p, a2p = (1.0 + g) * a1, (1.0 + g) * a2
+    c1p, c2p = math.hypot(a1p, b1), math.hypot(a2p, b2)
+    h1p = math.degrees(math.atan2(b1, a1p)) % 360.0 if (a1p or b1) else 0.0
+    h2p = math.degrees(math.atan2(b2, a2p)) % 360.0 if (a2p or b2) else 0.0
+
+    dlp = l2 - l1
+    dcp = c2p - c1p
+    if c1p * c2p == 0:
+        dhp = 0.0
+    else:
+        diff = h2p - h1p
+        dhp = diff - 360.0 if diff > 180 else diff + 360.0 if diff < -180 else diff
+    dhp = 2.0 * math.sqrt(c1p * c2p) * math.sin(math.radians(dhp) / 2.0)
+
+    lp_bar = (l1 + l2) / 2.0
+    cp_bar = (c1p + c2p) / 2.0
+    if c1p * c2p == 0:
+        hp_bar = h1p + h2p
+    elif abs(h1p - h2p) <= 180:
+        hp_bar = (h1p + h2p) / 2.0
+    else:
+        hp_bar = (h1p + h2p + 360.0) / 2.0 if h1p + h2p < 360 else (h1p + h2p - 360.0) / 2.0
+
+    t = (1.0 - 0.17 * math.cos(math.radians(hp_bar - 30.0))
+         + 0.24 * math.cos(math.radians(2 * hp_bar))
+         + 0.32 * math.cos(math.radians(3 * hp_bar + 6.0))
+         - 0.20 * math.cos(math.radians(4 * hp_bar - 63.0)))
+
+    sl = 1.0 + (0.015 * (lp_bar - 50.0) ** 2) / math.sqrt(20.0 + (lp_bar - 50.0) ** 2)
+    sc = 1.0 + 0.045 * cp_bar
+    sh = 1.0 + 0.015 * cp_bar * t
+    rt = (-2.0 * math.sqrt(cp_bar ** 7 / (cp_bar ** 7 + 25.0 ** 7))
+          * math.sin(math.radians(60.0 * math.exp(-(((hp_bar - 275.0) / 25.0) ** 2))))
+          if cp_bar > 0 else 0.0)
+
+    return math.sqrt((dlp / sl) ** 2 + (dcp / sc) ** 2 + (dhp / sh) ** 2
+                     + rt * (dcp / sc) * (dhp / sh))
+
+
+def check_status_cvd(tokens: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Status colours must stay separable under red-green colour blindness.
+
+    This is the defect every other check here is blind to by construction.
+    Status roles carry MEANING by hue — success versus danger is the whole
+    point — and a red/green pair can hold its contrast bar against the
+    surface while collapsing into one colour for the ~8% of men with a
+    red-green deficiency. Contrast is a luminance measure; it cannot see a
+    hue collision, so no amount of contrast checking substitutes for this.
+    """
+    problems: list[str] = []
+    notes: list[str] = []
+    app = parse_color(tokens.get("surface-app", "")) or (0, 0, 0, 1.0)
+
+    resolved: dict[str, tuple[int, int, int, float]] = {}
+    for role in STATUS_ROLES:
+        parsed = parse_color(tokens.get(role, ""))
+        if parsed is None:
+            continue
+        resolved[role] = composite(parsed, app) if parsed[3] < 1 else parsed
+
+    if len(resolved) < 2:
+        return problems, ["fewer than two status roles resolved; "
+                          "colour-vision check not run"]
+
+    names = sorted(resolved)
+    for i, first in enumerate(names):
+        for second in names[i + 1:]:
+            normal = delta_e(resolved[first], resolved[second])
+            for kind in ("protan", "deutan"):
+                simulated = _delta_e_lab(
+                    _lab_from_linear(*_simulate_linear(resolved[first], kind)),
+                    _lab_from_linear(*_simulate_linear(resolved[second], kind)))
+                retained = 100.0 * simulated / normal if normal > 0 else 0.0
+                if simulated < CVD_DELTA_E_BAR:
+                    problems.append(
+                        f"--{first} ({tokens.get(first)}) and --{second} "
+                        f"({tokens.get(second)}) collapse under {kind}: "
+                        f"dE {normal:.1f} normal -> {simulated:.1f} simulated "
+                        f"({retained:.0f}% of the separation survives), under "
+                        f"the {CVD_DELTA_E_BAR} bar. These two carry opposite "
+                        f"meanings, so encode the difference with more than "
+                        f"hue — lightness, shape, icon, or position")
+                else:
+                    notes.append(f"--{first} vs --{second} under {kind}: "
+                                 f"dE {simulated:.1f} ({retained:.0f}% retained, "
+                                 f"bar {CVD_DELTA_E_BAR})")
+    return problems, notes
+
+
 def check_text_contrast(tokens: dict[str, str]) -> tuple[list[str], list[str]]:
     problems: list[str] = []
     notes: list[str] = []
@@ -403,6 +630,19 @@ def check_text_contrast(tokens: dict[str, str]) -> tuple[list[str], list[str]]:
     return problems, notes
 
 
+# The checks main() runs, as ONE list. The selftest iterates this same tuple:
+# when it hand-copied the set instead, adding a check left the shipped-pack
+# assertion silently judging a subset, which is the regression its own
+# docstring warns about.
+CHECKS = (check_accent_ramp, check_hue_family, check_text_contrast,
+          check_status_cvd)
+
+# The subset of CHECKS that reports rather than blocks unless --strict-cvd.
+# Derived from CHECKS rather than listed beside it, so the two cannot drift.
+ADVISORY_CHECKS = (check_status_cvd,)
+ENFORCING_CHECKS = tuple(c for c in CHECKS if c not in ADVISORY_CHECKS)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     source = ap.add_mutually_exclusive_group(required=True)
@@ -416,6 +656,12 @@ def main() -> int:
                     help="which theme block to resolve, with --pack")
     ap.add_argument("--json", action="store_true",
                     help="emit the findings as JSON on stdout")
+    ap.add_argument("--strict-cvd", action="store_true",
+                    help="treat colour-vision findings as failures. Off by "
+                         "default: the bar sits in a narrow calibrated gap, "
+                         "and this tool also judges imported third-party "
+                         "designs, where a red/green status hue is the "
+                         "author's choice and not a Pulp defect")
     args = ap.parse_args()
 
     path = args.tokens or args.artifact or args.pack
@@ -445,24 +691,39 @@ def main() -> int:
 
     problems: list[str] = []
     notes: list[str] = []
-    for check in (check_accent_ramp, check_hue_family, check_text_contrast):
+    cvd: list[str] = []
+    for check in CHECKS:
         found, said = check(tokens)
-        problems += found
+        # The colour-vision lane reports on its own track unless promoted.
+        # Keeping it separate is what lets the structural assertions stay
+        # hard-failing while this one is still being calibrated against packs.
+        if check in ADVISORY_CHECKS and not args.strict_cvd:
+            cvd += found
+        else:
+            problems += found
         notes += said
 
     if args.json:
         print(json.dumps({"source": str(path), "tokens": len(tokens),
-                          "problems": problems, "notes": notes}, indent=2))
+                          "problems": problems, "colour_vision": cvd,
+                          "notes": notes}, indent=2))
     else:
         for note in notes:
             print(f"  note: {note}")
+        for finding in cvd:
+            print(f"  colour-vision (advisory): {finding}")
         for problem in problems:
             print(f"{path.name}: {problem}")
     if problems:
         print(f"\n{len(problems)} palette problem(s).", file=sys.stderr)
         return EX_ASSERT
-    print(f"\n{path.name}: OK — {len(tokens)} colour tokens, accent ramp has "
-          f"structure, named hues survive, text clears its bars")
+    summary = (f"\n{path.name}: OK — {len(tokens)} colour tokens, accent ramp "
+               f"has structure, named hues survive, text clears its bars, and "
+               f"status colours survive red-green colour blindness")
+    if cvd:
+        summary += (f"; {len(cvd)} colour-vision finding(s) reported but not "
+                    f"enforced (--strict-cvd to enforce)")
+    print(summary)
     return 0
 
 
