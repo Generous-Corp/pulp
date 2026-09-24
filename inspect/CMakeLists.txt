@@ -36,9 +36,14 @@ target_include_directories(pulp-inspect-protocol
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
 )
-target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
+target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime PRIVATE pulp::events)
 
 if(NOT PULP_ENABLE_INSPECTOR)
+    # The protocol/session surface remains available in stripped SDK builds,
+    # and session.cpp still calls the RPC implementation. Keep that one
+    # implementation TU in the protocol archive when the full inspector
+    # runtime target is intentionally omitted.
+    target_sources(pulp-inspect-protocol PRIVATE src/main_thread_rpc.cpp)
     return()
 endif()
 

@@ -170,6 +170,26 @@ target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
     pulp::ship pulp::view pulp::render pulp::format pulp::host
     pulp::tool-gpu-health-probes)
+
+# Apple ld scans a static archive once.  The CLI intentionally exposes the
+# complete design/import and inspector command surface, so a single archive
+# can contain both the public entry point and its implementation-only helper
+# TUs (for example WindowHost/design/inspector RPC).  Those helper objects can
+# become newly-needed while the archive is being scanned and are then skipped,
+# leaving the otherwise valid CLI with undefined symbols.  Force-load only the
+# CLI's implementation archives; this keeps plugin consumers unchanged while
+# making the installed SDK CLI link deterministic on arm64 macOS.
+if(APPLE)
+    foreach(_pulp_cli_force_archive IN ITEMS
+            pulp-view-core pulp-view-script pulp-canvas
+            pulp-runtime pulp-inspect-protocol)
+        if(TARGET ${_pulp_cli_force_archive})
+            target_link_options(pulp-cli PRIVATE
+                "-Wl,-force_load,$<TARGET_FILE:${_pulp_cli_force_archive}>")
+        endif()
+    endforeach()
+    unset(_pulp_cli_force_archive)
+endif()
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/PulpCliGpuProbeLink.cmake)
 pulp_link_cli_gpu_probe_recipes(pulp-cli)
 target_link_libraries(pulp-cli PRIVATE pulp::inspect-protocol)
