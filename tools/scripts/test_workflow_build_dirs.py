@@ -115,8 +115,13 @@ class WorkflowBuildDirTests(unittest.TestCase):
                     text,
                 )
                 self.assertIsNotNone(cmd, f"no cmd label exclude for {event}")
+                # The advisory Windows leg keeps the source-only selftests: the
+                # macOS gate drops them only because the build-free required
+                # lane runs them, and Windows is the one place they meet a
+                # Windows Python.
                 self.assertLessEqual(
-                    posix_labels | {"windows-pr-quarantine"},
+                    (posix_labels - {ctest_gate_args.SOURCE_SELFTEST_LABEL})
+                    | {"windows-pr-quarantine"},
                     set(cmd.group("labels").split("|")),
                 )
 

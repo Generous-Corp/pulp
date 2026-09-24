@@ -19,6 +19,10 @@ The lanes, and why they differ:
   report every failing test rather than the first one. Stopping early here
   would trade the one complete signal in the system for a few minutes.
 
+* The gate events also exclude ``source-selftest``: registrations that read
+  only the checkout, which the build-free required ``Enforce version & skill
+  sync`` context runs instead (``tools/ci/source_selftests.py``).
+
 * ``pull_request`` heads do not run the suite at all (the workflow's own Test
   step excludes them), so no rule here applies to them beyond the label set
   used by the dispatch lane that stands in for them.
@@ -37,7 +41,13 @@ import shlex
 import sys
 
 # Label set for lanes whose timing tests would be measuring runner load.
-GATE_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+SHARED_HOST_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+# Source-only Python selftests (tools/ci/source_selftests.json). The required
+# `Enforce version & skill sync` context runs them without a build, so the gate
+# events drop them; `push` keeps them as the macOS detector.
+SOURCE_SELFTEST_LABEL = "source-selftest"
+# Label set for the gate events.
+GATE_LABEL_EXCLUDE = f"{SHARED_HOST_LABEL_EXCLUDE}|{SOURCE_SELFTEST_LABEL}"
 # Label set for steady-load lanes, which keep the heavier informational tests.
 FULL_LABEL_EXCLUDE = "validation"
 
@@ -62,7 +72,7 @@ def label_exclude(event_name: str, runner_os: str) -> str:
     # pushes stay on GitHub-hosted runners under steady load and keep the
     # heavier set.
     if event == "push" and _norm(runner_os).lower() == "macos":
-        return GATE_LABEL_EXCLUDE
+        return SHARED_HOST_LABEL_EXCLUDE
     return FULL_LABEL_EXCLUDE
 
 
