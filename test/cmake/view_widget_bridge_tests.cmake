@@ -1,41 +1,57 @@
 # View widgets, inspector, WidgetBridge, text editor, layout, and visual harness tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# One executable for this manifest's pulp::view suites. Each member keeps its
+# own registration, labels and properties (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake); only the binary behind them is shared. A
+# suite stays out when it needs a different compile line (param-host-sync and
+# the two source-scan suites link no view code) or a custom main
+# (pulp-test-visual).
+set(_pulp_view_group_libs pulp::view pulp::state pulp::midi)
+if(TARGET pulp-render)
+    list(APPEND _pulp_view_group_libs pulp::render)
+endif()
+pulp_add_test_group(pulp-test-group-view-widgets LIBRARIES ${_pulp_view_group_libs})
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
-pulp_add_test_suite(pulp-test-platform-maturity LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-platform-maturity GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
 
 # Audio bridge tests
-pulp_add_test_suite(pulp-test-audio-bridge LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-audio-bridge GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
 # Widget tests
-pulp_add_test_suite(pulp-test-widgets LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-parameter-edit LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-widgets GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-parameter-edit GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view pulp::state)
 pulp_add_test_suite(pulp-test-param-host-sync LIBRARIES pulp::state INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/core/format/include)
-pulp_add_test_suite(pulp-test-midi-binding LIBRARIES pulp::view pulp::state pulp::midi)
+pulp_add_test_suite(pulp-test-midi-binding GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view pulp::state pulp::midi)
 # Widget tests — Label cluster extracted from test_widgets.cpp. Label
 # intrinsic_width / intrinsic_height /
 # line-height multiplier / line_clamp / measured_height under
 # bounded width / baseline_y from text metrics / vertical text
 # direction / letter_spacing glyph counting.
-pulp_add_test_suite(pulp-test-widgets-label LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widgets-label GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
 # Hot-reload tests
-add_executable(pulp-test-hot-reload test_hot_reload.cpp)
-target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
 # Registered twice. The `[slow]` scenarios each wait on file-watcher debounce
 # plus filesystem mtime resolution (~1-1.5 sec apiece), so they carry the
 # `slow` label that both the required macOS gate and the diff-coverage lane
 # exclude. The rest run in milliseconds and stay unlabelled so they reach
 # both. Tagging the slow cases rather than the fast ones is deliberate: an
 # untagged future case lands on the enforced lane instead of vanishing from it.
-catch_discover_tests(pulp-test-hot-reload
+pulp_add_test_suite(pulp-test-hot-reload GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view
     TEST_SPEC "~[slow]"
-    PROPERTIES
-        RESOURCE_LOCK hot-reload-file-watcher)
-catch_discover_tests(pulp-test-hot-reload
+    PROPERTIES RESOURCE_LOCK hot-reload-file-watcher)
+pulp_add_test_suite(pulp-test-hot-reload GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view
     TEST_SPEC "[slow]"
     TEST_PREFIX "slow::"
     LABELS slow
-    PROPERTIES
-        RESOURCE_LOCK hot-reload-file-watcher)
+    PROPERTIES RESOURCE_LOCK hot-reload-file-watcher)
 
 # The model/provider registrations in this owner file are intentionally visible
 # when the optional Inspector component is disabled. Inspector-only fixtures in
@@ -129,11 +145,16 @@ if(PULP_ENABLE_FUZZING)
         -fsanitize=fuzzer,address)
 endif()
 
-add_executable(pulp-test-control-identity test_control_identity.cpp)
-target_link_libraries(pulp-test-control-identity PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-identity
-    PROPERTIES LABELS "inspect;control;identity")
+# One executable for the pulp::inspect-control suites that spawn no fixture and
+# carry no codesign step. The signed ones (peer, endpoint, bootstrap, preflight,
+# client-connection, health) test the identity of their own binary and stay
+# separate.
+pulp_add_test_group(pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control pulp::inspect-client)
+
+pulp_add_test_suite(pulp-test-control-identity GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;identity")
 
 add_executable(pulp-test-control-peer test_control_peer.cpp)
 target_link_libraries(pulp-test-control-peer PRIVATE
@@ -167,12 +188,9 @@ endif()
 catch_discover_tests(pulp-test-control-endpoint
     PROPERTIES LABELS "inspect;control;carrier")
 
-add_executable(pulp-test-control-connection-admission
-    test_control_connection_admission.cpp)
-target_link_libraries(pulp-test-control-connection-admission PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-connection-admission
-    PROPERTIES LABELS "inspect;control;carrier;admission;security")
+pulp_add_test_suite(pulp-test-control-connection-admission GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;carrier;admission;security")
 
 add_executable(pulp-control-trusted-host-fixture
     control_trusted_host_fixture.cpp)
@@ -342,17 +360,13 @@ if(TARGET pulp::inspect)
         PROPERTIES LABELS "inspect;control;host;lifecycle")
 endif()
 
-add_executable(pulp-test-control-host-router test_control_host_router.cpp)
-target_link_libraries(pulp-test-control-host-router PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-host-router
-    PROPERTIES LABELS "inspect;control;host;router")
+pulp_add_test_suite(pulp-test-control-host-router GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;host;router")
 
-add_executable(pulp-test-control-executor-slot test_control_executor_slot.cpp)
-target_link_libraries(pulp-test-control-executor-slot PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-executor-slot
-    PROPERTIES LABELS "inspect;control;host;executor;slot")
+pulp_add_test_suite(pulp-test-control-executor-slot GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;host;executor;slot")
 
 add_executable(pulp-control-host-bootstrap-fixture
     fixtures/control_host_bootstrap_fixture.cpp)
@@ -424,11 +438,9 @@ endif()
 catch_discover_tests(pulp-test-control-host-preflight
     PROPERTIES LABELS "inspect;control;host;preflight;security")
 
-add_executable(pulp-test-control-carrier test_control_carrier.cpp)
-target_link_libraries(pulp-test-control-carrier PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-carrier
-    PROPERTIES LABELS "inspect;control;carrier;security")
+pulp_add_test_suite(pulp-test-control-carrier GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;carrier;security")
 
 if(APPLE AND NOT IOS AND NOT PULP_IOS)
     add_executable(pulp-control-broker-crash-fixture
@@ -479,37 +491,26 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS)
 
 endif()
 
-add_executable(pulp-test-control-grants
-    test_control_grants.cpp
-    test_control_consent_authority.cpp)
-target_link_libraries(pulp-test-control-grants PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-grants
-    PROPERTIES LABELS "inspect;control;grants")
+pulp_add_test_suite(pulp-test-control-grants GROUP pulp-test-group-control-core
+    SOURCES test_control_grants.cpp test_control_consent_authority.cpp
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;grants")
 
-add_executable(pulp-test-control-broker test_control_broker.cpp)
-target_link_libraries(pulp-test-control-broker PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-broker
-    PROPERTIES LABELS "inspect;control;broker")
+pulp_add_test_suite(pulp-test-control-broker GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;broker")
 
-add_executable(pulp-test-control-admission test_control_admission.cpp)
-target_link_libraries(pulp-test-control-admission PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-admission
-    PROPERTIES LABELS "inspect;control;admission")
+pulp_add_test_suite(pulp-test-control-admission GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;admission")
 
-add_executable(pulp-test-control-operations test_control_operations.cpp)
-target_link_libraries(pulp-test-control-operations PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-operations
-    PROPERTIES LABELS "inspect;control;receipt")
+pulp_add_test_suite(pulp-test-control-operations GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;receipt")
 
-add_executable(pulp-test-control-artifacts test_control_artifacts.cpp)
-target_link_libraries(pulp-test-control-artifacts PRIVATE
-    pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-artifacts
-    PROPERTIES LABELS "inspect;control;artifact")
+pulp_add_test_suite(pulp-test-control-artifacts GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-control
+    LABELS "inspect;control;artifact")
 
 add_executable(pulp-test-control-service test_control_service.cpp)
 target_link_libraries(pulp-test-control-service PRIVATE
@@ -525,12 +526,15 @@ target_link_libraries(pulp-test-control-offline-render-executor PRIVATE
 catch_discover_tests(pulp-test-control-offline-render-executor
     PROPERTIES LABELS "inspect;control;offline;t0;artifact")
 
-add_executable(pulp-test-control-read-operations
-    test_control_read_operations.cpp)
-target_link_libraries(pulp-test-control-read-operations PRIVATE
-    pulp::inspect-runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-read-operations
-    PROPERTIES LABELS "inspect;control;read;t0;t1;state")
+# One executable for the control executor suites: all link pulp::inspect-runtime
+# and pulp::inspect-control and compile on the same line.
+pulp_add_test_group(pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
+              pulp::playback pulp::timeline-editor)
+
+pulp_add_test_suite(pulp-test-control-read-operations GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime
+    LABELS "inspect;control;read;t0;t1;state")
 
 add_executable(pulp-test-control-client-connection
     test_control_client_connection.cpp)
@@ -561,49 +565,29 @@ endif()
 catch_discover_tests(pulp-test-control-health
     PROPERTIES LABELS "inspect;control;carrier;health")
 
-add_executable(pulp-test-control-inspector-client
-    test_control_inspector_client.cpp)
-target_link_libraries(pulp-test-control-inspector-client PRIVATE
-    pulp::inspect-client Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-inspector-client
-    PROPERTIES LABELS "inspect;control;client;trace")
+pulp_add_test_suite(pulp-test-control-inspector-client GROUP pulp-test-group-control-core
+    LIBRARIES pulp::inspect-client
+    LABELS "inspect;control;client;trace")
 
-add_executable(pulp-test-control-main-thread-executor
-    test_control_main_thread_executor.cpp)
-target_link_libraries(pulp-test-control-main-thread-executor PRIVATE
-    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-main-thread-executor
-    PROPERTIES LABELS "inspect;control;main-thread;executor")
+pulp_add_test_suite(pulp-test-control-main-thread-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control
+    LABELS "inspect;control;main-thread;executor")
 
-add_executable(pulp-test-control-sequencer-state-executor
-    test_control_sequencer_state_executor.cpp)
-target_link_libraries(pulp-test-control-sequencer-state-executor PRIVATE
-    pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-sequencer-state-executor
-    PROPERTIES LABELS "inspect;control;sequencer;main-thread;mutation")
+pulp_add_test_suite(pulp-test-control-sequencer-state-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control pulp::state pulp::events
+    LABELS "inspect;control;sequencer;main-thread;mutation")
 
-add_executable(pulp-test-control-state-write-executor
-    test_control_state_write_executor.cpp)
-target_link_libraries(pulp-test-control-state-write-executor PRIVATE
-    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-state-write-executor
-    PROPERTIES LABELS "inspect;control;main-thread;mutation;t1;t2a")
+pulp_add_test_suite(pulp-test-control-state-write-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control
+    LABELS "inspect;control;main-thread;mutation;t1;t2a")
 
-add_executable(pulp-test-control-sequencer-transport-executor
-    test_control_sequencer_transport_executor.cpp)
-target_link_libraries(pulp-test-control-sequencer-transport-executor PRIVATE
-    pulp::inspect-runtime pulp::inspect-control pulp::playback pulp::timeline-editor
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-sequencer-transport-executor
-    PROPERTIES LABELS "inspect;control;sequencer;transport;main-thread")
+pulp_add_test_suite(pulp-test-control-sequencer-transport-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control pulp::playback pulp::timeline-editor
+    LABELS "inspect;control;sequencer;transport;main-thread")
 
-add_executable(pulp-test-control-trace-session-executor
-    test_control_trace_session_executor.cpp)
-target_link_libraries(pulp-test-control-trace-session-executor PRIVATE
-    pulp::inspect-runtime pulp::inspect-control Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-trace-session-executor
-    PROPERTIES LABELS "inspect;control;main-thread;trace")
+pulp_add_test_suite(pulp-test-control-trace-session-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime pulp::inspect-control
+    LABELS "inspect;control;main-thread;trace")
 
 add_executable(pulp-test-inspector-audit
     test_inspector_audit.cpp
@@ -642,75 +626,64 @@ target_link_libraries(pulp-test-control-host-ui-executor PRIVATE
 catch_discover_tests(pulp-test-control-host-ui-executor
     PROPERTIES LABELS "inspect;control;ui;capture;runtime-eval")
 
-add_executable(pulp-test-control-host-development-executor
-    test_control_host_development_executor.cpp)
-target_link_libraries(pulp-test-control-host-development-executor PRIVATE
-    pulp::inspect-runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-control-host-development-executor
-    PROPERTIES LABELS "inspect;control;development;main-thread")
+pulp_add_test_suite(pulp-test-control-host-development-executor GROUP pulp-test-group-control-executors
+    LIBRARIES pulp::inspect-runtime
+    LABELS "inspect;control;development;main-thread")
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
-    add_executable(pulp-test-inspector test_inspector.cpp)
-    target_link_libraries(pulp-test-inspector PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
+    # One executable for the inspector suites: they share pulp::view + pulp::inspect
+    # + pulp::state and the same compile line. Members keep their own
+    # PULP_INSPECTOR_NO_LAUNCH guard and labels.
+    pulp_add_test_group(pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state pulp::inspect-runtime-eval)
+
     # PULP_INSPECTOR_NO_LAUNCH: the source-jump tests exercise the J
     # hotkey, whose handler resolves with dry_run=false. Without this
     # guard the test would spawn a real `open vscode://file/...`, popping
     # a macOS open-confirmation dialog. The env var makes launch_editor_url()
     # a no-op. The test file also sets it in-process so it stays safe when
     # the binary is run directly, outside CTest.
-    catch_discover_tests(pulp-test-inspector
+    pulp_add_test_suite(pulp-test-inspector GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Inspector sibling TUs: GPU pass attribution, source-jump,
-    # drift/reconcile, and atlas viewer.
-    # Each mirrors pulp-test-inspector's exact registration (own executable
-    # + catch_discover_tests, same libraries, same NO_LAUNCH env guard).
-    add_executable(pulp-test-inspector-gpu-passes test_inspector_gpu_passes.cpp)
-    target_link_libraries(pulp-test-inspector-gpu-passes PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-gpu-passes
+    # drift/reconcile, and atlas viewer. Same libraries and NO_LAUNCH env
+    # guard as pulp-test-inspector.
+    pulp_add_test_suite(pulp-test-inspector-gpu-passes GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Wiring tab — lists design-sourced (Figma) overlays + wired/unwired badge.
-    add_executable(pulp-test-inspector-wiring test_inspector_wiring.cpp)
-    target_link_libraries(pulp-test-inspector-wiring PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-wiring
+    pulp_add_test_suite(pulp-test-inspector-wiring GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-source-jump test_inspector_source_jump.cpp)
-    target_link_libraries(pulp-test-inspector-source-jump PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-source-jump
+    pulp_add_test_suite(pulp-test-inspector-source-jump GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-drift-reconcile test_inspector_drift_reconcile.cpp)
-    target_link_libraries(pulp-test-inspector-drift-reconcile PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-drift-reconcile
+    pulp_add_test_suite(pulp-test-inspector-drift-reconcile GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-atlas-viewer test_inspector_atlas_viewer.cpp)
-    target_link_libraries(pulp-test-inspector-atlas-viewer PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-atlas-viewer
+    pulp_add_test_suite(pulp-test-inspector-atlas-viewer GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    # Additional inspector sibling TUs. Same registration as
-    # pulp-test-inspector.
-    add_executable(pulp-test-inspector-domains test_inspector_domains.cpp)
-    target_link_libraries(pulp-test-inspector-domains PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-domains
+    # Additional inspector sibling TUs, registered like pulp-test-inspector.
+    pulp_add_test_suite(pulp-test-inspector-domains GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-runtime-domain
-        test_inspector_runtime_domain.cpp)
-    target_link_libraries(pulp-test-inspector-runtime-domain PRIVATE
-        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-runtime-domain
+    pulp_add_test_suite(pulp-test-inspector-runtime-domain GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspect-runtime-eval-component
-        test_runtime_eval_component.cpp)
-    target_link_libraries(pulp-test-inspect-runtime-eval-component PRIVATE
-        pulp::inspect-runtime-eval pulp::view Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspect-runtime-eval-component)
+    pulp_add_test_suite(pulp-test-inspect-runtime-eval-component GROUP pulp-test-group-inspector
+        SOURCES test_runtime_eval_component.cpp
+        LIBRARIES pulp::inspect-runtime-eval pulp::view)
 
     add_test(NAME pulp-inspect-runtime-eval-archive-boundary
         COMMAND ${CMAKE_COMMAND}
@@ -726,72 +699,57 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
             -DBASE_FORMAT_VIEW=$<TARGET_FILE:pulp-format-view>
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/inspect_runtime_eval_archive_check.cmake)
 
-    add_executable(pulp-test-inspector-hook-lifecycle
-        test_inspector_hook_lifecycle.cpp)
-    target_link_libraries(pulp-test-inspector-hook-lifecycle PRIVATE
-        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-hook-lifecycle
+    pulp_add_test_suite(pulp-test-inspector-hook-lifecycle GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-context-capture
-        test_inspector_context_capture.cpp)
-    target_link_libraries(pulp-test-inspector-context-capture PRIVATE
-        pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-context-capture
+    pulp_add_test_suite(pulp-test-inspector-context-capture GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Trace.* bridge to the process-global pulp::runtime::Tracing controller.
     # Config-agnostic: verifies the OFF (shipping) build reports tracing is not
     # compiled in, and the ON build round-trips a real .pftrace.
-    add_executable(pulp-test-trace-inspector test_trace_inspector.cpp)
-    target_link_libraries(pulp-test-trace-inspector PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-trace-inspector
+    pulp_add_test_suite(pulp-test-trace-inspector GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-field-edit test_inspector_field_edit.cpp)
-    target_link_libraries(pulp-test-inspector-field-edit PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-field-edit
+    pulp_add_test_suite(pulp-test-inspector-field-edit GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-eyedropper test_inspector_eyedropper.cpp)
-    target_link_libraries(pulp-test-inspector-eyedropper PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-eyedropper
+    pulp_add_test_suite(pulp-test-inspector-eyedropper GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-overlay-knobs test_inspector_overlay_knobs.cpp)
-    target_link_libraries(pulp-test-inspector-overlay-knobs PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-overlay-knobs
+    pulp_add_test_suite(pulp-test-inspector-overlay-knobs GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-knobs-host-integration test_inspector_knobs_host_integration.cpp)
-    target_link_libraries(pulp-test-inspector-knobs-host-integration PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-knobs-host-integration
+    pulp_add_test_suite(pulp-test-inspector-knobs-host-integration GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
-    add_executable(pulp-test-inspector-knob-panel-screenshot test_inspector_knob_panel_screenshot.cpp)
-    target_link_libraries(pulp-test-inspector-knob-panel-screenshot PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-inspector-knob-panel-screenshot
+    pulp_add_test_suite(pulp-test-inspector-knob-panel-screenshot GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # TweakStore + Inspector.applyTweak protocol surface.
-    add_executable(pulp-test-tweak-store test_tweak_store.cpp)
-    target_link_libraries(pulp-test-tweak-store PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-tweak-store)
+    pulp_add_test_suite(pulp-test-tweak-store GROUP pulp-test-group-inspector
+        LIBRARIES pulp::view pulp::inspect pulp::state)
 
     # Editor URI plumbing for the source-jump action.
     # Pure config / format-helper / protocol — no overlay / GPU surface,
     # but lives under the same PULP_ENABLE_GPU guard as the rest of
     # pulp-inspect's tests so it links against the same library.
-    add_executable(pulp-test-editor-url test_editor_url.cpp)
-    target_link_libraries(pulp-test-editor-url PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-editor-url
+    pulp_add_test_suite(pulp-test-editor-url GROUP pulp-test-group-inspector
+        LIBRARIES pulp::inspect
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 
     # Agent-request queue: pure serialize/parse/append/ack + atomic file I/O.
     # No overlay / GPU surface, but links pulp::inspect so it shares the guard.
-    add_executable(pulp-test-agent-request-queue test_agent_request_queue.cpp)
-    target_link_libraries(pulp-test-agent-request-queue PRIVATE pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-agent-request-queue
+    pulp_add_test_suite(pulp-test-agent-request-queue GROUP pulp-test-group-inspector
+        LIBRARIES pulp::inspect
         PROPERTIES ENVIRONMENT "PULP_INSPECTOR_NO_LAUNCH=1")
 endif()
 endif()
@@ -856,20 +814,20 @@ set(_pulp_widget_bridge_test_libs pulp::view)
 if(TARGET pulp-render)
     list(APPEND _pulp_widget_bridge_test_libs pulp::render)
 endif()
-pulp_add_test_suite(pulp-test-widget-bridge LIBRARIES ${_pulp_widget_bridge_test_libs})
-pulp_add_test_suite(pulp-test-widget-bridge-capabilities LIBRARIES ${_pulp_widget_bridge_test_libs})
-pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime
+pulp_add_test_suite(pulp-test-widget-bridge GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-capabilities GROUP pulp-test-group-view-widgets LIBRARIES ${_pulp_widget_bridge_test_libs})
+pulp_add_test_suite(pulp-test-widget-bridge-removal-lifetime GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})
 # Widget bridge — child ordering. Every createX appends, so a widget that
 # reaches the bridge after its siblings needs insertChild to land where its
 # author put it; covers the reorder, the fail-closed cases, and the View-level
 # move that keeps the child attached instead of rebuilding it.
-pulp_add_test_suite(pulp-test-widget-bridge-child-order
+pulp_add_test_suite(pulp-test-widget-bridge-child-order GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs})
 # The View lifecycle contract at the bridge boundary: the retained ScrollView
 # upgrade and the ordinary reparent must fail closed rather than dereference a
 # null removal or strand a destroyed view in the non-owning registries.
-pulp_add_test_suite(pulp-test-view-lifecycle-bridge
+pulp_add_test_suite(pulp-test-view-lifecycle-bridge GROUP pulp-test-group-view-widgets
     LIBRARIES ${_pulp_widget_bridge_test_libs} pulp::state)
 
 # Widget bridge — source-level API contract. Keeps JS-native registrations
@@ -892,17 +850,17 @@ pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
     COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # Widget bridge — runtime-import handlers.
-pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-runtime-import GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — declarative native→widget param/meter bindings
 # (bindWidgetToParam / bindMeter / unbindWidget + gesture precedence).
-pulp_add_test_suite(pulp-test-widget-bridge-param-binding LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-widget-bridge-param-binding GROUP pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
 
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /
 # canvasSetLineDash / canvasDrawImage, canvasGetImageData /
 # canvasPutImageData, and 4-arg canvasFillText prior-state preservation.
-pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — Yoga layer. Three coherent clusters: (1) dimension
 # percent strings (width/height + min/max via Yoga's percent API),
@@ -910,60 +868,60 @@ pulp_add_test_suite(pulp-test-widget-bridge-canvas2d LIBRARIES pulp::view)
 # decomposition), and (3) yoga value-aliasing
 # (flexDirection / justifyContent / alignItems / alignSelf / order /
 # flexWrap value translations).
-pulp_add_test_suite(pulp-test-widget-bridge-yoga LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-yoga GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Yoga node-tree lifetime. A layout pass that reuses solver state across
 # passes must resolve the geometry a from-scratch pass resolves, and a
 # nested pass over a different root (grid containers and views that own
 # their child layout re-enter layout mid-walk) must leave the outer pass
 # intact.
-pulp_add_test_suite(pulp-test-yoga-tree-reuse LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-yoga-tree-reuse GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — recovered Canvas2D/CSS compatibility regressions.
 # The canonical Canvas2D bridge surface is in
 # pulp-test-widget-bridge-wave2-cheap below; this older split keeps
 # recovered CSS cases and later Canvas2D bridge regressions.
-pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-wave2 GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — yoga logical-edge fan-out + A4 OOS pins. Covers yoga
 # logical-edge marginInline/Block + paddingInline/Block + inset
 # shorthand plus CSS NOT-IMPL closure catalog hygiene.
-pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-a4-oos GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — compatibility cheap-wiring. Bundles the Canvas2D
 # wiring (DIVERGE → PASS) + CSS value-coverage entries from compat.json.
-pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-wave2-cheap GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — RN style-prop bridge primitives.
 # setShadow / setOpacity / setTransform RN-shaped style
 # functions flow through bridge into View's slots. Includes RN's
 # shadowOpacity-into-color-alpha composition + transform-prop
 # aggregation.
-pulp_add_test_suite(pulp-test-widget-bridge-rn-style LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-rn-style GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — Tier-4 OOS / perf-hints / interaction misc pins.
 # Pins the no-op / fallback contract for properties
 # Pulp deliberately doesn't paint: 3D transforms, generated content,
 # scroll-snap, will-change, contain, touch-action
 # secondary keywords. Catalog hygiene tests.
-pulp_add_test_suite(pulp-test-widget-bridge-tier4-oos LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-tier4-oos GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — RN outline cluster.
 # outlineColor / outlineOffset / outlineStyle / outlineWidth longhands
 # + `outline` shorthand decomposition through the RN style shim.
-pulp_add_test_suite(pulp-test-widget-bridge-rn-outline LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-rn-outline GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — clip-path + mask cluster.
 # clip-path: inset/circle/polygon/url + shape coordinate parsing;
 # mask-image: url + linear-gradient + transforms; mask-size /
 # -position / -repeat / -origin / -clip / -composite; mask shorthand.
-pulp_add_test_suite(pulp-test-widget-bridge-clip-mask LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-clip-mask GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — SVG widgets. Three clusters: SvgPathWidget JS bridge
 # integration, SvgRectWidget + SvgLineWidget JS bridge integration,
 # and compound-path
 # parser regression (Spectr PEAK / AVG / BOTH / OFF analyzer icons).
-pulp_add_test_suite(pulp-test-widget-bridge-svg LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-svg GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — CSS compatibility audit. Runtime-path coverage for
 # 49 entries flipped from partial/DIVERGE to supported:
@@ -973,114 +931,114 @@ pulp_add_test_suite(pulp-test-widget-bridge-svg LIBRARIES pulp::view)
 # backdropFilter / display / overflow / overflow per-axis / and
 # many more. 45 TEST_CASEs each exercising JS shim → bridge → View
 # slot round-trip.
-pulp_add_test_suite(pulp-test-widget-bridge-wave5-css LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-wave5-css GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — HTML ARIA + querySelector. aria-label / role flow
 # into View accessibility slots;
 # document.querySelector accepts attribute selectors + combinators +
 # :hover / :disabled / :checked / :enabled / :not / :first-child /
 # :nth-child / :empty pseudo-classes.
-pulp_add_test_suite(pulp-test-widget-bridge-html-aria LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-html-aria GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — CSS animations + transitions.
 # animation-* longhands + shorthand decomposition; transition-*
 # longhands + shorthand round-trip through the CSS shim and bridge.
-pulp_add_test_suite(pulp-test-widget-bridge-css-animations LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-css-animations GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — CSS Grid extended surface.
 # grid-template-columns / -rows / -areas, grid-column / -row / -area
 # placement shorthand, gap longhands + shorthand, justify-* / align-* /
 # place-* alignment, repeat() + minmax() + fr-unit + auto sizing tokens
 # round-trip through the bridge.
-pulp_add_test_suite(pulp-test-widget-bridge-css-grid LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-css-grid GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — animation API cluster. Bridge ↔ MotionEngine
 # plumbing for setMotionToken, animate(), the Web
 # Animations API surface (Element.animate / KeyframeEffect), motion
 # provenance, and pulp-motion-bench harness output. Self-contained
 # ~800-line cluster from test_widget_bridge.cpp.
-pulp_add_test_suite(pulp-test-widget-bridge-animation LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-animation GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — per-edge margin / padding. marginTop /
 # marginRight / marginBottom / marginLeft (and padding counterparts)
 # each route to their own Yoga edge enum without cross-contamination
 # through the bridge.
-pulp_add_test_suite(pulp-test-widget-bridge-css-per-edge LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-css-per-edge GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — RN-OOS-fixup catalog audit tail. Material elevation
 # shim, includeFontPadding round-trip, borderCurve
 # squircle paint dispatch, isolation honest CSS-subset, and other
 # RN-side OOS catalog hygiene checks.
-pulp_add_test_suite(pulp-test-widget-bridge-rn-oos-fixup LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-rn-oos-fixup GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — Canvas2D bridge-fn cluster. canvasSetFontFull,
 # fillRule, and canvasSetDirection / canvasSetFilter are closely related
 # bridge entry-points that thread JS-side Canvas2D semantics through
 # WidgetBridge into the native canvas pipeline.
-pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-bridge-fns LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-canvas2d-bridge-fns GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — Yoga borderWidth wiring.
 # Pins YGNodeStyleSetBorder integration with Yoga 3.x default box-sizing
 # (border-box); the content-box case belongs with setBoxSizing coverage.
-pulp_add_test_suite(pulp-test-widget-bridge-yoga-border LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-yoga-border GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Widget bridge — CSS-misc cluster. Text-decoration longhands,
 # line-clamp, and background-repeat are two coherent
 # small CSS clusters that keep test_widget_bridge.cpp under the
 # 3,000-line target.
-pulp_add_test_suite(pulp-test-widget-bridge-css-misc LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-css-misc GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Autonomous Spectr regression suite. Composes the six
 # [contract] invariants from
 # test_widget_bridge.cpp into a Spectr-shaped mini-scenario so a future
 # change that keeps each unit-level invariant passing but breaks their
 # *interaction* still fails first.
-pulp_add_test_suite(pulp-test-spectr-regression LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-spectr-regression GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Typography inheritance for the CSS-style cascade
-pulp_add_test_suite(pulp-test-typography-inheritance LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-typography-inheritance GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Text-overflow ellipsis helper
-pulp_add_test_suite(pulp-test-text-overflow LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-overflow GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Editor bridge tests for the renderer-agnostic envelope/dispatcher
-pulp_add_test_suite(pulp-test-editor-bridge LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-editor-bridge GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Input events tests
-pulp_add_test_suite(pulp-test-input-events LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-input-events GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Text editor tests
 # Caret shape geometry + the solid-while-moving blink policy shared by every
 # editable widget.
-pulp_add_test_suite(pulp-test-caret LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-text-editor LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-text-editor-mouse LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
-pulp_add_test_suite(pulp-test-text-editor-paint LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-text-editor-policy LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
+pulp_add_test_suite(pulp-test-caret GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-mouse GROUP pulp-test-group-view-widgets LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
+pulp_add_test_suite(pulp-test-text-editor-paint GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-policy GROUP pulp-test-group-view-widgets LIBRARIES pulp::view PROPERTIES RESOURCE_LOCK system-clipboard)
 
 # TextEditor multi-line coverage: wrap, click-to-caret in
 # wrapped rows, caret_rect pixel positioning, single-vs-multi Enter
 # contract). Keeps the original test_text_editor.cpp file unchanged
 # so the existing single-line surface stays pinned in isolation.
-pulp_add_test_suite(pulp-test-text-editor-multiline LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-multiline GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # The SelectableText capability: painted-line geometry exposed by Label and
 # TextEditor, plus the shared hit-test / rect arithmetic over it.
-pulp_add_test_suite(pulp-test-selectable-text LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-selectable-text GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
-pulp_add_test_suite(pulp-test-text-input LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-input GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # W3C Layout parity tests (flexbox, box model, visual properties)
-pulp_add_test_suite(pulp-test-layout-w3c LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-layout-w3c GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # W3C design-token runtime pair (parse/export) via the self-contained
 # w3c_tokens.hpp — stays always-compiled when design-import is gated.
-pulp_add_test_suite(pulp-test-w3c-tokens LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-w3c-tokens GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # LottieView playback logic (opt-in PULP_LOTTIE). Passes whether or not Lottie
 # is compiled in: LottieView::supported() gates the playback assertions.
-pulp_add_test_suite(pulp-test-lottie-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-lottie-view GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
 
 # Visual semantic snapshot harness. This is a custom-main Catch2 binary:
 # --self-test runs its focused tests, while --fixture emits a stable JSON
@@ -1093,11 +1051,11 @@ set_tests_properties(visual-harness-self-test PROPERTIES
     TIMEOUT 30)
 
 # Off-UI-thread query service (R7): worker + marshal-back, and the JS bridge API.
-pulp_add_test_suite(pulp-test-query-service LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-widget-bridge-query LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-query-service GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-query GROUP pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
 
 # Widget bridge — flex containers carrying both their own text and element
 # children. CSS gives a container's bare text its own anonymous slot on the
 # flex line; this suite pins that the widget layer does the same instead of
 # painting the text under its first element child.
-pulp_add_test_suite(pulp-test-widget-bridge-flex-text-children LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-bridge-flex-text-children GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)

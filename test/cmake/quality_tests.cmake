@@ -317,8 +317,11 @@ if(Python3_Interpreter_FOUND)
     # (carrier named by -include-pch, matching -std, no carrier-only -D). The
     # named expectations pin a C++20 suite, a C++23 suite (pulp::format raises
     # the standard when it is built at 23), an excluded -fno-exceptions probe,
-    # a Catch2 suite excluded for its per-target -ffp-contract option, and
-    # SDL3-static, whose own PCH is off so ccache can store its objects.
+    # a Catch2 suite excluded for its per-target -ffp-contract option, a
+    # grouped executable (pulp_add_test_group: its members' definitions and
+    # include dirs are per-source properties, which must not cost it the
+    # PCH; pulp::view never reaches pulp-format-core's cxx_std_23, so C++20),
+    # and SDL3-static, whose own PCH is off so ccache can store its objects.
     if(PULP_TEST_PCH)
         set(_pulp_pch_option ON)
     else()
@@ -335,7 +338,8 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-biquad=pulp-test-pch-cxx20
         --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-signal-no-exceptions=none
-        --expect pulp-test-cross-platform-audio-golden=none)
+        --expect pulp-test-cross-platform-audio-golden=none
+        --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
@@ -1167,4 +1171,26 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-catch-multilabel-properties PROPERTIES
         LABELS "cmake;ci"
         TIMEOUT 120)
+
+    # Grouped suites (pulp_add_test_suite ... GROUP): one executable, every
+    # member discovered under its own labels and properties, and a member
+    # whose file tag matches nothing fails the build instead of vanishing.
+    add_test(
+        NAME cmake-test-group-discovery
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/test_pulp_test_group.py)
+    set_tests_properties(cmake-test-group-discovery PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 180)
+
+    # The comparator that proves a registration refactor kept every CTest name
+    # and property. Its self-check plants a rename, a dropped label, a lost
+    # test and an extra one and requires each to be reported.
+    add_test(
+        NAME ctest-inventory-parity-self-check
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/ctest_inventory_parity.py self-check)
+    set_tests_properties(ctest-inventory-parity-self-check PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 60)
 endif()

@@ -30,10 +30,13 @@ function(catch_discover_tests_impl)
   cmake_parse_arguments(
     ""
     ""
-    "TEST_TARGET;TEST_EXECUTABLE;TEST_WORKING_DIR;TEST_OUTPUT_DIR;TEST_OUTPUT_PREFIX;TEST_OUTPUT_SUFFIX;TEST_PREFIX;TEST_REPORTER;TEST_SPEC;TEST_SUFFIX;TEST_LIST;CTEST_FILE"
-    "TEST_EXTRA_ARGS;TEST_PROPERTIES;TEST_LABELS;TEST_EXECUTOR;TEST_DL_PATHS;TEST_DL_FRAMEWORK_PATHS"
+    "TEST_TARGET;TEST_EXECUTABLE;TEST_WORKING_DIR;TEST_OUTPUT_DIR;TEST_OUTPUT_PREFIX;TEST_OUTPUT_SUFFIX;TEST_PREFIX;TEST_REPORTER;TEST_SUFFIX;TEST_LIST;TEST_FAIL_IF_EMPTY;CTEST_FILE"
+    "TEST_SPEC;TEST_EXTRA_ARGS;TEST_PROPERTIES;TEST_LABELS;TEST_EXECUTOR;TEST_DL_PATHS;TEST_DL_FRAMEWORK_PATHS"
     ${ARGN}
   )
+  # TEST_SPEC is multi-valued here (upstream reads one value) so a scoped
+  # discovery can pass Catch2 flags next to its tag expression, e.g.
+  # `-# [#test_widgets]`; every element reaches the --list-tests command line.
 
   set(prefix "${_TEST_PREFIX}")
   set(suffix "${_TEST_SUFFIX}")
@@ -149,6 +152,15 @@ function(catch_discover_tests_impl)
       break()
     endif()
   endforeach()
+
+  if(_TEST_FAIL_IF_EMPTY AND first_test STREQUAL "")
+    message(FATAL_ERROR
+      "Test discovery for '${_TEST_EXECUTABLE}' with spec '${spec}' matched no "
+      "test cases. A scoped discovery that lists nothing would register "
+      "nothing and report nothing, so the build fails here instead. Check that "
+      "the member's source file still defines cases and that its stem matches "
+      "the [#file] tag.")
+  endif()
 
   set(use_windows_binary_fallback OFF)
   if(WIN32 AND NOT output STREQUAL "")
@@ -298,6 +310,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     TEST_OUTPUT_SUFFIX ${TEST_OUTPUT_SUFFIX}
     TEST_DL_PATHS ${TEST_DL_PATHS}
     TEST_DL_FRAMEWORK_PATHS ${TEST_DL_FRAMEWORK_PATHS}
+    TEST_FAIL_IF_EMPTY ${TEST_FAIL_IF_EMPTY}
     CTEST_FILE ${CTEST_FILE}
   )
 endif()
