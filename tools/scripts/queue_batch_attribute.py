@@ -26,6 +26,12 @@ low, and reporting a low score as a culprit is a false accusation -- worse than
 no attribution, because someone acts on it. Below the confidence threshold this
 reports a likely pre-existing break on main instead of naming anyone.
 
+Scoring is scoped to the batch's ACTUAL members. A batch holds every entry
+ahead of the one it is named for, and an open pull request that is not in it can
+still touch the same surface -- so scoring the whole open list lets an innocent
+branch outrank the real owner. Membership is read from the queue ref the run was
+built on; when it cannot be read, that is said out loud rather than assumed.
+
 Read-only. Prints findings; mutates nothing.
 """
 
@@ -229,6 +235,11 @@ class Attribution:
     # "nobody owns it".
     census_tests: list[str] = field(default_factory=list)
     census_roots_read: bool = True
+    # Every candidate tied at the top strength. A single arbitrary pick among
+    # equals is a coin toss presented as a finding.
+    contenders: list[int] = field(default_factory=list)
+    batch_members_known: bool = False
+    scoped_out: list[int] = field(default_factory=list)
 
     @property
     def best_strength(self) -> int:
@@ -239,13 +250,19 @@ def attribute(
     tests: list[str],
     pr_files: dict[int, list[ChangedFile | str]],
     census_roots: frozenset[str] = frozenset(),
+    batch_members: frozenset[int] | None = None,
 ) -> Attribution:
     """Map failing tests onto the pull requests whose files own them."""
     result = Attribution(tests=list(tests))
     result.census_tests = [test for test in tests if test in CENSUS_TESTS]
     result.census_roots_read = bool(census_roots)
+    result.batch_members_known = batch_members is not None
+    candidates = pr_files
+    if batch_members is not None:
+        candidates = {n: f for n, f in pr_files.items() if n in batch_members}
+        result.scoped_out = sorted(set(pr_files) - set(candidates))
     for test in tests:
-        for number, entries in pr_files.items():
+        for number, entries in candidates.items():
             for entry in entries:
                 change = as_changed(entry)
                 weight = max(
@@ -273,8 +290,55 @@ def attribute(
         result.verdict = VERDICT_PRE_EXISTING
     else:
         result.verdict = VERDICT_CULPRIT
-        result.culprit = max(result.strength, key=lambda n: result.strength[n])
+        best = result.best_strength
+        result.contenders = sorted(
+            number for number, total in result.strength.items() if total == best
+        )
+        result.culprit = result.contenders[0]
     return result
+
+
+# A merge-queue ref names the LAST entry in the batch and the base it was built
+# on: `gh-readonly-queue/main/pr-8726-<base sha>`.
+BATCH_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(\d+)-([0-9a-f]{40})$")
+MERGED_PR_RE = re.compile(r"^Merge pull request #(\d+)\b")
+
+
+def parse_batch_members(head_branch: str, subjects: list[str]) -> frozenset[int] | None:
+    """The pull requests a merge_group batch actually contains.
+
+    `None` means the membership could not be determined -- never an empty batch.
+    The two must stay distinguishable: an empty set silently scopes every
+    candidate out and reports nobody, which is the same phantom as blaming main.
+    """
+    match = BATCH_BRANCH_RE.match(head_branch.strip())
+    if not match:
+        return None
+    members = {int(match.group(1))}
+    # The range's merge subjects name the entries ahead of that one. A member's
+    # own branch can also carry a "Merge pull request #N" subject, which admits N
+    # as a candidate it is not; that over-admits at worst to the pre-scoping
+    # behaviour, and only for a pull request whose files already own the failure.
+    for subject in subjects:
+        merged = MERGED_PR_RE.match(subject.strip())
+        if merged:
+            members.add(int(merged.group(1)))
+    return frozenset(members)
+
+
+def batch_members(repo: str, run_id: str) -> frozenset[int] | None:
+    raw = gh(f"repos/{repo}/actions/runs/{run_id}", "[.head_branch,.head_sha]|@tsv")
+    if not raw or "\t" not in raw:
+        return None
+    head_branch, head_sha = raw.split("\t", 1)
+    match = BATCH_BRANCH_RE.match(head_branch.strip())
+    if not match:
+        return None
+    subjects = gh(
+        f"repos/{repo}/compare/{match.group(2)}...{head_sha.strip()}",
+        '.commits[]|.commit.message|split("\\n")[0]',
+    )
+    return parse_batch_members(head_branch, (subjects or "").splitlines())
 
 
 def failing_tests(repo: str, run_id: str) -> list[str]:
@@ -350,6 +414,21 @@ def latest_failed_merge_group(repo: str) -> str:
     return (raw or "").strip()
 
 
+def batch_notes(result: Attribution) -> list[str]:
+    """Say what was in scope, because a finding is only as good as its field."""
+    if not result.batch_members_known:
+        return [
+            "  ! this batch's membership could not be read, so EVERY open pull",
+            "    request was scored: a name above may not be in the batch at all.",
+        ]
+    if result.scoped_out:
+        return [
+            f"  ({len(result.scoped_out)} other open PR(s) scored nothing: not in "
+            "this batch)"
+        ]
+    return []
+
+
 def census_notes(result: Attribution) -> list[str]:
     """Explain a census attribution, or say the rule could not be applied.
 
@@ -364,9 +443,9 @@ def census_notes(result: Attribution) -> list[str]:
     if not result.census_roots_read:
         return [
             "  ! a census gate failed but no exported include roots were read from",
-            f"    {CENSUS_RELPATH}: census ownership was NOT evaluated, so any",
-            "    'pre-existing on main' reading above is unproven. Re-run with",
-            "    --source-root pointing at a checkout.",
+            f"    {CENSUS_RELPATH}: header-count ownership was NOT evaluated, so",
+            "    any 'pre-existing on main' reading above is unproven. Re-run",
+            "    with --source-root pointing at a checkout.",
         ]
     return [
         "  note: a census gate counts headers, so its name matches no file by",
@@ -385,7 +464,7 @@ def render(result: Attribution, run_id: str) -> list[str]:
             "  entry already merged. Do NOT blame the batch's branch name."
         )
         out += [f"    - {t}" for t in result.tests[:6]]
-        return out + census_notes(result)
+        return out + batch_notes(result) + census_notes(result)
 
     if result.verdict == VERDICT_PRE_EXISTING:
         out.append(
@@ -394,13 +473,17 @@ def render(result: Attribution, run_id: str) -> list[str]:
         )
         out.append("  => LIKELY PRE-EXISTING ON MAIN. Do not blame a batch member;")
         out.append("     check whether main's own suite is red before re-queueing.")
-        ranked = sorted(result.scores.items(), key=lambda kv: -result.strength[kv[0]])
+        ranked = sorted(
+            result.scores.items(), key=lambda kv: (-result.strength[kv[0]], kv[0])
+        )
         for number, per_test in ranked[:3]:
             test, (weight, files) = list(per_test.items())[0]
             out.append(f"       (weak, {weight}) #{number}: {test} ~ {sorted(files)[0]}")
-        return out + census_notes(result)
+        return out + batch_notes(result) + census_notes(result)
 
-    ranked = sorted(result.scores.items(), key=lambda kv: -result.strength[kv[0]])
+    ranked = sorted(
+        result.scores.items(), key=lambda kv: (-result.strength[kv[0]], kv[0])
+    )
     for number, per_test in ranked:
         out.append(
             f"  #{number} owns {len(per_test)} failing test(s), "
@@ -408,11 +491,19 @@ def render(result: Attribution, run_id: str) -> list[str]:
         )
         for test, (weight, files) in list(per_test.items())[:4]:
             out.append(f"      [{weight:>3}] {test}  <- {sorted(files)[0]}")
-    out.append(
-        f"  => CULPRIT: #{result.culprit}. Do not re-arm it until fixed; it "
-        "fails every batch it joins."
-    )
-    return out + census_notes(result)
+    if len(result.contenders) > 1:
+        out.append(
+            "  => CO-OWNERS: "
+            + ", ".join(f"#{n}" for n in result.contenders)
+            + " own it at equal strength. Fix every one; picking"
+        )
+        out.append("     between equals would be a guess, not a finding.")
+    else:
+        out.append(
+            f"  => CULPRIT: #{result.culprit}. Do not re-arm it until fixed; it "
+            "fails every batch it joins."
+        )
+    return out + batch_notes(result) + census_notes(result)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -440,10 +531,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    files = {n: pr_files(args.repo, n) for n in open_prs(args.repo)}
+    members = batch_members(args.repo, run_id)
+    opened = open_prs(args.repo)
+    # Fetching a diff costs a round trip per pull request, and only a member can
+    # own the batch, so narrow before fetching rather than after.
+    in_batch = opened if members is None else [n for n in opened if n in members]
+    files = {n: pr_files(args.repo, n) for n in in_batch}
     result = attribute(
-        tests, files, census_roots=census_include_roots(Path(args.source_root))
+        tests,
+        files,
+        census_roots=census_include_roots(Path(args.source_root)),
+        batch_members=members,
     )
+    result.scoped_out = sorted(set(opened) - set(in_batch))
 
     if args.format == "json":
         print(
@@ -456,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
                     "strength": result.strength,
                     "census_tests": result.census_tests,
                     "census_roots_read": result.census_roots_read,
+                    "contenders": result.contenders,
+                    "batch_members_known": result.batch_members_known,
                 },
                 indent=2,
                 sort_keys=True,

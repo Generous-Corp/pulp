@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -294,6 +295,127 @@ class CensusOwnershipTests(unittest.TestCase):
         self.assertEqual(result.culprit, 8726)
 
 
+class BatchMembershipTests(unittest.TestCase):
+    """Only an entry the batch CONTAINS can own the batch's failure.
+
+    Header-count ownership makes this load-bearing. Two open branches can each
+    add a counted header under the same exported root while only one of them is
+    in the batch, and scoring the whole open list lets the bystander outrank the
+    real owner -- a false accusation dressed as a decisive match. The fixture is
+    the batch where that nearly happened: one member, one non-member, both
+    adding a header under `core/canvas/include`.
+    """
+
+    ROOTS = frozenset({"core/canvas/include"})
+    MEMBER = 8726
+    BYSTANDER = 8761
+    DIFFS = {
+        8726: [
+            qba.ChangedFile("core/canvas/include/pulp/canvas/path_measure.hpp", "added")
+        ],
+        8761: [
+            qba.ChangedFile(
+                "core/canvas/include/pulp/canvas/drawlist_format.hpp", "added"
+            )
+        ],
+    }
+
+    def test_only_the_member_is_named(self) -> None:
+        result = qba.attribute(
+            ["consumption-census-drift"],
+            self.DIFFS,
+            census_roots=self.ROOTS,
+            batch_members=frozenset({self.MEMBER}),
+        )
+        self.assertEqual(result.culprit, self.MEMBER)
+        self.assertNotIn(self.BYSTANDER, result.strength)
+        self.assertEqual(result.scoped_out, [self.BYSTANDER])
+
+    def test_without_membership_the_bystander_can_outrank_the_owner(self) -> None:
+        """Unscoped, both tie -- which is why membership is not optional."""
+        result = qba.attribute(
+            ["consumption-census-drift"], self.DIFFS, census_roots=self.ROOTS
+        )
+        self.assertEqual(result.contenders, [self.MEMBER, self.BYSTANDER])
+        self.assertFalse(result.batch_members_known)
+
+    def test_unknown_membership_is_announced_not_assumed(self) -> None:
+        result = qba.attribute(
+            ["consumption-census-drift"], self.DIFFS, census_roots=self.ROOTS
+        )
+        text = "\n".join(qba.render(result, "1"))
+        self.assertIn("membership could not be read", text)
+
+    def test_equal_owners_are_both_named_rather_than_one_picked(self) -> None:
+        result = qba.attribute(
+            ["consumption-census-drift"],
+            self.DIFFS,
+            census_roots=self.ROOTS,
+            batch_members=frozenset({self.MEMBER, self.BYSTANDER}),
+        )
+        text = "\n".join(qba.render(result, "1"))
+        self.assertIn("CO-OWNERS: #8726, #8761", text)
+        self.assertNotIn("CULPRIT", text)
+
+    def test_the_ref_names_the_last_entry_and_the_merges_name_the_rest(self) -> None:
+        members = qba.parse_batch_members(
+            "gh-readonly-queue/main/pr-8726-"
+            "3d9026b8750626493e6f0de6ba87399818b646cf",
+            [
+                "feat(canvas): measure and trim a Path by arc length",
+                "Merge branch 'main' into feature/path-arc-length-measure",
+                "Merge pull request #8726 from Generous-Corp/feature/path-arc",
+                "Merge pull request #8754 from Generous-Corp/test/sdf-emitter",
+            ],
+        )
+        self.assertEqual(members, frozenset({8726, 8754}))
+
+    def test_a_single_entry_batch_is_read_from_the_ref_alone(self) -> None:
+        """No merge subject is needed: the queue ref names the last entry."""
+        members = qba.parse_batch_members(
+            "gh-readonly-queue/main/pr-8726-"
+            "3d9026b8750626493e6f0de6ba87399818b646cf",
+            [],
+        )
+        self.assertEqual(members, frozenset({8726}))
+
+    def test_an_unrecognised_ref_yields_unknown_never_an_empty_batch(self) -> None:
+        """Empty would scope every candidate out and report nobody."""
+        self.assertIsNone(qba.parse_batch_members("refs/heads/main", []))
+        self.assertIsNone(qba.parse_batch_members("", ["Merge pull request #1 x"]))
+
+
+class HeaderSuffixTests(unittest.TestCase):
+    """Tie the counted-suffix list to what the census actually counts.
+
+    The rule turns on whether a path is header surface the census counts, and
+    that list lives in the generator. Restating it here is a copy that can drift
+    silently, so ask the generator instead of asserting the copy is right.
+    """
+
+    def counted(self, suffix: str) -> int:
+        import consumption_census
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / "inc"
+            root.mkdir()
+            (root / f"probe{suffix}").write_text("")
+            return consumption_census.count_headers(pathlib.Path(directory), ["inc"])
+
+    def test_every_suffix_the_census_counts_is_declared_and_no_others(self) -> None:
+        for suffix in (".h", ".hpp", ".hxx", ".hh", ".inc", ".cpp", ".md"):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(
+                    bool(self.counted(suffix)),
+                    suffix in qba.HEADER_SUFFIXES,
+                    f"{suffix}: the census and this rule disagree about counting it",
+                )
+
+    def test_the_probe_can_see_a_counted_header(self) -> None:
+        """Control: a probe that counts nothing would pass the test above."""
+        self.assertEqual(self.counted(".hpp"), 1)
+
+
 class CensusRootsTests(unittest.TestCase):
     """The roots come out of the committed census, so read the real one.
 
@@ -323,7 +445,7 @@ class CensusRootsTests(unittest.TestCase):
         )
         self.assertFalse(result.census_roots_read)
         text = "\n".join(qba.render(result, "1"))
-        self.assertIn("census ownership was NOT evaluated", text)
+        self.assertIn("header-count ownership was NOT evaluated", text)
 
     def test_a_non_census_batch_carries_no_census_note(self) -> None:
         result = qba.attribute(
