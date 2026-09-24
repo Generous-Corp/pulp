@@ -414,6 +414,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME capability-contract-gate-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_capability_contract_gate.py")
 
+    # A discarded CONTROL_PROFILE must not be discarded silently. Only
+    # Standalone composes the control endpoint, so every plug-in format is
+    # force-downgraded to production-stripped -- correct for a module loaded
+    # into a host process its author does not own, but it used to happen
+    # without a word. The branch is only reachable when an author explicitly
+    # passed CONTROL_PROFILE, since the default is already stripped, so
+    # reaching it means an explicit request is being thrown away. The test also
+    # pins that default, because flipping it would turn this warning into noise
+    # on every plug-in build.
+    add_test(NAME control-profile-downgrade-announced COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_control_profile_downgrade_is_announced.py")
+
     # GPU span categories: a span named `gpu_*` must be emitted under the `gpu`
     # category. The trace-SQL GPU queries select `category GLOB 'gpu*'`, so a
     # `gpu_*` span filed elsewhere is invisible to them rather than merely
