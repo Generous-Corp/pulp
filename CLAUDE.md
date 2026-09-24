@@ -1456,8 +1456,8 @@ Before pushing a PR, run a local diff-coverage check to catch the same
 roundtrip on coverage-only failures.
 
 ```bash
-# Whole-tree (slow, matches CI)
-tools/scripts/local_diff_cover.sh
+# Focused: only targets/tests the diff reaches (pre-push runs this)
+tools/scripts/local_diff_cover.sh   # PULP_DIFF_COVER_SELECT=all: whole tree
 
 # Targeted build (fast — builds only named test targets)
 tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
