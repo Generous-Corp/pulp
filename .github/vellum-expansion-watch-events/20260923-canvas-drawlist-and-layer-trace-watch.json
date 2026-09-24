@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-canvas-drawlist-and-layer-trace-watch",
+  "created_at": "2026-09-23T02:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record two additive observability surfaces over existing rendering code. The drawlist formatter is a pure function that reads a RecordingCanvas drawlist and returns text; it draws nothing, changes no backend, and is consumed by tests. The compositing-layer trace spans wrap the existing push_effect_layers / pop_effect_layers pair with Perfetto BEGIN/END in the already-declared canvas category, and compile to no-ops in every build that does not set PULP_TRACING=ON, which is every shipping build. No rendering behavior, backend selection, or authority boundary changes.",
+  "tests": [
+    "pulp-test-canvas-drawlist-format",
+    "pulp-test-tracing-canvas-layers",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

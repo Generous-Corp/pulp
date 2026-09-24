@@ -32,9 +32,23 @@
 namespace {
 
 // A small view tree with opaque children so layout + paint do real work.
+//
+// One child carries opacity and a filter blur so the paint walks
+// push_effect_layers / pop_effect_layers. Without it the scene pushes no
+// compositing layer at all and the `canvas` category stays empty — which is
+// indistinguishable from the instrumentation being absent, and is exactly the
+// trap this test exists to close.
 std::unique_ptr<pulp::view::View> make_scene() {
     auto root = std::make_unique<pulp::view::View>();
     root->set_background_color(pulp::canvas::Color::rgba8(18, 18, 24, 255));
+
+    auto layered = std::make_unique<pulp::view::View>();
+    layered->set_bounds({20.0f, 76.0f, 200.0f, 40.0f});
+    layered->set_background_color(pulp::canvas::Color::rgba8(200, 90, 40, 255));
+    layered->set_opacity(0.5f);
+    layered->set_filter_blur(2.0f);
+    root->add_child(std::move(layered));
+
     for (int i = 0; i < 3; ++i) {
         auto box = std::make_unique<pulp::view::View>();
         box->set_bounds({static_cast<float>(20 + i * 60), 20.0f, 48.0f, 48.0f});
@@ -113,6 +127,17 @@ TEST_CASE("frame pipeline emits Perfetto spans across a headless render",
         bytes.find("gpu_submit") != std::string::npos ||
         bytes.find("gpu_present") != std::string::npos;
     REQUIRE(has_other_pass);
+
+    // The `canvas` category is DECLARED as "Canvas 2D drawing"; for a long
+    // time nothing emitted into it, so a query filtered on it returned no
+    // rows — which reads as "canvas drawing is free" rather than "nothing is
+    // instrumented". The scene above forces a compositing layer, so this is
+    // the guard that the category stays populated.
+    REQUIRE(bytes.find("effect_layer") != std::string::npos);
+
+    // ...and that its argument keys survive, since a span with no args cannot
+    // answer which layer was expensive.
+    REQUIRE(bytes.find("layers") != std::string::npos);
 
     std::filesystem::remove(out, ec);
 }

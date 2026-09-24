@@ -39,6 +39,13 @@ pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
 # contract; ON emits spans from two threads and byte-checks the flushed trace.
 pulp_add_test_suite(pulp-test-tracing-session LIBRARIES pulp::runtime)
 
+# The canvas trace category must stay populated. Drives a compositing layer
+# through a RecordingCanvas, so it needs no GPU and runs in the PULP_TRACING=ON
+# lane, which configures GPU off. test_trace_frame_pipeline asserts the same
+# spans but requires GPU capture, so it can never be the guard.
+pulp_add_test_suite(pulp-test-tracing-canvas-layers
+    LIBRARIES pulp::runtime pulp::view pulp::canvas)
+
 # Perfetto auto-flush timeout: cancel-before-deadline, join-on-cancel (the
 # property that makes plug-in module unload safe), re-arm replacing rather than
 # adding a timer, and the session-generation guard that stops a stale timer
