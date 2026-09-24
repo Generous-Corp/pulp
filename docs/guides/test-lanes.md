@@ -10,6 +10,7 @@ single source of truth for that model.
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below); an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
+| **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~150 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
@@ -88,15 +89,22 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   fails on the PR that caused it rather than ejecting a merge-queue batch, and
   the timing flakes that moved the full suite off the PR head stay off it.
   Tests carrying `pr-fast` still run in the full suite everywhere else.
+- **`source-selftest`** — applied from `tools/ci/source_selftests.json`, never by
+  hand: a Python registration that reads only the checkout. **Excluded from the
+  required `macos` gate on gate events** and run instead by the build-free
+  required `Enforce version & skill sync` context. `push` and every other lane
+  still run it. See [the source-selftest lane](#the-source-selftest-lane).
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
-The required gate excludes all three groups with one CTest filter,
-`--label-exclude "validation|slow|performance|bench|quality-lab"` — the same
-filter `build.yml`'s PR ctest uses on `pull_request`, `workflow_dispatch`, and
-`merge_group`. The other lanes filter differently and deliberately: a `push` to
-`main` excludes only `validation`, and `cross-platform-check.yml` excludes only
-`validation|slow`. Read the lane you mean; the filters are not uniform. It is set in
+The required gate excludes these groups with one CTest filter,
+`--label-exclude "validation|slow|performance|bench|quality-lab|source-selftest"`
+— the filter `build.yml`'s ctest uses on `pull_request`, `workflow_dispatch`, and
+`merge_group` (`tools/ci/ctest_gate_args.py`; `protected_merge_receipt.py` pins
+the same string). The other lanes filter differently and deliberately: a macOS
+`push` to `main` excludes `validation|slow|performance|bench|quality-lab` and so
+still runs `source-selftest`, a Linux or Windows push excludes only
+`validation`, and `cross-platform-check.yml` excludes only `validation|slow`. Read the lane you mean; the filters are not uniform. It is set in
 [`.shipyard/config.toml`](../../.shipyard/config.toml) (`[validation.default]`,
 `test =`).
 
@@ -130,6 +138,55 @@ of them (SDK-consumer and smoke manifests) do.
 The explicit restoration is limited to reduced PR, merge-group, and Shipyard
 dispatch corpora; unfiltered main/nightly runs already include the proof and do
 not run it a second time.
+
+## The source-selftest lane
+
+Roughly a sixth of the ctest registrations the gate configures are Python
+scripts that read nothing but the checkout: CI-tooling selftests, source lints,
+drift checks. Measured on five merge-group `macos` jobs on 2026-09-24
+(107757339345, 107743043020, 107730781122, 107729256710, 107666303648), the 153
+now in the lane cost ~770 s of the ~2,700 serial test-seconds, and six of them
+(`PROCESSORS 8`, e.g. `gpu-first-visible-role-producers-selftest`) ran alone in
+the serial tail for ~150 s per run. None of that needs the build that
+dominates the gate.
+
+So they run in the required `Enforce version & skill sync` job instead, which
+has no build, reports on `merge_group`, and takes minutes. Three pieces share one
+manifest, `tools/ci/source_selftests.json`:
+
+- `test/cmake/source_selftest_lane_tests.cmake` labels each listed registration
+  `source-selftest` (included last in `test/CMakeLists.txt`).
+- `tools/ci/ctest_gate_args.py` excludes that label on the gate events.
+- `version-skill-check.yml` runs every entry with
+  `tools/ci/source_selftests.py run`, in parallel, from an empty scratch
+  directory unless the registration sets a source `WORKING_DIRECTORY`, with the
+  registration's `TIMEOUT` (120 s default) and `RESOURCE_LOCK`, retrying once as
+  the gate's `--repeat until-pass:2` does.
+
+`source-selftest-lane-contract` (a ctest that stays on the gate, because it
+needs the configured tree) runs `source_selftests.py check`. It fails when a
+labelled test is missing from the manifest, a listed test is not registered or
+not labelled, a manifest command no longer matches its registration, an entry
+reaches the build tree or a path outside the checkout, an entry carries
+`pr-fast` or an excluded label, or either half of the wiring is gone. A test
+can therefore leave the gate only by being run on another required context.
+
+**Joining the lane.** A registration qualifies when it is `python3 <script>`
+over source paths only, imports only the standard library (the lane has no
+numpy, Pillow or PyYAML), is not a `pr-fast` member (that tier runs on the PR
+head with the same exclusion), and is registered inside `test/` (a
+`set_property(TEST)` from `test/` cannot label a test another directory
+registered). Add it with
+`python3 tools/ci/source_selftests.py write --build-dir build --add <name>`, and
+refresh after editing a moved registration's arguments with the same command
+without `--add`. The contract test tells you which one you need.
+
+**What it costs.** The required `Enforce version & skill sync` job grows from
+about 2 minutes to several; it runs in parallel with the ~28-minute `macos`
+job, so it does not lengthen a merge. The lane runs on Linux with Python 3.12,
+where the gate ran macOS with Python 3.14. Every entry passed on the Linux
+CI leg and under Python 3.12 with no build tree before it moved, and a macOS
+`push` to `main` still runs them all.
 
 ## Why example validators are off the required gate
 
@@ -295,7 +352,8 @@ lane checks its own.
 ## The trap to avoid
 
 Labeling a test `slow`, `validation`, `performance`, `bench`, or `quality-lab`
-**removes it from the required gate**. If
+**removes it from the required gate**. (`source-selftest` is the exception by
+construction: its contract test fails unless the required source lane runs it.) If
 nothing else runs it as a *gate*, you have silently disabled it — the nightly
 runs it but does **not** fail on it. Before moving a test off the required gate,
 make sure it is enforced somewhere. During the staged rollout,

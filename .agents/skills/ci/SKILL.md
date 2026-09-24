@@ -389,6 +389,27 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+### `source-selftest` tests gate on `Enforce version & skill sync`, not on `macos`
+
+The gate events also exclude `source-selftest`: ~150 Python registrations that
+read only the checkout, listed in `tools/ci/source_selftests.json` and run by
+the required `Enforce version & skill sync` job
+(`tools/ci/source_selftests.py run`). So a red selftest such as
+`governed-build-selftest` or `gpu-dpr-runner-selftest` shows up on THAT context,
+on Linux with Python 3.12, and a green `macos` says nothing about it. Two
+consequences worth knowing before you debug:
+
+- A moved test that passes on the macOS gate host can fail on the lane only for
+  a Linux or Python-3.12 reason, or because it needs a third-party module (the
+  lane installs none). Reproduce with
+  `python3.12 tools/ci/source_selftests.py run` after temporarily renaming
+  `build/`, which is the lane's condition.
+- Editing a moved registration's arguments without refreshing the manifest
+  fails `source-selftest-lane-contract` on the gate; run
+  `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
+  merge receipt pins the same label string as `ctest_gate_args.py`
+  (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+
 ### A green ctest job proves nothing about a label its event excludes
 
 `build.yml` computes `label_exclude` from the event, and the two values are far
