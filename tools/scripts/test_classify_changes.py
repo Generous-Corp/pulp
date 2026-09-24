@@ -289,6 +289,10 @@ class IosCompileRequiredTests(unittest.TestCase):
                 if rel == "CMakeLists.txt":
                     references.update(m.group(1) for m in bare.finditer(code))
         references = {ref.rstrip("./") for ref in references}
+        # A bare tree root names no file: it appears in path comparisons such
+        # as `if(_sub MATCHES "^${CMAKE_SOURCE_DIR}/test/")`, not as a configure
+        # input, and denying it would force the gate for every test/ change.
+        references -= {"test", "docs"}
         # Control: known references must be found, or the scan is blind.
         self.assertIn("test/ios/coremidi_backend_harness.mm", references)
         self.assertIn("test/harness/rt_allocation_probe.cpp", references)
