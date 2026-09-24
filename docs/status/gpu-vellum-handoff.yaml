@@ -3058,8 +3058,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/release_product_matrix.json",
           "state": "pulp-owned-retained",
-          "revision": "ad13306e4e43840d3a87286439274e1f2328507c",
-          "object_id": "dfca7b99716b5b5ea105e9f2e334bc5c08d8950e",
+          "revision": "1b40c69bc1f21afac853cd844138508606d0e362",
+          "object_id": "37fd62a240291bdff1360e5bc9a02fbfd39d84c2",
           "object_type": "blob"
         },
         {
