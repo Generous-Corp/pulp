@@ -5470,3 +5470,35 @@ pull requests waiting for a slot.
 
 So a green `macos` on a pull request means it **built**. Test results arrive when the queue
 validates it.
+
+### The required gate must not need a third-party service at run time
+
+`build.yml`'s `Install visual-analysis Python dependencies` step installs the
+declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
+`visual-python-deps-present` ctest stays answerable. It used to pass
+`--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
+already met* — turning "pypi.org is reachable from this VM" into a precondition
+of the **required** `macos` check.
+
+On 2026-09-23 that precondition failed. Ephemeral VMs on one host refused
+CONNECT to pypi.org (`Tunnel connection failed: 403 Forbidden`), so the step
+died at 21 of 41 and took out every merge_group batch that happened to land
+there, while the identical batch passed on a host whose VMs could reach it.
+The queue stopped merging and the cause looked like a PR defect, because the
+batch is named after one PR.
+
+The step now checks with `pip install --dry-run --no-index` first and only
+reaches the network when the set is genuinely missing. Two consequences worth
+keeping in mind:
+
+- **Pre-provisioning the wheels into the golden image now works.** Before this
+  change it did not: `--upgrade` contacted the index regardless, so a fully
+  provisioned VM still needed PyPI.
+- **A missing dependency is still fatal**, just at the right place. The
+  `visual-python-deps-present` ctest is the proof, and it names what is absent.
+  Making the install non-fatal instead would produce the failure mode this
+  check exists to prevent — seven ctests silently skipping, which reads as green.
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is unreachable. If it can, that is a fleet-wide
+outage waiting on someone else's uptime.
