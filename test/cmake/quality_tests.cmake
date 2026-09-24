@@ -653,6 +653,16 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    # Offline reachability of every lane against the checked-in
+    # advertised-labels snapshot (declared supply), plus routing-override
+    # validation. The clock is pinned inside the test; live expiry is enforced
+    # by the hourly sweep, never by a ctest that would redden unrelated PRs.
+    add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
+    # Snapshot regeneration/freshness against a fake tartci checkout: profiles
+    # are discovered by glob, so adding or removing a machine needs no edit here.
+    add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
@@ -842,8 +852,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
     # Self-test: the read surface (surface/list/validate), the external-contributor
-    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
-    # the AGENTS.md + CLAUDE.md pointers.
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, the
+    # AGENTS.md + CLAUDE.md pointers, and `--mode probe` against a checked-in
+    # `shipyard landing --json` capture (never the live API).
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
@@ -1002,6 +1013,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    # CLAUDE.md's ci-routing-digest block is generated from runner_topology.json
+    # and the advertised-labels snapshot only (never the workflows, so a
+    # workflow-only change cannot redden it); a stale or hand-edited block fails
+    # here.
+    add_test(NAME ci-routing-digest-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ci_routing_digest.py" --check)
+    add_test(NAME ci-routing-digest-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ci_routing_digest.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
     # Presence checks over a rendered panel: every one of the five is proved in

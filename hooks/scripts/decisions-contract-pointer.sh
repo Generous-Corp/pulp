@@ -23,6 +23,7 @@ Settled build-system / CI / release-automation decisions live in
 change to fleet/CI config, read the relevant rows:
     python3 tools/scripts/decisions_contract.py --mode list        # all rows
     python3 tools/scripts/decisions_contract.py --mode surface --base origin/main
+Generated routing/landing facts: CLAUDE.md `ci-routing-digest` block.
 Reversing a decision requires proving its incident class can no longer occur.
 EOF
 exit 0
