@@ -344,3 +344,73 @@ Check the *transitive* dependency, not just the ctest arguments. Both
 file, but only the first names it in its arguments; the second reaches it
 through a verifier that hardcodes the path. Excluding only the obvious one
 leaves a permanent red.
+
+## Grouped test executables (one binary, many suites)
+
+Every Catch2 executable statically links the whole `pulp::view` stack, so a
+manifest of N one-file suites costs N links of the same ~150 MiB of archives,
+N copies on disk, and N relinks whenever one core `.cpp` changes. A **test
+group** is one executable that several suites compile into, declared in the
+manifest with `pulp_add_test_group()` and joined with `GROUP` on each
+`pulp_add_test_suite()` call (`tools/cmake/PulpTestSuite.cmake`):
+
+```cmake
+pulp_add_test_group(pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-widgets GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-mouse GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view
+    PROPERTIES RESOURCE_LOCK system-clipboard)
+```
+
+Nothing about routing changes. Each member keeps its own discovery call, so
+its LABELS, TIMEOUT, RESOURCE_LOCK, ENVIRONMENT, TEST_SPEC and TEST_PREFIX
+apply to exactly the cases it always applied to: the group runs Catch2 with
+`--filenames-as-tags`, which tags every case `[#<source stem>]`, and each
+member's `--list-tests` is scoped to its own sources' tags. The registered
+command stays `<binary> "<case name>"`; only the binary is shared. A member
+whose tag expression lists nothing fails the **build** (`FAIL_IF_EMPTY` in
+`PulpCatch.cmake`) rather than silently registering no tests.
+
+### Converting a manifest
+
+1. **Group by compile line, not by link line.** Members share one set of
+   compile flags. Read them from `compile_commands.json` for the manifest's
+   targets (strip `-o`/`-c`/`-MF`, ignore per-target `-D<path>` defines) and
+   group targets whose flag *set* is identical. A member may only name
+   `LIBRARIES` the group already links; the configure fails otherwise, so put
+   the union on the group.
+2. **Leave out anything that needs its own process**: a custom `main()`
+   (`Catch2::Catch2` without `WithMain`), a `codesign` POST_BUILD on the test
+   binary (identity tests sign *themselves*), a fixture path baked in with
+   `$<TARGET_FILE:...>`, `-fno-exceptions`, RT allocation probes,
+   `PASS_REGULAR_EXPRESSION` probes, and any test source compiled together
+   with a library `.cpp` that the group's libraries also contain (duplicate
+   symbols at link).
+3. **Find duplicate case names across the group** (`TEST_CASE`, `SCENARIO`,
+   `TEST_CASE_METHOD`) and rename one side with a short suffix. Catch2 aborts
+   at startup on a duplicate with equal tags, and CTest would register the
+   name twice either way. Record every rename as
+   `{"from", "to", "executable"}` for the parity check.
+4. **Rewrite the registrations.** `add_executable` +
+   `target_link_libraries` + `catch_discover_tests(... PROPERTIES LABELS "a;b")`
+   becomes `pulp_add_test_suite(NAME GROUP <group> LIBRARIES ... LABELS "a;b")`.
+   A target that was registered twice with different `TEST_SPEC`s becomes two
+   `pulp_add_test_suite` calls with the same NAME and GROUP. Per-target
+   `COMPILE_DEFINITIONS` / `INCLUDE_DIRS` become per-source properties
+   automatically.
+5. **Prove parity, not just green.** Snapshot before and after with
+   `tools/scripts/ctest_inventory_parity.py snapshot --build-dir build --out
+   <file>` (build the affected targets first, or the placeholders differ), then
+   `compare before.json after.json --rename-map renames.json`. It compares the
+   whole inventory as a multiset of (name, properties) and reports any missing,
+   extra or drifted test.
+6. **Prove isolation.** Run each group binary whole and with `--order rand`
+   (three seeds), and run each member alone
+   (`<group> -# "[#test_widgets]"`). A case that passes alone and fails in
+   the group has a static-state dependency: keep that suite out and say why.
+
+`ctest` output, `-R`/`-L` selection, `confirm_failure.sh --test`, and the
+changed-surface selector all keep working, since they address tests by name.
+The one visible difference is `--target`: build the group
+(`pulp-test-group-view-widgets`), not the old per-suite target.

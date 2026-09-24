@@ -43,7 +43,7 @@ using namespace pulp::inspect;
 
 #include <pulp/inspect/console_capture.hpp>
 
-TEST_CASE("ConsoleCapture: captures log entries") {
+TEST_CASE("ConsoleCapture: captures log entries (domains)") {
     ConsoleCapture capture;
     auto cb = capture.callback();
     cb("log", "hello");
@@ -56,7 +56,7 @@ TEST_CASE("ConsoleCapture: captures log entries") {
     REQUIRE(entries[2].level == "error");
 }
 
-TEST_CASE("ConsoleCapture: chains previous callback") {
+TEST_CASE("ConsoleCapture: chains previous callback (domains)") {
     std::string captured;
     auto previous = [&](std::string_view level, std::string_view msg) {
         captured = std::string(level) + ":" + std::string(msg);
@@ -68,7 +68,7 @@ TEST_CASE("ConsoleCapture: chains previous callback") {
     REQUIRE(capture.entries().size() == 1);
 }
 
-TEST_CASE("ConsoleCapture: clear") {
+TEST_CASE("ConsoleCapture: clear (domains)") {
     ConsoleCapture capture;
     auto cb = capture.callback();
     cb("log", "a");
@@ -77,7 +77,8 @@ TEST_CASE("ConsoleCapture: clear") {
     REQUIRE(capture.entries().empty());
 }
 
-TEST_CASE("ConsoleCapture: retains the newest ring buffer entries", "[inspect][console][issue-641]") {
+TEST_CASE("ConsoleCapture: retains the newest ring buffer entries (domains)",
+          "[inspect][console][issue-641]") {
     ConsoleCapture capture;
     auto cb = capture.callback();
 
@@ -97,7 +98,7 @@ TEST_CASE("ConsoleCapture: retains the newest ring buffer entries", "[inspect][c
 
 #include <pulp/inspect/audio_inspector.hpp>
 
-TEST_CASE("AudioInspector: config roundtrip") {
+TEST_CASE("AudioInspector: config roundtrip (domains)") {
     AudioInspector audio;
     AudioConfig cfg;
     cfg.sample_rate = 48000;
@@ -109,7 +110,7 @@ TEST_CASE("AudioInspector: config roundtrip") {
     REQUIRE(read.buffer_size == 256);
 }
 
-TEST_CASE("AudioInspector: MIDI logging") {
+TEST_CASE("AudioInspector: MIDI logging (domains)") {
     AudioInspector audio;
     audio.log_midi(0x90, 60, 100, "Note On C4");
     audio.log_midi(0x80, 60, 0, "Note Off C4");
@@ -119,7 +120,7 @@ TEST_CASE("AudioInspector: MIDI logging") {
     REQUIRE(events[0].description == "Note On C4");
 }
 
-TEST_CASE("AudioInspector: metering gates level snapshots") {
+TEST_CASE("AudioInspector: metering gates level snapshots (domains)") {
     AudioInspector audio;
 
     audio.report_levels({{0.5f, 0.25f}});
@@ -140,13 +141,14 @@ TEST_CASE("AudioInspector: metering gates level snapshots") {
 #include <pulp/inspect/state_inspector.hpp>
 #include <pulp/state/store.hpp>
 
-TEST_CASE("DomainHandler: unknown domain") {
+TEST_CASE("DomainHandler: unknown domain (domains)") {
     DomainHandler handler;
     auto resp = handler.handle(make_request(1, "Bogus.method"));
     REQUIRE(resp.is_error);
 }
 
-TEST_CASE("DomainHandler: rejects malformed dispatch and missing inspect roots", "[inspect][domain][issue-641]") {
+TEST_CASE("DomainHandler: rejects malformed dispatch and missing inspect roots (domains)",
+          "[inspect][domain][issue-641]") {
     DomainHandler handler;
 
     auto invalid = handler.handle(make_request(1, "DOMGetDocument"));
@@ -166,7 +168,7 @@ TEST_CASE("DomainHandler: rejects malformed dispatch and missing inspect roots",
     REQUIRE(css_missing_root.params_json == "No root view attached");
 }
 
-TEST_CASE("DomainHandler: Inspector.getInfo") {
+TEST_CASE("DomainHandler: Inspector.getInfo (domains)") {
     View root;
     DomainHandler handler;
     handler.set_root_view(&root);
@@ -175,7 +177,7 @@ TEST_CASE("DomainHandler: Inspector.getInfo") {
     REQUIRE(resp.params_json.find("Pulp") != std::string::npos);
 }
 
-TEST_CASE("DomainHandler: DOM.getDocument") {
+TEST_CASE("DomainHandler: DOM.getDocument (domains)") {
     View root;
     auto child = std::make_unique<View>();
     child->set_id("child1");
@@ -187,7 +189,8 @@ TEST_CASE("DomainHandler: DOM.getDocument") {
     REQUIRE(resp.params_json.find("child1") != std::string::npos);
 }
 
-TEST_CASE("DomainHandler: DOM and CSS reject malformed params", "[inspect][domain][issue-641]") {
+TEST_CASE("DomainHandler: DOM and CSS reject malformed params (domains)",
+          "[inspect][domain][issue-641]") {
     View root;
     root.set_id("root");
 
@@ -215,7 +218,7 @@ TEST_CASE("DomainHandler: DOM and CSS reject malformed params", "[inspect][domai
     REQUIRE(css_missing_id.params_json == "Invalid params for CSS.getComputedStyle");
 }
 
-TEST_CASE("DomainHandler: State.getParameters") {
+TEST_CASE("DomainHandler: State.getParameters (domains)") {
     StateStore store;
     store.add_parameter({0, "Volume", "dB", {-60.0f, 6.0f, -12.0f}});
     store.set_value(0, -6.0f);
@@ -263,7 +266,7 @@ TEST_CASE("StateInspector::set_param validates, gestures, and supports normalize
     }
 }
 
-TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log") {
+TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log (domains)") {
     AudioInspector audio;
     AudioConfig cfg;
     cfg.sample_rate = 48000;
@@ -345,7 +348,8 @@ TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log") {
     REQUIRE(missing.is_error);
 }
 
-TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][domain][issue-641]") {
+TEST_CASE("DomainHandler: dispatches inspector domain edge paths (domains)",
+          "[inspect][domain][issue-641]") {
     View root;
     root.set_id("root");
     root.set_bounds({0, 0, 320, 200});
@@ -565,7 +569,7 @@ TEST_CASE("DomainHandler: dispatches inspector domain edge paths", "[inspect][do
 
 // ─── StateInspector ListenerToken lifecycle ─────────────────────────────────
 
-TEST_CASE("StateInspector records parameter changes after subscribing",
+TEST_CASE("StateInspector records parameter changes after subscribing (domains)",
           "[inspect][state][listener]") {
     StateStore store;
     ParamInfo info;
@@ -588,7 +592,7 @@ TEST_CASE("StateInspector records parameter changes after subscribing",
     REQUIRE(changes[1].value > changes[0].value);
 }
 
-TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
+TEST_CASE("Destroying StateInspector removes its listener (no alive-guard) (domains)",
           "[inspect][state][listener]") {
     StateStore store;
     ParamInfo info;
@@ -617,7 +621,7 @@ TEST_CASE("Destroying StateInspector removes its listener (no alive-guard)",
 
 #include <pulp/render/dirty_tracker.hpp>
 
-TEST_CASE("Performance.setRepaintFlash toggles DirtyTracker::debug_overlay",
+TEST_CASE("Performance.setRepaintFlash toggles DirtyTracker::debug_overlay (domains)",
           "[inspect][perf][repaint-flash]") {
     pulp::render::DirtyTracker dirty;
     REQUIRE_FALSE(dirty.debug_overlay());
@@ -646,7 +650,7 @@ TEST_CASE("Performance.setRepaintFlash toggles DirtyTracker::debug_overlay",
     REQUIRE_FALSE(dirty.debug_overlay());
 }
 
-TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
+TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable (domains)",
           "[inspect][perf][repaint-flash]") {
     DomainHandler handler;
     // Deliberately not calling set_dirty_tracker — the inspector
@@ -669,8 +673,7 @@ TEST_CASE("Performance.setRepaintFlash without a tracker reports unavailable",
 
 #include <pulp/view/live_constant_editor.hpp>
 
-TEST_CASE("LiveConstant.list returns the registry contents",
-          "[inspect][live-constant]") {
+TEST_CASE("LiveConstant.list returns the registry contents (domains)", "[inspect][live-constant]") {
     auto& registry = pulp::view::LiveConstantRegistry::instance();
 
     // Seed the registry. PULP_LIVE_CONSTANT macros do this implicitly,
@@ -692,8 +695,7 @@ TEST_CASE("LiveConstant.list returns the registry contents",
     REQUIRE(resp.params_json.find("\"constants\"") != std::string::npos);
 }
 
-TEST_CASE("LiveConstant.set mutates the registry value",
-          "[inspect][live-constant]") {
+TEST_CASE("LiveConstant.set mutates the registry value (domains)", "[inspect][live-constant]") {
     auto& registry = pulp::view::LiveConstantRegistry::instance();
     [[maybe_unused]] auto& v =
         registry.register_constant("test_setter", __FILE__, __LINE__,
@@ -709,7 +711,7 @@ TEST_CASE("LiveConstant.set mutates the registry value",
                  Catch::Matchers::WithinAbs(4.5, 0.001));
 }
 
-TEST_CASE("LiveConstant.set without a name returns an error",
+TEST_CASE("LiveConstant.set without a name returns an error (domains)",
           "[inspect][live-constant]") {
     DomainHandler handler;
     auto resp = handler.handle(make_request(
@@ -717,7 +719,7 @@ TEST_CASE("LiveConstant.set without a name returns an error",
     REQUIRE(resp.is_error);
 }
 
-TEST_CASE("LiveConstant.reset rolls a value back to its default",
+TEST_CASE("LiveConstant.reset rolls a value back to its default (domains)",
           "[inspect][live-constant]") {
     auto& registry = pulp::view::LiveConstantRegistry::instance();
     [[maybe_unused]] auto& v =
@@ -734,7 +736,6 @@ TEST_CASE("LiveConstant.reset rolls a value back to its default",
     REQUIRE_THAT(registry.get("test_reset"),
                  Catch::Matchers::WithinAbs(2.0, 0.001));
 }
-
 
 // ── Console domain: device-log cursor poll ───────────────────────────────────
 

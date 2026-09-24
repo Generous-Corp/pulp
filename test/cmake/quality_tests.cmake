@@ -1085,4 +1085,26 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-catch-multilabel-properties PROPERTIES
         LABELS "cmake;ci"
         TIMEOUT 120)
+
+    # Grouped suites (pulp_add_test_suite ... GROUP): one executable, every
+    # member discovered under its own labels and properties, and a member
+    # whose file tag matches nothing fails the build instead of vanishing.
+    add_test(
+        NAME cmake-test-group-discovery
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/test_pulp_test_group.py)
+    set_tests_properties(cmake-test-group-discovery PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 180)
+
+    # The comparator that proves a registration refactor kept every CTest name
+    # and property. Its self-check plants a rename, a dropped label, a lost
+    # test and an extra one and requires each to be reported.
+    add_test(
+        NAME ctest-inventory-parity-self-check
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/ctest_inventory_parity.py self-check)
+    set_tests_properties(ctest-inventory-parity-self-check PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 60)
 endif()
