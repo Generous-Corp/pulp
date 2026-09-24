@@ -1,0 +1,74 @@
+{
+  "id": "au-host-mono-channel-negotiation",
+  "title": "AU host slot negotiates the caller's channel width instead of the descriptor default",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "au-host-mono-channel-negotiation-20260926",
+  "owned_paths": [
+    "core/host/include/pulp/host/plugin_slot.hpp",
+    "core/host/src/plugin_slot_au.mm",
+    "tools/cli/cmd_audio_render.cpp",
+    "test/test_plugin_slot_au.mm",
+    ".agents/skills/hosting/SKILL.md",
+    ".agents/skills/cli-maintenance/SKILL.md",
+    "docs/status/sequencer-exposure/rows/au-host-mono-channel-negotiation.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/plugin_slot.hpp",
+      "needles": [
+        "virtual void set_preferred_channel_layout(int /*inputs*/, int /*outputs*/) {}"
+      ]
+    },
+    {
+      "path": "core/host/src/plugin_slot_au.mm",
+      "needles": [
+        "void set_preferred_channel_layout(int inputs, int outputs) override",
+        "scope == kAudioUnitScope_Input ? in_channels : out_channels"
+      ]
+    },
+    {
+      "path": "test/test_plugin_slot_au.mm",
+      "needles": [
+        "AU host negotiates the caller's requested channel width"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "set_preferred_channel_layout is a public virtual on the installed PluginSlot header, appended after every existing virtual (immediately after bypass_surface) so a downstream subclass keeps its slot layout -- the additive-only vtable ordering the pre-push guard enforces. Its body is a no-op, so a slot that does not override it behaves exactly as before and an SDK consumer that never calls it sees no change. Only the AU slot overrides it, because only a format that fixes its stream shape at initialize time needs the caller's width in advance.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/plugin_slot.hpp",
+          "needles": [
+            "virtual void set_preferred_channel_layout(int /*inputs*/, int /*outputs*/) {}"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command is added or altered. `pulp audio render` is an audio-render command, not a Timeline surface, and its flags are unchanged -- --in-channels/--out-channels keep their documented meaning and now actually reach the AU slot."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added, removed or changed."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No product control, grant or policy projection is created. The change corrects the stream format an AU is initialized with inside the host slot; no musician-facing control surface is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time authoring capability is added or altered. The new virtual is a host-embedding detail, not an authoring operation."
+    }
+  }
+}
