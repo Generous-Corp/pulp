@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The visual-analysis install step resolves the interpreter CMake configured.
 
-The step installs tools/motion/visual/requirements.txt into the interpreter
+The step installs the hash-pinned resolution of
+tools/motion/visual/requirements.txt (requirements.lock) into the interpreter
 ctest will launch, so a wrong answer here is silent: the install lands in some
 other interpreter, every visual test goes on skipping, and the step reports
 success. That makes a structural assertion on the step's text worthless — it
@@ -30,6 +31,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import re
 import textwrap
 import unittest
 from pathlib import Path
@@ -40,6 +42,7 @@ REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/build.yml"
 STEP_NAME = "Install visual-analysis Python dependencies"
 REQUIREMENTS = REPO / "tools/motion/visual/requirements.txt"
+LOCK = REPO / "tools/motion/visual/requirements.lock"
 
 # Entries a real cache carries that share the prefix but are not the
 # interpreter. A fixture that omitted them could not catch a loosened pattern.
@@ -51,6 +54,14 @@ DECOYS = "\n".join(
         "Python3_NumPy_INCLUDE_DIR:PATH=Python3_NumPy_INCLUDE_DIR-NOTFOUND",
     )
 )
+
+
+def _canonical(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
 
 
 def _step_script() -> str:
@@ -70,46 +81,51 @@ class VisualPythonDepsStepTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.script = _step_script()
 
-    def _run(self, cache_body: str, *, pep668: bool = False,
-             satisfied: bool = False):
-        """Run the step with a fixture cache. Returns (proc, argv_lines).
+    def _run(
+        self,
+        cache_body: str,
+        *,
+        pep668: bool = False,
+        satisfied: bool = False,
+        index_failures: int = 0,
+        wheelhouse: str | None = None,
+        wheelhouse_ok: bool = True,
+    ):
+        """Run the step with a fixture cache. Returns (proc, install_argv_lines).
 
         `cache_body` may contain {py}, replaced by the stub interpreter's path.
-        With pep668, the stub refuses a plain --user install the way a
-        Homebrew/Debian interpreter does, exercising the step's fallback.
-        With satisfied, the stub answers the `--dry-run --no-index` probe
-        successfully, standing in for a VM that already carries the wheels —
-        the case where the step must not reach the network at all.
+        The step first probes with `pip install --dry-run --no-index`; the stub
+        answers that probe per `satisfied` (default: NOT satisfied, so the
+        install paths stay exercised). Probes are excluded from the returned
+        lines; every pip invocation, probes included and in order, is kept on
+        `self.pip_calls`. The stub answers the step's PEP 668 probe per
+        `pep668`, fails the first `index_failures` index installs, and fails a
+        --no-index install unless `wheelhouse_ok`. `wheelhouse` is "present",
+        "missing" or None (unset).
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             build_dir = tmp_path / "build-fixture"
             build_dir.mkdir()
             argv_log = tmp_path / "argv.log"
+            counter = tmp_path / "index-attempts"
 
             stub = tmp_path / "stub-python3"
-            # The step probes with `--dry-run --no-index` before installing.
-            # Default: report NOT satisfied, so the install paths below stay
-            # exercised. With satisfied=True the probe succeeds and the step
-            # must stop there.
-            probe = (
-                'case " $* " in *" --no-index "*) exit %d ;; esac\n'
-                % (0 if satisfied else 1)
-            )
-            refuse = (
-                'case " $* " in *" --break-system-packages "*) exit 0 ;; esac\nexit 1\n'
-                if pep668
-                else "exit 0\n"
-            )
             stub.write_text(
                 textwrap.dedent(
                     f"""\
                     #!/bin/bash
+                    if [ "$1" = "-c" ]; then exit {0 if pep668 else 1}; fi
                     printf '%s\\n' "$*" >> {argv_log}
+                    case " $* " in
+                      *" --dry-run "*) exit {0 if satisfied else 1} ;;
+                      *" --no-index "*) exit {0 if wheelhouse_ok else 1} ;;
+                    esac
+                    n=$(( $(cat {counter} 2>/dev/null || echo 0) + 1 ))
+                    echo "$n" > {counter}
+                    [ "$n" -gt {index_failures} ]
                     """
-                )
-                + probe
-                + refuse,
+                ),
                 encoding="utf-8",
             )
             stub.chmod(0o755)
@@ -118,19 +134,32 @@ class VisualPythonDepsStepTest(unittest.TestCase):
                 cache_body.format(py=stub) + "\n", encoding="utf-8"
             )
 
+            env = {
+                **os.environ,
+                "PULP_BUILD_DIR": str(build_dir),
+                "PULP_PIP_RETRY_DELAY_SECS": "0",
+            }
+            env.pop("TARTCI_PIP_WHEELHOUSE", None)
+            if wheelhouse is not None:
+                house = tmp_path / "wheelhouse"
+                if wheelhouse == "present":
+                    house.mkdir()
+                env["TARTCI_PIP_WHEELHOUSE"] = str(house)
+
             proc = subprocess.run(
                 ["bash", "-c", self.script],
                 cwd=REPO,
-                env={**os.environ, "PULP_BUILD_DIR": str(build_dir)},
+                env=env,
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
-            invocations = (
+            self.pip_calls = (
                 argv_log.read_text(encoding="utf-8").splitlines()
                 if argv_log.exists()
                 else []
             )
+            invocations = [c for c in self.pip_calls if "--dry-run" not in c]
             return proc, invocations
 
     def test_resolves_the_interpreter_find_package_recorded(self) -> None:
@@ -139,7 +168,8 @@ class VisualPythonDepsStepTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(invocations, "the resolved interpreter was never invoked")
         self.assertIn("-m pip install", invocations[0])
-        self.assertIn("-r tools/motion/visual/requirements.txt", invocations[0])
+        self.assertIn("--require-hashes", invocations[0])
+        self.assertIn("-r tools/motion/visual/requirements.lock", invocations[0])
 
     def test_resolves_an_explicitly_pinned_interpreter(self) -> None:
         """The shape a -DPython3_EXECUTABLE configure produces (Shipyard local)."""
@@ -175,18 +205,102 @@ class VisualPythonDepsStepTest(unittest.TestCase):
         self.assertIn("_Python3_EXECUTABLE", proc.stderr)
         self.assertIn("Python3_EXECUTABLE", proc.stderr)
 
-    def test_falls_back_to_the_pep668_override(self) -> None:
-        """Homebrew and Debian refuse a plain --user install."""
+    def test_pep668_interpreter_gets_the_override_on_the_first_install(self) -> None:
+        """Homebrew and Debian refuse a plain --user install.
+
+        The step probes for EXTERNALLY-MANAGED once instead of retrying every
+        install, so an index outage is not paid twice per attempt.
+        """
         proc, invocations = self._run(
             "_Python3_EXECUTABLE:INTERNAL={py}", pep668=True
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        # Assert the SHAPE of the install attempts, not a raw count: the
-        # `--no-index` probe runs first and is not an install.
-        installs = [i for i in invocations if "--no-index" not in i]
-        self.assertEqual(len(installs), 2, invocations)
-        self.assertNotIn("--break-system-packages", installs[0])
-        self.assertIn("--break-system-packages", installs[1])
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertIn("--break-system-packages", invocations[0])
+
+    def test_unmanaged_interpreter_gets_no_override(self) -> None:
+        proc, invocations = self._run("_Python3_EXECUTABLE:INTERNAL={py}")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertNotIn("--break-system-packages", invocations[0])
+
+    def test_host_wheelhouse_installs_without_the_index(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", wheelhouse="present"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertIn("--no-index", invocations[0])
+        self.assertIn("--find-links", invocations[0])
+        self.assertIn("--require-hashes", invocations[0])
+
+    def test_unusable_wheelhouse_falls_back_to_the_index(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}",
+            wheelhouse="present",
+            wheelhouse_ok=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(invocations), 2, invocations)
+        self.assertIn("--no-index", invocations[0])
+        self.assertNotIn("--no-index", invocations[1])
+        self.assertIn("--require-hashes", invocations[1])
+        self.assertIn("falling back to the package index", proc.stdout)
+
+    def test_declared_but_missing_wheelhouse_uses_the_index(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", wheelhouse="missing"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(invocations), 1, invocations)
+        self.assertNotIn("--no-index", invocations[0])
+
+    def test_transient_index_failures_are_retried(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", index_failures=2
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(invocations), 3, invocations)
+
+    def test_a_persistent_index_failure_fails_the_step(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", index_failures=99
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(len(invocations), 3, invocations)
+        self.assertIn("after 3 attempts", proc.stderr)
+
+    def test_the_lock_pins_every_declared_requirement(self) -> None:
+        """A requirement added to requirements.txt must be regenerated here.
+
+        Otherwise CI would keep installing the old closure and the new
+        dependency would be missing from exactly the lane meant to prove it.
+        """
+        pins: dict[str, str] = {}
+        hashed: set[str] = set()
+        current = None
+        for raw in LOCK.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            match = re.match(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", line)
+            if match:
+                current = _canonical(match.group(1))
+                pins[current] = match.group(2)
+            elif line.startswith("--hash=sha256:") and current:
+                hashed.add(current)
+        self.assertTrue(pins, f"{LOCK} pins nothing")
+        self.assertEqual(set(pins), hashed, "every pin must carry a sha256 hash")
+        for raw in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            match = re.match(r"^([A-Za-z0-9_.-]+)\s*>=\s*([0-9.]+)$", line)
+            self.assertIsNotNone(match, f"unrecognised requirement {line!r}")
+            name, floor = _canonical(match.group(1)), match.group(2)
+            self.assertIn(name, pins, f"{name} is declared but not locked")
+            self.assertGreaterEqual(
+                _version(pins[name]), _version(floor),
+                f"{name}=={pins[name]} does not satisfy >={floor}",
+            )
 
     def test_an_already_satisfied_set_never_reaches_the_index(self) -> None:
         """The poka-yoke: a provisioned VM must not need PyPI to be reachable.
@@ -200,10 +314,30 @@ class VisualPythonDepsStepTest(unittest.TestCase):
             "_Python3_EXECUTABLE:INTERNAL={py}", satisfied=True
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        probes = [i for i in invocations if "--no-index" in i]
-        installs = [i for i in invocations if "--no-index" not in i]
-        self.assertEqual(len(probes), 1, invocations)
-        self.assertEqual(installs, [], "a satisfied set must install nothing")
+        probes = [c for c in self.pip_calls if "--dry-run" in c]
+        self.assertEqual(len(probes), 1, self.pip_calls)
+        self.assertIn("--no-index", probes[0])
+        self.assertIn("-r tools/motion/visual/requirements.txt", probes[0])
+        self.assertEqual(invocations, [], "a satisfied set must install nothing")
+
+    def test_a_satisfied_set_skips_even_a_declared_wheelhouse(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}",
+            satisfied=True,
+            wheelhouse="present",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(invocations, [], self.pip_calls)
+
+    def test_the_satisfied_probe_runs_before_any_install(self) -> None:
+        """The no-network check must come first, or it protects nothing."""
+        proc, invocations = self._run("_Python3_EXECUTABLE:INTERNAL={py}")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(invocations, self.pip_calls)
+        self.assertIn("--dry-run", self.pip_calls[0])
+        self.assertTrue(
+            all("--dry-run" not in c for c in self.pip_calls[1:]), self.pip_calls
+        )
 
     def test_the_declared_requirements_file_exists(self) -> None:
         """The step installs by path; a rename must break here, not in CI."""
