@@ -65,7 +65,7 @@ TEST_CASE("an existing cache with an empty build type is filled with Release",
     REQUIRE(configure_default_args(in) == std::vector<std::string>{"-DCMAKE_BUILD_TYPE=Release"});
 }
 
-TEST_CASE("--examples opts in; standalone projects never get the option",
+TEST_CASE("the examples flag opts in; standalone projects never get the option",
           "[cli][configure-defaults]") {
     ConfigureDefaults in;
     in.existing_cache = "PULP_BUILD_EXAMPLES:BOOL=OFF\nCMAKE_BUILD_TYPE:STRING=Release\n";

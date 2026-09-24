@@ -503,7 +503,7 @@ pub fn cmake_cache_value<'a>(cache: &'a str, name: &str) -> Option<&'a str> {
 
 /// Generator, build-type, and examples arguments for a `pulp build` configure.
 ///
-/// - Generator: `-G Ninja` only for a fresh build dir. CMake refuses to switch
+/// - Generator: `-G Ninja` only for a fresh build dir. `CMake` refuses to switch
 ///   the generator of an existing cache, so an existing dir keeps whatever it
 ///   was created with.
 /// - Build type: an explicit `PULP_BUILD_TYPE` always applies; otherwise
