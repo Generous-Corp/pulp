@@ -151,6 +151,47 @@ def agent_capability_installed_sdk_required(files: list[str]) -> bool:
     )
 
 
+# Paths that the iOS compile gate reads even though they sit under a prefix
+# `ios_compile_skip_safe_paths` authorizes. Checked before that allowlist, so a
+# match always runs the gate. The gate configures with PULP_BUILD_TESTS=OFF, so
+# most of test/ and docs/ never reaches it; these are the exceptions:
+#   - the gate's own scripts, which build.yml executes;
+#   - sources core/midi compiles into the iOS CoreMIDI contract and harness;
+#   - every test/ and docs/ path a non-test CMake file the iOS configure
+#     reaches names (examples, bindings, install rules, gpu_health), because
+#     the GPU leg configures with examples ON and a missing or renamed file
+#     fails configure. The desktop CLI (tools/cli, tools/cli/gpu_probe) is
+#     added only for non-iOS builds, so its references are out of scope.
+# test_classify_changes.py re-derives the last group from the live CMake tree,
+# so a new reference that is not listed here fails that test.
+IOS_COMPILE_REQUIRED_PATTERNS = (
+    # The gate's own scripts.
+    "test/cmake/test_ios_*",
+    # Compiled into the iOS CoreMIDI contract and Simulator harness.
+    "test/ios/**",
+    "test/test_coremidi_shared_client.cpp",
+    # Named by non-test CMake the iOS configure reaches.
+    "test/harness/**",
+    "test/support/**",
+    "test/native_components/**",
+    "test/fixtures/**",
+    "test/*_bundle_lifecycle.cpp",
+    "test/gpu_health_scene3d_acceptance.cpp",
+    "test/test_gpu_health_*.cpp",
+    "test/test_python_bindings*",
+    "test/test_control_phase15_aggregate_e2e.cpp",
+    "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "docs/contracts/**",
+    "docs/status/*.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "docs/status/agent-capabilities.json",
+    "docs/status/authority-navigation.json",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/guides/intel-support.md",
+)
+
+
 def _matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
@@ -164,9 +205,13 @@ def _mobile_skip_authorized(policy: dict, path: str) -> bool:
     """
     if path == ".shipyard/config.toml" or _matches(path, policy["policy_paths"]):
         return False
-    if _matches(path, policy["test_topology_paths"]):
-        return False
     if _matches(path, policy["full_required_paths"]):
+        return False
+    # Test-topology paths (test/cmake manifests, tools/scripts/test_*.py)
+    # change which ctests exist, not what the iOS gate compiles: that gate
+    # configures with PULP_BUILD_TESTS=OFF. The ones it does read are denied
+    # here explicitly rather than through the topology list.
+    if _matches(path, list(IOS_COMPILE_REQUIRED_PATTERNS)):
         return False
     return _matches(path, policy["ios_compile_skip_safe_paths"])
 

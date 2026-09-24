@@ -1741,6 +1741,34 @@ jobs:
             ~/AppData/Local/ccache
           key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
 
+      - name: Test fast deterministic tier (pull request head)
+        # The full suite below runs only in the merge queue, where one failure
+        # ejects every pull request batched with it. The `pr-fast` label
+        # (test/cmake/pr_fast_tests.cmake) is the static-contract tier: lint,
+        # drift, registry-completeness and generated-manifest checks that read
+        # the tree, finish in seconds, and assert no wall-clock bound, so they
+        # cannot reintroduce the load-dependent flakes the queue split removed.
+        # Running them here reports a forgotten regeneration on the pull
+        # request that caused it instead of in a batch it poisons.
+        #
+        # This is NOT test evidence for the merge: it writes its own JUnit file
+        # (never ctest.junit.xml) and the merge queue still runs the full suite.
+        # `--no-tests=error` makes a label that selects nothing a failure.
+        id: pr_fast_tests
+        if: runner.os != 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same label exclusions as the full suite, from the same module.
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
+            -L '^pr-fast$' -LE "$label_exclude" \
+            --no-tests=error --timeout 120 -j4 \
+            --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+
       - name: Test (non-Windows)
         # Tests run in the merge queue, not on the pull request head. The queue
         # validates the exact commit that will land, so skipping here loses no
@@ -2008,6 +2036,7 @@ jobs:
           path: |
             ${{ env.PULP_BUILD_DIR }}/Testing/Temporary/
             ${{ env.PULP_BUILD_DIR }}/ctest.junit.xml
+            ${{ env.PULP_BUILD_DIR }}/ctest-pr-fast.junit.xml
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
