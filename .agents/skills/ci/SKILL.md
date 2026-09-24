@@ -1398,6 +1398,61 @@ points at a force-pushed-away commit — between the force-push and the next
 That window is narrow and does not touch the shape the gate is for: a commit
 amended before its first push was never on any remote ref.
 
+## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
+
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
+`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
+0.1s and ~2s, no build tree, no configure. The required gate already runs them
+as ctests, so this adds no coverage; it moves *when* you find out.
+
+That timing is the whole point. A batch is main plus every entry ahead of it, so
+a bad test registration does not fail only its author: it fails the batch, ejects
+PRs that did nothing wrong, and the queue re-forms on the same failure until
+somebody reads a log. A single literal `TIMEOUT` inside `catch_discover_tests`
+has held eighteen PRs this way, and `catch_discover_timeout_guard.py` names the
+exact file and line in a tenth of a second.
+
+What each one refuses:
+
+- **A literal `TIMEOUT` in a `catch_discover_tests` block.** The budget must be
+  a scaled variable, because a literal is not widened on the instrumented lanes
+  and the test is killed at an uninstrumented budget:
+
+      pulp_scaled_test_timeout(_pulp_<name>_timeout <seconds>)
+      catch_discover_tests(<target>
+          PROPERTIES TIMEOUT "${_pulp_<name>_timeout}")
+
+  Prior art: `test/cmake/app_audio_host_tests.cmake`,
+  `test/cmake/character_delay_tests.cmake`. The guard honours an inline
+  `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
+  since the skip marker evades the thing the guard exists to catch.
+
+- **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
+  `return` at the top of a case leaves it PASSING, so the suite's pass count is
+  identical whether the lane ran or the precondition vanished. Use `SKIP()`.
+  `tools/scripts/check_skip_not_pass.json` is a frozen ledger whose `sites`
+  counts may shrink and never grow — a count that has DROPPED is an error, so
+  lower it in the same change or delete the entry at zero.
+
+Diff-scoped, like the unbounded-wait lint: a violation is fatal only when it sits
+on a path the push changes, and one elsewhere is reported without failing. That
+keeps a pre-existing backlog on the base from blocking every developer's push. It
+is reported rather than swallowed because a violation on the base still reds the
+required gate for whoever owns it.
+
+Two traps when running these by hand:
+
+- **Run them against a ref, not a working tree.** A checkout parked on an old
+  branch may not even contain the scripts, and the resulting "not found" reads
+  as a clean run. Use `git archive <ref> | tar -x -C "$(mktemp -d)"` and assert
+  a non-zero extracted file count.
+- **Extract the WHOLE tree for `check_skip_not_pass`.** It reports a ledger entry
+  as "listed in the ledger but not scanned" when the file is merely absent from
+  your extraction, which looks like a real finding and is not.
+
+`PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
+run as ctests on the required gate.
+
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
