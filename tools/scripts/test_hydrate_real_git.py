@@ -28,6 +28,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 
 import hydrate_gpu_provenance_commits as hydration
 
+# The queue's own branch-naming shape, base sha and all.
+QUEUE_BRANCH = "gh-readonly-queue/main/pr-4321-" + "b" * 40
+
 
 def git(cwd: pathlib.Path, *args: str) -> str:
     return subprocess.run(
@@ -166,6 +169,106 @@ class RealGitHydrationTest(unittest.TestCase):
         code, output = run_verify_only(checkout)
         self.assertEqual(code, 1)
         self.assertIn(orphan, output)
+
+
+class MergeGroupHydrationTest(unittest.TestCase):
+    """A merge-queue run whose own branch was deleted out from under it.
+
+    The queue names each batch `gh-readonly-queue/<base>/pr-<n>-<base sha>` and
+    deletes that branch the moment it re-forms the batch onto a newer base. The
+    run holding the old name keeps going, so its hydration step asks for a ref
+    the remote no longer has while the history it wants is entirely intact. The
+    fixture reproduces that exactly: the branch is gone, the batch head is
+    reachable from no remaining ref, and the pinned commit is a true ancestor.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(self._tmp.name)
+
+        source = self.root / "source"
+        source.mkdir()
+        git(source, "init", "-q", "-b", "main", ".")
+        git(source, "config", "user.email", "hydration@pulp.test")
+        git(source, "config", "user.name", "hydration test")
+        for index in range(4):
+            (source / f"f{index}.txt").write_text(f"{index}\n", encoding="utf-8")
+            git(source, "add", f"f{index}.txt")
+            git(source, "commit", "-qm", f"c{index}")
+        self.provenance = git(source, "rev-parse", "HEAD~3")
+        # The batch commit sits ahead of main, as a real merge-group head does.
+        git(source, "checkout", "-q", "-b", "batch")
+        (source / "batch.txt").write_text("batch\n", encoding="utf-8")
+        git(source, "add", "batch.txt")
+        git(source, "commit", "-qm", "queued batch")
+        self.batch_head = git(source, "rev-parse", "HEAD")
+        git(source, "checkout", "-q", "main")
+
+        self.remote = self.root / "remote.git"
+        git(self.root, "clone", "-q", "--bare", str(source), str(self.remote))
+        git(self.remote, "update-ref", "refs/heads/" + QUEUE_BRANCH, self.batch_head)
+        git(self.remote, "update-ref", "-d", "refs/heads/batch")
+
+        self.checkout = self.root / "checkout"
+        git(
+            self.root, "clone", "-q", "--depth", "1", "--branch", QUEUE_BRANCH,
+            self.remote.as_uri(), str(self.checkout),
+        )
+        git(self.checkout, "config", "user.email", "hydration@pulp.test")
+        git(self.checkout, "config", "user.name", "hydration test")
+        write_provenance(self.checkout, [self.provenance], self.provenance)
+
+        # The queue re-forms the batch onto a newer base and drops the old name.
+        git(self.remote, "update-ref", "-d", "refs/heads/" + QUEUE_BRANCH)
+
+        self.assertEqual(
+            git(self.checkout, "rev-parse", "--is-shallow-repository"), "true"
+        )
+        self.assertFalse(hydration.is_commit(self.checkout, self.provenance))
+
+    def assert_queue_branch_is_unfetchable(self) -> None:
+        """The fixture is only meaningful while the queue branch is really gone."""
+        completed = subprocess.run(
+            ["git", "fetch", "--no-tags", "origin", "refs/heads/" + QUEUE_BRANCH],
+            cwd=self.checkout, text=True, capture_output=True, check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("couldn't find remote ref", completed.stderr)
+
+    def test_a_deleted_queue_branch_hydrates_through_the_event_commit(self) -> None:
+        self.assert_queue_branch_is_unfetchable()
+        env = {"GITHUB_REF": "refs/heads/" + QUEUE_BRANCH, "GITHUB_SHA": self.batch_head}
+        with mock.patch.dict("os.environ", env):
+            total, missing = hydration.hydrate(self.checkout, "origin")
+        self.assertEqual((total, missing), (1, 1))
+        self.assertTrue(hydration.is_commit(self.checkout, self.provenance))
+        self.assertEqual(
+            git(self.checkout, "rev-parse", "--is-shallow-repository"), "false"
+        )
+
+    def test_without_the_event_commit_the_same_run_fails_closed(self) -> None:
+        """The control: the commit id is what rescues this, and nothing else.
+
+        Same fixture, same unfetchable ref, only `GITHUB_SHA` withheld. It must
+        still fail, or the test above would pass on a repository that hydrated
+        for some other reason.
+        """
+        self.assert_queue_branch_is_unfetchable()
+        env = {"GITHUB_REF": "refs/heads/" + QUEUE_BRANCH, "GITHUB_SHA": ""}
+        with mock.patch.dict("os.environ", env):
+            with self.assertRaises(hydration.HydrationError) as raised:
+                hydration.hydrate(self.checkout, "origin")
+        self.assertIn("remain unresolved", str(raised.exception))
+
+    def test_a_reachable_queue_branch_is_still_preferred(self) -> None:
+        """A live ref decides the fetch; the commit id never displaces it."""
+        self.assertEqual(
+            hydration.event_ref_candidates(
+                "refs/heads/" + QUEUE_BRANCH, self.batch_head
+            ),
+            ["refs/heads/" + QUEUE_BRANCH, self.batch_head],
+        )
 
 
 class OrphanedPinTest(unittest.TestCase):

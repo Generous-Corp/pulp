@@ -39,6 +39,15 @@ target_include_directories(pulp-test-cli-overflow-selector PRIVATE
 target_link_libraries(pulp-test-cli-overflow-selector PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-overflow-selector)
 
+add_executable(pulp-test-cli-configure-defaults test_cli_configure_defaults.cpp)
+target_include_directories(pulp-test-cli-configure-defaults PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-configure-defaults PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
+    PULP_BUILD_DIR="${CMAKE_BINARY_DIR}")
+catch_discover_tests(pulp-test-cli-configure-defaults)
+
 # CLI create shell-out edge tests. These launch the built CLI but stay on
 # fail-fast paths that do not run doctor, configure, build, or network setup.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
@@ -254,7 +263,7 @@ catch_discover_tests(pulp-test-cli-tweaks-shellout)
 add_executable(pulp-test-cli-shell-quote
     test_cli_shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -280,7 +289,7 @@ catch_discover_tests(pulp-test-cli-shell-quote)
 add_executable(pulp-test-cli-checkout-dependencies
     test_cli_checkout_dependencies.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
@@ -302,7 +311,7 @@ catch_discover_tests(pulp-test-cli-checkout-dependencies)
 add_executable(pulp-test-cli-tartci-lease
     test_cli_tartci_lease.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
@@ -328,7 +337,7 @@ catch_discover_tests(pulp-test-cli-tartci-lease)
 add_executable(pulp-test-cli-git-lock-health
     test_cli_git_lock_health.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
@@ -353,7 +362,7 @@ add_executable(pulp-test-cli-docs-command
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/authority_navigation.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp

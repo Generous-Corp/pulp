@@ -2,6 +2,7 @@
 // Combines build --watch + test + validate + process supervision in one command.
 
 #include "cli_common.hpp"
+#include "focused_build.hpp"
 #include "tartci_lease.hpp"
 
 #include <iostream>
@@ -24,7 +25,9 @@ int cmd_dev(const std::vector<std::string>& args) {
     std::vector<std::string> launch_args;
     std::vector<std::string> build_args;
     bool allow_unsupported_sdk = false;
+    bool examples = false;
     bool hot_dsp = false;
+    bool build_all = false;
     bool after_separator = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -42,6 +45,9 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout << "                         ReloadableShell hot-swaps the rebuilt logic live (no relaunch)\n";
             std::cout << "  --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n";
             std::cout << "  --target T             Pass --target T to cmake --build\n";
+            std::cout << "  --all                  Build every target and run every test (default: only\n"
+                         "                         those affected by the working diff)\n";
+            std::cout << "  --examples             Configure the source checkout with example projects\n";
             std::cout << "  --allow-unsupported-sdk  Bypass the CLI-vs-project SDK guard (unsupported)\n";
             std::cout << "  -- args...             Arguments passed to the launched app\n\n";
             std::cout << "Examples:\n";
@@ -72,8 +78,12 @@ int cmd_dev(const std::vector<std::string>& args) {
             run_tests = true;
         } else if (args[i] == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
+        } else if (args[i] == "--examples") {
+            examples = true;
         } else if (args[i] == "--hot-dsp") {
             hot_dsp = true;
+        } else if (args[i] == "--all") {
+            build_all = true;
         } else if (args[i] == "--validate") {
             run_validate = true;
         } else if (args[i] == "--run") {
@@ -87,8 +97,10 @@ int cmd_dev(const std::vector<std::string>& args) {
                 std::cerr << "pulp dev: --design requires a value\n";
                 return 2;
             }
-            // Build the design tool target and launch it with the script
+            // Build the design tool target and launch it with the script.
+            // pulp-design-tool lives under examples/.
             auto script = args[++i];
+            examples = true;
             build_args.push_back("--target");
             build_args.push_back("pulp-design-tool");
 
@@ -142,20 +154,37 @@ int cmd_dev(const std::vector<std::string>& args) {
     // Ensure configured
     if (!fs::exists(build_dir / "CMakeCache.txt")
         || (!standalone_mode
-            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))
+        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir))) {
         std::cout << "Project not configured. Building first...\n";
         std::vector<std::string> bootstrap_args;
         if (allow_unsupported_sdk) {
             bootstrap_args.push_back("--allow-unsupported-sdk");
         }
+        if (examples) bootstrap_args.push_back("--examples");
+        // The bootstrap build focuses like this command would; an explicit
+        // target or --all here means the bootstrap builds everything.
+        if (build_all || build_args_name_target(build_args)) bootstrap_args.push_back("--all");
         int rc = cmd_build(bootstrap_args);
         if (rc != 0) return rc;
     }
 
+
+    // Focused build: select the targets the working diff affects. The
+    // selector reads the CMake file-API codemodel, which only a configure
+    // that finds the query already in place produces.
+    const bool focus = focused_build_applicable(project_root, standalone_mode, build_args, build_all);
+    if (focus) {
+        int crc = ensure_codemodel_reply(project_root, build_dir, !standalone_mode, examples);
+        if (crc != 0) return crc;
+    }
+    const auto selection = select_for_rebuild(project_root, build_dir, focus, "");
+
     // Initial build
     std::string build_cmd = "cmake --build " + build_dir.string();
     for (auto& arg : capped_build.args) build_cmd += " " + arg;
-    int rc = run_with_spinner(
+    build_cmd = focused_build_command(build_cmd, selection);
+    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
         apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
                                    lease.jobs(),
                                    lease.active()),
@@ -173,6 +202,7 @@ int cmd_dev(const std::vector<std::string>& args) {
     opts.run_tests = run_tests;
     opts.test_filter = test_filter;
     opts.run_validate = run_validate;
+    opts.focus = focus;
     opts.launch_target = launch_target;
     opts.launch_args = launch_args;
     opts.hot_dsp = hot_dsp;

@@ -4,6 +4,7 @@
   "_convention": "When promoting an entry off the cli_only list, add the matching pulp_<command> tool to tools/mcp/pulp_mcp.cpp's tools_list_json() AND a corresponding handler dispatch in handle_request(); the parity check will then auto-detect the new coverage. When promoting a tool off the mcp_only list, add the matching CLI command to tools/cli/pulp_cli.cpp's command tables or experimental/pulp-rs/src/main.rs's Command enum.",
   "cli_only": {
     "add": "Package add \u2014 agents shell out to `pulp add` directly; no MCP gain",
+    "affected": "Projects the caller's own working-tree diff to build targets and tests; agents run `pulp affected --json` in their checkout, and the MCP server's process has no working diff to project",
     "audio": "Parent command \u2014 actual MCP surface is pulp_audio_model_* and pulp_audio_excerpt_find sub-tools",
     "audit": "License audit \u2014 agents shell out; output not RPC-shaped",
     "authority": "Static routing and provenance navigator over a source checkout, downstream exact selected SDK, or exact adjacent SDK registry; it exposes no semantic rows or live operations, so agents call the CLI directly",

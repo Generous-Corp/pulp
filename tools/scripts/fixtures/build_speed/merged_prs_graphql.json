@@ -1,0 +1,47 @@
+{
+    "data": {
+        "search": {
+            "nodes": [
+                {
+                    "number": 8760,
+                    "createdAt": "2026-09-23T19:31:12Z",
+                    "mergedAt": "2026-09-23T20:09:42Z",
+                    "timelineItems": {
+                        "nodes": [
+                            {
+                                "__typename": "AddedToMergeQueueEvent",
+                                "createdAt": "2026-09-23T20:06:47Z"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "number": 8758,
+                    "createdAt": "2026-09-23T15:24:23Z",
+                    "mergedAt": "2026-09-23T16:31:25Z",
+                    "timelineItems": {
+                        "nodes": [
+                            {
+                                "__typename": "AddedToMergeQueueEvent",
+                                "createdAt": "2026-09-23T16:28:36Z"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "number": 8744,
+                    "createdAt": "2026-09-23T06:14:28Z",
+                    "mergedAt": "2026-09-23T06:22:19Z",
+                    "timelineItems": {
+                        "nodes": [
+                            {
+                                "__typename": "AddedToMergeQueueEvent",
+                                "createdAt": "2026-09-23T06:19:27Z"
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+}

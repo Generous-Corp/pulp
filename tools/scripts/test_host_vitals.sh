@@ -130,6 +130,59 @@ else
   FAIL=$((FAIL+1)); printf '  [FAIL] json: sampled_at != %s in %s\n' "$NOW" "$json_out"
 fi
 
+# 13-16. --build-json: the build-capacity snapshot the sensor publishes for the
+# build-speed scorecard. A tool that cannot be found must read as null, never 0.
+jcheck() {  # jcheck <label> <json> <python expression over d>
+  if printf '%s' "$2" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if ($3) else 1)" 2>/dev/null; then
+    PASS=$((PASS+1)); printf '  [PASS] %s\n' "$1"
+  else
+    FAIL=$((FAIL+1)); printf '  [FAIL] %s: got %s\n' "$1" "$2"
+  fi
+}
+BHOME="$WORK/home"; mkdir -p "$BHOME"
+bj="$(HOME="$BHOME" PULP_VITALS_TOOL_PATH="" PULP_VITALS_SYSCTL="$STUB" STUB_NCPU=18 \
+  PULP_VITALS_NOW="$NOW" bash "$VITALS" --build-json 2>/dev/null)"
+jcheck "build-json: no tools -> nulls, not zeros" "$bj" \
+  'd["ccache_host"] is None and d["ccache_gate"] is None and d["tartci"]["leases"] is None and d["wheelhouse_wheels"] is None and d["ncpu"] == 18 and d["sampled_at"] == '"$NOW"
+
+TOOLS="$WORK/tools"; mkdir -p "$TOOLS" "$BHOME/.cache/pulp-ci/ccache" "$BHOME/.cache/pulp-ci/pip-wheelhouse"
+: > "$BHOME/.cache/pulp-ci/pip-wheelhouse/numpy-2.0-cp311.whl"
+: > "$BHOME/.cache/pulp-ci/pip-wheelhouse/pillow-11.0-cp311.whl"
+cat > "$TOOLS/ccache" <<'EOF2'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-p" ]; then echo "(conf) cache_dir = /cache/host"; echo "(conf) max_size = 200.0 GB"; exit 0; fi
+if [ "${1:-}" = "-d" ]; then
+  printf 'Cacheable calls:   100 / 100 (100.0%%)\n  Hits:               91 / 100 (91.00%%)\n    Direct:           91 /  91 (100.0%%)\n  Misses:              9 / 100 ( 9.00%%)\nUncacheable calls:     0 / 100 ( 0.00%%)\nLocal storage:\n  Cache size (GiB):   1.5 /   5.0 (30.00%%)\n'
+  exit 0
+fi
+printf 'Cacheable calls:   1953074 / 2070842 (94.31%%)\n  Hits:            1293682 / 1953074 (66.24%%)\n    Direct:        1159527 / 1293682 (89.63%%)\n  Misses:           659392 / 1953074 (33.76%%)\nUncacheable calls:  117654 / 2070842 ( 5.68%%)\nLocal storage:\n  Cache size (GB):   182.7 /   200.0 (91.35%%)\n  Cleanups:            740\n  Hits:            1293684 / 1953076 (66.24%%)\n'
+EOF2
+chmod +x "$TOOLS/ccache"
+bj="$(HOME="$BHOME" PULP_VITALS_TOOL_PATH="$TOOLS" PULP_VITALS_SYSCTL="$STUB" \
+  bash "$VITALS" --build-json 2>/dev/null)"
+jcheck "build-json: host ccache stats parsed" "$bj" \
+  'd["ccache_host"] == {"dir": "/cache/host", "hit_pct": 66.24, "size_gb": 182.7, "max_gb": 200, "cleanups": 740, "uncacheable_pct": 5.68}'
+jcheck "build-json: gate ccache read from its own dir" "$bj" \
+  'd["ccache_gate"]["hit_pct"] == 91.0 and d["ccache_gate"]["max_gb"] == 5 and d["ccache_gate"]["dir"].endswith("/.cache/pulp-ci/ccache")'
+jcheck "build-json: wheelhouse counted" "$bj" 'd["wheelhouse_wheels"] == 2'
+
+# 17-18. the sensor publishes the snapshot under "build", and PULP_VITALS_BUILD=0
+# keeps it out; the history log never carries it.
+SDIR="$WORK/state"
+HOME="$BHOME" PULP_VITALS_TOOL_PATH="$TOOLS" PULP_VITALS_STATE_DIR="$SDIR" \
+  PULP_VITALS_SYSCTL="$STUB" PULP_VITALS_REPORTS_DIR="$WORK/empty" \
+  bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1
+jcheck "sensor: publishes build snapshot" "$(cat "$SDIR/host_vitals.json")" \
+  '"level" in d and d["build"]["ccache_host"]["hit_pct"] == 66.24'
+if grep -q '"build"' "$SDIR/host_vitals.log"; then
+  FAIL=$((FAIL+1)); printf '  [FAIL] sensor: history log carries the build snapshot\n'
+else
+  PASS=$((PASS+1)); printf '  [PASS] sensor: history log stays health-only\n'
+fi
+HOME="$BHOME" PULP_VITALS_BUILD=0 PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSCTL="$STUB" \
+  PULP_VITALS_REPORTS_DIR="$WORK/empty" bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1
+jcheck "sensor: PULP_VITALS_BUILD=0 omits the snapshot" "$(cat "$SDIR/host_vitals.json")" '"build" not in d'
+
 echo ""
 echo "host_vitals: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

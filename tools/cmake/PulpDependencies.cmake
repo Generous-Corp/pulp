@@ -434,7 +434,18 @@ FetchContent_Declare(
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST OFF CACHE BOOL "" FORCE)
+# SDL3 precompiles src/SDL_internal.h into every one of its ~400 objects. A
+# TU compiled against a PCH is uncacheable for ccache unless the cache runs
+# with pch_defines sloppiness, and the PCH itself embeds the build path, so
+# those objects never hit across worktrees or clean VM checkouts either way.
+# SDL3 is a fixed dependency whose sources never change between builds, which
+# is exactly the compile ccache is for: turn its PCH off so every SDL3 object
+# is a plain, cacheable compile. Scoped to this FetchContent only.
+set(_pulp_sdl3_saved_disable_pch "${CMAKE_DISABLE_PRECOMPILE_HEADERS}")
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
 FetchContent_MakeAvailable(SDL3)
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS "${_pulp_sdl3_saved_disable_pch}")
+unset(_pulp_sdl3_saved_disable_pch)
 set(PULP_HAS_SDL3 TRUE)
 message(STATUS "Pulp: SDL3 enabled")
 

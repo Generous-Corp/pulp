@@ -375,6 +375,12 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     # additionally makes scanner/manifests first-class dependencies, so an
     # install or normal ALL build re-scans an unchanged binary after policy
     # changes instead of trusting a stale report.
+    #
+    # When the artifact relinks in the same build, the generator has already
+    # scheduled this stamp edge, but POST_BUILD has just scanned the new binary
+    # and touched the stamp. SKIP_IF_FRESH_STAMP lets the scanner return early
+    # when the stamp is strictly newer than every input this edge depends on,
+    # instead of scanning the same bytes a second time.
     set(_scanner "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_control_shipping_artifact.cmake")
     set(_scan_target "${artifact_target}_ControlShippingScan_${_format_identifier}")
     add_custom_command(
@@ -385,6 +391,7 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
             -DSHIPPING_MANIFEST=${_shipping_manifest}
             -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
             -DREPORT=$<TARGET_FILE_DIR:${artifact_target}>/${_shipping_manifest_stem}.control-shipping-report.json
+            -DSKIP_IF_FRESH_STAMP=${_scan_stamp}
             -P "${_scanner}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_scan_stamp}"
         DEPENDS ${artifact_target} "${_control_manifest}"

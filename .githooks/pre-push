@@ -676,10 +676,10 @@ fi
 
 # Local diff-coverage check — mirror the CI `Diff coverage required` gate
 # (75% by default; threshold lives in tools/scripts/coverage_config.json).
-# We only run the script when the diff actually touches a mapped coverage
-# surface (core/, tools/cli/, tools/scripts/) — otherwise we'd pay the
-# configure+build cost on doc-only or workflow-only PRs that CI's coverage
-# workflow itself bypasses for the gate.
+# The script skips a diff with no measurable C/C++ line before configuring,
+# and otherwise builds and tests only the targets the diff reaches
+# (tools/scripts/diff_cover_targets.py), falling back to every target when that
+# mapping is ambiguous.
 diff_cover_failed=0
 
 # Compat status-flip gate (#1657 control #2) — when a compat.json entry
@@ -743,9 +743,10 @@ elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
             # agent) misdiagnoses it as a transport problem again.
             echo "" >&2
             echo "┌──────────────────────────────────────────────────────────────────────┐" >&2
-            echo "│ pre-push: DIFF-COVERAGE BUILD running (configure + compile).           │" >&2
-            echo "│ Expect SEVERAL MINUTES of near-silence — this is a LOCAL BUILD, not a  │" >&2
-            echo "│ network/SSH hang. Do NOT kill it as a 'stuck push'.                    │" >&2
+            echo "│ pre-push: DIFF-COVERAGE BUILD running (configure + focused compile).   │" >&2
+            echo "│ Builds only the targets the diff reaches (PULP_DIFF_COVER_SELECT=all   │" >&2
+            echo "│ for the whole tree). Expect minutes of near-silence — a LOCAL BUILD,   │" >&2
+            echo "│ not a network/SSH hang. Do NOT kill it as a 'stuck push'.              │" >&2
             echo "│ Already validated (e.g. via 'shipyard pr')? Skip it:                   │" >&2
             echo "│     PULP_SKIP_DIFF_COVER=1 git push                                    │" >&2
             echo "└──────────────────────────────────────────────────────────────────────┘" >&2

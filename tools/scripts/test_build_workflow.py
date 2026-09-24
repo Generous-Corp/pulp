@@ -56,8 +56,27 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn("protected receipt decision unavailable", alias)
 
     def test_receipts_are_only_published_after_successful_pr_validation(self) -> None:
-        self.assertIn("github.event_name == 'pull_request'", WORKFLOW)
-        self.assertIn("success()", WORKFLOW)
+        issue = WORKFLOW.split("- name: Issue exact protected-validation receipt", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        condition = issue.split("run: |", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", condition)
+        self.assertIn("success()", condition)
+        # success() alone also holds when the Test step was skipped; the
+        # receipt must require that the tests actually ran and passed.
+        self.assertIn("steps.ctest.outcome == 'success'", condition)
+        for flag in ("--ctest-exit-file", "--ctest-selection", "--ctest-selected-json", "--ctest-junit"):
+            self.assertIn(flag, issue)
+
+    def test_ctest_step_records_receipt_evidence(self) -> None:
+        test_step = WORKFLOW.split("- name: Test (non-Windows)", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn("id: ctest", test_step)
+        self.assertIn('"$evidence_dir/selection.json"', test_step)
+        self.assertIn("ctest --show-only=json-v1 --test-dir", test_step)
+        self.assertIn('"$evidence_dir/exit-code"', test_step)
+        self.assertIn("--output-junit", test_step)
         self.assertIn("id: protected_receipt", WORKFLOW)
         self.assertIn("steps.protected_receipt.outcome == 'success'", WORKFLOW)
         self.assertIn("steps.protected_receipt.outputs.path", WORKFLOW)
@@ -179,6 +198,69 @@ class LocalProofWorkflowTest(unittest.TestCase):
         for name in sorted(ordinary):
             with self.subTest(job=name):
                 self.assertIn("!inputs.local_proof", str(self.jobs[name].get("if", "")))
+
+
+class CtestParallelismTest(unittest.TestCase):
+    """The non-Windows ctest -j follows a declared tartci lease, capped at 8.
+
+    Runs the derivation lines exactly as build.yml declares them, with a stub
+    getconf standing in for the runner's core count. A runner that declares no
+    lease keeps the prior -j8, so the change rolls out host by host.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        match = re.search(
+            r'^( *ctest_jobs=8$.*?)^ *echo "ctest parallelism',
+            WORKFLOW,
+            re.DOTALL | re.MULTILINE,
+        )
+        assert match, "build.yml no longer derives ctest_jobs"
+        cls.snippet = match.group(1) + 'echo "$ctest_jobs"\n'
+
+    def _jobs(self, cores: str | None, guest: str | None = None) -> int:
+        import os
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "getconf"
+            body = f"echo {cores}" if cores is not None else "exit 1"
+            stub.write_text(f"#!/bin/bash\n{body}\n", encoding="utf-8")
+            stub.chmod(0o755)
+            env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
+            env.pop("TARTCI_GUEST_CORES", None)
+            if guest is not None:
+                env["TARTCI_GUEST_CORES"] = guest
+            proc = subprocess.run(
+                ["bash", "-c", "set -euo pipefail\n" + self.snippet],
+                env=env, capture_output=True, text=True, check=True,
+            )
+        return int(proc.stdout.strip())
+
+    def test_undeclared_runner_keeps_the_prior_parallelism(self) -> None:
+        self.assertEqual(self._jobs("3"), 8)
+        self.assertEqual(self._jobs("28"), 8)
+
+    def test_small_guest_is_not_oversubscribed(self) -> None:
+        self.assertEqual(self._jobs("3", guest="3"), 3)
+        self.assertEqual(self._jobs("6", guest="6"), 6)
+
+    def test_large_guest_is_capped_at_eight(self) -> None:
+        self.assertEqual(self._jobs("12", guest="12"), 8)
+
+    def test_declared_lease_can_only_narrow(self) -> None:
+        self.assertEqual(self._jobs("12", guest="3"), 3)
+        self.assertEqual(self._jobs("6", guest="16"), 6)
+        self.assertEqual(self._jobs(None, guest="3"), 3)
+
+    def test_garbage_is_ignored(self) -> None:
+        for bad in ("", "0", "abc", "-2"):
+            with self.subTest(value=bad):
+                self.assertEqual(self._jobs("6", guest=bad), 8)
+
+    def test_non_windows_ctest_uses_the_derived_value(self) -> None:
+        self.assertIn('-j"$ctest_jobs" --timeout 120', WORKFLOW)
 
 
 if __name__ == "__main__":

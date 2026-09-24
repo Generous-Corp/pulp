@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.871.1
+    VERSION 0.873.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -23,6 +23,11 @@ project(Pulp
 # directory in both cases. (The find_package(Pulp) path instead keys off
 # CMAKE_CURRENT_LIST_DIR in the installed helpers.)
 set(PULP_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Pulp source tree root")
+
+# ── Default build type + link pool ───────────────────────────────────────
+# Both must run before any target is declared.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDefaultBuildType.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkPool.cmake)
 
 # ── C++20 Standard ──────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
@@ -491,6 +496,12 @@ add_subdirectory(ship)
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
     add_subdirectory(tools/design-ab)
+    # Offline driver that asks a built LV2 module to describe itself into its
+    # bundle. Host-side, so it is useless when the modules it would run are
+    # built for another machine.
+    if(NOT CMAKE_CROSSCOMPILING AND NOT IOS AND NOT ANDROID)
+        add_subdirectory(tools/lv2-ttlgen)
+    endif()
     if(PULP_ENABLE_PROJECT_PACKAGE AND NOT IOS)
         add_subdirectory(tools/timeline)
     endif()

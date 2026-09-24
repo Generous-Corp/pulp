@@ -119,6 +119,11 @@ hand each time. Each `.sql` file carries a header comment explaining its shape.
 | `pulp_gpu_health_transitions` | health/device-loss evidence | `pulp trace gpu-health` |
 | `pulp_gpu_probe_correlation` | probe/readback evidence correlation | `pulp trace gpu-probe` |
 
+`pulp_gpu_health_candidates` and `pulp_gpu_probe_candidates` ship inside those
+last two files. They are the pre-correlation candidate sets the closed views
+select from, published so a consumer can tell a refused cohort from an absent
+one rather than re-deriving the join. They answer no preset of their own.
+
 A3 product spans supply low-cardinality debug annotations such as
 `debug.gpu_evidence_id` and `debug.trace_evidence_id`; the C++ trace macro call
 uses the unprefixed annotation name and Perfetto exposes it under `debug.*`.
@@ -197,6 +202,17 @@ whole probe cohort; a healthy tagged row cannot hide it. Generic untagged
 backend work such as `gpu_submit*` remains allowed but cannot supply the cohort.
 Do not generalize the diagnostic rule to every nonempty diagnostic because
 healthy diagnostics are valid.
+
+**A refusal names itself.** Both evidence-gated views answer an uncorrelatable
+capture and a capture holding none of their work the same way: with no rows. So
+each publishes its candidate set as its own view — `pulp_gpu_probe_candidates`
+and `pulp_gpu_health_candidates` — and the analyzer counts the question's own
+candidates before it describes an empty answer. Candidates present with no
+answer is `invalid-evidence-correlation`; no candidates at all is
+`missing-question-category`. The probe view's `is_tooling_owned` column carries
+the `gpu_probe*` / `gpu_readback*` classification that both the cohort rejection
+and that diagnosis read, so a refusal cannot be described by a second, drifting
+copy of the rule. Never restate either predicate in a consumer.
 
 **One definition, three surfaces.** The L0 CLI preset names map **1:1** onto
 these views: `slowest-frames → pulp_slowest_frames`, `xruns → pulp_xruns`,

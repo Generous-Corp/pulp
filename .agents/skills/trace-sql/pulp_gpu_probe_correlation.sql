@@ -1,3 +1,29 @@
+-- The candidate set is published on its own because two consumers need it: the
+-- correlation view below rejects a cohort that holds an untagged tooling span,
+-- and the CLI asks this view whether any tooling-owned candidate existed at all
+-- so an empty answer can name the correlation failure instead of reporting a
+-- missing question category. Both read one definition of `is_tooling_owned`, so
+-- the rejection and its diagnosis cannot drift apart. Generic backend work such
+-- as `gpu_submit*` is a candidate but is not tooling-owned: it may accompany a
+-- cohort without supplying or invalidating one.
+CREATE OR REPLACE PERFETTO VIEW pulp_gpu_probe_candidates AS
+SELECT
+  s.name,
+  s.dur,
+  s.arg_set_id,
+  th.upid AS process_upid,
+  p.pid AS process_pid,
+  COALESCE(
+    CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
+    CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id,
+  (s.name GLOB 'gpu_probe*' OR s.name GLOB 'gpu_readback*') AS is_tooling_owned
+FROM slice AS s
+JOIN thread_track AS tt ON s.track_id = tt.id
+JOIN thread AS th ON tt.utid = th.utid
+JOIN process AS p ON th.upid = p.upid
+WHERE s.category GLOB 'gpu*'
+  AND (s.name GLOB 'gpu_probe*' OR s.name GLOB 'gpu_readback*' OR s.name GLOB 'gpu_submit*');
+
 -- Correlate bounded numeric-probe work by its stable evidence identifier. The
 -- closed view returns rows only when every candidate has the same exact, valid
 -- evidence ID; mixed or uncorrelated traces fail closed as an empty result.
@@ -6,21 +32,7 @@
 -- marketing strings are excluded.
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_probe_correlation AS
 WITH candidates AS (
-  SELECT
-    s.name,
-    s.dur,
-    s.arg_set_id,
-    th.upid AS process_upid,
-    p.pid AS process_pid,
-    COALESCE(
-      CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT),
-      CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id
-  FROM slice AS s
-  JOIN thread_track AS tt ON s.track_id = tt.id
-  JOIN thread AS th ON tt.utid = th.utid
-  JOIN process AS p ON th.upid = p.upid
-  WHERE s.category GLOB 'gpu*'
-    AND (s.name GLOB 'gpu_probe*' OR s.name GLOB 'gpu_readback*' OR s.name GLOB 'gpu_submit*')
+  SELECT * FROM pulp_gpu_probe_candidates
 ), identified_candidates AS (
   SELECT * FROM candidates WHERE evidence_id IS NOT NULL
 ), selected_evidence AS (
@@ -34,8 +46,7 @@ WITH candidates AS (
       SELECT 1
       FROM candidates AS unbound_tooling
       WHERE unbound_tooling.evidence_id IS NULL
-        AND (unbound_tooling.name GLOB 'gpu_probe*'
-             OR unbound_tooling.name GLOB 'gpu_readback*'))
+        AND unbound_tooling.is_tooling_owned)
 )
 SELECT
   CASE

@@ -17,51 +17,48 @@ Debug build of a JS-scripted GPU UI is dramatically slower than its
 Release equivalent (no -O3, no NDEBUG, asserts live, no inlining of
 canvas / Skia / Yoga / QuickJS) — slow enough that a UX-perceived
 regression in a Debug build is almost always the build type, not the
-code. The Codify-Release work made `pulp build` default to Release;
-match that convention when reaching for raw `cmake` too.
+code. A fresh `pulp build`/`dev`/`loop` configure pins `-G Ninja` (when on
+PATH), `-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}`, and, in the source
+checkout, `-DPULP_BUILD_EXAMPLES=OFF` unless `--examples` (`pulp design` turns
+them on); an EXISTING dir keeps its generator and non-empty cached build type.
 
 Rules of thumb:
-- **Default**: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`. Use
-  `pulp build` (the CLI) when possible — it pins Release for you and
-  refuses to silently flip.
+- **Default**: `pulp build`, or `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`.
+- **Focused by default in a source checkout**: `pulp build`/`dev`/`loop`/`test`
+  build and run only what the working diff affects (`pulp affected --json`
+  shows it) behind a loud `FOCUSED: building 3/1708 targets …` line. `--all`
+  restores everything, `--target` wins, `PULP_BUILD_FOCUS=0` disables, and it
+  widens to `all` (saying why) for an empty diff, a build-system change, an
+  unmapped C/C++ file, or >40% of the graph. **Focused green is not landing
+  green** — pre-push and Shipyard build `all`; rules: `docs/reference/cli.md#affected`.
 - **Flip to Debug only when**: stepping in a debugger, capturing fresh
   `runtime::log_info` traces, repro'ing a sanitizer hit, or running
-  `validate-build.sh` for a clean detached reconfigure pass. Restore
-  Release immediately when the investigation ends.
-- **Reconfigure gotcha**: a bare `cmake -S . -B build` (no build-type
-  flag) usually preserves the cache value, BUT something in the
-  shipyard / pre-push gate / rebase paths can silently reset the cache
-  to Debug. Pass `-DCMAKE_BUILD_TYPE=Release` every reconfigure, or
-  use `pulp build`.
-- **Verify before reporting a build is Release**: BOTH
-  `grep '^CMAKE_BUILD_TYPE' build/CMakeCache.txt` (should print
-  `Release`) AND `grep '^CXX_FLAGS '
-  build/<dir>/CMakeFiles/<target>.dir/flags.make` (should contain
-  `-O3 -DNDEBUG`) must check out. Checking only the cache field is
-  necessary-but-not-sufficient — it has been wrong by itself.
+  `validate-build.sh`; restore Release when the investigation ends.
+- **Reconfigure gotcha**: shipyard / pre-push / rebase paths can silently reset a
+  cache to Debug, and `pulp build` keeps a non-empty cached type; pass `-DCMAKE_BUILD_TYPE=Release` (or `PULP_BUILD_TYPE=Release pulp build`).
+- **Verify before reporting a build is Release**: BOTH `grep '^CMAKE_BUILD_TYPE'
+  build/CMakeCache.txt` (prints `Release`) AND `grep '^CXX_FLAGS '
+  build/<dir>/CMakeFiles/<target>.dir/flags.make` (contains `-O3 -DNDEBUG`) must
+  check out; the cache field alone is necessary-but-not-sufficient — it has been wrong by itself.
 - **A struct-layout change must compile EVERYWHERE before shipping**: when a
   change alters the field layout of a struct that is brace-initialized
   positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
-  FULL `pulp build` over ALL targets — not just the named feature/parity
-  targets — and run it in the background (a full build exceeds a short foreground
-  budget). This is the longest build anyone runs, so it is the one that most
-  needs to take a governed *share* of the machine rather than every core; `pulp
-  build` (or `tools/ci/governed-build.sh cmake --build build`) does that, a raw
-  `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional inits in unrelated test
-  files fail *closed* at compile time, so they are safe, but only a full build
-  surfaces them; building a subset and shipping pushes the discovery to CI. A
-  uniform build failure across macOS/Linux/Windows is the tell for a real
-  compile miss, versus the macOS-only stale-build-dir ODR the `pulp-runner-ops`
-  skill handles.
+  FULL `pulp build --all` — not just the named feature/parity targets — in the
+  background (it exceeds a short foreground budget). It is the longest build
+  anyone runs, so it most needs a governed *share* of the machine, not every
+  core: `pulp build` (or `tools/ci/governed-build.sh cmake --build build`) does
+  that; a raw `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional
+  inits in unrelated test files fail *closed* at compile time, so they are safe,
+  but only a full build surfaces them; building a subset pushes the discovery to
+  CI. A uniform macOS/Linux/Windows failure is the tell for a real compile miss,
+  versus the macOS-only stale-build-dir ODR the `pulp-runner-ops` skill handles.
 
 ```bash
 # Configure (first time or after CMakeLists.txt changes)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-# Or preferred for repo + example builds:
-./build/pulp build
-
-# Build everything (takes its job count from the host build governor)
+# Build only what your diff affects (default in a source checkout; governed
+# job count); --all builds everything — do this before opening a PR
 ./build/pulp build
 
 # Run all tests
@@ -447,6 +444,7 @@ writing a change to CI/fleet config, read the relevant rows and honor them:
 python3 tools/scripts/decisions_contract.py --mode list                          # all rows
 python3 tools/scripts/decisions_contract.py --mode surface --base origin/main    # rows your diff touches
 python3 tools/scripts/decisions_contract.py --mode validate                      # schema-check the file
+python3 tools/scripts/decisions_contract.py --mode probe --landing-json <f>      # probed rows vs `shipyard landing --json` (--live: manual only)
 ```
 
 Reversing a decision requires first proving its motivating incident class can no
@@ -1011,11 +1009,24 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
+**build** — build and test only what a diff touches
+- Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py). → `pulp affected`
+
+**build-speed** — measure build, gate and merge-queue speed
+- Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
+  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+- Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before and after a build-system change. → `tools/scripts/build_time_report.py blast-radius`
+  - ⚠ **Cannot see:** Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not counted) and says so. It touches each file and restores its mtime, so do not run it against a tree another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
+
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+- Before reasoning from a green `macos` check — decide whether that green means the suite ran and passed, or that a bootstrap/receipt-reuse job claimed the context without running anything. → `tools/scripts/gate_suite_executed.py`
+  - ⚠ **Cannot see:** Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step without updating it would make a real run look void.
 - A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes. → `tools/scripts/pr_flow_audit.py`
   - ⚠ **Cannot see:** Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+- A merge_group batch failed and you need the PR that actually owns the failing tests — the batch's own branch name is NOT the culprit, because a batch contains every entry ahead of it. → `tools/scripts/queue_batch_attribute.py`
+  - ⚠ **Cannot see:** Attribution is NAME-SHAPED — it matches a test name against changed file paths, so a test whose name does not resemble its owning file is invisible to it. Below the confidence threshold it reports LIKELY PRE-EXISTING ON MAIN and names nobody; read that as "look at main", never as "no culprit exists". It reads the macos job's log, so a batch whose macos gate never ran the suite yields nothing.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -1452,8 +1463,8 @@ Before pushing a PR, run a local diff-coverage check to catch the same
 roundtrip on coverage-only failures.
 
 ```bash
-# Whole-tree (slow, matches CI)
-tools/scripts/local_diff_cover.sh
+# Focused: only targets/tests the diff reaches (pre-push runs this)
+tools/scripts/local_diff_cover.sh   # PULP_DIFF_COVER_SELECT=all: whole tree
 
 # Targeted build (fast — builds only named test targets)
 tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
@@ -1887,7 +1898,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
-| `lv2` | LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
+| `lv2` | LV2 format adapter for Pulp — the Turtle manifest the build emits by asking the module to describe itself, port indices as a saved-session wire format with one shared layout, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
@@ -2039,6 +2050,29 @@ A JIT runner census alone proves neither idle capacity nor outage.
 GitHub-*hosted* advisory lanes queue independently and don't block merge. Full
 diagnosis + the non-Shipyard fallback: the `ci` skill, "Diagnosing a slow /
 stuck PR."
+
+#### Routing and landing digest (generated)
+
+<!-- generated:start id=ci-routing-digest -->
+Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `2f3bc6214385`), never live service. Workflow-name matching, advisory lanes, and undeclared selector variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.
+
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON`: REACHABLE on merge_group, pull_request, workflow_dispatch by m1, m5, studio
+- `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
+- `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
+- `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
+- `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
+- `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
+
+Active routing overrides (`runner_topology.json` `overrides`; an expired one fails every mode):
+- `macos-overflow-local-only`: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` = `local-only`, owner daniel, since 2026-09-05, expires 2026-12-04. Revert when: Hosted overflow is re-approved, or local gate capacity proves insufficient under measured queue age.
+
+Landing API traps (verify with `decisions_contract.py --mode probe --live`, manual only, Shipyard >= 0.208.0):
+- REST `pulls/<n>.auto_merge` (and GraphQL `autoMergeRequest`) read null for a PR the merge queue already holds; read GraphQL `mergeQueueEntry`.
+- Classic branch protection omits a ruleset-based merge queue; query `repos/<o>/<r>/rulesets` before concluding there is no queue.
+
+GENERATED by `tools/scripts/ci_routing_digest.py --write`. Do not edit by hand.
+<!-- generated:end id=ci-routing-digest -->
 
 #### Runner priority (hard rule)
 

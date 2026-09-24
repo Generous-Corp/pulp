@@ -6,6 +6,7 @@ sweep:
   - tools/harness
   - tools/audio
   include_paths:
+  - tools/scripts/affected_targets.py
   - tools/scripts/ctest_nonruns.py
   - tools/scripts/pr_flow_audit.py
   - tools/scripts/figma_import_diff.py
@@ -13,6 +14,16 @@ sweep:
   - tools/scripts/gpu_audio_p4_evidence.py
   - tools/scripts/render-figma-import.sh
 tools:
+- name: affected-targets
+  path: tools/scripts/affected_targets.py
+  category: build
+  use_when: Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py).
+  invocation: pulp affected --json
+  inputs: A configured build dir (the script writes the CMake file-API query; the next configure answers it) and the working diff, or explicit --file paths.
+  outputs: mode (focused|all) + reason, target names for `cmake --build --target`, literal ctest names for `--tests-from-file`, and the one-line banner.
+  availability: always
+  skill: prototype-loop
+  docs: reference/cli.md#affected
 - name: audio-quality-lab
   path: tools/audio/quality-lab
   category: audio
@@ -458,6 +469,39 @@ tools:
   availability: always
   skill: ci
   docs: guides/local-ci.md
+- name: build-speed-scorecard
+  path: tools/scripts/build_speed_scorecard.py
+  category: build-speed
+  use_when: Asking whether builds, the required macos gate or the merge queue got faster or slower — per
+    host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases
+    look like right now.
+  invocation: python3 tools/scripts/build_speed_scorecard.py report --since 7d [--build-dir build] [--baseline
+    planning/bench/build-speed/2026-09-23/baseline.json]
+  inputs: Shipyard metrics (filled by `build_speed_scorecard.py ingest --since 14d` from the GitHub API), each
+    host's published host_vitals.json over ssh, and optionally a Ninja build dir.
+  outputs: Markdown scorecard (local build, PR pipeline, fleet) or `--json`; `--baseline` renders the before/after
+    delta through bench_diff.py.
+  caveat: Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own
+    (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build
+    snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: build-time-report
+  path: tools/scripts/build_time_report.py
+  category: build-speed
+  use_when: Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before
+    and after a build-system change.
+  invocation: python3 tools/scripts/build_time_report.py blast-radius <build-dir> <file>...
+  inputs: A Ninja build dir (`.ninja_log`, `build.ninja`, optional `-ftime-trace` JSON).
+  outputs: '`log`: edge-seconds by category per build invocation; `trace`: header/TU/area compile cost;
+    `blast-radius`: compiles / exe relinks / bundle relinks per touched file. All take `--json`.'
+  caveat: Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not
+    counted) and says so. It touches each file and restores its mtime, so do not run it against a tree
+    another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
 - name: pr-flow-audit
   path: tools/scripts/pr_flow_audit.py
   category: test-evidence
@@ -473,6 +517,39 @@ tools:
     the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own
     commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix`
     refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: queue-batch-attribute
+  path: tools/scripts/queue_batch_attribute.py
+  category: test-evidence
+  use_when: A merge_group batch failed and you need the PR that actually owns the failing tests — the
+    batch's own branch name is NOT the culprit, because a batch contains every entry ahead of it.
+  invocation: python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>] [--format json]
+  inputs: A failed merge_group run id (defaults to the most recent one) and the open-PR file lists, read
+    live through `ghapp`.
+  outputs: Each failing ctest mapped to the PR whose files own it with a match strength, and a named
+    culprit only above the confidence threshold.
+  caveat: Attribution is NAME-SHAPED — it matches a test name against changed file paths, so a test whose
+    name does not resemble its owning file is invisible to it. Below the confidence threshold it reports
+    LIKELY PRE-EXISTING ON MAIN and names nobody; read that as "look at main", never as "no culprit
+    exists". It reads the macos job's log, so a batch whose macos gate never ran the suite yields nothing.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: gate-suite-executed
+  path: tools/scripts/gate_suite_executed.py
+  category: test-evidence
+  use_when: Before reasoning from a green `macos` check — decide whether that green means the suite ran
+    and passed, or that a bootstrap/receipt-reuse job claimed the context without running anything.
+  invocation: python3 tools/scripts/gate_suite_executed.py --run-id <run-id> [--require-executed] [--format
+    json]
+  inputs: An Actions run id, read live through `ghapp`.
+  outputs: executed / built-but-untested / not-executed per `macos` job, with its step count;
+    `--require-executed` exits nonzero unless the suite genuinely ran.
+  caveat: Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on
+    a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step
+    without updating it would make a real run look void.
   availability: always
   skill: ci
   docs: guides/local-ci.md

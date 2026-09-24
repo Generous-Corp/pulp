@@ -17,6 +17,17 @@ if(APPLE AND NOT PULP_IOS)
         LABELS "cmake;ios;compile"
         TIMEOUT 180)
 
+    # Leg orchestration of the iOS compile gate (Ninja SDK legs, background
+    # GPU leg, failure propagation), run against stub toolchain executables.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME ios-compile-gate-legs
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_ios_compile_gate_legs.py")
+        set_tests_properties(ios-compile-gate-legs PROPERTIES
+            LABELS "cmake;ios"
+            TIMEOUT 180)
+    endif()
+
     add_test(NAME cmake-ios-auv3-configure
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_configure.sh
                 ${CMAKE_SOURCE_DIR})
@@ -991,6 +1002,24 @@ add_test(NAME cmake-control-shipping-matrix
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_matrix.cmake)
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
+
+add_test(NAME cmake-control-shipping-fresh-stamp
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-shipping-fresh-stamp
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_fresh_stamp.cmake)
+set_tests_properties(cmake-control-shipping-fresh-stamp PROPERTIES
+    LABELS "cmake;control;ship" TIMEOUT 60)
+
+add_test(NAME cmake-build-defaults
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/build-defaults
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_build_defaults.cmake)
+set_tests_properties(cmake-build-defaults PROPERTIES
+    LABELS "cmake" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: ninja is not on PATH")
 
 # Every CTest manifest must parse, including the ones behind an off-by-default
 # option. A manifest body guarded by a flag such as PULP_ENABLE_SCENE3D is

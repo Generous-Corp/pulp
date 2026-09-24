@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-queue-cascade-guards-watch",
+  "created_at": "2026-09-23T03:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record two tools-registry entries for merge-queue CI diagnostics. The only changed line that selects this family is the pair of rows added to docs/status/tools.yaml (queue-batch-attribute and gate-suite-executed), plus the CLAUDE.md digest regenerated from it. Both registered tools are read-only readers of GitHub Actions run state: one maps a failed merge_group batch's failing ctest names to the pull request whose files own them, the other reports whether a run's macos gate actually executed the suite. Neither produces, renders, or packages an artifact, and the rest of the change is the build workflow's ctest arguments, the macOS leg's event coverage, and their tests. The family is reached only because the registry manifest is a watched path.",
+  "tests": [
+    "queue-batch-attribute-selftest",
+    "gate-suite-executed-selftest",
+    "ctest-gate-args-selftest",
+    "build-matrix-contract",
+    "tools-registry-check",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

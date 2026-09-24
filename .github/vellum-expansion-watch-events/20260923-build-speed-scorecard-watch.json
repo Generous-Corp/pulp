@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-build-speed-scorecard-watch",
+  "created_at": "2026-09-24T03:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record two tools-registry entries for build-speed measurement. The only changed lines that select this family are the two rows added to docs/status/tools.yaml (build-speed-scorecard and build-time-report), plus the CLAUDE.md digest regenerated from it. Both tools measure build and CI timing: one reads .ninja_log, -ftime-trace output and a dry run of a build manifest, the other records GitHub gate/queue timings into Shipyard metrics and reads each host's published vitals. Neither produces, renders, or packages a design artifact; the rest of the change is the host-vitals build snapshot, bench_diff's section mode, the governed-build metrics record, and their tests. The family is reached only because the registry manifest is a watched path.",
+  "tests": [
+    "build-time-report-selftest",
+    "build-speed-scorecard-selftest",
+    "host-vitals-selftest",
+    "governed-build-selftest",
+    "tools-registry-check",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

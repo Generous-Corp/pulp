@@ -42,6 +42,50 @@ def audio_peak(path):
     else: vals=[]
     return max((abs(v) for v in vals),default=0.0)
 
+def serialized_coefficient(rpp):
+    """Decode the plug-in's serialized coefficient out of a saved REAPER project.
+
+    TrackFX_GetParamNormalized returns REAPER's own controller cache, which stays
+    correct even when the plug-in serialized a different value, so the host
+    read-back cannot see this class of failure. The serialized store blob is the
+    only surface that can: bare 'PULP' store -- magic, version, count, then
+    (u32 id, f32 plain-value) pairs.
+    """
+    import base64, struct
+    payload = []
+    inside = False
+    for line in Path(rpp).read_text(errors='ignore').splitlines():
+        s = line.strip()
+        if s.startswith('<VST ') or s.startswith('<AU ') or s.startswith('<CLAP '):
+            inside = True
+            continue
+        if inside:
+            if s == '>':
+                break
+            payload.append(s.strip('"'))
+    if not payload:
+        return None
+    try:
+        blob = base64.b64decode(''.join(payload))
+    except Exception:
+        return None
+    magic = blob.find(b'PULP')
+    if magic < 0:
+        return None
+    try:
+        count = struct.unpack_from('<I', blob, magic + 8)[0]
+        for n in range(count):
+            off = magic + 12 + n * 8
+            if off + 8 > len(blob):
+                break
+            pid, value = struct.unpack_from('<If', blob, off)
+            if pid == 2901:
+                return value
+    except Exception:
+        return None
+    return None
+
+
 def strip_parameter_envelopes(text):
     """Remove FX parameter envelopes from the render-project copy.
 
@@ -207,6 +251,10 @@ def run(fmt,bundle,out,timeout):
     rec['bundle_executable_sha256_before']=executable_sha256_before
     rec['bundle_executable_sha256_after']=hashlib.sha256(executable.read_bytes()).hexdigest()
     rec['bundle_executable_stable']=rec['bundle_executable_sha256_before']==rec['bundle_executable_sha256_after']
+    try:
+        rec['serialized_coefficient']=serialized_coefficient(project) if project.exists() else None
+    except Exception:
+        rec['serialized_coefficient']=None
     rec['render_envelope_stripped']=envelope_strip
     rec['render_envelope_residual']=envelope_residual
     rec['audio_oracle_pass']=False
@@ -231,6 +279,28 @@ def main(argv=None):
         code, reason = receipt_verdict(rec)
         rec['status']='passed' if code == 0 else ('failed' if code == 1 else 'inconclusive')
         rec['verdict_reason']=reason
+        # A receipt must name the module it actually loaded. REAPER resolves a
+        # saved project's FX by identity (AU: type/subtype/manufacturer; VST3:
+        # filename + UID), not by the path the driver added, so a name-fallback
+        # resolution can bind a different build than the one under test and the
+        # proof would not say so.
+        # Evaluated unconditionally: which module actually ran is more
+        # fundamental than any other field, so it must not be masked by an
+        # earlier downgrade. A run that cannot name its module is inconclusive
+        # regardless of what else passed or failed.
+        if not rec.get('exact_identity_load'):
+            prior=rec.get('verdict_reason')
+            rec['status']='inconclusive'
+            rec['verdict_reason']=('module provenance not exact: add_resolution='
+                                   f"{rec.get('add_resolution')}, "
+                                   f"reload_resolution={rec.get('reload_resolution')}"
+                                   + (f" (also: {prior})" if prior else ''))
+        sc=rec.get('serialized_coefficient')
+        if sc is not None and abs(sc-0.5) > 1e-4:
+            rec['status']='failed'
+            rec['verdict_reason']=(f'serialized coefficient is {sc:.6f}, expected 0.5 -- '
+                                   'the host parameter write did not land before the '
+                                   'project was saved; host read-back cannot see this')
         if rec['status']=='passed' and not (rec.get('render_envelope_stripped') and not rec.get('render_envelope_residual')):
             rec['status']='inconclusive'
             rec['verdict_reason']=('render-project parameter-envelope strip control failed '

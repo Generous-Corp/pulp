@@ -696,6 +696,68 @@ Pulp expects agents and contributors to consume the optional integration.
 Without tartci, `shipyard metrics import github` and manual/command metrics
 still work for GitHub-hosted or SSH-backed CI lanes.
 
+#### Build-speed scorecard
+
+`shipyard metrics import github` keys each self-hosted job by its ephemeral
+runner name, so a per-host p50 from it is a p50 over one-job "hosts", and it
+records no step timings. `tools/scripts/build_speed_scorecard.py ingest` fills
+that gap for the required `macos` gate: it records each gate job against its
+PHYSICAL host (`m1`/`m3`/`m5`, from the runner name) plus per-step and queue
+rows, the merge queue's enqueue→merged and PR opened→merged latency, and
+merge_group run outcomes. Step, queue and latency rows go to their own
+projects so they never inflate `pulp`'s worker-minute totals:
+
+| Project | Targets |
+|---|---|
+| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` |
+| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,SDK contract}` |
+| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `merge-group-run` |
+
+Ingest is idempotent (rows already in the store are skipped by external id),
+so it can run on a schedule. "Is this build slower than usual on this host?"
+is then `shipyard metrics watch --project pulp-gate-steps --json`.
+
+```bash
+# Backfill (first run) or top up; run from a Pulp checkout so ghapp resolves.
+python3 tools/scripts/build_speed_scorecard.py ingest --since 14d
+
+# The scorecard: local build, PR pipeline, fleet. Add --json for machines.
+python3 tools/scripts/build_speed_scorecard.py report --since 7d
+
+# Before/after against the recorded baseline (rendered by bench_diff.py).
+python3 tools/scripts/build_speed_scorecard.py report --since 7d \
+  --baseline planning/bench/build-speed/2026-09-23/baseline.json
+
+# The local section needs an existing Ninja build dir; it never builds one.
+python3 tools/scripts/build_speed_scorecard.py report --build-dir build --runs last
+```
+
+The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
+(one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
+snapshot there — ccache hit rate and fill for the host cache and the gate
+cache, gate-VM count and memory, tartci executing generation and checkout,
+lease usage and host profile, wheelhouse contents. A host whose installed
+sensor predates that snapshot is probed live with the in-repo
+`host_vitals.sh --build-json` and labelled so; re-run
+`tools/scripts/install_host_vitals_sensor.sh` on it to publish the snapshot.
+An unreachable host is reported as UNREACHABLE, never as zeros.
+
+`tools/ci/governed-build.sh` also records each governed build (wall time,
+granted `-j`, lease/floor/tier-0 grant, focused target set) as
+`local-build/{all,focused}` in the `pulp` project when `shipyard` is on PATH.
+The record is detached and silent; `PULP_BUILD_METRICS=0` turns it off.
+
+For the local build itself, `tools/scripts/build_time_report.py` has three
+subcommands: `log` (edge-seconds by category from `.ninja_log`, deduplicated
+by edge so a multi-output edge counts once), `trace` (clang `-ftime-trace`
+aggregation by header, TU and area) and `blast-radius` (touch a file, dry-run a
+regeneration-free copy of `build.ninja`, restore the mtime). A plain `ninja -n`
+in a tree with CONFIGURE_DEPENDS globs stops at "Re-running CMake" and reports
+nothing, which reads as a zero blast radius; the tool strips those edges,
+checks that ninja printed every edge it planned, and exits 3 rather than
+reporting zeros when a touched compiled source (or its built-in control)
+produces no work.
+
 Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
 global `shipyard` is newer. Use `shipyard pin bump --to vX.Y.Z` for pin
 updates instead of hand-editing the file; newer Rust Shipyard releases changed
@@ -1115,15 +1177,36 @@ It is tiered:
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
 
-  **The gate VM's bound is RAM, not vCPU.** tartci sizes a macOS VM's cores
-  from the lane's lease (`vm_cores`, 12 for Pulp's gate lane on the Studio) but
-  never sets `--memory` — only the Linux provider does — so every macOS gate VM
-  runs at the golden image's 8 GiB whatever its core count. The Tier-0 bound is
-  `min(cores, RAM x 0.75 / 1.5 GiB)`, so at 8 GiB the memory axis pins the build
-  to **4 jobs** on a 12-, 6- or 4-vCPU VM alike. Raising `vm_cores` alone
-  therefore does not speed up the build step; the VM's memory has to move with
-  it. Read a leg's actual share from its `[governed-build]` log line rather than
-  inferring it from the lease.
+  **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
+  the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
+  8 GiB and 16 GiB. That memory figure is the exact inverse of the Tier-0
+  bound, `min(cores, RAM x 0.75 / 1.5 GiB)`, so a guest lands on `-j(C-1)`
+  unless the clamp moved it. Measured on 2026-09-23: m1 leases 3 vCPU/8 GiB and
+  builds at `-j3` (cores bind), m5 leases 6 vCPU/10 GiB and builds at `-j5`
+  (memory binds), and the Studio's 12 vCPU/16 GiB VMs build at `-j8` (the
+  memory ceiling binds). The `[governed-build]` line names the axis that bound
+  it, and reads the lease from `TARTCI_GUEST_CORES` / `TARTCI_GUEST_MEM_MB` when
+  the runner declares them; a declaration can only narrow what the guest sees.
+  So a slow m1 or m5 gate is not a governor bug: speeding it up means a larger
+  lease (the host profile's `vm_pool_cores`, and `TARTCI_VM_LEASE_MAX_MEM_MB`
+  for the Studio), which trades against the agent builds and the second VM on
+  that host. The non-Windows ctest step takes `-j` from a declared
+  `TARTCI_GUEST_CORES` (narrowed to the visible cores, capped at 8) instead of
+  the literal `-j8` that ran eight tests on a 3-vCPU guest. A runner that
+  declares no lease keeps `-j8`, so the change reaches each host only as that
+  host's tartci starts declaring the lease — a per-host rollout, not a fleet
+  flip.
+- **Ninja link pool (every Ninja build).** The governor bounds *how many jobs*
+  a build runs; the `pulp_link` job pool (`tools/cmake/PulpLinkPool.cmake`)
+  additionally bounds *how many of them are links*. Every Pulp executable and
+  bundle links the same ~150 MiB of Skia/Dawn/SDL3 archives, so a wide link
+  phase is memory-bandwidth-bound: links run slower each and peak RSS climbs
+  with the number in flight, without the compiles needing to be throttled. The
+  depth is one slot per 2 GiB of RAM, clamped to [2, 8] (a test link peaks near
+  0.45 GiB RSS; an 8 GiB gate VM gets 4 slots, the same as its governed `-j`, so
+  the pool never throttles it). `-DPULP_LINK_JOBS=N` overrides the depth and
+  `-DPULP_LINK_JOBS=0` disables the pool. Makefile, Xcode, and Visual Studio
+  generators have no job pools, so the setting is a no-op there.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that
@@ -1198,9 +1281,37 @@ entry. Installing into a different interpreter would leave every one of them
 skipping while the install step reported success, so a missing cache entry
 fails the step outright instead of falling back.
 
-The install is retried with `--break-system-packages` because PEP 668 hosts
-(Homebrew on the self-hosted Macs, Debian on the Linux legs) refuse a plain
-`--user` install.
+It first asks `pip install --dry-run --no-index` whether the declared floor in
+`requirements.txt` is already satisfied, and stops there with no network
+contact when it is (see "The required gate must not need a third-party service
+at run time"). Only when something is missing does it install
+`tools/motion/visual/requirements.lock`, the hash-pinned resolution of
+`requirements.txt`, under `--require-hashes`, so every install lays down the
+same bytes and a new upstream release cannot change a gate verdict.
+Regenerate the lock (command in its header) whenever `requirements.txt`
+changes; `tools/scripts/test_visual_python_deps_step.py` fails if a declared
+distribution is not pinned and hashed there.
+
+When an install is needed, the bytes come from, in order:
+
+1. A tartci gate guest whose host keeps a pip wheelhouse gets
+   `TARTCI_PIP_WHEELHOUSE` in its job environment, and the step installs from
+   that read-only mount with `--no-index` — no relay, no PyPI. The host side is
+   `scripts/pip-wheelhouse.sh sync` in tartci; an empty or absent wheelhouse
+   changes nothing.
+2. Otherwise, or if the wheelhouse cannot satisfy the lock, the package index,
+   with three attempts spaced 20 s and 40 s apart
+   (`PULP_PIP_RETRY_DELAY_SECS`).
+
+PEP 668 hosts (Homebrew on the self-hosted Macs, Debian on the Linux legs)
+refuse a plain `--user` install and mark themselves with an
+`EXTERNALLY-MANAGED` file beside the stdlib; the step checks for it once and
+passes `--break-system-packages` only there.
+
+A `Tunnel connection failed: 403 Forbidden` from this step is the gate guest's
+egress relay refusing PyPI, not a package or diff problem. That took down 27
+m5 gate jobs on 2026-09-22/23 until tartci's relay allowlist gained `pypi.org`
+and `files.pythonhosted.org`; a populated wheelhouse removes the dependency.
 
 Seven ctest registrations import `numpy`, `Pillow` or `scikit-image` and skip
 themselves when one is absent. A ctest SKIP is indistinguishable from a PASS in
@@ -1420,9 +1531,10 @@ macOS Debug configuration, which enables
 that platform-specific cardinality.
 
 Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
-and `docs/validation/**` selects only that mandatory kernel and is independently
-authorized to omit the mobile compile gate. Generated or authoritative state
-under `docs/status/**` remains fail-closed rather than inheriting this rule.
+and `docs/validation/**` selects only that mandatory kernel. Generated or
+authoritative state under `docs/status/**` remains fail-closed for this bounded
+selection rather than inheriting that rule (the separate mobile allowlist below
+treats it on its own terms).
 
 The required Build-and-Test workflow also uses a separate, narrower mobile-safe
 allowlist to avoid an unrelated mobile compile tax. On pull requests and merge
@@ -1430,10 +1542,16 @@ groups, only a diff whose every path matches
 `ios_compile_skip_safe_paths` may emit the exact
 `ios_compile_required=false` authorization. A bounded macOS test family does
 not inherit mobile-skip authority; each allowlist addition requires its own
-mobile-impact review. The macOS job then skips the
+mobile-impact review. The allowlist covers `docs/**`, `test/**`,
+`tools/scripts/test_*.py`, `.agents/skills/**`, the Claude plugin manifests and
+`CHANGELOG.md`: the gate configures with `PULP_BUILD_TESTS=OFF`, so none of those
+reach it except the paths `IOS_COMPILE_REQUIRED_PATTERNS` in
+`tools/scripts/classify_changes.py` denies first (the gate's own scripts, the
+CoreMIDI harness sources, and each `test/`/`docs/` file a non-test CMake file
+names, re-derived from the tree by `test_classify_changes.py`). The macOS job then skips the
 two-SDK iOS compile step but still performs its ordinary desktop build and
 tests. Missing, malformed, empty, mixed, unknown, policy, CMake, CI, public
-header, test-topology, or `apple/**` evidence runs the iOS gate. Pushes to main,
+header, non-test `tools/scripts`, or `apple/**` evidence runs the iOS gate. Pushes to main,
 manual runs, nightly/release workflows, and audits never accept this skip;
 their existing event policy remains unchanged. Keep the condition inside the
 required job: path-filtering the workflow or job would prevent the stable
@@ -1479,12 +1597,14 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
 
-## Cache-warming runs on `main`
+## Runs on `main`: cache warming and main's health
 
 `build.yml` triggers on `push: branches: [main]` in addition to
-`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing —
-it exists solely to **publish the GitHub-hosted Linux/Windows ccache and
-FetchContent caches** that PR runs restore from.
+`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing.
+It does two jobs: it **publishes the GitHub-hosted Linux/Windows ccache and
+FetchContent caches** that PR runs restore from, and it **runs the full macOS
+suite against the commit that actually landed**, which is the only place that
+happens.
 
 It is needed because of how GitHub's cloud cache is scoped: a cache entry
 written by a PR run is visible only to that PR's own ref, so PR runs can never
@@ -1496,20 +1616,43 @@ Each trigger runs a deliberately different slice of the matrix:
 
 | | PR run | `merge_group` run | `push: main` cache run |
 |---|---|---|---|
-| macOS matrix leg | yes | yes | **no** — omitted by `resolve-provider` |
+| macOS matrix leg | yes | yes | **yes** — main's health detector |
 | Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
 | Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
 | `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
-| required direct `macos` context | yes | yes | no |
+| required direct `macos` context | yes | yes | no — descriptive name, gates nothing |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
-The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
-serve the one required check in this repo, and those machines keep ccache and
-FetchContent on local disk between jobs. Scheduling a macOS leg on a push would
-put the required gate's runners under load to save a cache that is never
-uploaded — strictly a cost. For the same reason the two `Save …` steps are
-scoped `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which
-is narrower than the restore side on purpose.
+### Why the macOS leg runs on push
+
+The push lane carries macOS because nothing else proves main is healthy.
+A pull-request head does not run the suite at all (the `Test (non-Windows)`
+step is gated `github.event_name != 'pull_request'`), and a merge group
+validates a synthetic merge commit rather than the commit that lands. So
+without the push leg, main's macOS health is simply unknown, and a break on
+main first surfaces when a queued batch inherits it, roughly forty minutes
+later, reported against a batch whose name is not the culprit. Because a merge
+queue re-forms a batch after each failure, every subsequent batch inherits the
+same break and pays the same forty minutes.
+
+Running it on push moves that detection onto the merge commit that caused it,
+where attribution is free.
+
+The cost is bounded rather than unlimited. Push runs share the
+`refs/heads/main` concurrency group, so consecutive merges serialize and at
+most one push macOS leg is ever in flight: the steady-state draw on the
+self-hosted Macs is one lane. The leg also keeps its descriptive matrix name on
+push instead of claiming the required `macos` context, so it detects without
+gating. Caches are still saved only from GitHub-hosted Linux and Windows: the
+two `Save …` steps stay scoped
+`runner.environment == 'github-hosted' && runner.os != 'macOS'`, which is
+narrower than the restore side on purpose, because the self-hosted Macs keep
+ccache and FetchContent on local disk between jobs.
+
+`tools/ci/test_build_matrix_contract.py` (ctest `build-matrix-contract`) pins
+this: it asserts over the parsed syntax tree that the macOS matrix entry is
+appended unconditionally, so re-gating it on the event name fails a test rather
+than quietly restoring the blind spot.
 
 Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
@@ -1618,6 +1761,90 @@ name before checkout; an ordinary CI label or an unknown name fails closed.
 The pending exact-head status remains the durable obligation while every Mac
 is offline, so its age alone never creates a duplicate model invocation.
 
+## A merge_group batch stops at the first failing test
+
+The full suite is roughly 21,764 tests. A batch that has one failing test is
+already unlandable, so the remaining tests prove nothing the first failure did
+not, and a merge queue multiplies the waste: every batch inherits a broken
+base, every platform lane pays it, and each re-formed batch pays again. One
+observed cascade had its leader fail at test 101 and spend about eighteen more
+minutes proving it, across three lanes and more than ten consecutive batches.
+
+So `merge_group` runs ctest with `--stop-on-failure`, and no other lane does.
+The push lane deliberately runs to completion, because it is the only place the
+full macOS suite ever runs against main and its completeness is the point: it
+reports every failing test, which is what
+`tools/scripts/queue_batch_attribute.py` reads to attribute a batch.
+
+`--stop-on-failure` composes with the existing `--repeat until-pass:2` rather
+than defeating it. ctest stops only after the retries are exhausted, so a
+single flake still self-heals and only a test that fails every attempt ends the
+run. Under `-j8` the stop is bounded by the parallel width: the tests already
+in flight finish, so a suite failing at test 101 runs about 8 more, not 21,663.
+
+Both event-dependent ctest decisions (this flag, and the label set) live in
+`tools/ci/ctest_gate_args.py` so they are stated once and tested.
+`tools/ci/test_ctest_gate_args.py` (ctest `ctest-gate-args-selftest`) pins the
+rules AND asserts `build.yml` still calls the module and still passes both
+outputs to ctest, because a decision module that is correct but unreferenced
+reads exactly like one that works.
+
+The label set follows the same split. `performance`, `bench` and `quality-lab`
+are relative-timing tests that survive steady load but not the load variance of
+a Studio running concurrent build VMs, so they are excluded wherever the suite
+runs on the shared self-hosted Macs. That now includes the push lane, which is
+why a push macOS leg does not reintroduce those flakes as false alarms about
+main.
+
+## A green `macos` check does not always mean the suite ran
+
+The required `macos` context is reported by more than one job. It can come from
+the macOS matrix leg, which builds and tests, or from a bootstrap job that
+claims the name without running anything, because the change touched no native
+build input or because an earlier run's protected receipt was reused. Both look
+identical in the checks list.
+
+A reused receipt produces a three-step job (`Set up job`, the bootstrap step,
+`Complete job`) reporting success. Reading one of those as evidence that the
+suite passed has already sent an investigation in the wrong direction for
+hours.
+
+Two things address it. Each bootstrap job now writes a banner into its own job
+summary stating that no build and no test step ran, and why, so the void case
+is legible from the check itself rather than only from its step count. And
+`tools/scripts/gate_suite_executed.py` answers the question directly:
+
+```bash
+# executed / built-but-untested / not-executed, per `macos` job
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
+
+# exit nonzero unless the suite genuinely ran, for use in a script
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
+```
+
+It classifies by the steps that actually ran, not by the conclusion, so it
+separates a real pass from a claimed one. It answers only whether the suite
+ran: an `executed` verdict on a failing job is still `executed`.
+
+## Attributing a failed batch to the PR that caused it
+
+A merge_group batch is named for one pull request but contains every entry
+ahead of it, so the run title names a branch that is usually not the culprit.
+
+```bash
+# defaults to the most recent failed merge_group run
+python3 tools/scripts/queue_batch_attribute.py [<run-id>]
+```
+
+It extracts the failing ctest names from the batch's macos job and maps each to
+the pull request whose files own it. Below its confidence threshold it reports
+`LIKELY PRE-EXISTING ON MAIN` and names nobody, which is the case that matters
+most: naming the wrong pull request sends someone to fix an innocent branch
+while the real break stays on main, failing every batch that forms. When it
+reports that, check main's own health first, which is what the push macOS leg
+above exists to tell you.
+
+
 ## Exact PR receipts on an unchanged merge-group candidate
 
 A successful pull-request macOS or Linux matrix child publishes a two-day
@@ -1685,6 +1912,27 @@ later authenticates the completed check/job/step and artifact metadata through
 GitHub, derives the protected merge identity, and matches those live facts to
 the downloaded bytes. Linux and Windows stay advisory and never issue this
 attestation.
+
+## The macOS PR head runs the `pr-fast` tier; the full suite runs in the queue
+
+On `pull_request`, `build.yml` skips `Test (non-Windows)` and instead runs
+`Test fast deterministic tier (pull request head)`:
+`ctest -L '^pr-fast$' --no-tests=error` over the static-contract checks listed in
+`test/cmake/pr_fast_tests.cmake` (lint, drift, registry-completeness and
+generated-manifest checks; about 115 tests, roughly 15 s). The full suite still
+runs on `merge_group` and push. The tier exists because a forgotten regeneration
+fails those checks deterministically, and once the full suite left the PR head
+it failed in the merge queue instead, ejecting every PR batched with it.
+
+A member must be deterministic, finish in seconds on a loaded gate VM, and
+assert nothing about wall-clock time or host load; the timing-sensitive tests
+that motivated moving the full suite to the queue stay out. A listed name that
+is not registered in a configuration is reported at configure time (some members
+are platform-conditional), and `pr-fast-tier-contract` fails when the
+label selects fewer than 50 tests or drops one of its pinned members. The step
+writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
+not the merge's test evidence and must never satisfy a protected-validation
+receipt.
 
 ## Windows is gated by the merge queue, not by the PR head
 
@@ -2187,6 +2435,12 @@ call to an operator.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
+- **`fleet-snapshot-selftest`** (ctest) — snapshot regeneration and `--check`
+  against a fake tartci checkout: a new profile file is picked up by glob, a
+  removed one fails `--check` by name.
+- **`runner-topology-static-selftest`** (ctest) — `--mode=static` on the real
+  contract, workflows, and snapshot: the required gate must read `REACHABLE`,
+  and a typo'd label must read `UNSERVED`.
 
 The checker exits `2` when live state cannot be read, distinct from pass (`0`)
 and violation (`1`), so a missing token scope fails loudly instead of reporting
@@ -2228,6 +2482,115 @@ reload, enable, or inspect a runner. They compare the checked-in TartCI profile,
 its installation receipt, and the private desired-fleet manifest. Keep
 repo-specific labels and host declarations in those Pulp/private inputs; generic
 Shipyard and TartCI code must not grow a second Pulp host table.
+
+### Offline reachability (`--mode=static`)
+
+`--mode=static` answers the diff-shaped half of "can this lane be served" with
+no network: every lane's contracted value (and its `unset_fallback`) is judged
+against `tools/scripts/fleet_advertised_labels.json`, a snapshot of what each
+runner registration advertises, generated from the fleet's checked-in macOS
+profiles (schema `tartci.advertised-labels/v1`). A job is reachable only when
+all three hold: the registration advertises every requested label, it mints
+runners for the job's workflow `name:`, and the repository matches.
+
+```bash
+python3 tools/scripts/runner_topology_check.py --mode=static          # table, exit 1 on a required UNSERVED
+python3 tools/scripts/runner_topology_check.py --mode=static --json
+```
+
+Verdicts: `REACHABLE` (names the host/lane/class that serves it), `UNSERVED`
+(names the labels no registration advertises, or the workflow mismatch),
+`HOSTED`, `SENTINEL`, `UNKNOWN` (workflow name not statically knowable, no
+consuming workflow, or a supervisor the snapshot does not cover, such as the
+Proxmox Linux pool), and `UNDECLARED` (a `*_RUNS_ON_JSON` variable a workflow
+reads with no lane, info only).
+
+Read `REACHABLE` as **declared supply**, never as live service. A host whose
+installed profile has drifted from its checked-in one reads reachable here and
+serves nothing; that is what `--mode=report` exists for. The required macOS
+gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
+via the same `_event_projection` the live checker uses), not the raw variable,
+which still carries a label the event-class registrations deliberately omit.
+Nothing in Pulp names a machine: the snapshot is tartci's published
+`fleet/advertised-labels.json` (or, in a tartci that predates it, tartci's own
+generator run over every `profiles/*-macos-fleet.toml`, discovered by glob), so
+adding or removing a host is a profile change in tartci plus a regeneration
+here.
+
+```bash
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --write   # regenerate
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check   # 1 = stale, 2 = unreadable
+```
+
+`--check` compares registrations only (provenance metadata is expected to
+move) and names every host, lane, or registration added, removed, or changed.
+`runner-topology-check.yml` runs it hourly against a fresh shallow clone of the
+public tartci repo on Python 3.12 (tomllib), and a stale snapshot joins the
+same finding and tracking issue as a live routing violation; a failed clone is
+reported as unreadable state (exit 2), never as green. Pulp reads only labels,
+workflows, and repository from the snapshot, never tartci internals.
+
+`decisions_contract.py --mode probe --live` needs Shipyard >= 0.208.0, the first
+release with `shipyard landing`; an older binary is reported as
+`shipyard landing unavailable (need >= 0.208.0; found ...)` with exit 2, never
+as a contract failure. `--landing-json FILE` needs no Shipyard at all.
+
+### Fact-checking declared supply
+
+Three layers, each answering a different question, so a disagreement names
+which side drifted. None of them lists a host: every one is derived from
+tartci's profiles or from observed runner names.
+
+1. **Declared (git).** What the checked-in fleet profiles say every runner
+   registration advertises. tartci publishes it as
+   `fleet/advertised-labels.json`; Pulp keeps a copy and checks it:
+
+   ```bash
+   python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check
+   python3 tools/scripts/fleet_snapshot.py --source-url --check   # tartci's published file on main
+   python3 tools/scripts/runner_topology_check.py --mode=static    # every lane vs declared supply
+   ```
+
+   With `--tartci`, the published file is used when present, otherwise tartci's
+   generator runs over every `profiles/*-macos-fleet.toml`. The hourly topology
+   sweep runs the `--check` against a fresh clone.
+2. **Installed (machines).** Whether each host actually runs the profile it
+   declares. This lives on the hosts, in tartci: `tartci fleet-macos
+   verify-supply` (installed vs declared) and `tartci fleet-macos
+   profile-drift`. Pulp cannot see it; a host whose installed profile drifted
+   reads REACHABLE in layer 1 and serves nothing.
+3. **Observed (GitHub).** Whether the declared registrations served jobs.
+   `runner_topology_check.py --mode=report` reads the jobs its host census
+   already fetched (no second crawl) and reports, per snapshot registration
+   serving a required lane, `OBSERVED` (with last seen), `NOT_OBSERVED` (jobs it
+   could have served ran elsewhere), or `IDLE` (no such demand in the window),
+   plus `UNDECLARED_OBSERVED` for a runner prefix whose jobs match no
+   registration by name (`<host_id>-<lane>-...`) and labels. tartci's
+   `scripts/supply_observed.py` answers the same question from its side.
+
+   ```bash
+   python3 tools/scripts/runner_topology_check.py --mode=report   # live; observed-supply lines
+   ```
+
+   These findings are INFO/WARN only and never a ctest: the census covers one
+   workflow and stops early once every host is proven, so `IDLE` is a prompt to
+   look, not a fault. Jobs are matched to a registration by GitHub's own rule
+   (job labels a subset of the runner's), not by the registration's minting
+   workflow list: release-cli's darwin legs were observed running on pulp-gate
+   runners.
+
+### Routing overrides
+
+A lane whose contracted value is a deliberate temporary state cites an entry in
+`runner_topology.json`'s `overrides` array by `override_id`. Each override
+records `subject` (the variable), `value`, `owner`, `reason`,
+`revert_condition`, `since`, and `expires`. Every mode lists active overrides
+with their age, and fails on an expired override, an override whose subject is
+not a declared lane or routing control, an override whose value no longer
+matches its lane, or a lane citing an override that does not exist. The hourly
+live sweep enforces expiry against the real clock; the ctest pins its clock so
+an expiry date never reddens unrelated PRs. Renewing is an edit of `expires`
+with the reason in the commit.
 
 ### An unset variable is not automatically a gap
 
@@ -3260,7 +3623,18 @@ bash test/cmake/test_ios_compile_gate.sh "$PWD" "$PWD/build-ios-compile-gate"
 
 The script uses Pulp's platform-wide FetchContent source cache, so fresh
 worktrees reuse dependency checkouts while keeping simulator and device build
-products separate. The existing `test_ios_source_syntax.sh` sweep runs after
+products separate. The two SDK legs configure with Ninja when it is on `PATH`
+(the Xcode generator otherwise): a Ninja configure takes about a minute where
+Xcode's takes seven to eight, and Ninja honours the compiler launcher, so the
+gate VM's persistent ccache serves a repeat build from cache. The GPU leg stays
+on the Xcode generator: its AUv3 `.appex` and host-app embedding use Xcode
+product types, and a Ninja configure of that tree fails in CMake's Swift
+compiler check for the iOS target. Because its Xcode configure is minutes of
+mostly serial try-compile work, the gate starts the GPU leg in the background
+and builds the SDK legs alongside it; it waits for the GPU leg and fails on
+its status before the Simulator phase, and stops it if an SDK leg fails first.
+`tools/scripts/test_ios_compile_gate_legs.py` (ctest `ios-compile-gate-legs`)
+pins that orchestration against stub toolchain executables. The existing `test_ios_source_syntax.sh` sweep runs after
 the real builds as the cheap, locally callable fallback for iOS-specific
 translation units.
 
@@ -5383,3 +5757,57 @@ pull requests waiting for a slot.
 
 So a green `macos` on a pull request means it **built**. Test results arrive when the queue
 validates it.
+
+### The required gate must not need a third-party service at run time
+
+`build.yml`'s `Install visual-analysis Python dependencies` step installs the
+declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
+`visual-python-deps-present` ctest stays answerable. It used to pass
+`--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
+already met* — turning "pypi.org is reachable from this VM" into a precondition
+of the **required** `macos` check.
+
+On 2026-09-23 that precondition failed. Ephemeral VMs on one host refused
+CONNECT to pypi.org (`Tunnel connection failed: 403 Forbidden`), so the step
+died at 21 of 41 and took out every merge_group batch that happened to land
+there, while the identical batch passed on a host whose VMs could reach it.
+The queue stopped merging and the cause looked like a PR defect, because the
+batch is named after one PR.
+
+The step now checks with `pip install --dry-run --no-index` first and only
+reaches the network when the set is genuinely missing. Two consequences worth
+keeping in mind:
+
+- **Pre-provisioning the wheels into the golden image now works.** Before this
+  change it did not: `--upgrade` contacted the index regardless, so a fully
+  provisioned VM still needed PyPI.
+- **A missing dependency is still fatal**, just at the right place. The
+  `visual-python-deps-present` ctest is the proof, and it names what is absent.
+  Making the install non-fatal instead would produce the failure mode this
+  check exists to prevent — seven ctests silently skipping, which reads as green.
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is unreachable. If it can, that is a fleet-wide
+outage waiting on someone else's uptime.
+
+## Protected-validation receipt reuse
+
+A merge group may skip rebuilding and retesting `macos`/`linux` when the pull
+request's own run already validated the identical tree. The pull-request run
+issues a receipt (`tools/scripts/protected_merge_receipt.py issue`), and the
+merge group verifies it with the verifier from its protected base commit.
+
+A receipt carries the evidence of the test run it stands in for, not a claimed
+verdict. It records the CTest selection (label and regex filters), the
+selected inventory, per-test results from the JUnit report, and the recorded
+exit status. It is only issued when the `Test (non-Windows)` step itself ran and
+succeeded. Verification refuses any receipt that:
+
+- records a failed or unexecuted selection,
+- selects a narrowed tier (an include label or regex, or a different excluded
+  label set than the merge group runs), or
+- covers less than 80% of the built test inventory.
+
+A pull-request run that skips its tests therefore issues no receipt, and the
+merge group validates in full. Any receipt that is missing, stale, or
+rejected also falls back to full validation.

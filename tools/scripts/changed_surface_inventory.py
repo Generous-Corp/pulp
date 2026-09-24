@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Canonical CTest inventory for changed-surface planning.
+"""Canonical CTest inventory and build-target projection for changed surfaces.
 
 CTest permits duplicate test names.  A name set therefore cannot describe the
 suite that the authoritative command will execute.  This module retains every
 filtered registration as a canonical composite, groups byte-identical
 composites as a multiset, and makes ambiguity a fail-closed result.
+
+The build-target projection at the end of the module is the developer-loop
+side of the same machinery: it maps a working diff to the CMake targets that
+own it (file-API codemodel), the test programs that exercise them, and the
+CTest tests to run, following ``add_dependencies`` and CTest fixture edges.
+Shipyard's exact-head plan stays the merge authority; ``pulp build``,
+``pulp dev``, ``pulp loop``, ``pulp test``, and ``pulp affected`` consume the
+projection through ``tools/scripts/affected_targets.py``.
 """
 
 from __future__ import annotations
@@ -18,8 +26,10 @@ import re
 import subprocess
 import unicodedata
 from collections import Counter
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from shutil import which
 from typing import Any, Iterable
 
 
@@ -165,33 +175,13 @@ def split_proven_unbuilt_placeholders(
 
 
 def _cmake_artifact_paths(build_root: Path) -> set[Path]:
-    reply = build_root / ".cmake" / "api" / "v1" / "reply"
-    indexes = sorted(reply.glob("index-*.json"))
-    if len(indexes) != 1:
-        raise InventoryError("CMake codemodel cannot prove commandless registrations")
     try:
-        index = json.loads(indexes[0].read_text(encoding="utf-8"))
-        codemodel = json.loads(
-            (reply / index["reply"]["codemodel-v2"]["jsonFile"]).read_text(
-                encoding="utf-8"
-            )
-        )
-        configurations = codemodel["configurations"]
-        if not isinstance(configurations, list) or len(configurations) != 1:
-            raise KeyError("configurations")
-        references = configurations[0]["targets"]
-        artifacts: set[Path] = set()
-        for reference in references:
-            target = json.loads(
-                (reply / reference["jsonFile"]).read_text(encoding="utf-8")
-            )
-            for artifact in target.get("artifacts", []):
-                artifacts.add((build_root / artifact["path"]).resolve())
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        model = load_codemodel_targets(build_root)
+    except InventoryError as error:
         raise InventoryError(
             "CMake codemodel cannot prove commandless registrations"
         ) from error
-    return artifacts
+    return {Path(path).resolve() for target in model.targets.values() for path in target.artifacts}
 
 
 def _unicode_key(value: str) -> bytes:
@@ -715,3 +705,741 @@ def source_root_for_build(build_dir: Path) -> Path:
                 raise InventoryError("CMAKE_HOME_DIRECTORY is not absolute")
             return root
     raise InventoryError("CMake cache has no CMAKE_HOME_DIRECTORY")
+
+
+# ── build-target projection ─────────────────────────────────────────────────
+#
+# Everything below maps a working diff to CMake targets and CTest tests for the
+# developer loop. It is deliberately best-effort where the exact-head plan
+# above is fail-closed: an unmappable diff widens to ``all`` instead of
+# refusing, because the caller is a build command, not a merge gate.
+
+PROJECTION_SCHEMA = "pulp.affected-targets/v1"
+DEFAULT_PROJECTION_THRESHOLD = 0.4
+CODEMODEL_QUERY_RELATIVE = Path(".cmake") / "api" / "v1" / "query" / "codemodel-v2"
+CODEMODEL_REPLY_RELATIVE = Path(".cmake") / "api" / "v1" / "reply"
+
+SOURCE_EXTENSIONS = {".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".s", ".S"}
+HEADER_EXTENSIONS = {".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".tpp"}
+BUILD_SYSTEM_NAMES = {"CMakeLists.txt", "CMakePresets.json", "CMakeUserPresets.json"}
+LIBRARY_TARGET_TYPES = {"STATIC_LIBRARY", "OBJECT_LIBRARY", "INTERFACE_LIBRARY"}
+TEST_SOURCE_RE = re.compile(r"^test_(?P<stem>.+)$")
+
+
+@dataclass
+class Target:
+    """One codemodel target: enough of the file-API record to project a diff."""
+
+    name: str
+    type: str
+    source_dir: str
+    build_dir: str
+    sources: list[str]
+    dependencies: list[str] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
+
+    @property
+    def is_test(self) -> bool:
+        if self.type != "EXECUTABLE":
+            return False
+        if self.name.startswith("pulp-test-"):
+            return True
+        return any(s == "test" or s.startswith("test/") for s in self.sources)
+
+    @property
+    def is_library(self) -> bool:
+        return self.type in LIBRARY_TARGET_TYPES
+
+
+@dataclass
+class CodeModel:
+    targets: dict[str, Target]
+    source_root: str
+    build_root: str
+
+    @property
+    def total(self) -> int:
+        return len(self.targets)
+
+
+@dataclass
+class CTestEntry:
+    name: str
+    command: list[str]
+    properties: dict[str, Any]
+
+
+@dataclass
+class Selection:
+    mode: str
+    reason: str
+    changed_files: list[str]
+    targets: list[str]
+    tests: list[str]
+    total_targets: int
+    total_tests: int
+    unmapped: list[str]
+    threshold: float
+
+    @property
+    def banner(self) -> str:
+        if self.mode == "focused" and not self.targets:
+            return (
+                f"FOCUSED: nothing to build for your diff ({len(self.tests)} tests selected) "
+                "- run 'pulp build --all' before opening a PR"
+            )
+        if self.mode == "focused":
+            return (
+                f"FOCUSED: building {len(self.targets)}/{self.total_targets} targets "
+                "affected by your diff - run 'pulp build --all' before opening a PR"
+            )
+        return f"FULL: building all {self.total_targets} targets ({self.reason})"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "schema": PROJECTION_SCHEMA,
+            "mode": self.mode,
+            "reason": self.reason,
+            "banner": self.banner,
+            "changed_files": self.changed_files,
+            "targets": self.targets,
+            "tests": self.tests,
+            "total_targets": self.total_targets,
+            "total_tests": self.total_tests,
+            "unmapped": self.unmapped,
+            "threshold": self.threshold,
+        }
+
+
+def all_selection(reason: str, changed: Iterable[str], total_targets: int, total_tests: int,
+                  threshold: float, unmapped: Iterable[str] = ()) -> Selection:
+    return Selection(
+        mode="all",
+        reason=reason,
+        changed_files=sorted(changed),
+        targets=[],
+        tests=[],
+        total_targets=total_targets,
+        total_tests=total_tests,
+        unmapped=sorted(unmapped),
+        threshold=threshold,
+    )
+
+
+# ── CMake file API ──
+
+
+def ensure_codemodel_query(build_dir: Path) -> bool:
+    """Write the stateless codemodel query. Returns True when newly created."""
+    query = build_dir / CODEMODEL_QUERY_RELATIVE
+    if query.exists():
+        return False
+    query.parent.mkdir(parents=True, exist_ok=True)
+    query.touch()
+    return True
+
+
+def codemodel_reply_available(build_dir: Path) -> bool:
+    reply = build_dir / CODEMODEL_REPLY_RELATIVE
+    return reply.is_dir() and any(reply.glob("index-*.json"))
+
+
+def codemodel_reply_mtime(build_dir: Path) -> float | None:
+    """Modification time of the file-API reply index, or None."""
+    indexes = sorted((build_dir / CODEMODEL_REPLY_RELATIVE).glob("index-*.json"))
+    if not indexes:
+        return None
+    try:
+        return indexes[-1].stat().st_mtime
+    except OSError:
+        return None
+
+
+def load_codemodel_targets(build_dir: Path) -> CodeModel:
+    """Parse the file-API reply into a name-keyed target graph.
+
+    The reply must hold exactly one index: two indexes mean two configures
+    raced, and neither can be proven current. Both the exact-head inventory
+    (``_cmake_artifact_paths``) and the projection read through here.
+    """
+    reply = build_dir / CODEMODEL_REPLY_RELATIVE
+    indexes = sorted(reply.glob("index-*.json"))
+    if len(indexes) != 1:
+        raise InventoryError(f"CMake file-API reply must contain one index, found {len(indexes)}")
+    try:
+        index = json.loads(indexes[0].read_text(encoding="utf-8"))
+        codemodel_name = index["reply"]["codemodel-v2"]["jsonFile"]
+        codemodel = json.loads((reply / codemodel_name).read_text(encoding="utf-8"))
+        configurations = codemodel["configurations"]
+        if not isinstance(configurations, list) or len(configurations) != 1:
+            raise KeyError("configurations")
+        references = configurations[0]["targets"]
+        paths = codemodel.get("paths", {})
+        source_root = os.path.normpath(paths.get("source", str(build_dir.parent)))
+        build_root = os.path.normpath(paths.get("build", str(build_dir)))
+        # Keyed by the file-API target id when present (dependencies refer to
+        # it); a reference without one still contributes its target record.
+        by_id: dict[str, dict[str, Any]] = {}
+        for reference in references:
+            key = reference.get("id") or reference["jsonFile"]
+            by_id[key] = json.loads(
+                (reply / reference["jsonFile"]).read_text(encoding="utf-8")
+            )
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise InventoryError(f"CMake file-API codemodel is unavailable: {error}") from error
+
+    targets: dict[str, Target] = {}
+    for raw in by_id.values():
+        name = raw.get("name")
+        if not isinstance(name, str) or not name:
+            raise InventoryError("CMake file-API target has no canonical name")
+        deps = []
+        for dep in raw.get("dependencies", []):
+            dep_raw = by_id.get(dep.get("id", "")) if isinstance(dep, dict) else None
+            if dep_raw is not None:
+                deps.append(dep_raw["name"])
+        artifacts = []
+        for artifact in raw.get("artifacts", []):
+            path = artifact.get("path", "") if isinstance(artifact, dict) else ""
+            if not isinstance(path, str) or not path:
+                continue
+            if not os.path.isabs(path):
+                path = os.path.join(build_root, path)
+            artifacts.append(os.path.normpath(path))
+        targets[name] = Target(
+            name=name,
+            type=raw.get("type", ""),
+            source_dir=os.path.normpath(raw.get("paths", {}).get("source", ".")),
+            build_dir=os.path.normpath(raw.get("paths", {}).get("build", ".")),
+            sources=[os.path.normpath(s["path"]) for s in raw.get("sources", [])],
+            dependencies=deps,
+            artifacts=artifacts,
+        )
+    return CodeModel(targets=targets, source_root=source_root, build_root=build_root)
+
+
+# ── working diff ──
+
+
+def _git_lines(source_root: Path, *args: str) -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=source_root, capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def changed_files(source_root: Path, base: str) -> tuple[list[str], list[str], str | None]:
+    """Return (existing changed paths, deleted paths, warning) relative to the root.
+
+    The set is the union of the branch diff against the merge-base with
+    ``base``, staged and unstaged edits, and untracked files. Paths inside
+    submodules are reported by git as the submodule directory and skipped.
+    """
+    warning = None
+    merge_base = _git_lines(source_root, "merge-base", base, "HEAD")
+    names: set[str] = set()
+    if merge_base:
+        committed = _git_lines(source_root, "diff", "--name-only", merge_base.strip(), "HEAD")
+        if committed is not None:
+            names.update(committed.split("\n"))
+    else:
+        warning = f"cannot resolve merge-base with {base}; using uncommitted changes only"
+    for extra in (("diff", "--name-only", "HEAD"), ("ls-files", "--others", "--exclude-standard")):
+        listing = _git_lines(source_root, *extra)
+        if listing is not None:
+            names.update(listing.split("\n"))
+    existing: list[str] = []
+    deleted: list[str] = []
+    for name in sorted(n for n in names if n):
+        path = source_root / name
+        if path.is_file():
+            existing.append(os.path.normpath(name))
+        elif not path.is_dir():
+            deleted.append(os.path.normpath(name))
+    return existing, deleted, warning
+
+
+def is_build_system_file(rel: str) -> bool:
+    name = os.path.basename(rel)
+    return name in BUILD_SYSTEM_NAMES or name.endswith(".cmake") or name.endswith(".cmake.in")
+
+
+def stale_build_system_files(source_root: Path, changed: list[str], deleted: list[str],
+                             reply_time: float | None) -> list[str]:
+    """Build-system files whose change postdates the codemodel reply (or all of
+    them when there is no reply to compare against). A deleted build file is
+    always stale: nothing records when it went away."""
+    stale = [f for f in deleted if is_build_system_file(f)]
+    for rel in changed:
+        if not is_build_system_file(rel):
+            continue
+        if reply_time is None:
+            stale.append(rel)
+            continue
+        try:
+            if (source_root / rel).stat().st_mtime > reply_time:
+                stale.append(rel)
+        except OSError:
+            stale.append(rel)
+    return stale
+
+
+# ── dependency database (header -> compiled objects) ──
+
+
+def _target_from_object_path(obj: str) -> str | None:
+    marker = ".dir/"
+    idx = obj.find(marker)
+    if idx < 0:
+        return None
+    head = obj[:idx]
+    return head.rsplit("/", 1)[-1] if "/" in head else head
+
+
+def _relativize(path: str, source_root: str, base_dir: str) -> str | None:
+    """Source-root-relative form of a dependency path, which the generator
+    writes relative to ``base_dir`` (the object's build directory) or absolute."""
+    if not os.path.isabs(path):
+        path = os.path.join(base_dir, path)
+    path = os.path.normpath(path)
+    try:
+        rel = os.path.relpath(path, source_root)
+    except ValueError:
+        return None
+    if rel.startswith(".."):
+        return None
+    return rel
+
+
+def parse_ninja_deps(text: str, source_root: str, build_dir: str,
+                     wanted: set[str]) -> dict[str, set[str]]:
+    """Map the ``wanted`` source-relative headers to target names from ``ninja -t deps``."""
+    out: dict[str, set[str]] = {}
+    basenames = {os.path.basename(h) for h in wanted}
+    target: str | None = None
+    for line in text.splitlines():
+        if not line.strip():
+            target = None
+            continue
+        if not line.startswith((" ", "\t")):
+            obj = line.split(":", 1)[0]
+            target = _target_from_object_path(obj.replace("\\", "/"))
+            continue
+        if target is None:
+            continue
+        dep = line.strip()
+        if os.path.basename(dep) not in basenames:
+            continue
+        rel = _relativize(dep, source_root, build_dir)
+        if rel in wanted:
+            out.setdefault(rel, set()).add(target)
+    return out
+
+
+def parse_make_depfile(text: str, target: str, source_root: str, base_dir: str,
+                       wanted: set[str], out: dict[str, set[str]]) -> None:
+    """Fold one compiler-generated ``.o.d`` file into the header map."""
+    body = text.replace("\\\n", " ")
+    for rule in body.split("\n"):
+        if ":" not in rule:
+            continue
+        _, deps = rule.split(":", 1)
+        for token in deps.split():
+            rel = _relativize(token, source_root, base_dir)
+            if rel in wanted:
+                out.setdefault(rel, set()).add(target)
+
+
+def _depfile_roots(build_dir: Path, model: CodeModel) -> list[Path]:
+    roots: set[Path] = set()
+    for target in model.targets.values():
+        head = target.build_dir.split(os.sep, 1)[0]
+        if head == "_deps":
+            continue
+        roots.add(build_dir / head if head not in ("", ".") else build_dir / "CMakeFiles")
+    return sorted(r for r in roots if r.is_dir())
+
+
+def _grep_depfiles(patterns: list[str], roots: list[Path]) -> list[str] | None:
+    """Depfiles under ``roots`` containing any pattern. ripgrep walks a large
+    build tree in well under a second; the portable fallback enumerates the
+    depfiles first because a recursive grep stats every object in the tree."""
+    if which("rg"):
+        args = ["rg", "-l", "-F", "--glob", "*.d"]
+        for pattern in patterns:
+            args += ["-e", pattern]
+        args += [str(r) for r in roots]
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True, check=False)
+        except OSError:
+            proc = None
+        if proc is not None and proc.returncode in (0, 1):
+            return proc.stdout.splitlines()
+    depfiles = [str(p) for r in roots for p in r.rglob("*.d")]
+    if not depfiles:
+        return []
+    hits: list[str] = []
+    chunk = 500
+    for i in range(0, len(depfiles), chunk):
+        args = ["grep", "-lF"]
+        for pattern in patterns:
+            args += ["-e", pattern]
+        args += depfiles[i:i + chunk]
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True, check=False)
+        except OSError:
+            return None
+        if proc.returncode not in (0, 1):
+            return None
+        hits.extend(proc.stdout.splitlines())
+    return hits
+
+
+def header_owners(build_dir: Path, model: CodeModel, headers: set[str]) -> dict[str, set[str]] | None:
+    """Targets whose compiled objects include each header, from the generator's
+    dependency database (``ninja -t deps`` or Makefile ``.o.d`` files). Returns
+    None when no database is available."""
+    if not headers:
+        return {}
+    if (build_dir / "build.ninja").is_file():
+        try:
+            proc = subprocess.run(
+                ["ninja", "-C", str(build_dir), "-t", "deps"],
+                capture_output=True, text=True, check=False,
+            )
+        except OSError:
+            return None
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return None
+        return parse_ninja_deps(proc.stdout, model.source_root, str(build_dir), headers)
+    roots = _depfile_roots(build_dir, model)
+    if not roots:
+        return None
+    matches = _grep_depfiles(sorted(headers), roots)
+    if matches is None:
+        return None
+    out: dict[str, set[str]] = {}
+    for line in matches:
+        depfile = Path(line.strip())
+        target = _target_from_object_path(str(depfile).replace("\\", "/"))
+        if target is None or target not in model.targets:
+            continue
+        base_dir = str(build_dir / model.targets[target].build_dir)
+        try:
+            parse_make_depfile(depfile.read_text(encoding="utf-8", errors="replace"),
+                               target, model.source_root, base_dir, headers, out)
+        except OSError:
+            continue
+    if not matches and not any(next(r.rglob("*.d"), None) for r in roots):
+        return None
+    return out
+
+
+# ── ctest inventory for projection ──
+
+
+def projection_ctest_entries(tests: Iterable[dict[str, Any]]) -> list[CTestEntry]:
+    """The authoritative corpus (same name/label exclusions as the exact-head
+    plan) as lightweight entries; malformed registrations are skipped rather
+    than refused, because a build command must not fail on inventory shape."""
+    entries: list[CTestEntry] = []
+    for test in tests:
+        try:
+            kept = authoritative_tests([test])
+        except InventoryError:
+            continue
+        if not kept:
+            continue
+        props: dict[str, Any] = {}
+        for prop in test.get("properties", []) or []:
+            props[prop.get("name", "")] = prop.get("value")
+        entries.append(CTestEntry(
+            name=test.get("name", ""),
+            command=[str(c) for c in (test.get("command") or [])],
+            properties=props,
+        ))
+    return entries
+
+
+def load_projection_ctest_entries(build_dir: Path) -> list[CTestEntry] | None:
+    try:
+        return projection_ctest_entries(load_ctest_json(build_dir))
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, InventoryError):
+        return None
+
+
+def _as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+# ── selection rules ──
+
+
+def file_stem(rel: str) -> str:
+    return os.path.basename(rel).split(".", 1)[0]
+
+
+def companion_test_targets(stem: str, model: CodeModel) -> set[str]:
+    """Test programs whose test source is ``test_<stem>.cpp`` or ``test_<stem>_*.cpp``."""
+    hits: set[str] = set()
+    if not stem:
+        return hits
+    for target in model.targets.values():
+        if not target.is_test:
+            continue
+        for source in target.sources:
+            match = TEST_SOURCE_RE.match(file_stem(source))
+            if not match:
+                continue
+            test_stem = match.group("stem")
+            if test_stem == stem or test_stem.startswith(stem + "_"):
+                hits.add(target.name)
+                break
+    return hits
+
+
+def directory_owners(rel: str, model: CodeModel) -> set[str]:
+    """Non-test targets defined in the longest source directory prefix of ``rel``."""
+    best_len = -1
+    owners: set[str] = set()
+    directory = os.path.dirname(rel)
+    for target in model.targets.values():
+        if target.is_test:
+            continue
+        src = target.source_dir
+        if src == ".":
+            match, length = True, 0
+        else:
+            match = directory == src or directory.startswith(src + os.sep)
+            length = len(src)
+        if not match:
+            continue
+        if length > best_len:
+            best_len = length
+            owners = {target.name}
+        elif length == best_len:
+            owners.add(target.name)
+    return owners
+
+
+def reverse_dependencies(model: CodeModel) -> dict[str, set[str]]:
+    rev: dict[str, set[str]] = {}
+    for target in model.targets.values():
+        for dep in target.dependencies:
+            rev.setdefault(dep, set()).add(target.name)
+    return rev
+
+
+def test_dependents(name: str, rev: dict[str, set[str]], model: CodeModel) -> set[str]:
+    """Test programs that depend on ``name`` directly (the ``add_dependencies``
+    edge a shell-out test declares on the binary it runs)."""
+    return {d for d in rev.get(name, set()) if d in model.targets and model.targets[d].is_test}
+
+
+def family_projection(families: Iterable[dict[str, Any]], changed: Iterable[str]
+                      ) -> tuple[set[str], set[str]]:
+    """Tests and build targets the Shipyard policy families declare for the
+    changed paths. Families are the hand-reviewed mapping the exact-head plan
+    uses; the projection honours them on top of what it derives."""
+    import fnmatch
+
+    tests: set[str] = set()
+    targets: set[str] = set()
+    changed = list(changed)
+    for family in families:
+        patterns = family.get("paths", [])
+        if not any(fnmatch.fnmatch(rel, pattern) for rel in changed for pattern in patterns):
+            continue
+        tests.update(family.get("tests", []))
+        tests.update(family.get("extended_tests", []))
+        targets.update(family.get("build_targets", []))
+    return tests, targets
+
+
+def follow_fixtures(tests: set[str], inventory: list[CTestEntry],
+                    artifact_owner: dict[str, str]) -> tuple[set[str], set[str]]:
+    """Close ``tests`` over FIXTURES_REQUIRED; return (tests, targets building fixtures)."""
+    by_name: dict[str, list[CTestEntry]] = {}
+    setups: dict[str, list[CTestEntry]] = {}
+    for entry in inventory:
+        by_name.setdefault(entry.name, []).append(entry)
+        for fixture in _as_list(entry.properties.get("FIXTURES_SETUP")):
+            setups.setdefault(fixture, []).append(entry)
+    result = set(tests)
+    fixture_targets: set[str] = set()
+    pending = list(tests)
+    while pending:
+        name = pending.pop()
+        for entry in by_name.get(name, []):
+            for fixture in _as_list(entry.properties.get("FIXTURES_REQUIRED")):
+                for setup in setups.get(fixture, []):
+                    for path in setup.command:
+                        owner = artifact_owner.get(os.path.normpath(path))
+                        if owner is not None:
+                            fixture_targets.add(owner)
+                    if setup.name not in result:
+                        result.add(setup.name)
+                        pending.append(setup.name)
+    return result, fixture_targets
+
+
+def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
+                     deps_db: dict[str, set[str]] | None, inventory: list[CTestEntry] | None,
+                     threshold: float = DEFAULT_PROJECTION_THRESHOLD,
+                     stale_build_system: list[str] | None = None,
+                     families: Iterable[dict[str, Any]] = ()) -> Selection:
+    """Map the diff to a Selection.
+
+    ``deps_db`` is the header -> targets map from :func:`header_owners` (None
+    when no dependency database exists). ``stale_build_system`` names the
+    build-system files that postdate the codemodel reply; None treats every
+    changed build-system file as stale. ``families`` are Shipyard policy
+    families whose declared tests and build targets are honoured as well.
+    """
+    total_tests = len(inventory) if inventory is not None else 0
+    total = model.total
+    if not changed and not deleted:
+        return all_selection("no changes relative to the base", [], total, total_tests, threshold)
+
+    if stale_build_system is None:
+        build_system = [f for f in changed + deleted if is_build_system_file(f)]
+    else:
+        build_system = list(stale_build_system)
+    if build_system:
+        return all_selection(f"build system changed: {build_system[0]}", changed, total,
+                             total_tests, threshold)
+    deleted_sources = [f for f in deleted
+                       if os.path.splitext(f)[1] in SOURCE_EXTENSIONS | HEADER_EXTENSIONS]
+    if deleted_sources:
+        return all_selection(f"deleted source: {deleted_sources[0]}", changed, total,
+                             total_tests, threshold)
+
+    source_owners: dict[str, set[str]] = {}
+    for target in model.targets.values():
+        for source in target.sources:
+            source_owners.setdefault(source, set()).add(target.name)
+    rev = reverse_dependencies(model)
+
+    selected: set[str] = set()
+    unmapped: list[str] = []
+    resolved = 0
+    file_selected_tests: set[str] = set()
+    for rel in changed:
+        ext = os.path.splitext(rel)[1]
+        owners = set(source_owners.get(rel, ()))
+        if not owners and deps_db is not None:
+            owners = set(deps_db.get(rel, ()))
+        if owners:
+            resolved += 1
+            selected |= owners
+            for owner in owners:
+                if not model.targets[owner].is_library:
+                    selected |= test_dependents(owner, rev, model)
+            selected |= companion_test_targets(file_stem(rel), model)
+            continue
+        if ext in HEADER_EXTENSIONS:
+            if deps_db is not None:
+                # A header no compiled object includes is inert; still relink
+                # its companion tests so a stale include list is noticed.
+                resolved += 1
+                selected |= companion_test_targets(file_stem(rel), model)
+                continue
+            owners = directory_owners(rel, model)
+            if not owners:
+                return all_selection(f"header without an owning target: {rel}", changed, total,
+                                     total_tests, threshold)
+            resolved += 1
+            selected |= owners
+            for owner in owners:
+                selected |= rev.get(owner, set())
+            selected |= companion_test_targets(file_stem(rel), model)
+            continue
+        if ext in SOURCE_EXTENSIONS:
+            return all_selection(f"source not owned by any configured target: {rel}", changed,
+                                 total, total_tests, threshold)
+        unmapped.append(rel)
+
+    family_tests, family_targets = family_projection(families, changed)
+    selected |= {t for t in family_targets if t in model.targets}
+    selected = {t for t in selected if t in model.targets}
+    if inventory is not None:
+        artifact_owner: dict[str, str] = {}
+        for target in model.targets.values():
+            for artifact in target.artifacts:
+                artifact_owner[artifact] = target.name
+        changed_abs = {os.path.normpath(os.path.join(model.source_root, f)) for f in changed}
+        by_test_target: dict[str, set[str]] = {}
+        known_names = {entry.name for entry in inventory}
+        for entry in inventory:
+            cmd_paths = [os.path.normpath(c) for c in entry.command]
+            for path in cmd_paths:
+                owner = artifact_owner.get(path)
+                if owner is not None:
+                    by_test_target.setdefault(owner, set()).add(entry.name)
+            if any(p in changed_abs for p in cmd_paths):
+                file_selected_tests.add(entry.name)
+        tests: set[str] = set(file_selected_tests) | (family_tests & known_names)
+        for name in selected:
+            tests |= by_test_target.get(name, set())
+        tests, fixture_targets = follow_fixtures(tests, inventory, artifact_owner)
+        selected |= {t for t in fixture_targets if t in model.targets}
+    else:
+        tests = set()
+
+    if not selected and not tests and (unmapped or resolved != len(changed)):
+        return all_selection("no build targets or tests map to the diff", changed, total,
+                             total_tests, threshold, unmapped)
+    if total and len(selected) > threshold * total:
+        return all_selection(
+            f"{len(selected)} affected targets exceed {int(threshold * 100)}% of {total}",
+            changed, total, total_tests, threshold, unmapped)
+    return Selection(
+        mode="focused",
+        reason="targets owning the diff plus their tests",
+        changed_files=sorted(changed),
+        targets=sorted(selected),
+        tests=sorted(tests),
+        total_targets=total,
+        total_tests=total_tests,
+        unmapped=sorted(unmapped),
+        threshold=threshold,
+    )
+
+
+def project_working_diff(build_dir: Path, source_root: Path | None, base: str,
+                         threshold: float = DEFAULT_PROJECTION_THRESHOLD,
+                         files: list[str] | None = None, with_tests: bool = True,
+                         families: Iterable[dict[str, Any]] = ()) -> Selection:
+    """Project the working diff of a configured build directory end to end."""
+    ensure_codemodel_query(build_dir)
+    if not codemodel_reply_available(build_dir):
+        return all_selection(
+            "codemodel reply missing; the query is written and the next configure produces it",
+            [], 0, 0, threshold)
+    try:
+        model = load_codemodel_targets(build_dir)
+    except InventoryError as error:
+        return all_selection(f"codemodel unreadable: {error}", [], 0, 0, threshold)
+    root = source_root or Path(model.source_root)
+    if files is None:
+        changed, deleted, _warning = changed_files(root, base)
+    else:
+        changed = [os.path.normpath(f) for f in files if (root / f).is_file()]
+        deleted = [os.path.normpath(f) for f in files if not (root / f).exists()]
+    if not changed and not deleted:
+        return all_selection("no changes relative to the base", [], model.total, 0, threshold)
+    stale = stale_build_system_files(root, changed, deleted, codemodel_reply_mtime(build_dir))
+    if stale:
+        return project_affected(model, changed, deleted, None, None, threshold, stale, families)
+    headers = {f for f in changed if os.path.splitext(f)[1] in HEADER_EXTENSIONS}
+    deps_db = header_owners(build_dir, model, headers)
+    inventory = load_projection_ctest_entries(build_dir) if with_tests else None
+    return project_affected(model, changed, deleted, deps_db, inventory, threshold, stale,
+                            families)

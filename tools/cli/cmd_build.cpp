@@ -85,9 +85,11 @@ int cmd_build(const std::vector<std::string>& args) {
     bool allow_unsupported_sdk = false;
     // Item 7.4b: install after build (with validation gate by default).
     bool install_mode = false;
+    bool build_all = false;
     bool skip_validation = false;
     bool trace_mode = false;
     bool allow_tracing_install = false;
+    bool examples = false;
     std::string test_filter;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
@@ -107,6 +109,10 @@ int cmd_build(const std::vector<std::string>& args) {
             install_mode = true;
             continue;
         }
+        if (arg == "--all") {
+            build_all = true;
+            continue;
+        }
         if (arg == "--skip-validation") {
             skip_validation = true;
             continue;
@@ -117,6 +123,10 @@ int cmd_build(const std::vector<std::string>& args) {
         }
         if (arg == "--allow-tracing") {
             allow_tracing_install = true;
+            continue;
+        }
+        if (arg == "--examples") {
+            examples = true;
             continue;
         }
         if (arg.rfind("--test-filter=", 0) == 0) {
@@ -188,7 +198,17 @@ int cmd_build(const std::vector<std::string>& args) {
     }
 
     auto build_dir = project_root / (trace_mode ? "build-trace" : "build");
-    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt");
+    // Focused build: --install and --validate need every bundle, so they keep
+    // the full build; everything else builds the targets the diff affects.
+    // The selector reads the CMake file-API codemodel, which only a configure
+    // that finds the query already in place produces, so the query goes in
+    // before any configure below.
+    const bool focus = !install_mode && !watch_validate
+                       && focused_build_applicable(project_root, standalone_mode,
+                                                   passthrough_args, build_all);
+    if (focus) ensure_codemodel_query(build_dir);
+    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt")
+        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir));
     bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
 
     // Heal source trees configured before dependency provisioning was
@@ -205,6 +225,10 @@ int cmd_build(const std::vector<std::string>& args) {
         auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
         auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
         if (cmake_time > cache_time) needs_configure = true;
+    }
+    if (focus && !needs_configure && !codemodel_reply_available(build_dir)) {
+        std::cout << "Configuring once to record the CMake codemodel that focused builds select from\n";
+        needs_configure = true;
     }
 
     if (!enforce_project_cli_compatibility(project_root,
@@ -235,6 +259,7 @@ int cmd_build(const std::vector<std::string>& args) {
         }
 
         std::string configure_cmd = "cmake -B " + build_dir.string() + " -S " + project_root.string();
+        configure_cmd += configure_default_flags(build_dir, !standalone_mode, examples);
         append_windows_visual_studio_generator_args(configure_cmd);
 
         // Standalone projects need CMAKE_PREFIX_PATH to find the SDK
@@ -307,8 +332,14 @@ int cmd_build(const std::vector<std::string>& args) {
         build_cmd += " " + arg;
     }
 
+    FocusedSelection selection;
+    if (focus) {
+        selection = select_for_rebuild(project_root, build_dir, true, "");
+        build_cmd = focused_build_command(build_cmd, selection);
+    }
+
     pulp_debug("cmd_build: run build (cmake --build)");
-    int rc = run_with_spinner(
+    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
         apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
                                    lease.jobs(),
                                    lease.active()),
@@ -407,6 +438,7 @@ int cmd_build(const std::vector<std::string>& args) {
     opts.run_tests = watch_test;
     opts.test_filter = test_filter;
     opts.run_validate = watch_validate;
+    opts.focus = focus;
     opts.build_jobs = capped_build.jobs;
     opts.build_qos = lease.qos();
     opts.build_watchdog = lease.active();

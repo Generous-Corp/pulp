@@ -13,6 +13,22 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Focused builds are a dev-loop default, never a landing signal
+
+`pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
+and run only what the working diff affects (`pulp affected`, the build-target
+projection in `tools/scripts/changed_surface_inventory.py`, which also honours
+the `families` under `[targets.mac.changed_surface_selection]`; banner
+`FOCUSED: building N/<total> targets affected by your diff - run 'pulp build
+--all' before opening a PR`). That is
+deliberate for iteration speed and deliberately **not** what any gate runs: the
+pre-push diff-cover build, `tools/scripts/gates.sh`, Shipyard's lanes, and every
+GitHub Actions job build `all` and drive `ctest` themselves, so the CLAUDE.md
+"struct-layout change must compile everywhere" contract is unchanged. Before
+`shipyard pr`, run `pulp build --all` (and `pulp test --all` when you changed
+anything with tests); a focused green run proves the affected set, not the
+graph. `PULP_BUILD_FOCUS=0` disables focus for scripts that wrap the CLI.
+
 ## A2T structural evidence is produced only by the required macOS PR job
 
 An A2T evidence PR targeting `Generous-Corp/pulp` `main` that adds or modifies the exact tracked
@@ -54,6 +70,83 @@ different from the PR-head blob, bound to a different schema/issuer/verifier,
 dynamically loaded dependency, trace, or source,
 or produces noncanonical verifier output fails the required check. Linux and
 Windows remain advisory and do not produce this authority.
+
+## A merge queue amplifies a broken base instead of catching it
+
+The merge queue's failure mode is not that it misses a break. It is that it
+inherits one and repeats it. A batch validates `main` plus its entries, so a
+break already on `main` fails every batch, ejects the innocent entries,
+re-forms, and fails again. One observed cascade ran ten-plus consecutive
+batches over seven hours with zero merges, each ~40 minutes, each reporting
+against a batch name that was not the culprit.
+
+Three facts make that possible, and all three are worth knowing before you
+diagnose a stalled queue:
+
+**A pull-request head does not run the test suite at all.** The `Test
+(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
+in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
+the PR head. So "the PR was green" never meant its tests passed.
+
+**`main`'s macOS health is measured only on push.** The macOS matrix leg now
+runs on `push: main` for exactly this reason: a merge group validates a
+synthetic merge commit, so without the push leg nothing ever runs the full
+macOS suite against a commit that is actually on `main`. If you are asking
+"is main broken?", look at the push run for the merge commit, not at a batch.
+The leg keeps its descriptive matrix name on push rather than claiming the
+required `macos` context, so it detects without gating.
+
+**A batch stops at its first failing test.** `merge_group` runs ctest with
+`--stop-on-failure`; no other lane does. It composes with `--repeat
+until-pass:2` rather than defeating it — ctest stops only once the retries are
+exhausted, so a flake still self-heals — and under `-j8` the stop is bounded by
+the parallel width, so a few extra tests finish. Do not read a batch's short
+test list as the complete set of what is broken; the push lane is the one that
+reports every failure.
+
+Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
+tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
+calls it.
+
+## A green `macos` check can mean nothing ran
+
+The required `macos` context is reported by more than one job: the macOS matrix
+leg, which builds and tests, and bootstrap jobs that claim the name without
+running anything — when no native input changed, or when a protected receipt is
+reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+bootstrap step, `Complete job`). In the checks list it is indistinguishable
+from a real pass, and reasoning from one as evidence that the suite passed has
+already cost hours of wrong conclusions.
+
+Ask the run instead of the colour:
+
+```bash
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
+# executed | built-but-untested | not-executed, with the step count
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
+# exits nonzero unless the suite genuinely ran
+```
+
+Each bootstrap job also writes a banner into its own job summary saying no
+build and no test step ran. A step count near three on a `macos` job is the
+tell.
+
+## A failed batch's branch name is not the culprit
+
+A merge_group batch is NAMED for one pull request but CONTAINS every entry
+ahead of it. Blaming the name sends someone to fix an innocent branch while the
+real break keeps failing every batch that forms.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
+```
+
+It maps each failing ctest to the pull request whose files own it. Below its
+confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
+read that as "go look at main's own push run", never as "no culprit exists".
+Because it reads the macos job's log, a batch whose macos gate never ran the
+suite yields nothing, which is the previous section's problem wearing a
+different hat.
 
 ## Current required-macOS truth (read before older incident notes)
 
@@ -279,6 +372,22 @@ context, and never execute the candidate's verifier as the authority.
 `tools/scripts/test_required_macos_alias.py` and
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
+
+### A reused merge-group receipt must carry test evidence, not a verdict
+
+A merge group can skip `macos`/`linux` entirely by reusing the pull-request
+run's protected-validation receipt. The job then reads as validated even
+though nothing ran in the group. A receipt that *states* success
+(`{"conclusion": "success", "ctest_exit": 0}` written as a constant), checked
+by a verifier comparing against that same constant, is circular: it stays
+green after the pull-request run stops running tests, and red code lands
+behind a green gate. Receipts carry the CTest selection, the selected
+inventory, JUnit per-test results and the recorded exit status. They are
+issued only when the `ctest` step ran and succeeded, and a narrowed tier (an
+include label or regex) can never be reused. When changing which tests a
+pull-request run executes, check `tools/scripts/test_build_workflow.py` and
+`tools/scripts/test_protected_merge_receipt.py` (both run from
+`workflow-lint.yml`).
 
 ### A green ctest job proves nothing about a label its event excludes
 
@@ -996,6 +1105,22 @@ from the declared file (`tools/motion/visual/requirements.txt`, which
 `tools/deps/manifest.json` already carries and audits) rather than from a
 hand-listed pair read off a skip line.
 
+**CI installs the lock, not the ranges.** After the no-network
+`--dry-run --no-index` satisfied check (which still runs first and ends the
+step when the floor is already met), `build.yml` installs
+`tools/motion/visual/requirements.lock` — the `pip-compile --generate-hashes`
+resolution of `requirements.txt` — under `--require-hashes`. Adding a
+requirement means regenerating the lock (command in its header);
+`test_visual_python_deps_step.py` fails if a declared name is missing from it or
+a pin lacks a hash. The step installs from a host wheelhouse first when a tartci
+guest declares `TARTCI_PIP_WHEELHOUSE`, then from the index with three spaced
+attempts. A `Tunnel connection failed: 403 Forbidden` in this step is the guest
+egress relay refusing PyPI, not a package problem: 27 m5 gate jobs failed that
+way on 2026-09-22/23 until tartci allowed `pypi.org` and
+`files.pythonhosted.org`. PEP 668 is probed once (`EXTERNALLY-MANAGED` beside
+the stdlib) rather than by retrying each install, so an index outage is not paid
+twice per attempt.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
@@ -1320,6 +1445,61 @@ points at a force-pushed-away commit — between the force-push and the next
 `git fetch --prune` — keeps that commit reachable, so the gate would pass it.
 That window is narrow and does not touch the shape the gate is for: a commit
 amended before its first push was never on any remote ref.
+
+## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
+
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
+`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
+0.1s and ~2s, no build tree, no configure. The required gate already runs them
+as ctests, so this adds no coverage; it moves *when* you find out.
+
+That timing is the whole point. A batch is main plus every entry ahead of it, so
+a bad test registration does not fail only its author: it fails the batch, ejects
+PRs that did nothing wrong, and the queue re-forms on the same failure until
+somebody reads a log. A single literal `TIMEOUT` inside `catch_discover_tests`
+has held eighteen PRs this way, and `catch_discover_timeout_guard.py` names the
+exact file and line in a tenth of a second.
+
+What each one refuses:
+
+- **A literal `TIMEOUT` in a `catch_discover_tests` block.** The budget must be
+  a scaled variable, because a literal is not widened on the instrumented lanes
+  and the test is killed at an uninstrumented budget:
+
+      pulp_scaled_test_timeout(_pulp_<name>_timeout <seconds>)
+      catch_discover_tests(<target>
+          PROPERTIES TIMEOUT "${_pulp_<name>_timeout}")
+
+  Prior art: `test/cmake/app_audio_host_tests.cmake`,
+  `test/cmake/character_delay_tests.cmake`. The guard honours an inline
+  `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
+  since the skip marker evades the thing the guard exists to catch.
+
+- **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
+  `return` at the top of a case leaves it PASSING, so the suite's pass count is
+  identical whether the lane ran or the precondition vanished. Use `SKIP()`.
+  `tools/scripts/check_skip_not_pass.json` is a frozen ledger whose `sites`
+  counts may shrink and never grow — a count that has DROPPED is an error, so
+  lower it in the same change or delete the entry at zero.
+
+Diff-scoped, like the unbounded-wait lint: a violation is fatal only when it sits
+on a path the push changes, and one elsewhere is reported without failing. That
+keeps a pre-existing backlog on the base from blocking every developer's push. It
+is reported rather than swallowed because a violation on the base still reds the
+required gate for whoever owns it.
+
+Two traps when running these by hand:
+
+- **Run them against a ref, not a working tree.** A checkout parked on an old
+  branch may not even contain the scripts, and the resulting "not found" reads
+  as a clean run. Use `git archive <ref> | tar -x -C "$(mktemp -d)"` and assert
+  a non-zero extracted file count.
+- **Extract the WHOLE tree for `check_skip_not_pass`.** It reports a ledger entry
+  as "listed in the ledger but not scanned" when the file is merely absent from
+  your extraction, which looks like a real finding and is not.
+
+`PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
+run as ctests on the required gate.
 
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
@@ -1898,6 +2078,22 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
 
+Before editing a lane, run `runner_topology_check.py --mode=static` (offline,
+no token). Its `REACHABLE` means *declared* supply from the checked-in
+advertised-labels snapshot, not live service, so a drifted installed profile
+still needs `--mode=report`. Never judge the required gate by its raw variable:
+build.yml swaps `pulp-gate-fast` for an event-class label before dispatch, and
+the static mode projects that for you. A temporary lane value belongs in the
+contract's `overrides` array with an owner and an expiry; an expired override
+fails every mode. The snapshot names no host by hand: regenerate it with
+`tools/scripts/fleet_snapshot.py --tartci <checkout> --write` after any
+`profiles/*-macos-fleet.toml` change in tartci; the hourly topology sweep runs
+`--check` and files a stale snapshot on the same tracking issue. `--mode=report` also prints advisory observed-supply lines
+(OBSERVED / NOT_OBSERVED / IDLE per registration, UNDECLARED_OBSERVED for an
+unknown runner prefix); jobs attach to a registration by runner-name prefix and
+labels, not by the registration's workflow list, because GitHub assigns by
+labels alone (release-cli darwin legs have run on pulp-gate runners).
+
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
 A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and
@@ -2123,6 +2319,25 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   process — so it is safe to run on the required-gate host. Installed on the m3/m5
   /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
   reading; `--uninstall` removes the agent.
+- **The published reading also carries a `build` snapshot** (`host_vitals.sh
+  --build-json`: host and gate ccache hit/fill/cleanups, gate-VM count and RSS,
+  tartci executing generation vs `~/Code/tartci` checkout, lease usage, wheelhouse
+  count). It is sensor-only, never part of the cheap probe that gates.sh and the
+  pre-push hook call. Two traps it encodes: over ssh and under launchd `PATH` has
+  no Homebrew, so `ccache`/`tartci`/`tart` must be resolved by absolute path; and
+  `tart list` over ssh prints NOTHING on m5 while two VMs run, so gate VMs are
+  counted from `com.apple.Virtualization.VirtualMachine` processes (their RSS is
+  the VM's memory; the `tart run` launcher's is not). A sensor installed before
+  the snapshot existed publishes none; `build_speed_scorecard.py report` then
+  probes live and labels it — reinstall the sensor to fix.
+- **"Is the gate slower than usual on this host?"** is `shipyard metrics watch
+  --project pulp-gate-steps --json` after `tools/scripts/build_speed_scorecard.py
+  ingest`. Plain `shipyard metrics import github` keys self-hosted jobs by their
+  ephemeral runner name (one job per "host") and stores no steps, so its per-host
+  numbers are meaningless for the gate. `shipyard metrics record` keeps only the
+  FIRST step for a given external id, so per-step rows need their own external id
+  and live in a separate project (`pulp-gate-steps`) to keep `pulp`'s
+  worker-minutes honest.
 - **A whole-pool-fails-at-once red leg is infra, not code** (per
   `macos-required-leg-timeout-saturation`): if `windows` + both `macos` legs fail
   together and the diff can't explain it, correlate against host reboot / jetsam
@@ -6027,9 +6242,18 @@ The Build-and-Test macOS job uses the independent
 compile step. Accept `ios_compile_required=false` only for `pull_request` or
 `merge_group` diffs whose every path matches that allowlist. A bounded macOS
 test family does not inherit this authority; review mobile impact explicitly
-before adding a path. Any missing/malformed value, empty or mixed diff, unknown path,
-mobile/Apple path, public header, CMake/CI/policy/test-topology change, or policy
-read failure runs the gate. Main, manual, nightly, release, and audit execution
+before adding a path. The allowlist covers `docs/**`, `test/**`,
+`tools/scripts/test_*.py`, `.agents/skills/**`, the Claude plugin manifests and
+`CHANGELOG.md`, because the gate configures with `PULP_BUILD_TESTS=OFF`. The
+paths under those prefixes that the gate does read (its own
+`test/cmake/test_ios_*` scripts, the CoreMIDI harness sources, and every
+`test/`/`docs/` file a non-test CMake file the iOS configure reaches names) are
+denied first by `IOS_COMPILE_REQUIRED_PATTERNS` in `classify_changes.py`;
+`test_classify_changes.py` re-derives that list from the live CMake tree, so a
+new reference has to be added there. Test-topology paths no longer force the
+gate on their own. Any missing/malformed value, empty or mixed diff, unknown
+path, mobile/Apple path, public header, CMake/CI/policy change, non-test
+`tools/scripts` file, or policy read failure runs the gate. Main, manual, nightly, release, and audit execution
 never accepts this skip and retains its existing event policy. Condition the
 expensive step, never the required workflow/job, so the stable required context
 still reports.
@@ -7836,6 +8060,7 @@ Gotchas:
 - **Per-OS coverage (Phase 1 PR 4)**: each matrix leg tags its Codecov upload with an OS flag so `host AND os-windows` answers "what fraction of `core/host` is exercised when tests run on Windows?" — a different question from `host AND windows` (which is "what fraction of `core/host/**/windows/` shim files are covered at all"). Cross-OS unions of the same file happen at the Codecov flag layer, NOT via `llvm-profdata merge` (not architecture-portable — see planning decision doc §7).
 - **Windows coverage uses Clang, not MSVC.** `tools/cmake/PulpInstrumentation.cmake` rejects MSVC because `/fsanitize-coverage` and llvm-cov emit incompatible profile shapes. The Windows matrix leg adds `C:\Program Files\LLVM\bin` to PATH and builds with clang++; the `windows-msvc-release-gate` job in `build.yml` keeps the MSVC release-path green separately.
 - **diff-cover consumes a merged XML, not the per-OS ones.** It's a single-XML tool — running it against three XMLs would produce three PR comments for the same metric with slightly different numbers, more noise than signal. The merge happens once in the job (`merge_cobertura.py`, max-hits-per-line union) so the gate sees a cross-platform view while diff-cover still emits one comment. Earlier the gate read only the Linux artifact and silently skipped Apple-only / Windows-only files (pulp#635). Local `scripts/run_coverage.sh` still produces a single per-host XML; a local diff-cover invocation against that has the original silent-skip and is best treated as a sanity check, not the authoritative gate.
+- **The pre-push diff-cover build is FOCUSED, not whole-tree.** With no targets, `local_diff_cover.sh` asks `tools/scripts/diff_cover_targets.py` for a plan from `build-cov`'s File API codemodel (written to `build-cov/coverage/diff-cover-plan.json`) and runs only the CTests whose command runs a built target. A changed `.cpp` first tries the *likely* tier (its owners plus tests named after it or including its header). A shortfall re-execs once in the *closure* tier (owners plus every transitive consumer), so a first "below 75%" line followed by "widening…" is expected, not a failure. Headers go straight to the closure, because an inline function is only mapped in the TUs that use it. A diff whose only native changes sit under `test/`/`examples/`/`external/` or `diff_cover_excludes` skips before configuring. Two gotchas: `pulp-state`/`pulp-runtime`-level libraries are linked by most test executables, so their closure is ~60% of the tree; and a focused run can read LOWER than CI (a test reaching the change only through an undeclared runtime path is not selected), never higher. Confirm a surprising failure with `PULP_DIFF_COVER_SELECT=all`.
 - **Global vs per-tier enforcement**: `diff-cover --fail-under=75` is already required. The per-tier gate is still `continue-on-error: true` while the tier definitions soak; don't silently flip that to required without updating `docs/guides/coverage.md` and the issue trail.
 - **Don't `|| ...` the `merge_cobertura` step in `coverage-diff-gate`.** The script uses a DEDICATED exit code (2 = `EXIT_ALL_INPUTS_MISSING`) for the intentionally-tolerated "every input XML missing or empty" case; the diff-cover step then renders the no-XML fallback. Any other non-zero exit (1 = real error: parse failure, script bug, IO error) MUST fail the gate — otherwise a corrupted artifact silently bypasses the required 75% diff-coverage check. Codex P1 reviews on both PR #654 (original `|| echo` shape masked everything) and PR #660 (collapsing rc==1 into the tolerated case let `xml.etree.ParseError` slip through) drove the current shape. The workflow branches on the exact code with `if rc -eq 0` / `elif rc -eq 2` / `else fail`. The script's `EXIT_ALL_INPUTS_MISSING` constant + the workflow's literal `2` are paired — change them in lockstep, and add fixture-tests in `test_merge_cobertura.py` if you alter the contract.
 - **Local mirror of the diff-cover gate.** `tools/scripts/local_diff_cover.sh` runs the same `diff-cover --fail-under=$THRESHOLD` flow CI runs, so coverage-only failures don't cost a 20-min CI roundtrip. The threshold + filters are read from `tools/scripts/coverage_config.json` — both the workflow's diff-cover step and the local script consume that file, so editing the JSON in one place keeps CI + local + the pre-push hook in lockstep. Bypass with `PULP_SKIP_DIFF_COVER=1` for workflow-only or doc-only PRs. The Claude Code `/coverage-diff` slash command and `pulp coverage diff` CLI subcommand are thin wrappers over the same script. The pre-push hook runs this check enforcing-by-default; `PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes it to advisory for an intentional one-push escape hatch. For focused PRs, pass build targets and set `PULP_DIFF_COVER_CTEST_REGEX` to run only the relevant CTest subset while still enforcing the shared 75% floor. Test coverage in `tools/scripts/test_local_diff_cover.py` includes anti-drift gates that fail if a future edit hardcodes `--fail-under=NN` back into `coverage.yml` or drops the targeted CTest selector.
@@ -9925,17 +10150,30 @@ under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
 
-## The macOS gate is build-only on a pull request; tests run in the merge queue
+## The macOS gate runs only the fast tier on a pull request; the full suite runs in the merge queue
 
 `build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
 The merge queue runs the same workflow on `merge_group` against the exact commit that will
 land, so `main` keeps full build-and-test protection while a pull request only pays for the
-build.
+build plus the `pr-fast` tier.
+
+The `pr-fast` tier (`Test fast deterministic tier (pull request head)`, selected with
+`ctest -L '^pr-fast$' --no-tests=error`) is the static-contract ctests listed in
+`test/cmake/pr_fast_tests.cmake`: lint, drift, registry-completeness and generated-manifest
+checks, about 15 s in total. Those checks were most of the merge-queue ejections once the full
+suite left the pull request head, because a forgotten regeneration fails deterministically in
+the batch it joins. Membership rules: deterministic, a few seconds on a loaded gate VM, no
+wall-clock or load-dependent assertion, no device or network. A listed name that is not
+registered is only reported at configure (some members are platform-conditional), so the
+real guard is `pr-fast-tier-contract`, which fails if the label selects fewer than
+50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
+`ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
 
 Two consequences worth knowing:
 
-- **A green `macos` check on a pull request does not mean the tests passed.** It means the
-  build succeeded. The tests run when the pull request is validated in the queue.
+- **A green `macos` check on a pull request does not mean the full suite passed.** It means
+  the build and the `pr-fast` tier passed. The full suite runs when the pull request is
+  validated in the queue.
 - **A test failure blocks in the queue rather than on the pull request.** Under `ALLGREEN`
   grouping a red entry forces its neighbours in that batch to rebuild, so a genuinely broken
   test is more expensive there than it was on the head. Fix a known-bad test before enqueueing
@@ -9943,3 +10181,43 @@ Two consequences worth knowing:
 
 This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
 the same file for longer.
+
+## A required gate step that fetches from the internet is a fleet-wide outage waiting to happen
+
+`build.yml`'s `Install visual-analysis Python dependencies` step passed
+`--upgrade`. pip then asks the index for a newer wheel **even when the
+requirement is already satisfied**, so "pypi.org is reachable from this VM"
+became a precondition of the **required** `macos` check — 21 steps before any
+test runs.
+
+On 2026-09-23 it failed exactly that way:
+
+```
+error: externally-managed-environment
+Tunnel connection failed: 403 Forbidden   ->  /simple/numpy/   (x5 retries)
+ERROR: No matching distribution found for numpy>=1.24
+```
+
+**The tell that it was infrastructure, not a PR:** the same step was `failure`
+on two `m5-pulp-gate-*` runners and `success` on `studio-pulp-gate-*` for
+comparable batches. Both *hosts* reach pypi.org fine (HTTP 200 from a login
+shell) — the refusal is inside the ephemeral VM's egress, so it follows the
+host that mints the VM, not the diff. A merge_group batch is named after one
+PR, so this reads as that PR being broken when it is a host property.
+
+Two rules follow, and they generalise past this step:
+
+- **Check before you fetch.** `pip install --dry-run --no-index` answers
+  "already satisfied?" without touching the network, so the happy path has no
+  external dependency at all. This is also what makes pre-provisioning wheels
+  into the golden image *work* — with `--upgrade` a fully provisioned VM still
+  contacted the index.
+- **Do not make the install non-fatal to "fix" it.** Seven ctests import these
+  modules and SKIP when they are missing, and a ctest SKIP reads exactly like a
+  PASS. The failure belongs at the non-skippable `visual-python-deps-present`
+  check, which can name what is absent; an install step cannot distinguish
+  "absent" from "unreachable".
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is down. If it can, you have handed the merge queue
+to someone else's uptime.

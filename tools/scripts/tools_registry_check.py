@@ -64,6 +64,8 @@ CATEGORY_ORDER = [
     "import-roundtrip",
     "harness",
     "audio",
+    "build",
+    "build-speed",
 ]
 
 CATEGORY_BLURB = {
@@ -72,6 +74,8 @@ CATEGORY_BLURB = {
     "import-roundtrip": "validate an import lane end to end",
     "harness": "coverage + deterministic visual harness",
     "audio": "prove what the audio actually did",
+    "build": "build and test only what a diff touches",
+    "build-speed": "measure build, gate and merge-queue speed",
 }
 
 
@@ -472,14 +476,21 @@ def render_digest(registry: dict) -> str:
     return "\n".join(lines)
 
 
-def _splice(doc_text: str, block: str) -> str | None:
-    """Replace the marked region. None if the markers are missing/malformed."""
+def _splice(doc_text: str, block: str, block_id: str = DIGEST_ID) -> str | None:
+    """Replace the marked region. None if the markers are missing/malformed.
+
+    `block_id` lets other generated CLAUDE.md digests reuse this splice.
+    """
+    start_re = START if block_id == DIGEST_ID else re.compile(
+        rf"<!--\s*generated:start\s+id={re.escape(block_id)}\s*-->")
+    end_re = END if block_id == DIGEST_ID else re.compile(
+        rf"<!--\s*generated:end\s+id={re.escape(block_id)}\s*-->")
     lines = doc_text.splitlines()
     start = end = None
     for i, l in enumerate(lines):
-        if START.search(l):
+        if start_re.search(l):
             start = i
-        elif END.search(l):
+        elif end_re.search(l):
             end = i
             break
     if start is None or end is None or end < start:

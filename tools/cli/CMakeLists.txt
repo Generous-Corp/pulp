@@ -52,6 +52,7 @@ add_executable(pulp-cli
     pulp_cli.cpp
     atomic_text_file.cpp
     cli_common.cpp
+    focused_build.cpp
     cli_delegate.cpp
     shell_quote.cpp
     shell_redirect.cpp

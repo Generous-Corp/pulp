@@ -33,6 +33,7 @@
   --ink-amber:   #F6B847;
   --ink-amber-deep: #E09E2A;
   --ink-leaf:    #3FCF77;
+  --ink-leaf-bright: #8CE8B0;  /* semantic success: separable from coral under CVD */
   --ink-pink:    #FF7AA8;
   --ink-coral:   #FF5C4D;   /* PEAK / danger only */
   --ink-coral-deep: #F23B33;

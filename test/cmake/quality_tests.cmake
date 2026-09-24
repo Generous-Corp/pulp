@@ -312,6 +312,44 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
+    # a carrier; this reads the generator's compile lines back and proves it
+    # (carrier named by -include-pch, matching -std, no carrier-only -D). The
+    # named expectations pin a C++20 suite, a C++23 suite (pulp::format raises
+    # the standard when it is built at 23), an excluded -fno-exceptions probe,
+    # a Catch2 suite excluded for its per-target -ffp-contract option, a
+    # grouped executable (pulp_add_test_group: its members' definitions and
+    # include dirs are per-source properties, which must not cost it the
+    # PCH; pulp::view never reaches pulp-format-core's cxx_std_23, so C++20),
+    # and SDL3-static, whose own PCH is off so ccache can store its objects.
+    if(PULP_TEST_PCH)
+        set(_pulp_pch_option ON)
+    else()
+        set(_pulp_pch_option OFF)
+    endif()
+    set(_pulp_pch_format_std 20)
+    if(TARGET pulp-format-core)
+        get_target_property(_pulp_pch_format_std_prop pulp-format-core CXX_STANDARD)
+        if(_pulp_pch_format_std_prop)
+            set(_pulp_pch_format_std "${_pulp_pch_format_std_prop}")
+        endif()
+    endif()
+    set(_pulp_pch_expect
+        --expect pulp-test-biquad=pulp-test-pch-cxx20
+        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-signal-no-exceptions=none
+        --expect pulp-test-cross-platform-audio-golden=none
+        --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20)
+    if(TARGET SDL3-static)
+        list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
+        ${_pulp_pch_expect})
+    add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
     # clean on every machine a developer or reviewer uses and breaks one release
@@ -456,6 +494,38 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
+
+    # Queue-cascade guards. A break that reaches main is amplified by the merge
+    # queue: every batch inherits it, fails, ejects its innocent entries, and
+    # the next batch pays again. These four cover the rules that stop that.
+    #
+    # ctest-gate-args-selftest pins the event-dependent ctest decisions AND
+    # asserts build.yml still calls them, because a decision module that is
+    # correct but unreferenced reads exactly like one that works.
+    add_test(NAME ctest-gate-args-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ctest_gate_args.py")
+    set_tests_properties(ctest-gate-args-selftest PROPERTIES TIMEOUT 120)
+
+    # build-matrix-contract keeps the macOS leg unconditional (a push to main is
+    # the only lane that runs the full macOS suite against main) and compiles
+    # every Python heredoc embedded in the workflow's YAML block scalars, where
+    # a mis-indented edit still loads as YAML and fails only at job runtime.
+    add_test(NAME build-matrix-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_build_matrix_contract.py")
+    set_tests_properties(build-matrix-contract PROPERTIES TIMEOUT 120)
+
+    # gate-suite-executed-selftest keeps a receipt-reuse green distinguishable
+    # from a real one. Both report through the same `macos` check name.
+    add_test(NAME gate-suite-executed-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_suite_executed.py")
+    set_tests_properties(gate-suite-executed-selftest PROPERTIES TIMEOUT 120)
+
+    # queue-batch-attribute-selftest guards the REFUSAL as hard as the finding:
+    # naming the wrong PR sends someone to fix an innocent branch while the real
+    # break stays on main.
+    add_test(NAME queue-batch-attribute-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
+    set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -621,6 +691,16 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    # Offline reachability of every lane against the checked-in
+    # advertised-labels snapshot (declared supply), plus routing-override
+    # validation. The clock is pinned inside the test; live expiry is enforced
+    # by the hourly sweep, never by a ctest that would redden unrelated PRs.
+    add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
+    # Snapshot regeneration/freshness against a fake tartci checkout: profiles
+    # are discovered by glob, so adding or removing a machine needs no edit here.
+    add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
@@ -662,9 +742,10 @@ if(Python3_Interpreter_FOUND)
 
     # The sibling suite mocks subprocess wholesale, so it proves the candidate
     # order and the fall-through without ever asking git whether those refs
-    # resolve. This drives real git against a genuinely shallow clone whose
-    # refs/pull/<n>/merge is absent -- the production condition the fallback
-    # exists for -- and also asserts an unreachable commit still fails closed.
+    # resolve. This drives real git against genuinely shallow clones in the two
+    # shapes production produces -- an absent refs/pull/<n>/merge, and a
+    # merge-queue branch deleted while its own run is still going -- and also
+    # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
 
@@ -809,8 +890,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
     # Self-test: the read surface (surface/list/validate), the external-contributor
-    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
-    # the AGENTS.md + CLAUDE.md pointers.
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, the
+    # AGENTS.md + CLAUDE.md pointers, and `--mode probe` against a checked-in
+    # `shipyard landing --json` capture (never the live API).
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
@@ -828,6 +910,13 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
             ${_changed_surface_policy_args})
     endif()
+
+    # Affected-target selector behind the focused `pulp build/dev/loop/test`
+    # default: source->target, header->targets through the dependency
+    # database, companion tests, add_dependencies and fixture edges, and the
+    # fallback-to-all rules, over a synthetic file-API reply. No CMake runs.
+    add_test(NAME affected-targets-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_affected_targets.py")
 
     # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
     # --diag-dir contract that copies captured validator output out of the temp
@@ -923,6 +1012,16 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
 
+        # The diff-coverage target selector: changed file -> owning CMake
+        # targets -> consumers, the no-measurable-line skip, the fall-back to
+        # every target, and the one-shot widening from the likely tier. Drives
+        # the real helper and script against throwaway repos and hand-written
+        # File API replies; no compiler involved.
+        add_test(NAME diff-cover-targets-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_diff_cover_targets
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(diff-cover-targets-selftest PROPERTIES TIMEOUT 180)
+
         # The two build-directory reapers. Both DELETE directories, so their
         # gates are the thing under test: each builds a throwaway git
         # repository with real worktrees in every state its gate
@@ -935,6 +1034,24 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_build_cov
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
+
+        # Build-speed measurement. Each suite carries a negative control: a blind
+        # dry run must refuse (exit 3) rather than report zero edges, and a value
+        # nobody measured must stay unknown instead of reading as 0.
+        add_test(NAME build-time-report-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_time_report
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-time-report-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME build-speed-scorecard-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_scorecard
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-speed-scorecard-selftest PROPERTIES TIMEOUT 120)
+        if(APPLE)
+            # host_vitals.sh reads macOS sysctls and BSD stat/date.
+            add_test(NAME host-vitals-selftest
+                COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_host_vitals.sh")
+            set_tests_properties(host-vitals-selftest PROPERTIES TIMEOUT 120)
+        endif()
 
         add_test(NAME clean-worktree-builds-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
@@ -969,6 +1086,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    # CLAUDE.md's ci-routing-digest block is generated from runner_topology.json
+    # and the advertised-labels snapshot only (never the workflows, so a
+    # workflow-only change cannot redden it); a stale or hand-edited block fails
+    # here.
+    add_test(NAME ci-routing-digest-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ci_routing_digest.py" --check)
+    add_test(NAME ci-routing-digest-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ci_routing_digest.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
     # Presence checks over a rendered panel: every one of the five is proved in
@@ -1053,4 +1178,26 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(cmake-catch-multilabel-properties PROPERTIES
         LABELS "cmake;ci"
         TIMEOUT 120)
+
+    # Grouped suites (pulp_add_test_suite ... GROUP): one executable, every
+    # member discovered under its own labels and properties, and a member
+    # whose file tag matches nothing fails the build instead of vanishing.
+    add_test(
+        NAME cmake-test-group-discovery
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/test_pulp_test_group.py)
+    set_tests_properties(cmake-test-group-discovery PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 180)
+
+    # The comparator that proves a registration refactor kept every CTest name
+    # and property. Its self-check plants a rename, a dropped label, a lost
+    # test and an extra one and requires each to be reported.
+    add_test(
+        NAME ctest-inventory-parity-self-check
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/ctest_inventory_parity.py self-check)
+    set_tests_properties(ctest-inventory-parity-self-check PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 60)
 endif()
