@@ -32,10 +32,16 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("governed-build.sh")
+
+# The wrapper records each build in Shipyard's metrics store when `shipyard` is
+# on PATH. These tests run it many times, so they must never write rows into a
+# developer's real store; BuildMetricRecordTests opts back in with a stub.
+os.environ["PULP_BUILD_METRICS"] = "0"
 
 # Deliberately unlike any plausible core count so an assertion can tell a
 # granted lease size apart from a host-derived one.
@@ -605,6 +611,63 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 body["reaped"],
                 [{"id": "old-boot-owner", "reason": "identity_mismatch"}],
             )
+
+
+class BuildMetricRecordTests(unittest.TestCase):
+    """The wrapper reports each build to `shipyard metrics record`, and a
+    missing or disabled recorder can never change the build's outcome."""
+
+    RECORDER = "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SHIPYARD_ARGS_OUT\"\n"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.bindir = Path(self._tmp.name)
+        sy = self.bindir / "shipyard"
+        sy.write_text(self.RECORDER)
+        sy.chmod(0o755)
+        self.out = self.bindir / "args.txt"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, exit_code: int, metrics: str) -> subprocess.CompletedProcess:
+        env = {**os.environ, "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+               "PULP_TARTCI_LEASES": "0", "PULP_BUILD_METRICS": metrics,
+               "SHIPYARD_ARGS_OUT": str(self.out)}
+        return subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c", f"exit {exit_code}", "sh",
+             "--target", "pulp-test-widgets"],
+            capture_output=True, text=True, check=False, env=env)
+
+    def _recorded(self) -> list[str]:
+        # The record runs detached in the background.
+        for _ in range(100):
+            if self.out.exists() and self.out.read_text().strip():
+                return self.out.read_text().splitlines()
+            time.sleep(0.05)
+        return []
+
+    def _value(self, args: list[str], flag: str) -> str:
+        return args[args.index(flag) + 1]
+
+    def test_failed_focused_build_is_recorded_with_its_outcome(self) -> None:
+        r = self._run(3, "1")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        args = self._recorded()
+        self.assertTrue(args, "no metrics record was made")
+        self.assertEqual(args[:2], ["metrics", "record"])
+        self.assertEqual(self._value(args, "--target"), "local-build/focused")
+        self.assertEqual(self._value(args, "--workflow"), "targets:pulp-test-widgets")
+        self.assertEqual(self._value(args, "--status"), "failure")
+        self.assertEqual(self._value(args, "--exit-code"), "3")
+        self.assertEqual(self._value(args, "--routing-decision"), "tier0")
+        self.assertRegex(self._value(args, "--profile"), r"^j[0-9]+$")
+        self.assertRegex(self._value(args, "--duration-ms"), r"^[0-9]+$")
+
+    def test_disabled_recorder_records_nothing(self) -> None:
+        r = self._run(0, "0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._recorded(), [])
 
 
 if __name__ == "__main__":

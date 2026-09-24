@@ -11,6 +11,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# The wrapper records each build in Shipyard's metrics store when `shipyard` is
+# on PATH; a test run must never write rows into a developer's real store.
+export PULP_BUILD_METRICS=0
+
 # The build command records the parallelism the wrapper handed it.
 probe="$tmp/probe.sh"
 cat >"$probe" <<'SH'

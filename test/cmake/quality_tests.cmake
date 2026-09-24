@@ -968,6 +968,24 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
 
+        # Build-speed measurement. Each suite carries a negative control: a blind
+        # dry run must refuse (exit 3) rather than report zero edges, and a value
+        # nobody measured must stay unknown instead of reading as 0.
+        add_test(NAME build-time-report-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_time_report
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-time-report-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME build-speed-scorecard-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_scorecard
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-speed-scorecard-selftest PROPERTIES TIMEOUT 120)
+        if(APPLE)
+            # host_vitals.sh reads macOS sysctls and BSD stat/date.
+            add_test(NAME host-vitals-selftest
+                COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_host_vitals.sh")
+            set_tests_properties(host-vitals-selftest PROPERTIES TIMEOUT 120)
+        endif()
+
         add_test(NAME clean-worktree-builds-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
