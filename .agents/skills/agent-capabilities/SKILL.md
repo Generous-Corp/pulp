@@ -1458,3 +1458,10 @@ and supports a nonnegative timing floor. Its operational binding constructs a
 kernel and invokes the update with a bounded spec. This design-time kernel
 registration does not advertise placed-device parameter operations or grants;
 the event-humaniser exposure ledger keeps those product-control gaps explicit.
+## Sample-region capability rows
+
+A sample-region capability describes a declared graph/control contract. Region
+proof and runtime admission are the authority; capability rows and inspector
+examples are projections. Keep unsupported latency, state-size, history, and
+format projections explicit until their contracts and independent proofs exist.
+Do not use vestigial flags or create a second DSP registry.

@@ -2329,6 +2329,16 @@ capabilities over new virtual methods.
 
 ## host
 
+The host module owns plugin hosting and the `SignalGraph` binding. Its bounded
+sample-region surface declares scalar kernels, explicit `UnitDelay` causal
+boundaries, promoted parameter contracts, and immutable prepared snapshots.
+`SampleRegionExecutionDomain` prevents an old binding and a newly adopted
+binding from executing concurrently; exact state identities may be retained,
+while changed identities start fresh. Regions lower through the same canonical
+executor used by the graph and `BakedGraphProcessor`, including signed
+`.pulpbake` verification and re-proof on load.
+
+
 Plugin *hosting* — the mirror of `format`. Load VST3 / AU / CLAP / LV2
 plug-ins, wire them into a DAG, and process audio through the chain.
 

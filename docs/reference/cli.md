@@ -1352,6 +1352,14 @@ Remaining limitation:
 - `skia` and `coregraphics` still validate headless render paths, not the live app.
   Use `live-gpu` when you need proof from the actual design-tool renderer.
 
+### Sample-region graph inspection
+
+Sample-region graph and capability reports are read-only views of the declared
+Processor contract. Use the inspector/capability output to see region IDs,
+promoted parameters, causality, and proof disposition; execution still requires
+canonical graph admission. The installed `sample-region-allpass-consumer` is the
+validation path for signed bake/load and scalar-oracle output.
+
 ### inspect
 
 **Status**: experimental

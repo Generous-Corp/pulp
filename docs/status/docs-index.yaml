@@ -251,6 +251,8 @@ docs:
 
   - slug: character-delay
     path: guides/character-delay.md
+  - slug: sample-granular-graphs
+    path: guides/sample-granular-graphs.md
     kind: guide
     summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
 
