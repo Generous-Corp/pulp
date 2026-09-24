@@ -2299,6 +2299,15 @@ void SignalGraph::compile_snapshot_for_test(double sample_rate, int max_block_si
     // prologue, no publish. See the header: this exercises compile_() concurrently
     // with a live process() for the 2.2a no-silence-swap race contract. Discarding
     // the snapshot frees it here (no reader ever pins it), so this leaks nothing.
+    //
+    // compile_() writes each authored node's transport_sensitive readback into
+    // nodes_ (through node_mut_locked_), so it runs under graph_mutation_mutex_
+    // here exactly as it does inside prepare() and prepare_swap(). The audio
+    // thread never takes this mutex, so the concurrent process() this hook
+    // exists to race against is unaffected; a concurrent control-thread mutator
+    // is serialized, which is the same contract every other compile_() caller
+    // already gives it.
+    GraphMutationLock mutation_lock(*this);
     auto snapshot = compile_(sample_rate, max_block_size);
     (void)snapshot;
 }
