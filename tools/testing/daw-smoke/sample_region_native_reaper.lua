@@ -5,6 +5,7 @@ local fx_name=os.getenv("PULP_F4_FX_NAME") or "Sample Region Allpass"
 local out_wav=os.getenv("PULP_F4_WAV"); local out_receipt=os.getenv("PULP_F4_RECEIPT")
 local project_path=os.getenv("PULP_F4_PROJECT"); local input_wav=os.getenv("PULP_F4_INPUT_WAV")
 local state_before_path=os.getenv("PULP_F4_STATE_BEFORE"); local state_after_path=os.getenv("PULP_F4_STATE_AFTER")
+local identity_before_path=os.getenv("PULP_F4_IDENTITY_BEFORE"); local identity_after_path=os.getenv("PULP_F4_IDENTITY_AFTER")
 local trace_path=os.getenv("PULP_F4_TRACE")
 local function trace(s) if trace_path then local f=io.open(trace_path,'a'); if f then f:write(s..'\n'); f:close() end end end
 local function esc(s) return tostring(s):gsub('\\','\\\\'):gsub('"','\\"'):gsub('\n','\\n') end
@@ -18,6 +19,17 @@ local function qualify()
   return prefix..(os.getenv('PULP_F4_PLUGIN_PATH') or fx_name)
 end
 local function write(path,data) if path then local f=io.open(path,'wb'); if f then f:write(data or ''); f:close() end end end
+local function module_identity(track, fx_index, stage)
+  if not track or fx_index == nil or fx_index < 0 then return '', '', '', '' end
+  local _,name=reaper.TrackFX_GetFXName(track,fx_index,'')
+  local _,ident=reaper.TrackFX_GetNamedConfigParm(track,fx_index,'fx_ident','')
+  local _,kind=reaper.TrackFX_GetNamedConfigParm(track,fx_index,'fx_type','')
+  local _,path=reaper.TrackFX_GetNamedConfigParm(track,fx_index,'fx_path','')
+  local _,chunk=reaper.GetTrackStateChunk(track,'',false); chunk=chunk or ''
+  write(stage=='before' and identity_before_path or identity_after_path,chunk)
+  trace('identity_'..stage..'_name:'..tostring(name)..':ident:'..tostring(ident)..':type:'..tostring(kind)..':path:'..tostring(path))
+  return name or '', ident or '', kind or '', path or ''
+end
 local function ensure_serialized_wet(track, fx_index, param_index)
   if not param_index or param_index < 0 or not reaper.TrackFX_SetParamNormalized then return false end
   reaper.TrackFX_SetParamNormalized(track,fx_index,param_index,1.0)
@@ -63,6 +75,7 @@ local n=reaper.TrackFX_GetNumParams(tr,fx); local ids,names={},{}
 trace('param_count:'..tostring(n))
 for i=0,n-1 do local _,ident=reaper.TrackFX_GetParamIdent(tr,fx,i); local _,name=reaper.TrackFX_GetParamName(tr,fx,i); ids[#ids+1]=string.format('index:%d;ident:%s;name:%s',i,ident or '',name or ''); names[#names+1]=name or '' end
 trace('after_params')
+local loaded_fx_name_before,loaded_fx_ident_before,loaded_fx_type_before,loaded_fx_path_before=module_identity(tr,fx,'before')
 local env=n>0 and reaper.GetFXEnvelope(tr,fx,0,true) or nil; local points={}; local automation=false
 if env then reaper.DeleteEnvelopePointRange(env,-1000000000,1000000000); reaper.InsertEnvelopePoint(env,0,0.25,0,0,false,false); reaper.InsertEnvelopePoint(env,1,0.75,0,0,false,false); reaper.Envelope_SortPoints(env); local _,t0,v0=reaper.GetEnvelopePoint(env,0); local _,t1,v1=reaper.GetEnvelopePoint(env,1); points={v0,v1}; automation=(t0==0 and t1==1 and v0==0.25 and v1==0.75); if reaper.TrackFX_SetParamNormalized then reaper.TrackFX_SetParamNormalized(tr,fx,0,v0); local _,obs0=reaper.TrackFX_GetParamNormalized(tr,fx,0); reaper.TrackFX_SetParamNormalized(tr,fx,0,v1); local _,obs1=reaper.TrackFX_GetParamNormalized(tr,fx,0); points={v0,v1,obs0,obs1}; reaper.TrackFX_SetParamNormalized(tr,fx,0,(0.5+0.99)/1.98) end end
 trace('after_automation')
@@ -223,12 +236,13 @@ end
 -- Deferred -renderproject consumes the saved .rpp, so persist the canonical
 -- post-reload controls before the Python driver copies that project for the
 -- actual host render.
+local loaded_fx_name_after,loaded_fx_ident_after,loaded_fx_type_after,loaded_fx_path_after=module_identity(tr,fx,'after')
 if project_path then reaper.Main_SaveProjectEx(0,project_path,8) end
 if out_wav and os.getenv('PULP_F4_DEFER_RENDER')~='1' then trace('before_render'); reaper.Main_OnCommand(41824,0); trace('after_render') end
 local deadline=os.time()+120
 local function finish()
   if out_wav and os.getenv('PULP_F4_DEFER_RENDER')~='1' and not reaper.file_exists(out_wav) and os.time()<deadline then reaper.defer(finish); return end
-  trace('finish'); emit({pdc_api='TrackFX_GetNamedConfigParm:pdc',chain_pdc_api='TrackFX_GetNamedConfigParm:chain_pdc_actual',packet='PKT-F4-01',format=fmt,host='REAPER',host_version=reaper.GetAppVersion(),host_instance=tostring(reaper.GetProjectName(0,'')),plugin_path=os.getenv('PULP_F4_PLUGIN_PATH') or '',bundle_id='com.pulp.sample-region-allpass',host_parameter_ids=ids,parameter_ids=ids,parameter_names=names,parameter_identity=(#ids>0),parameter_order=ids,automation=automation,automation_points=points,state_save=(#before>0),state_reload=(#after>0),reload=(reloaded>=0),audio=(out_wav and reaper.file_exists(out_wav) or false),zero_pdc=(latency==0 and chain_latency==0),pdc_samples=latency,chain_pdc_samples=chain_latency,audio_peak=0,saved_generation=#before,reload_generation=#after,wav_path=out_wav or '',coefficient_observed=coeff_observed,wet_observed=wet_observed,add_resolution=add_resolution,reload_resolution=reload_resolution,exact_identity_load=(add_resolution=='exact_path' and reload_resolution=='exact_path'),negative_control='canonical audio oracle required'})
+  trace('finish'); emit({pdc_api='TrackFX_GetNamedConfigParm:pdc',chain_pdc_api='TrackFX_GetNamedConfigParm:chain_pdc_actual',packet='PKT-F4-01',format=fmt,host='REAPER',host_version=reaper.GetAppVersion(),host_instance=tostring(reaper.GetProjectName(0,'')),plugin_path=os.getenv('PULP_F4_PLUGIN_PATH') or '',bundle_id='com.pulp.sample-region-allpass',host_parameter_ids=ids,parameter_ids=ids,parameter_names=names,parameter_identity=(#ids>0),parameter_order=ids,automation=automation,automation_points=points,state_save=(#before>0),state_reload=(#after>0),reload=(reloaded>=0),audio=(out_wav and reaper.file_exists(out_wav) or false),zero_pdc=(latency==0 and chain_latency==0),pdc_samples=latency,chain_pdc_samples=chain_latency,audio_peak=0,saved_generation=#before,reload_generation=#after,wav_path=out_wav or '',coefficient_observed=coeff_observed,wet_observed=wet_observed,add_resolution=add_resolution,reload_resolution=reload_resolution,exact_identity_load=(add_resolution=='exact_path' and reload_resolution=='exact_path'),loaded_fx_name_before=loaded_fx_name_before,loaded_fx_ident_before=loaded_fx_ident_before,loaded_fx_type_before=loaded_fx_type_before,loaded_fx_path_before=loaded_fx_path_before,loaded_fx_name_after=loaded_fx_name_after,loaded_fx_ident_after=loaded_fx_ident_after,loaded_fx_type_after=loaded_fx_type_after,loaded_fx_path_after=loaded_fx_path_after,negative_control='canonical audio oracle required'})
   reaper.Main_OnCommand(40004,0)
 end
 reaper.defer(finish)
