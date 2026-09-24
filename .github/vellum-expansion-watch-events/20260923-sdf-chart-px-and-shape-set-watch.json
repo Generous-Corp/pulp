@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260923-sdf-chart-px-and-shape-set-watch",
+  "created_at": "2026-09-23T08:03:42Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The lines that select this family are the chart composer's px derivation and its shape-admission predicate in core/canvas/src/skia_canvas_shaders.cpp, plus the doc comment on the API they implement. No backend, renderer, asset path or authority boundary changes, and the 1x rendering path is byte-unchanged, while the transferred rendering slice remains under watch.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas PulpChart.px tracks the canvas backing scale",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

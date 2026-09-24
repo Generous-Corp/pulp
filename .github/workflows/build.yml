@@ -7,9 +7,10 @@ on:
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
   # to every other PR — so without this trigger the `Save …` steps below are
-  # unreachable and the restore steps are a permanent miss. A push run drops the
-  # macOS leg (see resolve-provider) and skips the reporting aliases: it exists
-  # to warm caches, not to gate anything.
+  # unreachable and the restore steps are a permanent miss. A push run also
+  # carries the macOS leg, which is the only place the full macOS suite ever
+  # runs against a commit that is actually on main (see resolve-provider). It
+  # still skips the reporting aliases, so it detects rather than gates.
   push:
     branches: [main]
   # Run the required macos/linux/windows alias gates on queued merge groups so
@@ -246,11 +247,8 @@ jobs:
           _this_repo = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
           IS_FORK_PR = bool(_pr_head_repo) and _pr_head_repo != _this_repo
           # Events whose only job is to publish the GitHub-hosted Linux/Windows
-          # caches. The macOS leg is excluded from their matrix: it runs on the
-          # self-hosted Macs that serve the one required check in this repo, and
-          # those Macs keep their caches on local disk — so a macOS leg here
-          # would occupy the required gate's runners to save nothing.
-          PUSH_ONLY_CACHE_EVENTS = ("push",)
+          # caches. The macOS leg rides along for a different reason — see the
+          # matrix assembly below.
           WORKSPACE = Path(os.environ["GITHUB_WORKSPACE"])
           RESOLVER = [
               "python3",
@@ -747,19 +745,26 @@ jobs:
           ])
 
           include = []
-          if EVENT_NAME not in PUSH_ONLY_CACHE_EVENTS:
-              include.append({
-                  "key": "macos",
-                  "name": "macOS (ARM64)",
-                  "runs_on_json": macos_runs_on,
-                  "provider": macos_provider,
-              })
-          else:
-              print(
-                  f"resolve-provider: {EVENT_NAME} event — macOS leg omitted "
-                  "(cache-warming run; macOS caches live on local disk)",
-                  file=sys.stderr,
-              )
+          # The macOS leg runs for EVERY event, push included. A push to main is
+          # the only lane that runs the full macOS suite against a commit that
+          # is actually on main: pull-request heads skip the test step entirely
+          # and merge groups validate a synthetic merge, so without this a break
+          # on main stays invisible until a queued batch inherits it roughly
+          # forty minutes later and reports the failure against a batch whose
+          # name is not the culprit.
+          #
+          # The draw on the self-hosted Macs is bounded to one leg at a time:
+          # push runs share the `build-<ref>` concurrency group, so consecutive
+          # merges to main serialize rather than fan out. On push the matrix
+          # child also keeps its descriptive name (see the `name:` expression on
+          # the build job) instead of claiming the required `macos` context, so
+          # this detects a broken main without gating anything.
+          include.append({
+              "key": "macos",
+              "name": "macOS (ARM64)",
+              "runs_on_json": macos_runs_on,
+              "provider": macos_provider,
+          })
           # Windows is advisory, GitHub-hosted, and slow, and a run carries four
           # Windows jobs (this leg plus the three compile gates below). The repo
           # gets a fixed pool of concurrent GitHub-hosted jobs, so a handful of
@@ -1125,10 +1130,14 @@ jobs:
             echo "macos_reused=$macos_reused"
           } >> "$GITHUB_OUTPUT"
 
-  # Protected pushes normally omit macOS. Allocate this independent leg only
-  # when the authenticated before/after diff changed the A2T receipt. Merge
-  # groups instead retain the required native macOS leg above. Neither path can
-  # publish the PR-only attestation authority.
+  # A push carries the macOS matrix leg, which runs these same verify-only
+  # steps -- but only when the push changed a native build input. This
+  # independent leg covers the gap: a push that changed the A2T receipt and
+  # nothing native skips the matrix entirely, and the receipt still has to be
+  # verified. When both run the verification is simply performed twice, which
+  # is harmless because neither can publish the attestation. That authority is
+  # PR-only and gated twice over: `classify` sets the issue flag only for a
+  # pull_request, and the issuer itself refuses any other event.
   a2t-protected-event:
     needs: [resolve-provider, classify]
     if: >-
@@ -1634,48 +1643,65 @@ jobs:
             echo "so installing into any other interpreter would leave them skipping." >&2
             exit 1
           fi
-          # Install the hash-pinned resolution, not the ranges: the same bytes
-          # on every run, so a new upstream release cannot change a gate verdict
-          # and a tampered or truncated download fails the hash check.
-          lock=tools/motion/visual/requirements.lock
-          echo "Installing the pinned visual-analysis set ($lock) into $py"
-          # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install and
-          # mark themselves with EXTERNALLY-MANAGED beside the stdlib. Ask once
-          # rather than retrying every install, so a network failure is not
-          # paid twice.
-          pep668=()
-          if "$py" -c 'import os, sys, sysconfig; sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)'; then
-            pep668=(--break-system-packages)
+          # Satisfied already? Then do not touch the network. `--upgrade` asks the
+          # index for a newer wheel even when the requirement is met, so it turned
+          # a reachable-PyPI assumption into a precondition of the REQUIRED macos
+          # gate: on 2026-09-23 an ephemeral VM whose egress refused CONNECT to
+          # pypi.org ("Tunnel connection failed: 403 Forbidden") failed this step
+          # at 21 of 41 and killed every merge_group batch that landed on that
+          # host, while the same batch passed on a host whose VMs could reach it.
+          # A required gate must not depend on a third-party service being
+          # reachable, and the declared set is a floor, not a latest-wins pin.
+          if "$py" -m pip install --dry-run --no-index --quiet \
+               -r tools/motion/visual/requirements.txt >/dev/null 2>&1; then
+            echo "visual-analysis dependencies already satisfied in $py; no index fetch"
+          else
+            # Install the hash-pinned resolution, not the ranges: the same bytes
+            # on every run, so a new upstream release cannot change a gate verdict
+            # and a tampered or truncated download fails the hash check.
+            lock=tools/motion/visual/requirements.lock
+            echo "Installing the pinned visual-analysis set ($lock) into $py"
+            # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install and
+            # mark themselves with EXTERNALLY-MANAGED beside the stdlib. Ask once
+            # rather than retrying every install, so a network failure is not
+            # paid twice.
+            pep668=()
+            if "$py" -c 'import os, sys, sysconfig; sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)'; then
+              pep668=(--break-system-packages)
+            fi
+            pip_user() {
+              "$py" -m pip install ${pep668[@]+"${pep668[@]}"} --user --require-hashes -r "$lock" "$@"
+            }
+            # A tartci gate guest may carry a read-only host wheelhouse. Installing
+            # from it needs no network at all, so the egress relay and PyPI stop
+            # being able to fail the required gate. It is an accelerator, not an
+            # authority: the hashes above still decide what is acceptable.
+            wheelhouse="${TARTCI_PIP_WHEELHOUSE:-}"
+            if [ -n "$wheelhouse" ] && [ -d "$wheelhouse" ]; then
+              if pip_user --no-index --find-links "$wheelhouse"; then
+                echo "Installed from the host wheelhouse $wheelhouse"
+                exit 0
+              fi
+              echo "::warning::host wheelhouse $wheelhouse could not satisfy $lock; falling back to the package index"
+            fi
+            # pip already retries a dropped connection; these attempts cover a
+            # refusal or an outage that outlasts pip's own short backoff.
+            delay="${PULP_PIP_RETRY_DELAY_SECS:-20}"
+            for attempt in 1 2 3; do
+              if pip_user; then
+                exit 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::pip install attempt $attempt failed; retrying in $(( delay * attempt ))s"
+                sleep $(( delay * attempt ))
+              fi
+            done
+            echo "::error::could not install $lock after 3 attempts; the visual-analysis ctests would skip" >&2
+            exit 1
           fi
-          pip_user() {
-            "$py" -m pip install ${pep668[@]+"${pep668[@]}"} --user --require-hashes -r "$lock" "$@"
-          }
-          # A tartci gate guest may carry a read-only host wheelhouse. Installing
-          # from it needs no network at all, so the egress relay and PyPI stop
-          # being able to fail the required gate. It is an accelerator, not an
-          # authority: the hashes above still decide what is acceptable.
-          wheelhouse="${TARTCI_PIP_WHEELHOUSE:-}"
-          if [ -n "$wheelhouse" ] && [ -d "$wheelhouse" ]; then
-            if pip_user --no-index --find-links "$wheelhouse"; then
-              echo "Installed from the host wheelhouse $wheelhouse"
-              exit 0
-            fi
-            echo "::warning::host wheelhouse $wheelhouse could not satisfy $lock; falling back to the package index"
-          fi
-          # pip already retries a dropped connection; these attempts cover a
-          # refusal or an outage that outlasts pip's own short backoff.
-          delay="${PULP_PIP_RETRY_DELAY_SECS:-20}"
-          for attempt in 1 2 3; do
-            if pip_user; then
-              exit 0
-            fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::pip install attempt $attempt failed; retrying in $(( delay * attempt ))s"
-              sleep $(( delay * attempt ))
-            fi
-          done
-          echo "::error::could not install $lock after 3 attempts; the visual-analysis ctests would skip" >&2
-          exit 1
+          # Whether the set was pre-provisioned or installed here, the
+          # non-skippable `visual-python-deps-present` ctest is what proves it.
+          # This step only has to stop being a network-dependent tripwire.
 
       - name: Build
         shell: bash
@@ -1770,6 +1796,7 @@ jobs:
           key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
 
       - name: Test (non-Windows)
+        id: ctest
         # Tests run in the merge queue, not on the pull request head. The queue
         # validates the exact commit that will land, so skipping here loses no
         # protection on main, and it removes a whole class of flake from the
@@ -1791,27 +1818,38 @@ jobs:
         # timing-sensitive tests the 120s timeout and the retry exist for.
         run: |
           set -euo pipefail
-          label_exclude="validation"
-          # merge_group runs the same reduced set as a PR: a queued group is
-          # exactly the PR content that already passed here, and the required
-          # macos gate rides the serialized self-hosted runner — running the
-          # heavier `slow` set only on push/nightly keeps the queue landable.
+          # Both event-dependent ctest decisions come from one tested module so
+          # the lanes that share them cannot drift apart:
           #
-          # `performance|bench|quality-lab` are ALSO excluded from the required
-          # PR/merge_group gate (added 2026-07-21). These are RELATIVE-timing /
-          # CPU-budget / benchmark tests (e.g. heritage-performance's
-          # "Representative chain stays within the shipping CPU budget", which
-          # asserts a ratio ≤ 2.0×1.05 vs an in-run baseline). They are robust to
-          # STEADY load but NOT to the load VARIANCE created when the Studio runs
-          # its 2 concurrent build VMs (cap=2) — a sibling VM's bursty compile
-          # inflates the ratio past threshold → flake. A perf/ratio test cannot be
-          # a required gate on a runner that (correctly) runs 2 concurrent VMs, so
-          # it belongs in a dedicated cap=1 nightly/perf lane, not gating every
-          # merge. They still run on push (informational). See
-          # planning/org-flip-status.md §A.
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
-            label_exclude="validation|slow|performance|bench|quality-lab"
-          fi
+          #   label_exclude — `performance|bench|quality-lab` are RELATIVE-timing
+          #     tests (e.g. heritage-performance's "Representative chain stays
+          #     within the shipping CPU budget", a ratio ≤ 2.0×1.05 against an
+          #     in-run baseline). They survive STEADY load but not the load
+          #     VARIANCE of a Studio running 2 concurrent build VMs, so they are
+          #     excluded wherever the suite runs on the shared self-hosted Macs
+          #     and retained on the steady GitHub-hosted Linux/Windows runners.
+          #     `slow` is excluded from the gate lanes for the same reason the
+          #     queue stays landable: the required macos gate rides a serialized
+          #     runner.
+          #
+          #   stop_on_failure — a merge_group batch that has one failing test is
+          #     already unlandable, and a queue multiplies the cost of proving it
+          #     twice over: every batch inherits a broken base and every re-formed
+          #     batch pays again. The queue therefore stops at the first failure,
+          #     while the push lane runs the suite to completion because it is the
+          #     only place the full macOS suite ever runs against main.
+          #
+          # ctest applies --stop-on-failure only after --repeat until-pass has
+          # exhausted its retries, so a single flake still self-heals.
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          # Expanded unquoted on the ctest line below, where an empty value must
+          # disappear rather than become an empty argument. Default it so the
+          # bare expansion is safe under `set -u`.
+          stop_on_failure="${stop_on_failure:-}"
+          echo "ctest gate args: label_exclude=$label_exclude stop_on_failure=${stop_on_failure:-<none>}"
           exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
           if [ "${RUNNER_OS}" = "macOS" ]; then
             # macOS self-hosted required gate stability:
@@ -1875,6 +1913,13 @@ jobs:
           # --test-dir, ctest resolves a relative --output-junit against the
           # build dir, nesting the file at $PULP_BUILD_DIR/$PULP_BUILD_DIR/.
           # The report is written even when ctest exits nonzero.
+          #
+          # The selection, the selected inventory, and the exit status are
+          # recorded beside the JUnit report so a protected-validation receipt
+          # can prove which tests ran and that every one of them passed.
+          evidence_dir="$RUNNER_TEMP/ctest-evidence"
+          mkdir -p "$evidence_dir"
+          LABEL_EXCLUDE="$label_exclude" EXCLUDE_REGEX="$exclude" python3 -c 'import json, os; print(json.dumps({"label_exclude": os.environ["LABEL_EXCLUDE"], "exclude_regex": os.environ["EXCLUDE_REGEX"], "label_include": "", "include_regex": ""}))' > "$evidence_dir/selection.json"
           # The derivation is keyed on the lease declaration so it rolls out
           # host by host with tartci rather than flipping the whole fleet at
           # once: a runner that declares no lease keeps -j8. A declared lease
@@ -1890,7 +1935,14 @@ jobs:
               ;;
           esac
           echo "ctest parallelism: -j${ctest_jobs}"
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j"$ctest_jobs" --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          ctest_exit=0
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j"$ctest_jobs" --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
+          printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          # Inventory of what that selection covers: a listing, not a run, so
+          # it takes no stop-on-failure flag. A failed listing leaves an invalid
+          # file, and the receipt issuer then refuses rather than guessing.
+          ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
+          exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
@@ -2068,10 +2120,15 @@ jobs:
 
       - name: Issue exact protected-validation receipt
         id: protected_receipt
+        # A receipt stands in for the merge group's own test run, so it is only
+        # issued when this job's full ctest selection actually ran and passed.
+        # A pull-request run that skips the Test step issues no receipt, and the
+        # merge group then validates in full.
         if: >-
           success()
           && github.event_name == 'pull_request'
           && (matrix.key == 'macos' || matrix.key == 'linux')
+          && steps.ctest.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
@@ -2093,7 +2150,12 @@ jobs:
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
             --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
+            --build-dir "$PULP_BUILD_DIR" \
+            --ctest-exit-file "$RUNNER_TEMP/ctest-evidence/exit-code" \
+            --ctest-selection "$RUNNER_TEMP/ctest-evidence/selection.json" \
+            --ctest-selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --ctest-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+            --output "$receipt_dir/receipt.json"
           echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact protected-validation receipt
@@ -2372,6 +2434,21 @@ jobs:
             exit 1
           fi
           echo "Skip-safe PR/dispatch — macos gate ✓ (native matrix intentionally omitted)"
+          REASON="this change touched no native build input, so the matrix was skipped"
+          {
+            echo "### ⚠️ macos gate passed WITHOUT running the test suite"
+            echo
+            echo "This check is green because **$REASON**, not because any test"
+            echo "executed. No ctest run happened in this job — it has no build"
+            echo "and no test step. Do not read it as evidence that the suite"
+            echo "passes on this tree."
+            echo
+            echo "To find a run where the suite actually executed:"
+            echo '```'
+            echo "python3 tools/scripts/gate_suite_executed.py --run-id <run-id>"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "::notice title=macos gate did not run the suite::$REASON"
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
@@ -2408,9 +2485,28 @@ jobs:
               exit 1
             fi
             echo "Exact-tree protected PR receipt revalidated for this merge group — macos gate ✓"
+            REASON="an exact-tree protected receipt from an earlier run was reused"
           else
             echo "Skip-safe merge group — macos gate ✓ (native matrix omitted)"
+            REASON="the merge group changed no native build input, so the matrix was skipped"
           fi
+          # A green `macos` here is indistinguishable from a real one in the
+          # checks list, and reasoning from it as though the suite passed has
+          # already cost hours. Say so in the job's own output.
+          {
+            echo "### ⚠️ macos gate passed WITHOUT running the test suite"
+            echo
+            echo "This check is green because **$REASON**, not because any test"
+            echo "executed. No ctest run happened in this job — it has no build"
+            echo "and no test step. Do not read it as evidence that the suite"
+            echo "passes on this tree."
+            echo
+            echo "To find a run where the suite actually executed:"
+            echo '```'
+            echo "python3 tools/scripts/gate_suite_executed.py --run-id <run-id>"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "::notice title=macos gate did not run the suite::$REASON"
 
   linux:
     needs: [build, classify]

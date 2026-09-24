@@ -86,16 +86,22 @@ class VisualPythonDepsStepTest(unittest.TestCase):
         cache_body: str,
         *,
         pep668: bool = False,
+        satisfied: bool = False,
         index_failures: int = 0,
         wheelhouse: str | None = None,
         wheelhouse_ok: bool = True,
     ):
-        """Run the step with a fixture cache. Returns (proc, pip_argv_lines).
+        """Run the step with a fixture cache. Returns (proc, install_argv_lines).
 
         `cache_body` may contain {py}, replaced by the stub interpreter's path.
-        The stub answers the step's PEP 668 probe per `pep668`, fails the first
-        `index_failures` index installs, and fails a --no-index install unless
-        `wheelhouse_ok`. `wheelhouse` is "present", "missing" or None (unset).
+        The step first probes with `pip install --dry-run --no-index`; the stub
+        answers that probe per `satisfied` (default: NOT satisfied, so the
+        install paths stay exercised). Probes are excluded from the returned
+        lines; every pip invocation, probes included and in order, is kept on
+        `self.pip_calls`. The stub answers the step's PEP 668 probe per
+        `pep668`, fails the first `index_failures` index installs, and fails a
+        --no-index install unless `wheelhouse_ok`. `wheelhouse` is "present",
+        "missing" or None (unset).
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -112,6 +118,7 @@ class VisualPythonDepsStepTest(unittest.TestCase):
                     if [ "$1" = "-c" ]; then exit {0 if pep668 else 1}; fi
                     printf '%s\\n' "$*" >> {argv_log}
                     case " $* " in
+                      *" --dry-run "*) exit {0 if satisfied else 1} ;;
                       *" --no-index "*) exit {0 if wheelhouse_ok else 1} ;;
                     esac
                     n=$(( $(cat {counter} 2>/dev/null || echo 0) + 1 ))
@@ -147,11 +154,12 @@ class VisualPythonDepsStepTest(unittest.TestCase):
                 text=True,
                 timeout=120,
             )
-            invocations = (
+            self.pip_calls = (
                 argv_log.read_text(encoding="utf-8").splitlines()
                 if argv_log.exists()
                 else []
             )
+            invocations = [c for c in self.pip_calls if "--dry-run" not in c]
             return proc, invocations
 
     def test_resolves_the_interpreter_find_package_recorded(self) -> None:
@@ -293,6 +301,43 @@ class VisualPythonDepsStepTest(unittest.TestCase):
                 _version(pins[name]), _version(floor),
                 f"{name}=={pins[name]} does not satisfy >={floor}",
             )
+
+    def test_an_already_satisfied_set_never_reaches_the_index(self) -> None:
+        """The poka-yoke: a provisioned VM must not need PyPI to be reachable.
+
+        A required gate that fetches from a third-party service fails whenever
+        that service is unreachable from the runner, which on 2026-09-23 took
+        out every merge_group batch landing on one host while the same batch
+        passed on another.
+        """
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}", satisfied=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        probes = [c for c in self.pip_calls if "--dry-run" in c]
+        self.assertEqual(len(probes), 1, self.pip_calls)
+        self.assertIn("--no-index", probes[0])
+        self.assertIn("-r tools/motion/visual/requirements.txt", probes[0])
+        self.assertEqual(invocations, [], "a satisfied set must install nothing")
+
+    def test_a_satisfied_set_skips_even_a_declared_wheelhouse(self) -> None:
+        proc, invocations = self._run(
+            "_Python3_EXECUTABLE:INTERNAL={py}",
+            satisfied=True,
+            wheelhouse="present",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(invocations, [], self.pip_calls)
+
+    def test_the_satisfied_probe_runs_before_any_install(self) -> None:
+        """The no-network check must come first, or it protects nothing."""
+        proc, invocations = self._run("_Python3_EXECUTABLE:INTERNAL={py}")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(invocations, self.pip_calls)
+        self.assertIn("--dry-run", self.pip_calls[0])
+        self.assertTrue(
+            all("--dry-run" not in c for c in self.pip_calls[1:]), self.pip_calls
+        )
 
     def test_the_declared_requirements_file_exists(self) -> None:
         """The step installs by path; a rename must break here, not in CI."""

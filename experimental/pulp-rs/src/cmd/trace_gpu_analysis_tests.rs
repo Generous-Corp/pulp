@@ -161,6 +161,7 @@ fn scheduler_attribution_and_data_loss_are_not_inferred_from_wall_time() {
             no_flush_count: 0,
             processor_reported_truncated: false,
         },
+        QuestionCandidates::default(),
     );
     assert_eq!(lost.verdict, "unavailable");
     assert_eq!(lost.unavailable_reason, Some("trace-data-loss"));
@@ -338,8 +339,107 @@ fn checked_in_gpu_views_keep_the_safe_sql_contract() {
     assert!(STARTUP_SQL.contains("'unknown'"));
     assert!(PROBE_SQL.contains("FROM candidates AS unbound_tooling"));
     assert!(PROBE_SQL.contains("unbound_tooling.evidence_id IS NULL"));
-    assert!(PROBE_SQL.contains("unbound_tooling.name GLOB 'gpu_probe*'"));
-    assert!(PROBE_SQL.contains("unbound_tooling.name GLOB 'gpu_readback*'"));
+    // The rejection and the CLI's diagnosis of it read one classification, so
+    // a probe answer refused for an untagged tooling span cannot be described
+    // as a missing category by a second, drifting copy of the rule.
+    assert!(PROBE_SQL
+        .contains("(s.name GLOB 'gpu_probe*' OR s.name GLOB 'gpu_readback*') AS is_tooling_owned"));
+    assert!(PROBE_SQL.contains("unbound_tooling.is_tooling_owned"));
+    assert!(PROBE_SQL.contains("CREATE OR REPLACE PERFETTO VIEW pulp_gpu_probe_candidates AS"));
+    assert!(
+        PROBE_SQL.contains("WITH candidates AS (\n  SELECT * FROM pulp_gpu_probe_candidates\n)")
+    );
+    assert!(HEALTH_SQL.contains("CREATE OR REPLACE PERFETTO VIEW pulp_gpu_health_candidates AS"));
+    assert!(HEALTH_SQL.contains("1 AS is_tooling_owned"));
+    // Both evidence-gated questions publish the candidate set their empty
+    // answer is diagnosed against; startup deliberately publishes none.
+    assert_eq!(
+        GpuQuestion::GpuProbe.candidates_view(),
+        Some("pulp_gpu_probe_candidates")
+    );
+    assert_eq!(
+        GpuQuestion::GpuHealth.candidates_view(),
+        Some("pulp_gpu_health_candidates")
+    );
+    assert_eq!(GpuQuestion::GpuStartup.candidates_view(), None);
+    assert!(CANDIDATE_QUERY.contains("FROM {candidates_view} WHERE is_tooling_owned"));
+}
+
+#[test]
+fn an_empty_probe_answer_separates_a_refused_cohort_from_a_missing_category() {
+    let empty_answer = |tooling_owned| {
+        result_from_rows_and_categories(
+            GpuQuestion::GpuProbe,
+            Path::new("/tmp/probe.pftrace"),
+            Vec::new(),
+            Vec::new(),
+            CaptureIntegrity {
+                slice_count: 4,
+                ..CaptureIntegrity::default()
+            },
+            QuestionCandidates { tooling_owned },
+        )
+    };
+
+    let refused = empty_answer(2);
+    assert_eq!(refused.verdict, "unavailable");
+    assert!(!refused.capture_complete);
+    assert_eq!(
+        refused.unavailable_reason,
+        Some("invalid-evidence-correlation")
+    );
+
+    let absent = empty_answer(0);
+    assert_eq!(absent.verdict, "unavailable");
+    assert_eq!(absent.unavailable_reason, Some("missing-question-category"));
+
+    // A candidate count never overrides an answer the view did return.
+    let answered = result_from_rows_and_categories(
+        GpuQuestion::GpuProbe,
+        Path::new("/tmp/probe.pftrace"),
+        vec![RawRow {
+            stage: "probe".to_owned(),
+            duration_ns: 42,
+            evidence_id: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned()),
+            diagnostic_code: None,
+            health_state: Some("healthy".to_owned()),
+            sequence: Some(1),
+            frame_index: Some(0),
+            timing_phase: "not-applicable".to_owned(),
+            cpu_running_ns: None,
+            scheduler_evidence: false,
+            incomplete: false,
+            failure: false,
+        }],
+        Vec::new(),
+        CaptureIntegrity {
+            slice_count: 4,
+            ..CaptureIntegrity::default()
+        },
+        QuestionCandidates { tooling_owned: 2 },
+    );
+    assert_eq!(answered.verdict, "pass");
+    assert_eq!(answered.unavailable_reason, None);
+}
+
+#[test]
+fn a_missing_probe_candidate_count_fails_closed() {
+    let counted =
+        parse_question_candidates(GpuQuestion::GpuProbe, "__PULP_GPU_CANDIDATE__3\n").unwrap();
+    assert_eq!(counted.tooling_owned, 3);
+    // An absent marker is an unanswered question, not a zero count: reading it
+    // as zero would report a refused cohort as a missing category again.
+    assert!(
+        parse_question_candidates(GpuQuestion::GpuProbe, "__PULP_GPU_INTEGRITY__4|0|0|0").is_err()
+    );
+    assert!(parse_question_candidates(GpuQuestion::GpuHealth, "").is_err());
+    // Startup publishes no candidate view to interrogate.
+    assert_eq!(
+        parse_question_candidates(GpuQuestion::GpuStartup, "")
+            .unwrap()
+            .tooling_owned,
+        0
+    );
 }
 
 #[test]
@@ -347,7 +447,10 @@ fn startup_view_admits_an_untagged_cohort_only_when_nothing_is_tagged() {
     // The untagged cohort exists, and it is gated on the absence of evidence
     // anywhere in the capture. Gating on `identified_candidates` instead would
     // miss probe, readback and health spans, which are not startup candidates.
-    assert!(STARTUP_SQL.contains("), unidentified_candidates AS ("));
+    assert!(STARTUP_SQL
+        .as_bytes()
+        .windows(b"), unidentified_candidates AS (".len())
+        .any(|window| window == b"), unidentified_candidates AS ("));
     assert!(STARTUP_SQL.contains("), admitted_candidates AS ("));
     assert!(STARTUP_SQL.contains("FROM unidentified_candidates"));
     assert!(STARTUP_SQL.contains("), trace_evidence AS ("));
@@ -450,7 +553,7 @@ fn processor_receives_only_the_private_trace_snapshot() {
         root.path(),
         "snapshot-observer.sh",
         &format!(
-            "#!/bin/sh\nprintf '%s' \"$3\" > {}\ncat \"$3\" > {}\nprintf '%s\\n' '__PULP_GPU_INTEGRITY__0|0|0|0'\n",
+            "#!/bin/sh\nprintf '%s' \"$3\" > {}\ncat \"$3\" > {}\nprintf '%s\\n' '__PULP_GPU_INTEGRITY__0|0|0|0' '__PULP_GPU_CANDIDATE__0'\n",
             shell_quote(&observed_path.to_string_lossy()),
             shell_quote(&observed_bytes.to_string_lossy()),
         ),

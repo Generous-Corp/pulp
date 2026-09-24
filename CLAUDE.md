@@ -447,6 +447,7 @@ writing a change to CI/fleet config, read the relevant rows and honor them:
 python3 tools/scripts/decisions_contract.py --mode list                          # all rows
 python3 tools/scripts/decisions_contract.py --mode surface --base origin/main    # rows your diff touches
 python3 tools/scripts/decisions_contract.py --mode validate                      # schema-check the file
+python3 tools/scripts/decisions_contract.py --mode probe --landing-json <f>      # probed rows vs `shipyard landing --json` (--live: manual only)
 ```
 
 Reversing a decision requires first proving its motivating incident class can no
@@ -1014,8 +1015,12 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
   - ⚠ **Cannot see:** Artifact observation only. It does not run tests, decide whether a skip is allowed, prove source or binary provenance, or distinguish filtering/configuration changes from code changes. Exit 2 means the evidence could not be interpreted, not that CTest failed.
+- Before reasoning from a green `macos` check — decide whether that green means the suite ran and passed, or that a bootstrap/receipt-reuse job claimed the context without running anything. → `tools/scripts/gate_suite_executed.py`
+  - ⚠ **Cannot see:** Answers only whether the suite RAN, never whether the tree is healthy — an `executed` verdict on a failing job is still `executed`. It classifies by step names, so renaming the workflow's Test step without updating it would make a real run look void.
 - A backlog has stopped draining, or before assuming the fleet is starved — classify every open PR as moving, auto-fixable, waiting on a named human, or unknown, and optionally perform the mechanical fixes. → `tools/scripts/pr_flow_audit.py`
   - ⚠ **Cannot see:** Reports where flow has STOPPED; it never certifies health. Step reachability is evaluated against the BASE workflow, because that is what a fresh run uses — a re-run replays the workflow from its own commit and so can never clear a stale-gate failure. Anything undeterminable is UNKNOWN and `--fix` refuses to touch it, so a green-looking sweep with UNKNOWNs has not been audited.
+- A merge_group batch failed and you need the PR that actually owns the failing tests — the batch's own branch name is NOT the culprit, because a batch contains every entry ahead of it. → `tools/scripts/queue_batch_attribute.py`
+  - ⚠ **Cannot see:** Attribution is NAME-SHAPED — it matches a test name against changed file paths, so a test whose name does not resemble its owning file is invisible to it. Below the confidence threshold it reports LIKELY PRE-EXISTING ON MAIN and names nobody; read that as "look at main", never as "no culprit exists". It reads the macos job's log, so a batch whose macos gate never ran the suite yields nothing.
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -1887,7 +1892,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `ios` | iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. |
 | `jsfx-subset` | Work in Pulp's bounded JSFX lane using source-only examples, subset validation, and explicit exclusions like no `@gfx`. |
 | `kits` | Search, inspect, plan, apply, remove, pack, and scaffold local Pulp package manifests. |
-| `lv2` | LV2 format adapter for Pulp — the generated Turtle manifest nothing ships, port indices as a saved-session wire format, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
+| `lv2` | LV2 format adapter for Pulp — the Turtle manifest the build emits by asking the module to describe itself, port indices as a saved-session wire format with one shared layout, host transport arriving as a time:Position atom on the MIDI port, the optional buf-size feature that is a hint and not a guarantee, state:interface versus control ports, and the real-time rules run() has to keep. |
 | `moonbase` | Optional Moonbase license-activation integration for Pulp — load-bearing compile settings, OpenSSL-at-configure caveat, the moonbase-pulp User-Agent contract, audio-thread gating + click-free fade, async start/pump, the interactive native (no-WebView) activation editor (frame-tick polling + the don't-rebuild-mid-event trap), loadable plugin/standalone formats, and headless screenshots. |
 | `motion` | Debug or validate Pulp animations / transitions / scroll behavior using in-process motion fixtures and offline visual analysis. |
 | `mpe` | Build an MPE-aware Pulp synth — opt into MPE via PluginDescriptor, consume per-note pitch bend / pressure / timbre from MpeBuffer, and route voices through MpeVoiceAllocator without reinventing channel tracking. |
@@ -2039,6 +2044,29 @@ A JIT runner census alone proves neither idle capacity nor outage.
 GitHub-*hosted* advisory lanes queue independently and don't block merge. Full
 diagnosis + the non-Shipyard fallback: the `ci` skill, "Diagnosing a slow /
 stuck PR."
+
+#### Routing and landing digest (generated)
+
+<!-- generated:start id=ci-routing-digest -->
+Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_labels.json` @ `2f3bc6214385`), never live service. Workflow-name matching, advisory lanes, and undeclared selector variables: `runner_topology_check.py --mode=static`; live: `--mode=report`.
+
+- `PULP_LOCAL_MACOS_RUNS_ON_JSON`: REACHABLE on merge_group, pull_request, workflow_dispatch by m1, m5, studio
+- `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
+- `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
+- `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
+- `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
+- `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
+
+Active routing overrides (`runner_topology.json` `overrides`; an expired one fails every mode):
+- `macos-overflow-local-only`: `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` = `local-only`, owner daniel, since 2026-09-05, expires 2026-12-04. Revert when: Hosted overflow is re-approved, or local gate capacity proves insufficient under measured queue age.
+
+Landing API traps (verify with `decisions_contract.py --mode probe --live`, manual only, Shipyard >= 0.208.0):
+- REST `pulls/<n>.auto_merge` (and GraphQL `autoMergeRequest`) read null for a PR the merge queue already holds; read GraphQL `mergeQueueEntry`.
+- Classic branch protection omits a ruleset-based merge queue; query `repos/<o>/<r>/rulesets` before concluding there is no queue.
+
+GENERATED by `tools/scripts/ci_routing_digest.py --write`. Do not edit by hand.
+<!-- generated:end id=ci-routing-digest -->
 
 #### Runner priority (hard rule)
 

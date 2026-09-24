@@ -3,11 +3,13 @@
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
+#include "detail/gpu_audio_transport_trial_observer.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_trace.hpp"
 #include "harness/rt_allocation_probe.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -324,7 +326,91 @@ struct Block {
     uint32_t n;
 };
 
+struct TrialDeliveryCapture {
+    struct Entry {
+        std::uint64_t sequence = 0;
+        std::uint8_t disposition = 0;
+        std::uint64_t callback_start_ns = 0;
+        std::uint64_t callback_end_ns = 0;
+        std::uint64_t result_visible_ns = 0;
+    };
+    std::array<Entry, 16> entries{};
+    std::uint32_t count = 0;
+
+    static void observe(void* context, std::uint64_t sequence, std::uint8_t disposition,
+                        std::uint64_t callback_start_ns, std::uint64_t callback_end_ns,
+                        std::uint64_t result_visible_ns) noexcept {
+        auto& capture = *static_cast<TrialDeliveryCapture*>(context);
+        if (capture.count >= capture.entries.size())
+            return;
+        capture.entries[capture.count++] =
+            Entry{sequence, disposition, callback_start_ns, callback_end_ns, result_visible_ns};
+    }
+};
+
 } // namespace
+
+TEST_CASE("GpuAudioTransport trial observer records staged callback delivery",
+          "[gpu_audio][transport][trace]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 8;
+    GainNode node(CH, BS, 2.0f, MissPolicy::PassthroughDry, L);
+    REQUIRE(node.prepare());
+    TrialDeliveryCapture capture;
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {.ring_blocks = RING}));
+    REQUIRE(
+        configure_gpu_audio_transport_trial_observer(t, &capture, &TrialDeliveryCapture::observe));
+
+    Block in(CH, BS), out(CH, BS);
+    for (int k = 0; k < 4; ++k) {
+        in.fill(static_cast<float>(k + 1));
+        auto output = out.view();
+        t.process(in.cview(), output, BS);
+        t.pump();
+    }
+
+    REQUIRE(capture.count == 4);
+    for (std::uint32_t i = 0; i < capture.count; ++i) {
+        CHECK(capture.entries[i].sequence == i);
+        const auto expected = i < L ? detail::SharedIoDeliveryDisposition::Priming
+                                    : detail::SharedIoDeliveryDisposition::GpuDelivered;
+        CHECK(capture.entries[i].disposition == static_cast<std::uint8_t>(expected));
+        CHECK(capture.entries[i].callback_start_ns != 0);
+        CHECK(capture.entries[i].callback_end_ns >= capture.entries[i].callback_start_ns);
+        CHECK(capture.entries[i].callback_end_ns != 0);
+        CHECK(capture.entries[i].result_visible_ns >= capture.entries[i].callback_end_ns);
+    }
+}
+
+TEST_CASE("GpuAudioTransport trial observer records fallback dispositions",
+          "[gpu_audio][transport][trace]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 8;
+    for (const auto policy : {MissPolicy::CpuFallback, MissPolicy::Silence}) {
+        GainNode node(CH, BS, 2.0f, policy, L);
+        REQUIRE(node.prepare());
+        TrialDeliveryCapture capture;
+        GpuAudioTransport t;
+        REQUIRE(t.prepare(&node, {.ring_blocks = RING}));
+        REQUIRE(configure_gpu_audio_transport_trial_observer(t, &capture,
+                                                             &TrialDeliveryCapture::observe));
+
+        Block in(CH, BS), out(CH, BS);
+        for (int k = 0; k < 3; ++k) {
+            in.fill(static_cast<float>(k + 1));
+            auto output = out.view();
+            t.process(in.cview(), output, BS);
+        }
+
+        REQUIRE(capture.count == 3);
+        const auto fallback = policy == MissPolicy::CpuFallback
+                                  ? detail::SharedIoDeliveryDisposition::CpuFallbackDelivered
+                                  : detail::SharedIoDeliveryDisposition::SilenceDelivered;
+        for (std::uint32_t i = 0; i < capture.count; ++i) {
+            const auto expected = i < L ? detail::SharedIoDeliveryDisposition::Priming : fallback;
+            CHECK(capture.entries[i].disposition == static_cast<std::uint8_t>(expected));
+        }
+    }
+}
 
 TEST_CASE("GpuAudioTransport applies fixed latency + node processing", "[gpu_audio][transport]") {
     constexpr uint32_t CH = 2, BS = 64, L = 2, RING = 8;

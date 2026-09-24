@@ -457,6 +457,38 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # Queue-cascade guards. A break that reaches main is amplified by the merge
+    # queue: every batch inherits it, fails, ejects its innocent entries, and
+    # the next batch pays again. These four cover the rules that stop that.
+    #
+    # ctest-gate-args-selftest pins the event-dependent ctest decisions AND
+    # asserts build.yml still calls them, because a decision module that is
+    # correct but unreferenced reads exactly like one that works.
+    add_test(NAME ctest-gate-args-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ctest_gate_args.py")
+    set_tests_properties(ctest-gate-args-selftest PROPERTIES TIMEOUT 120)
+
+    # build-matrix-contract keeps the macOS leg unconditional (a push to main is
+    # the only lane that runs the full macOS suite against main) and compiles
+    # every Python heredoc embedded in the workflow's YAML block scalars, where
+    # a mis-indented edit still loads as YAML and fails only at job runtime.
+    add_test(NAME build-matrix-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_build_matrix_contract.py")
+    set_tests_properties(build-matrix-contract PROPERTIES TIMEOUT 120)
+
+    # gate-suite-executed-selftest keeps a receipt-reuse green distinguishable
+    # from a real one. Both report through the same `macos` check name.
+    add_test(NAME gate-suite-executed-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_suite_executed.py")
+    set_tests_properties(gate-suite-executed-selftest PROPERTIES TIMEOUT 120)
+
+    # queue-batch-attribute-selftest guards the REFUSAL as hard as the finding:
+    # naming the wrong PR sends someone to fix an innocent branch while the real
+    # break stays on main.
+    add_test(NAME queue-batch-attribute-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
+    set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
+
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
     # lane provably CANNOT see: at -O3 each TU inlines its own copy so the A/B
@@ -621,6 +653,16 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    # Offline reachability of every lane against the checked-in
+    # advertised-labels snapshot (declared supply), plus routing-override
+    # validation. The clock is pinned inside the test; live expiry is enforced
+    # by the hourly sweep, never by a ctest that would redden unrelated PRs.
+    add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
+    # Snapshot regeneration/freshness against a fake tartci checkout: profiles
+    # are discovered by glob, so adding or removing a machine needs no edit here.
+    add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
@@ -662,9 +704,10 @@ if(Python3_Interpreter_FOUND)
 
     # The sibling suite mocks subprocess wholesale, so it proves the candidate
     # order and the fall-through without ever asking git whether those refs
-    # resolve. This drives real git against a genuinely shallow clone whose
-    # refs/pull/<n>/merge is absent -- the production condition the fallback
-    # exists for -- and also asserts an unreachable commit still fails closed.
+    # resolve. This drives real git against genuinely shallow clones in the two
+    # shapes production produces -- an absent refs/pull/<n>/merge, and a
+    # merge-queue branch deleted while its own run is still going -- and also
+    # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
 
@@ -809,8 +852,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
     # Self-test: the read surface (surface/list/validate), the external-contributor
-    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
-    # the AGENTS.md + CLAUDE.md pointers.
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, the
+    # AGENTS.md + CLAUDE.md pointers, and `--mode probe` against a checked-in
+    # `shipyard landing --json` capture (never the live API).
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
@@ -969,6 +1013,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    # CLAUDE.md's ci-routing-digest block is generated from runner_topology.json
+    # and the advertised-labels snapshot only (never the workflows, so a
+    # workflow-only change cannot redden it); a stale or hand-edited block fails
+    # here.
+    add_test(NAME ci-routing-digest-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ci_routing_digest.py" --check)
+    add_test(NAME ci-routing-digest-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ci_routing_digest.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
     # Presence checks over a rendered panel: every one of the five is proved in
