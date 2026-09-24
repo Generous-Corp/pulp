@@ -170,12 +170,6 @@
       "timeout": 180.0
     },
     {
-      "name": "control-product-b-absence-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_control_product_b_absence_check.py"
-      ]
-    },
-    {
       "name": "ctest-gate-args-selftest",
       "argv": [
         "{repo}/tools/ci/test_ctest_gate_args.py"

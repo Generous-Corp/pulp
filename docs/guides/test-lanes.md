@@ -144,7 +144,7 @@ not run it a second time.
 Roughly a sixth of the ctest registrations the gate configures are Python
 scripts that read nothing but the checkout: CI-tooling selftests, source lints,
 drift checks. Measured on five merge-group `macos` jobs on 2026-09-24
-(107757339345, 107743043020, 107730781122, 107729256710, 107666303648), the 153
+(107757339345, 107743043020, 107730781122, 107729256710, 107666303648), the 152
 now in the lane cost ~770 s of the ~2,700 serial test-seconds, and six of them
 (`PROCESSORS 8`, e.g. `gpu-first-visible-role-producers-selftest`) ran alone in
 the serial tail for ~150 s per run. None of that needs the build that
@@ -174,7 +174,10 @@ can therefore leave the gate only by being run on another required context.
 **Joining the lane.** A registration qualifies when it is `python3 <script>`
 over source paths only, imports only the standard library (the lane has no
 numpy, Pillow or PyYAML), is not a `pr-fast` member (that tier runs on the PR
-head with the same exclusion), and is registered inside `test/` (a
+head with the same exclusion), names no marker that
+`control_product_b_absence_check.py` forbids (it scans `tools/`, so such a
+test stays on the gate), and is
+registered inside `test/` (a
 `set_property(TEST)` from `test/` cannot label a test another directory
 registered). Add it with
 `python3 tools/ci/source_selftests.py write --build-dir build --add <name>`, and
