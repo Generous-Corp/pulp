@@ -293,7 +293,10 @@ TEST_CASE("Ink & Signal applies brand-faithful overrides",
     REQUIRE(dark.color("meter.red").value() == color_from_hex(0xFF5C4D));
 
     // Status accents likewise.
-    REQUIRE(dark.color("accent.success").value() == color_from_hex(0x3FCF77));
+    // ink.leaf-bright: the success ROLE moved so it stays separable from
+    // accent.error under red-green CVD. meter.green below is unchanged --
+    // that pairing is what proves only the semantic role moved.
+    REQUIRE(dark.color("accent.success").value() == color_from_hex(0x8CE8B0));
     REQUIRE(dark.color("accent.warning").value() == color_from_hex(0xF6B847));
 
     // on-ink: dark text that sits on bright accent fills (differs per mode).
