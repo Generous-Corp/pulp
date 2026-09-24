@@ -74,7 +74,7 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         )[0]
         self.assertIn("id: ctest", test_step)
         self.assertIn('"$evidence_dir/selection.json"', test_step)
-        self.assertIn("--show-only=json-v1", test_step)
+        self.assertIn("ctest --show-only=json-v1 --test-dir", test_step)
         self.assertIn('"$evidence_dir/exit-code"', test_step)
         self.assertIn("--output-junit", test_step)
         self.assertIn("id: protected_receipt", WORKFLOW)

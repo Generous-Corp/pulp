@@ -1866,10 +1866,13 @@ jobs:
           evidence_dir="$RUNNER_TEMP/ctest-evidence"
           mkdir -p "$evidence_dir"
           LABEL_EXCLUDE="$label_exclude" EXCLUDE_REGEX="$exclude" python3 -c 'import json, os; print(json.dumps({"label_exclude": os.environ["LABEL_EXCLUDE"], "exclude_regex": os.environ["EXCLUDE_REGEX"], "label_include": "", "include_regex": ""}))' > "$evidence_dir/selection.json"
-          ctest --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" --show-only=json-v1 > "$evidence_dir/selected.json"
           ctest_exit=0
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
           printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          # Inventory of what that selection covers: a listing, not a run, so
+          # it takes no stop-on-failure flag. A failed listing leaves an invalid
+          # file, and the receipt issuer then refuses rather than guessing.
+          ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
           exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
