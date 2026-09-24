@@ -184,7 +184,7 @@ It also runs in the pre-push `gates.sh`, so a violation is caught before the pus
 
 The workflow's last step, **Source-only selftests**, runs every registration
 listed in `tools/ci/source_selftests.json` with
-`tools/ci/source_selftests.py run --min-count 150`. Those are Python ctests that
+`tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that
 read only the checkout; the required `macos` gate excludes their
 `source-selftest` label on gate events, so this required context is where they
 block a merge. The step needs the full-history checkout this job already does

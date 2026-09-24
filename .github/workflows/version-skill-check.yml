@@ -346,4 +346,4 @@ jobs:
         # manifest that shrank without anyone deciding to shrink it.
         timeout-minutes: 45
         run: |
-          python3 tools/ci/source_selftests.py run --min-count 150
+          python3 tools/ci/source_selftests.py run --min-count 130

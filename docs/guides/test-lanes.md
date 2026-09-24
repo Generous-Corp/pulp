@@ -10,7 +10,7 @@ single source of truth for that model.
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
 | **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below); an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
-| **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~150 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
+| **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
@@ -144,10 +144,10 @@ not run it a second time.
 Roughly a sixth of the ctest registrations the gate configures are Python
 scripts that read nothing but the checkout: CI-tooling selftests, source lints,
 drift checks. Measured on five merge-group `macos` jobs on 2026-09-24
-(107757339345, 107743043020, 107730781122, 107729256710, 107666303648), the 152
-now in the lane cost ~770 s of the ~2,700 serial test-seconds, and six of them
-(`PROCESSORS 8`, e.g. `gpu-first-visible-role-producers-selftest`) ran alone in
-the serial tail for ~150 s per run. None of that needs the build that
+(107757339345, 107743043020, 107730781122, 107729256710, 107666303648), the 137
+now in the lane cost ~580 s of the ~2,700 serial test-seconds, and five of them
+(`PROCESSORS 8`, e.g. `gpu-dpr-v2-evidence-selftest`) ran alone in the serial
+tail for ~100 s per run. None of that needs the build that
 dominates the gate.
 
 So they run in the required `Enforce version & skill sync` job instead, which
@@ -168,12 +168,14 @@ needs the configured tree) runs `source_selftests.py check`. It fails when a
 labelled test is missing from the manifest, a listed test is not registered or
 not labelled, a manifest command no longer matches its registration, an entry
 reaches the build tree or a path outside the checkout, an entry carries
-`pr-fast` or an excluded label, or either half of the wiring is gone. A test
+`pr-fast` or an excluded label, an entry's script is platform-gated or imports
+an optional third-party module (see below), or either half of the wiring is
+gone. A test
 can therefore leave the gate only by being run on another required context.
 
 **Joining the lane.** A registration qualifies when it is `python3 <script>`
 over source paths only, imports only the standard library (the lane has no
-numpy, Pillow or PyYAML), is not a `pr-fast` member (that tier runs on the PR
+numpy, Pillow or PyYAML), is not platform-gated, is not a `pr-fast` member (that tier runs on the PR
 head with the same exclusion), names no marker that
 `control_product_b_absence_check.py` forbids (it scans `tools/`, so such a
 test stays on the gate), and is
@@ -183,6 +185,15 @@ registered). Add it with
 `python3 tools/ci/source_selftests.py write --build-dir build --add <name>`, and
 refresh after editing a moved registration's arguments with the same command
 without `--add`. The contract test tells you which one you need.
+
+**Platform-gated tests stay on the gate.** A selftest that branches on the host
+being macOS (`sys.platform == "darwin"`, `platform.system()`), or probes for
+`codesign`, `lipo`, `xcrun`, `security` and similar, skips that half on Linux
+and still exits 0. On the lane it would report a pass it never earned. The
+contract scans each entry's script for those markers and for `yaml`, `numpy`,
+`PIL`, `skimage` and `scipy` imports, and rejects any hit. The scan is textual
+and broad on purpose: a false positive only keeps a test on the gate, where it
+already ran.
 
 **What it costs.** The required `Enforce version & skill sync` job grows from
 about 2 minutes to several; it runs in parallel with the ~28-minute `macos`

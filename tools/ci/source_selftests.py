@@ -64,6 +64,61 @@ ALLOWED_PROPERTIES = frozenset(
     {"LABELS", "PROCESSORS", "RESOURCE_LOCK", "TIMEOUT", "WORKING_DIRECTORY"}
 )
 PYTHON_BASENAME = re.compile(r"^python(3(\.\d+)?)?(\.exe)?$")
+# A selftest whose source branches on the host being macOS, or probes for a
+# macOS-only tool, runs less (or nothing) on the Linux lane and still exits 0.
+# Such a test must stay on the macOS gate. The scan is textual and deliberately
+# broad: a false positive only keeps a test where it already ran.
+PLATFORM_GATE_MARKERS = re.compile(
+    r"""darwin"""
+    r"""|mac_ver\("""
+    r"""|platform\.system\(\)"""
+    r"""|shutil\.which\(\s*["'](?:codesign|lipo|xcrun|security|otool|"""
+    r"""install_name_tool|plutil|auval|sw_vers|hdiutil|pkgbuild|productbuild|"""
+    r"""ditto|defaults|xcodebuild|notarytool|stapler|spctl)["']""",
+    re.IGNORECASE,
+)
+# Optional third-party imports the lane does not install; a test that skips
+# without one would read as a pass.
+OPTIONAL_IMPORT_MARKERS = re.compile(
+    r"^\s*(?:import|from)\s+(?:yaml|numpy|PIL|skimage|scipy)\b", re.MULTILINE
+)
+
+
+def entry_sources(entry: dict[str, Any], repo: pathlib.Path) -> list[pathlib.Path]:
+    """The script file(s) an entry executes, resolved against ``repo``."""
+    argv = entry["argv"]
+    if argv[:2] == ["-m", "unittest"] and entry.get("cwd"):
+        return [pathlib.Path(expand(entry["cwd"], repo)) / f"{argv[2]}.py"]
+    return [pathlib.Path(expand(argv[0], repo))]
+
+
+def portability_errors(entry: dict[str, Any], repo: pathlib.Path) -> list[str]:
+    """Reasons an entry cannot prove on Linux what it proved on the macOS gate."""
+    errors = []
+    for path in entry_sources(entry, repo):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            errors.append(f"{entry['name']}: cannot read {path}")
+            continue
+        found = PLATFORM_GATE_MARKERS.search(text)
+        if found:
+            line = text.count("\n", 0, found.start()) + 1
+            errors.append(
+                f"{entry['name']}: {path.name}:{line} is platform-gated "
+                f"({found.group(0)!r}); it would skip on the Linux lane and "
+                "report a pass, so it must stay on the macOS gate"
+            )
+        found = OPTIONAL_IMPORT_MARKERS.search(text)
+        if found:
+            line = text.count("\n", 0, found.start()) + 1
+            errors.append(
+                f"{entry['name']}: {path.name}:{line} imports "
+                f"{found.group(0).strip()!r}, which the lane does not install"
+            )
+    return errors
+
+
 ENTRY_KEYS = frozenset(
     {"name", "argv", "cwd", "env", "timeout", "resource_lock", "processors"}
 )
@@ -290,6 +345,7 @@ def check(
 
     build = str(build_dir.resolve())
     for name, entry in sorted(by_name.items()):
+        errors.extend(portability_errors(entry, repo))
         test = registered.get(name)
         if test is None:
             if require_all:

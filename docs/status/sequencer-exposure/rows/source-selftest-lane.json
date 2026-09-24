@@ -13,7 +13,7 @@
       "path": ".github/workflows/version-skill-check.yml",
       "needles": [
         "Source-only selftests (moved off the macOS gate)",
-        "python3 tools/ci/source_selftests.py run --min-count 150",
+        "python3 tools/ci/source_selftests.py run --min-count 130",
         "Sequencer exposure ledger"
       ]
     },

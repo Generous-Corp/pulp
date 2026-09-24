@@ -25,10 +25,17 @@ import ctest_gate_args  # noqa: E402
 import protected_merge_receipt  # noqa: E402
 import source_selftests as lane  # noqa: E402
 
-REPO = pathlib.Path("/src/pulp")
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+
+# A throwaway checkout: check() reads each entry's script to scan it.
+REPO = pathlib.Path(tempfile.mkdtemp(prefix="source-selftest-repo-")).resolve()
+atexit.register(shutil.rmtree, REPO, True)
+(REPO / "tools" / "scripts").mkdir(parents=True)
+(REPO / "tools" / "scripts" / "test_x.py").write_text("print('portable')\n")
 BUILD = REPO / "build"
 GATE = {"merge_group": "validation|slow|source-selftest"}
-WIRED = "run: python3 tools/ci/source_selftests.py run --min-count 150\n"
+WIRED = "run: python3 tools/ci/source_selftests.py run --min-count 130\n"
 
 
 def registration(name, argv, labels=("source-selftest",), **props):
@@ -162,6 +169,43 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(any("would run on no required lane" in e for e in errors), errors)
 
 
+class PortabilityTests(unittest.TestCase):
+    """A test that skips its macOS half on Linux must not leave the gate."""
+
+    CASES = {
+        "skip_unless": "@unittest.skipUnless(sys.platform == 'darwin', 'mac')\n",
+        "platform_system": "if platform.system() != 'Darwin':\n    raise SkipTest\n",
+        "which_codesign": "if shutil.which('codesign') is None: return\n",
+        "which_lipo": 'tool = shutil.which("lipo")\n',
+        "mac_ver": "if platform.mac_ver()[0]: pass\n",
+        "decorator": "@darwin_mutation_proof\ndef test_x(self): pass\n",
+        "yaml": "try:\n    import yaml\nexcept ImportError:\n    yaml = None\n",
+        "numpy": "import numpy as np\n",
+    }
+
+    def _errors(self, body: str) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "t.py").write_text("import sys, shutil, platform\n" + body)
+            return lane.portability_errors(entry("t", ["{repo}/t.py"]), root)
+
+    def test_each_marker_is_rejected(self) -> None:
+        for case, body in self.CASES.items():
+            with self.subTest(case=case):
+                self.assertTrue(self._errors(body), case)
+
+    def test_portable_source_passes(self) -> None:
+        self.assertEqual(self._errors("print(sys.version)\n"), [])
+
+    def test_unittest_module_entry_is_scanned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "sub").mkdir()
+            (root / "sub" / "test_m.py").write_text("X = 'darwin'\n")
+            item = entry("m", ["-m", "unittest", "test_m"], cwd="{repo}/sub")
+            self.assertTrue(lane.portability_errors(item, root))
+
+
 class RunTests(unittest.TestCase):
     def _manifest(self, root: pathlib.Path, body: str, **extra) -> list[dict]:
         script = root / "t.py"
@@ -258,7 +302,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_manifest_is_valid_and_points_at_real_scripts(self) -> None:
         entries = lane.load_manifest()
-        self.assertGreaterEqual(len(entries), 150)
+        self.assertGreaterEqual(len(entries), 130)
         for item in entries:
             argv = item["argv"]
             if argv[:2] == ["-m", "unittest"]:
@@ -267,6 +311,14 @@ class RepositoryTests(unittest.TestCase):
             else:
                 script = pathlib.Path(lane.expand(argv[0], lane.REPO_ROOT))
             self.assertTrue(script.is_file(), item["name"])
+
+    def test_no_entry_is_platform_gated(self) -> None:
+        errors = [
+            err
+            for item in lane.load_manifest()
+            for err in lane.portability_errors(item, lane.REPO_ROOT)
+        ]
+        self.assertEqual(errors, [])
 
     def test_gate_and_receipt_exclude_the_same_labels(self) -> None:
         self.assertIn("source-selftest", ctest_gate_args.GATE_LABEL_EXCLUDE.split("|"))

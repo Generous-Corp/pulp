@@ -100,12 +100,6 @@
       ]
     },
     {
-      "name": "check-bundle-architectures-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_check_bundle_architectures.py"
-      ]
-    },
-    {
       "name": "ci-python-selector-selftest",
       "argv": [
         "{repo}/tools/ci/test_find_python311.py"
@@ -225,12 +219,6 @@
       ]
     },
     {
-      "name": "findskia-arch-assert-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_findskia_arch_assert.py"
-      ]
-    },
-    {
       "name": "fleet-remote-probe-selftest",
       "argv": [
         "{repo}/tools/fleet/test_probe_remote.py"
@@ -304,21 +292,9 @@
       "timeout": 120.0
     },
     {
-      "name": "gpu-audio-provider-identity-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_audio_provider_identity.py"
-      ]
-    },
-    {
       "name": "gpu-audio-trace-validator-selftest",
       "argv": [
         "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"
-      ]
-    },
-    {
-      "name": "gpu-clean-agent-journey-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_clean_agent_journey.py"
       ]
     },
     {
@@ -393,20 +369,6 @@
       "processors": 8
     },
     {
-      "name": "gpu-first-visible-role-producers-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_first_visible_a3_role_producers.py"
-      ],
-      "timeout": 300.0,
-      "processors": 8
-    },
-    {
-      "name": "gpu-first-visible-trace-producer-overhead-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py"
-      ]
-    },
-    {
       "name": "gpu-handoff-pin-freshness-selftest",
       "argv": [
         "{repo}/tools/scripts/test_gpu_handoff_pin_freshness.py"
@@ -445,12 +407,6 @@
       ]
     },
     {
-      "name": "gpu-probe-terminal-recorder-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_probe_acceptance.py"
-      ]
-    },
-    {
       "name": "gpu-provenance-hydration-real-git-selftest",
       "argv": [
         "{repo}/tools/scripts/test_hydrate_real_git.py"
@@ -468,13 +424,6 @@
         "{repo}/tools/scripts/test_gpu_recipe_catalog.py"
       ],
       "timeout": 300.0
-    },
-    {
-      "name": "gpu-trace-overhead-acceptance-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_gpu_trace_overhead_acceptance.py"
-      ],
-      "timeout": 180.0
     },
     {
       "name": "gpu-trace-overhead-verifier-selftest",
@@ -507,16 +456,6 @@
         "{repo}/tools/scripts/test_live_build_check.py"
       ],
       "timeout": 120.0
-    },
-    {
-      "name": "local-diff-cover-selftest",
-      "argv": [
-        "-m",
-        "unittest",
-        "test_local_diff_cover"
-      ],
-      "cwd": "{repo}/tools/scripts",
-      "timeout": 300.0
     },
     {
       "name": "mac-objc-source-list-guard-selftest",
@@ -570,21 +509,9 @@
       ]
     },
     {
-      "name": "portable-ci-timeout-selftest",
-      "argv": [
-        "{repo}/tools/ci/test_run_with_timeout.py"
-      ]
-    },
-    {
       "name": "pr-check-triage-selftest",
       "argv": [
         "{repo}/tools/scripts/test_pr_check_triage.py"
-      ]
-    },
-    {
-      "name": "pr-flow-audit-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_pr_flow_audit.py"
       ]
     },
     {
@@ -713,13 +640,6 @@
       "timeout": 60.0
     },
     {
-      "name": "rack-generator-safety",
-      "argv": [
-        "{repo}/test/../tools/rack/test_generate_safety.py"
-      ],
-      "timeout": 180.0
-    },
-    {
       "name": "rack-inert-input-cause",
       "argv": [
         "{repo}/test/../tools/rack/test_inert_input_cause.py"
@@ -765,13 +685,6 @@
       "name": "rack-physical-targets",
       "argv": [
         "{repo}/test/../tools/rack/test_physical_targets.py"
-      ],
-      "timeout": 60.0
-    },
-    {
-      "name": "rack-qualify-scenes",
-      "argv": [
-        "{repo}/test/../tools/rack/test_qualify_scenes.py"
       ],
       "timeout": 60.0
     },
@@ -830,23 +743,11 @@
       ]
     },
     {
-      "name": "runner-topology-static-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_runner_topology_static.py"
-      ]
-    },
-    {
       "name": "sample-region-compat-baseline-selftest",
       "argv": [
         "{repo}/tools/scripts/test_sample_region_compat_baseline.py"
       ],
       "timeout": 120.0
-    },
-    {
-      "name": "sdk-consumer-sweep-selftest",
-      "argv": [
-        "{repo}/tools/scripts/test_sdk_consumer_sweep.py"
-      ]
     },
     {
       "name": "sdk-consumer-update-selftest",

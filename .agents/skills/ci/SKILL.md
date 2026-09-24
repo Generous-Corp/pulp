@@ -391,7 +391,7 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 
 ### `source-selftest` tests gate on `Enforce version & skill sync`, not on `macos`
 
-The gate events also exclude `source-selftest`: ~150 Python registrations that
+The gate events also exclude `source-selftest`: ~140 Python registrations that
 read only the checkout, listed in `tools/ci/source_selftests.json` and run by
 the required `Enforce version & skill sync` job
 (`tools/ci/source_selftests.py run`). So a red selftest such as
@@ -401,7 +401,10 @@ consequences worth knowing before you debug:
 
 - A moved test that passes on the macOS gate host can fail on the lane only for
   a Linux or Python-3.12 reason, or because it needs a third-party module (the
-  lane installs none). Reproduce with
+  lane installs none). The contract rejects any entry whose script is
+  platform-gated (`darwin`, `platform.system()`, `shutil.which("codesign")` and
+  similar) or imports yaml/numpy/PIL: on Linux such a test skips its macOS half
+  and still exits 0, which is a pass it never earned. Reproduce with
   `python3.12 tools/ci/source_selftests.py run` after temporarily renaming
   `build/`, which is the lane's condition.
 - Editing a moved registration's arguments without refreshing the manifest
