@@ -39,6 +39,8 @@ on:
       - 'tools/scripts/test_release_platform_subset_check.py'
       - 'tools/scripts/sdk_provenance.py'
       - 'tools/scripts/test_sdk_provenance.py'
+      - 'tools/scripts/protected_merge_receipt.py'
+      - 'tools/scripts/test_protected_merge_receipt.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
@@ -154,6 +156,8 @@ on:
       - 'tools/scripts/test_release_platform_subset_check.py'
       - 'tools/scripts/sdk_provenance.py'
       - 'tools/scripts/test_sdk_provenance.py'
+      - 'tools/scripts/protected_merge_receipt.py'
+      - 'tools/scripts/test_protected_merge_receipt.py'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
@@ -403,6 +407,8 @@ jobs:
           python3 tools/scripts/test_sdk_provenance.py
           python3 tools/scripts/test_required_gate_liveness.py
           python3 tools/scripts/test_build_workflow.py
+          # Protected-validation receipts: evidence-backed issue and verify.
+          python3 tools/scripts/test_protected_merge_receipt.py
           python3 tools/scripts/test_visual_python_deps_step.py
           python3 tools/scripts/test_build_macos_workflow_dispatch.py
           python3 tools/scripts/test_release_breakage_watchdog_wiring.py

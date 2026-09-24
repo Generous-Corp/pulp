@@ -439,6 +439,25 @@ Re-running it is idempotent: the counter a tree currently holds is not evidence
 of anything, so a tree already carrying a stale reservation is derived back
 down to what its material justifies.
 
+### A digest lives in a catalog module, not only in the registry
+
+A reviewed public header's fingerprint can be declared in **either**
+`agent_capability_registry.py` (as a `REVIEWED_HEADERS` entry) or a
+`agent_capability_catalog_*.py` module (as a binding's `header_fingerprint`).
+`--check` names the header and both digests but not the file, and grepping the
+registry for a header that is declared in a catalog finds nothing — which reads
+as "not tracked" rather than "declared elsewhere". Find the declaration by the
+**expected digest**, which is unique:
+
+```sh
+grep -rn "<the expected sha256 from --check>" tools/
+```
+
+`tools/agent-capabilities/contract-history.json` will also match; it is the
+appended snapshot, never the declaration. Measured on
+`pulp/timebase/grid_projection.hpp`, whose digest lives in
+`agent_capability_catalog_timing.py` as the `project_grid` binding.
+
 ### The push gate runs `--check` for you — but only against a resolved base
 
 `gates.sh` and `.githooks/pre-push` both run `--check` before a push, whenever
@@ -1439,3 +1458,10 @@ and supports a nonnegative timing floor. Its operational binding constructs a
 kernel and invokes the update with a bounded spec. This design-time kernel
 registration does not advertise placed-device parameter operations or grants;
 the event-humaniser exposure ledger keeps those product-control gaps explicit.
+## Sample-region capability rows
+
+A sample-region capability describes a declared graph/control contract. Region
+proof and runtime admission are the authority; capability rows and inspector
+examples are projections. Keep unsupported latency, state-size, history, and
+format projections explicit until their contracts and independent proofs exist.
+Do not use vestigial flags or create a second DSP registry.

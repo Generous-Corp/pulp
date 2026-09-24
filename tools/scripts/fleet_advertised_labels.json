@@ -1,0 +1,340 @@
+{
+  "schema": "tartci.advertised-labels/v1",
+  "generated_from": {
+    "repo": "danielraffel/tartci",
+    "commit": "2f3bc6214385e20718ee51fccafeca104387fa3c",
+    "profiles": [
+      "profiles/m1-macos-fleet.toml",
+      "profiles/m3-macos-fleet.toml",
+      "profiles/m5-macos-fleet.toml"
+    ],
+    "regenerate": "python3 tools/scripts/fleet_snapshot.py --tartci <tartci checkout> --write (tartci: python3 scripts/macos_fleet_lanes.py advertised-labels profiles/*-macos-fleet.toml --json)"
+  },
+  "registrations": [
+    {
+      "profile": "m1-macos-fleet",
+      "host_id": "m1",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-merge-group",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-merge-group"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m1-macos-fleet",
+      "host_id": "m1",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-pr-head",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-pr-head"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m1-macos-fleet",
+      "host_id": "m1",
+      "lane": "spectr-gate",
+      "repo": "danielraffel/spectr",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "spectr-build",
+        "spectr-build-vm",
+        "spectr-gate-fast"
+      ],
+      "workflows": [
+        "Spectr M5 Product Acceptance"
+      ]
+    },
+    {
+      "profile": "m1-macos-fleet",
+      "host_id": "m1",
+      "lane": "forge-gate",
+      "repo": "Generous-Corp/forge",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "forge-build",
+        "forge-build-vm",
+        "forge-gate-fast"
+      ],
+      "workflows": [
+        "build",
+        "protected macOS build"
+      ]
+    },
+    {
+      "profile": "m1-macos-fleet",
+      "host_id": "m1",
+      "lane": "vellum-gate",
+      "repo": "Generous-Corp/vellum",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "vellum-build-macos",
+        "vellum-host-m1"
+      ],
+      "workflows": [
+        "Locked macOS GPU proof",
+        "README clean release proof"
+      ]
+    },
+    {
+      "profile": "m3-macos-fleet",
+      "host_id": "studio",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-merge-group",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-merge-group"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m3-macos-fleet",
+      "host_id": "studio",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-pr-head",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-pr-head"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m3-macos-fleet",
+      "host_id": "studio",
+      "lane": "spectr-gate",
+      "repo": "danielraffel/spectr",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "spectr-build",
+        "spectr-build-vm",
+        "spectr-gate-fast"
+      ],
+      "workflows": [
+        "Spectr M5 Product Acceptance"
+      ]
+    },
+    {
+      "profile": "m3-macos-fleet",
+      "host_id": "studio",
+      "lane": "forge-gate",
+      "repo": "Generous-Corp/forge",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "forge-build",
+        "forge-build-vm",
+        "forge-gate-fast"
+      ],
+      "workflows": [
+        "build",
+        "protected macOS build"
+      ]
+    },
+    {
+      "profile": "m3-macos-fleet",
+      "host_id": "studio",
+      "lane": "vellum-gate",
+      "repo": "Generous-Corp/vellum",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "vellum-build-macos",
+        "vellum-host-m3"
+      ],
+      "workflows": [
+        "Locked macOS GPU proof",
+        "README clean release proof"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-merge-group",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-merge-group"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "pulp-gate",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "event-class-v2",
+      "class_label": "pulp-build-pr-head",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build",
+        "pulp-build-vm",
+        "pulp-build-pr-head"
+      ],
+      "workflows": [
+        "Build and Test"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "pulp-release",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "legacy",
+      "class_label": "pulp-release-tagged",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build-vm-release",
+        "pulp-release-tagged"
+      ],
+      "workflows": [
+        "Release CLI",
+        "Sign and Release"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "pulp-release",
+      "repo": "Generous-Corp/pulp",
+      "assignment_mode": "legacy",
+      "class_label": "pulp-release-pr-gate",
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "pulp-build-vm-release",
+        "pulp-release-pr-gate"
+      ],
+      "workflows": [
+        "Release-path PR gate"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "spectr-gate",
+      "repo": "danielraffel/spectr",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "spectr-build",
+        "spectr-build-vm",
+        "spectr-gate-fast"
+      ],
+      "workflows": [
+        "Spectr M5 Product Acceptance"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "forge-gate",
+      "repo": "Generous-Corp/forge",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "forge-build",
+        "forge-build-vm",
+        "forge-gate-fast"
+      ],
+      "workflows": [
+        "build",
+        "protected macOS build"
+      ]
+    },
+    {
+      "profile": "m5-macos-fleet",
+      "host_id": "m5",
+      "lane": "vellum-gate",
+      "repo": "Generous-Corp/vellum",
+      "assignment_mode": "legacy",
+      "class_label": null,
+      "labels": [
+        "self-hosted",
+        "macOS",
+        "ARM64",
+        "vellum-build-macos",
+        "vellum-host-m5"
+      ],
+      "workflows": [
+        "Locked macOS GPU proof",
+        "README clean release proof"
+      ]
+    }
+  ]
+}

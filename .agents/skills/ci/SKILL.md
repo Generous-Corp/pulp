@@ -357,6 +357,22 @@ context, and never execute the candidate's verifier as the authority.
 `test_windows_runner_policy.py` pin this topology. Do not reintroduce a reporter
 whose `needs` contains the combined `build` job.
 
+### A reused merge-group receipt must carry test evidence, not a verdict
+
+A merge group can skip `macos`/`linux` entirely by reusing the pull-request
+run's protected-validation receipt. The job then reads as validated even
+though nothing ran in the group. A receipt that *states* success
+(`{"conclusion": "success", "ctest_exit": 0}` written as a constant), checked
+by a verifier comparing against that same constant, is circular: it stays
+green after the pull-request run stops running tests, and red code lands
+behind a green gate. Receipts carry the CTest selection, the selected
+inventory, JUnit per-test results and the recorded exit status. They are
+issued only when the `ctest` step ran and succeeded, and a narrowed tier (an
+include label or regex) can never be reused. When changing which tests a
+pull-request run executes, check `tools/scripts/test_build_workflow.py` and
+`tools/scripts/test_protected_merge_receipt.py` (both run from
+`workflow-lint.yml`).
+
 ### A green ctest job proves nothing about a label its event excludes
 
 `build.yml` computes `label_exclude` from the event, and the two values are far
@@ -1398,6 +1414,61 @@ points at a force-pushed-away commit — between the force-push and the next
 That window is narrow and does not touch the shape the gate is for: a commit
 amended before its first push was never on any remote ref.
 
+## Gate: pre-queue static guards (`gates.sh` §20, diff-scoped)
+
+`tools/scripts/gates.sh` runs `catch_discover_timeout_guard.py` and
+`check_skip_not_pass.py` before every push. Both are whole-tree text scans —
+0.1s and ~2s, no build tree, no configure. The required gate already runs them
+as ctests, so this adds no coverage; it moves *when* you find out.
+
+That timing is the whole point. A batch is main plus every entry ahead of it, so
+a bad test registration does not fail only its author: it fails the batch, ejects
+PRs that did nothing wrong, and the queue re-forms on the same failure until
+somebody reads a log. A single literal `TIMEOUT` inside `catch_discover_tests`
+has held eighteen PRs this way, and `catch_discover_timeout_guard.py` names the
+exact file and line in a tenth of a second.
+
+What each one refuses:
+
+- **A literal `TIMEOUT` in a `catch_discover_tests` block.** The budget must be
+  a scaled variable, because a literal is not widened on the instrumented lanes
+  and the test is killed at an uninstrumented budget:
+
+      pulp_scaled_test_timeout(_pulp_<name>_timeout <seconds>)
+      catch_discover_tests(<target>
+          PROPERTIES TIMEOUT "${_pulp_<name>_timeout}")
+
+  Prior art: `test/cmake/app_audio_host_tests.cmake`,
+  `test/cmake/character_delay_tests.cmake`. The guard honours an inline
+  `catch-discover-timeout-guard: skip <reason>`; reach for the scaler instead,
+  since the skip marker evades the thing the guard exists to catch.
+
+- **An unmet precondition reported as a pass.** A `SUCCEED()` / `WARN()` / bare
+  `return` at the top of a case leaves it PASSING, so the suite's pass count is
+  identical whether the lane ran or the precondition vanished. Use `SKIP()`.
+  `tools/scripts/check_skip_not_pass.json` is a frozen ledger whose `sites`
+  counts may shrink and never grow — a count that has DROPPED is an error, so
+  lower it in the same change or delete the entry at zero.
+
+Diff-scoped, like the unbounded-wait lint: a violation is fatal only when it sits
+on a path the push changes, and one elsewhere is reported without failing. That
+keeps a pre-existing backlog on the base from blocking every developer's push. It
+is reported rather than swallowed because a violation on the base still reds the
+required gate for whoever owns it.
+
+Two traps when running these by hand:
+
+- **Run them against a ref, not a working tree.** A checkout parked on an old
+  branch may not even contain the scripts, and the resulting "not found" reads
+  as a clean run. Use `git archive <ref> | tar -x -C "$(mktemp -d)"` and assert
+  a non-zero extracted file count.
+- **Extract the WHOLE tree for `check_skip_not_pass`.** It reports a ledger entry
+  as "listed in the ledger but not scanned" when the file is merely absent from
+  your extraction, which looks like a real finding and is not.
+
+`PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
+run as ctests on the required gate.
+
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
@@ -1974,6 +2045,22 @@ issue) plus the `runner-topology-selftest` ctest. Lane→label intent lives in
 `tools/scripts/runner_topology.json` — edit a routing variable and its lane
 together, or the drift check fails. Full rationale:
 `docs/guides/local-ci.md` → "Routing contract (checked)".
+
+Before editing a lane, run `runner_topology_check.py --mode=static` (offline,
+no token). Its `REACHABLE` means *declared* supply from the checked-in
+advertised-labels snapshot, not live service, so a drifted installed profile
+still needs `--mode=report`. Never judge the required gate by its raw variable:
+build.yml swaps `pulp-gate-fast` for an event-class label before dispatch, and
+the static mode projects that for you. A temporary lane value belongs in the
+contract's `overrides` array with an owner and an expiry; an expired override
+fails every mode. The snapshot names no host by hand: regenerate it with
+`tools/scripts/fleet_snapshot.py --tartci <checkout> --write` after any
+`profiles/*-macos-fleet.toml` change in tartci; the hourly topology sweep runs
+`--check` and files a stale snapshot on the same tracking issue. `--mode=report` also prints advisory observed-supply lines
+(OBSERVED / NOT_OBSERVED / IDLE per registration, UNDECLARED_OBSERVED for an
+unknown runner prefix); jobs attach to a registration by runner-name prefix and
+labels, not by the registration's workflow list, because GitHub assigns by
+labels alone (release-cli darwin legs have run on pulp-gate runners).
 
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
@@ -10031,3 +10118,43 @@ Two consequences worth knowing:
 
 This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
 the same file for longer.
+
+## A required gate step that fetches from the internet is a fleet-wide outage waiting to happen
+
+`build.yml`'s `Install visual-analysis Python dependencies` step passed
+`--upgrade`. pip then asks the index for a newer wheel **even when the
+requirement is already satisfied**, so "pypi.org is reachable from this VM"
+became a precondition of the **required** `macos` check — 21 steps before any
+test runs.
+
+On 2026-09-23 it failed exactly that way:
+
+```
+error: externally-managed-environment
+Tunnel connection failed: 403 Forbidden   ->  /simple/numpy/   (x5 retries)
+ERROR: No matching distribution found for numpy>=1.24
+```
+
+**The tell that it was infrastructure, not a PR:** the same step was `failure`
+on two `m5-pulp-gate-*` runners and `success` on `studio-pulp-gate-*` for
+comparable batches. Both *hosts* reach pypi.org fine (HTTP 200 from a login
+shell) — the refusal is inside the ephemeral VM's egress, so it follows the
+host that mints the VM, not the diff. A merge_group batch is named after one
+PR, so this reads as that PR being broken when it is a host property.
+
+Two rules follow, and they generalise past this step:
+
+- **Check before you fetch.** `pip install --dry-run --no-index` answers
+  "already satisfied?" without touching the network, so the happy path has no
+  external dependency at all. This is also what makes pre-provisioning wheels
+  into the golden image *work* — with `--upgrade` a fully provisioned VM still
+  contacted the index.
+- **Do not make the install non-fatal to "fix" it.** Seven ctests import these
+  modules and SKIP when they are missing, and a ctest SKIP reads exactly like a
+  PASS. The failure belongs at the non-skippable `visual-python-deps-present`
+  check, which can name what is absent; an install step cannot distinguish
+  "absent" from "unreachable".
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is down. If it can, you have handed the merge queue
+to someone else's uptime.

@@ -1643,11 +1643,28 @@ jobs:
             echo "so installing into any other interpreter would leave them skipping." >&2
             exit 1
           fi
-          echo "Installing the declared visual-analysis set into $py"
-          # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install; the
-          # second form is the sanctioned override for those hosts.
-          "$py" -m pip install --user --upgrade -r tools/motion/visual/requirements.txt || \
-            "$py" -m pip install --break-system-packages --user --upgrade -r tools/motion/visual/requirements.txt
+          # Satisfied already? Then do not touch the network. `--upgrade` asks the
+          # index for a newer wheel even when the requirement is met, so it turned
+          # a reachable-PyPI assumption into a precondition of the REQUIRED macos
+          # gate: on 2026-09-23 an ephemeral VM whose egress refused CONNECT to
+          # pypi.org ("Tunnel connection failed: 403 Forbidden") failed this step
+          # at 21 of 41 and killed every merge_group batch that landed on that
+          # host, while the same batch passed on a host whose VMs could reach it.
+          # A required gate must not depend on a third-party service being
+          # reachable, and the declared set is a floor, not a latest-wins pin.
+          if "$py" -m pip install --dry-run --no-index --quiet \
+               -r tools/motion/visual/requirements.txt >/dev/null 2>&1; then
+            echo "visual-analysis dependencies already satisfied in $py; no index fetch"
+          else
+            echo "Installing the declared visual-analysis set into $py"
+            # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install; the
+            # second form is the sanctioned override for those hosts.
+            "$py" -m pip install --user -r tools/motion/visual/requirements.txt || \
+              "$py" -m pip install --break-system-packages --user -r tools/motion/visual/requirements.txt
+          fi
+          # Whether the set was pre-provisioned or installed here, the
+          # non-skippable `visual-python-deps-present` ctest is what proves it.
+          # This step only has to stop being a network-dependent tripwire.
 
       - name: Build
         shell: bash
@@ -1770,6 +1787,7 @@ jobs:
             --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
 
       - name: Test (non-Windows)
+        id: ctest
         # Tests run in the merge queue, not on the pull request head. The queue
         # validates the exact commit that will land, so skipping here loses no
         # protection on main, and it removes a whole class of flake from the
@@ -1886,7 +1904,21 @@ jobs:
           # --test-dir, ctest resolves a relative --output-junit against the
           # build dir, nesting the file at $PULP_BUILD_DIR/$PULP_BUILD_DIR/.
           # The report is written even when ctest exits nonzero.
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          #
+          # The selection, the selected inventory, and the exit status are
+          # recorded beside the JUnit report so a protected-validation receipt
+          # can prove which tests ran and that every one of them passed.
+          evidence_dir="$RUNNER_TEMP/ctest-evidence"
+          mkdir -p "$evidence_dir"
+          LABEL_EXCLUDE="$label_exclude" EXCLUDE_REGEX="$exclude" python3 -c 'import json, os; print(json.dumps({"label_exclude": os.environ["LABEL_EXCLUDE"], "exclude_regex": os.environ["EXCLUDE_REGEX"], "label_include": "", "include_regex": ""}))' > "$evidence_dir/selection.json"
+          ctest_exit=0
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
+          printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          # Inventory of what that selection covers: a listing, not a run, so
+          # it takes no stop-on-failure flag. A failed listing leaves an invalid
+          # file, and the receipt issuer then refuses rather than guessing.
+          ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
+          exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
@@ -2065,10 +2097,15 @@ jobs:
 
       - name: Issue exact protected-validation receipt
         id: protected_receipt
+        # A receipt stands in for the merge group's own test run, so it is only
+        # issued when this job's full ctest selection actually ran and passed.
+        # A pull-request run that skips the Test step issues no receipt, and the
+        # merge group then validates in full.
         if: >-
           success()
           && github.event_name == 'pull_request'
           && (matrix.key == 'macos' || matrix.key == 'linux')
+          && steps.ctest.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
@@ -2090,7 +2127,12 @@ jobs:
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
             --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
+            --build-dir "$PULP_BUILD_DIR" \
+            --ctest-exit-file "$RUNNER_TEMP/ctest-evidence/exit-code" \
+            --ctest-selection "$RUNNER_TEMP/ctest-evidence/selection.json" \
+            --ctest-selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --ctest-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+            --output "$receipt_dir/receipt.json"
           echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact protected-validation receipt

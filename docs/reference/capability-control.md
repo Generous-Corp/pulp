@@ -285,6 +285,10 @@ blank content, malformed producer data, reused lifecycle identity, and missing
 adapter identity all fail closed. This runtime operation remains absent from the
 design-time agent capability manifest.
 
+## Sample-region capability narrative
+
+Sample-region capabilities are reached through the Processor's graph/control contract. The capability registry and inspector can describe a declared region and its promoted parameters, but those rows do not grant execution by themselves. A candidate must pass the region proof, be reachable through the canonical executor, and have an independent receipt. Keep unsupported latency, retained-history, state-size, and projection cases as explicit refusals; do not create a second capability authority for them.
+
 ## Diagnose and audit
 
 Configure errors are the first manifest diagnostic. Fix the target declaration;

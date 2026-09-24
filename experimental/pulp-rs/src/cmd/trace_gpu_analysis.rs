@@ -17,6 +17,7 @@ use crate::error::{CliError, Result};
 const ROW_MARKER: &str = "__PULP_GPU_ROW__";
 const CATEGORY_MARKER: &str = "__PULP_GPU_CATEGORY__";
 const INTEGRITY_MARKER: &str = "__PULP_GPU_INTEGRITY__";
+const CANDIDATE_MARKER: &str = "__PULP_GPU_CANDIDATE__";
 const MAX_TRACE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PROCESSOR_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const PROCESSOR_DEADLINE: Duration = Duration::from_secs(120);
@@ -25,6 +26,13 @@ const PROCESS_TERMINATION_GRACE: Duration = Duration::from_secs(2);
 const ROW_QUERY: &str = "SELECT '__PULP_GPU_ROW__' || hex(stage) || '|' || duration_ns || '|' || hex(COALESCE(evidence_id,'')) || '|' || hex(COALESCE(diagnostic_code,'')) || '|' || hex(COALESCE(health_state,'')) || '|' || COALESCE(sequence,-1) || '|' || COALESCE(frame_index,-1) || '|' || hex(timing_phase) || '|' || COALESCE(cpu_running_ns,-1) || '|' || has_scheduler_evidence || '|' || is_incomplete || '|' || is_failure FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY timing_phase ORDER BY is_incomplete DESC, is_failure DESC, CASE health_state WHEN 'failed' THEN 4 WHEN 'lost' THEN 4 WHEN 'unavailable' THEN 3 WHEN 'unverified' THEN 2 WHEN 'healthy' THEN 0 ELSE 1 END DESC, CASE WHEN evidence_id IS NULL OR length(evidence_id) != 32 OR lower(evidence_id) GLOB '*[^0-9a-f]*' THEN 1 ELSE 0 END DESC, duration_ns DESC) AS phase_rank FROM {view}) WHERE phase_rank <= 16";
 const CATEGORY_QUERY: &str = "SELECT '__PULP_GPU_CATEGORY__' || hex(category) || '|' || hex(evidence_id) || '|' || upid || '|' || pid FROM (SELECT categories.category, categories.evidence_id, categories.upid, categories.pid FROM (SELECT DISTINCT s.category AS category, COALESCE(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_evidence_id') AS TEXT), CAST(EXTRACT_ARG(s.arg_set_id, 'args.debug.gpu_evidence_id') AS TEXT)) AS evidence_id, th.upid AS upid, p.pid AS pid FROM slice AS s JOIN thread_track AS tt ON s.track_id = tt.id JOIN thread AS th ON tt.utid = th.utid JOIN process AS p ON th.upid = p.upid WHERE s.category IS NOT NULL AND s.category != '') AS categories JOIN (SELECT DISTINCT evidence_id, process_upid, process_pid FROM {view}) AS question_scope ON categories.evidence_id = question_scope.evidence_id AND categories.upid = question_scope.process_upid AND categories.pid = question_scope.process_pid WHERE length(categories.evidence_id) = 32 AND categories.evidence_id NOT GLOB '*[^0-9a-f]*' ORDER BY categories.evidence_id, categories.upid, categories.category LIMIT 256)";
 const INTEGRITY_QUERY: &str = "SELECT '__PULP_GPU_INTEGRITY__' || (SELECT COUNT(*) FROM slice) || '|' || (SELECT COUNT(*) FROM slice WHERE dur = -1) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE severity = 'data_loss' AND value > 0),0) || '|' || COALESCE((SELECT SUM(value) FROM stats WHERE value > 0 AND (name GLOB '*no_flush*' OR name GLOB '*not_flushed*')),0)";
+
+// Count the question's own candidates, admitted or not. An empty evidence-gated
+// answer is ambiguous on its own: the capture may hold none of the question's
+// work, or it may hold work the correlation view refused. Only the candidate set
+// separates those, so a refusal can report itself instead of collapsing into a
+// missing question category.
+const CANDIDATE_QUERY: &str = "SELECT '__PULP_GPU_CANDIDATE__' || (SELECT COUNT(*) FROM {candidates_view} WHERE is_tooling_owned)";
 
 const STARTUP_SQL: &str =
     include_str!("../../../../.agents/skills/trace-sql/pulp_gpu_startup_breakdown.sql");
@@ -71,6 +79,16 @@ impl GpuQuestion {
             Self::GpuStartup => "pulp_gpu_startup_breakdown",
             Self::GpuHealth => "pulp_gpu_health_transitions",
             Self::GpuProbe => "pulp_gpu_probe_correlation",
+        }
+    }
+
+    /// The published candidate set an evidence-gated question correlates over,
+    /// or `None` for a question whose empty answer has its own reasons.
+    const fn candidates_view(self) -> Option<&'static str> {
+        match self {
+            Self::GpuStartup => None,
+            Self::GpuHealth => Some("pulp_gpu_health_candidates"),
+            Self::GpuProbe => Some("pulp_gpu_probe_candidates"),
         }
     }
 
@@ -141,6 +159,15 @@ struct CaptureIntegrity {
     data_loss_count: i64,
     no_flush_count: i64,
     processor_reported_truncated: bool,
+}
+
+/// Question-scoped candidate spans measured before correlation admits or
+/// refuses them, so an empty answer can name which of the two it is.
+#[derive(Debug, Clone, Copy, Default)]
+struct QuestionCandidates {
+    /// Spans the question owns that are present in the capture, counted
+    /// whether or not the correlation view admitted them.
+    tooling_owned: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -896,6 +923,27 @@ fn parse_integrity(output: &str) -> Result<CaptureIntegrity> {
     })
 }
 
+fn parse_question_candidates(question: GpuQuestion, output: &str) -> Result<QuestionCandidates> {
+    if question.candidates_view().is_none() {
+        return Ok(QuestionCandidates::default());
+    }
+    // A missing count is an unanswered question, never a zero: reading it as
+    // zero would report a refused cohort as a missing question category.
+    let Some(index) = output.find(CANDIDATE_MARKER) else {
+        return Err(CliError::Other(
+            "pulp trace: question candidate result missing".to_owned(),
+        ));
+    };
+    let encoded: String = output[index + CANDIDATE_MARKER.len()..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let tooling_owned = encoded.parse::<i64>().map_err(|_| {
+        CliError::Other("pulp trace: malformed question candidate count".to_owned())
+    })?;
+    Ok(QuestionCandidates { tooling_owned })
+}
+
 fn parse_category_scopes(output: &str) -> Vec<RawCategoryScope> {
     let mut scopes = Vec::new();
     for occurrence in output
@@ -1101,7 +1149,14 @@ fn result_from_rows(question: GpuQuestion, trace: &Path, rows: Vec<RawRow>) -> G
         no_flush_count: 0,
         processor_reported_truncated: false,
     };
-    result_from_rows_and_categories(question, trace, rows, Vec::new(), integrity)
+    result_from_rows_and_categories(
+        question,
+        trace,
+        rows,
+        Vec::new(),
+        integrity,
+        QuestionCandidates::default(),
+    )
 }
 
 fn contributor_from_row(rank: usize, row: &RawRow) -> Contributor {
@@ -1134,6 +1189,7 @@ fn result_from_rows_and_categories(
     mut rows: Vec<RawRow>,
     category_scopes: Vec<RawCategoryScope>,
     capture_integrity: CaptureIntegrity,
+    candidates: QuestionCandidates,
 ) -> GpuAnalysisResult {
     rows.sort_by(|a, b| b.duration_ns.max(0).cmp(&a.duration_ns.max(0)));
     let (observed_categories, category_scope, ambiguous_evidence_process) =
@@ -1146,6 +1202,12 @@ fn result_from_rows_and_categories(
     });
     let missing_probe_evidence =
         question == GpuQuestion::GpuProbe && rows.iter().any(|row| row.evidence_id.is_none());
+    // An evidence-gated view answers with nothing both when the capture holds
+    // none of the question's work and when it refuses the work it holds. A
+    // candidate the answer does not carry is the second case, and saying so is
+    // the difference between naming the correlation failure and reporting a
+    // question category that is plainly present.
+    let refused_evidence_cohort = rows.is_empty() && candidates.tooling_owned > 0;
     let missing_startup_gpu_stage =
         question == GpuQuestion::GpuStartup && !rows.iter().any(|row| row.stage != "frame");
     let missing_startup_cold_stage = question == GpuQuestion::GpuStartup
@@ -1176,6 +1238,8 @@ fn result_from_rows_and_categories(
         Some("incomplete-capture")
     } else if rows.is_empty() && capture_integrity.slice_count == 0 {
         Some("empty-or-never-flushed-capture")
+    } else if refused_evidence_cohort {
+        Some("invalid-evidence-correlation")
     } else if rows.is_empty() {
         Some("missing-question-category")
     } else if missing_startup_gpu_stage {
@@ -1405,6 +1469,7 @@ pub(crate) fn run_gpu_analysis_with_processor(
                 Vec::new(),
                 Vec::new(),
                 CaptureIntegrity::default(),
+                QuestionCandidates::default(),
             ),
             json,
             out,
@@ -1416,11 +1481,24 @@ pub(crate) fn run_gpu_analysis_with_processor(
                 .to_owned(),
         )
     })?;
+    // Only an evidence-gated question publishes a candidate view to
+    // interrogate; startup admits an untagged cohort and answers an empty
+    // result with its own reasons.
+    let candidate_query = args
+        .question
+        .candidates_view()
+        .map_or_else(String::new, |view| {
+            format!(
+                "UNION ALL\n{}\n",
+                CANDIDATE_QUERY.replace("{candidates_view}", view)
+            )
+        });
     let sql = format!(
-        "{}\n{}\nUNION ALL\n{}\nUNION ALL\n{};\n",
+        "{}\n{}\nUNION ALL\n{}\n{}UNION ALL\n{};\n",
         args.question.sql(),
         CATEGORY_QUERY.replace("{view}", args.question.view()),
         INTEGRITY_QUERY,
+        candidate_query,
         ROW_QUERY.replace("{view}", args.question.view())
     );
     let sql_path = write_sql_temp(&sql)
@@ -1452,6 +1530,7 @@ pub(crate) fn run_gpu_analysis_with_processor(
                         processor_reported_truncated: true,
                         ..CaptureIntegrity::default()
                     },
+                    QuestionCandidates::default(),
                 ),
                 json,
                 out,
@@ -1470,8 +1549,16 @@ pub(crate) fn run_gpu_analysis_with_processor(
     let rows = parse_rows(&stdout)?;
     let categories = parse_category_scopes(&stdout);
     let integrity = parse_integrity(&stdout)?;
+    let candidates = parse_question_candidates(args.question, &stdout)?;
     write_result(
-        &result_from_rows_and_categories(args.question, &args.trace, rows, categories, integrity),
+        &result_from_rows_and_categories(
+            args.question,
+            &args.trace,
+            rows,
+            categories,
+            integrity,
+            candidates,
+        ),
         json,
         out,
     )

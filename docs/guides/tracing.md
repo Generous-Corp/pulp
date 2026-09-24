@@ -133,6 +133,14 @@ even alongside an inconsistent `healthy` state. Every tooling-owned
 untagged tooling span makes correlation unavailable even when another tagged
 row is healthy. Generic untagged backend spans remain allowed.
 
+`gpu-health` and `gpu-probe` distinguish the two ways their answer can be
+empty. A capture that carries the question's spans but cannot correlate them —
+untagged, mixed, or malformed evidence — reports
+`invalid-evidence-correlation`; only a capture carrying none of that work at all
+reports `missing-question-category`. The distinction comes from the published
+candidate views the closed views select from, so a refusal cannot present
+itself as a capture that was never instrumented.
+
 The named GPU analyzer has explicit resource limits: traces larger than
 512 MiB are rejected before `trace_processor` launches. An opened non-symlink
 regular trace is copied into an exclusive private snapshot (mode 0600 on Unix);
