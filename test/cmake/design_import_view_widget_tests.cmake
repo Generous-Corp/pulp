@@ -1,25 +1,43 @@
 # Design import view-widget bridge test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# One executable for this manifest's pulp::view suites. Each member keeps its
+# own registration, labels and properties (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake); only the binary behind them is shared.
+# The two GraphEditorView suites compile on a different line (pulp::host adds
+# the format, graph and host include roots and their feature defines), so they
+# share a second executable of their own below.
+set(_pulp_design_import_widget_group_libs pulp::view pulp::state)
+if(TARGET pulp::render)
+    list(APPEND _pulp_design_import_widget_group_libs pulp::render)
+endif()
+pulp_add_test_group(pulp-test-group-design-import-widgets
+    LIBRARIES ${_pulp_design_import_widget_group_libs})
+
 # Reusable layout-tree parity oracle for design-import live/baked modes.
-pulp_add_test_suite(pulp-test-layout-snapshot LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-layout-snapshot GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Painted-appearance defect detectors: text box collisions, ink wider than its
 # box, and canvas-command text — plus the coverage statistic that keeps an
 # empty finding list from reading as a pass.
-pulp_add_test_suite(pulp-test-appearance-defects LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-appearance-defects GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # hitSlop: the accepted pointer area grown past the painted box, and the
 # RangeSlider thumb's proximity growth that the same controls depend on.
-pulp_add_test_suite(pulp-test-hit-slop LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-hit-slop GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Rect / IntRect layout geometry primitives: slicing, insets, unions,
 # hit-testing, and the float-vs-integer center truncation that is the whole
 # reason the two rect types do not share an implementation.
-pulp_add_test_suite(pulp-test-view-geometry LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-view-geometry GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # CanvasWidget tests (JS-driven custom drawing)
-pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas-widget GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Retained native CanvasWidget content: safe painter ownership/replacement,
 # balanced local paint scope, renderer metadata, and Graphite/Dawn fail-closed
@@ -27,162 +45,189 @@ pulp_add_test_suite(pulp-test-canvas-widget LIBRARIES pulp::view)
 # intentionally absent from no-GPU/coverage configurations, so do not make a
 # CPU-only configure fail while registering this GPU-stack oracle.
 if(TARGET pulp::render)
-    pulp_add_test_suite(pulp-test-native-canvas-painter
-        LIBRARIES pulp::view pulp::render)
+    set(_pulp_native_canvas_painter_defs "")
     if(PULP_HAS_SKIA)
-        target_compile_definitions(pulp-test-native-canvas-painter PRIVATE
-            PULP_HAS_SKIA=1)
+        set(_pulp_native_canvas_painter_defs PULP_HAS_SKIA=1)
     endif()
+    pulp_add_test_suite(pulp-test-native-canvas-painter GROUP pulp-test-group-design-import-widgets
+        LIBRARIES pulp::view pulp::render
+        COMPILE_DEFINITIONS ${_pulp_native_canvas_painter_defs})
+    unset(_pulp_native_canvas_painter_defs)
 endif()
 
 # CanvasWidget NaN/Infinity sanitization cluster.
 # Pins that JS-supplied NaN / ±Inf coords land as 0 in the recorded
 # draw command, while finite values pass through.
-pulp_add_test_suite(pulp-test-canvas-widget-sanitize LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas-widget-sanitize GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # CanvasWidget + SkiaCanvas Canvas2D shadow-state cluster. Replay +
 # clear + transparent/zero short-circuit of sticky Canvas2D shadow*
 # state.
-pulp_add_test_suite(pulp-test-canvas-widget-shadow LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas-widget-shadow GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Curated named GPU post-effects (crt / grain / vignette / noise / brushed /
 # bloom) applied via CanvasWidget::set_shader_effect ->
 # SkiaCanvas::save_layer_with_shader_effect. Skia-gated headless raster proof
 # that each named effect measurably changes pixels and an unknown name is a
 # graceful no-op (the Forge safety contract).
-pulp_add_test_suite(pulp-test-canvas-shader-effects LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas-shader-effects GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Canvas2D JS-shim coverage. Drives the full
 # web-compat-canvas.js → bridge → CanvasWidget path so a regression
 # that drops a save/restore/setTransform/createLinearGradient method
 # (and silently aborts FilterBank-style frame renders) gets caught.
-pulp_add_test_suite(pulp-test-canvas2d-shim LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas2d-shim GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Canvas2D _PulpCanvasMatrix DOMMatrix arithmetic — direct unit tests
 # for the matrix prelude extracted to web-compat-canvas-matrix.js.
 # Previously only exercised
-# indirectly via ctx.getTransform() round-trip tests; this binary
+# indirectly via ctx.getTransform() round-trip tests; this suite
 # pins identity construction, mutator chain composition (not
 # last-write-wins), rotateSelf degrees-not-radians, multiplySelf
 # composition, inverse singular-matrix → NaN+is2D=false detection,
 # toJSON honoring actual is2D state.
-pulp_add_test_suite(pulp-test-canvas2d-dommatrix LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas2d-dommatrix GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Canvas2D shim coverage extracted from test_canvas2d_shim.cpp.
 # Covers fillText / strokeText maxWidth, glyph cluster handling,
 # arc-as-path fallback, ctx.direction / ctx.filter, catalog hygiene
 # round-trip, lineDashOffset re-flush, and transform / hit-test APIs.
-pulp_add_test_suite(pulp-test-canvas2d-shim-late LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-canvas2d-shim-late GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # SvgPathWidget tests
-pulp_add_test_suite(pulp-test-svg-path-widget LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-svg-path-widget GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # SvgRect + SvgLine widget tests
-pulp_add_test_suite(pulp-test-svg-rect-widget LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-svg-rect-widget GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # ScrollView tests
-pulp_add_test_suite(pulp-test-scroll-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-scroll-view GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Standalone ScrollBar widget tests (macos plugin-authoring item 6.3)
-pulp_add_test_suite(pulp-test-scroll-bar LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-scroll-bar GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # SidePanel slide-in animation tests (macos plugin-authoring item 6.3)
-pulp_add_test_suite(pulp-test-side-panel LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-side-panel GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # ComboBox dropdown interaction tests
-pulp_add_test_suite(pulp-test-combo-dropdown LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-combo-dropdown GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Generalized overlay-click routing (View::active_overlay_)
-pulp_add_test_suite(pulp-test-overlay-routing LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-overlay-routing GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Press reachability: does a press at the rect a control paints reach it?
-pulp_add_test_suite(pulp-test-press-reach LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-press-reach GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Auto-clearing input-focus slot (View::focused_input_)
-pulp_add_test_suite(pulp-test-focused-input LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-focused-input GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Auto-claim active_overlay_ from CSS shape
 # (`position:absolute` + `z-index >= 10`) or `data-overlay` author hint
 # detected by the web-compat layer (web-compat-style-decl.js +
 # web-compat-element.js). Uses the real WidgetBridge so the heuristic
 # runs against the same prelude stack the runtime ships.
-pulp_add_test_suite(pulp-test-web-compat-overlay LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-web-compat-overlay GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Panel widget tests (styled containers)
-pulp_add_test_suite(pulp-test-panel LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-panel GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # ComponentDragger — drag-to-move helper for any View.
-pulp_add_test_suite(pulp-test-component-dragger LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-component-dragger GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # TooltipWindow — transient floating tooltip near cursor.
-pulp_add_test_suite(pulp-test-tooltip-window LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-tooltip-window GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # BubbleMessageComponent — floating message bubble anchored to a source
 # view with auto-dismiss.
-pulp_add_test_suite(pulp-test-bubble-message LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-bubble-message GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # PreferencesPanel — sidebar-of-pages container.
-pulp_add_test_suite(pulp-test-preferences-panel LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-preferences-panel GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # PropertyPanel — typed property editor sister widget. Header-only, links state
 # for PropertiesFile persistence.
-pulp_add_test_suite(pulp-test-property-panel
+pulp_add_test_suite(pulp-test-property-panel GROUP pulp-test-group-design-import-widgets
     SOURCES test_property_panel.cpp
     LIBRARIES pulp::view pulp::state)
 
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
-pulp_add_test_suite(pulp-test-ui-components LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-ui-components GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
+
+# GraphEditorView is deliberately absent from the view-only binary surface, so
+# its suites share an executable that links pulp::host explicitly. Keep that
+# link direct so removing the view-to-host dependency cannot be masked by
+# another target's transitive links.
+pulp_add_test_group(pulp-test-group-graph-editor LIBRARIES pulp::view pulp::host)
 
 # GraphEditorView tests
-pulp_add_test_suite(pulp-test-graph-editor-view LIBRARIES pulp::view pulp::host)
+pulp_add_test_suite(pulp-test-graph-editor-view GROUP pulp-test-group-graph-editor
+    LIBRARIES pulp::view pulp::host)
 # GraphEditorView opening a node's plugin editor (first EditorAttachment consumer)
-pulp_add_test_suite(pulp-test-graph-editor-open LIBRARIES pulp::view pulp::host)
+pulp_add_test_suite(pulp-test-graph-editor-open GROUP pulp-test-group-graph-editor
+    LIBRARIES pulp::view pulp::host)
 
-# GraphEditorView is deliberately absent from the view-only binary surface.
-# Keep every direct consumer explicit so removing the view-to-host dependency
-# cannot be masked by another target's transitive links.
-foreach(_pulp_graph_editor_target IN ITEMS
-        pulp-test-graph-editor-view
-        pulp-test-graph-editor-open)
-    get_target_property(_pulp_graph_editor_links
-        ${_pulp_graph_editor_target} LINK_LIBRARIES)
-    foreach(_pulp_graph_editor_dependency IN ITEMS pulp::view pulp::host)
-        list(FIND _pulp_graph_editor_links
-            ${_pulp_graph_editor_dependency} _pulp_graph_editor_link_index)
-        if(_pulp_graph_editor_link_index EQUAL -1)
-            message(FATAL_ERROR
-                "${_pulp_graph_editor_target} must link ${_pulp_graph_editor_dependency} directly")
-        endif()
-    endforeach()
+get_target_property(_pulp_graph_editor_links
+    pulp-test-group-graph-editor LINK_LIBRARIES)
+foreach(_pulp_graph_editor_dependency IN ITEMS pulp::view pulp::host)
+    list(FIND _pulp_graph_editor_links
+        ${_pulp_graph_editor_dependency} _pulp_graph_editor_link_index)
+    if(_pulp_graph_editor_link_index EQUAL -1)
+        message(FATAL_ERROR
+            "pulp-test-group-graph-editor must link ${_pulp_graph_editor_dependency} directly")
+    endif()
 endforeach()
 unset(_pulp_graph_editor_dependency)
 unset(_pulp_graph_editor_link_index)
 unset(_pulp_graph_editor_links)
-unset(_pulp_graph_editor_target)
 
 # Modal overlay + ContextMenu (view-drawn popup menu) tests
-pulp_add_test_suite(pulp-test-modal LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-context-menu LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-modal GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-context-menu GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # Black-box characterization harness — recovers a stock widget's implicit
 # sizing law by headless measurement + a least-squares fit, and pins each
 # widget's current law (ContextMenu panel width, Label intrinsic width,
 # TextButton fixed height) as a regression guard.
-pulp_add_test_suite(pulp-test-widget-characterization
+pulp_add_test_suite(pulp-test-widget-characterization GROUP pulp-test-group-design-import-widgets
     SOURCES test_widget_characterization.cpp support/widget_characterization.cpp
     LIBRARIES pulp::view)
 # Design export tests
-add_executable(pulp-test-design-export test_design_export.cpp)
-target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-export
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-export GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # Filters and blend modes reaching pixels in the native view tree. Asserts on
 # rendered bytes rather than on setters being called: a value that reaches the
 # View but never a paint would pass the latter and still draw a hard edge.
-pulp_add_test_suite(pulp-test-native-filter-render LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-native-filter-render GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
 
 # A design's accent reaching its controls. Tokens are copied by name, so a
 # design naming `primary` leaves `knob.arc` unset and every knob falls back to
 # the built-in blue whatever the design said.
-pulp_add_test_suite(pulp-test-design-token-widget-derive LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-design-token-widget-derive GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)

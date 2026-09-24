@@ -318,10 +318,12 @@ if(Python3_Interpreter_FOUND)
     # named expectations pin a C++20 suite, a C++23 suite (pulp::format raises
     # the standard when it is built at 23), an excluded -fno-exceptions probe,
     # a Catch2 suite excluded for its per-target -ffp-contract option, a
-    # grouped executable (pulp_add_test_group: its members' definitions and
-    # include dirs are per-source properties, which must not cost it the
-    # PCH; pulp::view never reaches pulp-format-core's cxx_std_23, so C++20),
-    # and SDL3-static, whose own PCH is off so ccache can store its objects.
+    # grouped executable per family (pulp_add_test_group: its members'
+    # definitions and include dirs are per-source properties, which must not
+    # cost it the PCH; pulp::view never reaches pulp-format-core's cxx_std_23,
+    # so the view-only groups are C++20, while a group that links pulp::host
+    # follows pulp::format's standard), and SDL3-static, whose own PCH is off
+    # so ccache can store its objects.
     if(PULP_TEST_PCH)
         set(_pulp_pch_option ON)
     else()
@@ -339,7 +341,10 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
-        --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20)
+        --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-widgets=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-system=pulp-test-pch-cxx20
+        --expect pulp-test-group-graph-editor=pulp-test-pch-cxx${_pulp_pch_format_std})
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
