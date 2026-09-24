@@ -41,7 +41,11 @@ catch_discover_tests(pulp-test-cli-overflow-selector)
 
 add_executable(pulp-test-cli-configure-defaults test_cli_configure_defaults.cpp)
 target_include_directories(pulp-test-cli-configure-defaults PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(pulp-test-cli-configure-defaults PRIVATE Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-cli-configure-defaults PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-configure-defaults PRIVATE
+    PULP_BUILD_DIR="${CMAKE_BINARY_DIR}")
 catch_discover_tests(pulp-test-cli-configure-defaults)
 
 # CLI create shell-out edge tests. These launch the built CLI but stay on
