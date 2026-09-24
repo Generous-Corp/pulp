@@ -696,6 +696,68 @@ Pulp expects agents and contributors to consume the optional integration.
 Without tartci, `shipyard metrics import github` and manual/command metrics
 still work for GitHub-hosted or SSH-backed CI lanes.
 
+#### Build-speed scorecard
+
+`shipyard metrics import github` keys each self-hosted job by its ephemeral
+runner name, so a per-host p50 from it is a p50 over one-job "hosts", and it
+records no step timings. `tools/scripts/build_speed_scorecard.py ingest` fills
+that gap for the required `macos` gate: it records each gate job against its
+PHYSICAL host (`m1`/`m3`/`m5`, from the runner name) plus per-step and queue
+rows, the merge queue's enqueue→merged and PR opened→merged latency, and
+merge_group run outcomes. Step, queue and latency rows go to their own
+projects so they never inflate `pulp`'s worker-minute totals:
+
+| Project | Targets |
+|---|---|
+| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` |
+| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,SDK contract}` |
+| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `merge-group-run` |
+
+Ingest is idempotent (rows already in the store are skipped by external id),
+so it can run on a schedule. "Is this build slower than usual on this host?"
+is then `shipyard metrics watch --project pulp-gate-steps --json`.
+
+```bash
+# Backfill (first run) or top up; run from a Pulp checkout so ghapp resolves.
+python3 tools/scripts/build_speed_scorecard.py ingest --since 14d
+
+# The scorecard: local build, PR pipeline, fleet. Add --json for machines.
+python3 tools/scripts/build_speed_scorecard.py report --since 7d
+
+# Before/after against the recorded baseline (rendered by bench_diff.py).
+python3 tools/scripts/build_speed_scorecard.py report --since 7d \
+  --baseline planning/bench/build-speed/2026-09-23/baseline.json
+
+# The local section needs an existing Ninja build dir; it never builds one.
+python3 tools/scripts/build_speed_scorecard.py report --build-dir build --runs last
+```
+
+The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
+(one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
+snapshot there — ccache hit rate and fill for the host cache and the gate
+cache, gate-VM count and memory, tartci executing generation and checkout,
+lease usage and host profile, wheelhouse contents. A host whose installed
+sensor predates that snapshot is probed live with the in-repo
+`host_vitals.sh --build-json` and labelled so; re-run
+`tools/scripts/install_host_vitals_sensor.sh` on it to publish the snapshot.
+An unreachable host is reported as UNREACHABLE, never as zeros.
+
+`tools/ci/governed-build.sh` also records each governed build (wall time,
+granted `-j`, lease/floor/tier-0 grant, focused target set) as
+`local-build/{all,focused}` in the `pulp` project when `shipyard` is on PATH.
+The record is detached and silent; `PULP_BUILD_METRICS=0` turns it off.
+
+For the local build itself, `tools/scripts/build_time_report.py` has three
+subcommands: `log` (edge-seconds by category from `.ninja_log`, deduplicated
+by edge so a multi-output edge counts once), `trace` (clang `-ftime-trace`
+aggregation by header, TU and area) and `blast-radius` (touch a file, dry-run a
+regeneration-free copy of `build.ninja`, restore the mtime). A plain `ninja -n`
+in a tree with CONFIGURE_DEPENDS globs stops at "Re-running CMake" and reports
+nothing, which reads as a zero blast radius; the tool strips those edges,
+checks that ninja printed every edge it planned, and exits 3 rather than
+reporting zeros when a touched compiled source (or its built-in control)
+produces no work.
+
 Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
 global `shipyard` is newer. Use `shipyard pin bump --to vX.Y.Z` for pin
 updates instead of hand-editing the file; newer Rust Shipyard releases changed

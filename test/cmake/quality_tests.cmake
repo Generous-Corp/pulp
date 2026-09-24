@@ -1008,6 +1008,16 @@ if(Python3_Interpreter_FOUND)
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(local-diff-cover-selftest PROPERTIES TIMEOUT 300)
 
+        # The diff-coverage target selector: changed file -> owning CMake
+        # targets -> consumers, the no-measurable-line skip, the fall-back to
+        # every target, and the one-shot widening from the likely tier. Drives
+        # the real helper and script against throwaway repos and hand-written
+        # File API replies; no compiler involved.
+        add_test(NAME diff-cover-targets-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_diff_cover_targets
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(diff-cover-targets-selftest PROPERTIES TIMEOUT 180)
+
         # The two build-directory reapers. Both DELETE directories, so their
         # gates are the thing under test: each builds a throwaway git
         # repository with real worktrees in every state its gate
@@ -1020,6 +1030,24 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_build_cov
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-build-cov-selftest PROPERTIES TIMEOUT 300)
+
+        # Build-speed measurement. Each suite carries a negative control: a blind
+        # dry run must refuse (exit 3) rather than report zero edges, and a value
+        # nobody measured must stay unknown instead of reading as 0.
+        add_test(NAME build-time-report-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_time_report
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-time-report-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME build-speed-scorecard-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_scorecard
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-speed-scorecard-selftest PROPERTIES TIMEOUT 120)
+        if(APPLE)
+            # host_vitals.sh reads macOS sysctls and BSD stat/date.
+            add_test(NAME host-vitals-selftest
+                COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_host_vitals.sh")
+            set_tests_properties(host-vitals-selftest PROPERTIES TIMEOUT 120)
+        endif()
 
         add_test(NAME clean-worktree-builds-selftest
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds

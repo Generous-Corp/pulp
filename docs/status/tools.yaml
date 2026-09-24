@@ -469,6 +469,39 @@ tools:
   availability: always
   skill: ci
   docs: guides/local-ci.md
+- name: build-speed-scorecard
+  path: tools/scripts/build_speed_scorecard.py
+  category: build-speed
+  use_when: Asking whether builds, the required macos gate or the merge queue got faster or slower — per
+    host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases
+    look like right now.
+  invocation: python3 tools/scripts/build_speed_scorecard.py report --since 7d [--build-dir build] [--baseline
+    planning/bench/build-speed/2026-09-23/baseline.json]
+  inputs: Shipyard metrics (filled by `build_speed_scorecard.py ingest --since 14d` from the GitHub API), each
+    host's published host_vitals.json over ssh, and optionally a Ninja build dir.
+  outputs: Markdown scorecard (local build, PR pipeline, fleet) or `--json`; `--baseline` renders the before/after
+    delta through bench_diff.py.
+  caveat: Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own
+    (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build
+    snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
+- name: build-time-report
+  path: tools/scripts/build_time_report.py
+  category: build-speed
+  use_when: Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before
+    and after a build-system change.
+  invocation: python3 tools/scripts/build_time_report.py blast-radius <build-dir> <file>...
+  inputs: A Ninja build dir (`.ninja_log`, `build.ninja`, optional `-ftime-trace` JSON).
+  outputs: '`log`: edge-seconds by category per build invocation; `trace`: header/TU/area compile cost;
+    `blast-radius`: compiles / exe relinks / bundle relinks per touched file. All take `--json`.'
+  caveat: Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not
+    counted) and says so. It touches each file and restores its mtime, so do not run it against a tree
+    another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
 - name: pr-flow-audit
   path: tools/scripts/pr_flow_audit.py
   category: test-evidence

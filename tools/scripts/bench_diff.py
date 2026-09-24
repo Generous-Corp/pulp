@@ -33,6 +33,23 @@ Input schema (per-widget JSON, see examples/ui-preview/CMakeLists):
       "memory_bandwidth_fraction": 0.112
     }
 
+A second, generic input shape — "sections" — carries any before/after metric
+set (the build-speed scorecard writes it):
+
+    {
+      "schema": "pulp-bench-sections/1",
+      "title": "Build speed", "host": "m3", "date": "...", "pulp_commit": "<sha>",
+      "sections": [
+        {"title": "Required macos gate job (min)", "unit": "min",
+         "lower_is_better": true, "higher_is_better_keys": [],
+         "values": {"pull_request p50": 39.5, "merge_group p50": 40.3}}
+      ]
+    }
+
+A value that is absent or null is UNKNOWN and renders as such, never as 0.
+``higher_is_better_keys`` flips the direction for individual rows of a
+section whose default is ``lower_is_better``.
+
 Usage:
 
     tools/scripts/bench_diff.py baseline.json current.json
@@ -107,6 +124,79 @@ def diff_section(
     return lines
 
 
+def _fmt_value(v: Any, unit: str) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        text = f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
+    else:
+        return str(v)
+    return f"{text} {unit}" if unit and unit != "count" else text
+
+
+def section_delta(before: float, after: float, lower_is_better: bool | None) -> str:
+    """Signed relative change plus whether it is better or worse.
+
+    ``lower_is_better=None`` marks a metric with no good direction (a count to
+    watch, not to optimize); it shows the change and never judges it.
+    """
+    if before == after:
+        return "="
+    if before == 0:
+        return "new"
+    rel = (after - before) / abs(before)
+    if lower_is_better is None:
+        return f"{rel * 100:+.1f}%"
+    better = (rel < 0) == lower_is_better
+    return f"{rel * 100:+.1f}% ({'better' if better else 'worse'})"
+
+
+def render_sections(baseline: dict[str, Any], current: dict[str, Any],
+                    threshold: float = 0.05) -> str:
+    """Before/after tables for two ``sections`` documents.
+
+    A row whose change is worse than ``threshold`` (relative) in the section's
+    direction is listed under Regressions. Rows missing on either side are
+    shown as unknown and never counted as a change.
+    """
+    out = [f"# Bench diff: {current.get('title') or baseline.get('title') or 'sections'}", "",
+           f"- **Baseline:** {baseline.get('date', '?')} "
+           f"({str(baseline.get('pulp_commit', '?'))[:10]} on {baseline.get('host', '?')})",
+           f"- **Current:** {current.get('date', '?')} "
+           f"({str(current.get('pulp_commit', '?'))[:10]} on {current.get('host', '?')})", ""]
+    base_secs = {s["title"]: s for s in baseline.get("sections", [])}
+    cur_secs = {s["title"]: s for s in current.get("sections", [])}
+    titles = list(base_secs) + [t for t in cur_secs if t not in base_secs]
+    regressions: list[str] = []
+    for title in titles:
+        b, c = base_secs.get(title, {}), cur_secs.get(title, {})
+        unit = c.get("unit", b.get("unit", ""))
+        lower = c.get("lower_is_better", b.get("lower_is_better", True))
+        bv, cv = b.get("values", {}), c.get("values", {})
+        keys = list(bv) + [k for k in cv if k not in bv]
+        out += [f"## {title}", "", "| Metric | Baseline | Current | Δ |", "|---|---|---|---|"]
+        higher = set(c.get("higher_is_better_keys", b.get("higher_is_better_keys", [])))
+        for k in keys:
+            x, y = bv.get(k), cv.get(k)
+            lower = c.get("lower_is_better", b.get("lower_is_better", True))
+            if lower is not None and k in higher:
+                lower = False
+            num = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (x, y))
+            delta = section_delta(float(x), float(y), lower) if num else "unknown"
+            out.append(f"| {k} | {_fmt_value(x, unit)} | {_fmt_value(y, unit)} | {delta} |")
+            if num and x and lower is not None:
+                rel = (y - x) / abs(x)
+                if (rel > threshold and lower) or (rel < -threshold and not lower):
+                    regressions.append(f"{title} / {k}: {_fmt_value(x, unit)} → {_fmt_value(y, unit)}")
+        notes = c.get("notes") or b.get("notes")
+        if notes:
+            out += [""] + [f"- {n}" for n in notes]
+        out.append("")
+    out += ["## Regressions beyond threshold", ""]
+    out += [f"- {r}" for r in regressions] or [f"- none beyond {threshold * 100:.0f}%"]
+    return "\n".join(out) + "\n"
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("baseline", type=Path)
@@ -131,6 +221,11 @@ def main() -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+    if "sections" in baseline or "sections" in current:
+        text = render_sections(baseline, current, args.threshold)
+        print(text if args.format == "markdown" else text.replace("|", "  "))
+        return 0
 
     if baseline.get("widget") != current.get("widget"):
         print(

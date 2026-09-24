@@ -65,6 +65,7 @@ CATEGORY_ORDER = [
     "harness",
     "audio",
     "build",
+    "build-speed",
 ]
 
 CATEGORY_BLURB = {
@@ -74,6 +75,7 @@ CATEGORY_BLURB = {
     "harness": "coverage + deterministic visual harness",
     "audio": "prove what the audio actually did",
     "build": "build and test only what a diff touches",
+    "build-speed": "measure build, gate and merge-queue speed",
 }
 
 
