@@ -1520,9 +1520,10 @@ macOS Debug configuration, which enables
 that platform-specific cardinality.
 
 Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
-and `docs/validation/**` selects only that mandatory kernel and is independently
-authorized to omit the mobile compile gate. Generated or authoritative state
-under `docs/status/**` remains fail-closed rather than inheriting this rule.
+and `docs/validation/**` selects only that mandatory kernel. Generated or
+authoritative state under `docs/status/**` remains fail-closed for this bounded
+selection rather than inheriting that rule (the separate mobile allowlist below
+treats it on its own terms).
 
 The required Build-and-Test workflow also uses a separate, narrower mobile-safe
 allowlist to avoid an unrelated mobile compile tax. On pull requests and merge
@@ -1530,10 +1531,16 @@ groups, only a diff whose every path matches
 `ios_compile_skip_safe_paths` may emit the exact
 `ios_compile_required=false` authorization. A bounded macOS test family does
 not inherit mobile-skip authority; each allowlist addition requires its own
-mobile-impact review. The macOS job then skips the
+mobile-impact review. The allowlist covers `docs/**`, `test/**`,
+`tools/scripts/test_*.py`, `.agents/skills/**`, the Claude plugin manifests and
+`CHANGELOG.md`: the gate configures with `PULP_BUILD_TESTS=OFF`, so none of those
+reach it except the paths `IOS_COMPILE_REQUIRED_PATTERNS` in
+`tools/scripts/classify_changes.py` denies first (the gate's own scripts, the
+CoreMIDI harness sources, and each `test/`/`docs/` file a non-test CMake file
+names, re-derived from the tree by `test_classify_changes.py`). The macOS job then skips the
 two-SDK iOS compile step but still performs its ordinary desktop build and
 tests. Missing, malformed, empty, mixed, unknown, policy, CMake, CI, public
-header, test-topology, or `apple/**` evidence runs the iOS gate. Pushes to main,
+header, non-test `tools/scripts`, or `apple/**` evidence runs the iOS gate. Pushes to main,
 manual runs, nightly/release workflows, and audits never accept this skip;
 their existing event policy remains unchanged. Keep the condition inside the
 required job: path-filtering the workflow or job would prevent the stable
@@ -1894,6 +1901,27 @@ later authenticates the completed check/job/step and artifact metadata through
 GitHub, derives the protected merge identity, and matches those live facts to
 the downloaded bytes. Linux and Windows stay advisory and never issue this
 attestation.
+
+## The macOS PR head runs the `pr-fast` tier; the full suite runs in the queue
+
+On `pull_request`, `build.yml` skips `Test (non-Windows)` and instead runs
+`Test fast deterministic tier (pull request head)`:
+`ctest -L '^pr-fast$' --no-tests=error` over the static-contract checks listed in
+`test/cmake/pr_fast_tests.cmake` (lint, drift, registry-completeness and
+generated-manifest checks; about 115 tests, roughly 15 s). The full suite still
+runs on `merge_group` and push. The tier exists because a forgotten regeneration
+fails those checks deterministically, and once the full suite left the PR head
+it failed in the merge queue instead, ejecting every PR batched with it.
+
+A member must be deterministic, finish in seconds on a loaded gate VM, and
+assert nothing about wall-clock time or host load; the timing-sensitive tests
+that motivated moving the full suite to the queue stay out. A listed name that
+is not registered in a configuration is reported at configure time (some members
+are platform-conditional), and `pr-fast-tier-contract` fails when the
+label selects fewer than 50 tests or drops one of its pinned members. The step
+writes `ctest-pr-fast.junit.xml` rather than `ctest.junit.xml`: the tier is
+not the merge's test evidence and must never satisfy a protected-validation
+receipt.
 
 ## Windows is gated by the merge queue, not by the PR head
 
@@ -3584,7 +3612,18 @@ bash test/cmake/test_ios_compile_gate.sh "$PWD" "$PWD/build-ios-compile-gate"
 
 The script uses Pulp's platform-wide FetchContent source cache, so fresh
 worktrees reuse dependency checkouts while keeping simulator and device build
-products separate. The existing `test_ios_source_syntax.sh` sweep runs after
+products separate. The two SDK legs configure with Ninja when it is on `PATH`
+(the Xcode generator otherwise): a Ninja configure takes about a minute where
+Xcode's takes seven to eight, and Ninja honours the compiler launcher, so the
+gate VM's persistent ccache serves a repeat build from cache. The GPU leg stays
+on the Xcode generator: its AUv3 `.appex` and host-app embedding use Xcode
+product types, and a Ninja configure of that tree fails in CMake's Swift
+compiler check for the iOS target. Because its Xcode configure is minutes of
+mostly serial try-compile work, the gate starts the GPU leg in the background
+and builds the SDK legs alongside it; it waits for the GPU leg and fails on
+its status before the Simulator phase, and stops it if an SDK leg fails first.
+`tools/scripts/test_ios_compile_gate_legs.py` (ctest `ios-compile-gate-legs`)
+pins that orchestration against stub toolchain executables. The existing `test_ios_source_syntax.sh` sweep runs after
 the real builds as the cheap, locally callable fallback for iOS-specific
 translation units.
 

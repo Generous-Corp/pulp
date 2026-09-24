@@ -343,14 +343,24 @@ baseline_only_paths = [
 # Do not infer this from `families`: a bounded macOS test family may still feed
 # a mobile build target. Each addition here requires its own mobile-impact
 # review and focused classifier mutation proof.
+#
+# The iOS gate configures with PULP_BUILD_TESTS=OFF, so the unit-test tree and
+# the Python test suites never reach its configure or compile. The exceptions
+# (the gate scripts themselves, the CoreMIDI harness sources core/midi compiles
+# for iOS, and every test/ or docs/ path a non-test CMake file names) are
+# denied first by IOS_COMPILE_REQUIRED_PATTERNS in
+# tools/scripts/classify_changes.py, and
+# test_classify_changes.py re-derives that deny list from the live CMake tree.
 ios_compile_skip_safe_paths = [
-  "docs/guides/**",
-  "docs/reference/**",
-  "docs/examples/**",
-  "docs/validation/**",
+  "docs/**",
+  "test/**",
+  "tools/scripts/test_*.py",
+  ".agents/skills/**",
+  ".claude-plugin/plugin.json",
+  ".claude-plugin/marketplace.json",
+  "CHANGELOG.md",
   "tools/cli/cmd_forge.cpp",
   "tools/cli/cmd_dsp.cpp",
-  "test/test_child_process.cpp",
 ]
 
 # Known global build, toolchain, ABI, security, provenance, packaging, and

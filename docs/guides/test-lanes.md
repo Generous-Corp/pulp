@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below); an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
@@ -76,6 +76,18 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   than the code. They still run on push, on the nightly, and on
   `cross-platform-check`. A timing test that must gate belongs in a dedicated
   cap=1 perf lane, not on the merge path.
+- **`pr-fast`** — additive, never exclusive: a static repository contract
+  (lint, drift, registry-completeness, generated-manifest check) that also runs
+  on the pull request head, where the rest of the suite does not. Members are
+  listed in `test/cmake/pr_fast_tests.cmake`, which reports a listed name
+  that this configuration did not register, and `pr-fast-tier-contract` fails if the label
+  selects fewer than 50 tests or loses a pinned member. `build.yml` selects it
+  with `ctest -L '^pr-fast$' --no-tests=error`, about 15 s for ~115 tests. A
+  member must be deterministic, finish in seconds on a loaded gate VM, and
+  assert no wall-clock or load-dependent bound: a forgotten regeneration then
+  fails on the PR that caused it rather than ejecting a merge-queue batch, and
+  the timing flakes that moved the full suite off the PR head stay off it.
+  Tests carrying `pr-fast` still run in the full suite everywhere else.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 

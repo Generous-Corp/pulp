@@ -6215,9 +6215,18 @@ The Build-and-Test macOS job uses the independent
 compile step. Accept `ios_compile_required=false` only for `pull_request` or
 `merge_group` diffs whose every path matches that allowlist. A bounded macOS
 test family does not inherit this authority; review mobile impact explicitly
-before adding a path. Any missing/malformed value, empty or mixed diff, unknown path,
-mobile/Apple path, public header, CMake/CI/policy/test-topology change, or policy
-read failure runs the gate. Main, manual, nightly, release, and audit execution
+before adding a path. The allowlist covers `docs/**`, `test/**`,
+`tools/scripts/test_*.py`, `.agents/skills/**`, the Claude plugin manifests and
+`CHANGELOG.md`, because the gate configures with `PULP_BUILD_TESTS=OFF`. The
+paths under those prefixes that the gate does read (its own
+`test/cmake/test_ios_*` scripts, the CoreMIDI harness sources, and every
+`test/`/`docs/` file a non-test CMake file the iOS configure reaches names) are
+denied first by `IOS_COMPILE_REQUIRED_PATTERNS` in `classify_changes.py`;
+`test_classify_changes.py` re-derives that list from the live CMake tree, so a
+new reference has to be added there. Test-topology paths no longer force the
+gate on their own. Any missing/malformed value, empty or mixed diff, unknown
+path, mobile/Apple path, public header, CMake/CI/policy change, non-test
+`tools/scripts` file, or policy read failure runs the gate. Main, manual, nightly, release, and audit execution
 never accepts this skip and retains its existing event policy. Condition the
 expensive step, never the required workflow/job, so the stable required context
 still reports.
@@ -10114,17 +10123,30 @@ under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
 
-## The macOS gate is build-only on a pull request; tests run in the merge queue
+## The macOS gate runs only the fast tier on a pull request; the full suite runs in the merge queue
 
 `build.yml`'s `Test (non-Windows)` step is skipped when `github.event_name == 'pull_request'`.
 The merge queue runs the same workflow on `merge_group` against the exact commit that will
 land, so `main` keeps full build-and-test protection while a pull request only pays for the
-build.
+build plus the `pr-fast` tier.
+
+The `pr-fast` tier (`Test fast deterministic tier (pull request head)`, selected with
+`ctest -L '^pr-fast$' --no-tests=error`) is the static-contract ctests listed in
+`test/cmake/pr_fast_tests.cmake`: lint, drift, registry-completeness and generated-manifest
+checks, about 15 s in total. Those checks were most of the merge-queue ejections once the full
+suite left the pull request head, because a forgotten regeneration fails deterministically in
+the batch it joins. Membership rules: deterministic, a few seconds on a loaded gate VM, no
+wall-clock or load-dependent assertion, no device or network. A listed name that is not
+registered is only reported at configure (some members are platform-conditional), so the
+real guard is `pr-fast-tier-contract`, which fails if the label selects fewer than
+50 tests or loses one of its pinned members. The tier writes `ctest-pr-fast.junit.xml`, never
+`ctest.junit.xml`: it is not merge test evidence and must never satisfy a protected receipt.
 
 Two consequences worth knowing:
 
-- **A green `macos` check on a pull request does not mean the tests passed.** It means the
-  build succeeded. The tests run when the pull request is validated in the queue.
+- **A green `macos` check on a pull request does not mean the full suite passed.** It means
+  the build and the `pr-fast` tier passed. The full suite runs when the pull request is
+  validated in the queue.
 - **A test failure blocks in the queue rather than on the pull request.** Under `ALLGREEN`
   grouping a red entry forces its neighbours in that batch to rebuild, so a genuinely broken
   test is more expensive there than it was on the head. Fix a known-bad test before enqueueing
