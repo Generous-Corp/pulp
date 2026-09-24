@@ -83,7 +83,9 @@ class GpuConvolver : public GpuAudioNode {
     /// before selecting a new policy. SharedRequired fails preparation unless
     /// the exact authenticated shared provider is available.
     bool set_provider_policy(ProviderPolicy policy) noexcept;
-    ProviderPolicy provider_policy() const noexcept { return provider_policy_; }
+    ProviderPolicy provider_policy() const noexcept {
+        return provider_policy_;
+    }
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
