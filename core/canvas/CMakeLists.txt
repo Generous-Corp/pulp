@@ -17,6 +17,7 @@ target_sources(pulp-canvas PRIVATE
     src/path.cpp
     src/path_measure.cpp
     src/recording_canvas.cpp
+    src/sdf_chart_contract.cpp
     src/svg.cpp
     # Lottie playback. Always compiled; the body is a no-op unless PULP_LOTTIE
     # is on AND the active Skia build ships the skottie module (detected below).
