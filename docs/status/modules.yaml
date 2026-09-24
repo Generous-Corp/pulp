@@ -62,7 +62,7 @@ modules:
       - runtime
     docs: reference/modules.md#dawproject
   - name: host
-    summary: Plugin hosting, the SignalGraph binding that compiles an authored graph including retained native Processor nodes into an immutable routed runtime snapshot with latency compensation dense audio-rate modulation and anticipation lanes, and a transport-aware one-shot offline renderer for bouncing a timeline region
+    summary: Plugin hosting, the SignalGraph binding that compiles an authored graph including retained native Processor nodes into an immutable routed runtime snapshot with latency compensation dense audio-rate modulation and anticipation lanes, and a transport-aware one-shot offline renderer for bouncing a timeline region, plus bounded sample-region scalar kernels with explicit UnitDelay causality, frozen promoted-parameter contracts, retained-state snapshot adoption, and signed bake/load lowering
     status: experimental
     dependencies:
       - playback

@@ -551,6 +551,52 @@ if(PULP_HAS_LV2)
     endif()
 
     catch_discover_tests(pulp-test-lv2-host-discovery)
+
+    # End-to-end: build a real LV2 module, let the SAME POST_BUILD path every
+    # plugin uses describe it, then read the result back through pulp::host's
+    # discovery. The generator and the reader were only ever tested apart --
+    # generated strings on one side, hand-authored TTL on the other -- so
+    # nothing failed when a bundle carried no manifest at all and no host could
+    # see it. Needs the driver, so it follows the same availability rule the
+    # build wiring does.
+    if(UNIX AND TARGET pulp-lv2-ttlgen)
+        set(_pulp_lv2_ttl_fixture_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/Lv2TtlFixture.lv2")
+
+        add_library(pulp-test-lv2-ttl-fixture MODULE
+            native_components/lv2_ttl_fixture_plugin.cpp
+            ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp)
+        target_link_libraries(pulp-test-lv2-ttl-fixture PRIVATE pulp::format lv2-headers)
+        target_include_directories(pulp-test-lv2-ttl-fixture PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/format/src)
+        set_target_properties(pulp-test-lv2-ttl-fixture PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "lv2-ttl-fixture"
+            LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_ttl_fixture_bundle}")
+
+        # Deliberately the same invocation _pulp_add_lv2 makes. A test that
+        # called the generator directly would prove the generator works and
+        # nothing about whether the build ever runs it.
+        add_custom_command(TARGET pulp-test-lv2-ttl-fixture POST_BUILD
+            COMMAND pulp-lv2-ttlgen
+                "$<TARGET_FILE:pulp-test-lv2-ttl-fixture>"
+                "$<TARGET_FILE_DIR:pulp-test-lv2-ttl-fixture>"
+                "$<TARGET_FILE_NAME:pulp-test-lv2-ttl-fixture>"
+            COMMENT "Describing the LV2 end-to-end fixture bundle"
+            VERBATIM)
+
+        add_executable(pulp-test-lv2-bundle-discovery-e2e test_lv2_bundle_discovery_e2e.cpp)
+        add_dependencies(pulp-test-lv2-bundle-discovery-e2e pulp-test-lv2-ttl-fixture)
+        target_include_directories(pulp-test-lv2-bundle-discovery-e2e PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/host/src)
+        target_compile_definitions(pulp-test-lv2-bundle-discovery-e2e PRIVATE
+            PULP_LV2_TTL_FIXTURE_BUNDLE_DIR="${_pulp_lv2_ttl_fixture_bundle}")
+        target_link_libraries(pulp-test-lv2-bundle-discovery-e2e PRIVATE
+            pulp::host
+            lv2-headers
+            Catch2::Catch2WithMain)
+        catch_discover_tests(pulp-test-lv2-bundle-discovery-e2e)
+    endif()
 endif()
 
 # NSIS installer script generation tests (cross-platform — pure string output)

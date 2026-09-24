@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "event_id": "20260923-sdf-chart-px-and-shape-set",
+  "kind": "change",
+  "created_at": "2026-09-23T08:03:42Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Two corrections inside the existing Skia SDF chart composer. PulpChart.px was the constant 1.0; it now derives from Canvas::backing_scale(), which the Skia backend already computes from the CTM, so a width written in device pixels survives a non-1x backing scale. And sdf_shape_has_chart() advertised seven band shapes while the chart's main() marked only flat_arc valid, so six shapes installed and then reported valid = 0 at every fragment; the advertised set now matches the implemented one and the refusal names the shape. No API is added or removed, no authority boundary moves, no alternate renderer appears, and the 1x rendering path is unchanged. The capability is Pulp-only because Pulp still builds and ships this implementation independently and there is no counterpart Vellum commit to backport from.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas PulpChart.px tracks the canvas backing scale",
+    "pulp-test-canvas SDF chart refuses and names every shape it cannot chart",
+    "tools/scripts/confirm_failure.sh"
+  ],
+  "disposition": "pulp-only"
+}

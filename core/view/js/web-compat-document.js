@@ -603,6 +603,10 @@ globalThis.self = window;
         return options;
     }
     function currentTrigger(popupState) {
+        // An adopted menu has no trigger to re-resolve, and must not fall
+        // through to the ordinal lookup below: that would pick an unrelated
+        // control that merely shares the popup kind.
+        if (!popupState.trigger && !popupState.triggerKind) return null;
         if (document.body.contains(popupState.trigger)) return popupState.trigger;
         var id = popupState.triggerId;
         if (id) {
@@ -692,8 +696,44 @@ globalThis.self = window;
         }
         return -1;
     }
+    // An open `role="menu"` that NO trigger owns. A context menu is summoned
+    // at coordinates by a pointer press, so there is no `aria-haspopup`
+    // element for `triggerFrom` to find and the trigger-driven entry below
+    // never fires -- which is why arrow keys did nothing inside one while the
+    // header dropdowns navigated fine. Returns the menu so the caller can
+    // adopt it with the SAME state machine the dropdowns already use.
+    //
+    // Deliberately narrow: a listbox is skipped (those are combo popups and
+    // always have a trigger), a menu whose trigger IS resolvable is left to
+    // the trigger path so this can never hijack a dropdown, and a menu with
+    // no options is not adopted so an empty panel cannot swallow keys.
+    function unownedOpenMenu() {
+        var menus = document.querySelectorAll('[role="menu"]');
+        var found = null;
+        for (var i = 0; i < menus.length; ++i) {
+            var menu = menus[i];
+            if (!document.body.contains(menu)) continue;
+            if (optedOut(menu)) continue;
+            if (triggerFor(menu)) continue;
+            if (!optionsFor(menu).length) continue;
+            // Two unowned menus open at once is ambiguous, and guessing would
+            // route keys to whichever the DOM happened to list first.
+            if (found) return null;
+            found = menu;
+        }
+        return found;
+    }
+    // The inverse of `popupFor`: does any trigger claim this popup?
+    function triggerFor(popup) {
+        var triggers = document.querySelectorAll('[aria-haspopup]');
+        for (var i = 0; i < triggers.length; ++i)
+            if (popupFor(triggers[i]) === popup) return triggers[i];
+        return null;
+    }
     function activate(trigger, edge, reveal) {
-        var popup = popupFor(trigger);
+        return adopt(trigger, popupFor(trigger), edge, reveal);
+    }
+    function adopt(trigger, popup, edge, reveal) {
         var options = optionsFor(popup);
         // Resolve the replacement before retiring what is already owned. A
         // trigger whose menu has just closed still resolves as a trigger, so
@@ -718,13 +758,19 @@ globalThis.self = window;
             baseBackgrounds.push(authored);
         }
         var hoverHandlers = [];
-        var triggerKind = trigger.getAttribute("aria-haspopup");
-        var triggerPeers = document.querySelectorAll(
-            '[aria-haspopup="' + triggerKind + '"]');
+        // An adopted menu has no trigger, so it carries no kind or ordinal to
+        // re-resolve by. Leaving these empty is what makes `currentTrigger`
+        // return null for it rather than picking an unrelated peer control.
+        var triggerKind = trigger ? trigger.getAttribute("aria-haspopup") : "";
+        var triggerPeers = triggerKind
+            ? document.querySelectorAll('[aria-haspopup="' + triggerKind + '"]')
+            : [];
         var selectedIndex = selectedIndexIn(popup, trigger, options);
-        state = { trigger: trigger, triggerId: trigger.id || "",
+        state = { trigger: trigger || null,
+                  triggerId: trigger && trigger.id ? trigger.id : "",
                   triggerKind: triggerKind,
-                  triggerOrdinal: Array.prototype.indexOf.call(triggerPeers, trigger),
+                  triggerOrdinal: trigger
+                      ? Array.prototype.indexOf.call(triggerPeers, trigger) : -1,
                   popup: popup, options: options,
                   baseBackgrounds: baseBackgrounds,
                   hoverHandlers: hoverHandlers,
@@ -816,8 +862,11 @@ globalThis.self = window;
         try { node.click(); } finally { syntheticClicks--; }
     }
     function outsidePopupTarget(target) {
+        // `state.trigger` is null for a menu this owner ADOPTED rather than
+        // opened: a context menu is summoned at coordinates, so there is no
+        // trigger element for the press to have landed inside.
         return state && !state.popup.contains(target)
-            && !state.trigger.contains(target);
+            && !(state.trigger && state.trigger.contains(target));
     }
     function consumeOutsideSequence(event) {
         if (event.type === "pointerdown" && outsidePopupTarget(event.target)) {
@@ -852,7 +901,13 @@ globalThis.self = window;
         // retire itself, and a menu the app has just closed would otherwise be
         // swept away before the branch can hand focus back to its trigger.
         if (syntheticClicks) return;
-        if (state && (!document.body.contains(state.trigger)
+        // Only a menu that HAS a trigger can have lost it. An adopted menu's
+        // trigger is null, and `contains(null)` is false, so testing it
+        // unconditionally read "my trigger vanished" on every event and
+        // dismissed the state between one arrow key and the next -- the menu
+        // was then re-adopted from scratch and the cursor snapped back to the
+        // first row instead of stepping.
+        if (state && ((state.trigger && !document.body.contains(state.trigger))
                       || !document.body.contains(state.popup))) dismiss(false);
         if (event.type === "pointerdown") {
             var pointerTrigger = triggerFrom(event.target);
@@ -884,6 +939,24 @@ globalThis.self = window;
         }
         if (event.type !== "keydown") return;
         var trigger = triggerFrom(document.activeElement);
+        // A menu nobody triggered still deserves a cursor. Adopt it on the
+        // first arrow so ArrowUp/ArrowDown, Home/End, Enter and Escape all
+        // reach it through the same state machine the dropdowns use, instead
+        // of each app re-implementing roving focus in script.
+        //
+        // Gated on there being an unowned menu OPEN: with nothing open this
+        // arm does not fire, so an arrow key still reaches the app and the
+        // host still forwards it to the DAW.
+        if (!state && !trigger
+            && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            var unowned = unownedOpenMenu();
+            if (unowned) {
+                event.preventDefault();
+                adopt(null, unowned, event.key === "ArrowUp" ? "last" : "first",
+                      true);
+                return;
+            }
+        }
         if (!state && trigger && !optedOut(trigger)
             && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
             event.preventDefault();
@@ -897,7 +970,11 @@ globalThis.self = window;
         var count = state.options.length;
         if (event.key === "Escape") {
             event.preventDefault();
-            clickSelf(state.trigger);
+            // An adopted menu has no trigger to toggle shut; dismissing the
+            // overlay fires `on_overlay_dismissed`, which is what flips the
+            // app's own open flag. With an overlay STACK this closes the top
+            // entry only, so Escape inside a submenu returns to its parent.
+            if (state.trigger) clickSelf(state.trigger);
             dismiss(true);
         } else if (event.key === "ArrowDown" || event.key === "ArrowUp"
                    || event.key === "Home" || event.key === "End") {

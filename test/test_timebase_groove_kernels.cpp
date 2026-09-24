@@ -711,6 +711,92 @@ TEST_CASE("host grid projection is binary64-stable at a frame boundary", "[timeb
     REQUIRE(output[0].frame_offset == 416);
 }
 
+TEST_CASE("host grid projection recovers an integer delta representation error moved",
+          "[timebase][grid]") {
+    using pulp::timebase::detail::grid_frame_error_budget;
+    using pulp::timebase::detail::grid_integral_frame_delta;
+
+    // The defect this covers: `frame_delta` is a cancellation between two tick
+    // values near 1e9, so an exactly-on-grid event arrives as its integer plus
+    // or minus several ulp OF THE INPUTS. A bare floor turns the low side into
+    // the preceding frame, firing the event one sample early, and only ever in
+    // that direction.
+    const auto budget = grid_frame_error_budget(-2'499'704'529.012294, -2'554'068'054.6532755,
+                                                96.1478374170194, 565'416.0);
+    REQUIRE(budget > 0.0);
+
+    SECTION("a delta nudged below an integer snaps back up, not down a frame") {
+        const auto low = std::nextafter(565'416.0, 0.0);
+        REQUIRE(low < 565'416.0);
+        REQUIRE(std::floor(low) == 565'415.0); // what the bare floor did
+        REQUIRE(grid_integral_frame_delta(low, budget) == 565'416.0);
+    }
+
+    SECTION("a delta nudged above an integer stays on it") {
+        const auto high = std::nextafter(565'416.0, 1e9);
+        REQUIRE(high > 565'416.0);
+        REQUIRE(grid_integral_frame_delta(high, budget) == 565'416.0);
+    }
+
+    SECTION("the real measured value from the boundary range") {
+        // Exactly the operands the binary64-stability case above projects.
+        const auto source_tick = -1'656'925'200.0 + -842'779'329.012294;
+        const auto frame_delta = (source_tick - -2'554'068'054.6532755) / 96.1478374170194;
+        // Binary64 lands ABOVE the integer here while exact rational arithmetic
+        // on the same inputs lands below it: the same intended 565416, either
+        // side of the boundary. Snapping makes the answer independent of which.
+        REQUIRE(frame_delta != 565'416.0);
+        REQUIRE(std::abs(frame_delta - 565'416.0) < 1e-8);
+        REQUIRE(grid_integral_frame_delta(
+                    frame_delta, grid_frame_error_budget(source_tick, -2'554'068'054.6532755,
+                                                         96.1478374170194, frame_delta)) ==
+                565'416.0);
+    }
+}
+
+TEST_CASE("host grid projection never rounds a genuinely early event forward", "[timebase][grid]") {
+    using pulp::timebase::detail::grid_frame_error_budget;
+    using pulp::timebase::detail::grid_integral_frame_delta;
+
+    SECTION("a fractional delta is floored, however close to the boundary") {
+        const auto budget = grid_frame_error_budget(-2'499'704'529.012294, -2'554'068'054.6532755,
+                                                    96.1478374170194, 565'416.0);
+        // Anything the budget cannot explain as representation error must keep
+        // the old behaviour exactly.
+        for (const double fraction : {0.5, 0.25, 0.75, 0.999, 0.001, 0.1, 0.9}) {
+            const auto delta = 565'416.0 + fraction;
+            REQUIRE(grid_integral_frame_delta(delta, budget) == 565'416.0);
+        }
+        // Just outside the budget on the low side still floors down a frame --
+        // the snap is a tolerance, not a re-rounding of the whole domain.
+        const auto outside = 565'416.0 - budget * 16.0;
+        REQUIRE(outside < 565'416.0);
+        REQUIRE(grid_integral_frame_delta(outside, budget) == 565'415.0);
+    }
+
+    SECTION("the budget cannot reach half a frame for any usable tick magnitude") {
+        // A genuinely early event differs from the boundary by a whole frame.
+        // For the snap to reach one, the budget would have to reach 0.5 -- this
+        // pins how far that is from anything a host can present. int64 ticks
+        // are exact in binary64 only to 2^53, so that is the ceiling worth
+        // testing; beyond it the tick value itself is already approximate.
+        const auto exact_integer_ceiling = std::ldexp(1.0, 53);
+        const auto worst = grid_frame_error_budget(exact_integer_ceiling, -exact_integer_ceiling,
+                                                   1.0, exact_integer_ceiling);
+        REQUIRE(worst < 0.5);
+        // The raw forward-error bound reaches 48 frames there, so the ceiling
+        // is what holds this -- not the bound. Assert the ceiling is the thing
+        // doing the work, or a later widening of it passes unnoticed.
+        REQUIRE(worst == pulp::timebase::detail::kGridMaxSnapFrames);
+        REQUIRE(pulp::timebase::detail::kGridMaxSnapFrames < 0.5);
+
+        // And at the magnitudes actually seen on a host clock it is ~1e-8.
+        const auto realistic = grid_frame_error_budget(
+            -2'499'704'529.012294, -2'554'068'054.6532755, 96.1478374170194, 565'416.0);
+        REQUIRE(realistic < 1e-6);
+    }
+}
+
 TEST_CASE("host grid projection preserves cancellable signed frame deltas", "[timebase][grid]") {
     std::uint32_t offset = 77;
     GridProjectionRange range{};

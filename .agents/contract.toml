@@ -27,6 +27,14 @@
 #     validate : parse + schema-check this file            (exit 0 / 2)
 #     surface  : given changed paths, print the matching rows (advisory, exit 0)
 #     list     : dump rows, optionally filtered by --layer
+#     probe    : evaluate rows carrying a `probe` against observed state
+#                (`--landing-json FILE`, or `--live` to shell out to
+#                `shipyard landing --json`, which needs Shipyard >= 0.208.0;
+#                manual, never a gate)
+#   A row may carry `probe`: one table or an array of tables
+#   {source = "shipyard-landing", path = ".a.b", equals = <scalar>}. A probe
+#   whose path is missing, or whose value is anything but `equals` (including
+#   an UNKNOWN verdict), FAILS; nothing unobserved ever counts as confirmed.
 #   Each decision's `guards` are glob patterns over fleet/CI config paths ONLY;
 #   a change that touches none of them surfaces nothing (the external-contributor
 #   no-op). `tags` are the re-proposal keywords (merge-queue, namespace,
@@ -228,11 +236,18 @@ guards = [".github/workflows/**", ".shipyard/config.toml"]
 [[decision]]
 id = 11
 layer = "pulp"
-tags = ["merge-queue", "lane-fallback"]
-title = "The merge queue is the accepted treadmill fix, BLOCKED on lane auto-fallback landing first."
-why = "Shelved three times: a queue makes the wedge-prone required lane a hard dependency of every merge until auto-fallback exists."
-do_not = "Re-proposing the queue before lane auto-fallback is green, or alternatives that drop the in-branch bump guarantee (decision 10)."
+tags = ["merge-queue", "ruleset", "enqueue", "auto-merge"]
+title = "Pulp main lands through the LIVE merge queue (ruleset main-merge-queue): enqueue, never hand-merge a backlog."
+why = "Ruleset main-merge-queue is enforcement=active, grouping ALLGREEN, up to 5 entries per merge, method MERGE. With strict up-to-date protection on (decision 17), each hand merge makes every other open PR behind and re-runs its full required gate, a treadmill by construction; the queue batches instead. Two API reads lie about it: classic branch protection omits a ruleset-based queue entirely, and REST pulls/<n>.auto_merge (and GraphQL autoMergeRequest) read null for a PR the queue already holds."
+do_not = "Hand-merging or rebasing PRs one at a time; concluding the queue is absent from branch protection (query repos/<o>/<r>/rulesets); reading auto_merge == null as 'not queued' (read GraphQL mergeQueueEntry); or enqueueing with a method other than MERGE (decision 16)."
 guards = [".github/workflows/**", ".shipyard/config.toml"]
+probe = [
+    { source = "shipyard-landing", path = ".merge_queue.verdict.verdict", equals = "present" },
+    { source = "shipyard-landing", path = ".merge_queue.verdict.value.enforcement", equals = "active" },
+    { source = "shipyard-landing", path = ".merge_queue.verdict.value.grouping_strategy", equals = "ALLGREEN" },
+    { source = "shipyard-landing", path = ".merge_queue.verdict.value.merge_method", equals = "MERGE" },
+    { source = "shipyard-landing", path = ".merge_queue.verdict.value.max_entries_to_merge", equals = 5 },
+]
 
 [[decision]]
 id = 16
@@ -251,6 +266,10 @@ title = "strict up-to-date branch protection stays ON for pulp main."
 why = "It is what keeps main always-green; the stale-base silent-revert class lives in non-strict merges."
 do_not = "Disabling strict to kill the rebase treadmill (the merge queue is the cure, not disabling strict)."
 guards = [".github/workflows/**"]
+probe = [
+    { source = "shipyard-landing", path = ".strict.verdict.verdict", equals = "present" },
+    { source = "shipyard-landing", path = ".strict.verdict.value", equals = true },
+]
 
 [[decision]]
 id = 19
