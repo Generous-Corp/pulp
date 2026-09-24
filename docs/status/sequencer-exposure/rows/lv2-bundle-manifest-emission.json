@@ -1,0 +1,76 @@
+{
+  "id": "lv2-bundle-manifest-emission",
+  "title": "An LV2 bundle carries the manifest a host discovers it by",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "889670cf-0b8e-4eb5-be50-b84aefc33af1",
+  "owned_paths": [
+    ".agents/skills/lv2/SKILL.md",
+    "docs/status/sequencer-exposure/rows/lv2-bundle-manifest-emission.json",
+    "test/native_components/lv2_ttl_fixture_plugin.cpp",
+    "test/test_lv2_bundle_discovery_e2e.cpp",
+    "tools/lv2-ttlgen/CMakeLists.txt",
+    "tools/lv2-ttlgen/main.cpp"
+  ],
+  "evidence": [
+    {
+      "path": "tools/cmake/PulpPluginFormats.cmake",
+      "needles": [
+        "pulp-lv2-ttlgen",
+        "Describing ${name}.lv2 for host discovery (manifest.ttl)"
+      ]
+    },
+    {
+      "path": "core/format/include/pulp/format/lv2_entry.hpp",
+      "needles": [
+        "pulp_lv2_write_bundle_ttl",
+        "inline int write_bundle_ttl"
+      ]
+    },
+    {
+      "path": "test/test_lv2_bundle_discovery_e2e.cpp",
+      "needles": [
+        "a built LV2 bundle carries the manifest a host discovers it by",
+        "discover_lv2_ports"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "core/format/include ships with the SDK, and lv2_entry.hpp gains an exported entry: PULP_LV2_PLUGIN now emits pulp_lv2_write_bundle_ttl alongside lv2_descriptor, so every plug-in built from this header exports one more C symbol. What an LV2 bundle CONTAINS changes with it -- _pulp_add_lv2 writes manifest.ttl and <binary>.ttl beside the shared object -- which turns an artifact no host could discover into a plugin.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/format/include/pulp/format/lv2_entry.hpp",
+          "needles": [
+            "inline int write_bundle_ttl",
+            "int pulp_lv2_write_bundle_ttl(const char* bundle_dir, const char* binary)"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag or handler is added or changed. The emitter runs from the build as a POST_BUILD step, never from a shipped command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler is added or changed. Nothing under tools/mcp reads or drives LV2 bundle packaging."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding or profile policy changes; nothing a live product can invoke is added, removed or re-gated. The controls this delivery makes reachable are LV2's own host-facing lv2:ControlPorts, which the generator already emitted per parameter and which shipping the manifest merely makes visible to a host -- a different surface from Pulp's control plane. Pulp's agent-facing control endpoint is deliberately unchanged and remains Standalone-only: _pulp_attach_control_shipping still forces production-stripped with empty capabilities for every non-Standalone format. Widening that would also change VST3, AU and CLAP, so it is its own decision and is recorded as an open question rather than taken here."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is byte-identical and the capability contract reports fresh: the same 111 capabilities and 496 public headers, none added, removed or re-keyed. Packaging an existing format's bundle publishes no new design-time capability."
+    }
+  }
+}
