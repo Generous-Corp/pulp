@@ -111,6 +111,63 @@ constexpr bool checked_grid_subtract(std::int64_t lhs, std::int64_t rhs,
     return true;
 }
 
+// Frames per tick-magnitude of forward error budget when deciding whether a
+// host-mapped frame delta is an integer that binary64 could not represent.
+//
+// `frame_delta` is (source_tick - anchor.source_tick) / ticks_per_frame, and
+// the subtraction is a cancellation between two tick values that are routinely
+// near 1e9. That is where the error comes from: the result keeps the absolute
+// error of the larger operands, not of the small difference, so a delta that
+// is exactly an integer arrives as that integer plus or minus several ulp of
+// the INPUTS. Measured on one host-mapped range: an exact 565416 arrived as
+// 565416.0000000024 while the same inputs in exact rational arithmetic give
+// 565415.9999999999 -- the same intended integer, landing on opposite sides.
+//
+// So the budget is a forward-error bound computed from the operands rather
+// than a fixed epsilon, which would be either too small for large ticks or too
+// loose for small ones. The multiplier is headroom over the ~2 ulp the three
+// operations (add, subtract, divide) can each contribute.
+inline constexpr double kGridFrameErrorUlps = 8.0;
+
+// Hard ceiling on that budget, in frames. The bound above is a faithful
+// forward-error estimate, but it grows with the operands and an estimate is not
+// a licence to snap: at ticks near 2^53 with one tick per frame it reaches 48
+// frames, which would round a genuinely early event forward -- the one thing
+// this must never do. Past this ceiling the delta carries more uncertainty than
+// an integer's worth of meaning, so the honest answer is to keep flooring
+// rather than guess which integer was intended. ~20 ns at 48 kHz: four orders
+// of magnitude above the ~1e-8 frames a real host clock produces, and five
+// below the 1.0 that separates a genuinely early event from an on-grid one.
+inline constexpr double kGridMaxSnapFrames = 1.0 / 1024.0;
+
+// The largest frame error the binary64 evaluation of `frame_delta` can carry
+// for these operands. Deliberately a function of the inputs: see above.
+inline double grid_frame_error_budget(double source_tick, double anchor_source_tick,
+                                      double ticks_per_frame, double frame_delta) noexcept {
+    const auto tick_magnitude = std::abs(source_tick) + std::abs(anchor_source_tick);
+    const auto scale = tick_magnitude / std::abs(ticks_per_frame) + std::abs(frame_delta);
+    const auto bound = kGridFrameErrorUlps * std::numeric_limits<double>::epsilon() * scale;
+    return bound < kGridMaxSnapFrames ? bound : kGridMaxSnapFrames;
+}
+
+// Floor `frame_delta`, first recovering an integer that representation error
+// moved off it in EITHER direction.
+//
+// A bare `std::floor` here is a correctness defect rather than a rounding
+// preference: an on-grid event whose delta lands a few ulp low floors to the
+// preceding frame and fires one sample early, and the bias is one-directional
+// because floor only ever truncates. Snapping to the nearest integer when the
+// delta is within the operands' own error budget removes the bias without
+// touching a genuinely fractional delta -- the budget is many orders of
+// magnitude below the 1.0 that separates a real early event from an on-grid
+// one, so a truly early event is never rounded forward.
+inline double grid_integral_frame_delta(double frame_delta, double budget) noexcept {
+    const auto nearest = std::nearbyint(frame_delta);
+    if (std::abs(frame_delta - nearest) <= budget)
+        return nearest;
+    return std::floor(frame_delta);
+}
+
 // Adds an already-integral binary64 delta without first narrowing it to int64.
 // An opposite-signed anchor can make a delta beyond the signed domain produce
 // a valid signed frame, so retain a uint64 magnitude through the cancellation.
@@ -249,7 +306,9 @@ inline bool host_mapped_grid_output_offset(const GridProjectionRange& range,
     const auto source_tick = document + range.document_to_source_tick_offset;
     const auto frame_delta =
         (source_tick - range.host_anchor.source_tick) / range.host_anchor.ticks_per_frame;
-    const auto integral_delta = std::floor(frame_delta);
+    const auto integral_delta = grid_integral_frame_delta(
+        frame_delta, grid_frame_error_budget(source_tick, range.host_anchor.source_tick,
+                                             range.host_anchor.ticks_per_frame, frame_delta));
     std::int64_t absolute_frame = 0;
     if (!checked_grid_add_integral_delta(range.host_anchor.frame, integral_delta, absolute_frame))
         return false;

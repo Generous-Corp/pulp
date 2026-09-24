@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """Guard against unbounded — and, on shared hosts, whole-machine — build parallelism.
 
+Exit codes:
+    0  scanned the build surfaces and every one is bounded
+    1  scanned them and found an unbounded / whole-machine build command
+    2  COULD NOT SCAN — the sweep matched no build surface at all, or a named
+       path was not a readable file. An empty scan is not a clean scan, so it
+       fails rather than reporting "OK - 0 surfaces bounded".
+
 Two distinct failure classes:
 
 * **bare** — a ``cmake --build … --parallel`` (or ``make -j`` / ``ninja`` with
@@ -420,7 +427,32 @@ def main(argv: list[str]) -> int:
             print(p.relative_to(REPO_ROOT))
         return 0
 
-    targets = [Path(a) for a in args] if args else iter_default_targets()
+    if args:
+        targets = [Path(a) for a in args]
+        missing = [str(t) for t in targets if not t.is_file()]
+        if missing:
+            print(
+                "build_parallelism_guard: CANNOT MEASURE — named path(s) are not "
+                "readable files, so nothing was scanned: " + ", ".join(sorted(missing)),
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        targets = iter_default_targets()
+        if not targets:
+            # A whole-tree scan that matched nothing did not prove the tree is
+            # clean — it proves the scan was pointed at nothing (wrong cwd, a
+            # checkout without the build surfaces, a moved REPO_ROOT). Reporting
+            # "OK - 0 surfaces bounded" is the false green this guard exists to
+            # prevent, so an empty corpus fails instead of passing.
+            print(
+                "build_parallelism_guard: CANNOT MEASURE — the default sweep found "
+                f"0 build surfaces under {REPO_ROOT}. Expected the repo's build "
+                "surfaces (CMakeLists.txt, ci/, .github/workflows/, setup.sh, "
+                "CLAUDE.md, .agents/skills/). An empty scan is not a clean scan.",
+                file=sys.stderr,
+            )
+            return 2
 
     bare: list[str] = []
     whole: list[str] = []
