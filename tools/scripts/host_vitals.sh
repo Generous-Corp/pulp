@@ -29,6 +29,13 @@
 #     host_vitals.sh --json     # machine-readable JSON; exit code = level
 #     host_vitals.sh --quiet    # no output; exit code = level
 #     host_vitals.sh --level    # print just green|warn|critical; exit code = level
+#     host_vitals.sh --build-json  # build-capacity snapshot (ccache, gate VMs,
+#                                  # tartci leases/commit, wheelhouse); exit 0
+#
+# --build-json is deliberately NOT part of the cheap probe: it shells out to
+# ccache, ps and tartci (~0.5 s), so only the launchd sensor tick and the
+# build-speed scorecard call it. Every field it cannot read is null, never 0,
+# so a missing tool never reads as an empty cache or an idle host.
 #
 # Non-macOS hosts have no jetsam/pressure sysctl; the probe degrades to a
 # load-only check (WARN above a high multiple of cores) and never reports
@@ -40,6 +47,7 @@
 #                              (default /Library/Logs/DiagnosticReports)
 #     PULP_VITALS_NOW          epoch seconds treated as "now" for report ages
 #     PULP_VITALS_UNAME        override the OS name (default `uname -s`)
+#     PULP_VITALS_TOOL_PATH    dirs searched for ccache/tartci by --build-json
 #
 # Thresholds (deliberately conservative to avoid false CRITICALs that would
 # stall a required CI gate):
@@ -129,12 +137,124 @@ _load_over() {
   [ "$load_int" -gt "$threshold" ]
 }
 
+# --- build-capacity snapshot (--build-json) ----------------------------------
+# JSON string escaping for the handful of free-text fields.
+_jstr() {
+  local v="${1-}"
+  v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
+  printf '"%s"' "$v"
+}
+
+_num_or_null() {
+  case "${1:-}" in ''|*[!0-9.]*) printf 'null' ;; *) printf '%s' "$1" ;; esac
+}
+
+# Resolve a tool even from launchd's or ssh's minimal PATH. PULP_VITALS_TOOL_PATH
+# (a colon-separated dir list) replaces the whole search, for tests.
+_find_tool() {
+  local name="$1" c d
+  if [ -n "${PULP_VITALS_TOOL_PATH+set}" ]; then
+    local IFS=:
+    for d in $PULP_VITALS_TOOL_PATH; do
+      [ -n "$d" ] && [ -x "$d/$name" ] && { printf '%s' "$d/$name"; return 0; }
+    done
+    return 1
+  fi
+  for c in "$(command -v "$name" 2>/dev/null)" "/opt/homebrew/bin/$name" "/usr/local/bin/$name" \
+           "$HOME/.local/bin/$name"; do
+    [ -n "$c" ] && [ -x "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+# ccache stats for one cache dir ("" = the user's configured cache) as JSON.
+_ccache_json() {
+  local bin="$1" dir="$2" stats cdir
+  if [ -n "$dir" ]; then
+    stats="$("$bin" -d "$dir" -s 2>/dev/null)" || { printf 'null'; return; }
+    cdir="$dir"
+  else
+    stats="$("$bin" -s 2>/dev/null)" || { printf 'null'; return; }
+    cdir="$("$bin" -p 2>/dev/null | awk -F' = ' '/ cache_dir = / {print $2; exit}')"
+  fi
+  printf '%s\n' "$stats" | awk -v cdir="$cdir" '
+    function pct(line,   a) { split(line, a, "("); sub(/%\).*/, "", a[2]); return a[2] + 0 }
+    /^  Hits:/ && hit == "" { hit = pct($0) }
+    /^Uncacheable calls:/ { unc = pct($0) }
+    /^  Cache size/ { gsub(/[()%]/, " "); n = 0
+                      for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+$/) v[++n] = $i
+                      size = v[1]; max = v[2] }
+    /^  Cleanups:/ { cleanups = $2 }
+    END {
+      gsub(/"/, "", cdir)
+      printf "{\"dir\":\"%s\",\"hit_pct\":%s,\"size_gb\":%s,\"max_gb\":%s,\"cleanups\":%s,\"uncacheable_pct\":%s}",
+        cdir, (hit == "" ? "null" : hit), (size == "" ? "null" : size + 0),
+        (max == "" ? "null" : max + 0), (cleanups == "" ? "null" : cleanups + 0),
+        (unc == "" ? "null" : unc)
+    }'
+}
+
+build_json() {
+  # Every probe below may legitimately find nothing (no tartci, no VMs, no
+  # ccache); a non-matching grep must yield null, not abort the snapshot.
+  set +e +o pipefail
+  local host ncpu mem load free_pct swap_used ccache_bin tartci_bin
+  host="$(hostname -s 2>/dev/null || hostname)"
+  ncpu="$(_ncpu)"
+  mem="$(_sysctl -n hw.memsize 2>/dev/null || echo '')"
+  load="$(_sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' | awk '{printf "[%s,%s,%s]", $1, $2, $3}')"
+  [ -n "$load" ] || load="null"
+  free_pct="$(memory_pressure -Q 2>/dev/null | awk -F': ' '/free percentage/ {gsub(/%/, "", $2); print $2}')"
+  swap_used="$(_sysctl -n vm.swapusage 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="used") {v=$(i+2); sub(/M$/, "", v); print v}}')"
+
+  local ccache_host="null" ccache_gate="null"
+  if ccache_bin="$(_find_tool ccache)"; then
+    ccache_host="$(_ccache_json "$ccache_bin" "")"
+    [ -d "$HOME/.cache/pulp-ci/ccache" ] && ccache_gate="$(_ccache_json "$ccache_bin" "$HOME/.cache/pulp-ci/ccache")"
+  fi
+
+  # Gate VMs: the Virtualization XPC service is the process that holds a VM's
+  # memory; `tart run` is a thin launcher, so its RSS says nothing about the VM.
+  local ps_out vms
+  ps_out="$(ps -axo rss=,pcpu=,args= 2>/dev/null || true)"
+  vms="$(printf '%s\n' "$ps_out" | awk '
+    /com\.apple\.Virtualization\.VirtualMachine$/ { n++; rss+=$1; cpu+=$2 }
+    /(^|\/)tart run / { name=$NF; names = names (names==""?"":",") "\"" name "\"" }
+    END { printf "{\"count\":%d,\"rss_mb\":%d,\"cpu_pct\":%.0f,\"names\":[%s]}", n, rss/1024, cpu, names }')"
+  local generation
+  generation="$(printf '%s\n' "$ps_out" | grep -o 'tartci-generations/[0-9a-f]\{7,40\}' | head -1 | sed 's|.*/||' | cut -c1-12 || true)"
+
+  local checkout="" leases="null" profile="null"
+  checkout="$(git -C "$HOME/Code/tartci" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  if tartci_bin="$(_find_tool tartci)"; then
+    leases="$("$tartci_bin" leases status --json 2>/dev/null | tr -d '\n' | sed -E 's/.*"capacity": *(\{[^}]*\}).*/\1/')"
+    case "$leases" in '{'*'}') : ;; *) leases="null" ;; esac
+    profile="$("$tartci_bin" host-profile --json 2>/dev/null | tr -d '\n' | sed -E 's/"notes": *\[[^]]*\],?//; s/"host": *\{[^}]*\},?//')"
+    case "$profile" in '{'*'}') : ;; *) profile="null" ;; esac
+  fi
+
+  local wheels="null" wh="$HOME/.cache/pulp-ci/pip-wheelhouse"
+  if [ -d "$wh" ]; then
+    wheels="$(find "$wh" -maxdepth 2 -name '*.whl' 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+
+  printf '{"host":%s,"ncpu":%s,"mem_bytes":%s,"load":%s,"memory_free_pct":%s,"swap_used_mb":%s,' \
+    "$(_jstr "$host")" "$(_num_or_null "$ncpu")" "$(_num_or_null "$mem")" "$load" \
+    "$(_num_or_null "$free_pct")" "$(_num_or_null "$swap_used")"
+  printf '"ccache_host":%s,"ccache_gate":%s,"gate_vms":%s,' "$ccache_host" "$ccache_gate" "$vms"
+  printf '"tartci":{"executing_generation":%s,"checkout_head":%s,"leases":%s,"host_profile":%s},' \
+    "$( [ -n "$generation" ] && _jstr "$generation" || printf 'null')" \
+    "$( [ -n "$checkout" ] && _jstr "$checkout" || printf 'null')" "$leases" "$profile"
+  printf '"wheelhouse_wheels":%s,"sampled_at":%s}\n' "$wheels" "$(_now)"
+}
+
 main() {
   local mode="human"
   case "${1:-}" in
     --json) mode="json" ;;
     --quiet) mode="quiet" ;;
     --level) mode="level" ;;
+    --build-json) build_json; exit 0 ;;
     ''|--human) mode="human" ;;
     -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
     *) echo "host_vitals.sh: unknown arg '$1'" >&2; exit 2 ;;

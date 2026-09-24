@@ -1,0 +1,342 @@
+{
+ "run": {
+  "id": 35935850903,
+  "event": "merge_group",
+  "status": "completed",
+  "conclusion": "success",
+  "run_attempt": 1,
+  "head_branch": "gh-readonly-queue/main/pr-8756-fc03deccd21fd5940b88ed42e84db24fb20e668a",
+  "head_sha": "eb9880dff1f057661cee1ed784bc1b7b3201c6d6",
+  "pull_requests": [],
+  "run_started_at": "2026-09-23T23:54:04Z",
+  "created_at": "2026-09-23T23:54:04Z",
+  "updated_at": "2026-09-24T01:19:50Z"
+ },
+ "jobs": [
+  {
+   "id": 107432591594,
+   "run_id": 35935850903,
+   "run_attempt": 1,
+   "name": "classify",
+   "status": "completed",
+   "conclusion": "success",
+   "created_at": "2026-09-23T23:54:04Z",
+   "started_at": "2026-09-23T23:54:07Z",
+   "completed_at": "2026-09-23T23:54:20Z",
+   "runner_name": "GitHub Actions 1000121913"
+  },
+  {
+   "id": 107432710921,
+   "run_id": 35935850903,
+   "run_attempt": 1,
+   "name": "macos",
+   "status": "completed",
+   "conclusion": "success",
+   "created_at": "2026-09-23T23:54:33Z",
+   "started_at": "2026-09-24T00:14:15Z",
+   "completed_at": "2026-09-24T01:19:48Z",
+   "runner_name": "m1-pulp-gate-slot2-02-9255-8",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:14:15Z",
+     "completed_at": "2026-09-24T00:14:19Z"
+    },
+    {
+     "name": "Run actions/checkout@v5",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:14:19Z",
+     "completed_at": "2026-09-24T00:14:42Z"
+    },
+    {
+     "name": "Fetch protected capability base",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:14:42Z",
+     "completed_at": "2026-09-24T00:14:42Z"
+    },
+    {
+     "name": "Hydrate bounded GPU provenance commits",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:14:42Z",
+     "completed_at": "2026-09-24T00:15:37Z"
+    },
+    {
+     "name": "Set up Namespace macOS cache",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:15:37Z",
+     "completed_at": "2026-09-24T00:15:37Z"
+    },
+    {
+     "name": "Install Linux dependencies",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:15:37Z",
+     "completed_at": "2026-09-24T00:15:37Z"
+    },
+    {
+     "name": "Namespace cache (brew + ccache + Pulp FetchContent)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:15:37Z",
+     "completed_at": "2026-09-24T00:15:37Z"
+    },
+    {
+     "name": "brew update (macOS)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:15:37Z",
+     "completed_at": "2026-09-24T00:15:51Z"
+    },
+    {
+     "name": "Install ccache (macOS)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:15:51Z",
+     "completed_at": "2026-09-24T00:16:12Z"
+    },
+    {
+     "name": "Install ccache (Windows)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:12Z",
+     "completed_at": "2026-09-24T00:16:12Z"
+    },
+    {
+     "name": "Restore FetchContent sources (GitHub-hosted)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:12Z",
+     "completed_at": "2026-09-24T00:16:12Z"
+    },
+    {
+     "name": "Restore ccache (GitHub-hosted)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:12Z",
+     "completed_at": "2026-09-24T00:16:12Z"
+    },
+    {
+     "name": "Bootstrap repository dependencies",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:16:12Z",
+     "completed_at": "2026-09-24T00:16:35Z"
+    },
+    {
+     "name": "Install pinned Chrome for browser-source fidelity (macOS ARM64)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:16:35Z",
+     "completed_at": "2026-09-24T00:16:41Z"
+    },
+    {
+     "name": "Save FetchContent sources (main push, GitHub-hosted Linux/Windows)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:41Z",
+     "completed_at": "2026-09-24T00:16:41Z"
+    },
+    {
+     "name": "Fetch prebuilt Skia (macOS)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:16:41Z",
+     "completed_at": "2026-09-24T00:16:42Z"
+    },
+    {
+     "name": "Intel canary \u2014 lint + x86_64 GPU-off compile",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:42Z",
+     "completed_at": "2026-09-24T00:16:42Z"
+    },
+    {
+     "name": "Ccache effective config (proof of override)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:16:42Z",
+     "completed_at": "2026-09-24T00:16:42Z"
+    },
+    {
+     "name": "Install materialized runtime Node test dependencies (Linux)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:16:42Z",
+     "completed_at": "2026-09-24T00:16:42Z"
+    },
+    {
+     "name": "Configure",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:16:42Z",
+     "completed_at": "2026-09-24T00:19:23Z"
+    },
+    {
+     "name": "Install visual-analysis Python dependencies",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:19:23Z",
+     "completed_at": "2026-09-24T00:19:34Z"
+    },
+    {
+     "name": "Build",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:19:34Z",
+     "completed_at": "2026-09-24T00:52:14Z"
+    },
+    {
+     "name": "Ccache stats",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:52:14Z",
+     "completed_at": "2026-09-24T00:52:15Z"
+    },
+    {
+     "name": "Save ccache (main push, GitHub-hosted Linux/Windows)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T00:52:15Z",
+     "completed_at": "2026-09-24T00:52:15Z"
+    },
+    {
+     "name": "Test (non-Windows)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T00:52:15Z",
+     "completed_at": "2026-09-24T01:16:01Z"
+    },
+    {
+     "name": "Observe ctest non-runs (non-Windows)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:16:01Z",
+     "completed_at": "2026-09-24T01:16:04Z"
+    },
+    {
+     "name": "Observe GPU adapter contract (self-hosted macOS)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:16:04Z",
+     "completed_at": "2026-09-24T01:16:05Z"
+    },
+    {
+     "name": "Test installed SDK capability contract (affected changes)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:16:05Z",
+     "completed_at": "2026-09-24T01:19:00Z"
+    },
+    {
+     "name": "Test A2T structural receipt issuer",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:19:00Z",
+     "completed_at": "2026-09-24T01:19:10Z"
+    },
+    {
+     "name": "Verify A2T structural receipt",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:10Z",
+     "completed_at": "2026-09-24T01:19:10Z"
+    },
+    {
+     "name": "Publish A2T structural verification",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:10Z",
+     "completed_at": "2026-09-24T01:19:10Z"
+    },
+    {
+     "name": "Surface ctest failures (non-Windows)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:10Z",
+     "completed_at": "2026-09-24T01:19:10Z"
+    },
+    {
+     "name": "Upload ctest logs and JUnit report",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:19:10Z",
+     "completed_at": "2026-09-24T01:19:12Z"
+    },
+    {
+     "name": "Test (Windows \u2014 UTF-8 code page wrapped)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:12Z",
+     "completed_at": "2026-09-24T01:19:12Z"
+    },
+    {
+     "name": "Issue exact protected-validation receipt",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:12Z",
+     "completed_at": "2026-09-24T01:19:12Z"
+    },
+    {
+     "name": "Publish exact protected-validation receipt",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:12Z",
+     "completed_at": "2026-09-24T01:19:12Z"
+    },
+    {
+     "name": "Upload plugin bundles (macOS)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:19:12Z",
+     "completed_at": "2026-09-24T01:19:40Z"
+    },
+    {
+     "name": "Upload plugin bundles (Windows)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:40Z",
+     "completed_at": "2026-09-24T01:19:40Z"
+    },
+    {
+     "name": "Upload plugin bundles (Linux)",
+     "status": "completed",
+     "conclusion": "skipped",
+     "started_at": "2026-09-24T01:19:40Z",
+     "completed_at": "2026-09-24T01:19:40Z"
+    },
+    {
+     "name": "Post Run actions/checkout@v5",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:19:40Z",
+     "completed_at": "2026-09-24T01:19:41Z"
+    },
+    {
+     "name": "Complete job",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-24T01:19:41Z",
+     "completed_at": "2026-09-24T01:19:44Z"
+    }
+   ]
+  },
+  {
+   "id": 107453033378,
+   "run_id": 35935850903,
+   "run_attempt": 1,
+   "name": "linux",
+   "status": "completed",
+   "conclusion": "skipped",
+   "created_at": "2026-09-24T01:19:48Z",
+   "started_at": "2026-09-24T01:19:48Z",
+   "completed_at": "2026-09-24T01:19:48Z",
+   "runner_name": null
+  }
+ ]
+}

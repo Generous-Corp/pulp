@@ -1,0 +1,64 @@
+{
+ "run": {
+  "id": 35849389954,
+  "event": "merge_group",
+  "status": "completed",
+  "conclusion": "success",
+  "run_attempt": 1,
+  "head_branch": "gh-readonly-queue/main/pr-8672-8fbea54bd801bb1d0225ebccbd24304179e8d50a",
+  "head_sha": "b3ed369b8b96376dc5dcc4649f2c09fd85b1b3ac",
+  "pull_requests": [],
+  "run_started_at": "2026-09-23T10:32:35Z",
+  "created_at": "2026-09-23T10:32:35Z",
+  "updated_at": "2026-09-23T10:33:20Z"
+ },
+ "jobs": [
+  {
+   "id": 107143191618,
+   "run_id": 35849389954,
+   "run_attempt": 1,
+   "name": "classify",
+   "status": "completed",
+   "conclusion": "success",
+   "created_at": "2026-09-23T10:32:35Z",
+   "started_at": "2026-09-23T10:32:37Z",
+   "completed_at": "2026-09-23T10:32:48Z",
+   "runner_name": "GitHub Actions 1000119586"
+  },
+  {
+   "id": 107143336809,
+   "run_id": 35849389954,
+   "run_attempt": 1,
+   "name": "macos",
+   "status": "completed",
+   "conclusion": "success",
+   "created_at": "2026-09-23T10:33:04Z",
+   "started_at": "2026-09-23T10:33:06Z",
+   "completed_at": "2026-09-23T10:33:09Z",
+   "runner_name": "GitHub Actions 1000119589",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-23T10:33:07Z",
+     "completed_at": "2026-09-23T10:33:07Z"
+    },
+    {
+     "name": "macOS merge-group bootstrap (required when native leg is absent)",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-23T10:33:07Z",
+     "completed_at": "2026-09-23T10:33:07Z"
+    },
+    {
+     "name": "Complete job",
+     "status": "completed",
+     "conclusion": "success",
+     "started_at": "2026-09-23T10:33:07Z",
+     "completed_at": "2026-09-23T10:33:07Z"
+    }
+   ]
+  }
+ ]
+}

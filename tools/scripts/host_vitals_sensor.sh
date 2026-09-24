@@ -33,6 +33,22 @@ json="$("$HV" --json 2>/dev/null)"; code=$?
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 printf '%s %s\n' "$ts" "$json" >> "$STATE_DIR/host_vitals.log"
+health_json="$json"
+
+# The published reading also carries a build-capacity snapshot (ccache, gate
+# VMs, tartci leases/commit, wheelhouse) under "build", for the build-speed
+# scorecard. It is kept out of the history log so that log still holds hours of
+# health readings, and PULP_VITALS_BUILD=0 turns it off.
+if [ "${PULP_VITALS_BUILD:-1}" != "0" ]; then
+    build="$("$HV" --build-json 2>/dev/null)"
+    case "$json" in
+        *'}')
+            case "$build" in
+                '{'*'}') json="${json%\}},\"build\":${build}}" ;;
+            esac
+            ;;
+    esac
+fi
 
 # Atomic publish so a reader never sees a half-written file.
 printf '%s\n' "$json" > "$STATE_DIR/host_vitals.json.tmp" \
@@ -49,7 +65,7 @@ fi
 
 # Non-green readings also go to stderr so launchd captures them in the agent log.
 if [ "$code" -ge 10 ]; then
-    echo "host_vitals_sensor: $json" >&2
+    echo "host_vitals_sensor: $health_json" >&2
 fi
 
 exit "$code"

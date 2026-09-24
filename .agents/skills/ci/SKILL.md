@@ -2303,6 +2303,25 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   process — so it is safe to run on the required-gate host. Installed on the m3/m5
   /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
   reading; `--uninstall` removes the agent.
+- **The published reading also carries a `build` snapshot** (`host_vitals.sh
+  --build-json`: host and gate ccache hit/fill/cleanups, gate-VM count and RSS,
+  tartci executing generation vs `~/Code/tartci` checkout, lease usage, wheelhouse
+  count). It is sensor-only, never part of the cheap probe that gates.sh and the
+  pre-push hook call. Two traps it encodes: over ssh and under launchd `PATH` has
+  no Homebrew, so `ccache`/`tartci`/`tart` must be resolved by absolute path; and
+  `tart list` over ssh prints NOTHING on m5 while two VMs run, so gate VMs are
+  counted from `com.apple.Virtualization.VirtualMachine` processes (their RSS is
+  the VM's memory; the `tart run` launcher's is not). A sensor installed before
+  the snapshot existed publishes none; `build_speed_scorecard.py report` then
+  probes live and labels it — reinstall the sensor to fix.
+- **"Is the gate slower than usual on this host?"** is `shipyard metrics watch
+  --project pulp-gate-steps --json` after `tools/scripts/build_speed_scorecard.py
+  ingest`. Plain `shipyard metrics import github` keys self-hosted jobs by their
+  ephemeral runner name (one job per "host") and stores no steps, so its per-host
+  numbers are meaningless for the gate. `shipyard metrics record` keeps only the
+  FIRST step for a given external id, so per-step rows need their own external id
+  and live in a separate project (`pulp-gate-steps`) to keep `pulp`'s
+  worker-minutes honest.
 - **A whole-pool-fails-at-once red leg is infra, not code** (per
   `macos-required-leg-timeout-saturation`): if `windows` + both `macos` legs fail
   together and the diff can't explain it, correlate against host reboot / jetsam
