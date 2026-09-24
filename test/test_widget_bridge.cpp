@@ -514,6 +514,66 @@ TEST_CASE("canvasDrawSdf records a validated retained command",
     REQUIRE(canvas->commands()[0].shader_uniforms.size() == 1);
 }
 
+TEST_CASE("both SDF geometry emitters agree on the same tree",
+          "[view][bridge][canvas][sdf][operators]") {
+    // The retained canvas replay path and the widget shader-install path each
+    // walk the geometry tree with their own emitter (retained_shader_geometry
+    // and shader_api). They are hand-maintained and must produce identical
+    // SkSL: if one drifts, the same authored tree renders differently through
+    // canvasDrawSdf than through setWidgetShaderGeometry, and nothing else in
+    // the suite compares them. Pin them together until they share one emitter.
+    // Left-leaning: an operator may only be the FIRST child, so the nesting
+    // goes down the left spine. A right-nested tree is refused by design.
+    static constexpr const char* kTree = R"({
+      "op": "smoothUnion", "k": 8,
+      "children": [
+        { "op": "subtract", "children": [
+            { "shape": "rounded_rect", "x": 2, "y": 3, "w": 16, "h": 12, "cornerRadius": 4 },
+            { "shape": "rect", "x": 6, "y": 7, "w": 10, "h": 9 } ] },
+        { "shape": "circle", "x": 4, "y": 8, "w": 24, "h": 24 }
+      ] })";
+
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(std::string(R"js(
+        createCanvas('canvas', 'root');
+        createKnob('knob', 'root');
+        setWidgetShader('knob',
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }');
+        globalThis.installed = setWidgetShaderGeometry('knob', )js") + kTree + R"js();
+        globalThis.retained = canvasDrawSdf('canvas', )js" + kTree + R"js(,
+          'PulpFragment shade(PulpGeom g, float2 p) { return PulpFragment(half4(1), 0, 0); }');
+    )js");
+
+    REQUIRE(engine.evaluate("installed.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("retained.success").getWithDefault<bool>(false));
+
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
+    REQUIRE(knob != nullptr);
+    REQUIRE(knob->shader_geometry().has_value());
+
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("canvas"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+    REQUIRE(canvas->commands()[0].shader_geometry.has_value());
+
+    const auto& installed = *knob->shader_geometry();
+    const auto& retained = *canvas->commands()[0].shader_geometry;
+
+    // Control: a non-trivial tree, so an accidental agreement on an empty or
+    // single-leaf expression cannot carry the comparison below.
+    REQUIRE(installed.leaf_count == 3);
+    REQUIRE(installed.sdf_expression.find("pulp_smooth_union") != std::string::npos);
+
+    INFO("installed=" << installed.sdf_expression);
+    INFO("retained =" << retained.sdf_expression);
+    REQUIRE(retained.leaf_count == installed.leaf_count);
+    REQUIRE(retained.sdf_expression == installed.sdf_expression);
+    REQUIRE(retained.leaf_uniforms.size() == installed.leaf_uniforms.size());
+}
+
 TEST_CASE("canvasDrawSdf retains composite geometry for replay",
           "[view][bridge][canvas][sdf][operators]") {
     ScriptEngine engine;
