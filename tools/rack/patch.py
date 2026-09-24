@@ -2548,6 +2548,33 @@ CATALOG_URL = "https://api.vcvrack.com/library/manifests?version=2"
 # which is the primary mechanism; this is the backstop.
 CATALOG_MAX_AGE_DAYS = 1
 
+
+def _publish_json(path: str, payload) -> None:
+    """Write `payload` to `path` so a reader never sees a partial file.
+
+    The cache under ~/.cache/forge-modular is shared by every process on the
+    machine, and two harnesses started together both refresh it. An in-place
+    `open(path, "w")` truncates the file first, so the second process's
+    json.load raced a half-written index and failed with JSONDecodeError. The
+    payload lands in a sibling temporary file and is moved over `path` with
+    os.replace, which is atomic on the same filesystem: a concurrent reader
+    gets either the previous complete file or the new one.
+    """
+    import tempfile
+    directory = os.path.dirname(path) or "."
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".part",
+                               dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(payload, output)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 # Refreshing on a miss is worth doing once, not once per search: a term that is
 # genuinely not in the library misses every time, and re-downloading 350 KB for
 # each of them would turn a typo into a stall.
@@ -2577,8 +2604,7 @@ def catalog(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS) -> 
             with urllib.request.urlopen(CATALOG_URL, timeout=30) as r:
                 data = json.loads(r.read().decode())
             os.makedirs(CACHE_DIR, exist_ok=True)
-            with open(CATALOG, "w", encoding="utf-8") as output:
-                json.dump(data, output)
+            _publish_json(CATALOG, data)
         except Exception as e:
             if not os.path.exists(CATALOG):
                 raise SystemExit(f"could not fetch the library catalog: {e}")
@@ -2647,8 +2673,7 @@ def module_index(refresh: bool = False, max_age_days: int = CATALOG_MAX_AGE_DAYS
                 return json.load(source)
         raise SystemExit(f"could not fetch the module index: {e}")
     os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(MODULE_INDEX, "w", encoding="utf-8") as output:
-        json.dump(idx, output)
+    _publish_json(MODULE_INDEX, idx)
     return idx
 
 
