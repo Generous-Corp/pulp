@@ -16,6 +16,9 @@
 # Adding a member: it must be deterministic, finish in a few seconds on a
 # loaded gate VM, and depend on nothing but the checkout and the build tree.
 # Anything timing-, device-, network- or load-sensitive stays out.
+# The rack-* generator tests are out for that reason: their shared module
+# index is fetched from the network into a user cache on a cold host and is
+# written in place, so two of them started together can read a partial file.
 if(NOT Python3_Interpreter_FOUND)
     return()
 endif()
@@ -92,31 +95,6 @@ set(PULP_PR_FAST_TESTS
     prepush-format-gate-wiring
     project-package-mutation-control
     pulp-uninstaller-contract
-    rack-acid-behavior
-    rack-acid-preflight
-    rack-acid-runtime-gate
-    rack-acid-taps
-    rack-capability-lessons
-    rack-capability-verify
-    rack-corpus-audit
-    rack-corpus-export
-    rack-cv-depth
-    rack-deterministic-repair
-    rack-fidelity
-    rack-generation-eligibility
-    rack-generator-endings
-    rack-knowledge-admission
-    rack-licence-fix-replay
-    rack-measure-ranges
-    rack-param-units
-    rack-patch-replay
-    rack-physical-targets
-    rack-qualify-scenes
-    rack-recover-subset-font-pdf
-    rack-run-state
-    rack-signal-path
-    rack-source-index
-    rack-with-app-model-selection
     raw-this-async-check
     refactor-baseline-manifest
     refactor-baseline-manifest-negative-contract
