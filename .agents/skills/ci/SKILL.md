@@ -55,6 +55,83 @@ dynamically loaded dependency, trace, or source,
 or produces noncanonical verifier output fails the required check. Linux and
 Windows remain advisory and do not produce this authority.
 
+## A merge queue amplifies a broken base instead of catching it
+
+The merge queue's failure mode is not that it misses a break. It is that it
+inherits one and repeats it. A batch validates `main` plus its entries, so a
+break already on `main` fails every batch, ejects the innocent entries,
+re-forms, and fails again. One observed cascade ran ten-plus consecutive
+batches over seven hours with zero merges, each ~40 minutes, each reporting
+against a batch name that was not the culprit.
+
+Three facts make that possible, and all three are worth knowing before you
+diagnose a stalled queue:
+
+**A pull-request head does not run the test suite at all.** The `Test
+(non-Windows)` step is gated `github.event_name != 'pull_request'`. Tests run
+in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
+the PR head. So "the PR was green" never meant its tests passed.
+
+**`main`'s macOS health is measured only on push.** The macOS matrix leg now
+runs on `push: main` for exactly this reason: a merge group validates a
+synthetic merge commit, so without the push leg nothing ever runs the full
+macOS suite against a commit that is actually on `main`. If you are asking
+"is main broken?", look at the push run for the merge commit, not at a batch.
+The leg keeps its descriptive matrix name on push rather than claiming the
+required `macos` context, so it detects without gating.
+
+**A batch stops at its first failing test.** `merge_group` runs ctest with
+`--stop-on-failure`; no other lane does. It composes with `--repeat
+until-pass:2` rather than defeating it — ctest stops only once the retries are
+exhausted, so a flake still self-heals — and under `-j8` the stop is bounded by
+the parallel width, so a few extra tests finish. Do not read a batch's short
+test list as the complete set of what is broken; the push lane is the one that
+reports every failure.
+
+Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
+tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
+calls it.
+
+## A green `macos` check can mean nothing ran
+
+The required `macos` context is reported by more than one job: the macOS matrix
+leg, which builds and tests, and bootstrap jobs that claim the name without
+running anything — when no native input changed, or when a protected receipt is
+reused. A reused receipt produces a **three-step** green job (`Set up job`, the
+bootstrap step, `Complete job`). In the checks list it is indistinguishable
+from a real pass, and reasoning from one as evidence that the suite passed has
+already cost hours of wrong conclusions.
+
+Ask the run instead of the colour:
+
+```bash
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id>
+# executed | built-but-untested | not-executed, with the step count
+python3 tools/scripts/gate_suite_executed.py --run-id <run-id> --require-executed
+# exits nonzero unless the suite genuinely ran
+```
+
+Each bootstrap job also writes a banner into its own job summary saying no
+build and no test step ran. A step count near three on a `macos` job is the
+tell.
+
+## A failed batch's branch name is not the culprit
+
+A merge_group batch is NAMED for one pull request but CONTAINS every entry
+ahead of it. Blaming the name sends someone to fix an innocent branch while the
+real break keeps failing every batch that forms.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
+```
+
+It maps each failing ctest to the pull request whose files own it. Below its
+confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
+read that as "go look at main's own push run", never as "no culprit exists".
+Because it reads the macos job's log, a batch whose macos gate never ran the
+suite yields nothing, which is the previous section's problem wearing a
+different hat.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
@@ -1011,6 +1088,64 @@ The general shape, worth reaching for whenever a lane's health depends on
 something being installed: pair the provisioning step with one non-skippable
 test that asserts the provisioning worked. The install step reports that it ran;
 only the test reports that it landed.
+
+## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
+
+Every gate script here fails closed on its own: a missing or unreadable config
+exits **2**, having checked nothing. The hook then threw that away. Each gate's
+catch-all branch was
+
+```sh
+case $? in
+    0) ;;
+    1) fail=1 ;;
+    *) echo "[pre-push] <gate>: internal error" >&2 ;;   # prints, does NOT set fail
+esac
+```
+
+so any exit code above 1 printed a line and fell through **as a pass**. A gate
+that could not find its config reported SUCCESS, which is indistinguishable in
+the output from a gate that ran and was happy. That false green let a missing
+version bump ride: no tag, no release.
+
+The exit-code contract every Pulp gate now follows, and every caller must
+honour:
+
+| code | meaning | caller must |
+|------|---------|-------------|
+| 0 | ran, check passed | continue |
+| 1 | ran, check FAILED | block — a real verdict |
+| 2+ | **could NOT run** — config missing/unreadable, empty corpus, crash | **block** |
+
+`.githooks/lib/gate-output.sh` exports `gate_could_not_run`; every catch-all
+branch routes through it and sets `fail=1`. The gate's status is captured into
+`$gate_rc` *before* `case` consumes `$?` — a branch that reads a bare `$?`
+inside the `case` gets the wrong value, so `test_prepush_cannot_measure.py`
+asserts the capture count equals the branch count.
+
+Two things are worth knowing before you touch this:
+
+* **`format_changed` is the one deliberate exemption.** It is advisory by
+  contract and carries its own documented `3) SKIPPED` branch for a machine
+  with no clang-format. The test pins it as the single exemption by name, so a
+  future gate quietly adopting the old fall-open shape is a test failure rather
+  than a silent drift.
+* **Adding a gate means adding its blocking branch.** The test's control counts
+  *both* halves (blocking + fall-open) and fails if the total drops below 20 —
+  a regex that stopped matching would otherwise report "nothing falls open"
+  over zero coverage, which is the same false green one level up.
+
+The sibling shape is a gate whose *corpus* comes back empty.
+`build_parallelism_guard` printed `OK — 0 build surface(s) bounded` and exited
+0 when its sweep matched nothing — the reading it gives when pointed at the
+wrong tree. An empty scan is not a clean scan; it now exits 2 naming what it
+searched. When you write a whole-tree gate, decide explicitly what a zero means
+and assert a floor.
+
+Shipyard carries the same two scripts and had the same hook shape. Its copies
+additionally hard-coded Pulp's `tools/scripts/versioning.json`, so a bare
+invocation in *that* repo never found its config at all; they now resolve
+`scripts/versioning.json` first and name every path searched on failure.
 
 ## An opt-in CMake flag hides tests more completely than any label
 
