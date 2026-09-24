@@ -3369,7 +3369,18 @@ bash test/cmake/test_ios_compile_gate.sh "$PWD" "$PWD/build-ios-compile-gate"
 
 The script uses Pulp's platform-wide FetchContent source cache, so fresh
 worktrees reuse dependency checkouts while keeping simulator and device build
-products separate. The existing `test_ios_source_syntax.sh` sweep runs after
+products separate. The two SDK legs configure with Ninja when it is on `PATH`
+(the Xcode generator otherwise): a Ninja configure takes about a minute where
+Xcode's takes seven to eight, and Ninja honours the compiler launcher, so the
+gate VM's persistent ccache serves a repeat build from cache. The GPU leg stays
+on the Xcode generator: its AUv3 `.appex` and host-app embedding use Xcode
+product types, and a Ninja configure of that tree fails in CMake's Swift
+compiler check for the iOS target. Because its Xcode configure is minutes of
+mostly serial try-compile work, the gate starts the GPU leg in the background
+and builds the SDK legs alongside it; it waits for the GPU leg and fails on
+its status before the Simulator phase, and stops it if an SDK leg fails first.
+`tools/scripts/test_ios_compile_gate_legs.py` (ctest `ios-compile-gate-legs`)
+pins that orchestration against stub toolchain executables. The existing `test_ios_source_syntax.sh` sweep runs after
 the real builds as the cheap, locally callable fallback for iOS-specific
 translation units.
 
