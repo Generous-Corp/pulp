@@ -1,8 +1,25 @@
 # Canvas text, font, shaping, and font-rendering tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# One executable for this manifest's pulp::canvas suites (pulp_add_test_group
+# in tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. With Skia the group
+# links skia::skia and states PULP_HAS_SKIA=1 plus the Skia include path once,
+# which is what the members that used to add them themselves compiled with
+# (pulp::canvas exports the same define PUBLIC). The live-GPU suites below get
+# their own groups, split by compile line (with and without pulp::view), and
+# the embedded-host smoke stays standalone because it compiles the CLAP
+# adapter sources into the test.
+pulp_add_test_group(pulp-test-group-canvas-text LIBRARIES pulp::canvas)
+if(PULP_HAS_SKIA)
+    target_link_libraries(pulp-test-group-canvas-text PRIVATE skia::skia)
+    target_compile_definitions(pulp-test-group-canvas-text PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-group-canvas-text PRIVATE ${SKIA_INCLUDE_DIRS})
+endif()
+
 # TextShaper (PreText-style measure-once-reflow-forever)
-pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-text-shaper GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # SheenBidi-backed BidiAnalyzer + TextRunPlanner non-ICU fallback.
 # Exercises pure-Arabic,
@@ -10,16 +27,19 @@ pulp_add_test_suite(pulp-test-text-shaper LIBRARIES pulp::canvas)
 # gates RTL-specific assertions on BidiAnalyzer::has_sheenbidi() so the
 # suite still passes on reduced-deps configs that compile the
 # pass-through stub.
-pulp_add_test_suite(pulp-test-bidi-text LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-bidi-text GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # FontScope memory-budget eviction.
-pulp_add_test_suite(pulp-test-font-scope-budget LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-font-scope-budget GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # TTF/OTF structural sanitizer.
 # Gated on PULP_HAS_SKIA: the non-Skia stub in font_registry_stubs.cpp
 # accepts any non-empty buffer, so the rejection cases false-negative.
 if(PULP_HAS_SKIA)
-    pulp_add_test_suite(pulp-test-font-security LIBRARIES pulp::canvas)
+    pulp_add_test_suite(pulp-test-font-security GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 # Variable axis wiring.
@@ -27,11 +47,13 @@ endif()
 # NotFound when Skia is absent, so the has_typeface() assertions
 # false-negative.
 if(PULP_HAS_SKIA)
-    pulp_add_test_suite(pulp-test-font-variable-axes LIBRARIES pulp::canvas)
+    pulp_add_test_suite(pulp-test-font-variable-axes GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 # UAX #29-lite cluster_step.
-pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-cluster-step GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Locale-aware word + line breaking.
 # The surface always links: when ICU's <unicode/brkiter.h> is on the
@@ -39,78 +61,61 @@ pulp_add_test_suite(pulp-test-cluster-step LIBRARIES pulp::canvas)
 # the SkUnicode_icu symbols bundled in libskia.a; otherwise the
 # degraded ASCII-space fallback keeps the API functional and the
 # English-only expectations still hold.
-pulp_add_test_suite(pulp-test-font-locale-shaping LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-font-locale-shaping GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # AA / hinting / subpixel policy centralization.
-add_executable(pulp-test-font-aa-hinting test_font_aa_hinting.cpp)
-target_link_libraries(pulp-test-font-aa-hinting PRIVATE pulp::canvas Catch2::Catch2WithMain)
-if(PULP_HAS_SKIA)
-    target_link_libraries(pulp-test-font-aa-hinting PRIVATE skia::skia)
-endif()
-catch_discover_tests(pulp-test-font-aa-hinting)
+pulp_add_test_suite(pulp-test-font-aa-hinting GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # FontFlightRecorder + JSON drain.
-add_executable(pulp-test-font-flight-recorder test_font_flight_recorder.cpp)
-target_link_libraries(pulp-test-font-flight-recorder PRIVATE pulp::canvas Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-font-flight-recorder)
+pulp_add_test_suite(pulp-test-font-flight-recorder GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Variable-font axis-animation LRU cache.
-add_executable(pulp-test-font-axis-animation test_font_axis_animation.cpp)
-target_link_libraries(pulp-test-font-axis-animation PRIVATE pulp::canvas Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-font-axis-animation)
+pulp_add_test_suite(pulp-test-font-axis-animation GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Parallel shaping via TextRunPlanner::shape_batch.
-add_executable(pulp-test-text-run-planner-parallel test_text_run_planner_parallel.cpp)
-target_link_libraries(pulp-test-text-run-planner-parallel PRIVATE pulp::canvas Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-text-run-planner-parallel)
+pulp_add_test_suite(pulp-test-text-run-planner-parallel GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Real ICU bidi + script run iterators. Verifies multi-run shaping on
 # bidi / script boundaries plus UAX #29 cluster grouping (ZWJ,
 # regional-indicator-pair, virama,
 # combining marks). Cluster-grouping cases run on every build; the
 # bidi / script cases auto-skip under non-Skia builds via SUCCEED.
-#
-# Add PULP_HAS_SKIA explicitly so the ICU-path assertions register
-# (mirrors test_canvas_fonts.cpp's pattern — pulp::canvas exports the
-# define PUBLIC but CMake's PUBLIC propagation doesn't always reach
-# sibling test targets, depending on configure ordering).
-add_executable(pulp-test-text-run-planner-icu test_text_run_planner_icu.cpp)
-target_link_libraries(pulp-test-text-run-planner-icu PRIVATE pulp::canvas Catch2::Catch2WithMain)
-if(PULP_HAS_SKIA)
-    target_compile_definitions(pulp-test-text-run-planner-icu PRIVATE PULP_HAS_SKIA=1)
-endif()
-catch_discover_tests(pulp-test-text-run-planner-icu)
+# The group states PULP_HAS_SKIA explicitly so the ICU-path assertions
+# register.
+pulp_add_test_suite(pulp-test-text-run-planner-icu GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Async font lifecycle (register_font_url).
-add_executable(pulp-test-font-async-lifecycle test_font_async_lifecycle.cpp)
-target_link_libraries(pulp-test-font-async-lifecycle PRIVATE pulp::canvas Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-font-async-lifecycle)
+pulp_add_test_suite(pulp-test-font-async-lifecycle GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # WOFF2 runtime decoding (security-gated).
 # Structural rejection + decoder-availability probe; no Skia link
 # required because the negative paths are universal.
-add_executable(pulp-test-font-woff2 test_font_woff2.cpp)
-target_link_libraries(pulp-test-font-woff2 PRIVATE pulp::canvas Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-font-woff2 PRIVATE
-    PULP_TEST_WOFF2_FIXTURE="${CMAKE_SOURCE_DIR}/packages/pulp-web-player/src/theme/inter.woff2"
-    PULP_TEST_INTER_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf"
-    PULP_TEST_JOST_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
-    PULP_TEST_JETBRAINS_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
-catch_discover_tests(pulp-test-font-woff2)
+pulp_add_test_suite(pulp-test-font-woff2 GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas
+    COMPILE_DEFINITIONS
+        PULP_TEST_WOFF2_FIXTURE="${CMAKE_SOURCE_DIR}/packages/pulp-web-player/src/theme/inter.woff2"
+        PULP_TEST_INTER_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf"
+        PULP_TEST_JOST_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
+        PULP_TEST_JETBRAINS_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
 
 # Color-font predicate on ResolvedFont.
 # Gated on PULP_HAS_SKIA — the predicate returns false without a real
 # typeface so the resolver-bound assertions can't fire on non-Skia.
 if(PULP_HAS_SKIA)
-    add_executable(pulp-test-font-color-mode test_font_color_mode.cpp)
-    target_link_libraries(pulp-test-font-color-mode PRIVATE pulp::canvas Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-font-color-mode)
+    pulp_add_test_suite(pulp-test-font-color-mode GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 # Font subsystem typed options and scope generation tests
-add_executable(pulp-test-font-options test_font_options.cpp)
-target_link_libraries(pulp-test-font-options PRIVATE pulp::canvas Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-font-options)
+pulp_add_test_suite(pulp-test-font-options GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Measurement-paint parity harness.
 # Asserts TextShaper predictions match Skia's measured advance within
@@ -119,9 +124,8 @@ catch_discover_tests(pulp-test-font-options)
 # corpus.json) loader + per-TextAnchor bbox assertions land alongside
 # a future JSON parser link.
 if(PULP_HAS_SKIA)
-    add_executable(pulp-test-parity test_parity.cpp)
-    target_link_libraries(pulp-test-parity PRIVATE pulp::canvas Catch2::Catch2WithMain skia::skia)
-    catch_discover_tests(pulp-test-parity)
+    pulp_add_test_suite(pulp-test-parity GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 # Cross-backend font rendering goldens.
@@ -132,15 +136,8 @@ endif()
 # the rationale. Skia-only; the bare TU still builds without
 # Skia (single soft-skip case) so this stays portable.
 if(PULP_HAS_SKIA)
-    add_executable(pulp-test-font-rendering-goldens
-        test_font_rendering_goldens.cpp)
-    target_link_libraries(pulp-test-font-rendering-goldens PRIVATE
-        pulp::canvas Catch2::Catch2WithMain skia::skia)
-    target_compile_definitions(pulp-test-font-rendering-goldens PRIVATE
-        PULP_HAS_SKIA=1)
-    target_include_directories(pulp-test-font-rendering-goldens PRIVATE
-        ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-font-rendering-goldens)
+    pulp_add_test_suite(pulp-test-font-rendering-goldens GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 # Skia GPU font rendering lane (Dawn → Metal on macOS-arm64).
@@ -162,24 +159,26 @@ endif()
 # owner identity, pruning of sealed-but-never-drawn non-cacheable layers, and a
 # bounded LRU budget. Raster-only — none of this needs a GPU.
 if(PULP_HAS_SKIA)
-    pulp_add_test_suite(pulp-test-retained-layer-store
-        LIBRARIES pulp::canvas
-        INCLUDE_DIRS ${SKIA_INCLUDE_DIRS}
-        COMPILE_DEFINITIONS PULP_HAS_SKIA=1)
+    pulp_add_test_suite(pulp-test-retained-layer-store GROUP pulp-test-group-canvas-text
+        LIBRARIES pulp::canvas)
 endif()
 
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
-    add_executable(pulp-test-font-rendering-goldens-gpu
-        test_font_rendering_goldens_gpu.cpp)
-    target_link_libraries(pulp-test-font-rendering-goldens-gpu PRIVATE
-        pulp::canvas pulp::render Catch2::Catch2WithMain skia::skia)
-    target_compile_definitions(pulp-test-font-rendering-goldens-gpu PRIVATE
-        PULP_HAS_SKIA=1)
-    target_include_directories(pulp-test-font-rendering-goldens-gpu PRIVATE
-        ${SKIA_INCLUDE_DIRS})
+    # Two live-GPU groups, split by compile line: the pulp::canvas + pulp::render
+    # suites, and the ones that also drive a pulp::view tree.
+    pulp_add_test_group(pulp-test-group-canvas-text-gpu
+        LIBRARIES pulp::canvas pulp::render skia::skia
+        INCLUDE_DIRS ${SKIA_INCLUDE_DIRS}
+        COMPILE_DEFINITIONS PULP_HAS_SKIA=1)
+    pulp_add_test_group(pulp-test-group-canvas-text-view-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render skia::skia
+        INCLUDE_DIRS ${SKIA_INCLUDE_DIRS}
+        COMPILE_DEFINITIONS PULP_HAS_SKIA=1)
+
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
-    catch_discover_tests(pulp-test-font-rendering-goldens-gpu
+    pulp_add_test_suite(pulp-test-font-rendering-goldens-gpu GROUP pulp-test-group-canvas-text-gpu
+        LIBRARIES pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # GPU view-host-in-plugins — proves a Processor::create_view() editor
@@ -203,33 +202,20 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # texture via the persistent Graphite recorder) and asserts it still
     # composites on the replay frame — the cross-frame texture-lifetime gap the
     # raster tests cannot cover. Soft-skips on Dawn-init failure.
-    add_executable(pulp-test-subtree-cache-gpu test_subtree_cache_gpu.cpp)
-    target_link_libraries(pulp-test-subtree-cache-gpu PRIVATE
-        pulp::view pulp::canvas pulp::render
-        Catch2::Catch2WithMain skia::skia)
-    target_compile_definitions(pulp-test-subtree-cache-gpu PRIVATE
-        PULP_HAS_SKIA=1)
-    target_include_directories(pulp-test-subtree-cache-gpu PRIVATE
-        ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-subtree-cache-gpu
-        # This live-GPU replay proof is environment-sensitive on ephemeral
-        # macOS CI VMs. Keep it in push/nightly coverage while the required
-        # PR and merge-group lanes exclude the existing `slow` label.
-        PROPERTIES RESOURCE_LOCK pulp_gpu LABELS slow)
+    # This live-GPU replay proof is environment-sensitive on ephemeral
+    # macOS CI VMs. Keep it in push/nightly coverage while the required
+    # PR and merge-group lanes exclude the existing `slow` label.
+    pulp_add_test_suite(pulp-test-subtree-cache-gpu GROUP pulp-test-group-canvas-text-view-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        LABELS slow
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
     # a full frame then a clipped frame, and asserts the untouched content
     # survives while the clipped region updates. Soft-skips without a real adapter.
-    add_executable(pulp-test-partial-repaint-gpu test_partial_repaint_gpu.cpp)
-    target_link_libraries(pulp-test-partial-repaint-gpu PRIVATE
-        pulp::view pulp::canvas pulp::render
-        Catch2::Catch2WithMain skia::skia)
-    target_compile_definitions(pulp-test-partial-repaint-gpu PRIVATE
-        PULP_HAS_SKIA=1)
-    target_include_directories(pulp-test-partial-repaint-gpu PRIVATE
-        ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-partial-repaint-gpu
+    pulp_add_test_suite(pulp-test-partial-repaint-gpu GROUP pulp-test-group-canvas-text-view-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Visible-frame success contract on a LIVE Dawn/Graphite surface (WAH-2).
@@ -237,15 +223,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     # this pins which outcome the real backend produces — in particular that a
     # captured frame (whose recording read_current_rgba already flushed) still
     # reports as having reached its output. Soft-skips without a real adapter.
-    add_executable(pulp-test-skia-frame-outcome-gpu test_skia_frame_outcome_gpu.cpp)
-    target_link_libraries(pulp-test-skia-frame-outcome-gpu PRIVATE
-        pulp::canvas pulp::render
-        Catch2::Catch2WithMain skia::skia)
-    target_compile_definitions(pulp-test-skia-frame-outcome-gpu PRIVATE
-        PULP_HAS_SKIA=1)
-    target_include_directories(pulp-test-skia-frame-outcome-gpu PRIVATE
-        ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-skia-frame-outcome-gpu
+    pulp_add_test_suite(pulp-test-skia-frame-outcome-gpu GROUP pulp-test-group-canvas-text-gpu
+        LIBRARIES pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
@@ -327,13 +306,15 @@ endif()
 # disagreeing about a twice-enclosed region, and scale_to_fit's centring and its
 # degenerate guard (a zero-width path scaled to a non-zero width is a division by
 # zero, and the "result" is a path of NaNs that renders as nothing, forever).
-pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-canvas-path GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # PathMeasure: arc length over a Path, and the trim built on it. Covers the
 # clamping contract a meter depends on, the zero-length cases that must report
 # no contour, and the requirement that trimming a cubic yields a cubic rather
 # than a polyline.
-pulp_add_test_suite(pulp-test-canvas-path-measure LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-canvas-path-measure GROUP pulp-test-group-canvas-text
+    LIBRARIES pulp::canvas)
 
 # Drawlist formatting: a recorded drawlist as diffable text. Covers the
 # completeness choices (every float slot, opaque black, HDR colour as floats)
