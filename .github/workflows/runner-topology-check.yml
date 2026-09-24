@@ -71,9 +71,38 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The snapshot freshness check parses TOML (tomllib, Python 3.11+); pin
+      # rather than trust whatever the runner image ships.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      # The advertised-labels snapshot is generated from tartci's fleet
+      # profiles. A machine added or removed there without regenerating the
+      # snapshot makes --mode=static judge lanes against a fleet that no longer
+      # exists, so staleness is a topology finding, not a log line. tartci is
+      # public; the clone needs no token. Exit 1 = stale, 2 = unreadable.
+      - name: Check advertised-labels snapshot freshness
+        id: snapshot
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          git clone --depth 1 --quiet https://github.com/danielraffel/tartci.git "$RUNNER_TEMP/tartci" \
+              > snapshot.txt 2>&1 \
+            && python3 tools/scripts/fleet_snapshot.py --check --tartci "$RUNNER_TEMP/tartci" \
+              >> snapshot.txt 2>&1
+          rc=$?
+          set -e
+          [ "${rc}" -eq 128 ] && rc=2   # git clone failure
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          cat snapshot.txt
+
       - name: Reconcile topology
         id: reconcile
         shell: bash
+        env:
+          SNAPSHOT_RC: ${{ steps.snapshot.outputs.rc }}
         run: |
           set -uo pipefail
           set +e
@@ -81,6 +110,21 @@ jobs:
               --mode=report --repo "${GITHUB_REPOSITORY}" > report.txt 2>report.err
           rc=$?
           set -e
+
+          # Fold the snapshot verdict into the same finding: a stale snapshot is
+          # a violation (1), an unreadable tartci clone is unreadable state (2),
+          # and neither may be hidden behind a green live reconcile.
+          {
+            echo ""
+            echo "── advertised-labels snapshot (fleet_snapshot.py --check) ──"
+            cat snapshot.txt 2>/dev/null || echo "(snapshot check did not run)"
+          } >> report.txt
+          snapshot_rc="${SNAPSHOT_RC:-2}"
+          if [ "${rc}" = "0" ] && [ "${snapshot_rc}" != "0" ]; then
+            rc="${snapshot_rc}"
+          elif [ "${rc}" = "2" ] && [ "${snapshot_rc}" = "1" ]; then
+            rc=1
+          fi
 
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"
           cat report.txt
@@ -113,11 +157,14 @@ jobs:
               echo "**Live fleet state could not be read.** This check cannot"
               echo "confirm the routing invariant, so it fails rather than"
               echo "report a false green. Usual cause: the token lacks"
-              echo "\`Administration: Read\` for the runners API."
+              echo "\`Administration: Read\` for the runners API, or the public"
+              echo "tartci clone for the snapshot freshness check failed."
             else
               echo "**Invariant violated:** one or more routing lanes resolve to a"
               echo "label set nothing can serve, or a repo variable drifted from the"
-              echo "reviewed contract in \`tools/scripts/runner_topology.json\`."
+              echo "reviewed contract in \`tools/scripts/runner_topology.json\`, or"
+              echo "the advertised-labels snapshot no longer matches tartci's fleet"
+              echo "profiles (regenerate with \`tools/scripts/fleet_snapshot.py --write\`)."
               echo ""
               echo "This failure mode is SILENT in GitHub: jobs routed at a label no"
               echo "runner carries are queued, not rejected. The symptom operators see"
