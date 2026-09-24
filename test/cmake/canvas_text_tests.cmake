@@ -329,6 +329,12 @@ endif()
 # zero, and the "result" is a path of NaNs that renders as nothing, forever).
 pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
 
+# PathMeasure: arc length over a Path, and the trim built on it. Covers the
+# clamping contract a meter depends on, the zero-length cases that must report
+# no contour, and the requirement that trimming a cubic yields a cubic rather
+# than a polyline.
+pulp_add_test_suite(pulp-test-canvas-path-measure LIBRARIES pulp::canvas)
+
 # Drawlist formatting: a recorded drawlist as diffable text. Covers the
 # completeness choices (every float slot, opaque black, HDR colour as floats)
 # and the two defect classes the pixel scorers document as invisible to them --

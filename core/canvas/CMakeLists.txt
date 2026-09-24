@@ -15,6 +15,7 @@ target_sources(pulp-canvas PRIVATE
     # config, including the ones with no GPU backend at all.
     src/drawlist_format.cpp
     src/path.cpp
+    src/path_measure.cpp
     src/recording_canvas.cpp
     src/svg.cpp
     # Lottie playback. Always compiled; the body is a no-op unless PULP_LOTTIE
