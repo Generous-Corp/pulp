@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260924-focused-builds-cli-watch",
+  "created_at": "2026-09-24T13:11:35Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record that the build-command defaults change crosses two design selectors without touching anything either family is about. `pulp build/dev/loop` now configure fresh source checkouts with Ninja, Release and examples OFF, and build only the targets the working diff affects, with a new `pulp affected` command. design-output-and-packaging is crossed by docs/status/cli-commands.yaml and docs/status/tools.yaml (the new command, the --all/--examples flags and the affected-target tool registry entry). design-source-ingest is crossed by experimental/pulp-rs/src/main.rs and src/cmd/mod.rs (registering the `affected` subcommand and its help row), tools/cli/cmd_design.cpp (one line: `pulp design` configures with examples ON because pulp-design-tool lives under examples/, preserving today's behaviour now that examples default OFF), and test/cmake/cli_import_tool_tests.cmake (adding tools/cli/focused_build.cpp to a CLI test's source list). No importer, DesignIR schema, browser capture path, renderer, codegen output, fixture, threshold, packaging artifact or Vellum-owned source changes, and no existing test's verdict changes. Registered as watch-only so both families' coverage stays honest about a change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "affected-targets-selftest",
+    "cmake-build-defaults",
+    "pulp-test-cli-configure-defaults",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

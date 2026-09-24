@@ -1196,6 +1196,17 @@ It is tiered:
   declares no lease keeps `-j8`, so the change reaches each host only as that
   host's tartci starts declaring the lease — a per-host rollout, not a fleet
   flip.
+- **Ninja link pool (every Ninja build).** The governor bounds *how many jobs*
+  a build runs; the `pulp_link` job pool (`tools/cmake/PulpLinkPool.cmake`)
+  additionally bounds *how many of them are links*. Every Pulp executable and
+  bundle links the same ~150 MiB of Skia/Dawn/SDL3 archives, so a wide link
+  phase is memory-bandwidth-bound: links run slower each and peak RSS climbs
+  with the number in flight, without the compiles needing to be throttled. The
+  depth is one slot per 2 GiB of RAM, clamped to [2, 8] (a test link peaks near
+  0.45 GiB RSS; an 8 GiB gate VM gets 4 slots, the same as its governed `-j`, so
+  the pool never throttles it). `-DPULP_LINK_JOBS=N` overrides the depth and
+  `-DPULP_LINK_JOBS=0` disables the pool. Makefile, Xcode, and Visual Studio
+  generators have no job pools, so the setting is a no-op there.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that

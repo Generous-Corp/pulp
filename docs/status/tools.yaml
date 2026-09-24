@@ -6,6 +6,7 @@ sweep:
   - tools/harness
   - tools/audio
   include_paths:
+  - tools/scripts/affected_targets.py
   - tools/scripts/ctest_nonruns.py
   - tools/scripts/pr_flow_audit.py
   - tools/scripts/figma_import_diff.py
@@ -13,6 +14,16 @@ sweep:
   - tools/scripts/gpu_audio_p4_evidence.py
   - tools/scripts/render-figma-import.sh
 tools:
+- name: affected-targets
+  path: tools/scripts/affected_targets.py
+  category: build
+  use_when: Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py).
+  invocation: pulp affected --json
+  inputs: A configured build dir (the script writes the CMake file-API query; the next configure answers it) and the working diff, or explicit --file paths.
+  outputs: mode (focused|all) + reason, target names for `cmake --build --target`, literal ctest names for `--tests-from-file`, and the one-line banner.
+  availability: always
+  skill: prototype-loop
+  docs: reference/cli.md#affected
 - name: audio-quality-lab
   path: tools/audio/quality-lab
   category: audio

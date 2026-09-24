@@ -50,8 +50,13 @@ pub struct DevArgs {
     pub launch_args: Vec<String>,
     /// Passed through to `cmake --build` (`--target FOO` pairs, etc.).
     pub build_args: Vec<String>,
+    /// `--all` — build every target and run every test instead of the
+    /// ones affected by the working diff.
+    pub all: bool,
     /// `true` when the user asked for `--help` — prints usage and exits 0.
     pub wants_help: bool,
+    /// `--examples` — configure a source checkout with examples on.
+    pub examples: bool,
 }
 
 /// Print the C++ parity usage banner to `out`.
@@ -71,6 +76,9 @@ pub fn print_help(out: &mut impl Write) -> Result<()> {
         \x20 --run TARGET           Launch TARGET from build dir, relaunch on rebuild\n\
         \x20 --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n\
         \x20 --target T             Pass --target T to cmake --build\n\
+        \x20 --all                  Build every target and run every test (default: only\n\
+        \x20                        those affected by the working diff)\n\
+        \x20 --examples             Configure a source checkout with example projects\n\
         \x20 -- args...             Arguments passed to the launched app\n\n\
         Note: pulp-rs does not yet implement the watch loop. A single\n\
         build pass runs; use the C++ binary for live-reload workflows.\n";
@@ -105,17 +113,23 @@ pub fn parse_args(args: &[String]) -> DevArgs {
         }
         if a == "--test" || a == "-t" {
             out.run_tests = true;
+        } else if a == "--all" {
+            out.all = true;
         } else if let Some(rest) = a.strip_prefix("--test-filter=") {
             out.test_filter = Some(rest.to_owned());
             out.run_tests = true;
         } else if a == "--validate" {
             out.run_validate = true;
+        } else if a == "--examples" {
+            out.examples = true;
         } else if a == "--run" && i + 1 < args.len() {
             i += 1;
             out.launch_target = Some(args[i].clone());
         } else if a == "--design" && i + 1 < args.len() {
             i += 1;
             out.design_script = Some(args[i].clone());
+            // pulp-design-tool lives under examples/.
+            out.examples = true;
             // Match C++: enqueue `--target pulp-design-tool` onto build_args.
             out.build_args.push("--target".to_owned());
             out.build_args.push("pulp-design-tool".to_owned());
@@ -169,6 +183,8 @@ pub fn run<S: Spawner>(
     let build_tail = args.build_args.clone();
     let build_req = orchestrate::BuildArgs {
         passthrough: build_tail,
+        all: args.all,
+        examples: args.examples,
         ..orchestrate::BuildArgs::default()
     };
     let rc = orchestrate::build_with(&proj, &build_req, spawner, out)?;
@@ -187,14 +203,15 @@ pub fn run<S: Spawner>(
     }
 
     if args.run_tests {
-        let mut inv = Invocation::new("ctest")
-            .arg("--test-dir")
-            .arg(proj.build_dir.to_string_lossy().into_owned())
-            .arg("--output-on-failure");
+        let mut ctest_args = Vec::new();
         if let Some(ref pat) = args.test_filter {
-            inv = inv.arg("-R").arg(pat.clone());
+            ctest_args.push("-R".to_owned());
+            ctest_args.push(pat.clone());
         }
-        let test_rc = spawner.run(&inv)?;
+        if args.all {
+            ctest_args.push("--all".to_owned());
+        }
+        let test_rc = orchestrate::test_with(&proj, &ctest_args, spawner, out)?;
         if test_rc != 0 {
             return Ok(test_rc);
         }

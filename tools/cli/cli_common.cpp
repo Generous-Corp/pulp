@@ -1,6 +1,7 @@
 // cli_common.cpp — Shared implementations for the Pulp CLI
 
 #include "cli_common.hpp"
+#include "configure_defaults.hpp"
 
 #include "fetchcontent_cache.hpp"
 #include "tartci_lease.hpp"
@@ -657,33 +658,29 @@ bool checkout_supports_au(const fs::path& repo_root) {
 }
 #endif
 
-int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir) {
-    bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
+std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
+                                    bool examples) {
+#ifdef _WIN32
+    const bool ninja = false;  // Windows keeps the Visual Studio generator.
+#else
+    const bool ninja = !find_executable_in_path("ninja").empty();
+#endif
+    std::string flags;
+    for (const auto& arg : pulp::cli::configure_default_args_for(build_dir, source_checkout, examples, ninja))
+        flags += " " + shell_quote(arg);
+    return flags;
+}
 
-    if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
-        auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
-        auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
-        if (cmake_time > cache_time) needs_configure = true;
-    }
-
+int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir,
+                                 bool examples) {
+    const auto cache = build_dir / "CMakeCache.txt";
+    const bool needs_configure = !fs::exists(cache)
+        || fs::last_write_time(project_root / "CMakeLists.txt") > fs::last_write_time(cache)
+        || (examples && build_dir_has_examples_off(build_dir));
     if (!needs_configure) return 0;
-    // Default to a Release build. Without an explicit CMAKE_BUILD_TYPE, CMake
-    // configures with NO optimization flags (no -O, no NDEBUG) — an unoptimized
-    // build whose plugin editor / DSP feels sluggish in a DAW for the same
-    // reason a Debug build does. Plugins are normally perf-tested in a host, so
-    // Release is the right default; `PULP_BUILD_TYPE=Debug pulp build` opts into
-    // a debuggable build. (Only applied on a fresh configure — an existing
-    // CMakeCache's build type is left untouched.)
-    std::string build_type = "Release";
-    if (const char* bt = std::getenv("PULP_BUILD_TYPE"); bt && bt[0] != '\0') {
-        build_type = bt;
-    }
     std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root)
-                              + " -DCMAKE_BUILD_TYPE=" + shell_quote(build_type);
+                              + configure_default_flags(build_dir, /*source_checkout=*/true, examples);
     append_windows_visual_studio_generator_args(configure_cmd);
-    std::cout << "Build type: " << build_type
-              << (build_type == "Release" ? "" : "  (set PULP_BUILD_TYPE=Release for perf)")
-              << "\n";
     return run_with_spinner(configure_cmd, "Configuring");
 }
 
@@ -1070,12 +1067,13 @@ int watch_loop(const WatchOptions& opts) {
         std::cout << "\n" << color::yellow() << "Change detected"
                   << color::reset() << ": " << first_changed << "\n";
 
-        // Build
+        const auto selection = select_for_rebuild(opts.root, opts.build_dir, opts.focus, "  ");
         std::string build_cmd = "cmake --build " + opts.build_dir.string();
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
-        int rc = run_with_spinner(apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, build_qos),
-                                                             build_jobs, opts.build_watchdog || loop_lease.active()),
-                                  "Rebuilding");
+        build_cmd = apply_agent_build_qos(focused_build_command(build_cmd, selection), build_qos);
+        int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
+            apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active()),
+            "Rebuilding");
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()
@@ -1084,12 +1082,11 @@ int watch_loop(const WatchOptions& opts) {
             continue;
         }
 
-        // Tests
+        // Tests (an explicit --test-filter wins over the selection)
         if (opts.run_tests) {
-            std::string test_cmd = "ctest --test-dir " + opts.build_dir.string()
-                                 + " --output-on-failure";
-            if (!opts.test_filter.empty()) test_cmd += " -R " + shell_quote(opts.test_filter);
-            int trc = run_with_spinner(test_cmd, "Testing");
+            std::string test_cmd = "ctest --test-dir " + opts.build_dir.string() + " --output-on-failure";
+            const bool run_ctest = focused_test_selection(test_cmd, opts.test_filter, selection, "  ");
+            int trc = run_ctest ? run_with_spinner(test_cmd, "Testing") : 0;
             if (trc != 0) {
                 std::cout << color::red() << "Tests failed." << color::reset()
                           << " Watching for more changes...\n";

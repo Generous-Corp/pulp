@@ -465,40 +465,16 @@ def validate_after_selected_build(
 def cmake_artifact_targets(build_dir: Path) -> tuple[set[str], dict[Path, str]]:
     """Read the configure-produced CMake File API target/artifact projection."""
 
-    reply = build_dir / ".cmake" / "api" / "v1" / "reply"
-    indexes = sorted(reply.glob("index-*.json"))
-    if len(indexes) != 1:
-        raise SelectionExecutionError(
-            f"CMake File API must contain one exact index, found {len(indexes)}"
-        )
     try:
-        index = json.loads(indexes[0].read_text(encoding="utf-8"))
-        codemodel_name = index["reply"]["codemodel-v2"]["jsonFile"]
-        codemodel = json.loads((reply / codemodel_name).read_text(encoding="utf-8"))
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-        raise SelectionExecutionError(f"CMake File API codemodel is unavailable: {error}") from error
-    configurations = codemodel.get("configurations")
-    if not isinstance(configurations, list) or len(configurations) != 1:
-        raise SelectionExecutionError("CMake File API must contain one build configuration")
+        model = inventory.load_codemodel_targets(build_dir)
+    except inventory.InventoryError as error:
+        raise SelectionExecutionError(str(error)) from error
     target_names: set[str] = set()
     artifacts: dict[Path, str] = {}
-    targets = configurations[0].get("targets")
-    if not isinstance(targets, list):
-        raise SelectionExecutionError("CMake File API codemodel has no target list")
-    for reference in targets:
-        try:
-            target = json.loads((reply / reference["jsonFile"]).read_text(encoding="utf-8"))
-            name = target["name"]
-        except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-            raise SelectionExecutionError(f"CMake File API target is invalid: {error}") from error
-        if not isinstance(name, str) or not name:
-            raise SelectionExecutionError("CMake File API target has no canonical name")
+    for name, target in model.targets.items():
         target_names.add(name)
-        for artifact in target.get("artifacts", []):
-            path = artifact.get("path") if isinstance(artifact, dict) else None
-            if not isinstance(path, str) or not path:
-                continue
-            resolved = (build_dir / path).resolve()
+        for path in target.artifacts:
+            resolved = Path(path).resolve()
             prior = artifacts.get(resolved)
             if prior is not None and prior != name:
                 raise SelectionExecutionError(

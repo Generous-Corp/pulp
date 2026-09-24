@@ -15,6 +15,9 @@ commands:
       - name: --arch
         kind: option
         description: "macOS target architecture: `host` (default — the build machine's arch, fast for dev), `universal` (fat arm64+x86_64, runs on every Mac — use for distribution), `arm64`, or `x86_64`. Maps to the PULP_MACOS_ARCH CMake option; forces reconfigure. Note: `--js-engine v8` cannot build universal (no universal libv8)."
+      - name: --all
+        kind: flag
+        description: "Build every target. In a source checkout the default builds only the targets the working diff affects (see `affected`); `--target`, `--install`, `--validate`, and `PULP_BUILD_FOCUS=0` also restore the full build."
       - name: --watch
         kind: flag
         description: Enter a file-watching loop after the initial build and rebuild on source changes.
@@ -39,6 +42,9 @@ commands:
       - name: --allow-tracing
         kind: flag
         description: Required with `--trace --install`; acknowledges that a tracing-enabled build is being copied into the user's plug-in folders. Rejected without `--trace`.
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON`. A fresh `pulp build` configure leaves the example projects off for a faster dev build; an existing build dir keeps its setting, and `--examples` reconfigures one that has them off."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
@@ -57,10 +63,34 @@ commands:
     status: usable
     summary: Run the test suite via CTest. Builds first if needed. When a cold-start build is triggered, runs the FetchContent cache preflight from `pulp doctor --caches` first and aborts with a clear remediation message on any dangling-symlink / stale-commit entry — bypass via `PULP_SKIP_CACHE_PREFLIGHT=1`. Works with repo and standalone projects.
     args:
+      - name: --all
+        kind: flag
+        description: "Run every test. In a source checkout the default runs only the tests whose programs the working diff affects, via `ctest --tests-from-file`; any ctest selection flag or `PULP_BUILD_FOCUS=0` also runs the full suite."
       - name: extra_args
         kind: passthrough
         description: Passed through to ctest (e.g., -R for filtering)
     docs: reference/cli.md#test
+
+  - name: affected
+    status: usable
+    summary: Print the CMake targets and CTest tests affected by the working diff (branch merge-base with origin/main plus uncommitted and untracked files), mapped through the CMake file-API codemodel, the generator dependency database, companion test naming, add_dependencies edges, and CTest fixture edges. This is the selection `build`, `dev`, `loop`, and `test` use by default in a source checkout; it falls back to `all` with a reason when the diff is empty, touches the build system, cannot be mapped, or exceeds the threshold.
+    args:
+      - name: --json
+        kind: flag
+        description: Print the selection as JSON (mode, reason, banner, targets, tests, totals)
+      - name: --base
+        kind: option
+        description: Ref whose merge-base bounds the committed part of the diff (default origin/main)
+      - name: --file
+        kind: option
+        description: Use this changed path instead of asking git (repeatable)
+      - name: --threshold
+        kind: option
+        description: Fall back to all above this fraction of targets (default 0.4)
+      - name: --no-tests
+        kind: flag
+        description: Skip the CTest inventory
+    docs: reference/cli.md#affected
 
   - name: status
     status: usable
@@ -2468,8 +2498,11 @@ commands:
 
   - name: dev
     status: usable
-    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice.
+    summary: Unified development loop — the Rust front end delegates to `pulp-cpp` for the live watch/rebuild loop when the sibling delegate is available; the Rust-only fallback performs one build/test/run pass and prints a watch-loop stub notice. In a source checkout each build and test pass is focused on the working diff (see `affected`) unless `--all` is given.
     args:
+      - name: --all
+        kind: flag
+        description: Build every target and run every test instead of the ones affected by the working diff
       - name: --test
         kind: flag
         description: Run tests after each successful build in delegated watch mode, or after the one Rust fallback build pass
@@ -2491,6 +2524,9 @@ commands:
       - name: --target
         kind: option
         description: Pass --target to cmake --build
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON` before the first build (a fresh dev configure leaves the example projects off). `--design` implies it, because pulp-design-tool lives under `examples/`."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard in the delegated C++ dev loop and continue anyway (unsupported)
@@ -2503,6 +2539,9 @@ commands:
     status: experimental
     summary: Leveraged-prototype focus mode — explicit "single-platform iteration" marker. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then runs the normal watch + rebuild loop using the current project's build configuration. Surrounding tooling may read the advisory marker for platform-specific behavior; `pulp loop` itself does not rewrite the build graph. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
     args:
+      - name: --all
+        kind: flag
+        description: Build every target and run every test instead of the ones affected by the working diff (the watch loop re-selects before each rebuild)
       - name: --platform
         kind: option
         description: "Override the auto-detected host platform. One of: macos, linux, windows."
@@ -2536,6 +2575,9 @@ commands:
       - name: --target
         kind: option
         description: Pass --target to cmake --build
+      - name: --examples
+        kind: flag
+        description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON` before the first build (a fresh dev configure leaves the example projects off)."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)

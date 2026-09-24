@@ -399,3 +399,82 @@ fn pr_errors_cleanly_when_native_flag_is_used() {
     );
     assert!(combined.contains("--native"));
 }
+
+/// `pulp build` against a fake `cmake`/`ninja` on `PATH`: the recorded
+/// configure argv is exactly what the CLI emits for a fresh source checkout.
+#[cfg(unix)]
+mod build_configure_argv {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    fn write_exe(path: &Path, body: &str) {
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Returns (project root, fake bin dir, argv log) for a minimal checkout.
+    fn fixture(with_ninja: bool) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let td = tempdir().unwrap();
+        let root = td.path().join("checkout");
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        std::fs::write(root.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        let bin = td.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = td.path().join("cmake-argv.log");
+        // One line per invocation, arguments separated by a unit separator.
+        write_exe(
+            &bin.join("cmake"),
+            &format!(
+                "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\037' \"$a\"; done >> '{}'\nprintf '\\n' >> '{}'\nexit 0\n",
+                log.display(),
+                log.display()
+            ),
+        );
+        if with_ninja {
+            write_exe(&bin.join("ninja"), "#!/bin/sh\nexit 0\n");
+        }
+        (td, bin, log)
+    }
+
+    fn configure_argv(root: &Path, bin: &Path, log: &Path, extra: &[&str]) -> Vec<String> {
+        let out = pulp_rs_no_fallthrough()
+            .arg("build")
+            .args(extra)
+            .current_dir(root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1")
+            .env("PULP_TARTCI_LEASES", "0")
+            .env_remove("PULP_BUILD_TYPE")
+            .output()
+            .expect("run pulp build");
+        assert!(out.status.success(), "pulp build failed: {out:?}");
+        let text = std::fs::read_to_string(log).unwrap();
+        let first = text.lines().next().expect("cmake was never invoked");
+        first
+            .split('\u{1f}')
+            .filter(|a| !a.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn fresh_checkout_configures_ninja_release_examples_off() {
+        let (td, bin, log) = fixture(true);
+        let argv = configure_argv(&td.path().join("checkout"), &bin, &log, &[]);
+        let joined = argv.join(" ");
+        assert!(joined.contains("-G Ninja"), "{joined}");
+        assert!(argv.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{joined}");
+        assert!(argv.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=OFF"), "{joined}");
+    }
+
+    #[test]
+    fn examples_flag_and_missing_ninja_are_honored() {
+        let (td, bin, log) = fixture(false);
+        let argv = configure_argv(&td.path().join("checkout"), &bin, &log, &["--examples"]);
+        let joined = argv.join(" ");
+        assert!(!argv.iter().any(|a| a == "-G"), "{joined}");
+        assert!(argv.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=ON"), "{joined}");
+        assert!(!argv.iter().any(|a| a == "--examples"), "{joined}");
+    }
+}

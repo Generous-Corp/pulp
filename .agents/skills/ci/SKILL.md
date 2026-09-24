@@ -13,6 +13,22 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Focused builds are a dev-loop default, never a landing signal
+
+`pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
+and run only what the working diff affects (`pulp affected`, the build-target
+projection in `tools/scripts/changed_surface_inventory.py`, which also honours
+the `families` under `[targets.mac.changed_surface_selection]`; banner
+`FOCUSED: building N/<total> targets affected by your diff - run 'pulp build
+--all' before opening a PR`). That is
+deliberate for iteration speed and deliberately **not** what any gate runs: the
+pre-push diff-cover build, `tools/scripts/gates.sh`, Shipyard's lanes, and every
+GitHub Actions job build `all` and drive `ctest` themselves, so the CLAUDE.md
+"struct-layout change must compile everywhere" contract is unchanged. Before
+`shipyard pr`, run `pulp build --all` (and `pulp test --all` when you changed
+anything with tests); a focused green run proves the affected set, not the
+graph. `PULP_BUILD_FOCUS=0` disables focus for scripts that wrap the CLI.
+
 ## A2T structural evidence is produced only by the required macOS PR job
 
 An A2T evidence PR targeting `Generous-Corp/pulp` `main` that adds or modifies the exact tracked

@@ -278,6 +278,41 @@ the generated graph, not the CMake text —
 `grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
 build/CMakeFiles/Makefile2` must print a line.
 
+### Build-shaped commands consult the focused-build selector
+
+`pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
+default to building/testing only what the working diff affects. One projection
+serves both binaries: `project_working_diff()` in
+`tools/scripts/changed_surface_inventory.py` (the Shipyard changed-surface
+module, extended with the build-target projection so there is one codemodel
+reader, one ctest loader, and one gate corpus filter), driven by the thin CLI
+`tools/scripts/affected_targets.py` (surfaced as `pulp affected`), which writes
+`selection.json` / `targets.txt` / `tests.txt` / `banner.txt` into
+`<build>/.pulp/affected/`; the Rust side reads them through
+`experimental/pulp-rs/src/cmd/affected.rs` (`build_enabled`, `select`,
+`tests_file`), the C++ delegate through `tools/cli/focused_build.{hpp,cpp}`
+(`focused_build_applicable`, `select_affected`, `focused_build_command`), and
+`WatchOptions::focus` makes the shared `watch_loop` re-select before every
+rebuild. Keep the two sides in step:
+
+- A flag that must bypass focus (`--all`, `--target`, `--install`,
+  `--validate`, a ctest filter) has to be recognised on BOTH parsers, because
+  `pulp build --watch` / `pulp dev` delegate the raw tail to `pulp-cpp`.
+- The selector needs the CMake file-API reply. Both sides write the stateless
+  `codemodel-v2` query and configure once when the reply is missing; a new
+  build-dir layout (e.g. `--trace` → `build-trace/`) must pass its real build
+  dir to `select`, not `proj.build_dir`.
+- Catch2 test names carry no executable prefix, so test selection is literal
+  names via `ctest --tests-from-file`, never a regex built from target names.
+- Tests: `tools/scripts/test_affected_targets.py` (synthetic codemodel, ctest
+  `affected-targets-selftest`) covers the rules; the Rust `orchestrate::tests`
+  focused-vs-`--all` cases assert the spawned `cmake`/`ctest` argv. Because the
+  projection shares `changed_surface_inventory.py` with Shipyard's exact-head
+  plan, also run `test_changed_surface_policy.py` and
+  `test_run_changed_surface_tests.py` after touching it, and never change the
+  `EXCLUDED_*` filter constants from the projection side: they are pinned by
+  `.shipyard/changed-surface-inventory.json`.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source
@@ -752,6 +787,29 @@ parsing, `check_trace_flags`, the build-dir choice) *and* in `cmd_build.cpp`
 for the delegated branches. The same split bites status output: a `pulp status`
 line added only to the Rust fallback never reaches installed users, because
 installed status delegates to `pulp-cpp status`.
+
+### Configure defaults live in two parsers — change both
+
+A fresh `pulp build` configure (and the `cmd_build` bootstrap that `pulp dev` /
+`pulp loop` run) passes `-G Ninja` when ninja is on PATH,
+`-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}`, and, in the source checkout,
+`-DPULP_BUILD_EXAMPLES=OFF` unless `--examples`. The rules are one pure
+function per language: `configure_default_args` in `orchestrate.rs` and
+`pulp::cli::configure_default_args` in `tools/cli/configure_defaults.hpp`
+(shared by `cmd_build`, `ensure_repo_build_configured`, dev, and loop). They
+must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
+`build_configure_argv` shell-out in `tests/orchestrate_parity_test.rs`;
+`pulp-test-cli-configure-defaults`). Two traps:
+
+- **Never pass `-G` to an existing build dir.** CMake errors on a generator
+  change. The functions only emit `-G` when there is no `CMakeCache.txt`, and
+  only fill an *empty* cached build type — an explicit `PULP_BUILD_TYPE` is the
+  one way to change a non-empty one.
+- **A command that needs an example target must ask for it.** Examples are off
+  in a fresh dev tree, so anything that builds `pulp-design-tool` (or another
+  `examples/` target) passes `examples=true` / `--examples`; `pulp design` and
+  `pulp dev --design` do. Forgetting it reads as "unknown target", not as a
+  configure problem.
 
 ### `pulp status` — build-governance tier line
 

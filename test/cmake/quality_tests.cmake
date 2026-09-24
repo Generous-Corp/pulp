@@ -911,6 +911,13 @@ if(Python3_Interpreter_FOUND)
             ${_changed_surface_policy_args})
     endif()
 
+    # Affected-target selector behind the focused `pulp build/dev/loop/test`
+    # default: source->target, header->targets through the dependency
+    # database, companion tests, add_dependencies and fixture edges, and the
+    # fallback-to-all rules, over a synthetic file-API reply. No CMake runs.
+    add_test(NAME affected-targets-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_affected_targets.py")
+
     # Format-baseline diff: exit-code routing (skip vs fail vs diff) and the
     # --diag-dir contract that copies captured validator output out of the temp
     # dir before it is deleted. Runs the validators nowhere — the capture

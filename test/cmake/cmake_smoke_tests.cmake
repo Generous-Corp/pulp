@@ -1003,6 +1003,24 @@ add_test(NAME cmake-control-shipping-matrix
 set_tests_properties(cmake-control-shipping-matrix PROPERTIES
     LABELS "cmake;control;ship;matrix" TIMEOUT 180)
 
+add_test(NAME cmake-control-shipping-fresh-stamp
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/control-shipping-fresh-stamp
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_shipping_fresh_stamp.cmake)
+set_tests_properties(cmake-control-shipping-fresh-stamp PROPERTIES
+    LABELS "cmake;control;ship" TIMEOUT 60)
+
+add_test(NAME cmake-build-defaults
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/build-defaults
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_build_defaults.cmake)
+set_tests_properties(cmake-build-defaults PROPERTIES
+    LABELS "cmake" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: ninja is not on PATH")
+
 # Every CTest manifest must parse, including the ones behind an off-by-default
 # option. A manifest body guarded by a flag such as PULP_ENABLE_SCENE3D is
 # never read by an ordinary configure, so a syntax error inside it survives a

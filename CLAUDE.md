@@ -17,51 +17,48 @@ Debug build of a JS-scripted GPU UI is dramatically slower than its
 Release equivalent (no -O3, no NDEBUG, asserts live, no inlining of
 canvas / Skia / Yoga / QuickJS) — slow enough that a UX-perceived
 regression in a Debug build is almost always the build type, not the
-code. The Codify-Release work made `pulp build` default to Release;
-match that convention when reaching for raw `cmake` too.
+code. A fresh `pulp build`/`dev`/`loop` configure pins `-G Ninja` (when on
+PATH), `-DCMAKE_BUILD_TYPE=${PULP_BUILD_TYPE:-Release}`, and, in the source
+checkout, `-DPULP_BUILD_EXAMPLES=OFF` unless `--examples` (`pulp design` turns
+them on); an EXISTING dir keeps its generator and non-empty cached build type.
 
 Rules of thumb:
-- **Default**: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`. Use
-  `pulp build` (the CLI) when possible — it pins Release for you and
-  refuses to silently flip.
+- **Default**: `pulp build`, or `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release`.
+- **Focused by default in a source checkout**: `pulp build`/`dev`/`loop`/`test`
+  build and run only what the working diff affects (`pulp affected --json`
+  shows it) behind a loud `FOCUSED: building 3/1708 targets …` line. `--all`
+  restores everything, `--target` wins, `PULP_BUILD_FOCUS=0` disables, and it
+  widens to `all` (saying why) for an empty diff, a build-system change, an
+  unmapped C/C++ file, or >40% of the graph. **Focused green is not landing
+  green** — pre-push and Shipyard build `all`; rules: `docs/reference/cli.md#affected`.
 - **Flip to Debug only when**: stepping in a debugger, capturing fresh
   `runtime::log_info` traces, repro'ing a sanitizer hit, or running
-  `validate-build.sh` for a clean detached reconfigure pass. Restore
-  Release immediately when the investigation ends.
-- **Reconfigure gotcha**: a bare `cmake -S . -B build` (no build-type
-  flag) usually preserves the cache value, BUT something in the
-  shipyard / pre-push gate / rebase paths can silently reset the cache
-  to Debug. Pass `-DCMAKE_BUILD_TYPE=Release` every reconfigure, or
-  use `pulp build`.
-- **Verify before reporting a build is Release**: BOTH
-  `grep '^CMAKE_BUILD_TYPE' build/CMakeCache.txt` (should print
-  `Release`) AND `grep '^CXX_FLAGS '
-  build/<dir>/CMakeFiles/<target>.dir/flags.make` (should contain
-  `-O3 -DNDEBUG`) must check out. Checking only the cache field is
-  necessary-but-not-sufficient — it has been wrong by itself.
+  `validate-build.sh`; restore Release when the investigation ends.
+- **Reconfigure gotcha**: shipyard / pre-push / rebase paths can silently reset a
+  cache to Debug, and `pulp build` keeps a non-empty cached type; pass `-DCMAKE_BUILD_TYPE=Release` (or `PULP_BUILD_TYPE=Release pulp build`).
+- **Verify before reporting a build is Release**: BOTH `grep '^CMAKE_BUILD_TYPE'
+  build/CMakeCache.txt` (prints `Release`) AND `grep '^CXX_FLAGS '
+  build/<dir>/CMakeFiles/<target>.dir/flags.make` (contains `-O3 -DNDEBUG`) must
+  check out; the cache field alone is necessary-but-not-sufficient — it has been wrong by itself.
 - **A struct-layout change must compile EVERYWHERE before shipping**: when a
   change alters the field layout of a struct that is brace-initialized
   positionally (adding/removing a field, swapping a `bool` for an `enum`), run a
-  FULL `pulp build` over ALL targets — not just the named feature/parity
-  targets — and run it in the background (a full build exceeds a short foreground
-  budget). This is the longest build anyone runs, so it is the one that most
-  needs to take a governed *share* of the machine rather than every core; `pulp
-  build` (or `tools/ci/governed-build.sh cmake --build build`) does that, a raw
-  `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional inits in unrelated test
-  files fail *closed* at compile time, so they are safe, but only a full build
-  surfaces them; building a subset and shipping pushes the discovery to CI. A
-  uniform build failure across macOS/Linux/Windows is the tell for a real
-  compile miss, versus the macOS-only stale-build-dir ODR the `pulp-runner-ops`
-  skill handles.
+  FULL `pulp build --all` — not just the named feature/parity targets — in the
+  background (it exceeds a short foreground budget). It is the longest build
+  anyone runs, so it most needs a governed *share* of the machine, not every
+  core: `pulp build` (or `tools/ci/governed-build.sh cmake --build build`) does
+  that; a raw `cmake --build … -j$(sysctl -n hw.ncpu)` does not. Stray positional
+  inits in unrelated test files fail *closed* at compile time, so they are safe,
+  but only a full build surfaces them; building a subset pushes the discovery to
+  CI. A uniform macOS/Linux/Windows failure is the tell for a real compile miss,
+  versus the macOS-only stale-build-dir ODR the `pulp-runner-ops` skill handles.
 
 ```bash
 # Configure (first time or after CMakeLists.txt changes)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
-# Or preferred for repo + example builds:
-./build/pulp build
-
-# Build everything (takes its job count from the host build governor)
+# Build only what your diff affects (default in a source checkout; governed
+# job count); --all builds everything — do this before opening a PR
 ./build/pulp build
 
 # Run all tests
@@ -1011,6 +1008,9 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Validate complete matched GPU-audio trial captures and summarize their declared CPU, latency, transfer, and disposition evidence. → `tools/scripts/gpu_audio_p4_evidence.py`
   - ⚠ **Cannot see:** Validates recorded evidence only; does not run the product benchmark, authenticate provider/build attestations, or assign a physical program verdict.
 - Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
+
+**build** — build and test only what a diff touches
+- Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py). → `pulp affected`
 
 **build-speed** — measure build, gate and merge-queue speed
 - Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
