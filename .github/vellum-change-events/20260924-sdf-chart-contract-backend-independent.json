@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260924-sdf-chart-contract-backend-independent",
+  "kind": "change",
+  "created_at": "2026-09-24T20:50:52Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Whether an SDF shape emits a stroke chart is decided by a switch on an enum and needs no renderer, but the predicate and its message lived inside the Skia-only translation unit while the non-Skia stub dropped the shape argument entirely. The same call therefore answered differently per build, and a non-GPU build skipped a check it could perform. This moves the predicate, the shape name and the message into an unconditionally compiled unit that both backends consult \u2014 the rule sksl_declares_uniform() already follows in the same file so the two backends agree. Only genuine SkSL compilation stays Skia-gated. No API is added or removed, no authority boundary moves, no alternate renderer appears, and the with-Skia answer is unchanged. Pulp-only because Pulp still builds and ships this implementation independently and there is no counterpart Vellum commit to backport from.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF chart refuses and names every shape it cannot chart",
+    "tools/scripts/confirm_failure.sh"
+  ],
+  "disposition": "pulp-only"
+}
