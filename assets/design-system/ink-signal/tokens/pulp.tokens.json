@@ -22,6 +22,7 @@
       "indigo":      { "value": "#5E78FF", "type": "color" },
       "amber":       { "value": "#F6B847", "type": "color" },
       "leaf":        { "value": "#3FCF77", "type": "color" },
+      "leaf-bright": { "value": "#8CE8B0", "type": "color" },
       "pink":        { "value": "#FF7AA8", "type": "color" },
       "coral":       { "value": "#FF5C4D", "type": "color", "description": "Peak / danger only" },
       "on-ink":      { "value": "#052320", "type": "color", "description": "Text on bright fills" }
@@ -109,7 +110,7 @@
     "control":      { "value": "#2A323D", "type": "color" },
     "status": {
       "info":    { "value": "{ink.indigo}", "type": "color" },
-      "success": { "value": "{ink.leaf}",   "type": "color" },
+      "success": { "value": "{ink.leaf-bright}",   "type": "color" },
       "warning": { "value": "{ink.amber}",  "type": "color" },
       "danger":  { "value": "{ink.coral}",  "type": "color" }
     }

@@ -823,6 +823,55 @@ if [ -f "$CAPABILITY_CONTRACT" ]; then
 fi
 
 
+# ── 20. pre-queue static guards (diff-scoped) ──────────────────────────────
+# Two whole-tree text scans the required gate already runs as ctests: a literal
+# TIMEOUT inside catch_discover_tests, and an unmet precondition reported as a
+# pass instead of a SKIP. Together they cost ~2s and need no build tree, but
+# reaching them any other way costs a merge-group batch — and a batch failure is
+# not confined to its author, because a batch is main plus every entry ahead of
+# it, so one bad test registration ejects innocent PRs and the queue re-forms on
+# the same failure until somebody reads a log. A literal TIMEOUT did exactly
+# that, and the scan that names it runs in a tenth of a second.
+#
+# Diff-scoped for the same reason as the unbounded-wait lint: fatal only when the
+# violation sits on a path this push changes, so a pre-existing backlog on the
+# base cannot block every developer's push. A violation elsewhere is reported and
+# not fatal. That is deliberate, and it is not a pass.
+if [ -n "${PULP_SKIP_PREQUEUE_GUARDS:-}" ]; then
+    echo "" >&2
+    echo "▸ pre-queue static guards: SKIPPED via PULP_SKIP_PREQUEUE_GUARDS." >&2
+    echo "  A skip is not a pass — both still run as ctests in the required gate." >&2
+else
+    prequeue_changed="$(git diff --name-only "$BASE"...HEAD 2>/dev/null || true)"
+    for prequeue_guard in catch_discover_timeout_guard.py check_skip_not_pass.py; do
+        prequeue_path="$ROOT/tools/scripts/$prequeue_guard"
+        [ -f "$prequeue_path" ] || continue
+        echo "" >&2
+        echo "▸ pre-queue guard: ${prequeue_guard%.py}" >&2
+        if prequeue_out="$("$PYTHON" "$prequeue_path" 2>&1)"; then
+            continue
+        fi
+        prequeue_hit=0
+        while IFS= read -r prequeue_file; do
+            [ -n "$prequeue_file" ] || continue
+            case "$prequeue_out" in
+                *"$prequeue_file"*) prequeue_hit=1; break ;;
+            esac
+        done <<EOF
+$prequeue_changed
+EOF
+        printf '%s\n' "$prequeue_out" >&2
+        if [ "$prequeue_hit" -eq 1 ]; then
+            echo "  ^ this violation is on a path THIS push changes." >&2
+            echo "    The merge queue rejects it and ejects the PRs batched with you." >&2
+            fail=1
+        else
+            echo "  ^ pre-existing on $BASE; not on a path this push changes." >&2
+            echo "    Not fatal here, and not a pass: it still reds the required gate." >&2
+        fi
+    done
+fi
+
 # ── Summary ────────────────────────────────────────────────────────────────
 echo "" >&2
 if [ "$fail" -eq 0 ]; then

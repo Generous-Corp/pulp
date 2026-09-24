@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -42,6 +43,7 @@ namespace {
 using Steinberg::Vst::ParameterInfo;
 namespace SpeakerArr = Steinberg::Vst::SpeakerArr;
 
+constexpr std::array<std::uint8_t, 4> kStoreMagicBytes{'P', 'U', 'L', 'P'};
 constexpr pulp::state::ParamID kGainParamId = 1;
 constexpr pulp::state::ParamID kBypassParamId = 2;
 constexpr pulp::state::ParamID kResetParamId = 3;
@@ -6065,4 +6067,62 @@ TEST_CASE("VST3 consumes a state-dirty edge a v1-only host cannot receive",
     REQUIRE(v1_only.restart_calls == 0);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 host parameter write reaches serialized state without process",
+          "[vst3][state][parity]") {
+    reset_test_processor();
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+
+    // Pull the serialized value of one parameter out of the bare 'PULP' store
+    // blob: magic, version, count, then (u32 id, f32 plain-value) pairs. The
+    // store serializes PLAIN values, so this reads the raw field and does not
+    // convert -- the property under test is that the field CHANGES, not what
+    // units it is in.
+    const auto serialized_value = [&](pulp::state::ParamID wanted) {
+        VectorStream stream;
+        REQUIRE(processor.getState(&stream) == Steinberg::kResultOk);
+        const std::vector<std::uint8_t> bytes = stream.take();
+        const auto magic = std::search(bytes.begin(), bytes.end(), kStoreMagicBytes.begin(),
+                                       kStoreMagicBytes.end());
+        REQUIRE(magic != bytes.end());
+        const std::size_t base = static_cast<std::size_t>(magic - bytes.begin());
+        std::uint32_t count = 0;
+        std::memcpy(&count, bytes.data() + base + 8, sizeof(count));
+        REQUIRE(count > 0);
+        for (std::uint32_t n = 0; n < count; ++n) {
+            const std::size_t off = base + 12 + n * 8;
+            REQUIRE(off + 8 <= bytes.size());
+            std::uint32_t id = 0;
+            std::memcpy(&id, bytes.data() + off, sizeof(id));
+            if (id == static_cast<std::uint32_t>(wanted)) {
+                float value = 0.0f;
+                std::memcpy(&value, bytes.data() + off + 4, sizeof(value));
+                return value;
+            }
+        }
+        FAIL("parameter id not present in the serialized store blob");
+        return 0.0f;
+    };
+
+    const float before = serialized_value(kGainParamId);
+
+    // Deliberately not the default and not a value any other path writes, so a
+    // pass cannot come from the store already holding it.
+    constexpr Steinberg::Vst::ParamValue kWritten = 0.42066666;
+    REQUIRE(processor.getParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId)) !=
+            Catch::Approx(kWritten).margin(1e-5));
+    REQUIRE(processor.setParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId),
+                                         kWritten) == Steinberg::kResultOk);
+
+    // The host side acknowledged the write.
+    CHECK(processor.getParamNormalized(static_cast<Steinberg::Vst::ParamID>(kGainParamId)) ==
+          Catch::Approx(kWritten).margin(1e-5));
+
+    // No process() call. A stale store serializes the OLD value here, which is
+    // what makes a host save-before-next-audio-block render the wrong value.
+    const float after = serialized_value(kGainParamId);
+    CHECK(after != Catch::Approx(before).margin(1e-6));
 }

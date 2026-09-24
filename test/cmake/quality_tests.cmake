@@ -312,6 +312,44 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
+    # a carrier; this reads the generator's compile lines back and proves it
+    # (carrier named by -include-pch, matching -std, no carrier-only -D). The
+    # named expectations pin a C++20 suite, a C++23 suite (pulp::format raises
+    # the standard when it is built at 23), an excluded -fno-exceptions probe,
+    # a Catch2 suite excluded for its per-target -ffp-contract option, a
+    # grouped executable (pulp_add_test_group: its members' definitions and
+    # include dirs are per-source properties, which must not cost it the
+    # PCH; pulp::view never reaches pulp-format-core's cxx_std_23, so C++20),
+    # and SDL3-static, whose own PCH is off so ccache can store its objects.
+    if(PULP_TEST_PCH)
+        set(_pulp_pch_option ON)
+    else()
+        set(_pulp_pch_option OFF)
+    endif()
+    set(_pulp_pch_format_std 20)
+    if(TARGET pulp-format-core)
+        get_target_property(_pulp_pch_format_std_prop pulp-format-core CXX_STANDARD)
+        if(_pulp_pch_format_std_prop)
+            set(_pulp_pch_format_std "${_pulp_pch_format_std_prop}")
+        endif()
+    endif()
+    set(_pulp_pch_expect
+        --expect pulp-test-biquad=pulp-test-pch-cxx20
+        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-signal-no-exceptions=none
+        --expect pulp-test-cross-platform-audio-golden=none
+        --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20)
+    if(TARGET SDL3-static)
+        list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
+        ${_pulp_pch_expect})
+    add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
     # clean on every machine a developer or reviewer uses and breaks one release
@@ -653,6 +691,16 @@ if(Python3_Interpreter_FOUND)
     # that invariant breaks with no commit involved.
     add_test(NAME runner-topology-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_check.py")
+    # Offline reachability of every lane against the checked-in
+    # advertised-labels snapshot (declared supply), plus routing-override
+    # validation. The clock is pinned inside the test; live expiry is enforced
+    # by the hourly sweep, never by a ctest that would redden unrelated PRs.
+    add_test(NAME runner-topology-static-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_runner_topology_static.py")
+    # Snapshot regeneration/freshness against a fake tartci checkout: profiles
+    # are discovered by glob, so adding or removing a machine needs no edit here.
+    add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
@@ -694,9 +742,10 @@ if(Python3_Interpreter_FOUND)
 
     # The sibling suite mocks subprocess wholesale, so it proves the candidate
     # order and the fall-through without ever asking git whether those refs
-    # resolve. This drives real git against a genuinely shallow clone whose
-    # refs/pull/<n>/merge is absent -- the production condition the fallback
-    # exists for -- and also asserts an unreachable commit still fails closed.
+    # resolve. This drives real git against genuinely shallow clones in the two
+    # shapes production produces -- an absent refs/pull/<n>/merge, and a
+    # merge-queue branch deleted while its own run is still going -- and also
+    # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
 
@@ -841,8 +890,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME decisions-contract-validate COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/decisions_contract.py" --mode validate)
     # Self-test: the read surface (surface/list/validate), the external-contributor
-    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, and
-    # the AGENTS.md + CLAUDE.md pointers.
+    # no-op (non-fleet paths surface nothing), the agent-neutral hint hook, the
+    # AGENTS.md + CLAUDE.md pointers, and `--mode probe` against a checked-in
+    # `shipyard landing --json` capture (never the live API).
     add_test(NAME decisions-contract-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_decisions_contract.py")
 
@@ -1001,6 +1051,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/tools_registry_check.py" --check)
     add_test(NAME tools-registry-check-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_tools_registry_check.py")
+    # CLAUDE.md's ci-routing-digest block is generated from runner_topology.json
+    # and the advertised-labels snapshot only (never the workflows, so a
+    # workflow-only change cannot redden it); a stale or hand-edited block fails
+    # here.
+    add_test(NAME ci-routing-digest-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ci_routing_digest.py" --check)
+    add_test(NAME ci-routing-digest-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ci_routing_digest.py")
     add_test(NAME verify-rendered-panel-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_rendered_panel.py")
     # Presence checks over a rendered panel: every one of the five is proved in

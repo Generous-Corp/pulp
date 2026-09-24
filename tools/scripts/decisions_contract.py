@@ -15,6 +15,15 @@ Modes (`--mode`):
               path. ADVISORY: always exit 0. A change touching no guarded
               config path prints nothing (the external-contributor no-op).
     list      dump rows, optionally filtered by `--layer default|pulp`.
+    probe     evaluate every row carrying a `probe` against observed landing
+              state: `--landing-json FILE` (a saved `shipyard landing --json`
+              report; what ctest uses) or `--live` (shells out to
+              `shipyard landing --json`; manual and advisory, never a gate,
+              because it needs network, auth, and Shipyard >= 0.208.0, the
+              first release with `shipyard landing`).
+              exit 0 = every probe confirmed; 1 = a probe failed; 2 = bad
+              contract or unreadable observation. A missing path or an
+              UNKNOWN verdict FAILS: nothing unobserved counts as confirmed.
 
 Why exit 0 for surface: hooks are defense-in-depth / context only (Codex
 PreToolUse cannot hard-block). The authoritative boundary is the CLI `validate`
@@ -151,6 +160,15 @@ DEFAULT_CONTRACT = REPO_ROOT / ".agents" / "contract.toml"
 
 VALID_LAYERS = ("default", "pulp")
 REQUIRED_DECISION_FIELDS = ("id", "layer", "tags", "title", "why", "do_not", "guards")
+PROBE_SOURCES = ("shipyard-landing",)
+PROBE_FIELDS = ("source", "path", "equals")
+# `shipyard landing` exits 9 when a verdict is UNKNOWN; its JSON is still
+# emitted and still evaluated, and an unknown verdict fails its probe.
+LANDING_UNKNOWN_EXIT = 9
+# `shipyard landing` first ships in this release; older binaries reject the
+# subcommand with a usage error (exit 2), which is reported as unavailability
+# rather than as a contract failure.
+LANDING_MIN_SHIPYARD = "0.208.0"
 
 
 class SchemaError(Exception):
@@ -228,7 +246,105 @@ def load_contract(path: Path) -> dict:
                     f"decision {did}: guard {guard!r} is not within [schema].config_paths "
                     f"(would break the external-contributor no-op)"
                 )
+        if "probe" in dec:
+            _validate_probes(did, dec["probe"])
     return data
+
+
+def probes_of(dec: dict) -> list[dict]:
+    """A row's probes as a list; `probe` may be one table or an array."""
+    raw = dec.get("probe")
+    if raw is None:
+        return []
+    return [raw] if isinstance(raw, dict) else list(raw)
+
+
+def _validate_probes(did: int, raw: object) -> None:
+    items = [raw] if isinstance(raw, dict) else raw
+    if not isinstance(items, list) or not items:
+        raise SchemaError(f"decision {did}: 'probe' must be a table or a non-empty array of tables")
+    for probe in items:
+        if not isinstance(probe, dict):
+            raise SchemaError(f"decision {did}: each probe must be a table")
+        extra = sorted(set(probe) - set(PROBE_FIELDS))
+        missing = [f for f in PROBE_FIELDS if f not in probe]
+        if missing or extra:
+            raise SchemaError(f"decision {did}: probe needs exactly {PROBE_FIELDS} "
+                              f"(missing {missing}, unexpected {extra})")
+        if probe["source"] not in PROBE_SOURCES:
+            raise SchemaError(f"decision {did}: probe source must be one of {PROBE_SOURCES}")
+        path = probe["path"]
+        if (not isinstance(path, str) or not path.startswith(".") or len(path) < 2
+                or any(not part for part in path[1:].split("."))):
+            raise SchemaError(f"decision {did}: probe path must look like '.a.b.c', got {path!r}")
+        if not isinstance(probe["equals"], (str, int, float, bool)):
+            raise SchemaError(f"decision {did}: probe 'equals' must be a scalar")
+
+
+_MISSING = object()
+
+
+def resolve_path(document: object, path: str) -> object:
+    """Walk '.a.b.c' through nested objects; _MISSING when any hop is absent."""
+    node = document
+    for part in path[1:].split("."):
+        if not isinstance(node, dict) or part not in node:
+            return _MISSING
+        node = node[part]
+    return node
+
+
+def evaluate_probe(probe: dict, observations: dict[str, object]) -> tuple[bool, str]:
+    """(passed, detail). Absence and type mismatch are failures, never passes."""
+    document = observations.get(probe["source"], _MISSING)
+    if document is _MISSING:
+        return False, f"no observation for source {probe['source']!r}"
+    actual = resolve_path(document, probe["path"])
+    if actual is _MISSING:
+        return False, f"{probe['path']} is absent from the observation"
+    expected = probe["equals"]
+    # bool is an int subclass: `True == 1` must not confirm a row claiming 1.
+    if type(actual) is not type(expected) or actual != expected:
+        return False, f"{probe['path']} = {actual!r}, row claims {expected!r}"
+    return True, f"{probe['path']} = {actual!r}"
+
+
+def probe_rows(data: dict, observations: dict[str, object]) -> list[dict]:
+    results = []
+    for dec in sorted(data["decision"], key=lambda d: d["id"]):
+        for probe in probes_of(dec):
+            passed, detail = evaluate_probe(probe, observations)
+            results.append({"id": dec["id"], "source": probe["source"],
+                            "path": probe["path"], "equals": probe["equals"],
+                            "passed": passed, "detail": detail})
+    return results
+
+
+def _live_landing() -> tuple[object | None, str | None]:
+    shipyard = shutil.which("shipyard")
+    if not shipyard:
+        return None, "`shipyard` is not on PATH"
+    try:
+        proc = subprocess.run([shipyard, "landing", "--json"], capture_output=True,
+                              text=True, cwd=REPO_ROOT, timeout=300)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"`shipyard landing --json` failed to run: {exc}"
+    if proc.returncode not in (0, LANDING_UNKNOWN_EXIT):
+        if proc.returncode == 2 and not proc.stdout.strip():
+            # clap's usage-error exit: this Shipyard predates the subcommand.
+            try:
+                version = subprocess.run([shipyard, "--version"], capture_output=True,
+                                         text=True, timeout=30).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                version = ""
+            return None, (f"shipyard landing unavailable (need >= {LANDING_MIN_SHIPYARD}; "
+                          f"found {version or 'unknown version'} at {shipyard})")
+        return None, (f"`shipyard landing --json` exited {proc.returncode}: "
+                      f"{proc.stderr.strip()[:300]}")
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError as exc:
+        return None, f"`shipyard landing --json` emitted unparseable JSON: {exc}"
 
 
 def _glob_within(guard: str, config_path: str) -> bool:
@@ -312,7 +428,7 @@ def _render_row(dec: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mode", choices=("validate", "surface", "list"), default="surface")
+    ap.add_argument("--mode", choices=("validate", "surface", "list", "probe"), default="surface")
     ap.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     ap.add_argument("--paths", nargs="*", default=None,
                     help="Explicit changed paths for --mode surface (skips git).")
@@ -320,6 +436,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="Git ref to diff against for --mode surface when --paths is omitted.")
     ap.add_argument("--layer", choices=VALID_LAYERS, default=None,
                     help="Filter --mode list to one layer.")
+    ap.add_argument("--landing-json", type=Path, default=None,
+                    help="Saved `shipyard landing --json` report for --mode probe.")
+    ap.add_argument("--live", action="store_true",
+                    help="--mode probe: run `shipyard landing --json` now (manual; never a "
+                         f"gate). Needs Shipyard >= {LANDING_MIN_SHIPYARD}.")
     ap.add_argument("--json", action="store_true", help="Machine-readable output.")
     args = ap.parse_args(argv)
 
@@ -366,6 +487,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(_render_row(d))
         return 0
 
+    if args.mode == "probe":
+        return _run_probe(data, args)
+
     # mode == surface
     changed = args.paths if args.paths is not None else _changed_paths_from_git(args.base)
     hits = surface(data, changed)
@@ -384,6 +508,40 @@ def main(argv: list[str] | None = None) -> int:
     print("   Reversing one requires proving its incident class can no longer "
           "occur (Step Zero).", file=sys.stderr)
     return 0
+
+
+def _run_probe(data: dict, args: argparse.Namespace) -> int:
+    if bool(args.landing_json) == bool(args.live):
+        print("decisions-contract: --mode probe needs exactly one of "
+              "--landing-json FILE or --live", file=sys.stderr)
+        return 2
+    if args.live:
+        landing, error = _live_landing()
+    else:
+        try:
+            landing, error = json.loads(args.landing_json.read_text()), None
+        except (OSError, json.JSONDecodeError) as exc:
+            landing, error = None, f"cannot read {args.landing_json}: {exc}"
+    if error:
+        print(f"decisions-contract: OBSERVATION ERROR: {error}", file=sys.stderr)
+        return 2
+    results = probe_rows(data, {"shipyard-landing": landing})
+    failed = [r for r in results if not r["passed"]]
+    if args.json:
+        print(json.dumps({"ok": not failed, "probes": results}, indent=2))
+    else:
+        for r in results:
+            mark = "PASS" if r["passed"] else "FAIL"
+            print(f"  {mark} #{r['id']} {r['detail']}")
+        rows = sorted({r["id"] for r in failed})
+        print(f"decisions-contract probe: {len(results) - len(failed)}/{len(results)} "
+              f"confirmed" + (f"; rows {rows} disagree with observed state -- "
+                              "rewrite the row to present truth or restore the state"
+                              if failed else "."))
+    if not results:
+        print("decisions-contract: no row carries a probe", file=sys.stderr)
+        return 2
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

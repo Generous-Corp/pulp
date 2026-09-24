@@ -258,7 +258,16 @@ lane checks its own.
 ## Adding a test — where will it land?
 
 - **A core unit/integration test** → add it with no special label. It runs on the
-  required gate. Keep it fast (< a few seconds) and non-flaky.
+  required gate. Keep it fast (< a few seconds) and non-flaky. Catch2 suites
+  compile against a shared precompiled header of Catch2 plus the common standard
+  headers (`PULP_TEST_PCH`, Clang only); a suite that must see a `#define`
+  before `<catch2/...>` or a standard header (a `CATCH_CONFIG_*` or `_LIBCPP_*`
+  switch) opts out with `pulp_add_test_suite(... NO_PCH)`. ObjC++ sources and
+  per-target `-f`/`-std` options opt out automatically; see
+  `<build>/pulp-test-pch.tsv` for every decision. A grouped executable (below)
+  is one decision, recorded under the group's name: `NO_PCH` goes on
+  `pulp_add_test_group()`, and a member that must opt out alone stays
+  ungrouped.
 - **A new example plugin** → its `clap-dlopen`/`auval`/`pluginval` validators
   should carry `LABELS "validation;<format>"` (match the existing examples). That
   automatically keeps them off the required gate and onto the example-validation
@@ -398,7 +407,8 @@ whose tag expression lists nothing fails the **build** (`FAIL_IF_EMPTY` in
    A target that was registered twice with different `TEST_SPEC`s becomes two
    `pulp_add_test_suite` calls with the same NAME and GROUP. Per-target
    `COMPILE_DEFINITIONS` / `INCLUDE_DIRS` become per-source properties
-   automatically.
+   automatically, and the group still reuses the shared Catch2 PCH (the
+   ledger lists it under the group's name; `NO_PCH` is a group option).
 5. **Prove parity, not just green.** Snapshot before and after with
    `tools/scripts/ctest_inventory_parity.py snapshot --build-dir build --out
    <file>` (build the affected targets first, or the placeholders differ), then

@@ -14,19 +14,30 @@ checks then read what CTest registered:
     timeout, prefix and properties, none of them leaking to a neighbour,
   * a member whose tags match nothing fails the BUILD with a named
     diagnostic rather than silently registering no tests,
-  * a member that links a library its group does not fails CONFIGURE.
+  * a member that links a library its group does not fails CONFIGURE,
+  * the group reuses the shared Catch2 PCH even though its members'
+    COMPILE_DEFINITIONS became per-source properties (the ledger names the
+    group, every compile line names the carrier, and the definition still
+    reaches its own TU), NO_PCH is accepted on the group, and NO_PCH on a
+    member fails CONFIGURE pointing at the group.
 """
 
 from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools" / "scripts"))
+import pch_wiring_check  # noqa: E402
+
+GROUP = "pulp-test-group-fixture"
 
 
 def run(command: list[str], *, cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -41,8 +52,16 @@ def require_success(result: subprocess.CompletedProcess[str], step: str) -> None
 
 
 def fixture_project(
-    root: pathlib.Path, *, empty_member: bool = False, foreign_library: bool = False
+    root: pathlib.Path,
+    *,
+    empty_member: bool = False,
+    foreign_library: bool = False,
+    cxx_standard: int = 17,
+    group_no_pch: bool = False,
+    member_no_pch: bool = False,
 ) -> None:
+    group_options = " NO_PCH" if group_no_pch else ""
+    member_options = "\n    NO_PCH" if member_no_pch else ""
     empty = ""
     if empty_member:
         empty = "pulp_add_test_suite(pulp-test-gamma GROUP pulp-test-group-fixture SOURCES gamma.cpp)"
@@ -58,10 +77,12 @@ def fixture_project(
             f"""\
             cmake_minimum_required(VERSION 3.20)
             project(pulp_test_group_probe LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
+            set(CMAKE_CXX_STANDARD {cxx_standard})
             set(CMAKE_CXX_STANDARD_REQUIRED ON)
             enable_testing()
 
+            add_library(Catch2 INTERFACE)
+            add_library(Catch2::Catch2 ALIAS Catch2)
             add_library(Catch2WithMain INTERFACE)
             add_library(Catch2::Catch2WithMain ALIAS Catch2WithMain)
             add_library(shared_lib INTERFACE)
@@ -70,13 +91,13 @@ def fixture_project(
             include("{ROOT / 'tools/cmake/PulpCatch.cmake'}")
             include("{ROOT / 'tools/cmake/PulpTestSuite.cmake'}")
 
-            pulp_add_test_group(pulp-test-group-fixture LIBRARIES shared_lib)
+            pulp_add_test_group(pulp-test-group-fixture LIBRARIES shared_lib{group_options})
             pulp_add_test_suite(pulp-test-alpha GROUP pulp-test-group-fixture
                 SOURCES alpha.cpp
                 LIBRARIES shared_lib
                 LABELS "alpha;widgets"
                 TIMEOUT 7
-                COMPILE_DEFINITIONS ALPHA_ONLY=1)
+                COMPILE_DEFINITIONS ALPHA_ONLY=1{member_options})
             pulp_add_test_suite(pulp-test-beta GROUP pulp-test-group-fixture
                 SOURCES beta.cpp
                 TEST_SPEC "~[slow]"
@@ -130,6 +151,28 @@ def fixture_project(
 
 def properties_of(test: dict[str, object]) -> dict[str, object]:
     return {item["name"]: item["value"] for item in test["properties"]}
+
+
+def pch_configure_args(source: pathlib.Path) -> list[str]:
+    """Point the shared-PCH machinery at the fixture: the carriers are created
+    in the fixture's own directory and precompile standard headers only (the
+    fake Catch2 has no headers). PULP_TEST_PCH itself is left at its default,
+    so the test asserts the classifier's real verdict for this compiler."""
+    args = [
+        f"-DPULP_TEST_PCH_CARRIER_DIR={source}",
+        "-DPULP_TEST_PCH_HEADERS=<string>;<vector>",
+    ]
+    if shutil.which("ninja"):
+        args += ["-G", "Ninja"]
+    return args
+
+
+def pch_option_is_on(build: pathlib.Path) -> bool:
+    cache = (build / "CMakeCache.txt").read_text()
+    for line in cache.splitlines():
+        if line.startswith("PULP_TEST_PCH:BOOL="):
+            return line.split("=", 1)[1].strip().upper() in {"ON", "TRUE", "1", "YES"}
+    raise AssertionError("PULP_TEST_PCH missing from the fixture's CMakeCache.txt")
 
 
 def test_group_registers_each_member_with_its_own_properties() -> None:
@@ -217,10 +260,68 @@ def test_member_may_not_link_beyond_its_group() -> None:
         )
 
 
+def test_group_reuses_the_shared_pch_with_per_source_definitions() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-test-group-pch-") as temporary:
+        source = pathlib.Path(temporary) / "source"
+        build = pathlib.Path(temporary) / "build"
+        source.mkdir()
+        fixture_project(source, cxx_standard=20)
+
+        configure = ["cmake", "-S", str(source), "-B", str(build), *pch_configure_args(source)]
+        require_success(run(configure), "configure")
+        option_on = pch_option_is_on(build)
+        ledger = pch_wiring_check.read_ledger(build)
+        assert GROUP in ledger.entries, sorted(ledger.entries)
+        status, detail = ledger.entries[GROUP]
+        if option_on:
+            # The member's COMPILE_DEFINITIONS are per-source properties on
+            # the group; that must not read as a per-source flag and cost the
+            # group its PCH.
+            assert (status, detail) == ("pch", "pulp-test-pch-cxx20"), (status, detail)
+            problems = pch_wiring_check.check(
+                build, True, {GROUP: "pulp-test-pch-cxx20"}
+            )
+            assert not problems, problems
+        else:
+            assert status == "off", (status, detail)
+        # alpha.cpp #errors unless ALPHA_ONLY reached it, so a green build is
+        # the proof that a per-source definition survives next to the PCH.
+        require_success(run(["cmake", "--build", str(build), "--parallel", "2"]), "build")
+        print(f"  pch fixture: PULP_TEST_PCH={'ON' if option_on else 'OFF'}, {GROUP} -> {status} {detail}")
+
+
+def test_no_pch_is_a_group_option() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-test-group-nopch-") as temporary:
+        source = pathlib.Path(temporary) / "source"
+        build = pathlib.Path(temporary) / "build"
+        source.mkdir()
+        fixture_project(source, cxx_standard=20, group_no_pch=True)
+        configure = ["cmake", "-S", str(source), "-B", str(build), *pch_configure_args(source)]
+        require_success(run(configure), "configure")
+        status, detail = pch_wiring_check.read_ledger(build).entries[GROUP]
+        if pch_option_is_on(build):
+            assert (status, detail) == ("skip", "no-pch-requested"), (status, detail)
+        else:
+            assert status == "off", (status, detail)
+
+    with tempfile.TemporaryDirectory(prefix="pulp-test-group-member-nopch-") as temporary:
+        source = pathlib.Path(temporary) / "source"
+        build = pathlib.Path(temporary) / "build"
+        source.mkdir()
+        fixture_project(source, cxx_standard=20, member_no_pch=True)
+        configured = run(["cmake", "-S", str(source), "-B", str(build), *pch_configure_args(source)])
+        assert configured.returncode != 0, configured.stdout
+        flat = configured.stderr.replace("\n  ", " ")
+        assert "NO_PCH on a GROUP member" in flat, configured.stderr
+        assert f"pulp_add_test_group({GROUP})" in flat, configured.stderr
+
+
 def main() -> int:
     test_group_registers_each_member_with_its_own_properties()
     test_member_matching_nothing_fails_the_build()
     test_member_may_not_link_beyond_its_group()
+    test_group_reuses_the_shared_pch_with_per_source_definitions()
+    test_no_pch_is_a_group_option()
     print("pulp test group tests passed")
     return 0
 

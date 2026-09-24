@@ -1,3 +1,5 @@
+#include "detail/gpu_audio_transport_trial_observer.hpp"
+#include "detail/gpu_convolver_raw_trace_jsonl.hpp"
 #include "detail/gpu_convolver_trial_config.hpp"
 #include "detail/realtime_gpu_audio_path.hpp"
 
@@ -6,11 +8,13 @@
 #include <pulp/gpu_audio/gpu_convolver.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -23,6 +27,7 @@ using pulp::gpu_audio::GpuConvolver;
 using pulp::gpu_audio::detail::GpuConvolverTrialConfig;
 using pulp::gpu_audio::detail::GpuConvolverTrialPath;
 using pulp::gpu_audio::detail::SharedIoRequest;
+using pulp::gpu_audio::detail::SharedIoTraceKind;
 using pulp::gpu_audio::detail::SharedIoTraceRecord;
 
 constexpr std::uint32_t kChannels = 2;
@@ -43,10 +48,42 @@ constexpr auto kCallbackPeriod =
 struct TrialResult {
     GpuConvolverTrialPath path = GpuConvolverTrialPath::SharedAsync;
     std::vector<SharedIoTraceRecord> records;
+    std::vector<SharedIoTraceRecord> delivery_records;
     std::uint64_t misses = 0;
     bool available = false;
     bool records_valid = false;
 };
+
+// The observer is called from the audio callback. Keep this capture object
+// fixed-capacity and trivially writable so the callback never allocates, locks,
+// or serializes JSON. The benchmark drains it only after transport quiescence.
+struct DeliveryCapture {
+    static constexpr std::size_t capacity = kBlocks + 4;
+    std::array<SharedIoTraceRecord, capacity> records{};
+    std::size_t count = 0;
+};
+
+void capture_delivery(void* context, std::uint64_t sequence, std::uint8_t disposition,
+                      std::uint64_t callback_start_ns, std::uint64_t callback_end_ns,
+                      std::uint64_t result_visible_ns) noexcept {
+    auto* capture = static_cast<DeliveryCapture*>(context);
+    if (capture == nullptr || capture->count >= capture->records.size())
+        return;
+    auto& record = capture->records[capture->count++];
+    record = {};
+    record.kind = SharedIoTraceKind::Delivery;
+    record.generation = kGeneration;
+    record.sequence = sequence;
+    record.output_eligible = true;
+    record.delivery =
+        static_cast<pulp::gpu_audio::detail::SharedIoDeliveryDisposition>(disposition);
+    record.callback_start_ns = callback_start_ns;
+    record.callback_end_ns = callback_end_ns;
+    record.result_visible_ns = result_visible_ns;
+    record.callback_timing_available = callback_start_ns != 0 &&
+                                       callback_end_ns >= callback_start_ns &&
+                                       result_visible_ns >= callback_end_ns;
+}
 
 std::vector<float> make_ir() {
     std::vector<float> ir(257);
@@ -88,7 +125,8 @@ const char* path_name(GpuConvolverTrialPath path) {
 }
 
 void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoTraceRecord& record,
-                 std::uint64_t input_digest, std::uint64_t ir_digest) {
+                 const SharedIoTraceRecord& delivery, std::uint64_t input_digest,
+                 std::uint64_t ir_digest) {
     const auto encode = pulp::gpu_audio::detail::shared_io_trace_duration(
         record, pulp::gpu_audio::detail::SharedIoTraceStage::EncodeBegin,
         pulp::gpu_audio::detail::SharedIoTraceStage::EncodeEnd);
@@ -102,7 +140,7 @@ void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoT
               << ",\"ir_digest\":" << ir_digest << ",\"gpu_terminal\":\""
               << pulp::gpu_audio::detail::shared_io_gpu_terminal_name(record.gpu_terminal)
               << "\",\"delivery\":\""
-              << pulp::gpu_audio::detail::shared_io_delivery_name(record.delivery)
+              << pulp::gpu_audio::detail::shared_io_delivery_name(delivery.delivery)
               << "\",\"timings\":{\"callback_cpu\":{\"availability\":\"unavailable\"}"
               << ",\"encode_cpu\":{\"availability\":\""
               << (encode.available ? "available" : "unavailable") << "\"";
@@ -141,22 +179,37 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
         return result;
 
     GpuAudioTransport transport;
-    if (!transport.prepare(&node, {.ring_blocks = 8, .run_worker_thread = false}))
+    if (!transport.prepare(&node,
+                           {.ring_blocks = 8, .run_worker_thread = true, .wake_on_write = true}))
+        return result;
+
+    DeliveryCapture delivery_capture;
+    if (path == GpuConvolverTrialPath::StagedAsync &&
+        !pulp::gpu_audio::configure_gpu_audio_transport_trial_observer(transport, &delivery_capture,
+                                                                       capture_delivery))
         return result;
 
     std::vector<float> output(static_cast<std::size_t>(kChannels) * kFrames);
     std::vector<const float*> input_ptrs(kChannels);
     std::vector<float*> output_ptrs(kChannels);
-    for (std::uint32_t block = 0; block < kBlocks; ++block) {
+    std::vector<float> tail_input(static_cast<std::size_t>(kChannels) * kFrames, 0.0f);
+    auto next_callback = std::chrono::steady_clock::now();
+    // The transport's lead latency means the final two measured GPU requests
+    // become deliverable only after two additional callback positions. Drive
+    // those positions with zero input, then retain only identities from the
+    // measured window below.
+    for (std::uint32_t block = 0; block < kBlocks + kLeadBlocks; ++block) {
         for (std::uint32_t channel = 0; channel < kChannels; ++channel) {
-            input_ptrs[channel] = input[channel].data() + static_cast<std::size_t>(block) * kFrames;
+            input_ptrs[channel] =
+                block < kBlocks ? input[channel].data() + static_cast<std::size_t>(block) * kFrames
+                                : tail_input.data() + static_cast<std::size_t>(channel) * kFrames;
             output_ptrs[channel] = output.data() + static_cast<std::size_t>(channel) * kFrames;
         }
         BufferView<const float> input_view(input_ptrs.data(), kChannels, kFrames);
         BufferView<float> output_view(output_ptrs.data(), kChannels, kFrames);
         transport.process(input_view, output_view, kFrames);
-        transport.pump(1);
-        std::this_thread::sleep_for(kCallbackPeriod);
+        next_callback += kCallbackPeriod;
+        std::this_thread::sleep_until(next_callback);
     }
 
     // Shared-I/O completions arrive through Dawn's non-RT ProcessEvents
@@ -168,31 +221,93 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
     const auto drain_deadline = std::chrono::steady_clock::now() + kTerminalDrainTimeout;
     while (transport.stats().produced_blocks < kBlocks &&
            std::chrono::steady_clock::now() < drain_deadline) {
-        transport.pump(0);
+        // The independent transport worker owns pump(). This bounded wait only
+        // allows it to retire all submitted work before quiescent draining.
         if (transport.stats().produced_blocks >= kBlocks)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    transport.pump(0);
     result.misses = transport.stats().miss_blocks;
     transport.release();
 
+    result.delivery_records.assign(delivery_capture.records.begin(),
+                                   delivery_capture.records.begin() + delivery_capture.count);
+
     result.available =
         pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, result.records);
+    if (path == GpuConvolverTrialPath::SharedAsync) {
+        for (const auto& record : result.records) {
+            if (record.kind == SharedIoTraceKind::Delivery)
+                result.delivery_records.push_back(record);
+        }
+    }
+    const auto measured_record = [](const SharedIoTraceRecord& record) noexcept {
+        return record.sequence < kBlocks;
+    };
+    result.records.erase(
+        std::remove_if(result.records.begin(), result.records.end(),
+                       [&](const auto& record) { return !measured_record(record); }),
+        result.records.end());
+    result.delivery_records.erase(
+        std::remove_if(result.delivery_records.begin(), result.delivery_records.end(),
+                       [&](const auto& record) { return !measured_record(record); }),
+        result.delivery_records.end());
     result.records_valid = result.available && !result.records.empty() &&
+                           !result.delivery_records.empty() &&
                            std::all_of(result.records.begin(), result.records.end(),
                                        [](const auto& record) { return record.valid(); });
     if (result.records_valid) {
-        for (std::size_t i = 0; i < result.records.size(); ++i)
-            emit_record(result, i, result.records[i], input_digest, ir_digest);
+        using Identity = std::pair<std::uint64_t, std::uint64_t>;
+        std::set<Identity> terminal_ids;
+        std::set<Identity> delivery_ids;
+        for (const auto& record : result.records) {
+            if (record.kind == SharedIoTraceKind::Terminal &&
+                !terminal_ids.emplace(record.generation, record.sequence).second) {
+                result.records_valid = false;
+                break;
+            }
+        }
+        for (const auto& delivery : result.delivery_records) {
+            if (!delivery_ids.emplace(delivery.generation, delivery.sequence).second) {
+                result.records_valid = false;
+                break;
+            }
+        }
+        if (result.records_valid && terminal_ids != delivery_ids)
+            result.records_valid = false;
+
+        std::vector<SharedIoTraceRecord> matched;
+        matched.reserve(result.records.size() + result.delivery_records.size());
+        for (const auto& terminal : result.records) {
+            if (!result.records_valid)
+                break;
+            if (terminal.kind != SharedIoTraceKind::Terminal)
+                continue;
+            const auto it = std::find_if(result.delivery_records.begin(),
+                                         result.delivery_records.end(), [&](const auto& delivery) {
+                                             return delivery.generation == terminal.generation &&
+                                                    delivery.sequence == terminal.sequence;
+                                         });
+            if (it == result.delivery_records.end()) {
+                result.records_valid = false;
+                break;
+            }
+            matched.push_back(terminal);
+            matched.push_back(*it);
+        }
+        if (result.records_valid) {
+            for (std::size_t i = 0; i + 1 < matched.size(); i += 2)
+                emit_record(result, i / 2, matched[i], matched[i + 1], input_digest, ir_digest);
+        }
     }
     return result;
 }
 
 std::size_t terminal_record_count(const TrialResult& result) {
     return static_cast<std::size_t>(
-        std::count_if(result.records.begin(), result.records.end(),
-                      [](const auto& record) { return record.gpu_work_admitted; }));
+        std::count_if(result.records.begin(), result.records.end(), [](const auto& record) {
+            return record.kind == SharedIoTraceKind::Terminal && record.gpu_work_admitted;
+        }));
 }
 
 } // namespace

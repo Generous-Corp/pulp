@@ -2296,6 +2296,12 @@ call to an operator.
 - **`runner-topology-selftest`** (ctest) — the diff-shaped half: contract
   well-formedness and the reconciliation logic. No network, so it runs on every
   PR for free and never adds an API call to the required macOS gate.
+- **`fleet-snapshot-selftest`** (ctest) — snapshot regeneration and `--check`
+  against a fake tartci checkout: a new profile file is picked up by glob, a
+  removed one fails `--check` by name.
+- **`runner-topology-static-selftest`** (ctest) — `--mode=static` on the real
+  contract, workflows, and snapshot: the required gate must read `REACHABLE`,
+  and a typo'd label must read `UNSERVED`.
 
 The checker exits `2` when live state cannot be read, distinct from pass (`0`)
 and violation (`1`), so a missing token scope fails loudly instead of reporting
@@ -2337,6 +2343,115 @@ reload, enable, or inspect a runner. They compare the checked-in TartCI profile,
 its installation receipt, and the private desired-fleet manifest. Keep
 repo-specific labels and host declarations in those Pulp/private inputs; generic
 Shipyard and TartCI code must not grow a second Pulp host table.
+
+### Offline reachability (`--mode=static`)
+
+`--mode=static` answers the diff-shaped half of "can this lane be served" with
+no network: every lane's contracted value (and its `unset_fallback`) is judged
+against `tools/scripts/fleet_advertised_labels.json`, a snapshot of what each
+runner registration advertises, generated from the fleet's checked-in macOS
+profiles (schema `tartci.advertised-labels/v1`). A job is reachable only when
+all three hold: the registration advertises every requested label, it mints
+runners for the job's workflow `name:`, and the repository matches.
+
+```bash
+python3 tools/scripts/runner_topology_check.py --mode=static          # table, exit 1 on a required UNSERVED
+python3 tools/scripts/runner_topology_check.py --mode=static --json
+```
+
+Verdicts: `REACHABLE` (names the host/lane/class that serves it), `UNSERVED`
+(names the labels no registration advertises, or the workflow mismatch),
+`HOSTED`, `SENTINEL`, `UNKNOWN` (workflow name not statically knowable, no
+consuming workflow, or a supervisor the snapshot does not cover, such as the
+Proxmox Linux pool), and `UNDECLARED` (a `*_RUNS_ON_JSON` variable a workflow
+reads with no lane, info only).
+
+Read `REACHABLE` as **declared supply**, never as live service. A host whose
+installed profile has drifted from its checked-in one reads reachable here and
+serves nothing; that is what `--mode=report` exists for. The required macOS
+gate is judged on its *dispatched* label set (build.yml's event-class rewrite,
+via the same `_event_projection` the live checker uses), not the raw variable,
+which still carries a label the event-class registrations deliberately omit.
+Nothing in Pulp names a machine: the snapshot is tartci's published
+`fleet/advertised-labels.json` (or, in a tartci that predates it, tartci's own
+generator run over every `profiles/*-macos-fleet.toml`, discovered by glob), so
+adding or removing a host is a profile change in tartci plus a regeneration
+here.
+
+```bash
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --write   # regenerate
+python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check   # 1 = stale, 2 = unreadable
+```
+
+`--check` compares registrations only (provenance metadata is expected to
+move) and names every host, lane, or registration added, removed, or changed.
+`runner-topology-check.yml` runs it hourly against a fresh shallow clone of the
+public tartci repo on Python 3.12 (tomllib), and a stale snapshot joins the
+same finding and tracking issue as a live routing violation; a failed clone is
+reported as unreadable state (exit 2), never as green. Pulp reads only labels,
+workflows, and repository from the snapshot, never tartci internals.
+
+`decisions_contract.py --mode probe --live` needs Shipyard >= 0.208.0, the first
+release with `shipyard landing`; an older binary is reported as
+`shipyard landing unavailable (need >= 0.208.0; found ...)` with exit 2, never
+as a contract failure. `--landing-json FILE` needs no Shipyard at all.
+
+### Fact-checking declared supply
+
+Three layers, each answering a different question, so a disagreement names
+which side drifted. None of them lists a host: every one is derived from
+tartci's profiles or from observed runner names.
+
+1. **Declared (git).** What the checked-in fleet profiles say every runner
+   registration advertises. tartci publishes it as
+   `fleet/advertised-labels.json`; Pulp keeps a copy and checks it:
+
+   ```bash
+   python3 tools/scripts/fleet_snapshot.py --tartci /path/to/tartci --check
+   python3 tools/scripts/fleet_snapshot.py --source-url --check   # tartci's published file on main
+   python3 tools/scripts/runner_topology_check.py --mode=static    # every lane vs declared supply
+   ```
+
+   With `--tartci`, the published file is used when present, otherwise tartci's
+   generator runs over every `profiles/*-macos-fleet.toml`. The hourly topology
+   sweep runs the `--check` against a fresh clone.
+2. **Installed (machines).** Whether each host actually runs the profile it
+   declares. This lives on the hosts, in tartci: `tartci fleet-macos
+   verify-supply` (installed vs declared) and `tartci fleet-macos
+   profile-drift`. Pulp cannot see it; a host whose installed profile drifted
+   reads REACHABLE in layer 1 and serves nothing.
+3. **Observed (GitHub).** Whether the declared registrations served jobs.
+   `runner_topology_check.py --mode=report` reads the jobs its host census
+   already fetched (no second crawl) and reports, per snapshot registration
+   serving a required lane, `OBSERVED` (with last seen), `NOT_OBSERVED` (jobs it
+   could have served ran elsewhere), or `IDLE` (no such demand in the window),
+   plus `UNDECLARED_OBSERVED` for a runner prefix whose jobs match no
+   registration by name (`<host_id>-<lane>-...`) and labels. tartci's
+   `scripts/supply_observed.py` answers the same question from its side.
+
+   ```bash
+   python3 tools/scripts/runner_topology_check.py --mode=report   # live; observed-supply lines
+   ```
+
+   These findings are INFO/WARN only and never a ctest: the census covers one
+   workflow and stops early once every host is proven, so `IDLE` is a prompt to
+   look, not a fault. Jobs are matched to a registration by GitHub's own rule
+   (job labels a subset of the runner's), not by the registration's minting
+   workflow list: release-cli's darwin legs were observed running on pulp-gate
+   runners.
+
+### Routing overrides
+
+A lane whose contracted value is a deliberate temporary state cites an entry in
+`runner_topology.json`'s `overrides` array by `override_id`. Each override
+records `subject` (the variable), `value`, `owner`, `reason`,
+`revert_condition`, `since`, and `expires`. Every mode lists active overrides
+with their age, and fails on an expired override, an override whose subject is
+not a declared lane or routing control, an override whose value no longer
+matches its lane, or a lane citing an override that does not exist. The hourly
+live sweep enforces expiry against the real clock; the ctest pins its clock so
+an expiry date never reddens unrelated PRs. Renewing is an edit of `expires`
+with the reason in the commit.
 
 ### An unset variable is not automatically a gap
 
@@ -5470,3 +5585,57 @@ pull requests waiting for a slot.
 
 So a green `macos` on a pull request means it **built**. Test results arrive when the queue
 validates it.
+
+### The required gate must not need a third-party service at run time
+
+`build.yml`'s `Install visual-analysis Python dependencies` step installs the
+declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
+`visual-python-deps-present` ctest stays answerable. It used to pass
+`--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
+already met* — turning "pypi.org is reachable from this VM" into a precondition
+of the **required** `macos` check.
+
+On 2026-09-23 that precondition failed. Ephemeral VMs on one host refused
+CONNECT to pypi.org (`Tunnel connection failed: 403 Forbidden`), so the step
+died at 21 of 41 and took out every merge_group batch that happened to land
+there, while the identical batch passed on a host whose VMs could reach it.
+The queue stopped merging and the cause looked like a PR defect, because the
+batch is named after one PR.
+
+The step now checks with `pip install --dry-run --no-index` first and only
+reaches the network when the set is genuinely missing. Two consequences worth
+keeping in mind:
+
+- **Pre-provisioning the wheels into the golden image now works.** Before this
+  change it did not: `--upgrade` contacted the index regardless, so a fully
+  provisioned VM still needed PyPI.
+- **A missing dependency is still fatal**, just at the right place. The
+  `visual-python-deps-present` ctest is the proof, and it names what is absent.
+  Making the install non-fatal instead would produce the failure mode this
+  check exists to prevent — seven ctests silently skipping, which reads as green.
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is unreachable. If it can, that is a fleet-wide
+outage waiting on someone else's uptime.
+
+## Protected-validation receipt reuse
+
+A merge group may skip rebuilding and retesting `macos`/`linux` when the pull
+request's own run already validated the identical tree. The pull-request run
+issues a receipt (`tools/scripts/protected_merge_receipt.py issue`), and the
+merge group verifies it with the verifier from its protected base commit.
+
+A receipt carries the evidence of the test run it stands in for, not a claimed
+verdict. It records the CTest selection (label and regex filters), the
+selected inventory, per-test results from the JUnit report, and the recorded
+exit status. It is only issued when the `Test (non-Windows)` step itself ran and
+succeeded. Verification refuses any receipt that:
+
+- records a failed or unexecuted selection,
+- selects a narrowed tier (an include label or regex, or a different excluded
+  label set than the merge group runs), or
+- covers less than 80% of the built test inventory.
+
+A pull-request run that skips its tests therefore issues no receipt, and the
+merge group validates in full. Any receipt that is missing, stale, or
+rejected also falls back to full validation.

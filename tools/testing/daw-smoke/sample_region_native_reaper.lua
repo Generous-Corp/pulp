@@ -39,10 +39,12 @@ reaper.SetMediaTrackInfo_Value(tr,'I_NCHAN',1)
 -- at the D4 reference level.
 reaper.SetMediaTrackInfo_Value(tr,'D_VOL',fmt=='au' and 2.0 or 1.0)
 if input_wav then trace('before_media'); reaper.InsertMedia(input_wav,0); reaper.SetMediaTrackInfo_Value(tr,'I_NCHAN',1); local item=reaper.GetTrackMediaItem(tr,0); trace('after_media:'..tostring(item)); if item then trace('fadein'); reaper.SetMediaItemInfo_Value(item,'D_FADEINLEN',0); trace('fadeout'); reaper.SetMediaItemInfo_Value(item,'D_FADEOUTLEN',0); trace('vol'); reaper.SetMediaItemInfo_Value(item,'D_VOL',2.015748031496063); trace('position'); reaper.SetMediaItemInfo_Value(item,'D_POSITION',0); trace('length'); reaper.SetMediaItemInfo_Value(item,'D_LENGTH',(16384+16)/48000); reaper.UpdateItemInProject(item); trace('after_media_config') end end
+local add_resolution='exact_path'; local reload_resolution='exact_path'
 trace('before_add:'..qualify()); local fx=reaper.TrackFX_AddByName(tr,qualify(),false,1)
 if fx<0 then
   local prefix=(fmt=='au' and 'AU:' or fmt=='clap' and 'CLAP:' or 'VST3:')
   trace('path_add_failed'); fx=reaper.TrackFX_AddByName(tr,prefix..fx_name,false,1)
+  add_resolution='name_fallback'
 end
 trace('after_add:'..tostring(fx))
 reaper.SetMediaTrackInfo_Value(tr,'I_NCHAN',1)
@@ -67,20 +69,43 @@ trace('after_automation')
 trace('before_state'); local _,before=reaper.GetTrackStateChunk(tr,'',false); before=before or ''; write(state_before_path,before); trace('after_state:'..tostring(#before))
 trace('before_pdc'); local pdc_ok,pdc=reaper.TrackFX_GetNamedConfigParm(tr,fx,'pdc',''); local chain_ok,chain=reaper.TrackFX_GetNamedConfigParm(tr,fx,'chain_pdc_actual',''); local latency=tonumber(pdc) or 0; local chain_latency=tonumber(chain) or 0; trace('after_pdc:'..tostring(latency)..':'..tostring(chain_latency))
 -- Keep the automation observation above, then retire the envelope for the
--- canonical fixed-coefficient render saved in the project consumed by
--- -renderproject. The envelope cannot be flattened to a literal value: REAPER
--- stores a VST3 parameter envelope in the normalized 0..1 domain and an
--- AU/CLAP envelope in the plug-in's own range, so one number does not mean the
--- same coefficient in every format. Delete every point and disarm, leaving the
--- serialized parameter state as the only coefficient source for the render.
+-- canonical fixed-coefficient render. NOTE: this is a correctness fix, NOT a
+-- fix for the -0.15708 handoff corruption -- that still reproduces at a similar
+-- rate with the envelope provably retired (act 0, arm 0, no points).
+-- An ACTIVE envelope OVERRIDES the parameter value, so deleting its points is
+-- not enough: REAPER re-adds a point carrying the envelope's own value at the
+-- edit cursor, and the saved state then takes that value instead of the one
+-- written below. Rebuild the chunk line-by-line -- a gsub on 'ACT 1' does not
+-- match the real 'ACT 1 -1' form -- dropping every PT line and forcing ACT/ARM
+-- off, then VERIFY the post-condition rather than assuming it.
 if env then
   reaper.DeleteEnvelopePointRange(env,-1000000000,1000000000)
   reaper.Envelope_SortPoints(env)
   local chunk_ok,env_chunk=reaper.GetEnvelopeStateChunk(env,'',false)
   if chunk_ok and env_chunk then
-    env_chunk=env_chunk:gsub('\nACT 1','\nACT 0'):gsub('\nARM 1','\nARM 0')
-    reaper.SetEnvelopeStateChunk(env,env_chunk,false)
+    local rebuilt={}
+    for line in (env_chunk..'\n'):gmatch('([^\n]*)\n') do
+      local trimmed=line:match('^%s*(.-)%s*$')
+      if trimmed:match('^PT ') then
+        -- drop the point: it carries the envelope's cursor value
+      elseif trimmed:match('^ACT ') then
+        rebuilt[#rebuilt+1]='ACT 0 -1'
+      elseif trimmed:match('^ARM ') then
+        rebuilt[#rebuilt+1]='ARM 0'
+      else
+        rebuilt[#rebuilt+1]=line
+      end
+    end
+    reaper.SetEnvelopeStateChunk(env,table.concat(rebuilt,'\n'),false)
   end
+  local ok2,after_chunk=reaper.GetEnvelopeStateChunk(env,'',false)
+  local act,arm,pts=nil,nil,0
+  if ok2 and after_chunk then
+    act=after_chunk:match('ACT%s+(%d+)')
+    arm=after_chunk:match('ARM%s+(%d+)')
+    for _ in after_chunk:gmatch('PT ') do pts=pts+1 end
+  end
+  trace('envelope_retired:'..tostring(act=='0' and pts==0)..':act:'..tostring(act)..':arm:'..tostring(arm)..':pts:'..tostring(pts))
 end
 if fx>=0 and reaper.TrackFX_SetParamNormalized then reaper.TrackFX_SetParamNormalized(tr,fx,0,(0.5+0.99)/1.98) end
 -- Force the documented pseudo-controls to a fully wet, unbypassed render;
@@ -113,8 +138,28 @@ trace('after_render_config')
 -- chunk remains the automation observation and is intentionally not used for
 -- reload equality.
 local _,fixed_before=reaper.GetTrackStateChunk(tr,'',false); fixed_before=fixed_before or ''; before=fixed_before; write(state_before_path,before)
+-- The queued parameter write lands only when REAPER flushes pending parameter
+-- changes, and GetTrackStateChunk (which calls the plug-in's getState) forces
+-- that flush. A wall-clock wait alone does NOT: a 1.5s settle still failed 6/34,
+-- while repeated state reads converged. So drive the flush explicitly -- rewrite
+-- the parameter and read the state back, bounded -- rather than waiting on it.
+-- The DURABLE guard remains the serialized-store post-condition in the Python
+-- driver, which fails closed; REAPER's own read-back returns its controller
+-- cache and is blind to this.
+do
+  for _ = 1, 12 do
+    if fx>=0 and reaper.TrackFX_SetParamNormalized then
+      reaper.TrackFX_SetParamNormalized(tr,fx,0,(0.5+0.99)/1.98)
+    end
+    local _,flush = reaper.GetTrackStateChunk(tr,'',false)
+    local _ = flush
+    local deadline = reaper.time_precise() + 0.05
+    while reaper.time_precise() < deadline do end
+  end
+  trace('param_flush_loop_done')
+end
 if project_path then trace('before_save'); reaper.Main_SaveProjectEx(0,project_path,8); trace('after_save') end
-trace('before_delete'); reaper.TrackFX_Delete(tr,fx); trace('after_delete'); local reloaded=reaper.TrackFX_AddByName(tr,qualify(),false,1); if reloaded<0 then local prefix=(fmt=='au' and 'AU:' or fmt=='clap' and 'CLAP:' or 'VST3:'); reloaded=reaper.TrackFX_AddByName(tr,prefix..fx_name,false,1) end; trace('after_reload:'..tostring(reloaded))
+trace('before_delete'); reaper.TrackFX_Delete(tr,fx); trace('after_delete'); local reloaded=reaper.TrackFX_AddByName(tr,qualify(),false,1); if reloaded<0 then trace('reload_path_add_failed'); reload_resolution='name_fallback'; local prefix=(fmt=='au' and 'AU:' or fmt=='clap' and 'CLAP:' or 'VST3:'); reloaded=reaper.TrackFX_AddByName(tr,prefix..fx_name,false,1) end; trace('after_reload:'..tostring(reloaded)..':'..tostring(reload_resolution))
 -- The saved project is retained as an artifact; continue with the freshly
 -- reinserted FX instance so REAPER's modal project loader cannot block the
 -- headless render loop.  The delete/reinsert instance is the reload boundary.
@@ -183,7 +228,7 @@ if out_wav and os.getenv('PULP_F4_DEFER_RENDER')~='1' then trace('before_render'
 local deadline=os.time()+120
 local function finish()
   if out_wav and os.getenv('PULP_F4_DEFER_RENDER')~='1' and not reaper.file_exists(out_wav) and os.time()<deadline then reaper.defer(finish); return end
-  trace('finish'); emit({pdc_api='TrackFX_GetNamedConfigParm:pdc',chain_pdc_api='TrackFX_GetNamedConfigParm:chain_pdc_actual',packet='PKT-F4-01',format=fmt,host='REAPER',host_version=reaper.GetAppVersion(),host_instance=tostring(reaper.GetProjectName(0,'')),plugin_path=os.getenv('PULP_F4_PLUGIN_PATH') or '',bundle_id='com.pulp.sample-region-allpass',host_parameter_ids=ids,parameter_ids=ids,parameter_names=names,parameter_identity=(#ids>0),parameter_order=ids,automation=automation,automation_points=points,state_save=(#before>0),state_reload=(#after>0),reload=(reloaded>=0),audio=(out_wav and reaper.file_exists(out_wav) or false),zero_pdc=(latency==0 and chain_latency==0),pdc_samples=latency,chain_pdc_samples=chain_latency,audio_peak=0,saved_generation=#before,reload_generation=#after,wav_path=out_wav or '',coefficient_observed=coeff_observed,wet_observed=wet_observed,negative_control='canonical audio oracle required'})
+  trace('finish'); emit({pdc_api='TrackFX_GetNamedConfigParm:pdc',chain_pdc_api='TrackFX_GetNamedConfigParm:chain_pdc_actual',packet='PKT-F4-01',format=fmt,host='REAPER',host_version=reaper.GetAppVersion(),host_instance=tostring(reaper.GetProjectName(0,'')),plugin_path=os.getenv('PULP_F4_PLUGIN_PATH') or '',bundle_id='com.pulp.sample-region-allpass',host_parameter_ids=ids,parameter_ids=ids,parameter_names=names,parameter_identity=(#ids>0),parameter_order=ids,automation=automation,automation_points=points,state_save=(#before>0),state_reload=(#after>0),reload=(reloaded>=0),audio=(out_wav and reaper.file_exists(out_wav) or false),zero_pdc=(latency==0 and chain_latency==0),pdc_samples=latency,chain_pdc_samples=chain_latency,audio_peak=0,saved_generation=#before,reload_generation=#after,wav_path=out_wav or '',coefficient_observed=coeff_observed,wet_observed=wet_observed,add_resolution=add_resolution,reload_resolution=reload_resolution,exact_identity_load=(add_resolution=='exact_path' and reload_resolution=='exact_path'),negative_control='canonical audio oracle required'})
   reaper.Main_OnCommand(40004,0)
 end
 reaper.defer(finish)
