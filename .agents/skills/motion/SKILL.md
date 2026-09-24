@@ -721,6 +721,7 @@ discovery.
 - `tools/motion/visual/test_grid_overlay.py` — visual-plus self-check (grid, trim, affine)
 - `tools/motion/visual/test_capture_smoke.py` — gated-capture smoke (skip 3 without source)
 - `tools/motion/visual/requirements-optional.txt` — opt-in deps (opencv-python for full affine)
+- `tools/motion/visual/requirements.lock` — hash-pinned resolution of `requirements.txt` that CI installs; regenerate it (command in its header) whenever `requirements.txt` changes, or `test_visual_python_deps_step.py` fails
 - `examples/ui-preview/main.cpp` — env-knob wiring for the standalone host
 - `apple/Sources/PulpSwift/PulpBridge.h` — Swift C ABI surface (Path G)
 - `apple/Sources/PulpSwift/PulpBridge.cpp` — Swift bridge shims (Path G)

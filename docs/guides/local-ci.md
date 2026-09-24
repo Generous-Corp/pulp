@@ -1115,15 +1115,25 @@ It is tiered:
   never asked to use them". `build.yml`'s `Build` step carried `--parallel 4`
   fleet-wide for this reason until it was replaced by the governor.
 
-  **The gate VM's bound is RAM, not vCPU.** tartci sizes a macOS VM's cores
-  from the lane's lease (`vm_cores`, 12 for Pulp's gate lane on the Studio) but
-  never sets `--memory` — only the Linux provider does — so every macOS gate VM
-  runs at the golden image's 8 GiB whatever its core count. The Tier-0 bound is
-  `min(cores, RAM x 0.75 / 1.5 GiB)`, so at 8 GiB the memory axis pins the build
-  to **4 jobs** on a 12-, 6- or 4-vCPU VM alike. Raising `vm_cores` alone
-  therefore does not speed up the build step; the VM's memory has to move with
-  it. Read a leg's actual share from its `[governed-build]` log line rather than
-  inferring it from the lease.
+  **A gate VM's `-j` is its lease.** tartci sizes each macOS gate clone from
+  the lane's VM lease: `C` vCPUs and `(C-1) x 1536 x 4/3` MB of RAM, clamped to
+  8 GiB and 16 GiB. That memory figure is the exact inverse of the Tier-0
+  bound, `min(cores, RAM x 0.75 / 1.5 GiB)`, so a guest lands on `-j(C-1)`
+  unless the clamp moved it. Measured on 2026-09-23: m1 leases 3 vCPU/8 GiB and
+  builds at `-j3` (cores bind), m5 leases 6 vCPU/10 GiB and builds at `-j5`
+  (memory binds), and the Studio's 12 vCPU/16 GiB VMs build at `-j8` (the
+  memory ceiling binds). The `[governed-build]` line names the axis that bound
+  it, and reads the lease from `TARTCI_GUEST_CORES` / `TARTCI_GUEST_MEM_MB` when
+  the runner declares them; a declaration can only narrow what the guest sees.
+  So a slow m1 or m5 gate is not a governor bug: speeding it up means a larger
+  lease (the host profile's `vm_pool_cores`, and `TARTCI_VM_LEASE_MAX_MEM_MB`
+  for the Studio), which trades against the agent builds and the second VM on
+  that host. The non-Windows ctest step takes `-j` from a declared
+  `TARTCI_GUEST_CORES` (narrowed to the visible cores, capped at 8) instead of
+  the literal `-j8` that ran eight tests on a 3-vCPU guest. A runner that
+  declares no lease keeps `-j8`, so the change reaches each host only as that
+  host's tartci starts declaring the lease — a per-host rollout, not a fleet
+  flip.
 - **Tier 1 — tartci per-host lease governor.** On a host running a tartci lease
   store, builds and VM runners acquire a weighted core+memory lease before
   starting; admission is `min(core-budget, memory-budget)`, so a build that
@@ -1198,9 +1208,33 @@ entry. Installing into a different interpreter would leave every one of them
 skipping while the install step reported success, so a missing cache entry
 fails the step outright instead of falling back.
 
-The install is retried with `--break-system-packages` because PEP 668 hosts
-(Homebrew on the self-hosted Macs, Debian on the Linux legs) refuse a plain
-`--user` install.
+It installs `tools/motion/visual/requirements.lock`, the hash-pinned
+resolution of `requirements.txt`, under `--require-hashes`, so every run
+installs the same bytes and a new upstream release cannot change a gate verdict.
+Regenerate the lock (command in its header) whenever `requirements.txt`
+changes; `tools/scripts/test_visual_python_deps_step.py` fails if a declared
+distribution is not pinned and hashed there.
+
+Where the bytes come from, in order:
+
+1. A tartci gate guest whose host keeps a pip wheelhouse gets
+   `TARTCI_PIP_WHEELHOUSE` in its job environment, and the step installs from
+   that read-only mount with `--no-index` — no relay, no PyPI. The host side is
+   `scripts/pip-wheelhouse.sh sync` in tartci; an empty or absent wheelhouse
+   changes nothing.
+2. Otherwise, or if the wheelhouse cannot satisfy the lock, the package index,
+   with three attempts spaced 20 s and 40 s apart
+   (`PULP_PIP_RETRY_DELAY_SECS`).
+
+PEP 668 hosts (Homebrew on the self-hosted Macs, Debian on the Linux legs)
+refuse a plain `--user` install and mark themselves with an
+`EXTERNALLY-MANAGED` file beside the stdlib; the step checks for it once and
+passes `--break-system-packages` only there.
+
+A `Tunnel connection failed: 403 Forbidden` from this step is the gate guest's
+egress relay refusing PyPI, not a package or diff problem. That took down 27
+m5 gate jobs on 2026-09-22/23 until tartci's relay allowlist gained `pypi.org`
+and `files.pythonhosted.org`; a populated wheelhouse removes the dependency.
 
 Seven ctest registrations import `numpy`, `Pillow` or `scikit-image` and skip
 themselves when one is absent. A ctest SKIP is indistinguishable from a PASS in

@@ -1634,11 +1634,48 @@ jobs:
             echo "so installing into any other interpreter would leave them skipping." >&2
             exit 1
           fi
-          echo "Installing the declared visual-analysis set into $py"
-          # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install; the
-          # second form is the sanctioned override for those hosts.
-          "$py" -m pip install --user --upgrade -r tools/motion/visual/requirements.txt || \
-            "$py" -m pip install --break-system-packages --user --upgrade -r tools/motion/visual/requirements.txt
+          # Install the hash-pinned resolution, not the ranges: the same bytes
+          # on every run, so a new upstream release cannot change a gate verdict
+          # and a tampered or truncated download fails the hash check.
+          lock=tools/motion/visual/requirements.lock
+          echo "Installing the pinned visual-analysis set ($lock) into $py"
+          # PEP 668 hosts (Homebrew, Debian) refuse a plain --user install and
+          # mark themselves with EXTERNALLY-MANAGED beside the stdlib. Ask once
+          # rather than retrying every install, so a network failure is not
+          # paid twice.
+          pep668=()
+          if "$py" -c 'import os, sys, sysconfig; sys.exit(0 if os.path.exists(os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED")) else 1)'; then
+            pep668=(--break-system-packages)
+          fi
+          pip_user() {
+            "$py" -m pip install ${pep668[@]+"${pep668[@]}"} --user --require-hashes -r "$lock" "$@"
+          }
+          # A tartci gate guest may carry a read-only host wheelhouse. Installing
+          # from it needs no network at all, so the egress relay and PyPI stop
+          # being able to fail the required gate. It is an accelerator, not an
+          # authority: the hashes above still decide what is acceptable.
+          wheelhouse="${TARTCI_PIP_WHEELHOUSE:-}"
+          if [ -n "$wheelhouse" ] && [ -d "$wheelhouse" ]; then
+            if pip_user --no-index --find-links "$wheelhouse"; then
+              echo "Installed from the host wheelhouse $wheelhouse"
+              exit 0
+            fi
+            echo "::warning::host wheelhouse $wheelhouse could not satisfy $lock; falling back to the package index"
+          fi
+          # pip already retries a dropped connection; these attempts cover a
+          # refusal or an outage that outlasts pip's own short backoff.
+          delay="${PULP_PIP_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if pip_user; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::pip install attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+            fi
+          done
+          echo "::error::could not install $lock after 3 attempts; the visual-analysis ctests would skip" >&2
+          exit 1
 
       - name: Build
         shell: bash
@@ -1748,10 +1785,10 @@ jobs:
         # PR validation excludes `slow` tests. Shipyard PR validation arrives
         # via workflow_dispatch, so it uses the same filter; otherwise slow
         # configure smokes can monopolize the single local macOS runner.
-        # `-j8` (was `-j4`) — local self-hosted runner is M1 Max with 8 P-cores;
-        # GH-hosted ubuntu/macos-15 runners also have ≥4 cores so this
-        # doesn't regress their previous behavior. Higher parallelism
-        # roughly halves test phase wall-time on multi-core hosts.
+        # CTest parallelism follows a tartci gate guest's declared lease,
+        # capped at 8. A literal -j8 oversubscribes the smaller gate guests
+        # (3 and 6 vCPUs today), and that self-inflicted load lands on the
+        # timing-sensitive tests the 120s timeout and the retry exist for.
         run: |
           set -euo pipefail
           label_exclude="validation"
@@ -1793,7 +1830,7 @@ jobs:
             exclude="${exclude}|mac harness right-click reaches PulpView::rightMouseDown"
             # CoreAudio/StandaloneApp device-opening suites rely on the
             # PROCESSORS reservation in test/CMakeLists.txt to avoid
-            # RT-thread starvation under -j8; keep that reservation if
+            # RT-thread starvation under parallel ctest; keep that reservation if
             # those suites stay enabled here.
           fi
           if [ "${RUNNER_OS}" = "Linux" ]; then
@@ -1838,7 +1875,22 @@ jobs:
           # --test-dir, ctest resolves a relative --output-junit against the
           # build dir, nesting the file at $PULP_BUILD_DIR/$PULP_BUILD_DIR/.
           # The report is written even when ctest exits nonzero.
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          # The derivation is keyed on the lease declaration so it rolls out
+          # host by host with tartci rather than flipping the whole fleet at
+          # once: a runner that declares no lease keeps -j8. A declared lease
+          # can only narrow the cores the runner itself reports.
+          ctest_jobs=8
+          case "${TARTCI_GUEST_CORES:-}" in
+            ''|*[!0-9]*|0*) ;;
+            *)
+              ctest_jobs="$TARTCI_GUEST_CORES"
+              visible="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)"
+              if [ "$visible" -ge 1 ] 2>/dev/null && [ "$visible" -lt "$ctest_jobs" ]; then ctest_jobs="$visible"; fi
+              if [ "$ctest_jobs" -gt 8 ]; then ctest_jobs=8; fi
+              ;;
+          esac
+          echo "ctest parallelism: -j${ctest_jobs}"
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j"$ctest_jobs" --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
