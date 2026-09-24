@@ -56,8 +56,27 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn("protected receipt decision unavailable", alias)
 
     def test_receipts_are_only_published_after_successful_pr_validation(self) -> None:
-        self.assertIn("github.event_name == 'pull_request'", WORKFLOW)
-        self.assertIn("success()", WORKFLOW)
+        issue = WORKFLOW.split("- name: Issue exact protected-validation receipt", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        condition = issue.split("run: |", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", condition)
+        self.assertIn("success()", condition)
+        # success() alone also holds when the Test step was skipped; the
+        # receipt must require that the tests actually ran and passed.
+        self.assertIn("steps.ctest.outcome == 'success'", condition)
+        for flag in ("--ctest-exit-file", "--ctest-selection", "--ctest-selected-json", "--ctest-junit"):
+            self.assertIn(flag, issue)
+
+    def test_ctest_step_records_receipt_evidence(self) -> None:
+        test_step = WORKFLOW.split("- name: Test (non-Windows)", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        self.assertIn("id: ctest", test_step)
+        self.assertIn('"$evidence_dir/selection.json"', test_step)
+        self.assertIn("--show-only=json-v1", test_step)
+        self.assertIn('"$evidence_dir/exit-code"', test_step)
+        self.assertIn("--output-junit", test_step)
         self.assertIn("id: protected_receipt", WORKFLOW)
         self.assertIn("steps.protected_receipt.outcome == 'success'", WORKFLOW)
         self.assertIn("steps.protected_receipt.outputs.path", WORKFLOW)

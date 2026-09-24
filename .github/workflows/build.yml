@@ -1733,6 +1733,7 @@ jobs:
           key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
 
       - name: Test (non-Windows)
+        id: ctest
         # Tests run in the merge queue, not on the pull request head. The queue
         # validates the exact commit that will land, so skipping here loses no
         # protection on main, and it removes a whole class of flake from the
@@ -1838,7 +1839,18 @@ jobs:
           # --test-dir, ctest resolves a relative --output-junit against the
           # build dir, nesting the file at $PULP_BUILD_DIR/$PULP_BUILD_DIR/.
           # The report is written even when ctest exits nonzero.
-          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          #
+          # The selection, the selected inventory, and the exit status are
+          # recorded beside the JUnit report so a protected-validation receipt
+          # can prove which tests ran and that every one of them passed.
+          evidence_dir="$RUNNER_TEMP/ctest-evidence"
+          mkdir -p "$evidence_dir"
+          LABEL_EXCLUDE="$label_exclude" EXCLUDE_REGEX="$exclude" python3 -c 'import json, os; print(json.dumps({"label_exclude": os.environ["LABEL_EXCLUDE"], "exclude_regex": os.environ["EXCLUDE_REGEX"], "label_include": "", "include_regex": ""}))' > "$evidence_dir/selection.json"
+          ctest --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" --show-only=json-v1 > "$evidence_dir/selected.json"
+          ctest_exit=0
+          ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 -C Release -LE "$label_exclude" -j8 --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
+          printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
@@ -2016,10 +2028,15 @@ jobs:
 
       - name: Issue exact protected-validation receipt
         id: protected_receipt
+        # A receipt stands in for the merge group's own test run, so it is only
+        # issued when this job's full ctest selection actually ran and passed.
+        # A pull-request run that skips the Test step issues no receipt, and the
+        # merge group then validates in full.
         if: >-
           success()
           && github.event_name == 'pull_request'
           && (matrix.key == 'macos' || matrix.key == 'linux')
+          && steps.ctest.outcome == 'success'
         continue-on-error: true
         shell: bash
         env:
@@ -2041,7 +2058,12 @@ jobs:
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
             --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
             --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --build-dir "$PULP_BUILD_DIR" --output "$receipt_dir/receipt.json"
+            --build-dir "$PULP_BUILD_DIR" \
+            --ctest-exit-file "$RUNNER_TEMP/ctest-evidence/exit-code" \
+            --ctest-selection "$RUNNER_TEMP/ctest-evidence/selection.json" \
+            --ctest-selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --ctest-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+            --output "$receipt_dir/receipt.json"
           echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact protected-validation receipt

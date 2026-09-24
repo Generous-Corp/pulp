@@ -5361,3 +5361,25 @@ pull requests waiting for a slot.
 
 So a green `macos` on a pull request means it **built**. Test results arrive when the queue
 validates it.
+
+## Protected-validation receipt reuse
+
+A merge group may skip rebuilding and retesting `macos`/`linux` when the pull
+request's own run already validated the identical tree. The pull-request run
+issues a receipt (`tools/scripts/protected_merge_receipt.py issue`), and the
+merge group verifies it with the verifier from its protected base commit.
+
+A receipt carries the evidence of the test run it stands in for, not a claimed
+verdict. It records the CTest selection (label and regex filters), the
+selected inventory, per-test results from the JUnit report, and the recorded
+exit status. It is only issued when the `Test (non-Windows)` step itself ran and
+succeeded. Verification refuses any receipt that:
+
+- records a failed or unexecuted selection,
+- selects a narrowed tier (an include label or regex, or a different excluded
+  label set than the merge group runs), or
+- covers less than 80% of the built test inventory.
+
+A pull-request run that skips its tests therefore issues no receipt, and the
+merge group validates in full. Any receipt that is missing, stale, or
+rejected also falls back to full validation.
