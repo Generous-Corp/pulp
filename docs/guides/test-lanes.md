@@ -391,7 +391,10 @@ apply to exactly the cases it always applied to: the group runs Catch2 with
 member's `--list-tests` is scoped to its own sources' tags. The registered
 command stays `<binary> "<case name>"`; only the binary is shared. A member
 whose tag expression lists nothing fails the **build** (`FAIL_IF_EMPTY` in
-`PulpCatch.cmake`) rather than silently registering no tests.
+`PulpCatch.cmake`) rather than silently registering no tests. Hidden cases
+(`[.tag]`) stay out as they did on their own: Catch2 admits them whenever a spec
+has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
+`TEST_SPEC` has no positive pattern is listed with `~[.]` appended.
 
 ### Converting a manifest
 

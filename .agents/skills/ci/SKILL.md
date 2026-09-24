@@ -3721,6 +3721,17 @@ hosted image ships **nine** Xcode bundles, and removing the eight inactive ones
 its `runner.environment == 'github-hosted'` guard — without it the same step
 would delete Xcode off a self-hosted Studio.
 
+### The -O0 class has a clean lane: `debug-o0.yml`
+
+Contract row #9's unoptimised full-suite coverage lives in
+`.github/workflows/debug-o0.yml` (clean GitHub-hosted, nightly on `main`, one
+tracking issue on a scheduled red). Run it against a PR head with
+`ghapp workflow run debug-o0.yml --ref <branch>` when a change could split a
+header symbol's body by macro or relies on an `assert`. Do not route it to a
+self-hosted runner: a warm build dir reproduces the stale-object false
+red/green the lane exists to rule out (row #8). The Shipyard host lane stays
+Debug until that lane is green on `main`; see `docs/guides/local-ci.md`.
+
 ### `shipyard pr` can leave YOUR build dir at Debug — and a later "successful" build can be stale
 
 The local validation backend builds Debug in the editing checkout. That is
@@ -10138,6 +10149,37 @@ Related: a GraphQL page asking for 50 per-PR check rollups times out (HTTP 504)
 under normal load on this repo. If a collector reads open PRs with their
 rollups, keep the page small and give transient 5xx a bounded retry — a
 terminal failure must still fail closed rather than retry.
+
+## A test added to the tracing lane needs THREE edits, or it silently never runs
+
+`.github/workflows/tracing-build.yml` is the only lane that configures
+`-DPULP_TRACING=ON`. Everywhere else the macros expand to `((void)0)`, so a
+test that asserts on span content does not fail there — it takes whatever
+OFF-contract branch it has and passes.
+
+That lane does **not** build the whole test tree. It names its targets:
+
+```yaml
+cmake --build build --target pulp-test-tracing pulp-test-tracing-session ...
+```
+
+and then names its binaries again in the run step. So adding a tracing
+assertion means editing **three** places — the CMake registration, the
+workflow's `--target` list, and the workflow's run step. Miss either workflow
+edit and the test compiles nowhere that matters and executes nowhere at all.
+
+It also configures `-DPULP_ENABLE_GPU=OFF`, so a tracing test that needs GPU
+capture will `SKIP` there even when it is built. A tracing assertion that
+depends on the GPU therefore has no lane at all: OFF everywhere else, skipped
+here.
+
+**The tell is the assertion count, not the exit code.** A suite reporting
+`3 assertions in 1 test case` where you wrote ten `REQUIRE`s has taken the
+compile-out path; it says "All tests passed" either way. Check the count
+against what you wrote before believing a tracing test ran — and prefer
+driving the path under test through a backend-agnostic seam (a
+`RecordingCanvas` rather than a GPU surface) so the assertion can live in the
+one lane that compiles tracing in.
 
 ## The macOS gate runs only the fast tier on a pull request; the full suite runs in the merge queue
 

@@ -85,6 +85,7 @@ jobs:
                      pulp-test-tracing-session \
                      pulp-test-offline-tracing \
                      pulp-test-ship-tracing-guard \
+                     pulp-test-tracing-canvas-layers \
             -j"$(nproc)"
 
       - name: Run tracing test suites
@@ -98,6 +99,9 @@ jobs:
           ./build/test/pulp-test-tracing-session
           ./build/test/pulp-test-offline-tracing
           ./build/test/pulp-test-ship-tracing-guard
+          # The canvas category stays populated. This is the only lane that
+          # compiles tracing in, so it is the only place the assertion can run.
+          ./build/test/pulp-test-tracing-canvas-layers
 
       - name: Summarize
         if: always()

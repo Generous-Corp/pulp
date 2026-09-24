@@ -12,6 +12,8 @@ checks then read what CTest registered:
     fake main links against, so the link proves it),
   * each member's cases are registered under that member's own labels,
     timeout, prefix and properties, none of them leaking to a neighbour,
+  * a member with no positive tag spec of its own is listed with `~[.]`, so
+    the hidden cases a standalone suite never registered stay unregistered,
   * a member whose tags match nothing fails the BUILD with a named
     diagnostic rather than silently registering no tests,
   * a member that links a library its group does not fails CONFIGURE,
@@ -137,8 +139,12 @@ def fixture_project(
                     else if (arg.substr(0, 1) == "[") spec = std::string(arg);
                 }
                 if (!filenames_as_tags) return 0;
-                if (spec == "[#alpha]") std::cout << "alpha one\\nalpha two\\n";
-                else if (spec == "[#beta]~[slow]") std::cout << "beta fast\\n";
+                // A positive tag admits hidden ([.tag]) cases in Catch2, so a
+                // member spec with no positive pattern of its own must carry
+                // ~[.]; the unguarded spec lists the hidden case to prove it.
+                if (spec == "[#alpha]~[.]") std::cout << "alpha one\\nalpha two\\n";
+                else if (spec == "[#alpha]") std::cout << "alpha one\\nalpha two\\nalpha hidden\\n";
+                else if (spec == "[#beta]~[slow]~[.]") std::cout << "beta fast\\n";
                 else if (spec == "[#beta][slow]") std::cout << "beta slow\\n";
                 return beta_symbol() == 42 ? 0 : 3;
             }

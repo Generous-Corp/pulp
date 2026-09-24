@@ -21,8 +21,10 @@
 
 #include "support/thread_progress.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -109,4 +111,84 @@ TEST_CASE("SignalGraph compile_() is race-free against a live process() "
 
     // The live snapshot must still render after the concurrent recompilation storm.
     render_block(g);
+}
+
+// compile_() writes each authored node's transport_sensitive readback into
+// nodes_, so every caller — prepare(), prepare_swap(), and this test hook — must
+// hold the graph mutation lock around it. A debug build proves that through the
+// lock-owner assertion inside node_mut_locked_ (this graph has nodes, so the
+// assertion is reached on every compile). This test proves it in every build
+// type: a custom type's latency query runs inside compile_(), and from there a
+// second thread's locking reader (node_gain) must be unable to complete until
+// the hook returns. Without the lock the reader finishes at once.
+TEST_CASE("compile_snapshot_for_test holds the graph mutation lock while it compiles",
+          "[host][signal-graph][prepared-swap][mutation-lock][threads]") {
+    using namespace std::chrono_literals;
+
+    SignalGraph g;
+    // Null until the hook under test runs, so prepare()'s own compile_() — which
+    // legitimately queries latency under the lock — does not start the probe.
+    std::atomic<SignalGraph*> probe_graph{nullptr};
+    std::atomic<bool> reader_done{false};
+    std::atomic<bool> reader_finished_during_compile{false};
+    std::atomic<int> probes{0};
+    std::thread reader;
+
+    CustomNodeType probe;
+    probe.type_id = "mutation-lock.probe";
+    probe.num_input_ports = 2;
+    probe.num_output_ports = 2;
+    probe.process = [](pulp::audio::BufferView<float>& out,
+                       const pulp::audio::BufferView<const float>& in, int n) {
+        const std::size_t chs = std::min(out.num_channels(), in.num_channels());
+        for (std::size_t c = 0; c < chs; ++c)
+            std::copy_n(in.channel_ptr(c), n, out.channel_ptr(c));
+    };
+    probe.latency_samples = [&](double) {
+        auto* graph = probe_graph.load(std::memory_order_acquire);
+        // compile_() may query latency more than once per compile; one probe
+        // per hook call is enough, and a second would orphan the first thread.
+        if (graph == nullptr || reader.joinable()) return 0;
+        probes.fetch_add(1, std::memory_order_relaxed);
+        reader = std::thread([graph, &reader_done] {
+            (void)graph->node_gain(1);
+            reader_done.store(true, std::memory_order_release);
+        });
+        // Bounded: with the lock held this window always elapses in full, so it
+        // is the only cost a correct build pays. Without the lock the reader
+        // acquires the mutex immediately and is seen long before the deadline.
+        const auto deadline = std::chrono::steady_clock::now() + 250ms;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (reader_done.load(std::memory_order_acquire)) {
+                reader_finished_during_compile.store(true, std::memory_order_relaxed);
+                break;
+            }
+            std::this_thread::sleep_for(1ms);
+        }
+        return 0;
+    };
+    REQUIRE(g.register_custom_node_type(probe));
+
+    const auto in = g.add_input_node(2, "In");
+    const auto cust = g.add_custom_node("mutation-lock.probe", "Probe");
+    const auto out = g.add_output_node(2, "Out");
+    for (int c = 0; c < 2; ++c) {
+        REQUIRE(g.connect(in, c, cust, c));
+        REQUIRE(g.connect(cust, c, out, c));
+    }
+    REQUIRE(g.prepare(kSr, kFrames));
+    REQUIRE(probes.load(std::memory_order_relaxed) == 0);
+
+    probe_graph.store(&g, std::memory_order_release);
+    g.compile_snapshot_for_test(kSr, kFrames);
+    probe_graph.store(nullptr, std::memory_order_release);
+
+    // Instrument control: the latency query really ran inside the hook's
+    // compile_() and the reader really ran — it completes once the hook returns.
+    REQUIRE(probes.load(std::memory_order_relaxed) == 1);
+    REQUIRE(reader.joinable());
+    reader.join();
+    REQUIRE(reader_done.load(std::memory_order_acquire));
+
+    CHECK_FALSE(reader_finished_during_compile.load(std::memory_order_relaxed));
 }
