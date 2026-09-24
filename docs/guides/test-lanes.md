@@ -258,7 +258,13 @@ lane checks its own.
 ## Adding a test — where will it land?
 
 - **A core unit/integration test** → add it with no special label. It runs on the
-  required gate. Keep it fast (< a few seconds) and non-flaky.
+  required gate. Keep it fast (< a few seconds) and non-flaky. Catch2 suites
+  compile against a shared precompiled header of Catch2 plus the common standard
+  headers (`PULP_TEST_PCH`, Clang only); a suite that must see a `#define`
+  before `<catch2/...>` or a standard header (a `CATCH_CONFIG_*` or `_LIBCPP_*`
+  switch) opts out with `pulp_add_test_suite(... NO_PCH)`. ObjC++ sources and
+  per-target `-f`/`-std` options opt out automatically; see
+  `<build>/pulp-test-pch.tsv` for every decision.
 - **A new example plugin** → its `clap-dlopen`/`auval`/`pluginval` validators
   should carry `LABELS "validation;<format>"` (match the existing examples). That
   automatically keeps them off the required gate and onto the example-validation
