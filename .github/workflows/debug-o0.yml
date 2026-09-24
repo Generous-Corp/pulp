@@ -1,0 +1,125 @@
+name: Debug -O0 Suite
+
+# The unoptimised (-O0) full-suite lane that decisions contract row #9
+# requires. At -O3 each translation unit inlines its own copy of a header
+# function, so an ODR violation where two TUs compile different bodies for the
+# same symbol stays invisible; at -O0 the linker keeps one body for both and
+# the test that depends on the other goes red (the snap_to_zero incident). Only
+# an unoptimised build that runs the tests can see that class, and NDEBUG-gated
+# assertions only fire here too.
+#
+# It runs clean on a GitHub-hosted runner, never in a warm self-hosted build
+# directory: contract row #8 keeps ODR-prone lanes off warm dirs, and a stale
+# object from an earlier branch is exactly the false red/false green this lane
+# must not produce.
+#
+# Triggers:
+#   * nightly on main — the standing check. A red run opens (or comments on)
+#     one tracking issue, so a failure is seen rather than buried.
+#   * workflow_dispatch — run it against any PR head on demand:
+#       ghapp workflow run debug-o0.yml --ref <branch>
+#
+# The configure and ctest selection mirror the Shipyard macOS lane's
+# `[validation.default]` so the two produce the same verdict; examples and the
+# GPU backend are OFF so a cold Debug tree fits a hosted runner's disk.
+#
+# Runner: PULP_DEBUG_O0_MACOS_RUNS_ON_JSON when set, otherwise macos-15. Do not
+# point it at the self-hosted build-gate pool (row #8, and it would compete
+# with the required `macos` gate).
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: '41 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: debug-o0-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-o0:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
+    name: Debug -O0 full suite (macOS ARM64)
+    runs-on: ${{ fromJSON(vars.PULP_DEBUG_O0_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Reclaim hosted macOS disk
+        # Same reclamation as the ASan and coverage lanes: drop inactive Xcode
+        # bundles on disposable hosted runners only.
+        if: runner.os == 'macOS' && runner.environment == 'github-hosted'
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_developer="$(xcode-select -p)"
+          active_xcode="${active_developer%/Contents/Developer}"
+          active_xcode="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${active_xcode}")"
+          while IFS= read -r -d '' candidate; do
+            candidate_real="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${candidate}")"
+            if [ "${candidate_real}" != "${active_xcode}" ]; then
+              sudo rm -rf -- "${candidate}"
+            fi
+          done < <(find /Applications -maxdepth 1 -type d -name 'Xcode*.app' -print0)
+          brew cleanup --prune=all || true
+          df -h /
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure (Debug, -O0)
+        shell: bash
+        run: |
+          ci_python="$(python3 tools/ci/find_python311.py)"
+          cmake -S . -B build-o0 \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPython3_EXECUTABLE="${ci_python}"
+          grep -q '^CMAKE_BUILD_TYPE:STRING=Debug$' build-o0/CMakeCache.txt
+
+      - name: Build
+        run: tools/ci/governed-build.sh cmake --build build-o0
+
+      - name: Test
+        run: >-
+          tools/ci/governed-build.sh ctest --test-dir build-o0 --output-on-failure
+          --repeat until-pass:2 --exclude-regex AudioWorkgroup
+          --label-exclude "validation|slow|performance|bench|quality-lab"
+
+  report:
+    # A nightly red that nobody reads is the failure mode this lane replaces,
+    # so a scheduled failure keeps exactly one open issue current.
+    needs: debug-o0
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Debug -O0 nightly suite is failing on main"
+          existing="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open \
+            --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')"
+          body="The unoptimised full-suite lane failed on ${GITHUB_SHA}: ${RUN_URL}"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --repo "${GITHUB_REPOSITORY}" --body "${body}"
+          else
+            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
+          fi

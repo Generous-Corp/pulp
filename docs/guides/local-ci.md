@@ -3885,6 +3885,28 @@ Intel safety net for this profile. It runs GitHub-hosted `ubuntu-latest` and
 auto-closes the tracker when the platform recovers. Do not add a duplicate
 nightly Intel workflow unless this one is deliberately retired.
 
+### `debug-o0.yml` — the clean -O0 full-suite lane
+
+Decisions contract row #9 requires one unoptimised full-suite lane: an ODR
+violation between two TUs that compile different bodies for one header symbol
+is invisible at -O3 (each TU inlines its own copy) and red at -O0 (the linker
+keeps one body for both), and NDEBUG-gated assertions only fire unoptimised.
+`.github/workflows/debug-o0.yml` is that lane. It configures Debug with tests
+ON and examples/GPU OFF, runs the same CTest selection as the Shipyard macOS
+lane, and runs clean on a GitHub-hosted `macos-15` runner (row #8 keeps
+ODR-prone lanes out of warm self-hosted build directories).
+
+- Nightly on `main`. A scheduled failure opens, or comments on, one tracking
+  issue titled "Debug -O0 nightly suite is failing on main".
+- On demand against a PR head: `ghapp workflow run debug-o0.yml --ref <branch>`.
+- `PULP_DEBUG_O0_MACOS_RUNS_ON_JSON` overrides the runner. Leave it unset;
+  never point it at the self-hosted build-gate pool.
+
+The Shipyard macOS host lane still builds Debug. Moving it to Release, so it
+shares the worktree's `build/` configuration with agent builds, waits until
+this lane is green on `main` and the changed-surface inventory contract is
+re-pinned for a Release lane.
+
 ### `sanitizers.yml` — per-sanitizer target selection
 
 The automatic matrix runs on every relevant pull request and once nightly.
