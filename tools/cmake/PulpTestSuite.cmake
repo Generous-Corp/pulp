@@ -520,7 +520,8 @@ endfunction()
 # Adds a member suite's sources to its group and returns, in ${out_spec}, the
 # Catch2 test-spec list that selects exactly that member's cases:
 # `-#` (filenames as tags) followed by one `[#<stem>]<member_spec>` term per
-# source, OR-ed with commas.
+# source, OR-ed with commas, with `~[.]` appended when the member's own spec
+# names no positive pattern.
 function(_pulp_test_group_attach GROUP MEMBER out_spec)
     set(options "")
     set(oneValueArgs TEST_SPEC)
@@ -555,6 +556,19 @@ function(_pulp_test_group_attach GROUP MEMBER out_spec)
             "single tag expression (no ','); the group scopes it per source file")
     endif()
 
+    # A standalone suite lists its cases with no spec, which leaves hidden
+    # cases ([.tag]) out; Catch2 admits a hidden case only when the spec has a
+    # positive pattern. A group's [#<stem>] term is always positive, so a
+    # member whose own spec has none (empty, or only ~[...] exclusions) gets an
+    # explicit ~[.] to keep listing exactly what it listed on its own.
+    string(REGEX REPLACE "~\\[[^]]*\\]" "" _positive "${M_TEST_SPEC}")
+    string(REGEX REPLACE "~\"[^\"]*\"" "" _positive "${_positive}")
+    string(STRIP "${_positive}" _positive)
+    set(_hidden_guard "")
+    if(_positive STREQUAL "")
+        set(_hidden_guard "~[.]")
+    endif()
+
     get_target_property(_known_sources ${GROUP} PULP_TEST_GROUP_SOURCES)
     set(_terms "")
     foreach(_src IN LISTS M_SOURCES)
@@ -572,7 +586,7 @@ function(_pulp_test_group_attach GROUP MEMBER out_spec)
                 INCLUDE_DIRECTORIES ${M_INCLUDE_DIRS})
         endif()
         get_filename_component(_stem "${_abs}" NAME_WLE)
-        list(APPEND _terms "[#${_stem}]${M_TEST_SPEC}")
+        list(APPEND _terms "[#${_stem}]${M_TEST_SPEC}${_hidden_guard}")
     endforeach()
     set_property(TARGET ${GROUP} PROPERTY PULP_TEST_GROUP_SOURCES "${_known_sources}")
     set_property(TARGET ${GROUP} APPEND PROPERTY PULP_TEST_GROUP_MEMBERS "${MEMBER}")

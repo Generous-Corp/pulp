@@ -700,7 +700,7 @@ TEST_CASE("a press on an aria-haspopup trigger switches menus in one press",
     CHECK_FALSE(on_trigger.consume_press);
 }
 
-TEST_CASE("a press on ordinary content still consumes the dismissal",
+TEST_CASE("a press on ordinary content still consumes the dismissal (web-compat)",
           "[view][web-compat][auto-overlay][trigger][pointer]") {
     // The negative control for the case above, in the direction that matters:
     // the pass-through is scoped to triggers. Widened to every dismissing
