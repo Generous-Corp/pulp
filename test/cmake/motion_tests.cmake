@@ -1,16 +1,33 @@
 # Motion, provenance, bridge, and visual-analysis tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. The pulp::view suites
+# share one executable and the pulp::inspect suites another (their compile
+# line adds the inspect include root). A suite stays on its own when it needs
+# its own process or compile line: meter-source carries the RT allocation
+# probe, and the Swift and Android bridge suites compile a bridge .cpp into
+# the test.
+set(_pulp_motion_group_libs pulp::view)
+if(TARGET pulp::render)
+    list(APPEND _pulp_motion_group_libs pulp::render)
+endif()
+pulp_add_test_group(pulp-test-group-motion LIBRARIES ${_pulp_motion_group_libs})
+
 # Animation tests
-pulp_add_test_suite(pulp-test-animation LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-animation GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # FrameClock tests
-pulp_add_test_suite(pulp-test-frame-clock LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-frame-clock GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Host frame-timing seam: measured-dt pump (60/120 Hz, variable refresh,
 # dropped + coalesced callbacks, first frame, wake-from-idle) and the
 # one-dt-to-every-consumer contract the hosts are wired to.
-pulp_add_test_suite(pulp-test-host-frame-pump LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-host-frame-pump GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Host->view value sources, subscription lifecycle, and transport-free telemetry
 # sidecars. Carries the allocation probe used to assert paint and producer paths.
@@ -20,67 +37,55 @@ pulp_add_test_suite(pulp-test-meter-source
     LIBRARIES pulp::view)
 
 # Motion bedrock tests.
-pulp_add_test_suite(pulp-test-motion LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-motion GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # MotionPreferences reduced-motion policy + animation honoring.
-add_executable(pulp-test-motion-preferences test_motion_preferences.cpp)
-target_link_libraries(pulp-test-motion-preferences PRIVATE
-    pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion-preferences)
+pulp_add_test_suite(pulp-test-motion-preferences GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Motion inspector protocol-domain tests.
 if(TARGET pulp::inspect)
-    add_executable(pulp-test-motion-inspector test_motion_inspector.cpp)
-    target_link_libraries(pulp-test-motion-inspector PRIVATE
-        pulp::view pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-motion-inspector)
+    pulp_add_test_group(pulp-test-group-motion-inspect LIBRARIES pulp::view pulp::inspect)
+
+    pulp_add_test_suite(pulp-test-motion-inspector GROUP pulp-test-group-motion-inspect
+        LIBRARIES pulp::view pulp::inspect)
 
     # Motion scrubber consumes .motion.jsonl fixtures and re-emits events
     # up to a frame playhead.
-    add_executable(pulp-test-motion-scrubber test_motion_scrubber.cpp)
-    target_link_libraries(pulp-test-motion-scrubber PRIVATE
-        pulp::view pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-motion-scrubber)
+    pulp_add_test_suite(pulp-test-motion-scrubber GROUP pulp-test-group-motion-inspect
+        LIBRARIES pulp::view pulp::inspect)
 
-    add_executable(pulp-test-control-motion-executor
-        test_control_motion_executor.cpp)
-    target_link_libraries(pulp-test-control-motion-executor PRIVATE
-        pulp::view pulp::inspect Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-control-motion-executor
-        PROPERTIES LABELS "inspect;control;motion;t1;main-thread")
+    pulp_add_test_suite(pulp-test-control-motion-executor GROUP pulp-test-group-motion-inspect
+        LIBRARIES pulp::view pulp::inspect
+        LABELS "inspect;control;motion;t1;main-thread")
 endif()
 
 # Motion end-to-end animation smoke — mirrors what a plugin author
 # would write: drive a real Tween, publish_value each tick, read the
 # fixture back, assert the shape matches the configured animation.
-add_executable(pulp-test-motion-animation-smoke test_motion_animation_smoke.cpp)
-target_link_libraries(pulp-test-motion-animation-smoke PRIVATE
-    pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion-animation-smoke)
+pulp_add_test_suite(pulp-test-motion-animation-smoke GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Motion provenance adapters. One test per
 # animation surface (Tween + PULP_MOTION_TWEEN, AnimatorSetBuilder::name,
 # CSS TransitionSpec, ambient slot for rAF + design-import). Verifies the
 # Provenance envelope round-trips end to end through the publish channel.
-add_executable(pulp-test-motion-provenance test_motion_provenance.cpp)
-target_link_libraries(pulp-test-motion-provenance PRIVATE
-    pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion-provenance)
+pulp_add_test_suite(pulp-test-motion-provenance GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Motion input record + replay end-to-end: records a hover -> click ->
 # drag against a synthetic view tree, replays the
 # same fixture against a fresh tree, asserts identical motion fixture
 # emerges (modulo timing tolerance).
-add_executable(pulp-test-motion-input-replay test_motion_input_replay.cpp)
-target_link_libraries(pulp-test-motion-input-replay PRIVATE
-    pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-motion-input-replay)
+pulp_add_test_suite(pulp-test-motion-input-replay GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
 
 # Motion cost attribution — correlates per-frame render cost +
 # dirty-rect area with the trace_ids that emitted on the same frame
 # (carrying their provenance envelopes). The bridge probe
 # test pulls real RenderPassManager + DirtyTracker stats, so this
-# test target depends on pulp::render alongside pulp::view.
+# suite depends on pulp::render alongside pulp::view.
 #
 # Sanitizer builds (ASan/UBSan/TSan) disable PULP_ENABLE_GPU and so
 # pulp::render is never created — skip the cost test in that case
@@ -88,10 +93,8 @@ catch_discover_tests(pulp-test-motion-input-replay)
 # is exercised by the GPU-on lanes (macOS local smoke + linux/windows
 # release-path), so coverage isn't lost.
 if(TARGET pulp::render)
-    add_executable(pulp-test-motion-cost test_motion_cost.cpp)
-    target_link_libraries(pulp-test-motion-cost PRIVATE
-        pulp::view pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-motion-cost)
+    pulp_add_test_suite(pulp-test-motion-cost GROUP pulp-test-group-motion
+        LIBRARIES pulp::view pulp::render)
 endif()
 
 # Motion Swift bridge — exercises the C ABI shims in
