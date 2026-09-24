@@ -12,6 +12,15 @@ pull request that adds or touches that file owns the failure.
 `prepush-cannot-measure` maps to `tools/scripts/test_prepush_cannot_measure.py`,
 which maps to the one pull request adding it.
 
+That signal is blind to a gate that reports a COUNT rather than a file, and the
+consumption census is exactly one: `public_headers.count` is walked live from
+each target's exported include roots, so one header added under a root a target
+already exports drifts the census while sharing no token with the gate's name.
+The header's own pull request then scores zero everywhere and the batch reads as
+"pre-existing on main" -- a phantom that sends people to re-measure a census
+that was already true. Census gates therefore get their own ownership rule,
+driven by the exported include roots the committed census itself names.
+
 The threshold matters as much as the mapping. Incidental token overlap scores
 low, and reporting a low score as a culprit is a false accusation -- worse than
 no attribution, because someone acts on it. Below the confidence threshold this
@@ -24,10 +33,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 DEFAULT_REPO = "Generous-Corp/pulp"
 
@@ -44,9 +55,55 @@ VERDICT_CULPRIT = "culprit"
 VERDICT_PRE_EXISTING = "pre-existing-on-main"
 VERDICT_UNOWNED = "unowned"
 
+# The census gates real drift takes down. The drift gate compares the measured
+# graph against the committed census; the negative contract opens with a control
+# that feeds UNMODIFIED inputs, so live drift fails it too. The rest of the
+# census family is deliberately absent: the schema and description checks read
+# the committed census with no build tree, and the contract control note stages
+# its own drift and still passes when the tree is already drifted.
+CENSUS_TESTS = frozenset(
+    {
+        "consumption-census-drift",
+        "consumption-census-negative-contract",
+    }
+)
 
-def gh(path: str, jq: str | None = None, repo_cwd: str | None = None) -> str | None:
-    cmd = ["ghapp", "api", path] + (["--jq", jq] if jq else [])
+CENSUS_RELPATH = "docs/status/consumption-profiles.json"
+
+# The census counts these and only these under an exported include root.
+HEADER_SUFFIXES = (".h", ".hpp")
+
+# Editing the census, its schema, its generator or its facts dump owns a census
+# failure directly; adding or deleting a counted header owns it by moving a
+# number nothing in the diff names.
+CENSUS_ARTIFACTS = frozenset(
+    {
+        CENSUS_RELPATH,
+        "docs/status/consumption-profiles.schema.json",
+        "tools/scripts/consumption_census.py",
+        "tools/scripts/consumption_census_contract.py",
+        "test/cmake/consumption_census_tests.cmake",
+    }
+)
+
+# A header the census counts, added or deleted, IS the cause of a count change,
+# so this is as decisive as an exact stem match. Touching a census artifact is
+# ownership too, but of a gate that could have failed several ways, so it lands
+# at the containment weight rather than above it.
+WEIGHT_CENSUS_HEADER = 100
+WEIGHT_CENSUS_ARTIFACT = 50
+
+
+def gh(
+    path: str,
+    jq: str | None = None,
+    repo_cwd: str | None = None,
+    paginate: bool = False,
+) -> str | None:
+    cmd = ["ghapp", "api", path]
+    if paginate:
+        cmd.append("--paginate")
+    cmd += ["--jq", jq] if jq else []
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_cwd)
     if proc.returncode != 0:
         return None
@@ -79,6 +136,84 @@ def score_match(test_name: str, path: str) -> int:
     return hits if hits >= MIN_INCIDENTAL_TOKENS else 0
 
 
+@dataclass(frozen=True)
+class ChangedFile:
+    """One entry in a pull request's diff, with the part a census needs.
+
+    `status` defaults to "modified" because an unknown status must not be able
+    to claim census ownership: only ADDING or DELETING a counted header moves a
+    header count, and inferring that from a bare path would be the false
+    accusation this module exists to avoid.
+    """
+
+    path: str
+    status: str = "modified"
+    previous_path: str = ""
+
+
+def as_changed(entry: ChangedFile | str) -> ChangedFile:
+    """Accept a bare path so callers that have no diff status still work."""
+    return entry if isinstance(entry, ChangedFile) else ChangedFile(path=entry)
+
+
+def census_include_roots(source_root: Path) -> frozenset[str]:
+    """Exported include roots the committed census counts headers under.
+
+    Read out of the census rather than hardcoded. The roots ARE the published
+    measurement, so a list kept alongside it would drift from it and attribute a
+    drift to the wrong diff -- the failure mode this whole rule exists to end.
+    """
+    try:
+        census = json.loads((source_root / CENSUS_RELPATH).read_text())
+    except (OSError, ValueError):
+        return frozenset()
+    roots: set[str] = set()
+    pending = [census]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            headers = node.get("public_headers")
+            if isinstance(headers, dict):
+                for root in headers.get("roots") or ():
+                    if isinstance(root, str) and root:
+                        roots.add(posixpath.normpath(root))
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+    return frozenset(roots)
+
+
+def counted_header(path: str, roots: frozenset[str]) -> bool:
+    """Would the census count `path` as public header surface?"""
+    if not path.endswith(HEADER_SUFFIXES):
+        return False
+    normalized = posixpath.normpath(path)
+    return any(
+        normalized == root or normalized.startswith(root + "/") for root in roots
+    )
+
+
+def census_weight(test_name: str, change: ChangedFile, roots: frozenset[str]) -> int:
+    """How strongly `change` looks like the cause of a census gate failure."""
+    if test_name not in CENSUS_TESTS:
+        return 0
+    if posixpath.normpath(change.path) in CENSUS_ARTIFACTS:
+        return WEIGHT_CENSUS_ARTIFACT
+    if not roots:
+        return 0
+    now = counted_header(change.path, roots)
+    if change.status in ("added", "removed"):
+        return WEIGHT_CENSUS_HEADER if now else 0
+    if change.status == "renamed":
+        # A rename moves the count only when it crosses the counted set. With no
+        # previous path there is no way to tell, so refuse rather than guess.
+        if not change.previous_path:
+            return 0
+        before = counted_header(change.previous_path, roots)
+        return WEIGHT_CENSUS_HEADER if now != before else 0
+    return 0
+
+
 @dataclass
 class Attribution:
     """Who owns a batch's failing tests, and how sure we are."""
@@ -89,19 +224,34 @@ class Attribution:
     strength: dict[int, int] = field(default_factory=dict)
     verdict: str = VERDICT_UNOWNED
     culprit: int | None = None
+    # Which failing tests are census gates, and whether the roots needed to
+    # judge them were actually loaded. An unevaluated rule must never read as
+    # "nobody owns it".
+    census_tests: list[str] = field(default_factory=list)
+    census_roots_read: bool = True
 
     @property
     def best_strength(self) -> int:
         return max(self.strength.values(), default=0)
 
 
-def attribute(tests: list[str], pr_files: dict[int, list[str]]) -> Attribution:
+def attribute(
+    tests: list[str],
+    pr_files: dict[int, list[ChangedFile | str]],
+    census_roots: frozenset[str] = frozenset(),
+) -> Attribution:
     """Map failing tests onto the pull requests whose files own them."""
     result = Attribution(tests=list(tests))
+    result.census_tests = [test for test in tests if test in CENSUS_TESTS]
+    result.census_roots_read = bool(census_roots)
     for test in tests:
-        for number, paths in pr_files.items():
-            for path in paths:
-                weight = score_match(test, path)
+        for number, entries in pr_files.items():
+            for entry in entries:
+                change = as_changed(entry)
+                weight = max(
+                    score_match(test, change.path),
+                    census_weight(test, change, census_roots),
+                )
                 if not weight:
                     continue
                 prev_weight, prev_files = result.scores.setdefault(
@@ -109,7 +259,7 @@ def attribute(tests: list[str], pr_files: dict[int, list[str]]) -> Attribution:
                 ).setdefault(test, (0, set()))
                 result.scores[number][test] = (
                     max(prev_weight, weight),
-                    prev_files | {path},
+                    prev_files | {change.path},
                 )
 
     result.strength = {
@@ -165,9 +315,31 @@ def open_prs(repo: str) -> list[int]:
     return [int(n) for n in raw.splitlines()] if raw else []
 
 
-def pr_files(repo: str, number: int) -> list[str]:
-    raw = gh(f"repos/{repo}/pulls/{number}/files?per_page=100", ".[].filename")
-    return raw.splitlines() if raw else []
+def pr_files(repo: str, number: int) -> list[ChangedFile]:
+    """Every file in a pull request's diff, with its status.
+
+    Paginated: a truncated first page hides exactly the kind of change census
+    ownership turns on, and a header add missing from the diff reproduces the
+    false negative under a different name.
+    """
+    raw = gh(
+        f"repos/{repo}/pulls/{number}/files?per_page=100",
+        '.[]|[.filename,.status,(.previous_filename//"")]|@tsv',
+        paginate=True,
+    )
+    changes: list[ChangedFile] = []
+    for line in (raw or "").splitlines():
+        fields = line.split("\t")
+        if not fields[0]:
+            continue
+        changes.append(
+            ChangedFile(
+                path=fields[0],
+                status=fields[1] if len(fields) > 1 and fields[1] else "modified",
+                previous_path=fields[2] if len(fields) > 2 else "",
+            )
+        )
+    return changes
 
 
 def latest_failed_merge_group(repo: str) -> str:
@@ -176,6 +348,31 @@ def latest_failed_merge_group(repo: str) -> str:
         '[.workflow_runs[]|select(.conclusion=="failure")]|.[0].id',
     )
     return (raw or "").strip()
+
+
+def census_notes(result: Attribution) -> list[str]:
+    """Explain a census attribution, or say the rule could not be applied.
+
+    A census gate reports a count, so nothing in its name points at the header
+    that moved it: an unexplained census attribution reads as a non sequitur and
+    gets discarded. And a census failure judged with no roots loaded is an
+    UNEVALUATED rule, which must be said out loud rather than reported as an
+    absence of owners.
+    """
+    if not result.census_tests:
+        return []
+    if not result.census_roots_read:
+        return [
+            "  ! a census gate failed but no exported include roots were read from",
+            f"    {CENSUS_RELPATH}: census ownership was NOT evaluated, so any",
+            "    'pre-existing on main' reading above is unproven. Re-run with",
+            "    --source-root pointing at a checkout.",
+        ]
+    return [
+        "  note: a census gate counts headers, so its name matches no file by",
+        "    design. It is owned by a header ADDED or DELETED under an exported",
+        f"    include root named in {CENSUS_RELPATH} -- not by an in-place edit.",
+    ]
 
 
 def render(result: Attribution, run_id: str) -> list[str]:
@@ -188,7 +385,7 @@ def render(result: Attribution, run_id: str) -> list[str]:
             "  entry already merged. Do NOT blame the batch's branch name."
         )
         out += [f"    - {t}" for t in result.tests[:6]]
-        return out
+        return out + census_notes(result)
 
     if result.verdict == VERDICT_PRE_EXISTING:
         out.append(
@@ -201,7 +398,7 @@ def render(result: Attribution, run_id: str) -> list[str]:
         for number, per_test in ranked[:3]:
             test, (weight, files) = list(per_test.items())[0]
             out.append(f"       (weak, {weight}) #{number}: {test} ~ {sorted(files)[0]}")
-        return out
+        return out + census_notes(result)
 
     ranked = sorted(result.scores.items(), key=lambda kv: -result.strength[kv[0]])
     for number, per_test in ranked:
@@ -215,13 +412,18 @@ def render(result: Attribution, run_id: str) -> list[str]:
         f"  => CULPRIT: #{result.culprit}. Do not re-arm it until fixed; it "
         "fails every batch it joins."
     )
-    return out
+    return out + census_notes(result)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", nargs="?", help="failed merge_group run id")
     parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument(
+        "--source-root",
+        default=str(Path(__file__).resolve().parents[2]),
+        help="checkout whose committed census names the exported include roots",
+    )
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args(argv)
 
@@ -239,7 +441,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     files = {n: pr_files(args.repo, n) for n in open_prs(args.repo)}
-    result = attribute(tests, files)
+    result = attribute(
+        tests, files, census_roots=census_include_roots(Path(args.source_root))
+    )
 
     if args.format == "json":
         print(
@@ -250,6 +454,8 @@ def main(argv: list[str] | None = None) -> int:
                     "culprit": result.culprit,
                     "tests": result.tests,
                     "strength": result.strength,
+                    "census_tests": result.census_tests,
+                    "census_roots_read": result.census_roots_read,
                 },
                 indent=2,
                 sort_keys=True,
