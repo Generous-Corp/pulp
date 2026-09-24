@@ -46,6 +46,20 @@ Reach for it on any "looks off / illegible / wrong colour" report that a
 pixel diff calls clean. Its bars are declared-value upper bounds — anything
 composited under the type only takes real contrast lower.
 
+It also judges whether the four status roles survive red-green colour
+blindness, which no contrast check can see: contrast is a luminance measure,
+so `--success` and `--danger` can each clear their bar against the surface
+and still be one colour to the ~8% of men with a deficiency. That lane
+REPORTS rather than blocks unless you pass `--strict-cvd`, for two reasons
+worth knowing before you promote it: the bar sits in a narrow gap between
+palettes designed to survive CVD (Okabe-Ito's worst pair is 11.6) and the
+traffic-light pairs products ship (Material red-700/green-800 is 9.1), and
+the tool also judges imported third-party designs, where a red/green status
+hue is the designer's choice and not a Pulp defect. It models a dichromat
+(severity 1.0), which is conservative for the anomalous-trichromat majority,
+and it measures TOKEN PAIRS — necessary, not sufficient, since a UI that
+disambiguates by icon or position can be fine while its tokens collide.
+
 **Check geometry BEFORE you look at pixels.** A `.fig` carries Figma's
 already-SOLVED rect for every node — auto-layout children included — so where
 each node belongs is a known number, not something to infer from a screenshot.

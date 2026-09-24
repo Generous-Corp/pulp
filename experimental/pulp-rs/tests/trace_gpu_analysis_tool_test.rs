@@ -275,6 +275,40 @@ fn untagged_tooling_failure_cannot_hide_behind_a_tagged_healthy_probe() {
 }
 
 #[test]
+fn a_capture_without_probe_work_still_reports_a_missing_question_category() {
+    // The companion control for the refusal above: both answers are empty, and
+    // only the candidate set separates them. Without this, hardcoding the
+    // correlation reason would look like a fix.
+    let trace = tempfile::NamedTempFile::new().expect("no probe work trace");
+    let fixture = serde_json::json!({"traceEvents": [
+        {"name":"frame","cat":"render","ph":"X","ts":1000,"dur":20,"pid":92,"tid":92},
+        {"name":"layout_pass","cat":"layout","ph":"X","ts":1030,"dur":20,"pid":92,"tid":92}
+    ]});
+    std::fs::write(trace.path(), serde_json::to_vec(&fixture).unwrap()).unwrap();
+
+    let result = run_path("gpu-probe", trace.path(), 2);
+    assert_eq!(result["verdict"], "unavailable");
+    assert_eq!(result["capture_complete"], false);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+    assert!(result["evidence_ids"].as_array().unwrap().is_empty());
+
+    // Generic untagged backend work is a candidate but is not tooling-owned, so
+    // a capture holding only that still has no probe question to answer.
+    let backend_only = tempfile::NamedTempFile::new().expect("untagged backend only trace");
+    let backend_fixture = serde_json::json!({"traceEvents": [
+        {"name":"gpu_submit_internal","cat":"gpu","ph":"X","ts":900,"dur":5,"pid":93,"tid":93}
+    ]});
+    std::fs::write(
+        backend_only.path(),
+        serde_json::to_vec(&backend_fixture).unwrap(),
+    )
+    .unwrap();
+
+    let result = run_path("gpu-probe", backend_only.path(), 2);
+    assert_eq!(result["unavailable_reason"], "missing-question-category");
+}
+
+#[test]
 fn compile_failure_is_ranked_with_a_concrete_fix() {
     for question in ["gpu-health", "gpu-probe"] {
         let result = run(question, "compile-failure.pftrace", 1);
@@ -648,7 +682,10 @@ fn health_and_probe_reject_mixed_evidence_before_the_row_cap() {
         let mixed = run_path(question, trace.path(), 2);
         assert_eq!(mixed["verdict"], "unavailable");
         assert_eq!(mixed["capture_complete"], false);
-        assert_eq!(mixed["unavailable_reason"], "missing-question-category");
+        // The capture carries this question's spans; what it cannot do is
+        // correlate them to one evidence ID. Naming the category missing would
+        // describe a capture other than the one analyzed.
+        assert_eq!(mixed["unavailable_reason"], "invalid-evidence-correlation");
         assert_eq!(mixed["observed_categories"], serde_json::json!([]));
         assert_eq!(mixed["category_scope"], serde_json::Value::Null);
         assert_eq!(mixed["contributors"], serde_json::json!([]));
@@ -790,7 +827,12 @@ fn health_and_probe_require_evidence_on_an_untagged_capture() {
         let untagged = run(question, "untagged-startup.pftrace", 2);
         assert_eq!(untagged["verdict"], "unavailable");
         assert_eq!(untagged["capture_complete"], false);
-        assert_eq!(untagged["unavailable_reason"], "missing-question-category");
+        // The fixture's own comment above states the cause: the spans are
+        // present and the evidence ID is not. The reported reason says so.
+        assert_eq!(
+            untagged["unavailable_reason"],
+            "invalid-evidence-correlation"
+        );
         assert_eq!(untagged["observed_categories"], serde_json::json!([]));
         assert_eq!(untagged["category_scope"], serde_json::Value::Null);
         assert_eq!(untagged["contributors"], serde_json::json!([]));

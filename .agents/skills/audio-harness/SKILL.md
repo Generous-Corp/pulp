@@ -1180,3 +1180,12 @@ caller ordering/internal headroom, coefficient replacement and reset tails,
 non-finite/unstable/over-capacity transaction failures, denormal decay, and an
 allocation probe around the prepared runtime surface. Build and time the largest
 supported product in Release; Debug timing is not performance evidence.
+## Sample-region proof surface
+
+For sample-region DSP, pair the declared scalar-kernel contract with a focused
+render proof through the canonical graph executor. Use an explicit `UnitDelay`
+for feedback, test regular and irregular callback schedules, and record the
+independent scalar oracle, source head, executable, artifact, and log hashes. A
+registered or generated proof without an executed receipt does not establish
+reachability; retained-state edits also need a positive unchanged-identity case
+and a negative changed-identity case.

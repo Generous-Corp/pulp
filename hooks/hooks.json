@@ -25,6 +25,11 @@
             "type": "command",
             "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/inject-worktree-lineage.sh",
             "timeout": 3000
+          },
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/decisions-contract-pointer.sh\"; [ -f \"$f\" ] && bash \"$f\"; exit 0",
+            "timeout": 3000
           }
         ]
       }

@@ -743,6 +743,17 @@ capture whose `gpu_probe*` spans are tagged is instrumented, and is not admitted
 `unavailable` there, because each of those answers is a correlation claim, and a
 correlation with nothing to correlate is not a weaker answer but a different one.
 
+**Read `unavailable_reason` before you conclude the capture is uninstrumented.**
+Those two questions separate the two ways their answer can be empty:
+`invalid-evidence-correlation` means the capture carries the question's spans
+and they could not be correlated (untagged, mixed, or malformed evidence), while
+`missing-question-category` means the capture carries none of that work at all.
+The first is a recapture-with-correct-evidence problem; the second is a
+recapture-with-the-right-categories problem, and treating one as the other sends
+you to re-record a trace that was already recording the right thing. Only
+`gpu-startup` still answers both with `missing-question-category`, since it
+admits an untagged cohort and an empty startup answer is not a refusal.
+
 Two things follow. A `gpu-startup` breakdown is **not** evidence that the capture
 is tagged, so it does not predict that `gpu-health` or `gpu-probe` will answer at
 all. And the relaxation is all-or-nothing about instrumentation: `gpu-startup`
