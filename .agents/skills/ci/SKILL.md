@@ -1105,6 +1105,22 @@ from the declared file (`tools/motion/visual/requirements.txt`, which
 `tools/deps/manifest.json` already carries and audits) rather than from a
 hand-listed pair read off a skip line.
 
+**CI installs the lock, not the ranges.** After the no-network
+`--dry-run --no-index` satisfied check (which still runs first and ends the
+step when the floor is already met), `build.yml` installs
+`tools/motion/visual/requirements.lock` — the `pip-compile --generate-hashes`
+resolution of `requirements.txt` — under `--require-hashes`. Adding a
+requirement means regenerating the lock (command in its header);
+`test_visual_python_deps_step.py` fails if a declared name is missing from it or
+a pin lacks a hash. The step installs from a host wheelhouse first when a tartci
+guest declares `TARTCI_PIP_WHEELHOUSE`, then from the index with three spaced
+attempts. A `Tunnel connection failed: 403 Forbidden` in this step is the guest
+egress relay refusing PyPI, not a package problem: 27 m5 gate jobs failed that
+way on 2026-09-22/23 until tartci allowed `pypi.org` and
+`files.pythonhosted.org`. PEP 668 is probed once (`EXTERNALLY-MANAGED` beside
+the stdlib) rather than by retrying each install, so an index outage is not paid
+twice per attempt.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it

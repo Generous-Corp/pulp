@@ -34,8 +34,27 @@ log() { echo "[governed-build] $*" >&2; }
 # count. It is therefore NOT a saturation bound and must never be used as the
 # response to a lease denial — a denial means cores are already spoken for, and
 # tier-0 knows nothing about that. See denial handling below.
-tier0_jobs() {
-  local cores mem_kb mem_mb mem_jobs
+#
+# Inside a tartci build VM there is no host profile, so this is the bound the
+# gate build runs at. tartci sizes each guest from its VM lease (C vCPUs,
+# (C-1) * 1536 * 4/3 MB of RAM, clamped to a floor and a ceiling), and that
+# memory figure is the exact inverse of the formula below, so the guest lands on
+# -j(C-1) unless the floor or ceiling moved it. The runner may also declare the
+# lease it booted with as TARTCI_GUEST_CORES / TARTCI_GUEST_MEM_MB. A declared
+# value can only NARROW the visible hardware, never widen it: a guest whose
+# Virtualization config disagrees with its lease stays bounded by what it can
+# actually see.
+positive_int() {
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$1" -ge 1 ] 2>/dev/null
+}
+
+TIER0_JOBS=""
+TIER0_EXPLAIN=""
+
+# Sets TIER0_JOBS and TIER0_EXPLAIN in the caller's shell.
+compute_tier0() {
+  local cores mem_kb mem_mb mem_jobs source="visible"
   cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
   [ "$cores" -ge 1 ] 2>/dev/null || cores=4
   # Physical RAM in MB (macOS + Linux); 0 → unknown → core-bound only.
@@ -45,15 +64,34 @@ tier0_jobs() {
   elif mem_kb="$(awk '/MemTotal/ {print $2; exit}' /proc/meminfo 2>/dev/null)"; then
     mem_mb=$(( mem_kb / 1024 ))
   fi
-  local jobs="$cores"
+  if positive_int "${TARTCI_GUEST_CORES:-}"; then
+    source="tartci guest lease"
+    if [ "$TARTCI_GUEST_CORES" -lt "$cores" ]; then cores="$TARTCI_GUEST_CORES"; fi
+  fi
+  if positive_int "${TARTCI_GUEST_MEM_MB:-}"; then
+    source="tartci guest lease"
+    if [ "$mem_mb" -le 0 ] || [ "$TARTCI_GUEST_MEM_MB" -lt "$mem_mb" ]; then
+      mem_mb="$TARTCI_GUEST_MEM_MB"
+    fi
+  fi
+  local jobs="$cores" bound="cores"
   if [ "$mem_mb" -gt 0 ]; then
     # ~1.5 GiB per compile job, reserve ~25% for the OS/window server.
     mem_jobs=$(( mem_mb * 3 / 4 / 1536 ))
     [ "$mem_jobs" -lt 1 ] && mem_jobs=1
-    [ "$mem_jobs" -lt "$jobs" ] && jobs="$mem_jobs"
+    if [ "$mem_jobs" -lt "$jobs" ]; then jobs="$mem_jobs"; bound="memory"; fi
   fi
   [ "$jobs" -ge 1 ] 2>/dev/null || jobs=1
-  echo "$jobs"
+  # Say which axis bound the result. A gate log that reads only "-j3" invites
+  # the conclusion that the VM was mis-sized, when -j3 is simply what a
+  # 3-vCPU guest can run.
+  TIER0_EXPLAIN="cores=$cores mem_mb=$mem_mb ($source), bound by $bound"
+  TIER0_JOBS="$jobs"
+}
+
+tier0_jobs() {
+  compute_tier0
+  echo "$TIER0_JOBS"
 }
 
 # Conservative floor for a leaseless build on a host whose lease store said no.
@@ -350,9 +388,11 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
     fi
   fi
 else
-  # No tartci (build VM / plain checkout): bounded tier-0 parallelism.
-  jobs="$(tier0_jobs)"
-  log "no tartci host profile — bounded local build at -j$jobs"
+  # No tartci (build VM / plain checkout): bounded tier-0 parallelism. Called
+  # directly rather than through $(...) so its explanation survives the call.
+  compute_tier0
+  jobs="$TIER0_JOBS"
+  log "no tartci host profile — bounded local build at -j$jobs [$TIER0_EXPLAIN]"
 fi
 
 # The no-profile and lease-denied fallbacks never pass through the admission
