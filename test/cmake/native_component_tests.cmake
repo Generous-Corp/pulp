@@ -1,13 +1,27 @@
 # Native component ABI, node-pack, and optional Rust lane tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. The two
+# pulp::platform suites that spawn no fixture share one executable and the two
+# pulp::runtime suites another. A suite stays on its own when it needs its
+# own process or compile line: a fixture or module path baked in with
+# $<TARGET_FILE:...> (child-process-standard-input, node-pack), the RT
+# intercept harness (native-core-processor), the httplib server fixture
+# (model-download), and the single pulp::view, pulp::native-components and
+# pulp::native-components + pulp::runtime suites.
+pulp_add_test_group(pulp-test-group-native-platform LIBRARIES pulp::platform)
+pulp_add_test_group(pulp-test-group-native-runtime LIBRARIES pulp::runtime)
+
 # Child process tests
 if(WIN32)
-    pulp_add_test_suite(pulp-test-child-process
+    pulp_add_test_suite(pulp-test-child-process GROUP pulp-test-group-native-platform
         LIBRARIES pulp::platform
         LABELS "windows-pr-quarantine")
 else()
-    pulp_add_test_suite(pulp-test-child-process LIBRARIES pulp::platform)
+    pulp_add_test_suite(pulp-test-child-process GROUP pulp-test-group-native-platform
+        LIBRARIES pulp::platform)
 endif()
 add_executable(pulp-child-process-input-fixture
     fixtures/child_process_input_fixture.cpp)
@@ -26,13 +40,16 @@ target_compile_definitions(pulp-test-child-process-standard-input PRIVATE
     PULP_CHILD_PROCESS_INPUT_FIXTURE="$<TARGET_FILE:pulp-child-process-input-fixture>")
 
 # Progress parser tests
-pulp_add_test_suite(pulp-test-progress-parser LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-progress-parser GROUP pulp-test-group-native-platform
+    LIBRARIES pulp::platform)
 
 # Stream tests (unified I/O interface)
-pulp_add_test_suite(pulp-test-stream LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-stream GROUP pulp-test-group-native-runtime
+    LIBRARIES pulp::runtime)
 
 # Generic model registry/store.
-pulp_add_test_suite(pulp-test-model-store LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-model-store GROUP pulp-test-group-native-runtime
+    LIBRARIES pulp::runtime)
 
 # Streaming model downloader; uses a local httplib server fixture.
 # Link pulp-cpp-httplib so this TU compiles httplib.h with the SAME
