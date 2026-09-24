@@ -22,3 +22,26 @@ run_gate_captured() {
     cat "$gate_log" >&2 || true
     return "$gate_status"
 }
+
+# A gate that could not RUN is not a gate that passed.
+#
+# Exit-code contract shared by Pulp's gate scripts:
+#   0   the gate ran and the check PASSED
+#   1   the gate ran and the check FAILED
+#   2+  the gate could NOT run — missing/unreadable config, an empty corpus,
+#       or a crash. It checked nothing.
+#
+# 2+ used to print "internal error" and fall through as a pass, so a gate that
+# could not find its config reported SUCCESS. That false green let a missing
+# version bump ride to main: no tag, no release. "I could not measure" is not
+# "it is fine" — an unmeasurable gate blocks, and an operator demotes it
+# deliberately with PULP_DISABLE_PREPUSH_GATES=1 rather than by accident.
+gate_could_not_run() {
+    local name="$1" status="$2"
+    echo "[pre-push] $name: COULD NOT RUN (exit $status) — blocking the push." >&2
+    echo "[pre-push]   This gate performed no check, so it cannot report a pass." >&2
+    echo "[pre-push]   Usually a missing or unreadable config; the gate's own output" >&2
+    echo "[pre-push]   above names the file it looked for and the path it looked at." >&2
+    echo "[pre-push]   If it is genuinely unrelated to your change, demote deliberately:" >&2
+    echo "[pre-push]     PULP_DISABLE_PREPUSH_GATES=1 git push" >&2
+}
