@@ -1042,6 +1042,20 @@ instrument. And "silent" and "unreadable" are different findings: report the
 recording's level, or a patch that plainly sounds reads as one that makes
 nothing.
 
+## The library cache is shared, so every write to it must be atomic
+
+`~/.cache/forge-modular/` (`library.json`, `modules.json`) is one directory
+for every process on the machine, and two rack harnesses started together
+both refresh it. An in-place `open(path, "w")` truncates the file before the
+new bytes land, so the second process's `json.load` reads a half-written index
+and dies with `JSONDecodeError: Expecting property name enclosed in double
+quotes` -- a red gate that names no line in the diff and passes on re-run.
+`patch.py` publishes both files through `_publish_json()`: a sibling temp file
+plus `os.replace`, so a concurrent reader sees the previous complete file or
+the new one, never a partial. Any new cache file under that directory goes
+through the same helper; `tools/rack/test_module_index_atomic.py` reproduces
+the race deterministically by probing the index mid-dump.
+
 ## A zero is usually your instrument, not the world
 
 The single most expensive habit on this project is believing a measurement
