@@ -17,6 +17,17 @@ if(APPLE AND NOT PULP_IOS)
         LABELS "cmake;ios;compile"
         TIMEOUT 180)
 
+    # Leg orchestration of the iOS compile gate (Ninja SDK legs, background
+    # GPU leg, failure propagation), run against stub toolchain executables.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME ios-compile-gate-legs
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_ios_compile_gate_legs.py")
+        set_tests_properties(ios-compile-gate-legs PROPERTIES
+            LABELS "cmake;ios"
+            TIMEOUT 180)
+    endif()
+
     add_test(NAME cmake-ios-auv3-configure
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_configure.sh
                 ${CMAKE_SOURCE_DIR})

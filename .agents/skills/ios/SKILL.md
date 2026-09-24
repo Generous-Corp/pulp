@@ -990,6 +990,14 @@ that mode in its CMake-generated Info.plist. Do not generalize this fixture
 requirement into production guidance: only claim background modes justified by
 the app's real behavior and Apple's current policy.
 
+That plist spells its executable, bundle identifier and name as literals, not
+Xcode build settings like `$(PRODUCT_BUNDLE_IDENTIFIER)`. The compile gate's
+SDK legs build with Ninja, which copies `MACOSX_BUNDLE_INFO_PLIST` verbatim: a
+`$(...)` placeholder then ships unexpanded, and `simctl install` / `launch` by
+bundle id fails even though the build is green. The Xcode generator expands
+them, so an Xcode-only check never notices. Keep any hand-written iOS plist
+generator-neutral, or configure it with `@VAR@` substitution.
+
 The authoritative iOS proof is `test/cmake/test_ios_compile_gate.sh`. It builds
 `pulp-midi`, the shared-client compile contract, and an installable harness for
 both the Simulator and device SDKs. On the Simulator it creates uniquely named

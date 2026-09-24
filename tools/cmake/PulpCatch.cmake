@@ -156,13 +156,19 @@ same as the Catch name; see also ``TEST_PREFIX`` and ``TEST_SUFFIX``.
   ``SKIP_IS_FAILURE``
     Disables skipped test detection.
 
+  ``FAIL_IF_EMPTY``
+    Pulp addition. Fail the discovery step (and so the build) when the
+    executable lists no test case for ``TEST_SPEC``. A scoped discovery whose
+    spec drifts away from its cases would otherwise register nothing and
+    report nothing.
+
 #]=======================================================================]
 
 #------------------------------------------------------------------------------
 function(catch_discover_tests TARGET)
   cmake_parse_arguments(
     ""
-    "SKIP_IS_FAILURE"
+    "SKIP_IS_FAILURE;FAIL_IF_EMPTY"
     "TEST_PREFIX;TEST_SUFFIX;WORKING_DIRECTORY;TEST_LIST;REPORTER;OUTPUT_DIR;OUTPUT_PREFIX;OUTPUT_SUFFIX;DISCOVERY_MODE"
     "TEST_SPEC;EXTRA_ARGS;PROPERTIES;LABELS;DL_PATHS;DL_FRAMEWORK_PATHS"
     ${ARGN}
@@ -229,6 +235,7 @@ function(catch_discover_tests TARGET)
               -D "TEST_OUTPUT_SUFFIX=${_OUTPUT_SUFFIX}"
               -D "TEST_DL_PATHS=${_DL_PATHS}"
               -D "TEST_DL_FRAMEWORK_PATHS=${_DL_FRAMEWORK_PATHS}"
+              -D "TEST_FAIL_IF_EMPTY=${_FAIL_IF_EMPTY}"
               -D "CTEST_FILE=${ctest_tests_file}"
               -P "${_CATCH_DISCOVER_TESTS_SCRIPT}"
       VERBATIM
@@ -276,6 +283,7 @@ function(catch_discover_tests TARGET)
       "      CTEST_FILE"             " [==[" "${ctest_tests_file}"        "]==]"   "\n"
       "      TEST_DL_PATHS"          " [==[" "${_DL_PATHS}"               "]==]"   "\n"
       "      TEST_DL_FRAMEWORK_PATHS" " [==[" "${_DL_FRAMEWORK_PATHS}"     "]==]"   "\n"
+      "      TEST_FAIL_IF_EMPTY"     " [==[" "${_FAIL_IF_EMPTY}"          "]==]"   "\n"
       "      CTEST_FILE"             " [==[" "${CTEST_FILE}"              "]==]"   "\n"
       "    )"                                                                      "\n"
       "  endif()"                                                                  "\n"

@@ -32,10 +32,16 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("governed-build.sh")
+
+# The wrapper records each build in Shipyard's metrics store when `shipyard` is
+# on PATH. These tests run it many times, so they must never write rows into a
+# developer's real store; BuildMetricRecordTests opts back in with a stub.
+os.environ["PULP_BUILD_METRICS"] = "0"
 
 # Deliberately unlike any plausible core count so an assertion can tell a
 # granted lease size apart from a host-derived one.
@@ -115,7 +121,8 @@ class GovernedBuildTests(unittest.TestCase):
         for k in ("PULP_TARTCI_BIN", "PULP_TARTCI_LEASES",
                   "PULP_GOVERNED_TARTCI_BIN", "PULP_REAL_TARTCI_BIN",
                   "STUB_PROFILE_JOBS", "STUB_FREE_CORES", "STUB_MAX_GRANT",
-                  "STUB_FAIL_ALL", "STUB_HOLDER_PIDS"):
+                  "STUB_FAIL_ALL", "STUB_HOLDER_PIDS",
+                  "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
         env.update(stub_env)
         return subprocess.run(
@@ -302,6 +309,58 @@ class GovernedBuildTests(unittest.TestCase):
         r = self._run(PULP_TARTCI_LEASES="0")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertGreaterEqual(self._granted(r), 1)
+
+    # --- the build-VM path: a guest declares its tartci lease ----------------
+    #
+    # A gate VM has no tartci host profile, so it runs at the tier-0 bound. The
+    # runner may declare the lease the guest booted with; that declaration can
+    # narrow the visible hardware and must never widen it.
+
+    # Declared values stay at or below any host this suite runs on (the
+    # smallest is a 3-vCPU/8 GiB gate guest), so narrowing is what is measured
+    # and the visible hardware never decides the expected number.
+
+    def test_declared_guest_cores_bound_the_build(self) -> None:
+        """Cores bind when the memory budget allows more jobs than vCPUs."""
+        r = self._run(PULP_TARTCI_LEASES="0", TARTCI_GUEST_CORES="2",
+                      TARTCI_GUEST_MEM_MB="6144")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 2)
+        self.assertEqual(self._ctest_granted(r), 2)
+        self.assertIn("tartci guest lease", r.stderr)
+        self.assertIn("bound by cores", r.stderr)
+
+    def test_declared_guest_memory_bounds_the_build(self) -> None:
+        """3 GiB at 1.5 GiB/job with a 25% reserve is one job, not two."""
+        r = self._run(PULP_TARTCI_LEASES="0", TARTCI_GUEST_CORES="2",
+                      TARTCI_GUEST_MEM_MB="3072")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 1)
+        self.assertIn("bound by memory", r.stderr)
+
+    def test_declared_guest_budget_never_widens_visible_hardware(self) -> None:
+        baseline = self._granted(self._run(PULP_TARTCI_LEASES="0"))
+        r = self._run(PULP_TARTCI_LEASES="0", TARTCI_GUEST_CORES="100000",
+                      TARTCI_GUEST_MEM_MB="100000000")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), baseline)
+
+    def test_garbage_guest_budget_is_ignored(self) -> None:
+        baseline = self._granted(self._run(PULP_TARTCI_LEASES="0"))
+        for bad in ("", "0", "-3", "abc", "3x"):
+            with self.subTest(value=bad):
+                r = self._run(PULP_TARTCI_LEASES="0", TARTCI_GUEST_CORES=bad,
+                              TARTCI_GUEST_MEM_MB=bad)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self._granted(r), baseline)
+                self.assertIn("(visible)", r.stderr)
+
+    def test_host_profile_lease_ignores_a_guest_declaration(self) -> None:
+        """On a host with a lease store the granted lease is the authority."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_MAX_GRANT=str(PROFILE_JOBS), TARTCI_GUEST_CORES="3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), PROFILE_JOBS)
 
     def test_build_failure_propagates(self) -> None:
         r = subprocess.run(
@@ -605,6 +664,63 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 body["reaped"],
                 [{"id": "old-boot-owner", "reason": "identity_mismatch"}],
             )
+
+
+class BuildMetricRecordTests(unittest.TestCase):
+    """The wrapper reports each build to `shipyard metrics record`, and a
+    missing or disabled recorder can never change the build's outcome."""
+
+    RECORDER = "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SHIPYARD_ARGS_OUT\"\n"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.bindir = Path(self._tmp.name)
+        sy = self.bindir / "shipyard"
+        sy.write_text(self.RECORDER)
+        sy.chmod(0o755)
+        self.out = self.bindir / "args.txt"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, exit_code: int, metrics: str) -> subprocess.CompletedProcess:
+        env = {**os.environ, "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+               "PULP_TARTCI_LEASES": "0", "PULP_BUILD_METRICS": metrics,
+               "SHIPYARD_ARGS_OUT": str(self.out)}
+        return subprocess.run(
+            ["bash", str(SCRIPT), "sh", "-c", f"exit {exit_code}", "sh",
+             "--target", "pulp-test-widgets"],
+            capture_output=True, text=True, check=False, env=env)
+
+    def _recorded(self) -> list[str]:
+        # The record runs detached in the background.
+        for _ in range(100):
+            if self.out.exists() and self.out.read_text().strip():
+                return self.out.read_text().splitlines()
+            time.sleep(0.05)
+        return []
+
+    def _value(self, args: list[str], flag: str) -> str:
+        return args[args.index(flag) + 1]
+
+    def test_failed_focused_build_is_recorded_with_its_outcome(self) -> None:
+        r = self._run(3, "1")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        args = self._recorded()
+        self.assertTrue(args, "no metrics record was made")
+        self.assertEqual(args[:2], ["metrics", "record"])
+        self.assertEqual(self._value(args, "--target"), "local-build/focused")
+        self.assertEqual(self._value(args, "--workflow"), "targets:pulp-test-widgets")
+        self.assertEqual(self._value(args, "--status"), "failure")
+        self.assertEqual(self._value(args, "--exit-code"), "3")
+        self.assertEqual(self._value(args, "--routing-decision"), "tier0")
+        self.assertRegex(self._value(args, "--profile"), r"^j[0-9]+$")
+        self.assertRegex(self._value(args, "--duration-ms"), r"^[0-9]+$")
+
+    def test_disabled_recorder_records_nothing(self) -> None:
+        r = self._run(0, "0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._recorded(), [])
 
 
 if __name__ == "__main__":

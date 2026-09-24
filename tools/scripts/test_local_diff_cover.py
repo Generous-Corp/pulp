@@ -1246,6 +1246,9 @@ def _fake_worktree(tmp: pathlib.Path, name: str) -> pathlib.Path:
     (root / "scripts").mkdir(parents=True)
     dest = root / "tools" / "scripts" / "local_diff_cover.sh"
     dest.write_text(SCRIPT.read_text())
+    (root / "tools" / "scripts" / "diff_cover_targets.py").write_text(
+        (SCRIPT.parent / "diff_cover_targets.py").read_text()
+    )
     (root / "scripts" / "coverage_ctest_policy.sh").write_text(
         CTEST_POLICY.read_text()
     )

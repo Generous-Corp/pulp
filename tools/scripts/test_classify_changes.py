@@ -193,6 +193,124 @@ class IosCompileRequiredTests(unittest.TestCase):
             with self.subTest(paths=paths):
                 self.assertFalse(classify.ios_compile_required(paths))
 
+    def test_test_tree_docs_and_python_tests_skip(self) -> None:
+        # The gate configures with PULP_BUILD_TESTS=OFF: unit-test sources,
+        # test manifests, Python suites and prose never reach it.
+        for paths in (
+            ["test/test_widgets.cpp"],
+            ["test/cmake/quality_tests.cmake"],
+            ["test/test_state.cpp"],
+            ["tools/scripts/test_classify_changes.py"],
+            ["docs/status/sequencer-exposure.json", "docs/guides/test-lanes.md"],
+            [".agents/skills/audio-harness/SKILL.md"],
+            [".claude-plugin/plugin.json", "CHANGELOG.md"],
+            # Feeds only the desktop CLI's generated migration index.
+            ["docs/migrations/v1-to-v2.md"],
+        ):
+            with self.subTest(paths=paths):
+                self.assertFalse(classify.ios_compile_required(paths))
+
+    def test_paths_the_ios_gate_reads_still_run(self) -> None:
+        for paths in (
+            # The gate scripts build.yml executes.
+            ["test/cmake/test_ios_compile_gate.sh"],
+            ["test/cmake/test_ios_source_syntax.sh"],
+            # Compiled for iOS by core/midi.
+            ["test/ios/coremidi_backend_harness.mm"],
+            ["test/test_coremidi_shared_client.cpp"],
+            # Named by example / tooling CMake the GPU leg configures.
+            ["test/harness/rt_allocation_probe.cpp"],
+            ["test/fixtures/native_ui_link_floor/CMakeLists.txt"],
+            ["docs/status/gpu-recipes.yaml"],
+            ["docs/status/forge-catalog.schema.json"],
+            # Test CMake manifests are topology, but a CMakeLists is global.
+            ["test/CMakeLists.txt"],
+            # Neighbouring non-test scripts may be build-coupled.
+            ["tools/scripts/classify_changes.py"],
+            ["tools/scripts/fetch_skia_for_release.py"],
+            # A test-named script matching a sensitive full-required glob.
+            ["tools/scripts/test_release_notes.py"],
+            ["test/test_widgets.cpp", "core/midi/src/midi_system.cpp"],
+        ):
+            with self.subTest(paths=paths):
+                self.assertTrue(classify.ios_compile_required(paths))
+
+    def test_every_test_or_docs_path_named_by_non_test_cmake_runs_the_gate(
+        self,
+    ) -> None:
+        """Re-derive the deny list from the live tree so it cannot go stale.
+
+        The iOS GPU leg configures with examples ON, so a test/ or docs/ file
+        that any non-test CMake file names is a configure input: renaming or
+        deleting it fails the gate. Every such reference must stay denied.
+        """
+        import re
+
+        repo = THIS_DIR.parent.parent
+        listed = subprocess.run(
+            ["git", "ls-files", "*CMakeLists.txt", "*.cmake", "*.cmake.in"],
+            cwd=repo, capture_output=True, text=True, check=True,
+        ).stdout.split()
+        # The root adds the desktop CLI and its GPU probe only for non-iOS
+        # configurations, so their CMake never runs in the iOS gate. Pin that
+        # guard here: if it ever moves, their references count again.
+        root_text = (repo / "CMakeLists.txt").read_text(encoding="utf-8")
+        for subdir in ("tools/cli", "tools/cli/gpu_probe"):
+            guarded = re.search(
+                r"if\(NOT ANDROID AND NOT IOS[^\n]*\)\n\s*add_subdirectory\("
+                + re.escape(subdir) + r"\)",
+                root_text,
+            )
+            self.assertIsNotNone(guarded, f"{subdir} lost its NOT IOS guard")
+        desktop_only = ("tools/cli/CMakeLists.txt", "tools/cli/gpu_probe/")
+        cmake_files = [
+            f for f in listed
+            if not f.startswith("test/")
+            and not f.startswith(desktop_only)
+            and not (f.startswith("tools/cli/") and f.count("/") == 2
+                     and f.endswith(".cmake"))
+        ]
+        # Control: the scan must see the tree, not an empty checkout.
+        self.assertIn("core/midi/CMakeLists.txt", cmake_files)
+        root_vars = (
+            "CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR", "PULP_ROOT_DIR",
+            "CMAKE_CURRENT_SOURCE_DIR", "CMAKE_CURRENT_LIST_DIR",
+        )
+        prefixed = re.compile(
+            r"\$\{(" + "|".join(root_vars) + r")\}/((?:test|docs)/[A-Za-z0-9_./*@-]*)"
+        )
+        bare = re.compile(r"(?<![A-Za-z0-9_./${}-])((?:test|docs)/[A-Za-z0-9_./*@-]*)")
+        references: set[str] = set()
+        for rel in cmake_files:
+            text = (repo / rel).read_text(encoding="utf-8", errors="replace")
+            for line in text.splitlines():
+                code = line.split("#", 1)[0]
+                references.update(m.group(2) for m in prefixed.finditer(code))
+                if rel == "CMakeLists.txt":
+                    references.update(m.group(1) for m in bare.finditer(code))
+        references = {ref.rstrip("./") for ref in references}
+        # A bare tree root names no file: it appears in path comparisons such
+        # as `if(_sub MATCHES "^${CMAKE_SOURCE_DIR}/test/")`, not as a configure
+        # input, and denying it would force the gate for every test/ change.
+        references -= {"test", "docs"}
+        # Control: known references must be found, or the scan is blind.
+        self.assertIn("test/ios/coremidi_backend_harness.mm", references)
+        self.assertIn("test/harness/rt_allocation_probe.cpp", references)
+        self.assertIn("docs/status/gpu-recipes.yaml", references)
+
+        undenied = []
+        for ref in sorted(references):
+            leaf = ref.rsplit("/", 1)[-1]
+            probe = ref if "." in leaf else f"{ref}/probe.cpp"
+            probe = probe.replace("*", "probe")
+            if not classify.ios_compile_required([probe]):
+                undenied.append(ref)
+        self.assertEqual(
+            undenied, [],
+            "non-test CMake names these paths; add them to "
+            "IOS_COMPILE_REQUIRED_PATTERNS in classify_changes.py",
+        )
+
     def test_mobile_global_unknown_and_mixed_surfaces_run(self) -> None:
         for paths in (
             ["apple/auv3/Sources/PulpAudioUnit.swift"],

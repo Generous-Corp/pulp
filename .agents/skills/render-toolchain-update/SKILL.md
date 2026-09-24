@@ -221,6 +221,14 @@ retain those fields in the PR/landing evidence.
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.
 - Skia's Dawn pin and Chromium's Dawn pin are separate dependency surfaces.
+- `PulpDependencies.cmake` sets `CMAKE_DISABLE_PRECOMPILE_HEADERS ON` around
+  SDL3's `FetchContent_MakeAvailable` only. SDL3 precompiles `src/SDL_internal.h`
+  into every object, and ccache refuses to cache a TU compiled against a PCH
+  unless `pch_defines` sloppiness is on (measured on 3.2.12: 188 of 214 SDL3
+  calls "could not use precompiled header"). Keep the scope tight when bumping
+  SDL3: the save/restore of the previous value is what keeps a later PCH user
+  (the Catch2 test carriers in `PulpTestSuite.cmake`) unaffected. The
+  `test-pch-wiring` ctest asserts `SDL3-static` compiles with no PCH.
 - GitHub release tags containing `/` must remain correctly URL-encoded/handled.
 - Linux x64 Skia and V8 assets must retain the portable glibc floor; do not replace
   their portable releases with a normal ubuntu-latest artifact.

@@ -41,6 +41,35 @@ similar frameworks) feature-detect on construction:
 | `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable. |
 | Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names. |
 
+### Popup keyboard navigation is owned by the prelude, not the app
+
+`web-compat-document.js` runs a popup owner that gives any open popup a roving
+keyboard cursor: ArrowUp/ArrowDown step, Home/End jump, Enter activates, Escape
+dismisses, and the stepped row is marked `data-pulp-popup-active="true"`. Apps
+should NOT re-implement this in script; authoring `role="menu"` with
+`role="menuitem"` rows is enough to inherit it.
+
+Two things about that marker and that owner are easy to get wrong:
+
+* **PRESENCE vs VALUE of `data-pulp-popup-active`.** The attribute is set on
+  EVERY row of a popup Pulp owns; the *value* `"true"` marks the one row the
+  cursor is on. A check written as `getAttribute(...)` truthiness reports every
+  row active and always finds row 0 — it must compare `=== "true"`. The same
+  distinction bites selectors: `[data-pulp-popup-active]` asks "does Pulp own a
+  popup", `[data-pulp-popup-active="true"]` asks "is a cursor painted", and a
+  pointer-opened popup paints no cursor until the user asks for one.
+
+* **A popup may have NO trigger.** The owner was originally entered only from
+  `triggerFrom(document.activeElement)`, so a context menu — summoned at
+  coordinates, owned by no `aria-haspopup` element — never got state and ignored
+  arrow keys. Such a menu is now adopted on the first arrow. When touching this
+  code, remember `state.trigger` can be null: `document.body.contains(null)` is
+  `false`, so an unguarded staleness test reads "my trigger vanished" and
+  dismisses the state on every event, which presents as a cursor that will not
+  move (it is re-adopted from scratch each key). Adoption is gated on exactly
+  one unowned, non-empty, non-opted-out `role="menu"` being open, because an
+  arrow key that no popup consumes must stay available to the app and to the DAW.
+
 When adding new framework support, check the engine capability
 comparison before assuming a polyfill is missing — the entry above is
 exhaustive for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s

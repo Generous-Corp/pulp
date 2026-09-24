@@ -367,7 +367,11 @@ static std::vector<ThemePreset> build_presets() {
             Theme t;
             t.colors["meter.green"]    = hex(0x3FCF77); // ink.leaf
             t.colors["meter.yellow"]   = hex(0xF6B847); // ink.amber
-            t.colors["accent.success"] = hex(0x3FCF77); // ink.leaf
+            // ink.leaf-bright, not ink.leaf: the semantic success role has to
+            // stay separable from accent.error under red-green colour
+            // blindness, which the plain leaf does not. meter.green above
+            // keeps the original ink -- a meter is a level, not a verdict.
+            t.colors["accent.success"] = hex(0x8CE8B0); // ink.leaf-bright
             t.colors["accent.warning"] = hex(0xF6B847); // ink.amber
             t.colors["accent.text"]    = hex(on_ink);   // on-ink (text on bright fills)
             // Navigation selected-row treatment (opt-in SelectionStyle::accent

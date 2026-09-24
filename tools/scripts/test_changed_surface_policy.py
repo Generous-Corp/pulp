@@ -247,7 +247,12 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
     def test_validation_docs_are_mobile_skip_safe_without_widening_status_data(self) -> None:
         self.assertIn("docs/validation/**", self.policy["baseline_only_paths"])
-        self.assertIn("docs/validation/**", self.policy["ios_compile_skip_safe_paths"])
+        self.assertTrue(
+            any(
+                fnmatch.fnmatchcase("docs/validation/fast-trigonometry.md", pattern)
+                for pattern in self.policy["ios_compile_skip_safe_paths"]
+            )
+        )
         self.assertEqual(
             disposition(self.policy, "docs/status/sequencer-exposure.json"),
             "unknown_full",

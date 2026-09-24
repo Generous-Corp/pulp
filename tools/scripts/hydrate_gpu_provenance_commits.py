@@ -67,18 +67,29 @@ def is_commit(root: pathlib.Path, revision: str) -> bool:
     ).returncode == 0
 
 
-def event_ref_candidates(event_ref: str) -> list[str]:
-    """Refs to try, most exact first, to reconnect this event's history.
+def event_ref_candidates(event_ref: str, event_sha: str = "") -> list[str]:
+    """Fetch sources to try, most exact first, to reconnect this event's history.
 
     A `pull_request` event names `refs/pull/<n>/merge`, which exists only while
     GitHub holds a computed merge commit for an open, non-conflicting pull
     request. The pull request's `head` ref has no such lifetime and reaches the
     same provenance commits, so it is the fallback rather than a second guess.
+
+    A `merge_group` event names `refs/heads/gh-readonly-queue/<base>/pr-<n>-<sha>`,
+    whose lifetime is shorter still: the queue deletes that branch the moment it
+    re-forms the batch onto a newer base, while the run holding the old name runs
+    on. So the event's head object id is the last candidate. It names the same
+    history the ref did, and it stays fetchable once no ref points at it, which
+    is why `actions/checkout` fetches the event by object id rather than by name.
+    A commit id is only ever appended, never substituted for an exact ref, so a
+    reachable ref still decides the fetch.
     """
     candidates = [event_ref]
     merge_ref = re.fullmatch(r"refs/pull/(\d+)/merge", event_ref)
     if merge_ref:
         candidates.append(f"refs/pull/{merge_ref.group(1)}/head")
+    if SHA.fullmatch(event_sha) and event_sha not in candidates:
+        candidates.append(event_sha)
     return candidates
 
 
@@ -270,7 +281,8 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
         if not event_ref.startswith("refs/"):
             raise HydrationError("shallow checkout lacks an exact GITHUB_REF to hydrate")
         failures = []
-        for candidate in event_ref_candidates(event_ref):
+        event_sha = os.environ.get("GITHUB_SHA", "")
+        for candidate in event_ref_candidates(event_ref, event_sha):
             completed = subprocess.run(
                 [
                     "git", "fetch", "--no-tags", "--unshallow", remote,
@@ -282,7 +294,7 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
                 break
             failures.append(f"{candidate}: {(completed.stderr or completed.stdout).strip()}")
         else:
-            # Every candidate ref was unfetchable. That is a statement about ref
+            # Every candidate was unfetchable. That is a statement about
             # AVAILABILITY, not about the provenance: GitHub deletes
             # refs/pull/<n>/merge the moment a pull request closes, and leaves it
             # absent while it recomputes mergeability after a base-branch push, so

@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below); an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
 | **Nightly full build** | schedule (nightly) | no — **informational** | yes | everything, including all five excluded label groups; results eyeballed, build failures file an issue |
@@ -76,6 +76,18 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   than the code. They still run on push, on the nightly, and on
   `cross-platform-check`. A timing test that must gate belongs in a dedicated
   cap=1 perf lane, not on the merge path.
+- **`pr-fast`** — additive, never exclusive: a static repository contract
+  (lint, drift, registry-completeness, generated-manifest check) that also runs
+  on the pull request head, where the rest of the suite does not. Members are
+  listed in `test/cmake/pr_fast_tests.cmake`, which reports a listed name
+  that this configuration did not register, and `pr-fast-tier-contract` fails if the label
+  selects fewer than 50 tests or loses a pinned member. `build.yml` selects it
+  with `ctest -L '^pr-fast$' --no-tests=error`, about 15 s for ~115 tests. A
+  member must be deterministic, finish in seconds on a loaded gate VM, and
+  assert no wall-clock or load-dependent bound: a forgotten regeneration then
+  fails on the PR that caused it rather than ejecting a merge-queue batch, and
+  the timing flakes that moved the full suite off the PR head stay off it.
+  Tests carrying `pr-fast` still run in the full suite everywhere else.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
@@ -258,7 +270,16 @@ lane checks its own.
 ## Adding a test — where will it land?
 
 - **A core unit/integration test** → add it with no special label. It runs on the
-  required gate. Keep it fast (< a few seconds) and non-flaky.
+  required gate. Keep it fast (< a few seconds) and non-flaky. Catch2 suites
+  compile against a shared precompiled header of Catch2 plus the common standard
+  headers (`PULP_TEST_PCH`, Clang only); a suite that must see a `#define`
+  before `<catch2/...>` or a standard header (a `CATCH_CONFIG_*` or `_LIBCPP_*`
+  switch) opts out with `pulp_add_test_suite(... NO_PCH)`. ObjC++ sources and
+  per-target `-f`/`-std` options opt out automatically; see
+  `<build>/pulp-test-pch.tsv` for every decision. A grouped executable (below)
+  is one decision, recorded under the group's name: `NO_PCH` goes on
+  `pulp_add_test_group()`, and a member that must opt out alone stays
+  ungrouped.
 - **A new example plugin** → its `clap-dlopen`/`auval`/`pluginval` validators
   should carry `LABELS "validation;<format>"` (match the existing examples). That
   automatically keeps them off the required gate and onto the example-validation
@@ -344,3 +365,74 @@ Check the *transitive* dependency, not just the ctest arguments. Both
 file, but only the first names it in its arguments; the second reaches it
 through a verifier that hardcodes the path. Excluding only the obvious one
 leaves a permanent red.
+
+## Grouped test executables (one binary, many suites)
+
+Every Catch2 executable statically links the whole `pulp::view` stack, so a
+manifest of N one-file suites costs N links of the same ~150 MiB of archives,
+N copies on disk, and N relinks whenever one core `.cpp` changes. A **test
+group** is one executable that several suites compile into, declared in the
+manifest with `pulp_add_test_group()` and joined with `GROUP` on each
+`pulp_add_test_suite()` call (`tools/cmake/PulpTestSuite.cmake`):
+
+```cmake
+pulp_add_test_group(pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-widgets GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-editor-mouse GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view
+    PROPERTIES RESOURCE_LOCK system-clipboard)
+```
+
+Nothing about routing changes. Each member keeps its own discovery call, so
+its LABELS, TIMEOUT, RESOURCE_LOCK, ENVIRONMENT, TEST_SPEC and TEST_PREFIX
+apply to exactly the cases it always applied to: the group runs Catch2 with
+`--filenames-as-tags`, which tags every case `[#<source stem>]`, and each
+member's `--list-tests` is scoped to its own sources' tags. The registered
+command stays `<binary> "<case name>"`; only the binary is shared. A member
+whose tag expression lists nothing fails the **build** (`FAIL_IF_EMPTY` in
+`PulpCatch.cmake`) rather than silently registering no tests.
+
+### Converting a manifest
+
+1. **Group by compile line, not by link line.** Members share one set of
+   compile flags. Read them from `compile_commands.json` for the manifest's
+   targets (strip `-o`/`-c`/`-MF`, ignore per-target `-D<path>` defines) and
+   group targets whose flag *set* is identical. A member may only name
+   `LIBRARIES` the group already links; the configure fails otherwise, so put
+   the union on the group.
+2. **Leave out anything that needs its own process**: a custom `main()`
+   (`Catch2::Catch2` without `WithMain`), a `codesign` POST_BUILD on the test
+   binary (identity tests sign *themselves*), a fixture path baked in with
+   `$<TARGET_FILE:...>`, `-fno-exceptions`, RT allocation probes,
+   `PASS_REGULAR_EXPRESSION` probes, and any test source compiled together
+   with a library `.cpp` that the group's libraries also contain (duplicate
+   symbols at link).
+3. **Find duplicate case names across the group** (`TEST_CASE`, `SCENARIO`,
+   `TEST_CASE_METHOD`) and rename one side with a short suffix. Catch2 aborts
+   at startup on a duplicate with equal tags, and CTest would register the
+   name twice either way. Record every rename as
+   `{"from", "to", "executable"}` for the parity check.
+4. **Rewrite the registrations.** `add_executable` +
+   `target_link_libraries` + `catch_discover_tests(... PROPERTIES LABELS "a;b")`
+   becomes `pulp_add_test_suite(NAME GROUP <group> LIBRARIES ... LABELS "a;b")`.
+   A target that was registered twice with different `TEST_SPEC`s becomes two
+   `pulp_add_test_suite` calls with the same NAME and GROUP. Per-target
+   `COMPILE_DEFINITIONS` / `INCLUDE_DIRS` become per-source properties
+   automatically, and the group still reuses the shared Catch2 PCH (the
+   ledger lists it under the group's name; `NO_PCH` is a group option).
+5. **Prove parity, not just green.** Snapshot before and after with
+   `tools/scripts/ctest_inventory_parity.py snapshot --build-dir build --out
+   <file>` (build the affected targets first, or the placeholders differ), then
+   `compare before.json after.json --rename-map renames.json`. It compares the
+   whole inventory as a multiset of (name, properties) and reports any missing,
+   extra or drifted test.
+6. **Prove isolation.** Run each group binary whole and with `--order rand`
+   (three seeds), and run each member alone
+   (`<group> -# "[#test_widgets]"`). A case that passes alone and fails in
+   the group has a static-state dependency: keep that suite out and say why.
+
+`ctest` output, `-R`/`-L` selection, `confirm_failure.sh --test`, and the
+changed-surface selector all keep working, since they address tests by name.
+The one visible difference is `--target`: build the group
+(`pulp-test-group-view-widgets`), not the old per-suite target.

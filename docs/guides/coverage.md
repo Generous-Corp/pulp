@@ -408,8 +408,37 @@ PR that the classifier marks skip-safe does not allocate native coverage
 runners at all; the required diff-coverage gate reports a fast green
 skip instead.
 
-For local pre-submit checks, run `tools/scripts/local_diff_cover.sh`.
-Pass test targets to limit the build, and set
+For local pre-submit checks, run `tools/scripts/local_diff_cover.sh`
+(the pre-push hook runs the same thing). With no arguments it builds
+only the targets the diff reaches: `tools/scripts/diff_cover_targets.py`
+reads the coverage build's CMake File API codemodel, maps each changed
+measured file to the targets that compile it (or, for an unlisted header,
+the targets declared by its deepest CMake directory). CTest then runs only
+the tests whose command runs one of the built targets. The plan is written
+to `build-cov/coverage/diff-cover-plan.json`. There are two tiers:
+
+- **likely** (default for a changed `.cpp`/`.mm`): the owning targets plus
+  the test executables with a source named `test_<stem>*` or including
+  `<stem>.h`/`.hpp`. A pass here stands, because fewer tests can only cover
+  fewer lines. A shortfall re-runs once in the closure tier, reusing the
+  objects already built.
+- **closure**: the owners plus every target that transitively depends on
+  them. Used directly for header changes (an inline function is only mapped
+  in the TUs that use it, so a guessed subset could leave a changed line
+  unmeasured) and for owners whose own artifact the report does not scan.
+
+- A diff whose native changes are all under ignored trees (`test/`,
+  `examples/`, `external/`) or `diff_cover_excludes` skips before
+  configuring: diff-cover would have nothing to measure.
+- An ambiguous mapping (no codemodel, or a measured file no target owns)
+  falls back to building everything and prints why.
+- `PULP_DIFF_COVER_SELECT=closure` skips the likely tier;
+  `PULP_DIFF_COVER_SELECT=all` forces the whole tree. A focused run can
+  read *lower* than a full one (a test reaching the change only through
+  an undeclared runtime path is not selected), never higher; the CI
+  coverage workflow stays authoritative.
+
+Pass test targets to choose the build yourself, and set
 `PULP_DIFF_COVER_CTEST_REGEX` when the PR has a focused test subset so
 the local coverage run does not execute the entire CTest registry.
 
