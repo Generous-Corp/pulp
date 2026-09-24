@@ -10025,3 +10025,43 @@ Two consequences worth knowing:
 
 This mirrors Windows, which has been merge-queue gated rather than pull-request-head gated in
 the same file for longer.
+
+## A required gate step that fetches from the internet is a fleet-wide outage waiting to happen
+
+`build.yml`'s `Install visual-analysis Python dependencies` step passed
+`--upgrade`. pip then asks the index for a newer wheel **even when the
+requirement is already satisfied**, so "pypi.org is reachable from this VM"
+became a precondition of the **required** `macos` check — 21 steps before any
+test runs.
+
+On 2026-09-23 it failed exactly that way:
+
+```
+error: externally-managed-environment
+Tunnel connection failed: 403 Forbidden   ->  /simple/numpy/   (x5 retries)
+ERROR: No matching distribution found for numpy>=1.24
+```
+
+**The tell that it was infrastructure, not a PR:** the same step was `failure`
+on two `m5-pulp-gate-*` runners and `success` on `studio-pulp-gate-*` for
+comparable batches. Both *hosts* reach pypi.org fine (HTTP 200 from a login
+shell) — the refusal is inside the ephemeral VM's egress, so it follows the
+host that mints the VM, not the diff. A merge_group batch is named after one
+PR, so this reads as that PR being broken when it is a host property.
+
+Two rules follow, and they generalise past this step:
+
+- **Check before you fetch.** `pip install --dry-run --no-index` answers
+  "already satisfied?" without touching the network, so the happy path has no
+  external dependency at all. This is also what makes pre-provisioning wheels
+  into the golden image *work* — with `--upgrade` a fully provisioned VM still
+  contacted the index.
+- **Do not make the install non-fatal to "fix" it.** Seven ctests import these
+  modules and SKIP when they are missing, and a ctest SKIP reads exactly like a
+  PASS. The failure belongs at the non-skippable `visual-python-deps-present`
+  check, which can name what is absent; an install step cannot distinguish
+  "absent" from "unreachable".
+
+When adding any step to a required gate, ask whether it can fail because a
+service outside this fleet is down. If it can, you have handed the merge queue
+to someone else's uptime.

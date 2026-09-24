@@ -81,7 +81,23 @@ quantizer's beat/frame arithmetic.
   (normalized source tick, absolute frame, ticks per frame) across the continuous
   session interval, give each range its absolute first frame and loop-pass
   document-to-source offset, and floor on that stable clock before clamping to
-  the owning half-open range. Initialize the source tick from the first resolved
+  the owning half-open range. **That floor recovers a near-integer delta first,
+  and must.** `frame_delta` is a cancellation between two tick values routinely
+  near 1e9, so it keeps the absolute error of the *operands*, not of the small
+  difference: an exactly-on-grid event arrives as its integer plus or minus
+  several ulp of the inputs. Flooring that directly fired 42.2% of on-grid
+  events one sample early and none late -- one-directional, because floor only
+  truncates. `grid_integral_frame_delta()` snaps to the nearest integer when the
+  delta is within `grid_frame_error_budget()`, which is computed from the
+  operands rather than fixed (a constant epsilon is too small at 1e9 ticks and
+  too loose at small ones) and is **capped at `kGridMaxSnapFrames`**. The cap is
+  the load-bearing half: the raw bound reaches 48 frames at ticks near 2^53 with
+  one tick per frame, which would round a genuinely early event forward. Past
+  the cap, keep flooring -- the delta no longer carries an integer's worth of
+  meaning, so snapping would be guessing. The snap is symmetric on purpose: one
+  measured range gives 565416.0000000024 in binary64 while exact rational
+  arithmetic on the same inputs gives 565415.9999999999, one intended integer
+  either side of the boundary. Initialize the source tick from the first resolved
   range in a normalization epoch, not from an absolute host beat that the
   transport has already wrapped into document coordinates; reset the anchor on
   an epoch or slope discontinuity. Never feed such a range through
