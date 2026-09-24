@@ -334,3 +334,9 @@ pulp_add_test_suite(pulp-test-canvas-path LIBRARIES pulp::canvas)
 # no contour, and the requirement that trimming a cubic yields a cubic rather
 # than a polyline.
 pulp_add_test_suite(pulp-test-canvas-path-measure LIBRARIES pulp::canvas)
+
+# Drawlist formatting: a recorded drawlist as diffable text. Covers the
+# completeness choices (every float slot, opaque black, HDR colour as floats)
+# and the two defect classes the pixel scorers document as invisible to them --
+# position and material.
+pulp_add_test_suite(pulp-test-canvas-drawlist-format LIBRARIES pulp::canvas)
