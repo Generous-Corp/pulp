@@ -60,6 +60,7 @@ void print_help() {
         "  --validate                        Run quick plugin dlopen validation after build\n"
         "  --run TARGET                      Launch TARGET from build dir, relaunch on rebuild\n"
         "  --target T                        Pass --target T to cmake --build\n"
+        "  --examples                        Configure the source checkout with example projects\n"
         "  --no-watch                        Set/clear focus state and exit (no watch)\n"
         "  --allow-unsupported-sdk           Bypass the CLI-vs-project SDK guard (unsupported)\n"
         "  -h, --help                        Show this help\n\n"
@@ -105,6 +106,7 @@ int cmd_loop(const std::vector<std::string>& args) {
     bool run_tests = false;
     bool run_validate = false;
     bool allow_unsupported_sdk = false;
+    bool examples = false;
     bool after_separator = false;
     std::string test_filter;
     std::string launch_target;
@@ -161,6 +163,8 @@ int cmd_loop(const std::vector<std::string>& args) {
             run_validate = true;
         } else if (a == "--allow-unsupported-sdk") {
             allow_unsupported_sdk = true;
+        } else if (a == "--examples") {
+            examples = true;
         } else if (a == "--run") {
             if (missing_value(args, i)) {
                 std::cerr << "pulp loop: --run requires a value\n";
@@ -309,10 +313,12 @@ int cmd_loop(const std::vector<std::string>& args) {
     // project's normal build configuration.
     if (!fs::exists(build_dir / "CMakeCache.txt")
         || (!standalone_mode
-            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))) {
+            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))
+        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir))) {
         std::cout << "Project not configured. Configuring + building first...\n";
         std::vector<std::string> bootstrap_args;
         if (allow_unsupported_sdk) bootstrap_args.push_back("--allow-unsupported-sdk");
+        if (examples) bootstrap_args.push_back("--examples");
         int rc = cmd_build(bootstrap_args);
         if (rc != 0) return rc;
     }

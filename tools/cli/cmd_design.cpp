@@ -132,7 +132,8 @@ int cmd_design(const std::vector<std::string>& args) {
     std::cout << "Build dir:    " << build_dir << " (" << build_reason << ")\n";
     std::cout << "Script:       " << script_path << " (" << script_reason << ")\n";
 
-    int rc = ensure_repo_build_configured(root, build_dir);
+    // pulp-design-tool lives under examples/, so this build needs them on.
+    int rc = ensure_repo_build_configured(root, build_dir, /*examples=*/true);
     if (rc != 0) return rc;
 
     rc = run_with_spinner("cmake --build " + shell_quote(build_dir) + " --target pulp-design-tool",

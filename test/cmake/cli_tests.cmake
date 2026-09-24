@@ -39,6 +39,11 @@ target_include_directories(pulp-test-cli-overflow-selector PRIVATE
 target_link_libraries(pulp-test-cli-overflow-selector PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-overflow-selector)
 
+add_executable(pulp-test-cli-configure-defaults test_cli_configure_defaults.cpp)
+target_include_directories(pulp-test-cli-configure-defaults PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-configure-defaults PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-configure-defaults)
+
 # CLI create shell-out edge tests. These launch the built CLI but stay on
 # fail-fast paths that do not run doctor, configure, build, or network setup.
 add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)

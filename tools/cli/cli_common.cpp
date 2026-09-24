@@ -1,6 +1,7 @@
 // cli_common.cpp — Shared implementations for the Pulp CLI
 
 #include "cli_common.hpp"
+#include "configure_defaults.hpp"
 
 #include "fetchcontent_cache.hpp"
 #include "tartci_lease.hpp"
@@ -657,7 +658,43 @@ bool checkout_supports_au(const fs::path& repo_root) {
 }
 #endif
 
-int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir) {
+namespace {
+std::optional<std::string> read_cmake_cache(const fs::path& build_dir) {
+    std::ifstream in(build_dir / "CMakeCache.txt", std::ios::binary);
+    if (!in) return std::nullopt;
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+}  // namespace
+
+std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
+                                    bool examples) {
+    pulp::cli::ConfigureDefaults inputs;
+    inputs.existing_cache = read_cmake_cache(build_dir);
+#ifdef _WIN32
+    // Windows keeps the Visual Studio generator this CLI selects explicitly.
+    inputs.ninja_available = false;
+#else
+    inputs.ninja_available = !find_executable_in_path("ninja").empty();
+#endif
+    if (const char* bt = std::getenv("PULP_BUILD_TYPE")) inputs.build_type_env = std::string(bt);
+    inputs.examples = examples;
+    inputs.source_checkout = source_checkout;
+    std::string flags;
+    for (const auto& arg : pulp::cli::configure_default_args(inputs)) {
+        flags += " " + shell_quote(arg);
+    }
+    return flags;
+}
+
+bool build_dir_has_examples_off(const fs::path& build_dir) {
+    auto cache = read_cmake_cache(build_dir);
+    return cache && pulp::cli::cmake_cache_value(*cache, "PULP_BUILD_EXAMPLES") == "OFF";
+}
+
+int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir,
+                                 bool examples) {
     bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
 
     if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
@@ -665,25 +702,16 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
         auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
         if (cmake_time > cache_time) needs_configure = true;
     }
+    if (!needs_configure && examples && build_dir_has_examples_off(build_dir)) {
+        needs_configure = true;
+    }
 
     if (!needs_configure) return 0;
-    // Default to a Release build. Without an explicit CMAKE_BUILD_TYPE, CMake
-    // configures with NO optimization flags (no -O, no NDEBUG) — an unoptimized
-    // build whose plugin editor / DSP feels sluggish in a DAW for the same
-    // reason a Debug build does. Plugins are normally perf-tested in a host, so
-    // Release is the right default; `PULP_BUILD_TYPE=Debug pulp build` opts into
-    // a debuggable build. (Only applied on a fresh configure — an existing
-    // CMakeCache's build type is left untouched.)
-    std::string build_type = "Release";
-    if (const char* bt = std::getenv("PULP_BUILD_TYPE"); bt && bt[0] != '\0') {
-        build_type = bt;
-    }
+    // `PULP_BUILD_TYPE=Debug pulp …` opts into a debuggable build; otherwise a
+    // fresh dir (or one with an empty build type) is configured Release.
     std::string configure_cmd = "cmake -B " + shell_quote(build_dir) + " -S " + shell_quote(project_root)
-                              + " -DCMAKE_BUILD_TYPE=" + shell_quote(build_type);
+                              + configure_default_flags(build_dir, /*source_checkout=*/true, examples);
     append_windows_visual_studio_generator_args(configure_cmd);
-    std::cout << "Build type: " << build_type
-              << (build_type == "Release" ? "" : "  (set PULP_BUILD_TYPE=Release for perf)")
-              << "\n";
     return run_with_spinner(configure_cmd, "Configuring");
 }
 

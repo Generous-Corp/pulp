@@ -126,7 +126,14 @@ fs::path resolve_create_projects_base_dir(const fs::path& repo_root);
 
 std::string default_create_formats(const fs::path& repo_root, const std::string& type);
 bool checkout_supports_vst3(const fs::path& repo_root);
-int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir);
+int ensure_repo_build_configured(const fs::path& project_root, const fs::path& build_dir,
+                                 bool examples = false);
+// Shell-ready ` -G Ninja -DCMAKE_BUILD_TYPE=… -DPULP_BUILD_EXAMPLES=…` suffix
+// for a configure of `build_dir` (see configure_defaults.hpp for the rules).
+std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
+                                    bool examples);
+// True when `build_dir`'s cache records PULP_BUILD_EXAMPLES=OFF.
+bool build_dir_has_examples_off(const fs::path& build_dir);
 void append_windows_visual_studio_generator_args(std::string& cmd);
 #ifdef __APPLE__
 bool checkout_supports_au(const fs::path& repo_root);

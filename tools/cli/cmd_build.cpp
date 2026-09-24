@@ -88,6 +88,7 @@ int cmd_build(const std::vector<std::string>& args) {
     bool skip_validation = false;
     bool trace_mode = false;
     bool allow_tracing_install = false;
+    bool examples = false;
     std::string test_filter;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
@@ -117,6 +118,10 @@ int cmd_build(const std::vector<std::string>& args) {
         }
         if (arg == "--allow-tracing") {
             allow_tracing_install = true;
+            continue;
+        }
+        if (arg == "--examples") {
+            examples = true;
             continue;
         }
         if (arg.rfind("--test-filter=", 0) == 0) {
@@ -188,7 +193,8 @@ int cmd_build(const std::vector<std::string>& args) {
     }
 
     auto build_dir = project_root / (trace_mode ? "build-trace" : "build");
-    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt");
+    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt")
+        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir));
     bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
 
     // Heal source trees configured before dependency provisioning was
@@ -235,6 +241,7 @@ int cmd_build(const std::vector<std::string>& args) {
         }
 
         std::string configure_cmd = "cmake -B " + build_dir.string() + " -S " + project_root.string();
+        configure_cmd += configure_default_flags(build_dir, !standalone_mode, examples);
         append_windows_visual_studio_generator_args(configure_cmd);
 
         // Standalone projects need CMAKE_PREFIX_PATH to find the SDK

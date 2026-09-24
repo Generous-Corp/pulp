@@ -105,6 +105,7 @@ pulp build --install --skip-validation # macOS debug escape hatch; bypasses vali
 pulp build --allow-unsupported-sdk # Bypass the CLI-vs-project SDK guard (unsupported)
 pulp build --check-identity    # Verify .pulp/identity.lock before configure (Track 3.12)
 pulp build --check-identity --allow-identity-change  # Treat identity drift as a warning
+pulp build --examples          # Source checkout: also configure/build the example projects
 pulp build --js-engine=v8      # Force the JS engine backend and reconfigure
 pulp build --arch=universal    # Fat arm64+x86_64 build (runs on every Mac) — use for distribution
 pulp build --arch=arm64        # Thin Apple Silicon only (or =x86_64 for Intel-only; default =host)
@@ -115,6 +116,8 @@ pulp build -f wclap -j8        # Short form, with a cmake passthrough flag
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+A fresh configure pins the generator and build type: `-G Ninja` when `ninja` is on `PATH` (outside Windows, which keeps Visual Studio), and `-DCMAKE_BUILD_TYPE=Release` unless `PULP_BUILD_TYPE` names another type (`PULP_BUILD_TYPE=Debug pulp build` for a debuggable tree). An existing build dir keeps its generator (CMake cannot switch it in place) and its build type; only an empty build type is filled in with Release. In the Pulp source checkout a fresh configure also sets `-DPULP_BUILD_EXAMPLES=OFF`, because the example plug-ins and apps are roughly half of an incremental rebuild; pass `--examples` to turn them on. `pulp dev` and `pulp loop` accept the same `--examples` flag for their first configure, and `pulp design` turns examples on because the design tool lives under `examples/`.
 
 `--format wam|wclap` (short: `-f`) builds a **web plugin format** instead of the native plugins, using a separate toolchain and build directory so it never collides with the native `build/`:
 
