@@ -2407,3 +2407,11 @@ admission rather than a truncation, and the two bounds a caller needs to predict
 one — `kAdmittedDeviceChainLength` and `event_device_latency_ceiling_samples()`
 — are on the public resolver header so nobody re-declares the ceiling and drifts
 from the constant the graph binding enforces.
+## Hosting sample-region processors
+
+Sample-region processors use the ordinary `Processor`/`SignalGraph` lifecycle.
+Freeze and bind promoted parameters before exposure, prepare the candidate, and
+publish only after the region proof accepts. The callback uses prepared storage;
+live edits adopt immutable snapshots and fail-fast admission prevents retained
+state from executing under two bindings. Signed baked artifacts are re-parsed,
+reconstructed, and re-proved before use.

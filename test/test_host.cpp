@@ -895,7 +895,9 @@ TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
     REQUIRE(input->flags.automatable);
     REQUIRE_FALSE(input->flags.stepped);
     REQUIRE(input->flags.rampable);
-    REQUIRE_FALSE(input->flags.modulatable);
+    // A continuous dB magnitude that declares nothing takes the default and is
+    // modulatable: an additive offset names a value the author defined.
+    REQUIRE(input->flags.modulatable);
 
     const auto* bypass = find_param(params, kPulpGainBypass);
     REQUIRE(bypass != nullptr);
@@ -903,6 +905,10 @@ TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
     REQUIRE(bypass->flags.automatable);
     REQUIRE(bypass->flags.stepped);
     REQUIRE_FALSE(bypass->flags.rampable);
+    // Bypass is refused modulation by rule, not by declaration. Pinning both
+    // parameters is what makes this assertion mean something: a blanket true
+    // would satisfy the gain above on its own.
+    REQUIRE_FALSE(bypass->flags.modulatable);
 
     REQUIRE_FALSE(slot->is_bypassed());
     REQUIRE(slot->latency_samples() == 0);

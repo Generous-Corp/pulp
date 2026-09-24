@@ -445,6 +445,14 @@ incidental:
 Stems, freeze, normalisation, adaptive tails and CLI rendering are out of scope;
 the renderer is scoped to deterministic Pulp nodes with anticipation disabled.
 
+## Sample regions and UnitDelay
+
+A sample region is a bounded scalar DSP program authored inside the same `SignalGraph` model. Its nodes use registered `SampleKernelDescriptor` contracts and execute through the canonical graph runtime executor; native and format adapters do not own a parallel DSP graph. The region proof checks membership, kernel identity, scalar ports, state limits, promoted parameters, boundary lanes, and causality before an edit can be published.
+
+Feedback must cross an explicit `UnitDelay` node. That one-sample state boundary is what makes a recurrence causal; an ordinary graph cycle remains refused. Promoted parameters are derived into a frozen `SampleRegionParameterContract` and merged with the Processor's ordinary `StateStore` manifest before host exposure.
+
+Live edits adopt immutable snapshots. Exact retained-state identities share their prepared cell and execution domain; changed kernel identities receive fresh state. Admission is fail-fast, so an older binding cannot execute concurrently with a newer adopted generation. See [Sample-granular graphs](../guides/sample-granular-graphs.md) and the installed `sample-region-allpass` example for the declaration, bake, reload, and independent-oracle proof path.
+
 ## Timeline playback adapter
 
 `TimelineGraphPlaybackBinding` lowers each phase-1 timeline track to a stable,

@@ -913,6 +913,81 @@ TEST_CASE("SDF chart is absent for non-band shapes",
 #endif
 }
 
+TEST_CASE("SDF chart refuses and names every shape it cannot chart",
+          "[canvas][sdf][shader]") {
+    // A shape whose chart main() would mark invalid must be refused at install
+    // with its own name, not accepted and then silently reported `valid = 0`
+    // at every fragment. flat_arc is the one shape the chart is derived for.
+    struct Case { Canvas::SDFShape shape; const char* name; };
+    const Case refused[] = {
+        {Canvas::SDFShape::arc, "arc"},
+        {Canvas::SDFShape::ring, "ring"},
+        {Canvas::SDFShape::stadium, "stadium"},
+        {Canvas::SDFShape::flat_segment, "flat_segment"},
+        {Canvas::SDFShape::rounded_segment, "rounded_segment"},
+        {Canvas::SDFShape::quadratic_bezier, "quadratic_bezier"},
+        {Canvas::SDFShape::circle, "circle"},
+    };
+    for (const auto& c : refused) {
+        const auto error = Canvas::compile_sdf_chart_sksl(
+            c.shape, "half4 shade(PulpChart g) { return half4(g.t); }");
+        INFO("shape " << c.name << " error=" << error);
+        REQUIRE_FALSE(error.empty());
+        REQUIRE(error.find("no stroke chart") != std::string::npos);
+        REQUIRE(error.find(c.name) != std::string::npos);
+    }
+
+    // Control: the one charted shape must still compile, or the check above
+    // would pass simply because every shape is refused.
+    const auto ok = Canvas::compile_sdf_chart_sksl(
+        Canvas::SDFShape::flat_arc,
+        "half4 shade(PulpChart g) { return half4(g.t, abs(g.d), g.valid, 1); }");
+#ifdef PULP_HAS_SKIA
+    INFO("flat_arc error=" << ok);
+    REQUIRE(ok.empty());
+#else
+    SUCCEED("chart compile control requires PULP_HAS_SKIA");
+#endif
+}
+
+TEST_CASE("PulpChart.px tracks the canvas backing scale",
+          "[canvas][sdf][shader][chart]") {
+#ifdef PULP_HAS_SKIA
+    // px must be one device pixel expressed in the same units as d, so an
+    // author writing `2.0 * g.px` gets two device pixels at any backing scale.
+    // Encode px directly so the assertion reads the value rather than a proxy.
+    auto probe = [](float scale) {
+        constexpr int kSize = 64;
+        auto surface = SkSurfaces::Raster(SkImageInfo::MakeN32Premul(kSize, kSize));
+        REQUIRE(surface != nullptr);
+        auto* sk = surface->getCanvas();
+        sk->scale(scale, scale);
+        SkiaCanvas canvas(sk);
+        Canvas::SDFStyle style;
+        style.arc_start = 0.0f;
+        style.arc_sweep = 6.28318530718f;
+        style.inner_radius = 0.5f;
+        REQUIRE(canvas.draw_sdf_shape_with_shader(
+            Canvas::SDFShape::flat_arc, 0, 0, kSize / scale, kSize / scale, style,
+            "half4 shade(PulpChart g) { return half4(half(g.px), 0, 0, 1); }", {}));
+        SkPixmap pixels;
+        REQUIRE(surface->peekPixels(&pixels));
+        return SkColorGetR(pixels.getColor(kSize / 2, kSize / 4));
+    };
+
+    // At 1x one device pixel is one local unit, so px encodes as full red.
+    const auto at1x = probe(1.0f);
+    // At 2x one device pixel is half a local unit, so px halves.
+    const auto at2x = probe(2.0f);
+    INFO("px at 1x=" << int(at1x) << " at 2x=" << int(at2x));
+    REQUIRE(at1x > 250);
+    REQUIRE(at2x > 118);
+    REQUIRE(at2x < 138);
+#else
+    SUCCEED("PulpChart.px probe requires PULP_HAS_SKIA");
+#endif
+}
+
 TEST_CASE("SDF chart draw rejects non-band geometry",
           "[canvas][sdf][shader]") {
 #ifdef PULP_HAS_SKIA
