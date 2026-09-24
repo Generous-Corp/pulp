@@ -239,6 +239,7 @@ class GpuConvolver : public GpuAudioNode {
     bool trial_enable_trace_ = false;
     bool trial_capture_admissions_ = false;
     bool trial_capture_callback_timing_ = false;
+    bool trial_staged_sync_reference_ = false;
     std::uint32_t trial_success_stride_ = 1;
     std::uint8_t trial_completion_policy_ = 0; // Dawn completion policy enum
     std::uint64_t trial_completion_wait_ns_ = 0;
@@ -246,6 +247,8 @@ class GpuConvolver : public GpuAudioNode {
     std::unique_ptr<render::GpuCompute> gpu_;
     std::unique_ptr<SharedIoState> shared_io_;
     std::unique_ptr<detail::StagedAsyncTrialState> staged_trial_;
+    // Quiescent-only records for the explicit P4 staged_sync reference.
+    std::vector<detail::SharedIoTraceRecord> staged_sync_records_;
     std::uint64_t staged_sequence_ = 0;
     std::vector<float> ir_spec_;            // 2*fft_size interleaved IR spectrum
     std::vector<std::vector<float>> carry_; // per-channel OLA accumulator (fft_size)

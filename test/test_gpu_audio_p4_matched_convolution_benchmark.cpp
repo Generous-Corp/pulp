@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <span>
@@ -52,7 +54,62 @@ struct TrialResult {
     std::uint64_t misses = 0;
     bool available = false;
     bool records_valid = false;
+    std::uint64_t duration_ns = 0;
 };
+
+std::uint64_t monotonic_ns() noexcept {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+
+TrialResult run_staged_sync_trial(const std::vector<std::vector<float>>& input,
+                                  const std::vector<float>& ir) {
+    TrialResult result;
+    const auto started = monotonic_ns();
+    result.path = GpuConvolverTrialPath::StagedSync;
+    GpuConvolver node(kChannels, kFrames, kSampleRate, ir, kLeadBlocks);
+    GpuConvolverTrialConfig config;
+    config.requested_path = SharedIoRequest::RequireStaged;
+    config.generation = kGeneration;
+    config.enable_trace = true;
+    config.staged_sync_reference = true;
+    if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, config) || !node.prepare() ||
+        !node.gpu_available())
+        return result;
+
+    std::vector<float> output(static_cast<std::size_t>(kChannels) * kFrames, 0.0f);
+    std::vector<const float*> input_ptrs(kChannels);
+    std::vector<float*> output_ptrs(kChannels);
+    for (std::uint32_t block = 0; block < kBlocks; ++block) {
+        for (std::uint32_t channel = 0; channel < kChannels; ++channel) {
+            input_ptrs[channel] = input[channel].data() + static_cast<std::size_t>(block) * kFrames;
+            output_ptrs[channel] = output.data() + static_cast<std::size_t>(channel) * kFrames;
+        }
+        BufferView<const float> input_view(input_ptrs.data(), kChannels, kFrames);
+        BufferView<float> output_view(output_ptrs.data(), kChannels, kFrames);
+        const auto start = monotonic_ns();
+        node.process_block(input_view, output_view, kFrames);
+        const auto end = monotonic_ns();
+        SharedIoTraceRecord delivery;
+        delivery.kind = SharedIoTraceKind::Delivery;
+        delivery.generation = kGeneration;
+        delivery.sequence = block;
+        delivery.output_eligible = true;
+        delivery.delivery = pulp::gpu_audio::detail::SharedIoDeliveryDisposition::GpuDelivered;
+        delivery.callback_timing_available = end >= start;
+        delivery.callback_start_ns = start;
+        delivery.callback_end_ns = end;
+        delivery.result_visible_ns = end;
+        result.delivery_records.push_back(delivery);
+    }
+    result.available = pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, result.records);
+    result.records_valid = result.available && result.records.size() == kBlocks &&
+                           std::all_of(result.records.begin(), result.records.end(),
+                                       [](const auto& record) { return record.valid(); });
+    result.duration_ns = monotonic_ns() - started;
+    return result;
+}
 
 // The observer is called from the audio callback. Keep this capture object
 // fixed-capacity and trivially writable so the callback never allocates, locks,
@@ -121,7 +178,9 @@ std::uint64_t digest(std::span<const float> values) {
 }
 
 const char* path_name(GpuConvolverTrialPath path) {
-    return path == GpuConvolverTrialPath::StagedAsync ? "staged_async" : "shared_async";
+    return path == GpuConvolverTrialPath::StagedSync
+               ? "staged_sync"
+               : path == GpuConvolverTrialPath::StagedAsync ? "staged_async" : "shared_async";
 }
 
 void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoTraceRecord& record,
@@ -159,6 +218,7 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
                       const std::vector<float>& ir, std::uint64_t input_digest,
                       std::uint64_t ir_digest) {
     TrialResult result;
+    const auto started = monotonic_ns();
     result.path = path;
     GpuConvolver node(kChannels, kFrames, kSampleRate, ir, kLeadBlocks);
     GpuConvolverTrialConfig config;
@@ -168,6 +228,7 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
     config.generation = kGeneration;
     config.enable_trace = true;
     config.capture_admissions = true;
+    config.capture_callback_timing = true;
     config.success_stride = 1;
     if (!pulp::gpu_audio::detail::configure_gpu_convolver_trial(node, config) || !node.prepare())
         return result;
@@ -300,6 +361,7 @@ TrialResult run_trial(GpuConvolverTrialPath path, const std::vector<std::vector<
                 emit_record(result, i / 2, matched[i], matched[i + 1], input_digest, ir_digest);
         }
     }
+    result.duration_ns = monotonic_ns() - started;
     return result;
 }
 
@@ -308,6 +370,100 @@ std::size_t terminal_record_count(const TrialResult& result) {
         std::count_if(result.records.begin(), result.records.end(), [](const auto& record) {
             return record.kind == SharedIoTraceKind::Terminal && record.gpu_work_admitted;
         }));
+}
+
+bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync,
+                                       const TrialResult& staged,
+                                       const TrialResult& shared) {
+    // The campaign is deliberately opt-in. Missing provenance must leave the
+    // existing matched diagnostic intact rather than producing an anonymous
+    // receipt that cannot be reproduced or attributed to a provider.
+    const auto env = [](const char* name) -> const char* {
+        const auto* value = std::getenv(name);
+        return value != nullptr && *value != '\0' ? value : nullptr;
+    };
+    const auto source = env("PULP_GPU_AUDIO_P4_SOURCE_REVISION");
+    const auto binary = env("PULP_GPU_AUDIO_P4_BINARY_SHA256");
+    const auto machine = env("PULP_GPU_AUDIO_P4_MACHINE_ID");
+    const auto model = env("PULP_GPU_AUDIO_P4_MACHINE_MODEL");
+    const auto os = env("PULP_GPU_AUDIO_P4_OS_VERSION");
+    const auto adapter = env("PULP_GPU_AUDIO_P4_ADAPTER_NAME");
+    const auto provider = env("PULP_GPU_AUDIO_P4_PROVIDER");
+    const auto provider_revision = env("PULP_GPU_AUDIO_P4_PROVIDER_REVISION");
+    const auto provider_asset = env("PULP_GPU_AUDIO_P4_PROVIDER_ASSET_SHA256");
+    const auto campaign_id = env("PULP_GPU_AUDIO_P4_CAMPAIGN_ID");
+    const auto ui_p99 = env("PULP_GPU_AUDIO_P4_UI_P99_NS");
+    const auto raw_output = env("PULP_GPU_AUDIO_P4_RAW_OUTPUT");
+    if (!source || !binary || !machine || !model || !os || !adapter || !provider ||
+        !provider_revision || !provider_asset || !campaign_id || !ui_p99 || !raw_output)
+        return false;
+    const auto parse_u64 = [](const char* value) -> std::uint64_t {
+        char* end = nullptr;
+        const auto parsed = std::strtoull(value, &end, 10);
+        return end != value && end != nullptr && *end == '\0' ? parsed : 0;
+    };
+    const auto ui_frame_p99_ns = parse_u64(ui_p99);
+    if (ui_frame_p99_ns == 0)
+        return false;
+
+    pulp::gpu_audio::detail::GpuConvolverRawManifest manifest;
+    manifest.campaign = "screening";
+    manifest.campaign_id = campaign_id;
+    manifest.source_revision = source;
+    manifest.binary_sha256 = binary;
+    manifest.machine_id = machine;
+    manifest.machine_model = model;
+    manifest.os_version = os;
+    manifest.adapter_name = adapter;
+    manifest.adapter_backend = "metal";
+    manifest.provider = provider;
+    manifest.provider_revision = provider_revision;
+    manifest.provider_asset_sha256 = provider_asset;
+    manifest.generated_utc = "provided-by-campaign-wrapper";
+    manifest.build_flags = {"-O3", "-DNDEBUG"};
+    manifest.warmup_blocks = 2;
+    manifest.expected_trials = 3;
+    manifest.expected_matched_pairs = 1;
+    manifest.expected_staged_sync_trials = 1;
+    manifest.bootstrap_resamples = 100;
+    manifest.paced = true;
+    manifest.block_frames = kFrames;
+    manifest.expected_blocks_per_trial = kBlocks;
+    manifest.sample_rate_hz = kSampleRate;
+    manifest.channels = kChannels;
+    manifest.ir_frames = 257;
+    manifest.inflight_depth = 2;
+    manifest.lead_blocks = kLeadBlocks;
+    manifest.deadline_ns = (std::uint64_t{1'000'000'000} * kFrames) / kSampleRate;
+    manifest.watchdog_ns = manifest.deadline_ns * 4;
+
+    std::array<std::vector<SharedIoTraceRecord>, 3> storage;
+    const auto collect = [](const TrialResult& result,
+                            std::vector<SharedIoTraceRecord>& destination) {
+        destination.reserve(result.records.size() + result.delivery_records.size());
+        for (const auto& record : result.records)
+            if (record.kind == SharedIoTraceKind::Terminal)
+                destination.push_back(record);
+        for (const auto& record : result.delivery_records)
+            if (record.kind == SharedIoTraceKind::Delivery)
+                destination.push_back(record);
+    };
+    collect(staged_sync, storage[0]);
+    collect(staged, storage[1]);
+    collect(shared, storage[2]);
+    using pulp::gpu_audio::detail::GpuConvolverRawTrial;
+    using pulp::gpu_audio::detail::GpuConvolverRawTrialPath;
+    const std::array<GpuConvolverRawTrial, 3> trials{
+        GpuConvolverRawTrial{1, 0, GpuConvolverRawTrialPath::StagedSync, 1, kGeneration,
+                             ui_frame_p99_ns, staged_sync.duration_ns, storage[0]},
+        GpuConvolverRawTrial{2, kPairId, GpuConvolverRawTrialPath::StagedAsync, 1, kGeneration,
+                             ui_frame_p99_ns, staged.duration_ns, storage[1]},
+        GpuConvolverRawTrial{3, kPairId, GpuConvolverRawTrialPath::SharedAsync, 1, kGeneration,
+                             ui_frame_p99_ns, shared.duration_ns, storage[2]}};
+    std::ofstream output(raw_output, std::ios::binary | std::ios::trunc);
+    if (!output)
+        return false;
+    return pulp::gpu_audio::detail::write_gpu_convolver_raw_jsonl(output, manifest, trials);
 }
 
 } // namespace
@@ -321,19 +477,22 @@ int main() {
     const auto input_digest = digest(flattened);
     const auto ir_digest = digest(ir);
 
+    const auto staged_sync = run_staged_sync_trial(input, ir);
     const auto staged =
         run_trial(GpuConvolverTrialPath::StagedAsync, input, ir, input_digest, ir_digest);
     const auto shared =
         run_trial(GpuConvolverTrialPath::SharedAsync, input, ir, input_digest, ir_digest);
-    if (!staged.available || !shared.available) {
+    if (!staged_sync.available || !staged.available || !shared.available) {
         std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\"unavailable\""
                      ",\"performance_verdict\":\"unassigned\",\"reason\":\"required_path_"
                      "unavailable\"}\n";
         return 77;
     }
+    const auto staged_sync_terminal_records = terminal_record_count(staged_sync);
     const auto staged_terminal_records = terminal_record_count(staged);
     const auto shared_terminal_records = terminal_record_count(shared);
-    const bool matched = staged.records_valid && shared.records_valid &&
+    const bool matched = staged_sync.records_valid && staged.records_valid && shared.records_valid &&
+                         staged_sync_terminal_records == kBlocks &&
                          staged_terminal_records == kBlocks && shared_terminal_records == kBlocks;
     std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\""
               << (matched ? "screening_complete" : "screening_failed")
@@ -342,12 +501,18 @@ int main() {
               << ",\"channels\":" << kChannels << ",\"block_frames\":" << kFrames
               << ",\"lead_blocks\":" << kLeadBlocks << ",\"ir_frames\":" << ir.size()
               << "},\"input_digest\":" << input_digest << ",\"ir_digest\":" << ir_digest
+              << ",\"staged_sync_records\":" << staged_sync.records.size()
               << ",\"staged_records\":" << staged.records.size()
+              << ",\"staged_sync_terminal_records\":" << staged_sync_terminal_records
               << ",\"shared_records\":" << shared.records.size()
               << ",\"staged_terminal_records\":" << staged_terminal_records
               << ",\"shared_terminal_records\":" << shared_terminal_records
               << ",\"terminal_records_required\":" << kBlocks
               << ",\"staged_misses\":" << staged.misses << ",\"shared_misses\":" << shared.misses
-              << ",\"raw_receipt\":\"not_emitted\"}\n";
+              << ",\"raw_receipt\":\""
+              << (matched && emit_raw_receipt_if_authenticated(staged_sync, staged, shared)
+                      ? "emitted"
+                      : "not_emitted")
+              << "\"}\n";
     return matched ? 0 : 1;
 }

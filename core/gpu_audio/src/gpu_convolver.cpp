@@ -79,6 +79,7 @@ bool configure_gpu_convolver_trial(GpuConvolver& convolver,
     convolver.trial_enable_trace_ = config.enable_trace;
     convolver.trial_capture_admissions_ = config.capture_admissions;
     convolver.trial_capture_callback_timing_ = config.capture_callback_timing;
+    convolver.trial_staged_sync_reference_ = config.staged_sync_reference;
     convolver.trial_success_stride_ = std::max<std::uint32_t>(1, config.success_stride);
     convolver.trial_completion_policy_ = static_cast<std::uint8_t>(config.completion_policy);
     convolver.trial_completion_wait_ns_ = config.completion_wait_ns;
@@ -99,6 +100,15 @@ bool drain_gpu_convolver_trial_records(GpuConvolver& convolver,
             return false;
         try {
             records = convolver.staged_trial_->take_completed();
+            return true;
+        } catch (...) {
+            records.clear();
+            return false;
+        }
+    }
+    if (convolver.trial_staged_sync_reference_ && !convolver.staged_sync_records_.empty()) {
+        try {
+            records = convolver.staged_sync_records_;
             return true;
         } catch (...) {
             records.clear();
@@ -150,6 +160,7 @@ bool GpuConvolver::prepare() {
 #endif
     shared_io_.reset();
     staged_trial_.reset();
+    staged_sync_records_.clear();
     staged_sequence_ = 0;
     if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
@@ -276,7 +287,8 @@ bool GpuConvolver::prepare() {
     }
 
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_)
+    if (trial_configured_ && requested_path == detail::SharedIoRequest::RequireStaged && gpu_ &&
+        !trial_staged_sync_reference_)
         staged_trial_ = std::make_unique<detail::StagedAsyncTrialState>(2, trial_generation_);
 #endif
 
@@ -523,6 +535,70 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         return;
     }
 #endif
+
+    // Explicit P4 reference path. This is the pre-existing blocking staged
+    // GpuCompute operation, instrumented at its actual call boundaries. It is
+    // selected only by the host-only staged_sync_reference trial flag and is
+    // never reachable from the realtime shared-I/O callback.
+    if (trial_staged_sync_reference_) {
+        const auto now_ns = []() noexcept {
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                   std::chrono::steady_clock::now().time_since_epoch())
+                                                   .count());
+        };
+        detail::SharedIoTraceRecord trace;
+        trace.generation = trial_generation_;
+        trace.sequence = staged_sequence_++;
+        trace.gpu_work_admitted = true;
+        trace.set(detail::SharedIoTraceStage::Scheduled, now_ns());
+        trace.set(detail::SharedIoTraceStage::WorkerEntry, now_ns());
+        const auto before = gpu_->async_stats();
+        trace.set(detail::SharedIoTraceStage::EncodeBegin, now_ns());
+        std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
+        const uint32_t direct_cplx = fft_size_ * 2u;
+        for (uint32_t ch = 0; ch < channels_; ++ch) {
+            const float* x = input.channel_ptr(ch);
+            float* slot = in_pad_.data() + static_cast<std::size_t>(ch) * direct_cplx;
+            for (uint32_t i = 0; i < n; ++i)
+                slot[2u * i] = x[i];
+        }
+        trace.set(detail::SharedIoTraceStage::EncodeEnd, now_ns());
+        trace.set(detail::SharedIoTraceStage::SubmitBegin, now_ns());
+        const bool success = gpu_->convolve_batch(in_pad_.data(), time_.data(), fft_size_, channels_);
+        trace.set(detail::SharedIoTraceStage::SubmitEnd, now_ns());
+        trace.set(detail::SharedIoTraceStage::CompletionObserved, now_ns());
+        const auto after = gpu_->async_stats();
+        trace.set(detail::SharedIoTraceStage::RetirementObserved, now_ns());
+        trace.transfer_counters = {
+            after.write_buffer_calls - before.write_buffer_calls,
+            after.write_buffer_bytes - before.write_buffer_bytes,
+            after.output_copy_calls - before.output_copy_calls,
+            after.output_copy_bytes - before.output_copy_bytes,
+            after.map_async_calls - before.map_async_calls,
+            after.mapped_readback_memcpy_calls - before.mapped_readback_memcpy_calls,
+            after.mapped_readback_memcpy_bytes - before.mapped_readback_memcpy_bytes};
+        trace.transfer_counters_available = true;
+        trace.cpu_detail_available = true;
+        trace.outcome = success ? detail::SharedIoTraceOutcome::Success
+                                : detail::SharedIoTraceOutcome::CompletionFailed;
+        trace.gpu_terminal = success ? detail::SharedIoGpuTerminalDisposition::CompletedAccepted
+                                     : detail::SharedIoGpuTerminalDisposition::ProviderFailed;
+        if (!success) {
+            trace.reason = detail::SharedIoFallbackReason::CompletionFailed;
+            trace.gpu_reason = detail::SharedIoFallbackReason::CompletionFailed;
+            output.clear();
+        } else {
+            for (uint32_t ch = 0; ch < channels_; ++ch)
+                detail::overlap_add_block(carry_[ch].data(),
+                                          time_.data() + static_cast<std::size_t>(ch) * direct_cplx,
+                                          /*src_stride=*/2, output.channel_ptr(ch), fft_size_, n);
+        }
+        // The record is retained only after all fields are complete. Invalid
+        // records are rejected rather than turned into synthetic evidence.
+        if (trace.valid())
+            staged_sync_records_.push_back(trace);
+        return;
+    }
 
     // Pack every channel's zero-padded complex block back to back.
     std::fill(in_pad_.begin(), in_pad_.end(), 0.0f);
