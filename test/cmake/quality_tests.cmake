@@ -312,6 +312,40 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME build-parallelism-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_parallelism_guard.py")
 
+    # Shared Catch2 test PCH: the configure-time ledger says which suites reuse
+    # a carrier; this reads the generator's compile lines back and proves it
+    # (carrier named by -include-pch, matching -std, no carrier-only -D). The
+    # named expectations pin a C++20 suite, a C++23 suite (pulp::format raises
+    # the standard when it is built at 23), an excluded -fno-exceptions probe,
+    # a Catch2 suite excluded for its per-target -ffp-contract option, and
+    # SDL3-static, whose own PCH is off so ccache can store its objects.
+    if(PULP_TEST_PCH)
+        set(_pulp_pch_option ON)
+    else()
+        set(_pulp_pch_option OFF)
+    endif()
+    set(_pulp_pch_format_std 20)
+    if(TARGET pulp-format-core)
+        get_target_property(_pulp_pch_format_std_prop pulp-format-core CXX_STANDARD)
+        if(_pulp_pch_format_std_prop)
+            set(_pulp_pch_format_std "${_pulp_pch_format_std_prop}")
+        endif()
+    endif()
+    set(_pulp_pch_expect
+        --expect pulp-test-biquad=pulp-test-pch-cxx20
+        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-signal-no-exceptions=none
+        --expect pulp-test-cross-platform-audio-golden=none)
+    if(TARGET SDL3-static)
+        list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
+        ${_pulp_pch_expect})
+    add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
     # clean on every machine a developer or reviewer uses and breaks one release

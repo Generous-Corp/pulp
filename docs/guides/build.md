@@ -34,6 +34,7 @@ ctest --test-dir build --output-on-failure    # test
 | `PULP_BUILD_TESTS` | ON | Build test targets |
 | `PULP_BUILD_EXAMPLES` | ON | Build the example projects. `setup.sh` configures `OFF` unless `--examples` is passed. |
 | `PULP_ENABLE_GPU` | ON | Enable Dawn/Skia GPU rendering |
+| `PULP_TEST_PCH` | ON on Clang, OFF elsewhere | Share one precompiled Catch2 + standard-library header across the Catch2 test executables (`pulp-test-pch-cxx20` / `-cxx23` carriers). Suites with ObjC++ sources, per-target `-f`/`-std` options, or `NO_PCH` compile as before; `<build>/pulp-test-pch.tsv` lists every decision and the `test-pch-wiring` ctest verifies it against the generated compile lines. |
 | `PULP_ENABLE_PROJECT_PACKAGE` | ON | Build and export the optional project-package component and dependent Timeline authoring tools. `OFF` omits them, so the installed SDK cannot satisfy a request for the `project-package` component. |
 | `PULP_ENABLE_JS` | ON | Build the JS scripting + web-compat layer (`pulp::view-script`). `OFF` yields a native-only `pulp::view` with no JS engine — smaller binaries, and the native faithful-vector design-import path still works. |
 | `PULP_JS_ENGINE` | auto | JS engine: `auto`/`quickjs` compile QuickJS only; `jsc` adds JavaScriptCore on Apple and makes it the default; `v8` adds the sealed V8 backend and makes it the default (only when `PULP_ENABLE_JS=ON`) |
