@@ -211,9 +211,9 @@ guards = ["tools/scripts/gpu_trace_overhead_acceptance.py", "tools/scripts/gpu_t
 id = 9
 layer = "pulp"
 tags = ["debug-lane", "mac-lane", "release"]
-title = "The Shipyard macOS lane builds DEBUG on purpose."
-why = "-O0 caught a real ODR/UB (snap_to_zero) that a Release build masks by inlining."
-do_not = "Flipping the macOS lane to Release for speed."
+title = "One unoptimised (-O0) full-suite lane exists on purpose: .github/workflows/debug-o0.yml, clean on GitHub-hosted, nightly on main and dispatchable per PR head. The Shipyard macOS host lane builds DEBUG until that lane has been green on main."
+why = "-O0 caught a real ODR/UB (snap_to_zero) that a Release build masks by inlining. Run once per worktree on the shared host it costs a second full Debug tree per worktree and ~27 min of up to 12 cores per run, while its reds were not acted on (134 of 180 mapped PRs merged over a red local lane)."
+do_not = "Removing the -O0 lane, running it in a warm self-hosted build dir (row #8), or flipping the Shipyard host lane to Release before debug-o0.yml is green on main and the changed-surface inventory contract is re-pinned for the Release lane."
 guards = [".shipyard/config.toml", ".github/workflows/**"]
 
 [[decision]]

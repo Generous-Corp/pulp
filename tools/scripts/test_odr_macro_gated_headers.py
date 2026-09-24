@@ -166,6 +166,24 @@ class MacroGatedHeaderFunctionsAreODRSafe(unittest.TestCase):
             "gate's calibration (see test_yoga_layout_bench), not the lane.",
         )
 
+    def test_the_clean_o0_lane_builds_debug_and_runs_the_suite(self) -> None:
+        """`.github/workflows/debug-o0.yml` is the clean -O0 lane for this class.
+
+        It must configure Debug with no optimisation override, run the whole
+        CTest suite (not a regex subset), and stay off warm self-hosted build
+        directories, where a stale object reproduces exactly the false
+        red/green this lane exists to rule out.
+        """
+        wf = (REPO_ROOT / ".github" / "workflows" / "debug-o0.yml").read_text(encoding="utf-8")
+        self.assertIn("-DCMAKE_BUILD_TYPE=Debug", wf)
+        self.assertNotRegex(wf, r"CMAKE_CXX_FLAGS[^\n]*-O[1-3s]")
+        self.assertNotIn("PULP_SANITIZER", wf)
+        test_step = wf[wf.index("- name: Test"):]
+        self.assertIn("ctest --test-dir build-o0", test_step)
+        self.assertNotRegex(test_step.split("report:")[0], r"(--tests-regex|\s-R\s)")
+        self.assertIn("schedule:", wf)
+        self.assertIn("'[\"macos-15\"]'", wf)
+
 
 if __name__ == "__main__":
     unittest.main()

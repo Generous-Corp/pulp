@@ -3506,6 +3506,17 @@ hosted image ships **nine** Xcode bundles, and removing the eight inactive ones
 its `runner.environment == 'github-hosted'` guard — without it the same step
 would delete Xcode off a self-hosted Studio.
 
+### The -O0 class has a clean lane: `debug-o0.yml`
+
+Contract row #9's unoptimised full-suite coverage lives in
+`.github/workflows/debug-o0.yml` (clean GitHub-hosted, nightly on `main`, one
+tracking issue on a scheduled red). Run it against a PR head with
+`ghapp workflow run debug-o0.yml --ref <branch>` when a change could split a
+header symbol's body by macro or relies on an `assert`. Do not route it to a
+self-hosted runner: a warm build dir reproduces the stale-object false
+red/green the lane exists to rule out (row #8). The Shipyard host lane stays
+Debug until that lane is green on `main`; see `docs/guides/local-ci.md`.
+
 ### `shipyard pr` can leave YOUR build dir at Debug — and a later "successful" build can be stale
 
 The local validation backend builds Debug in the editing checkout. That is
