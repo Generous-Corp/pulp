@@ -353,7 +353,9 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-late-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
-        --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20)
+        --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
