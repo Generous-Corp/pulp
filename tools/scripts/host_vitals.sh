@@ -168,14 +168,34 @@ _find_tool() {
 }
 
 # ccache stats for one cache dir ("" = the user's configured cache) as JSON.
+# Run a probe with a deadline. A launchd agent can block indefinitely in open()
+# on a cache that lives on an external volume it has not been granted, and one
+# stuck probe must cost a null field, not the whole snapshot.
+# The probe runs in its own process group so the deadline also reaps anything
+# it spawned; a surviving grandchild would hold the output pipe open.
+_bounded() {
+  local secs="${PULP_VITALS_PROBE_TIMEOUT:-15}"
+  perl -e '
+    my $t = shift;
+    my $pid = fork;
+    exit 127 unless defined $pid;
+    if ($pid == 0) { setpgrp(0, 0); exec @ARGV or exit 127; }
+    setpgrp($pid, $pid);
+    $SIG{ALRM} = sub { kill "KILL", -$pid; waitpid($pid, 0); exit 124; };
+    alarm $t;
+    waitpid($pid, 0);
+    exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+  ' "$secs" "$@"
+}
+
 _ccache_json() {
   local bin="$1" dir="$2" stats cdir
   if [ -n "$dir" ]; then
-    stats="$("$bin" -d "$dir" -s 2>/dev/null)" || { printf 'null'; return; }
+    stats="$(_bounded "$bin" -d "$dir" -s 2>/dev/null)" || { printf 'null'; return; }
     cdir="$dir"
   else
-    stats="$("$bin" -s 2>/dev/null)" || { printf 'null'; return; }
-    cdir="$("$bin" -p 2>/dev/null | awk -F' = ' '/ cache_dir = / {print $2; exit}')"
+    stats="$(_bounded "$bin" -s 2>/dev/null)" || { printf 'null'; return; }
+    cdir="$(_bounded "$bin" -p 2>/dev/null | awk -F' = ' '/ cache_dir = / {print $2; exit}')"
   fi
   printf '%s\n' "$stats" | awk -v cdir="$cdir" '
     function pct(line,   a) { split(line, a, "("); sub(/%\).*/, "", a[2]); return a[2] + 0 }
@@ -192,6 +212,27 @@ _ccache_json() {
         (max == "" ? "null" : max + 0), (cleanups == "" ? "null" : cleanups + 0),
         (unc == "" ? "null" : unc)
     }'
+}
+
+# The tartci commit this host has INSTALLED, read the way
+# `tartci fleet-macos self-update` reports "installed": the sealed launcher
+# bundle's source_commit first, then the fleet install record. A sealed host
+# runs no checkout and its gate processes run from the launcher bundle, so
+# neither the checkout head nor a `tartci-generations/` path in `ps` can name
+# its version.
+_tartci_installed_commit() {
+  local f sha
+  for f in "$HOME/.local/libexec/TartCILauncher.app/Contents/Resources/bundle.json" \
+           "$HOME/.config/tartci/macos-fleet-install.json"; do
+    [ -r "$f" ] || continue
+    sha="$(tr -d '\n' < "$f" | grep -o '"source_commit": *"[0-9a-f]\{7,40\}"' | head -1 \
+      | sed -E 's/.*"([0-9a-f]+)"$/\1/' | cut -c1-12)"
+    if [ -n "$sha" ]; then
+      printf '%s' "$sha"
+      return 0
+    fi
+  done
+  return 0
 }
 
 build_json() {
@@ -224,12 +265,13 @@ build_json() {
   local generation
   generation="$(printf '%s\n' "$ps_out" | grep -o 'tartci-generations/[0-9a-f]\{7,40\}' | head -1 | sed 's|.*/||' | cut -c1-12 || true)"
 
-  local checkout="" leases="null" profile="null"
+  local checkout="" installed="" leases="null" profile="null"
   checkout="$(git -C "$HOME/Code/tartci" rev-parse --short=12 HEAD 2>/dev/null || true)"
+  installed="$(_tartci_installed_commit)"
   if tartci_bin="$(_find_tool tartci)"; then
-    leases="$("$tartci_bin" leases status --json 2>/dev/null | tr -d '\n' | sed -E 's/.*"capacity": *(\{[^}]*\}).*/\1/')"
+    leases="$(_bounded "$tartci_bin" leases status --json 2>/dev/null | tr -d '\n' | sed -E 's/.*"capacity": *(\{[^}]*\}).*/\1/')"
     case "$leases" in '{'*'}') : ;; *) leases="null" ;; esac
-    profile="$("$tartci_bin" host-profile --json 2>/dev/null | tr -d '\n' | sed -E 's/"notes": *\[[^]]*\],?//; s/"host": *\{[^}]*\},?//')"
+    profile="$(_bounded "$tartci_bin" host-profile --json 2>/dev/null | tr -d '\n' | sed -E 's/"notes": *\[[^]]*\],?//; s/"host": *\{[^}]*\},?//')"
     case "$profile" in '{'*'}') : ;; *) profile="null" ;; esac
   fi
 
@@ -242,8 +284,9 @@ build_json() {
     "$(_jstr "$host")" "$(_num_or_null "$ncpu")" "$(_num_or_null "$mem")" "$load" \
     "$(_num_or_null "$free_pct")" "$(_num_or_null "$swap_used")"
   printf '"ccache_host":%s,"ccache_gate":%s,"gate_vms":%s,' "$ccache_host" "$ccache_gate" "$vms"
-  printf '"tartci":{"executing_generation":%s,"checkout_head":%s,"leases":%s,"host_profile":%s},' \
+  printf '"tartci":{"executing_generation":%s,"installed_generation":%s,"checkout_head":%s,"leases":%s,"host_profile":%s},' \
     "$( [ -n "$generation" ] && _jstr "$generation" || printf 'null')" \
+    "$( [ -n "$installed" ] && _jstr "$installed" || printf 'null')" \
     "$( [ -n "$checkout" ] && _jstr "$checkout" || printf 'null')" "$leases" "$profile"
   printf '"wheelhouse_wheels":%s,"sampled_at":%s}\n' "$wheels" "$(_now)"
 }

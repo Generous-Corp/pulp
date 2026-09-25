@@ -35,6 +35,11 @@ ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '%s %s\n' "$ts" "$json" >> "$STATE_DIR/host_vitals.log"
 health_json="$json"
 
+# Publish the health reading before the slower build snapshot, so a probe that
+# stalls there can delay only the snapshot, never the back-off signal.
+printf '%s\n' "$json" > "$STATE_DIR/host_vitals.json.tmp" \
+    && mv -f "$STATE_DIR/host_vitals.json.tmp" "$STATE_DIR/host_vitals.json"
+
 # The published reading also carries a build-capacity snapshot (ccache, gate
 # VMs, tartci leases/commit, wheelhouse) under "build", for the build-speed
 # scorecard. It is kept out of the history log so that log still holds hours of
