@@ -77,3 +77,34 @@ execution, zero-copy transfer, realtime safety, or GPU-NAM integration. Those
 claims remain blocked on a real provider implementation and receipts for
 provider identity, numerical output, stereo isolation, fallback, and terminal
 retirement.
+
+## Follow-up audit: why the first authenticated implementation must stay scoped
+
+A provider-owned WaveNet program cannot safely be added by only forwarding
+`SharedIoPreparedProgram::submit()`. The submit token identifies a slot,
+stream epoch, and sequence, but it does not identify a WaveNet stream instance.
+`DawnSharedIoWavenetProgramSpec::stream_instances` therefore cannot select a
+causal-history buffer for stereo or other independent streams. Mapping an
+instance from `slot % stream_instances` would silently mix histories whenever
+the fixed ring is reused and would fail numerical parity.
+
+The smallest safe implementation contract is one of:
+
+* make one prepared session represent exactly one causal stream and require
+  `stream_instances == 1`; or
+* extend the private submission context with an authenticated instance index
+  (and include it in the token/slot lease) before enabling multi-instance
+  WaveNet.
+
+The provider also needs a private factory and plan owner, for example
+`make_wavenet_program(spec)`, `prepare_wavenet_program(spec, slots)`,
+`submit_wavenet_program(resources, token, inbox)`, and
+`release_wavenet_program()`. Those methods must retain the provider's Dawn
+device and queue internally, build resident weight/activation/history buffers,
+and use the same queue-future/error-scope/terminal-inbox machinery as the
+existing convolution path. No public raw Dawn handle is required.
+
+Until the instance-routing contract and this provider-owned plan exist, a
+WaveNet `submit()` refusal is the only honest behavior. A copy/upload/readback
+adapter through `render::GpuCompute` would not test shared-memory execution and
+must not be counted as GPU-NAM validation.
