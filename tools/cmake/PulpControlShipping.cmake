@@ -268,8 +268,24 @@ function(_pulp_attach_control_shipping target artifact_target artifact_format)
     set(_control_manifest_digest "${PULP_${target}_CONTROL_MANIFEST_DIGEST}")
     # Only Standalone composes the control endpoint today. Mixed developer
     # builds keep every plug-in module on an independent stripped declaration.
+    #
+    # Say so when it happens. A plug-in format reaching here with a non-stripped
+    # profile means the author explicitly passed CONTROL_PROFILE to
+    # pulp_add_plugin() -- the default is production-stripped, so this branch
+    # cannot fire on an ordinary build. Discarding that request silently leaves
+    # an author with a stripped bundle, no endpoint, and nothing in the build
+    # output connecting the two; the limitation is then discoverable only by
+    # reading this file. Keeping the downgrade and announcing it preserves the
+    # safe default for shipped artifacts while making the boundary visible at
+    # the moment it bites.
     if(NOT artifact_format STREQUAL "Standalone" AND
        NOT _profile STREQUAL "production-stripped")
+        message(WARNING
+            "pulp_add_plugin(${target}): CONTROL_PROFILE '${_profile}' is not composed for "
+            "${artifact_format}; only Standalone composes the control endpoint today. This "
+            "${artifact_format} artifact ships a production-stripped declaration with no "
+            "capabilities and endpoint_included=false. A plug-in module is loaded into a host "
+            "process the author does not own, so the endpoint is not offered there by default.")
         set(_profile "production-stripped")
         set(_artifact_capabilities "")
         _pulp_control_json_escape(_artifact_json_target "${target}")

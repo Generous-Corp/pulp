@@ -887,7 +887,14 @@ TEST_CASE("SDF chart prelude exposes analytic feathering and bounded operators",
         "PulpSdf c = pulpSmoothUnion(pulpUnion(a, b), pulpIntersect(a, b), leaf1); "
         "return half4(pulpFeather(c.d, 1.0, 0, 0) + "
         "pulpFeather(g, 1.0, 1, 5) + pulpFeather(g, 1.0, 0, 6)); }");
+#ifdef PULP_HAS_SKIA
     REQUIRE(error.empty());
+#else
+    // Without Skia there is no SkSL compiler to ask, so the stub reports the
+    // missing capability. Asserting an empty error here would demand that a
+    // non-GPU build claim a successful compile it never performed.
+    REQUIRE(error.find("Skia not available") != std::string::npos);
+#endif
 }
 
 TEST_CASE("SDF geometry composer exposes PulpGeom and PulpFragment",
@@ -897,7 +904,14 @@ TEST_CASE("SDF geometry composer exposes PulpGeom and PulpFragment",
         "PulpFragment shade(PulpGeom g, float2 p) { "
         "return PulpFragment(half4(g.uv.x, abs(g.sdf), g.coverage, 1), 0, 0); }");
     INFO(error);
+#ifdef PULP_HAS_SKIA
     REQUIRE(error.empty());
+#else
+    // Without Skia there is no SkSL compiler to ask, so the stub reports the
+    // missing capability. Asserting an empty error here would demand that a
+    // non-GPU build claim a successful compile it never performed.
+    REQUIRE(error.find("Skia not available") != std::string::npos);
+#endif
 }
 
 TEST_CASE("SDF chart is absent for non-band shapes",
@@ -933,8 +947,14 @@ TEST_CASE("SDF chart refuses and names every shape it cannot chart",
             c.shape, "half4 shade(PulpChart g) { return half4(g.t); }");
         INFO("shape " << c.name << " error=" << error);
         REQUIRE_FALSE(error.empty());
+#ifdef PULP_HAS_SKIA
+        // Naming the shape is what makes the refusal actionable, but only the
+        // Skia path gets far enough to know which shape was asked for.
         REQUIRE(error.find("no stroke chart") != std::string::npos);
         REQUIRE(error.find(c.name) != std::string::npos);
+#else
+        REQUIRE(error.find("Skia not available") != std::string::npos);
+#endif
     }
 
     // Control: the one charted shape must still compile, or the check above

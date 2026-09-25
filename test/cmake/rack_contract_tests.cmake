@@ -133,4 +133,14 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(rack-inert-input-cause PROPERTIES
         LABELS "rack;contract"
         TIMEOUT 300)
+
+    # The shared library cache is refreshed by every harness that needs it, so
+    # a reader must never see a half-written modules.json. Deterministic: it
+    # probes the index mid-write rather than racing two processes on the clock.
+    add_test(NAME rack-module-index-atomic
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../tools/rack/test_module_index_atomic.py)
+    set_tests_properties(rack-module-index-atomic PROPERTIES
+        LABELS "rack;contract"
+        TIMEOUT 60)
 endif()

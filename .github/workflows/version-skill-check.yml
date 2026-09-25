@@ -333,3 +333,17 @@ jobs:
           python3 tools/scripts/processing_model_terms_lint.py --selftest
           python3 tools/scripts/conflict_marker_check.py --selftest
           python3 tools/scripts/framework_neutrality_check.py --selftest
+
+      - name: Source-only selftests (moved off the macOS gate)
+        # The registrations in tools/ci/source_selftests.json read only the
+        # checkout, so they need none of the macOS build the required gate
+        # spends most of its time producing. The gate excludes their
+        # `source-selftest` label on pull_request / workflow_dispatch /
+        # merge_group, and this required context runs every one of them on
+        # the same events, so each still blocks a merge. The
+        # source-selftest-lane-contract ctest (on the gate) fails if the label,
+        # the manifest and this step drift apart. --min-count catches a
+        # manifest that shrank without anyone deciding to shrink it.
+        timeout-minutes: 45
+        run: |
+          python3 tools/ci/source_selftests.py run --min-count 130

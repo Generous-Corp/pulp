@@ -35,6 +35,9 @@ BUILD_YML = REPO_ROOT / ".github" / "workflows" / "build.yml"
 
 # The literal label set the workflow used for gate events before extraction.
 LEGACY_GATE_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+# The gate events additionally drop the source-only selftests, which the
+# required `Enforce version & skill sync` context runs without a build.
+GATE_LABEL_EXCLUDE = LEGACY_GATE_LABEL_EXCLUDE + "|source-selftest"
 # The literal label set the workflow used for every other event.
 LEGACY_FULL_LABEL_EXCLUDE = "validation"
 
@@ -48,7 +51,7 @@ class LabelExcludeParityTests(unittest.TestCase):
                 with self.subTest(event=event, runner_os=runner_os):
                     self.assertEqual(
                         ctest_gate_args.label_exclude(event, runner_os),
-                        LEGACY_GATE_LABEL_EXCLUDE,
+                        GATE_LABEL_EXCLUDE,
                     )
 
     def test_push_on_steady_hosted_runners_keeps_the_heavier_set(self) -> None:
@@ -75,7 +78,12 @@ class PushMacosLabelTests(unittest.TestCase):
     which would reproduce the blind spot it was added to close.
     """
 
-    def test_push_macos_uses_the_gate_label_set(self) -> None:
+    def test_push_macos_uses_the_shared_host_label_set(self) -> None:
+        """Push drops the timing tests but keeps the source-only selftests.
+
+        Push is the only lane that runs the whole macOS suite on main, so the
+        source-selftest exclusion that shortens the gate must not reach it.
+        """
         self.assertEqual(
             ctest_gate_args.label_exclude("push", "macOS"),
             LEGACY_GATE_LABEL_EXCLUDE,
@@ -124,7 +132,7 @@ class ShellOutputTests(unittest.TestCase):
         parsed = dict(
             token.split("=", 1) for token in shlex.split(out.replace("\n", " "))
         )
-        self.assertEqual(parsed["label_exclude"], LEGACY_GATE_LABEL_EXCLUDE)
+        self.assertEqual(parsed["label_exclude"], GATE_LABEL_EXCLUDE)
         self.assertEqual(parsed["stop_on_failure"], "--stop-on-failure")
 
     def test_empty_stop_flag_round_trips_as_an_empty_token(self) -> None:
