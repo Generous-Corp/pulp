@@ -350,12 +350,25 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-render-helpers=pulp-test-pch-cxx20
         --expect pulp-test-group-canvas-text=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-fmt-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-ship=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-httplib=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-reload-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format-view=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-late-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    # Registered in format_reload_tests.cmake, which is included after this file.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-fmt-au-v2=pulp-test-pch-cxx23)
     endif()
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
