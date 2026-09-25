@@ -364,6 +364,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
 
+    # Dependency configure-check replay (PulpConfigureCheckCache.cmake): drives
+    # real CMake configures of a toy dependency, so it is Apple-only like the
+    # module and skips (77) elsewhere.
+    add_test(NAME configure-check-cache COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_configure_check_cache.py")
+    set_tests_properties(configure-check-cache PROPERTIES
+        LABELS "build;tools" SKIP_RETURN_CODE 77 TIMEOUT 120)
+
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
     # clean on every machine a developer or reviewer uses and breaks one release
