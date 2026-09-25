@@ -2074,6 +2074,81 @@ jobs:
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure \
             -C Release --no-tests=error -R '^agent-capability-installed-sdk$'
 
+      # The installed-SDK contract above exercises the install tree inside the
+      # build job, but downstream consumers such as GPU-NAM need the exact
+      # tested prefix. Publish that prefix only for the ARM64 macOS capability
+      # lane; this keeps the artifact tied to the same checkout, build, and
+      # required gate rather than asking consumers to guess which SDK was used.
+      - name: Install and publish exact GPU-audio SDK (macOS ARM64)
+        if: >-
+          runner.os == 'macOS'
+          && matrix.key == 'macos'
+          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
+          && (github.event_name == 'pull_request'
+              || github.event_name == 'merge_group'
+              || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          SDK_ARTIFACT_DIR: ${{ runner.temp }}/pulp-gpu-audio-sdk
+          SDK_ARTIFACT_TAR: ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+          SDK_ARTIFACT_RECEIPT: ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+        run: |
+          set -euo pipefail
+          rm -rf "$SDK_ARTIFACT_DIR"
+          cmake --install "$PULP_BUILD_DIR" --prefix "$SDK_ARTIFACT_DIR" --config Release
+          test -s "$SDK_ARTIFACT_DIR/lib/cmake/Pulp/PulpConfig.cmake"
+          test -d "$SDK_ARTIFACT_DIR/include/pulp/gpu_audio"
+          test -s "$SDK_ARTIFACT_DIR/lib/libpulp-gpu-audio.a"
+          source_sha="$(git rev-parse HEAD)"
+          python3 - "$SDK_ARTIFACT_DIR" "$SDK_ARTIFACT_RECEIPT" "$source_sha" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import platform
+          import sys
+
+          prefix = pathlib.Path(sys.argv[1]).resolve()
+          receipt_path = pathlib.Path(sys.argv[2])
+          source_sha = sys.argv[3]
+          tracked = []
+          for path in sorted(prefix.rglob('*')):
+              if path.is_file():
+                  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                  tracked.append({"path": str(path.relative_to(prefix)), "sha256": digest})
+          receipt = {
+              "schema_version": "pulp.gpu-audio.sdk-artifact.v1",
+              "repository": "Generous-Corp/pulp",
+              "source_sha": source_sha,
+              "platform": platform.platform(),
+              "machine": platform.machine(),
+              "prefix_sha256": hashlib.sha256(
+                  json.dumps(tracked, separators=(",", ":"), sort_keys=True).encode()
+              ).hexdigest(),
+              "files": tracked,
+          }
+          receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+          PY
+          tar -czf "$SDK_ARTIFACT_TAR" -C "$SDK_ARTIFACT_DIR" .
+          test -s "$SDK_ARTIFACT_TAR"
+
+      - name: Upload exact GPU-audio SDK (macOS ARM64)
+        if: >-
+          runner.os == 'macOS'
+          && matrix.key == 'macos'
+          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
+          && (github.event_name == 'pull_request'
+              || github.event_name == 'merge_group'
+              || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v5
+        with:
+          name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
+          path: |
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Test A2T structural receipt issuer
         if: runner.os == 'macOS' && matrix.key == 'macos'
         shell: bash
