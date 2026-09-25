@@ -214,6 +214,14 @@ does not expose Dawn or Metal handles, queues, rings, or callbacks, and it does
 not by itself activate a generic shared provider. `GpuConvolver` remains the
 authenticated shared consumer until a typed execution implementation is added.
 
+The installed SDK also includes `<pulp/gpu_audio/gpu_wavenet.hpp>`. Its
+`GpuWaveNetDescriptor` is the narrow, model-neutral admission boundary for the
+first mono WaveNet slice: one stream, one layer and dilation, non-gated Tanh,
+and an exact flat-weight count. Unsupported model shapes fail validation and
+must stay on the CPU fallback. The header intentionally exposes no provider
+handles or execution method; a future adapter can add execution only after it
+has an authenticated provider owner and parity evidence.
+
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
 `validate_gpu_audio_program()`. That overload binds the declaration to the
