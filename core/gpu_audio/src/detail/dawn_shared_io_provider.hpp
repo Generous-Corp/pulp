@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared_io_arena.hpp"
+#include "dawn_shared_io_wavenet_spec.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -114,6 +115,11 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     static CreateResult create(const Options& options) noexcept;
     std::unique_ptr<SharedIoPreparedProgram>
     make_convolution_program(const SharedIoConvolutionProgramSpec& spec) noexcept;
+    // Factory for the authenticated WaveNet preparation boundary. The current
+    // private implementation is intentionally mono-only; multi-instance models
+    // require an instance-qualified submit token before they can be enabled.
+    std::unique_ptr<SharedIoPreparedProgram>
+    make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept;
     ~DawnSharedIoProvider() override;
 
     DawnSharedIoProvider(const DawnSharedIoProvider&) = delete;
