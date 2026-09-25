@@ -10162,6 +10162,31 @@ false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
 
+### Its `--lines` output is not always what clang-format would produce
+
+Running the fixer the failure message tells you to run can make a file **less**
+conformant. Passing the full set of changed-line ranges at once can de-indent a
+class body that neither a whole-file run nor a single-range run touches.
+Measured on `core/canvas/include/pulp/canvas/canvas.hpp`:
+
+| | `public:` | members |
+|---|---|---|
+| committed | 0 | 4 |
+| `clang-format --style=file` (whole file) | 2 | **4** |
+| `--style=file --lines=239:246` (one range) | 2 | **4** |
+| `format_changed.sh` (all ranges together) | 0 | **2** |
+
+`.clang-format` is `IndentWidth: 4` with LLVM's `AccessModifierOffset: -2`, so
+2/4 is canonical; the script's answer leaves a 2-space island inside a 4-space
+class. On the branch where this surfaced it rewrote 1,034 lines across 18 files,
+including blocks the branch never touched.
+
+The cost is the opposite of a false failure: the gate is advisory and not a
+required check, so nothing blocks — but an author who does the obvious thing
+commits output the formatter would not reproduce. **Diff a class body before
+committing the fixer's result**; if it de-indents, do not commit it. Tracked as
+issue #8753, which carries the full reproduction.
+
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 
 `auto-release.yml` decides post-merge whether a version bump becomes a release
