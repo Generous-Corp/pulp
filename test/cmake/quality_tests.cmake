@@ -363,6 +363,14 @@ if(Python3_Interpreter_FOUND)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-dsp-rt-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-dsp-rt-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-dsp-rt-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-dsp-rt-signal-fft=pulp-test-pch-cxx20)
+    if(TARGET pulp-test-group-mac-view)
+        list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
+    endif()
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
