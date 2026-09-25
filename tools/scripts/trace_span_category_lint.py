@@ -40,10 +40,33 @@ MACRO = re.compile(
 SKIP_MARKER = "trace-span-category-lint: skip"
 SOURCE_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".h", ".mm", ".m"}
 
-# The prefix rule: a span named `gpu_*` must sit in a category matching the
-# SQL layer's `category GLOB 'gpu*'`.
+# The rules, as (name suffix-or-prefix predicate, required category prefix).
+# Each exists because a query filters on the CATEGORY while a reader searches
+# by NAME, so a span in the wrong category is invisible rather than merely
+# mislabelled.
+#
+#   gpu_*      the SQL layer selects GPU work with `category GLOB 'gpu*'`.
+#   *_layer    compositing layers are the expensive canvas op, and the
+#              `canvas` category is what a reader filters on to find them.
+#              Emitting one under `render` hides it among frame scopes.
+RULES: tuple[tuple[str, str, str], ...] = (
+    ("prefix", "gpu_", "gpu"),
+    ("suffix", "_layer", "canvas"),
+)
+
+# Kept for the message and the selftest's historical entry point.
 NAME_PREFIX = "gpu_"
 CATEGORY_PREFIX = "gpu"
+
+
+def _rule_for(name: str) -> tuple[str, str] | None:
+    """The (matched token, required category prefix) for a span name, if any."""
+    for kind, token, category in RULES:
+        if kind == "prefix" and name.startswith(token):
+            return token, category
+        if kind == "suffix" and name.endswith(token):
+            return token, category
+    return None
 
 
 def _is_comment(line: str) -> bool:
@@ -83,15 +106,17 @@ def violations(root: Path) -> list[tuple[Path, int, str, str, str]]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if NAME_PREFIX not in text:
+        if not any(token in text for _, token, _ in RULES):
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             if SKIP_MARKER in line or _is_comment(line):
                 continue
             for macro, category, name in MACRO.findall(line):
-                if name.startswith(NAME_PREFIX) and not category.startswith(
-                    CATEGORY_PREFIX
-                ):
+                rule = _rule_for(name)
+                if rule is None:
+                    continue
+                _token, required = rule
+                if not category.startswith(required):
                     found.append(
                         (path.relative_to(root), lineno, macro, category, name)
                     )
@@ -114,15 +139,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     print(
-        f"{len(found)} GPU span(s) emitted outside the '{CATEGORY_PREFIX}' "
-        f"category. Every `{NAME_PREFIX}*` span must be categorised "
-        f"`{CATEGORY_PREFIX}` or the trace-SQL GPU queries cannot see it:",
+        f"{len(found)} span(s) emitted outside their required category. A span "
+        f"in the wrong category is INVISIBLE to the queries that filter on it, "
+        f"not merely mislabelled:",
         file=sys.stderr,
     )
     for path, lineno, macro, category, name in found:
+        rule = _rule_for(name)
+        required = rule[1] if rule else "?"
         print(
             f"  {path}:{lineno}: PULP_TRACE_{macro}(\"{category}\", \"{name}\") "
-            f"-> expected category \"{CATEGORY_PREFIX}\"",
+            f"-> expected category \"{required}\"",
             file=sys.stderr,
         )
     print(

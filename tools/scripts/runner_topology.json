@@ -168,7 +168,7 @@
     },
     {
       "variable": "PULP_RELEASE_MACOS_RUNS_ON_JSON",
-      "purpose": "release-cli arm64 macOS build lane. SET to the dedicated `pulp-build-vm-release` ephemeral Tart pool — a proven dedicated release lane, served by JIT slots that register only while a job runs (judge it on service evidence, never the runner census; see service_evidence). Resolution in release-cli.yml is PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so UNSETTING this variable is the break-glass rollback: releases then share the self-hosted Studio/M5 pool that backs the required `macos` gate — safe because release-cli is tag-only and its checkout runs clean:true, so it neither starves the gate nor inherits a warm dir (why the hosted-pool starvation incidents of 2026-05-18 and 2026-06-09 no longer block publishing). unset_fallback records that rollback labelset.",
+      "purpose": "release-cli arm64 macOS build lane. SET to the dedicated `pulp-build-vm-release` ephemeral Tart pool — a proven dedicated release lane, served by JIT slots that register only while a job runs (judge it on service evidence, never the runner census; see service_evidence). Resolution in release-cli.yml (resolve_release_runners.py) and release-path-pr-gate.yml is PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so UNSETTING this variable is NOT a rollback: it dispatches the gate label set recorded in unset_fallback, which carries `pulp-gate-fast` (no registration advertises it; build.yml rewrites it per event, these workflows do not) and whose gate slots mint only `Build and Test` — a release darwin-arm64 leg would queue forever. (sign-and-release.yml skips PULP_LOCAL_MACOS_RUNS_ON_JSON and would fall to macos-15.) The served break-glass rollback is to SET the variable to break_glass_rollback, GitHub-hosted macos-15: slower to schedule (the hosted-pool starvation of 2026-05-18 and 2026-06-09) but always dispatchable. `runner_topology_check.py --mode=static` adjudicates both rows.",
       "expect": [
         "self-hosted",
         "macOS",
@@ -185,6 +185,9 @@
         "pulp-build",
         "pulp-build-vm",
         "pulp-gate-fast"
+      ],
+      "break_glass_rollback": [
+        "macos-15"
       ]
     },
     {
