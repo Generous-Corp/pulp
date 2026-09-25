@@ -32,6 +32,10 @@ from pathlib import Path
 HOST_INCLUDE = Path("core/host/include/pulp/host")
 INDEX = HOST_INCLUDE / "forge_catalog_index.hpp"
 EXPORT = Path("core/host/src/forge_catalog_export.cpp")
+# The export's add(...) registrations are spread over one translation unit per
+# catalog family beside the main file (forge_catalog_export_detail.hpp explains
+# why); the registry is the main file plus every family file.
+EXPORT_FAMILY_GLOB = "forge_catalog_export_*.cpp"
 
 # Each tuple is (indexed pack, descriptor source, semantic node keys).  A detail
 # header is allowed as the descriptor source, but ownership remains with its
@@ -180,6 +184,12 @@ def main() -> int:
                       f"in {descriptor_source}", file=sys.stderr)
 
     export_text = (root / EXPORT).read_text(encoding="utf-8")
+    family_files = sorted((root / EXPORT).parent.glob(EXPORT_FAMILY_GLOB))
+    if not family_files:
+        print(f"\n  export has no per-family translation units "
+              f"({EXPORT.parent / EXPORT_FAMILY_GLOB})", file=sys.stderr)
+        return 2
+    export_text += "".join(path.read_text(encoding="utf-8") for path in family_files)
     expected_match = EXPECTED_KEYS_RE.search(export_text)
     if expected_match is None:
         ok = False

@@ -479,10 +479,13 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
 2. **Leave out anything that needs its own process**: a custom `main()`
    (`Catch2::Catch2` without `WithMain`), a `codesign` POST_BUILD on the test
    binary (identity tests sign *themselves*), a fixture path baked in with
-   `$<TARGET_FILE:...>`, `-fno-exceptions`, RT allocation probes,
-   `PASS_REGULAR_EXPRESSION` probes, and any test source compiled together
-   with a library `.cpp` that the group's libraries also contain (duplicate
-   symbols at link).
+   `$<TARGET_FILE:...>`, `-fno-exceptions`, `PASS_REGULAR_EXPRESSION`
+   probes, and any test source compiled together with a library `.cpp` that
+   the group's libraries also contain (duplicate symbols at link). RT
+   allocation probe suites (`harness/rt_allocation_probe.cpp`) replace the
+   global allocation operators for the whole process, so they never join a
+   group of ordinary suites; they may share a group made only of probe suites
+   on the same compile line (`dsp_rt_contract_tests.cmake` does).
 3. **Find duplicate case names across the group** (`TEST_CASE`, `SCENARIO`,
    `TEST_CASE_METHOD`) and rename one side with a short suffix. Catch2 aborts
    at startup on a duplicate with equal tags, and CTest would register the

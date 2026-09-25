@@ -97,7 +97,31 @@ quantizer's beat/frame arithmetic.
   meaning, so snapping would be guessing. The snap is symmetric on purpose: one
   measured range gives 565416.0000000024 in binary64 while exact rational
   arithmetic on the same inputs gives 565415.9999999999, one intended integer
-  either side of the boundary. Initialize the source tick from the first resolved
+  either side of the boundary.
+
+  **Where an event lands between two samples is now a caller's choice.**
+  `GridProjectionRequest::placement` selects `GridPlacement::Floor` (the
+  default, and what Pulp has always done) or `Nearest`. They are not
+  interchangeable: `Floor` never fires late but its error is [0, 1) samples and
+  **always early**, mean 0.5; `Nearest` is unbiased with error <= 0.5 either
+  way, mean 0.25 — strictly the more accurate placement against true event
+  time. Keep `Floor` as the default: it is the conventional slot assignment and
+  changing it would move every projected event in the product. Select `Nearest`
+  when matching a consumer clock that rounds — Forge's `tempo_clock_advance`
+  uses `llround`, and projecting it through `Floor` moves 27.8% of on-grid
+  events one sample earlier, versus 0.2% through `Nearest`.
+
+  `Nearest` is `std::round`, deliberately **not** `std::nearbyint`. `nearbyint`
+  honours the current FP rounding mode, a hidden global that defaults to
+  half-to-**even**, so it answers 56 for both 55.5 and 56.5 while `llround`
+  answers 56 and 57. Matching at the tie is the point of the policy. Measured,
+  it barely moves the count — so this is a semantics and mode-independence
+  choice, not an accuracy one.
+
+  The epsilon recovery runs **before** the placement under both policies. Do
+  not skip it under `Nearest` on the reasoning that rounding already absorbs a
+  few ulp: at a tie it does not, and representation error would decide which
+  way the tie breaks. Initialize the source tick from the first resolved
   range in a normalization epoch, not from an absolute host beat that the
   transport has already wrapped into document coordinates; reset the anchor on
   an epoch or slope discontinuity. Never feed such a range through

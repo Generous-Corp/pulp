@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 91,
+  "inventory_version": 92,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -4838,7 +4838,7 @@
     {
       "domain": "timebase",
       "source": "core/timebase/include/pulp/timebase/grid_projection.hpp",
-      "fingerprint": "sha256:400a633d3089fe1b7aca8c0cc889caf5d10f322f6c3350856989dce75c0b0e55",
+      "fingerprint": "sha256:1bd2b91ed7be26bbf4c8f34798af5d673fd557e2235c31f540fc987b8deb189f",
       "include": "pulp/timebase/grid_projection.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

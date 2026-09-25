@@ -13,7 +13,7 @@ class GpuConvolver;
 
 namespace pulp::gpu_audio::detail {
 
-enum class GpuConvolverTrialPath : std::uint8_t { StagedAsync, SharedAsync };
+enum class GpuConvolverTrialPath : std::uint8_t { StagedSync, StagedAsync, SharedAsync };
 enum class GpuConvolverTrialLoad : std::uint8_t {
     Quiet,
     GraphiteUi,
@@ -62,15 +62,19 @@ struct GpuConvolverTrialConfig {
     bool enable_trace = false;
     bool capture_admissions = false;
     bool capture_callback_timing = false;
+    // Explicit blocking staged reference for the P4 campaign. This disables
+    // the asynchronous staged ledger and records the existing blocking
+    // GpuCompute call directly. It is never used by the normal runtime path.
+    bool staged_sync_reference = false;
     std::uint32_t success_stride = 1;
     DawnSharedIoProvider::CompletionPolicy completion_policy =
         DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
 };
 
-// Must be called while the node is quiescent, before the next prepare(). A
-// requested staged path currently fails closed because the legacy GpuCompute
-// provider has no authenticated SharedIoTraceRecord bridge yet.
+// Must be called while the node is quiescent, before the next prepare(). The
+// normal staged path uses the authenticated asynchronous ledger; the explicit
+// staged_sync_reference flag enables the blocking reference recorder for P4.
 bool configure_gpu_convolver_trial(GpuConvolver&, const GpuConvolverTrialConfig&) noexcept;
 
 // Quiescent diagnostic drain. Returns complete authenticated worker records;

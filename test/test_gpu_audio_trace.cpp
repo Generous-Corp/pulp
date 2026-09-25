@@ -276,6 +276,7 @@ GpuConvolverRawManifest raw_manifest() {
     value.expected_trials = 3;
     value.expected_matched_pairs = 1;
     value.expected_staged_sync_trials = 1;
+    value.expected_blocks_per_trial = 1;
     value.bootstrap_resamples = 100;
     value.paced = true;
     value.block_frames = 1;
