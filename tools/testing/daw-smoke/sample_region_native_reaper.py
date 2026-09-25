@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Run the real REAPER PUB-04 journey and validate its host-bound receipt."""
 from __future__ import annotations
-import argparse, hashlib, json, os, re, shutil, subprocess, tempfile, time
+import argparse, hashlib, json, os, plistlib, re, shutil, subprocess, tempfile, time
 from pathlib import Path
 import struct
 import sys
 import wave
 FORMATS=('au','vst3','clap')
+EXPECTED_BUNDLE_ID='com.pulp.sample-region-allpass'
 ROOT=Path(__file__).resolve().parent
 LUA=ROOT/'sample_region_native_reaper.lua'
 
@@ -86,6 +87,159 @@ def serialized_coefficient(rpp):
     return None
 
 
+def _fourcc(value):
+    """Decode REAPER's unsigned AU type/subtype/manufacturer fields."""
+    try:
+        return struct.pack('>I', int(value)).decode('ascii')
+    except (ValueError, struct.error, UnicodeDecodeError):
+        return None
+
+
+def parse_loaded_fx_chunk(fmt, text):
+    """Extract the host-serialized module identity from a REAPER track chunk."""
+    tag = {'au': 'AU', 'clap': 'CLAP', 'vst3': 'VST'}[fmt]
+    line = next((line.strip() for line in text.splitlines()
+                 if line.strip().startswith(f'<{tag} ')), '')
+    if not line:
+        return {}
+    if fmt == 'au':
+        match = re.match(r'<AU\s+"([^"]*)"\s+"([^"]*)"\s+"([^"]*)"\s+(\d+)\s+(\d+)\s+(\d+)', line)
+        if not match:
+            return {'header': line}
+        type_code, subtype_code, manufacturer_code = match.group(4, 5, 6)
+        return {
+            'header': line,
+            'display_name': match.group(1),
+            'ident': match.group(2),
+            'type_code': int(type_code),
+            'subtype_code': int(subtype_code),
+            'manufacturer_code': int(manufacturer_code),
+            'type': _fourcc(type_code),
+            'subtype': _fourcc(subtype_code),
+            'manufacturer': _fourcc(manufacturer_code),
+        }
+    if fmt == 'clap':
+        match = re.match(r'<CLAP\s+"([^"]*)"\s+(\S+)\s+"([^"]*)"', line)
+        if not match:
+            return {'header': line}
+        return {'header': line, 'display_name': match.group(1),
+                'ident': match.group(2), 'path_field': match.group(3)}
+    match = re.match(r'<VST\s+"([^"]*)"\s+"([^"]*)"\s+(\d+)\s+"([^"]*)"\s+([^ ]+)\s+"([^"]*)"', line)
+    if not match:
+        return {'header': line}
+    return {'header': line, 'display_name': match.group(1),
+            'module_name': match.group(2), 'uid': match.group(5),
+            'path_field': match.group(4), 'tail': match.group(6)}
+
+
+def _bundle_plist(bundle):
+    path = bundle / 'Contents' / 'Info.plist'
+    try:
+        with path.open('rb') as handle:
+            return plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return {}
+
+
+def installed_identity_candidates(fmt):
+    """Find installed bundles carrying the expected format identity.
+
+    This is deliberately an independent host-side control. It does not claim
+    that a fallback add used a path; it establishes whether the loaded
+    format-specific identity has one and only one installed candidate.
+    """
+    roots = [Path.home() / 'Library' / 'Audio' / 'Plug-Ins',
+             Path('/Library/Audio/Plug-Ins')]
+    candidates = []
+    if fmt == 'au':
+        expected = ('aufx', 'SrAp', 'Pulp')
+        paths = [root / 'Components' for root in roots]
+        for directory in paths:
+            if not directory.is_dir():
+                continue
+            for bundle in sorted(directory.glob('*.component')):
+                info = _bundle_plist(bundle)
+                for component in info.get('AudioComponents', []):
+                    if (component.get('type'), component.get('subtype'),
+                            component.get('manufacturer')) == expected:
+                        candidates.append(str(bundle.resolve()))
+                        break
+    elif fmt == 'clap':
+        expected = EXPECTED_BUNDLE_ID + '.clap'
+        paths = [root / 'CLAP' for root in roots]
+        for directory in paths:
+            if not directory.is_dir():
+                continue
+            for bundle in sorted(directory.glob('*.clap')):
+                info = _bundle_plist(bundle)
+                if info.get('CFBundleIdentifier') == expected:
+                    candidates.append(str(bundle.resolve()))
+    elif fmt == 'vst3':
+        expected = EXPECTED_BUNDLE_ID + '.vst3'
+        paths = [root / 'VST3' for root in roots]
+        for directory in paths:
+            if not directory.is_dir():
+                continue
+            for bundle in sorted(directory.glob('*.vst3')):
+                info = _bundle_plist(bundle)
+                if info.get('CFBundleIdentifier') == expected:
+                    candidates.append(str(bundle.resolve()))
+    return sorted(set(candidates))
+
+
+def bundle_identity_metadata(fmt, bundle):
+    info = _bundle_plist(bundle)
+    if fmt == 'au':
+        components = [{key: component.get(key) for key in
+                       ('type', 'subtype', 'manufacturer', 'name')}
+                      for component in info.get('AudioComponents', [])]
+        return {'CFBundleIdentifier': info.get('CFBundleIdentifier'),
+                'CFBundleVersion': info.get('CFBundleVersion'),
+                'AudioComponents': components}
+    return {'CFBundleIdentifier': info.get('CFBundleIdentifier'),
+            'CFBundleVersion': info.get('CFBundleVersion'),
+            'CFBundleShortVersionString': info.get('CFBundleShortVersionString')}
+
+
+def loaded_identity_evidence(fmt, bundle, rec, before_path, after_path):
+    """Bind REAPER's loaded identity to the installed candidate, fail-closed."""
+    before_text = before_path.read_text(errors='replace') if before_path.is_file() else ''
+    after_text = after_path.read_text(errors='replace') if after_path.is_file() else ''
+    before = parse_loaded_fx_chunk(fmt, before_text)
+    after = parse_loaded_fx_chunk(fmt, after_text)
+    candidates = installed_identity_candidates(fmt)
+    expected_path = str(bundle.resolve())
+    plist_path = bundle / 'Contents' / 'Info.plist'
+    plist_bytes = plist_path.read_bytes() if plist_path.is_file() else b''
+    api_before = (rec.get('loaded_fx_ident_before'), rec.get('loaded_fx_type_before'))
+    api_after = (rec.get('loaded_fx_ident_after'), rec.get('loaded_fx_type_after'))
+    if fmt == 'au':
+        chunk_match = all((before.get(k), after.get(k)) == (v, v)
+                          for k, v in {'type': 'aufx', 'subtype': 'SrAp',
+                                       'manufacturer': 'Pulp'}.items())
+        api_match = api_before == ('Pulp: Sample Region Allpass', 'AU') and api_after == api_before
+    elif fmt == 'clap':
+        chunk_match = before.get('ident') == EXPECTED_BUNDLE_ID and after.get('ident') == EXPECTED_BUNDLE_ID
+        api_match = api_before == (EXPECTED_BUNDLE_ID, 'CLAP') and api_after == api_before
+    else:
+        chunk_match = bool(before.get('module_name') == 'Sample Region Allpass.vst3' and
+                           after.get('module_name') == before.get('module_name'))
+        api_match = api_before[1] in (None, '', 'VST3') and api_after[1] == api_before[1]
+    rec['loaded_fx_chunk_before_sha256'] = hashlib.sha256(before_text.encode()).hexdigest() if before_text else None
+    rec['loaded_fx_chunk_after_sha256'] = hashlib.sha256(after_text.encode()).hexdigest() if after_text else None
+    rec['loaded_fx_identity_before'] = before
+    rec['loaded_fx_identity_after'] = after
+    rec['identity_candidate_paths'] = candidates
+    rec['identity_candidate_count'] = len(candidates)
+    rec['identity_candidate_unique'] = len(candidates) == 1 and candidates[0] == expected_path
+    rec['identity_search_roots'] = [str(Path.home() / 'Library' / 'Audio' / 'Plug-Ins'),
+                                    '/Library/Audio/Plug-Ins']
+    rec['bundle_identity_metadata'] = bundle_identity_metadata(fmt, bundle)
+    rec['bundle_info_plist_sha256'] = hashlib.sha256(plist_bytes).hexdigest() if plist_bytes else None
+    rec['identity_exact'] = bool(chunk_match and api_match and rec['identity_candidate_unique'])
+    return rec
+
+
 def strip_parameter_envelopes(text):
     """Remove FX parameter envelopes from the render-project copy.
 
@@ -154,7 +308,9 @@ def run(fmt,bundle,out,timeout):
     with wave.open(str(input_wav),'wb') as w:
         w.setnchannels(1); w.setsampwidth(4); w.setframerate(48000); samples=[1.0]+[0.0]*16383; w.writeframes(struct.pack('<16384f',*samples))
     trace=out/f'{fmt}-trace.log'
-    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_INPUT_WAV=str(input_wav),PULP_F4_TRACE=str(trace),PULP_F4_DEFER_RENDER=os.getenv('PULP_F4_DEFER_RENDER','1'))
+    identity_before=out/f'{fmt}-identity-before.chunk'
+    identity_after=out/f'{fmt}-identity-after.chunk'
+    env=os.environ.copy(); env.update(PULP_F4_FORMAT=fmt,PULP_F4_FX_NAME='Sample Region Allpass',PULP_F4_PLUGIN_PATH=str(bundle),PULP_F4_WAV=str(wav),PULP_F4_PROJECT=str(project),PULP_F4_RECEIPT=str(receipt),PULP_F4_STATE_BEFORE=str(state_before),PULP_F4_STATE_AFTER=str(state_after),PULP_F4_IDENTITY_BEFORE=str(identity_before),PULP_F4_IDENTITY_AFTER=str(identity_after),PULP_F4_INPUT_WAV=str(input_wav),PULP_F4_TRACE=str(trace),PULP_F4_DEFER_RENDER=os.getenv('PULP_F4_DEFER_RENDER','1'))
     reaper=env.get('REAPER_BIN','/Applications/REAPER.app/Contents/MacOS/REAPER')
     if not Path(reaper).is_file(): return {'format':fmt,'status':'inconclusive','reason':'REAPER unavailable'}
     # Force a disposable REAPER process.  Without -newinst, an already open
@@ -193,7 +349,7 @@ def run(fmt,bundle,out,timeout):
         # The host drops WET when it is set through the pseudo-parameter API
         # during the setup process; SAMPLE_ACCURATE_WETDRY is required for the
         # saved project to honor the serialized value in -renderproject.
-        wet_mode = '1' if fmt == 'au' else '0'
+        wet_mode = '0'
         text=re.sub(r'(?m)^(\s*)FLOATPOS 0 0 0 0$',
                     r'\g<1>SAMPLE_ACCURATE_WETDRY 1\n\g<1>WET 1.000000 ' + wet_mode + r'\n\g<1>FLOATPOS 0 0 0 0',
                     text,count=1)
@@ -216,6 +372,7 @@ def run(fmt,bundle,out,timeout):
         lines=saved
     if not lines: return {'format':fmt,'status':'inconclusive','reason':'no real-host receipt','returncode':p.returncode}
     rec=json.loads(lines[-1]); rec['driver_returncode']=p.returncode
+    loaded_identity_evidence(fmt, bundle, rec, identity_before, identity_after)
     rec['state_before_sha256']=hashlib.sha256(state_before.read_bytes()).hexdigest() if state_before.exists() else None
     rec['state_after_sha256']=hashlib.sha256(state_after.read_bytes()).hexdigest() if state_after.exists() else None
     if state_before.exists() and state_after.exists():
@@ -288,13 +445,17 @@ def main(argv=None):
         # fundamental than any other field, so it must not be masked by an
         # earlier downgrade. A run that cannot name its module is inconclusive
         # regardless of what else passed or failed.
-        if not rec.get('exact_identity_load'):
+        identity_ok = rec.get('exact_identity_load') or rec.get('identity_exact')
+        if not identity_ok:
             prior=rec.get('verdict_reason')
             rec['status']='inconclusive'
             rec['verdict_reason']=('module provenance not exact: add_resolution='
                                    f"{rec.get('add_resolution')}, "
-                                   f"reload_resolution={rec.get('reload_resolution')}"
+                                   f"reload_resolution={rec.get('reload_resolution')}, "
+                                   f"identity_exact={rec.get('identity_exact')}"
                                    + (f" (also: {prior})" if prior else ''))
+        elif rec.get('identity_exact') and not rec.get('exact_identity_load'):
+            rec['module_provenance'] = 'loaded_identity_unique_installed_candidate'
         sc=rec.get('serialized_coefficient')
         if sc is not None and abs(sc-0.5) > 1e-4:
             rec['status']='failed'
