@@ -2292,6 +2292,20 @@ registry entry must fail instead of emitting a shorter, superficially valid
 document. SDK installs carry the checked projection at
 `share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
 
+The export's `add(...)` registrations live in one translation unit per catalog
+family (`core/host/src/forge_catalog_export_<family>.cpp`, behind the private
+`forge_catalog_export_detail.hpp`), not in `forge_catalog_export.cpp`. Every
+pack's node factory is header-inline, so whichever TU constructs a realization
+also instantiates that node's DSP; one file constructing all 20 packs compiled
+the whole Forge DSP library into a single 14.5 s object (10.6 s of it backend),
+the slowest TU in the tree. Add a new pack's registrations to the family file
+whose packs it belongs with (or a new family file listed in
+`core/host/CMakeLists.txt`); `forge_descriptor_coverage.py` reads the main file
+plus every `forge_catalog_export_*.cpp` when it counts registrations, and the
+audit suite pins the family append order, so a family appended out of order or
+left out of `forge_catalog_export_nodes()` fails there rather than in a
+consumer of the JSON.
+
 Treat that JSON as a published v1 contract, not a regenerable implementation
 detail:
 

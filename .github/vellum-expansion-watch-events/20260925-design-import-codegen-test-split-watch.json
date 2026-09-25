@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260925-design-import-codegen-test-split-watch",
+  "created_at": "2026-09-25T05:27:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record that splitting one test translation unit crosses the design-source-ingest selector without touching anything that family is about. The selector test/cmake/design_import*.cmake is crossed by test/cmake/design_import_native_codegen_tests.cmake, whose pulp-test-design-import suite gains three source files: test/test_design_import_codegen.cpp (5,493 lines, 111 Catch2 cases, the tree's slowest test object at 11.8 s) is cut at three case boundaries into test_design_import_codegen_layout_text.cpp, _paint.cpp and _web_controls.cpp so the slowest part compiles in 4.6 s. Every case keeps its name, tags and body, the executable, its labels and its test spec are unchanged, and the case inventory is unchanged (111 cases, all passing). No importer, DesignIR, codegen, fixture, screenshot, golden, capture, renderer, threshold or Vellum-owned source changes, and no test's verdict changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "native codegen emits container padding (issue-3192)",
+    "native codegen fades text, image, widget and container alike",
+    "web-compat overlay controls carry their designed position",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

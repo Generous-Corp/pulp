@@ -568,7 +568,7 @@ TEST_CASE("11 auto-makeup restores unity at the reference point",
 
 // ── float/double parity ───────────────────────────────────────────────────
 
-TEST_CASE("the float and double instantiations agree", "[feedforward-compressor]") {
+TEST_CASE("the float and double instantiations agree (feedforward compressor)", "[feedforward-compressor]") {
     FeedforwardCompressorT<float> f;
     FeedforwardCompressorT<double> d;
     for (auto* c : {static_cast<void*>(&f), static_cast<void*>(&d)}) (void)c;
