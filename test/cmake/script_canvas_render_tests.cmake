@@ -232,20 +232,25 @@ if(PULP_HAS_SKIA)
         LIBRARIES pulp::view)
 endif()
 
-# CG-degraded gradient + pattern cluster. Apple-only TU: every
+# CG-degraded gradient + pattern cluster. Apple-only TU, registered only on
+# Apple: a grouped member whose file compiles to no test cases fails discovery. every
 # TEST_CASE drives CoreGraphics directly to prove the CoreGraphicsCanvas
 # fallback honours the canvas2d spec — conic / two-circle
 # radial / pattern + gradient-anchored fill/stroke text + line-dash CG
 # paths.
-pulp_add_test_suite(pulp-test-canvas-cg-gradients GROUP pulp-test-group-canvas
-    LIBRARIES pulp::canvas)
+if(APPLE)
+    pulp_add_test_suite(pulp-test-canvas-cg-gradients GROUP pulp-test-group-canvas
+        LIBRARIES pulp::canvas)
+endif()
 
 # CoreGraphicsCanvas image-draw verbs. Apple-only TU: encodes a known PNG,
 # draws it back through the CG decoder + CGContextDrawImage, reads the
 # pixels, and proves the actual image (color + orientation) lands instead of
 # a filename-placeholder fallback.
-pulp_add_test_suite(pulp-test-canvas-cg-image GROUP pulp-test-group-canvas
-    LIBRARIES pulp::canvas)
+if(APPLE)
+    pulp_add_test_suite(pulp-test-canvas-cg-image GROUP pulp-test-group-canvas
+        LIBRARIES pulp::canvas)
+endif()
 
 # ImageFileCache path-keyed decoded/GPU-uploaded image cache.
 # Skia-gated (value type is sk_sp<SkImage>); asserts hit/miss, backend-token
