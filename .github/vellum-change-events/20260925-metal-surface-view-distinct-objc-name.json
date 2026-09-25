@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260925-metal-surface-view-distinct-objc-name",
+  "kind": "change",
+  "created_at": "2026-09-25T06:58:12Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "The GPU surface NSView in metal_surface_mac.mm is declared under its own base name, PulpMetalSurfaceView, instead of under PulpMetalView with a per-binary rename macro that mapped it to that same base. The view layer defines a separate PulpMetalView in window_host_mac.mm, so when the macOS ObjC view cluster is compiled as one unity translation unit per binary the render header's `#define PulpMetalView` would rename the view layer's class too. Declaring the distinct base directly keeps the two names independent with or without the per-binary suffix. The suffixed class name a plug-in registers is byte-identical to before (PULP_RENDER_OBJC_NAME(PulpMetalSurfaceView)); no API, rendering behavior, or authority boundary changes. Pulp-only because Pulp builds and ships this ObjC glue independently and there is no counterpart Vellum commit to backport from.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "mac-objc-coload-PulpGain-PulpEffect",
+    "macos"
+  ],
+  "disposition": "pulp-only"
+}
