@@ -1,44 +1,76 @@
 # Application UI, audio harness, platform, WebView, MPE, host, WAM, WebCLAP, and web demo tests.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration,
+# labels and properties; only the binary behind them is shared. Members are
+# grouped by the compile line they already had: the pulp::view widget and app
+# suites, pulp::audio, pulp::signal, pulp::midi, pulp::state, the pulp::host
+# suites, and the audio-harness support library. A suite stays on its own
+# when it needs its own process or compile line: RT allocation probes and the
+# RT-intercept host suites, a library or SDK .cpp compiled into the test
+# (WAM/WebCLAP bridges, render loop, VST3 plug view), a fixture wired by path
+# or from the root CMakeLists (host, host-regression, CLI shell-outs, LV2),
+# the example-plugin suites (each includes one example's headers), the real
+# CoreAudio device suites, the suites whose build target the audio-harness
+# and design-debugging guides name, and suites whose library set no sibling
+# shares.
+pulp_add_test_group(pulp-test-group-app-view
+    LIBRARIES pulp::view pulp::state pulp::platform)
+pulp_add_test_group(pulp-test-group-app-audio LIBRARIES pulp::audio)
+pulp_add_test_group(pulp-test-group-app-signal LIBRARIES pulp::signal)
+pulp_add_test_group(pulp-test-group-app-midi LIBRARIES pulp::midi)
+pulp_add_test_group(pulp-test-group-app-state LIBRARIES pulp::state)
+pulp_add_test_group(pulp-test-group-app-host LIBRARIES pulp::host pulp::signal)
+
 # WAMv2 Processor->WASM bridge: native coverage of the -fno-exceptions bridge TU (compiled directly; links real pulp libs; PulpWam.cmake's lib target can replace this later).
 add_executable(pulp-test-wam-adapter test_wam_adapter.cpp ${CMAKE_SOURCE_DIR}/core/format/src/wasm/wam_adapter.cpp)
 target_link_libraries(pulp-test-wam-adapter PRIVATE Catch2::Catch2WithMain pulp::format pulp::state pulp::runtime pulp::events pulp::midi pulp::audio)
 catch_discover_tests(pulp-test-wam-adapter)
 
 # Parameter attachment tests
-pulp_add_test_suite(pulp-test-param-attachment LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-param-attachment GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # The value engine the continuous controls share: range, interval, skew, drag
 # law, gesture bracketing, and the notify policy.
-pulp_add_test_suite(pulp-test-slider-core LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-slider-core GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # The paint delegate: subtree inheritance, partial override, and the units each
 # control shape reasons in.
-pulp_add_test_suite(pulp-test-widget-painter LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-painter GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Bugs that shipped: a button face that never rendered, a wheel notch that moved
 # a quantized control by zero, a field that collapsed to no height in a flex
 # tree, and caret/selection colors no skin could reach.
-pulp_add_test_suite(pulp-test-widget-regressions LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-regressions GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
-pulp_add_test_suite(pulp-test-app-framework LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-app-framework GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Preset manager tests
-pulp_add_test_suite(pulp-test-preset-manager LIBRARIES pulp::state)
+pulp_add_test_suite(pulp-test-preset-manager GROUP pulp-test-group-app-state
+    LIBRARIES pulp::state)
 
 # Waveform editor tests
-pulp_add_test_suite(pulp-test-waveform-editor LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-waveform-editor GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # FastMath approximation tests
-pulp_add_test_suite(pulp-test-fast-math LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-fast-math GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # Polynomial/Matrix math tests
-pulp_add_test_suite(pulp-test-poly-math LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-poly-math GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # Preset browser UI tests
-pulp_add_test_suite(pulp-test-preset-browser LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-preset-browser GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Plugin manager panel UI tests
 add_executable(pulp-test-plugin-manager-panel test_plugin_manager_panel.cpp)
@@ -64,13 +96,16 @@ unset(_pulp_plugin_manager_links)
 catch_discover_tests(pulp-test-plugin-manager-panel)
 
 # DSP expansion tests (FIR, Ballistics, LogRamp, ProcessorChain, LookupTable, TPT)
-pulp_add_test_suite(pulp-test-dsp-expansion LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-dsp-expansion GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # Interpolator tests (Hermite, Lagrange, windowed-sinc)
-pulp_add_test_suite(pulp-test-interpolator LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-interpolator GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # MIDI expansion tests (RPN/NRPN parser, MidiKeyboardState)
-pulp_add_test_suite(pulp-test-midi-expansion LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-expansion GROUP pulp-test-group-app-midi
+    LIBRARIES pulp::midi)
 
 # Audio process load measurer tests
 pulp_add_test_suite(pulp-test-load-measurer
@@ -83,15 +118,17 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry
     LIBRARIES pulp::audio pulp::runtime)
 
 # Live per-node DSP telemetry snapshot → JSON serializer (schema contract)
-pulp_add_test_suite(pulp-test-live-dsp-telemetry-json
+pulp_add_test_suite(pulp-test-live-dsp-telemetry-json GROUP pulp-test-group-app-audio
     SOURCES test_live_dsp_telemetry_json.cpp
     LIBRARIES pulp::audio)
 
 # FilterDesign tests
-pulp_add_test_suite(pulp-test-filter-design LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-filter-design GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # IIR design tests (Chebyshev I/II, Elliptic)
-pulp_add_test_suite(pulp-test-iir-design LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-iir-design GROUP pulp-test-group-app-signal
+    LIBRARIES pulp::signal)
 
 # Fixed-capacity runtime executor for designed second-order-section cascades.
 pulp_add_test_suite(pulp-test-sos-cascade
@@ -99,33 +136,45 @@ pulp_add_test_suite(pulp-test-sos-cascade
     LIBRARIES pulp::signal)
 
 # TreeView tests
-pulp_add_test_suite(pulp-test-tree-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-tree-view GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Toolbar tests (UTF-8 icon-label extraction, custom-item width, hit-testing)
-pulp_add_test_suite(pulp-test-toolbar LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-toolbar GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # File browser, file tree, and multi-document panel tests
-pulp_add_test_suite(pulp-test-file-browser LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-file-browser GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # FileChooser widget builder wrapper over pulp::platform::FileDialog
 # with async callback delivery.
-pulp_add_test_suite(pulp-test-file-chooser LIBRARIES pulp::view pulp::platform)
+pulp_add_test_suite(pulp-test-file-chooser GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view pulp::platform)
 
 # Undo manager tests
-pulp_add_test_suite(pulp-test-undo-manager LIBRARIES pulp::state)
+pulp_add_test_suite(pulp-test-undo-manager GROUP pulp-test-group-app-state
+    LIBRARIES pulp::state)
 
 # BufferingReader tests
-pulp_add_test_suite(pulp-test-buffering-reader LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-buffering-reader GROUP pulp-test-group-app-audio
+    LIBRARIES pulp::audio)
 
 # AudioWorkgroup tests
-pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-workgroup GROUP pulp-test-group-app-audio
+    LIBRARIES pulp::audio)
 
 # Public route-timing contract and control-thread latency composition.
-pulp_add_test_suite(pulp-test-audio-io-timing LIBRARIES pulp::audio)
+set(_pulp_audio_io_timing_jack_args "")
 if(PULP_JACK_AVAILABLE)
-    target_include_directories(pulp-test-audio-io-timing PRIVATE ${JACK_INCLUDE_DIRS})
-    target_compile_definitions(pulp-test-audio-io-timing PRIVATE PULP_HAS_JACK=1)
+    set(_pulp_audio_io_timing_jack_args
+        INCLUDE_DIRS ${JACK_INCLUDE_DIRS}
+        COMPILE_DEFINITIONS PULP_HAS_JACK=1)
 endif()
+pulp_add_test_suite(pulp-test-audio-io-timing GROUP pulp-test-group-app-audio
+    LIBRARIES pulp::audio
+    ${_pulp_audio_io_timing_jack_args})
+unset(_pulp_audio_io_timing_jack_args)
 
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring
@@ -224,9 +273,10 @@ catch_discover_tests(pulp-test-audio-doctor)
 # WAV bridge: render an in-tree oscillator to a WAV the offline Python lane can
 # read. The test proves the file round-trips the samples; the tool is the
 # argv surface the Quality Lab shells out to.
-add_executable(pulp-test-wav-bridge test_wav_bridge.cpp)
-target_link_libraries(pulp-test-wav-bridge PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-wav-bridge)
+pulp_add_test_group(pulp-test-group-app-audio-support
+    LIBRARIES pulp-audio-test-support)
+pulp_add_test_suite(pulp-test-wav-bridge GROUP pulp-test-group-app-audio-support
+    LIBRARIES pulp-audio-test-support)
 add_executable(pulp-osc-render-wav osc_render_wav.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
 # CLI argv smoke for the tool above: shells out per --engine and for --seed,
@@ -444,22 +494,18 @@ endif()
 
 # Mode-estimator calibration: renders known modes and measures them back, so its
 # fixtures are source-owned and it needs no example plugin.
-add_executable(pulp-test-modal-analysis test_modal_analysis.cpp)
-target_link_libraries(pulp-test-modal-analysis PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
-pulp_scaled_test_timeout(_pulp_modal_analysis_timeout 300)
-catch_discover_tests(pulp-test-modal-analysis
-    PROPERTIES TIMEOUT "${_pulp_modal_analysis_timeout}")
+pulp_add_test_suite(pulp-test-modal-analysis GROUP pulp-test-group-app-audio-support
+    LIBRARIES pulp-audio-test-support
+    TIMEOUT 300)
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
 target_link_libraries(pulp-test-latency-contract PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-latency-contract)
 
-add_executable(pulp-test-oversampling-latency-contract
-    test_oversampling_latency_contract.cpp)
-target_link_libraries(pulp-test-oversampling-latency-contract
-    PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-oversampling-latency-contract)
+pulp_add_test_suite(pulp-test-oversampling-latency-contract
+    GROUP pulp-test-group-app-audio-support
+    LIBRARIES pulp-audio-test-support)
 add_executable(pulp-test-cli-audio-validate test_cli_audio_validate.cpp)
 target_link_libraries(pulp-test-cli-audio-validate PRIVATE pulp::audio pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-validate)
@@ -513,9 +559,9 @@ target_include_directories(pulp-test-negative-path PRIVATE ${CMAKE_SOURCE_DIR}/e
 catch_discover_tests(pulp-test-negative-path)
 # iOS foundation tests (platform detection, safe area geometry, touch events,
 # AUv3 HostApp template shape).
-pulp_add_test_suite(pulp-test-ios-foundation LIBRARIES pulp::view pulp::platform)
-target_compile_definitions(pulp-test-ios-foundation PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_add_test_suite(pulp-test-ios-foundation GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view pulp::platform
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
@@ -538,23 +584,26 @@ endif()
 # on every supported OS and keeps the native WebView backend identifier
 # contract aligned with the public WebView guide.
 if(WIN32)
-    pulp_add_test_suite(pulp-test-webview-backend-detect
+    pulp_add_test_suite(pulp-test-webview-backend-detect GROUP pulp-test-group-app-view
         LIBRARIES pulp::view
         LABELS "windows-pr-quarantine")
 else()
-    pulp_add_test_suite(pulp-test-webview-backend-detect LIBRARIES pulp::view)
+    pulp_add_test_suite(pulp-test-webview-backend-detect GROUP pulp-test-group-app-view
+        LIBRARIES pulp::view)
 endif()
 
 # MIDI 2.0 UMP/MPE tests
-pulp_add_test_suite(pulp-test-ump-mpe LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-ump-mpe GROUP pulp-test-group-app-midi
+    LIBRARIES pulp::midi)
 
 # MPE voice tracker tests
 if(WIN32)
-    pulp_add_test_suite(pulp-test-mpe-voice-tracker
+    pulp_add_test_suite(pulp-test-mpe-voice-tracker GROUP pulp-test-group-app-midi
         LIBRARIES pulp::midi
         LABELS "windows-pr-quarantine")
 else()
-    pulp_add_test_suite(pulp-test-mpe-voice-tracker LIBRARIES pulp::midi)
+    pulp_add_test_suite(pulp-test-mpe-voice-tracker GROUP pulp-test-group-app-midi
+        LIBRARIES pulp::midi)
 endif()
 
 # MPE synth voice helpers (voice, allocator, glide detector)
@@ -586,22 +635,16 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
-add_executable(pulp-test-custom-node-enumeration test_custom_node_enumeration.cpp)
-target_link_libraries(pulp-test-custom-node-enumeration
-    PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-custom-node-enumeration)
+pulp_add_test_suite(pulp-test-custom-node-enumeration GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host)
 
-add_executable(pulp-test-sample-kernel-registry test_sample_kernel_registry.cpp)
-target_link_libraries(pulp-test-sample-kernel-registry
-    PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-sample-kernel-registry)
+pulp_add_test_suite(pulp-test-sample-kernel-registry GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host)
 
-add_executable(pulp-test-sample-region-planner
-    test_sample_region_plan.cpp
-    test_sample_region_proof.cpp)
-target_link_libraries(pulp-test-sample-region-planner
-    PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-sample-region-planner)
+pulp_add_test_suite(pulp-test-sample-region-planner GROUP pulp-test-group-app-host
+    SOURCES test_sample_region_plan.cpp
+            test_sample_region_proof.cpp
+    LIBRARIES pulp::host)
 
 # Exercise the same public API from an installed SDK, outside the source tree.
 add_test(NAME cmake-custom-node-enumeration-sdk-consumer
@@ -686,11 +729,8 @@ target_link_libraries(pulp-test-forge-drum-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-drum-catalog)
 
-add_executable(pulp-test-forge-drum-param-efficacy
-    test_forge_drum_param_efficacy.cpp)
-target_link_libraries(pulp-test-forge-drum-param-efficacy
-    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-forge-drum-param-efficacy)
+pulp_add_test_suite(pulp-test-forge-drum-param-efficacy GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host pulp::signal)
 
 # Analog-modelled VCF core + four measured voicings. The dedicated executable
 # keeps its render-heavy calibration/stability suite isolated from the smaller
@@ -709,9 +749,8 @@ catch_discover_tests(pulp-test-analog-vcf
 
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
-add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
-target_link_libraries(pulp-test-native-handle-visitor PRIVATE pulp::host Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-native-handle-visitor)
+pulp_add_test_suite(pulp-test-native-handle-visitor GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host)
 
 # Opt-in real-plugin integration runner. Builds only when
 # PULP_REAL_PLUGIN_TESTS=ON. Even when built, individual TEST_CASEs SKIP
@@ -794,7 +833,8 @@ if(DEFINED ENV{PULP_STRESS_FLAKY_TESTS} AND NOT "$ENV{PULP_STRESS_FLAKY_TESTS}" 
 endif()
 
 # GraphSerializer round-trip tests
-pulp_add_test_suite(pulp-test-graph-serializer LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-graph-serializer GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host)
 
 # NetworkServiceDiscovery backend-dispatch tests
 pulp_add_test_suite(pulp-test-network-service-discovery LIBRARIES pulp::events)
@@ -829,7 +869,8 @@ target_include_directories(pulp-test-web-demos PRIVATE
 catch_discover_tests(pulp-test-web-demos)
 
 # AI Designer: design tool layout/parity tests
-pulp_add_test_suite(pulp-test-design-tool-layout LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-design-tool-layout GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view pulp::state)
 
 add_executable(pulp-test-design-debug-contracts test_design_debug_contracts.cpp)
 target_link_libraries(pulp-test-design-debug-contracts PRIVATE
@@ -839,7 +880,8 @@ target_link_libraries(pulp-test-design-debug-contracts PRIVATE
 catch_discover_tests(pulp-test-design-debug-contracts)
 
 # AI Designer: style pack tests
-pulp_add_test_suite(pulp-test-style-pack LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-style-pack GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Removed: pulp-test-token-diff (test_token_diff.cpp) and pulp-test-showcase
 # (test_showcase.cpp) were placeholder TEST_CASE("...") { REQUIRE(true); }
@@ -850,7 +892,8 @@ pulp_add_test_suite(pulp-test-style-pack LIBRARIES pulp::view)
 # token-diff or Showcase class is ever added.
 
 # WindowManager multi-window framework tests
-pulp_add_test_suite(pulp-test-window-manager LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-window-manager GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Multi-window rendering fairness + per-window RenderLoop isolation
 # Mirrors pulp-test-render-loop:
@@ -873,28 +916,34 @@ catch_discover_tests(pulp-test-multi-window)
 # ── Theme management, widgets, asset system ─────────────────────────────────
 
 # Theme contrast utilities (WCAG AA)
-pulp_add_test_suite(pulp-test-theme-contrast LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-theme-contrast GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Theme preset library (38 tweakcn + derivation)
-pulp_add_test_suite(pulp-test-theme-presets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-theme-presets GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Button widgets — theme-token wiring + rgba()-clamp bug-fix regression guard
-pulp_add_test_suite(pulp-test-buttons LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-buttons GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Gap widgets — Badge/Banner/Toast/EmptyState/Stepper/Pan/Popover/Dialog/ChannelStrip
-pulp_add_test_suite(pulp-test-gap-widgets LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-gap-widgets GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # Widget gallery — themed board of every primitive; builds + renders
-pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-gallery GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # The sizing delegate, and the two widgets reworked to consult it: a menu that
 # can compute its whole geometry with no canvas and no paint, and a label whose
 # inline editor is a real child view.
-pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-widget-metrics GROUP pulp-test-group-app-view
+    LIBRARIES pulp::view)
 
 # The Forge semantic-descriptor contract: descriptors must agree with the DSP
 # they annotate, in both directions. Carries the negative controls that prove
 # the audit fails closed on a grown, shrunk, or mislabelled catalog node.
-pulp_add_test_suite(pulp-test-forge-descriptor-audit LIBRARIES pulp::host)
-target_compile_definitions(pulp-test-forge-descriptor-audit PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_add_test_suite(pulp-test-forge-descriptor-audit GROUP pulp-test-group-app-host
+    LIBRARIES pulp::host
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

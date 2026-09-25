@@ -338,7 +338,6 @@ if(Python3_Interpreter_FOUND)
     endif()
     set(_pulp_pch_expect
         --expect pulp-test-biquad=pulp-test-pch-cxx20
-        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
         --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20
@@ -353,9 +352,24 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-late-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
-        --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20)
+        --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-host=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-core-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-app-audio-support=pulp-test-pch-cxx${_pulp_pch_format_std})
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    if(PULP_HAS_CLAP)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-core-clap=pulp-test-pch-cxx${_pulp_pch_format_std})
     endif()
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
