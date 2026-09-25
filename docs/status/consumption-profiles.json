@@ -123,7 +123,7 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 70,
-            "public_header_count": 30
+            "public_header_count": 31
           },
           {
             "exported_as": "Pulp::render",
@@ -6370,7 +6370,7 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 70,
-            "public_header_count": 30
+            "public_header_count": 31
           },
           {
             "exported_as": "Pulp::render",
