@@ -1,5 +1,6 @@
 #include "dawn_shared_io_provider.hpp"
 #include "dawn_shared_io_convolution_session.hpp"
+#include "dawn_shared_io_wavenet_program.hpp"
 
 #include "dawn_submission_tracker.hpp"
 
@@ -884,6 +885,19 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
     const SharedIoConvolutionProgramSpec& spec) noexcept {
     try {
         return std::make_unique<DawnSharedIoConvolutionProgram>(*this, spec);
+    } catch (...) {
+        return {};
+    }
+}
+
+std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_wavenet_program(
+    const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+    // The submit token currently carries no stream-instance identity. Refuse
+    // multi-instance plans rather than risking causal-history aliasing.
+    if (spec.stream_instances != 1)
+        return {};
+    try {
+        return DawnSharedIoWavenetProgram::create(spec);
     } catch (...) {
         return {};
     }
