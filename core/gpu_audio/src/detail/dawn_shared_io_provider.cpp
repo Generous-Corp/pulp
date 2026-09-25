@@ -115,6 +115,7 @@ bool install_exact_proc_table(const std::string& expected, const void* override_
              .callback = &install_vellum_override,
              .context = &context},
             header, &coordinator_error);
+    } else {
         registered = vellum::app_host::register_native_dawn_bootstrap(&coordinator_error);
     }
     if (!registered || !vellum::graphics::dawn_bootstrap_is_registered(&coordinator_error)) {
