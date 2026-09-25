@@ -11,6 +11,9 @@ enum class GpuAudioExecutionPath : std::uint8_t {
     Unavailable = 0,
     Staged = 1,
     SharedMemory = 2,
+    /// A prepared CPU implementation with no GPU provider resources.
+    /// Appended to preserve the established numeric values above.
+    Cpu = 3,
 };
 
 /// Provider identity when the selected path can establish it without exposing

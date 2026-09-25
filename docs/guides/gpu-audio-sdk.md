@@ -202,6 +202,34 @@ and not the scheduling problem. Choose
 enough fixed lead for the measured workload and keep the CPU fallback ready for
 late, stale, failed, or unavailable GPU results.
 
+The installed SDK also exposes the backend-neutral
+`<pulp/gpu_audio/gpu_audio_program.hpp>` contract for the next class of
+providers. A `GpuAudioProgramDescriptor` identifies a typed workload
+(`Convolution`, `Spectral`, `Neural`, or `Custom`) and records the fixed stream
+shape, lead, bounded pipeline depth, provider-slot count, provider identity,
+and whether the CPU fallback and persistent provider-owned resources were
+prepared. `validate_gpu_audio_program()` applies the same fail-closed rules to
+every provider. It is metadata and preparation validation only: it deliberately
+does not expose Dawn or Metal handles, queues, rings, or callbacks, and it does
+not by itself activate a generic shared provider. `GpuConvolver` remains the
+authenticated shared consumer until a typed execution implementation is added.
+
+When a host has already prepared a transport, pass its
+`GpuAudioCapabilityReport` to the two-argument overload of
+`validate_gpu_audio_program()`. That overload binds the declaration to the
+prepared path, provider identity, lead, and fallback policy. A consumer cannot
+turn a self-authored `provider_owned_resources` flag into a shared execution
+claim when the host reports staged, unavailable, ineligible, or differently
+prepared execution. The check is constexpr, allocation-free, and still does
+not expose provider resources.
+
+Every future typed provider should also assign exactly one
+`GpuAudioTerminalDisposition` to each admitted block (`GpuDelivered`,
+`CpuFallback`, `Silence`, `StaleRejected`, `LateRejected`, `DeviceLost`, or
+`Cancelled`). Keeping that outcome in the backend-neutral contract makes it
+possible to connect block IDs and terminal delivery to the existing trace and
+Perfetto work without deriving the result from a loose collection of events.
+
 For host diagnostics, `capability_report()` returns an allocation-free snapshot
 of the selected path. `path` distinguishes the ordinary staged worker from the
 experimental shared-memory path, while `provider` is `Dawn` only when the exact
