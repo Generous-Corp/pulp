@@ -727,6 +727,15 @@ if(Python3_Interpreter_FOUND)
     # are discovered by glob, so adding or removing a machine needs no edit here.
     add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
+    # Every host the protected macOS gate downloads from must be in tartci's
+    # egress-relay contract (checked-in copy); a missing one fails every gate
+    # job at once. Offline: the hourly sweep compares the copy with tartci.
+    if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+        add_test(NAME relay-contract-hosts COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/relay_contract_check.py")
+        add_test(NAME relay-contract-hosts-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_relay_contract_check.py")
+    endif()
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
