@@ -375,6 +375,29 @@ def rehash_ninja_log(build_dir: Path, ninja: str, hasher: str, subst=None) -> di
     return stats
 
 
+def retarget_nested_ninja_dirs(build_dir: Path, ninja: str, subst) -> int:
+    """Retarget the logs of Ninja builds nested inside the build dir.
+
+    FetchContent populates each dependency through its own sub-build
+    (``_deps/<name>-subbuild``), whose ``.ninja_log`` and ``.ninja_deps``
+    name the donor like the top-level ones do. Left alone, a CMake re-run
+    replays every populate step.
+    """
+    count = 0
+    for dirpath, dirnames, filenames in os.walk(build_dir):
+        dirnames[:] = [d for d in dirnames if not os.path.islink(os.path.join(dirpath, d))]
+        d = Path(dirpath)
+        if d == build_dir or "build.ninja" not in filenames:
+            continue
+        if ".ninja_deps" in filenames:
+            rewrite_ninja_deps(d / ".ninja_deps", subst)
+        if ".ninja_log" in filenames:
+            header, _ = parse_ninja_log(d / ".ninja_log")
+            rehash_ninja_log(d, ninja, hasher_for_log(header), subst)
+        count += 1
+    return count
+
+
 # ---------------------------------------------------------------------------
 # clonefile
 # ---------------------------------------------------------------------------
@@ -789,6 +812,8 @@ def main(argv=None) -> int:
         tmp = None
         t = time.monotonic()
         receipt["log"] = rehash_ninja_log(target_build, args.ninja, control["hasher"], subst)
+        receipt["nested_ninja_dirs"] = retarget_nested_ninja_dirs(
+            target_build, args.ninja, subst)
         receipt["rehash_s"] = round(time.monotonic() - t, 3)
         if not args.no_source_mtime_sync:
             t = time.monotonic()

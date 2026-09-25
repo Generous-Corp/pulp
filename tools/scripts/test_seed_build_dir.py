@@ -43,6 +43,17 @@ target_link_libraries(app lib)
 target_compile_definitions(app PRIVATE FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 enable_testing()
 add_test(NAME app COMMAND app)
+# A Ninja build nested in the build dir, logged with absolute paths, the way
+# FetchContent's _deps/<name>-subbuild is.
+set(N ${CMAKE_BINARY_DIR}/nested)
+file(WRITE ${N}-src/CMakeLists.txt "cmake_minimum_required(VERSION 3.24)
+project(nested NONE)
+add_custom_command(OUTPUT ${N}/stamp COMMAND \\${CMAKE_COMMAND} -E touch ${N}/stamp)
+add_custom_target(s ALL DEPENDS ${N}/stamp)
+")
+execute_process(COMMAND ${CMAKE_COMMAND} -S ${N}-src -B ${N} -G Ninja
+                OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND ${CMAKE_COMMAND} --build ${N} OUTPUT_QUIET COMMAND_ERROR_IS_FATAL ANY)
 """,
     "a/lib.hpp": "int f();\n",
     "a/lib.cpp": '#include "lib.hpp"\nint f(){return 1;}\n',
