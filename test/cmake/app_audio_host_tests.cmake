@@ -165,11 +165,24 @@ pulp_add_test_suite(pulp-test-workgroup GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio)
 
 # Public route-timing contract and control-thread latency composition.
+# A grouped member's INCLUDE_DIRS become a per-source property, and CMake
+# strips the compiler's implicit include directories only from target-level
+# includes. pkg-config reports JACK under /usr/include, and an explicit
+# -I/usr/include breaks libstdc++'s #include_next <stdlib.h>, so drop the
+# implicit directories before handing the rest to the member.
 set(_pulp_audio_io_timing_jack_args "")
 if(PULP_JACK_AVAILABLE)
-    set(_pulp_audio_io_timing_jack_args
-        INCLUDE_DIRS ${JACK_INCLUDE_DIRS}
-        COMPILE_DEFINITIONS PULP_HAS_JACK=1)
+    set(_pulp_audio_io_timing_jack_dirs ${JACK_INCLUDE_DIRS})
+    if(_pulp_audio_io_timing_jack_dirs AND CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+        list(REMOVE_ITEM _pulp_audio_io_timing_jack_dirs
+            ${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES})
+    endif()
+    if(_pulp_audio_io_timing_jack_dirs)
+        list(APPEND _pulp_audio_io_timing_jack_args
+            INCLUDE_DIRS ${_pulp_audio_io_timing_jack_dirs})
+    endif()
+    list(APPEND _pulp_audio_io_timing_jack_args COMPILE_DEFINITIONS PULP_HAS_JACK=1)
+    unset(_pulp_audio_io_timing_jack_dirs)
 endif()
 pulp_add_test_suite(pulp-test-audio-io-timing GROUP pulp-test-group-app-audio
     LIBRARIES pulp::audio
