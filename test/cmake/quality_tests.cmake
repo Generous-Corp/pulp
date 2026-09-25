@@ -337,7 +337,7 @@ if(Python3_Interpreter_FOUND)
         endif()
     endif()
     set(_pulp_pch_expect
-        --expect pulp-test-biquad=pulp-test-pch-cxx20
+        --expect pulp-test-tilt-eq=pulp-test-pch-cxx20
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
         --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20
@@ -349,33 +349,59 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-render-helpers=pulp-test-pch-cxx20
         --expect pulp-test-group-canvas-text=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-fmt-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-ship=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-httplib=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-reload-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format-view=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-late-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-analysis=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-standalone=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-core-events=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-platform=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-audio=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-host-graph=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-sampler-format=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-sampler-timebase=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-graph-runtime=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-playback=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20
         --expect pulp-test-group-app-view=pulp-test-pch-cxx20
         --expect pulp-test-group-app-audio=pulp-test-pch-cxx20
         --expect pulp-test-group-app-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-app-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-app-state=pulp-test-pch-cxx20
         --expect pulp-test-group-app-host=pulp-test-pch-cxx${_pulp_pch_format_std}
-        --expect pulp-test-group-core-audio=pulp-test-pch-cxx20
-        --expect pulp-test-group-core-midi=pulp-test-pch-cxx20
-        --expect pulp-test-group-core-state=pulp-test-pch-cxx20
-        --expect pulp-test-group-core-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-cap-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-format=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-app-audio-support=pulp-test-pch-cxx${_pulp_pch_format_std})
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
     if(PULP_HAS_CLAP)
         list(APPEND _pulp_pch_expect
-            --expect pulp-test-group-core-clap=pulp-test-pch-cxx${_pulp_pch_format_std})
+            --expect pulp-test-group-cap-clap=pulp-test-pch-cxx${_pulp_pch_format_std})
+    endif()
+    # Registered in format_reload_tests.cmake, which is included after this file.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-fmt-au-v2=pulp-test-pch-cxx23)
     endif()
     list(APPEND _pulp_pch_expect
         --expect pulp-test-group-dsp-rt-midi=pulp-test-pch-cxx20
@@ -391,6 +417,21 @@ if(Python3_Interpreter_FOUND)
         ${_pulp_pch_expect})
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+
+    # Test-support sources compiled once into OBJECT libraries
+    # (tools/cmake/PulpTestSharedObjects.cmake) must stay compiled once.
+    set(_pulp_shared_test_objects
+        --shared test/harness/rt_allocation_probe.cpp=pulp-test-rt-allocation-probe)
+    if(TARGET pulp-test-rt-intercept)
+        list(APPEND _pulp_shared_test_objects --shared
+            test/native_components/rt_intercept_test_support.cpp=pulp-test-rt-intercept)
+    endif()
+    add_test(NAME test-shared-objects COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/shared_test_objects_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" ${_pulp_shared_test_objects})
+    set_tests_properties(test-shared-objects PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME test-shared-objects-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_shared_test_objects_check.py")
 
     # Dependency configure-check replay (PulpConfigureCheckCache.cmake): drives
     # real CMake configures of a toy dependency, so it is Apple-only like the
@@ -763,6 +804,15 @@ if(Python3_Interpreter_FOUND)
     # are discovered by glob, so adding or removing a machine needs no edit here.
     add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
+    # Every host the protected macOS gate downloads from must be in tartci's
+    # egress-relay contract (checked-in copy); a missing one fails every gate
+    # job at once. Offline: the hourly sweep compares the copy with tartci.
+    if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+        add_test(NAME relay-contract-hosts COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/relay_contract_check.py")
+        add_test(NAME relay-contract-hosts-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_relay_contract_check.py")
+    endif()
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}

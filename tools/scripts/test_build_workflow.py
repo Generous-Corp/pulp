@@ -29,10 +29,22 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         reuse_block = WORKFLOW.split("  protected-receipt-reuse:", 1)[1].split(
             "\n  build:", 1
         )[0]
+        # Reuse (dropping the target from the matrix) happens only in the
+        # branch where the protected-base copy both downloaded and verified.
         self.assertRegex(
             reuse_block,
-            re.compile(r"if python3 .* download .*&& python3 .* verify", re.DOTALL),
+            re.compile(
+                r'if ! python3 "\$RUNNER_TEMP/protected_merge_receipt.py" download .*'
+                r'elif python3 "\$RUNNER_TEMP/protected_merge_receipt.py" verify [^\n]*(\n[^\n]*)*?'
+                r'\n\s*matrix="\$\(MATRIX_JSON=.*macos_reused=true.*\n\s*else\n',
+                re.DOTALL,
+            ),
         )
+        # The checked-out copy only renders decision notes; it never decides.
+        workspace_calls = re.findall(
+            r"python3 tools/scripts/protected_merge_receipt.py (\S+)", reuse_block)
+        self.assertEqual(set(workspace_calls), {"note", "publish-notes"})
+        self.assertIn("--summary", reuse_block)
         self.assertIn(
             "receipt reuse unavailable for ${target}; full validation retained",
             reuse_block,

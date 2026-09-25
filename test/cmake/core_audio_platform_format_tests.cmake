@@ -14,22 +14,22 @@
 # clap_entry), fixtures wired by path (MCP, LV2), an example plug-in's
 # headers on the include path, and suites whose library set no sibling
 # shares.
-pulp_add_test_group(pulp-test-group-core-audio LIBRARIES pulp::audio pulp::signal)
-pulp_add_test_group(pulp-test-group-core-midi LIBRARIES pulp::midi)
-pulp_add_test_group(pulp-test-group-core-state LIBRARIES pulp::state)
+pulp_add_test_group(pulp-test-group-cap-audio LIBRARIES pulp::audio pulp::signal)
+pulp_add_test_group(pulp-test-group-cap-midi LIBRARIES pulp::midi)
+pulp_add_test_group(pulp-test-group-cap-state LIBRARIES pulp::state)
 set(_pulp_core_format_group_libs pulp::format pulp::state pulp::audio pulp::midi)
 if(PULP_HAS_CLAP)
     list(APPEND _pulp_core_format_group_libs clap)
 endif()
-pulp_add_test_group(pulp-test-group-core-format
+pulp_add_test_group(pulp-test-group-cap-format
     LIBRARIES ${_pulp_core_format_group_libs})
 unset(_pulp_core_format_group_libs)
 
 # WAV metadata round-trip tests (BWAV / iXML / ASWG / ACID — item 6.11)
-pulp_add_test_suite(pulp-test-wav-metadata GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-wav-metadata GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
-pulp_add_test_suite(pulp-test-offline-processor-edges GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-offline-processor-edges GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
 # Offline-render DSP tracing (Perfetto, dev-only). Config-agnostic: OFF verifies
@@ -40,7 +40,7 @@ pulp_add_test_suite(pulp-test-offline-tracing
     LIBRARIES pulp::audio pulp::runtime pulp::format
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/pulp-compressor)
 
-pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
 # Impulse-response loading. The PCM entry point is fed by UNTRUSTED, already-
@@ -48,7 +48,7 @@ pulp_add_test_suite(pulp-test-ogg-reader GROUP pulp-test-group-core-audio
 # build has no FormatRegistry), so its fail-closed guards — implausible rate,
 # absurd duration, non-finite content — carry the same weight as a decoder's.
 # Header-only over pulp::audio + pulp::signal (the resampler).
-pulp_add_test_suite(pulp-test-impulse-response GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-impulse-response GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio pulp::signal)
 
 # Audio tests
@@ -71,21 +71,21 @@ catch_discover_tests(pulp-test-audio
     LABELS "audio;hardware;validation"
     PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE TIMEOUT "${_pulp_audio_hardware_timeout}")
 
-pulp_add_test_suite(pulp-test-system-volume GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-system-volume GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
 # Streaming sample source: preload window + background-filled ring + RT-safe
 # sequential pull. Threaded case has an internal deadline; give headroom.
-pulp_add_test_suite(pulp-test-streaming-sample-source GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-streaming-sample-source GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio
     PROPERTIES TIMEOUT 60)
 
 # Multi-mic / velocity-layer / round-robin layered zone selection.
-pulp_add_test_suite(pulp-test-zone-layer-select GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-zone-layer-select GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
 # Excerpt window enumeration tests
-pulp_add_test_suite(pulp-test-audio-excerpt GROUP pulp-test-group-core-audio
+pulp_add_test_suite(pulp-test-audio-excerpt GROUP pulp-test-group-cap-audio
     LIBRARIES pulp::audio)
 
 # Repo-level audio tooling tests
@@ -145,13 +145,13 @@ if(NOT ANDROID AND NOT IOS AND PROJECT_IS_TOP_LEVEL)
 endif()
 
 # MIDI tests
-pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-core-midi
+pulp_add_test_suite(pulp-test-midi GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
-pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-core-midi
+pulp_add_test_suite(pulp-test-midi-file GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
-pulp_add_test_suite(pulp-test-tuning GROUP pulp-test-group-core-midi
+pulp_add_test_suite(pulp-test-tuning GROUP pulp-test-group-cap-midi
     LIBRARIES pulp::midi)
 
 # State tests
@@ -161,17 +161,17 @@ pulp_add_test_suite(pulp-test-state
 
 # The one parameter payload (param_json) and the pin that keeps its wire field
 # set from drifting — the bridge and the inspector both serialize through it.
-pulp_add_test_suite(pulp-test-param-json GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-param-json GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # Binding tests
-pulp_add_test_suite(pulp-test-binding GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-binding GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
-pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-external-binding GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # Cross-version parameter-ordering guard (host-facing ID + index stability).
-pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # Gesture thread-safety: run_gesture_on_main marshalling + off-main misuse
@@ -179,45 +179,45 @@ pulp_add_test_suite(pulp-test-param-ordering GROUP pulp-test-group-core-state
 pulp_add_test_suite(pulp-test-gesture-threading LIBRARIES pulp::state pulp::events)
 
 # Structured non-param state channel (sequencer/mod-matrix transport)
-pulp_add_test_suite(pulp-test-sequencer-state-channel GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-sequencer-state-channel GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # Freeze coverage: parametric SequencerConfig (second/non-square/custom-cell
 # configs), the shared step_edit_reducer, and the neutral non-Processor producer.
-pulp_add_test_suite(pulp-test-sequencer-freeze GROUP pulp-test-group-core-state
+pulp_add_test_suite(pulp-test-sequencer-freeze GROUP pulp-test-group-cap-state
     LIBRARIES pulp::state)
 
 # StepGridView — the UI consumer of the sequencer state channel
 pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 
 # Headless adapter tests
-pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-headless GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
-pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-format-hardening GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
 # Editor parameter-write provenance: host automation interleaved with editor
 # edits during an open gesture, exact begin/value/end ordering, one normalized
 # snapshot per reported edit, and no host-originated echo.
-pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-host-parameter-edit GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format pulp::state)
 
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
-pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-plugin-registry GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
 # The device quota table: monotonicity across both axes, clamping of values cast
 # in from outside the enumerators, and that the row is keyed by capability rung
 # rather than by the lane that observed it. Header-only over pulp::format —
 # linked for the include path only.
-pulp_add_test_suite(pulp-test-device-quotas GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-device-quotas GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
 # Where a generation job runs, given what the device can carry. Sits beside the
 # quota table because both are policy over the same capability vocabulary: the
 # quota table says how much is granted at a rung, this says where the work goes.
 # Header-only over pulp::format — linked for the include path only.
-pulp_add_test_suite(pulp-test-generation-routing GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-generation-routing GROUP pulp-test-group-cap-format
     LIBRARIES pulp::format)
 
 # Standalone host render-path RT-safety guard. Drives the extracted
@@ -239,25 +239,25 @@ target_link_libraries(pulp-test-standalone-rt PRIVATE
 target_compile_definitions(pulp-test-standalone-rt PRIVATE
     $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 catch_discover_tests(pulp-test-standalone-rt)
-pulp_add_test_suite(pulp-test-audio-inspector-demo-processor GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-audio-inspector-demo-processor GROUP pulp-test-group-cap-format
     SOURCES test_audio_inspector_demo_processor.cpp
     LIBRARIES pulp::format pulp::audio pulp::midi)
 # .pulpset render/replay harness (G4)
-pulp_add_test_suite(pulp-test-pulpset-replay GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-pulpset-replay GROUP pulp-test-group-cap-format
     SOURCES test_pulpset_replay.cpp
     LIBRARIES pulp::format)
 
 # Diagnostic reporter tests
-pulp_add_test_suite(pulp-test-diagnostic GROUP pulp-test-group-core-format
+pulp_add_test_suite(pulp-test-diagnostic GROUP pulp-test-group-cap-format
     SOURCES test_diagnostic_reporter.cpp
     LIBRARIES pulp::format)
 
 # CLAP entry point macro test
 if(PULP_HAS_CLAP)
-    pulp_add_test_suite(pulp-test-clap-param-flags GROUP pulp-test-group-core-format
+    pulp_add_test_suite(pulp-test-clap-param-flags GROUP pulp-test-group-cap-format
         LIBRARIES pulp::format clap)
 
-    pulp_add_test_group(pulp-test-group-core-clap
+    pulp_add_test_group(pulp-test-group-cap-clap
         LIBRARIES pulp::format clap
         COMPILE_DEFINITIONS PULP_CLAP_GUI=1)
 
@@ -316,14 +316,14 @@ if(PULP_HAS_CLAP)
     # A Processor may reach its StateStore from its destructor, and from a worker
     # thread that destructor is about to join. Pin that every host destroys the
     # store after the Processor, not before.
-    pulp_add_test_suite(pulp-test-store-lifetime GROUP pulp-test-group-core-clap
+    pulp_add_test_suite(pulp-test-store-lifetime GROUP pulp-test-group-cap-clap
         LIBRARIES pulp::format clap)
 
     # An in-place host can hand the adapter an output buffer still carrying the
     # constant_mask of the input it aliases. Pin that the adapter clears it, so a
     # varying (CV-rate) output is never read back as one held sample. Link-only
     # against pulp::format, keeping the diff-cover TU attribution single.
-    pulp_add_test_suite(pulp-test-clap-constant-mask GROUP pulp-test-group-core-clap
+    pulp_add_test_suite(pulp-test-clap-constant-mask GROUP pulp-test-group-cap-clap
         LIBRARIES pulp::format clap)
 
     # Empirical proof the CLAP adapter respects clamp_latency_to_nonneg
@@ -341,7 +341,7 @@ if(PULP_HAS_CLAP)
     # Format-shaped transport fixtures do not stand in for other adapters.
     # Link-only against pulp::format so adapter coverage is attributed to the
     # library's single translation unit.
-    pulp_add_test_suite(pulp-test-adapter-boundary-parity GROUP pulp-test-group-core-clap
+    pulp_add_test_suite(pulp-test-adapter-boundary-parity GROUP pulp-test-group-cap-clap
         LIBRARIES pulp::format clap)
 endif()
 

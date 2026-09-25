@@ -16,13 +16,13 @@
 
 #include <pulp/runtime/log.hpp>
 
-// ── PulpMetalView: NSView backed by CAMetalLayer ─────────────────────────────
+// ── PulpMetalSurfaceView: NSView backed by CAMetalLayer ─────────────────────────────
 
-@interface PulpMetalView : NSView
+@interface PulpMetalSurfaceView : NSView
 @property (nonatomic, readonly) CAMetalLayer* metalLayer;
 @end
 
-@implementation PulpMetalView
+@implementation PulpMetalSurfaceView
 
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
@@ -72,12 +72,12 @@
 namespace pulp::render::mac {
 
 struct MacMetalSurface {
-    PulpMetalView* view = nil;
+    PulpMetalSurfaceView* view = nil;
 
     bool create(float width, float height) {
         @autoreleasepool {
             NSRect frame = NSMakeRect(0, 0, width, height);
-            view = [[PulpMetalView alloc] initWithFrame:frame];
+            view = [[PulpMetalSurfaceView alloc] initWithFrame:frame];
             if (!view || !view.metalLayer || !view.metalLayer.device) {
                 runtime::log_error("MacMetalSurface: failed to create Metal-backed view");
                 return false;

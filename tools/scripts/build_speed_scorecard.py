@@ -64,6 +64,9 @@ STEP_NAMES: dict[str, tuple[str, ...]] = {
     "Build": ("Build",),
     "iOS compile gate": ("iOS compile gate",),
     "Test": ("Test (non-Windows)",),
+    # Pull-request heads run only this label tier; the full suite runs in the
+    # merge queue, so a pull_request "Test" row predates the split.
+    "Fast tier": ("Test fast deterministic tier (pull request head)",),
     "SDK contract": ("Test installed SDK capability contract (affected changes)",),
 }
 
@@ -517,6 +520,70 @@ def pipeline_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: list
     }
 
 
+def _between(rows: list[dict], lo: dt.datetime, hi: dt.datetime | None) -> list[dict]:
+    out = []
+    for r in rows:
+        t = parse_ts(r.get("completed_at"))
+        if t and t >= lo and (hi is None or t < hi):
+            out.append(r)
+    return out
+
+
+def _p(rows: list[dict]) -> dict:
+    xs = _mins(rows)
+    return {"n": len(xs), "p50": percentile(xs, 50), "p90": percentile(xs, 90)}
+
+
+def split_stats(job_rows: list[dict], step_rows: list[dict], since: dt.datetime,
+                split: dt.datetime) -> dict:
+    """Gate job and step timings before vs after one instant.
+
+    `shipyard metrics watch` judges drift by halving a fixed window, which
+    straddles whatever changed mid-window; an explicit split point (a merge, an
+    incident's end) compares the two regimes instead. `shipyard metrics
+    compare` splits only on whole days ago and cannot filter by target, so this
+    reads the same `metrics list` rows the pipeline section already fetched.
+    Successful runs only: a failure's duration measures where it stopped.
+    """
+    if split <= since:
+        raise ValueError(f"--split {iso(split)} must be after the window start {iso(since)}")
+    halves = {"before": (since, split), "after": (split, None)}
+    out: dict[str, Any] = {"since": iso(since), "split": iso(split), "rows": []}
+    ok_jobs = [r for r in job_rows if r.get("status") == "success"]
+    ok_steps = [r for r in step_rows if r.get("status") in ("success", None)
+                or str(r.get("target", "")).endswith("/queue")]
+    for ev in EVENTS:
+        labels = [("gate job", [r for r in ok_jobs if r.get("target") == f"macos-gate/{ev}"])]
+        for label in ("queue", *STEP_NAMES):
+            labels.append((label, [r for r in ok_steps
+                                   if r.get("target") == f"macos-gate/{ev}/{label}"]))
+        for label, rows in labels:
+            row = {"event": ev, "stage": label}
+            for side, (lo, hi) in halves.items():
+                row[side] = _p(_between(rows, lo, hi))
+            b, a = row["before"]["p50"], row["after"]["p50"]
+            row["p50_change_pct"] = (None if b in (None, 0) or a is None
+                                     else (a - b) / b * 100.0)
+            out["rows"].append(row)
+    return out
+
+
+def render_split_markdown(sp: dict) -> list[str]:
+    L = [f"### Before / after {sp['split']} (window from {sp['since']})", "",
+         "| Event | Stage | before n | before p50 | before p90 | after n | after p50 | after p90 | p50 change |",
+         "|---|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for row in sp["rows"]:
+        b, a = row["before"], row["after"]
+        if not b["n"] and not a["n"]:
+            continue
+        ch = row["p50_change_pct"]
+        L.append(f"| {row['event']} | {row['stage']} | {b['n']} | {_fmt(_r(b['p50']), 'min')} | "
+                 f"{_fmt(_r(b['p90']), 'min')} | {a['n']} | {_fmt(_r(a['p50']), 'min')} | "
+                 f"{_fmt(_r(a['p90']), 'min')} | {'NOT MEASURED' if ch is None else f'{ch:+.0f}%'} |")
+    L.append("\nSuccessful runs only. A side with n < 5 is anecdote, not a trend.")
+    return L
+
+
 def drift_findings(sy: Shipyard, since_spec: str) -> list[dict]:
     """`shipyard metrics watch` findings that say something (not 'keep collecting')."""
     out = []
@@ -727,6 +794,22 @@ def _fmt(v: Any, unit: str = "") -> str:
     return f"{v:,}{(' ' + unit) if unit and unit not in ('count',) else ''}"
 
 
+def tartci_cell(tc: dict) -> str:
+    """tartci's version on a host: installed / executing / checkout.
+
+    `installed` is what `tartci fleet-macos self-update` calls installed (the
+    sealed launcher bundle's commit), so a sealed host with no checkout still
+    names its version. A sensor older than that field reads `not published`,
+    which is a stale install, not an unknown version.
+    """
+    if "installed_generation" in tc:
+        installed = tc.get("installed_generation") or "n/a"
+    else:
+        installed = "not published"
+    return (f"{installed} / {tc.get('executing_generation') or 'n/a'} / "
+            f"{tc.get('checkout_head') or 'n/a'}")
+
+
 def render_markdown(rep: dict) -> str:
     L: list[str] = [f"# Build-speed scorecard — {rep['generated_at']}", ""]
     btr = _load_sibling("build_time_report")
@@ -792,6 +875,10 @@ def render_markdown(rep: dict) -> str:
                 L.append(f"- … {len(drift) - DRIFT_SHOWN} more (`--json` lists all)")
         else:
             L.append("No drift findings beyond 'insufficient samples'.")
+        L.append("\nDrift compares the two halves of the window, so a window that spans a change "
+                 "mixes both regimes; `--split <ISO time>` compares either side of it.")
+        if rep.get("split"):
+            L += [""] + render_split_markdown(rep["split"])
     L.append("")
 
     L += ["## Fleet", ""]
@@ -799,7 +886,7 @@ def render_markdown(rep: dict) -> str:
     if fleet is None:
         L.append("**NOT MEASURED**: fleet probe skipped.")
     else:
-        L += ["| Host | Source | Load (1/5/15) / cores | Mem free | Gate VMs (RSS, CPU) | ccache host: hit / size / max / cleanups | Gate ccache hit | tartci (exec / checkout) | Leases used | Wheelhouse |",
+        L += ["| Host | Source | Load (1/5/15) / cores | Mem free | Gate VMs (RSS, CPU) | ccache host: hit / size / max / cleanups | Gate ccache hit | tartci (installed / exec / checkout) | Leases used | Wheelhouse |",
               "|---|---|---|---|---|---|---|---|---|---|"]
         for h in fleet:
             if h.get("status") != "ok":
@@ -809,7 +896,7 @@ def render_markdown(rep: dict) -> str:
             load = b.get("load") or []
             cc = b.get("ccache_host")
             ccs = (f"{cc.get('hit_pct')}% / {cc.get('size_gb')} / {cc.get('max_gb')} GB / {cc.get('cleanups')}"
-                   if cc else "NOT MEASURED (no ccache)")
+                   if cc else "NOT MEASURED (ccache absent, or its stats timed out)")
             gcc = b.get("ccache_gate")
             vms = b.get("gate_vms") or {}
             tc = b.get("tartci") or {}
@@ -821,7 +908,7 @@ def render_markdown(rep: dict) -> str:
                      f"{b.get('ncpu')} | {_fmt(b.get('memory_free_pct'), '%')} | "
                      f"{vms.get('count')} ({_fmt(vms.get('rss_mb'), 'MB')}, {vms.get('cpu_pct')}%) | {ccs} | "
                      f"{(str(gcc.get('hit_pct')) + '%') if gcc else 'n/a'} | "
-                     f"{tc.get('executing_generation') or 'n/a'} / {tc.get('checkout_head') or 'n/a'} | "
+                     f"{tartci_cell(tc)} | "
                      f"{leases} | {'absent' if wh is None else f'{wh} wheels'} |")
     return "\n".join(L)
 
@@ -872,6 +959,9 @@ def cmd_report(args) -> int:
             else:
                 rep["pipeline"] = stats
                 rep["drift"] = drift_findings(sy, args.since)
+                if args.split:
+                    rep["split"] = split_stats(rows[PROJECT_JOBS], rows[PROJECT_STEPS], since,
+                                               args.split)
     rep["fleet"] = None if args.no_fleet else fleet_state(args.hosts or DEFAULT_HOSTS)
     pipe = rep["pipeline"] if not rep["pipeline"].get("status") else None
     current = {"schema": "pulp-bench-sections/1", "title": "Build speed",
@@ -888,6 +978,13 @@ def cmd_report(args) -> int:
     if args.write_current:
         Path(args.write_current).write_text(json.dumps(current, indent=2) + "\n")
     return rc
+
+
+def _parse_split(text: str) -> dt.datetime:
+    t = parse_ts(text)
+    if t is None:
+        raise argparse.ArgumentTypeError(f"not an ISO time: {text!r}")
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
 def _head() -> str:
@@ -931,6 +1028,9 @@ def main(argv: list[str] | None = None) -> int:
     p_rep.add_argument("--threshold", type=float, default=0.05,
                        help="relative change flagged as a regression in the baseline diff")
     p_rep.add_argument("--write-current", type=Path, help="also write the bench-sections JSON here")
+    p_rep.add_argument("--split", type=_parse_split, metavar="ISO-TIME",
+                       help="also compare gate job and step timings before vs after this "
+                            "instant (e.g. 2026-09-24T13:12Z), within the --since window")
     p_rep.add_argument("--json", action="store_true")
     p_rep.set_defaults(func=cmd_report)
     args = ap.parse_args(argv)
