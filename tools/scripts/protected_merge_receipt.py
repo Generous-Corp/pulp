@@ -58,6 +58,68 @@ class ReceiptError(ValueError):
     """Receipt evidence is absent, ambiguous, or does not match exactly."""
 
 
+# A merge group's reuse decision per target, in the shape Shipyard reads from a
+# check-run annotation titled NOTE_TITLE, so "did this merge actually run
+# tests?" is answered by `shipyard landing` rather than by reading notices.
+# Notes only describe a decision the verifier's exit status already made; they
+# never influence it.
+NOTE_SCHEMA = "shipyard-receipt-decision/v1"
+NOTE_TITLE = "shipyard-receipt-decision"
+NOTE_COUNT_KEYS = ("selected", "passed", "skipped", "inventory_count")
+
+
+def decision_note(target: str, verdict: str, reason: str,
+                  receipt: Any = None) -> dict[str, Any]:
+    """One target's decision, with the receipt's own counts when it has them.
+
+    For a refusal the counts come from the refused receipt: they explain the
+    refusal (e.g. how little a narrowed run selected), never vouch for it.
+    """
+    if verdict not in ("reuse", "refuse"):
+        raise ReceiptError(f"unknown verdict {verdict!r}")
+    note: dict[str, Any] = {
+        "schema": NOTE_SCHEMA, "target": target, "verdict": verdict,
+        "reason": " ".join(reason.split()) or "no reason recorded",
+        "source_run_id": None,
+    }
+    validation = receipt.get("validation") if isinstance(receipt, dict) else None
+    for key in NOTE_COUNT_KEYS:
+        value = validation.get(key) if isinstance(validation, dict) else None
+        note[key] = value if type(value) is int and value >= 0 else None
+    run_id = receipt.get("run_id") if isinstance(receipt, dict) else None
+    if isinstance(run_id, (str, int)) and str(run_id).isdigit():
+        note["source_run_id"] = str(run_id)
+    return note
+
+
+def _escape_command_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def render_notes(notes: list[dict[str, Any]]) -> tuple[list[str], str]:
+    """Workflow-command annotation lines and a job-summary table for `notes`."""
+    lines = [f"::notice title={NOTE_TITLE}::"
+             + _escape_command_data(json.dumps(n, separators=(",", ":"), sort_keys=True))
+             for n in notes]
+    md = ["### Protected receipt decisions", "",
+          "| Target | Decision | Evidence | Reason |", "|---|---|---|---|"]
+    for n in notes:
+        if n["verdict"] == "reuse":
+            decision = f"reused receipt from run {n['source_run_id'] or 'unknown'}"
+        else:
+            decision = "validated in full (receipt refused)"
+        if n.get("selected") is None:
+            evidence = "n/a"
+        else:
+            evidence = (f"{n['selected']} selected / {n['passed']} passed / "
+                        f"{n['skipped']} skipped of {n['inventory_count']} built")
+        reason = str(n["reason"]).replace("|", "\\|")
+        md.append(f"| {n['target']} | {decision} | {evidence} | {reason} |")
+    if not notes:
+        md.append("| — | no receipt decision was needed | | |")
+    return lines, "\n".join(md) + "\n"
+
+
 def canonical_json(value: Any) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -614,6 +676,20 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
 
+    note = subparsers.add_parser("note", help="record one target's reuse decision")
+    note.add_argument("--target", choices=("macos", "linux"), required=True)
+    note.add_argument("--verdict", choices=("reuse", "refuse"), required=True)
+    note.add_argument("--reason", default="")
+    note.add_argument("--reason-file", type=Path,
+                      help="read the reason from this file (e.g. the verifier's stderr)")
+    note.add_argument("--receipt", type=Path, help="receipt the decision was about, if any")
+    note.add_argument("--output", type=Path, required=True)
+
+    publish = subparsers.add_parser(
+        "publish-notes", help="print decision annotations and append a job-summary table")
+    publish.add_argument("notes", type=Path, nargs="*")
+    publish.add_argument("--summary", type=Path, help="markdown file to append to")
+
     fetch = subparsers.add_parser("download", parents=[common])
     fetch.add_argument("--api-url", default="https://api.github.com")
     fetch.add_argument("--token", required=True)
@@ -624,9 +700,52 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _cmd_note(args: argparse.Namespace) -> int:
+    reason = args.reason
+    if args.reason_file is not None:
+        try:
+            text = args.reason_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        # The verifier reports `protected receipt: <why>` as its last line.
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if lines:
+            reason = lines[-1].removeprefix("protected receipt:").strip()
+    receipt_value: Any = None
+    if args.receipt is not None:
+        try:
+            receipt_value = json.loads(args.receipt.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            receipt_value = None
+    note = decision_note(args.target, args.verdict, reason, receipt_value)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(canonical_json(note) + b"\n")
+    return 0
+
+
+def _cmd_publish_notes(args: argparse.Namespace) -> int:
+    notes = []
+    for path in args.notes:
+        try:
+            notes.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as error:
+            print(f"protected receipt: unreadable decision note {path}: {error}", file=sys.stderr)
+    lines, table = render_notes(notes)
+    for line in lines:
+        print(line)
+    if args.summary is not None:
+        with args.summary.open("a", encoding="utf-8") as handle:
+            handle.write(table)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "note":
+            return _cmd_note(args)
+        if args.command == "publish-notes":
+            return _cmd_publish_notes(args)
         if args.command == "issue":
             result = issue(args)
         elif args.command == "download":

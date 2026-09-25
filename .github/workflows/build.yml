@@ -1073,6 +1073,17 @@ jobs:
           set -u
           matrix="$ORIGINAL_MATRIX"
           macos_reused=false
+          # One decision note per target, published below as the
+          # `shipyard-receipt-decision` annotation `shipyard landing` reads and
+          # as a job-summary table. Notes describe the decision the verifier's
+          # exit status made; the workspace copy of the script only renders.
+          notes_dir="$RUNNER_TEMP/receipt-decisions"
+          mkdir -p "$notes_dir"
+          note() {  # note <target> <verdict> <reason> [extra note args...]
+            python3 tools/scripts/protected_merge_receipt.py note --target "$1" \
+              --verdict "$2" --reason "$3" "${@:4}" \
+              --output "$notes_dir/$1.json" || true
+          }
           if [ "$GITHUB_EVENT_NAME" = merge_group ] \
             && [ "$NATIVE_BUILD_REQUIRED" = true ]; then
             read -r group base head extra <<EOF
@@ -1080,26 +1091,35 @@ jobs:
           EOF
             if [ -n "${extra:-}" ] || [ -z "${base:-}" ] || [ -z "${head:-}" ]; then
               echo "::notice::receipt reuse unavailable: merge group is not exactly two-parent"
+              for target in macos linux; do
+                note "$target" refuse "merge group is not exactly two-parent"
+              done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
               for target in macos linux; do
                 if [ "$target" = macos ] \
                     && [ "$A2T_RECEIPT_VERIFICATION_REQUIRED" = true ]; then
                   echo "::notice::macos receipt reuse disabled: A2T receipt changed"
+                  note macos refuse "A2T receipt changed; macos reuse is disabled"
                   continue
                 fi
                 artifact_name="protected-validation-${target}-${head}-${base}"
                 receipt_path="$RUNNER_TEMP/${target}-receipt.json"
                 decision_path="$RUNNER_TEMP/${target}-decision.json"
-                if python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
+                verify_err="$RUNNER_TEMP/${target}-verify.err"
+                if ! python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
                     --repository "$GITHUB_REPOSITORY" --target "$target" \
                     --token "$RECEIPT_TOKEN" --artifact-name "$artifact_name" \
                     --base-sha "$base" --head-sha "$head" \
-                    --output "$receipt_path" \
-                  && python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
+                    --output "$receipt_path" 2> "$verify_err"; then
+                  cat "$verify_err" >&2
+                  echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
+                  note "$target" refuse "no usable receipt for this head and base" \
+                    --reason-file "$verify_err"
+                elif python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
                     --repo "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
                     --target "$target" --group-sha "$group" \
-                    --receipt "$receipt_path" --output "$decision_path"; then
+                    --receipt "$receipt_path" --output "$decision_path" 2> "$verify_err"; then
                   matrix="$(MATRIX_JSON="$matrix" TARGET="$target" python3 - <<'PY'
           import json, os
           matrix = json.loads(os.environ["MATRIX_JSON"])
@@ -1111,13 +1131,24 @@ jobs:
           )"
                   [ "$target" != macos ] || macos_reused=true
                   echo "::notice::exact protected receipt reused for ${target}"
+                  note "$target" reuse "exact-tree receipt revalidated against the protected base" \
+                    --receipt "$receipt_path"
                 else
+                  cat "$verify_err" >&2
                   echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
+                  note "$target" refuse "receipt failed verification" \
+                    --reason-file "$verify_err" --receipt "$receipt_path"
                 fi
               done
             else
               echo "::notice::protected base has no receipt verifier; full validation retained"
+              for target in macos linux; do
+                note "$target" refuse "protected base has no receipt verifier"
+              done
             fi
+            shopt -s nullglob
+            python3 tools/scripts/protected_merge_receipt.py publish-notes \
+              "$notes_dir"/*.json --summary "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
           fi
           build_required="$(MATRIX_JSON="$matrix" python3 - <<'PY'
           import json, os
@@ -1822,6 +1853,9 @@ jobs:
             -L '^pr-fast$' -LE "$label_exclude" \
             --no-tests=error --timeout 120 -j4 \
             --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+          # A green check here means the fast tier passed, not the suite. Say
+          # so where `shipyard landing` reads it (a check-run annotation).
+          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
 
       - name: Test (non-Windows)
         id: ctest
@@ -1970,6 +2004,8 @@ jobs:
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
           ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
+          # Tell `shipyard landing` which tier this check's green means.
+          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
           exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
@@ -2478,6 +2514,11 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"receipt-reused"}'
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
+          fi
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
@@ -2536,6 +2577,11 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"receipt-reused"}'
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
+          fi
 
   linux:
     needs: [build, classify]

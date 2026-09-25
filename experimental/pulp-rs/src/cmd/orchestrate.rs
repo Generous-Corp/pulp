@@ -485,13 +485,35 @@ fn build_with_dependency_policy<S: Spawner>(
         }
         None => {}
     }
-    let build = build_parallelism::finish_build_command(
+    let (build, plan) = build_parallelism::finish_build_command_planned(
         Invocation::new("cmake")
             .arg("--build")
             .arg(build_dir.to_string_lossy().into_owned()),
         &passthrough,
     );
-    let rc = if skip_build { 0 } else { spawner.run(&build)? };
+    let rc = if skip_build {
+        0
+    } else {
+        let started = std::time::SystemTime::now();
+        let clock = std::time::Instant::now();
+        let rc = spawner.run(&build)?;
+        crate::build_metrics::record(
+            &proj.root,
+            &crate::build_metrics::BuildMetric {
+                started,
+                duration: clock.elapsed(),
+                exit_code: rc,
+                jobs: crate::build_metrics::plan_jobs(&plan),
+                grant: crate::build_metrics::grant_name(&plan),
+                targets: crate::build_metrics::targets_in(&plan.passthrough),
+                total_targets: selection
+                    .as_ref()
+                    .filter(|s| s.is_focused())
+                    .map(|s| s.total_targets),
+            },
+        );
+        rc
+    };
     if rc != 0 {
         return Ok(rc);
     }
@@ -3770,6 +3792,120 @@ mod tests {
         assert!(text.contains("FOCUSED: building 2/1708 targets"), "{text}");
         assert!(text.contains("pulp build --all"), "{text}");
         assert!(proj.build_dir.join(affected::QUERY_RELATIVE).is_file());
+    }
+
+    /// A checkout carrying the real shared recorder, and a fake `shipyard`
+    /// that writes the argv it was given, one arg per line.
+    #[cfg(unix)]
+    fn with_recorder(proj: &ActiveProject, td: &Path) -> (PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let real = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(crate::build_metrics::RECORDER_RELATIVE);
+        let dest = proj.root.join(crate::build_metrics::RECORDER_RELATIVE);
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::copy(&real, &dest).unwrap();
+        let bin = td.join("fakebin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let sy = bin.join("shipyard");
+        std::fs::write(&sy, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SHIPYARD_ARGS_OUT.tmp\" && mv \"$SHIPYARD_ARGS_OUT.tmp\" \"$SHIPYARD_ARGS_OUT\"\n").unwrap();
+        std::fs::set_permissions(&sy, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (bin, td.join("shipyard-args.txt"))
+    }
+
+    #[cfg(unix)]
+    fn recorded_args(out: &Path) -> Vec<String> {
+        // The recorder backgrounds the shipyard call and returns at once.
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(out) {
+                return text.lines().map(str::to_owned).collect();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Vec::new()
+    }
+
+    #[cfg(unix)]
+    fn flag<'a>(args: &'a [String], name: &str) -> &'a str {
+        let i = args.iter().position(|a| a == name).unwrap_or_else(|| panic!("{name} missing: {args:?}"));
+        &args[i + 1]
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn focused_build_is_recorded_through_the_shared_recorder() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        let (bin, out_file) = with_recorder(&proj, td.path());
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let out_str = out_file.to_string_lossy().into_owned();
+        let _guard = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("1")),
+            ("PATH", Some(&path)),
+            ("SHIPYARD_ARGS_OUT", Some(&out_str)),
+            ("PULP_BUILD_METRICS", None),
+            ("PULP_BUILD_JOBS", Some("5")),
+        ]);
+        let spawner = RecordingSpawner::with_codes(vec![0, 7]);
+        let mut out = Vec::new();
+        let started = std::time::Instant::now();
+        let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(rc, 7, "a recorded build keeps its own exit status");
+        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+        let args = recorded_args(&out_file);
+        assert_eq!(
+            &args[..6],
+            ["metrics", "record", "--project", "pulp", "--job", "governed-build"],
+            "{args:?}"
+        );
+        assert_eq!(flag(&args, "--target"), "local-build/focused");
+        assert_eq!(
+            flag(&args, "--workflow"),
+            "targets:2/1708:pulp-view-core,pulp-test-widgets"
+        );
+        assert_eq!(flag(&args, "--provider"), "pulp-cli");
+        assert_eq!(flag(&args, "--profile"), "j5");
+        assert_eq!(flag(&args, "--routing-decision"), "inherited");
+        assert_eq!(flag(&args, "--status"), "failure");
+        assert_eq!(flag(&args, "--exit-code"), "7");
+        assert!(flag(&args, "--duration-ms").parse::<u64>().is_ok(), "{args:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn full_build_records_all_and_the_opt_out_records_nothing() {
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        let (bin, out_file) = with_recorder(&proj, td.path());
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let out_str = out_file.to_string_lossy().into_owned();
+        {
+            let _guard = EnvVarGuard::set_many(&[
+                (affected::FOCUS_ENV, Some("1")),
+                ("PATH", Some(&path)),
+                ("SHIPYARD_ARGS_OUT", Some(&out_str)),
+                ("PULP_BUILD_METRICS", Some("0")),
+                ("PULP_BUILD_JOBS", Some("5")),
+            ]);
+            let args = parse_build_args(&["--all".to_owned()]);
+            build_with(&proj, &args, &RecordingSpawner::ok(), &mut Vec::new()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            assert!(!out_file.exists(), "PULP_BUILD_METRICS=0 must record nothing");
+        }
+        let _guard = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("1")),
+            ("PATH", Some(&path)),
+            ("SHIPYARD_ARGS_OUT", Some(&out_str)),
+            ("PULP_BUILD_METRICS", None),
+            ("PULP_BUILD_JOBS", Some("5")),
+        ]);
+        let args = parse_build_args(&["--all".to_owned()]);
+        build_with(&proj, &args, &RecordingSpawner::ok(), &mut Vec::new()).unwrap();
+        let recorded = recorded_args(&out_file);
+        assert_eq!(flag(&recorded, "--target"), "local-build/all");
+        assert_eq!(flag(&recorded, "--workflow"), "targets:all");
+        assert_eq!(flag(&recorded, "--status"), "success");
     }
 
     #[test]
