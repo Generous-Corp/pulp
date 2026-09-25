@@ -43,6 +43,35 @@ add_subdirectory(pulp-tone)
 
 # PulpEffect: filter with parameters and state
 add_subdirectory(pulp-effect)
+
+# Two shipped plug-ins in one process must register DISTINCT macOS view ObjC
+# classes: _pulp_apply_view_mac_objc_suffix() (tools/cmake/PulpUtils.cmake)
+# suffixes every class name per binary. Only loading two real bundles proves
+# it, which is why the probe lives with the examples: it dlopens PulpGain and
+# PulpEffect together and requires each class to exist under both suffixes and
+# never under its bare name. The GPU classes exist only with Skia.
+if(APPLE AND PULP_HAS_CLAP AND TARGET PulpGain_CLAP AND TARGET PulpEffect_CLAP)
+    add_executable(pulp-mac-objc-coload-probe
+        ${CMAKE_SOURCE_DIR}/test/mac_objc_coload_probe.cpp)
+    target_link_libraries(pulp-mac-objc-coload-probe PRIVATE
+        ${CMAKE_DL_LIBS} "-framework Foundation")
+    add_dependencies(pulp-mac-objc-coload-probe PulpGain_CLAP PulpEffect_CLAP)
+    set(_pulp_coload_classes
+        PulpView PulpWindowDelegate PulpAppDelegate PulpMenuCommandTarget
+        PulpPluginView PulpAccessibilityElement PulpWindowAccessibilityElement
+        PulpAccessibilityHostLifetime PulpTextAccessibilityElement PulpFileDragSource)
+    if(PULP_HAS_SKIA)
+        list(APPEND _pulp_coload_classes PulpMetalView PulpGpuPluginView PulpMetalSurfaceView)
+    endif()
+    add_test(NAME mac-objc-coload-PulpGain-PulpEffect
+        COMMAND pulp-mac-objc-coload-probe
+            $<TARGET_FILE:PulpGain_CLAP> PulpGain_CLAP
+            $<TARGET_FILE:PulpEffect_CLAP> PulpEffect_CLAP
+            ${_pulp_coload_classes})
+    set_tests_properties(mac-objc-coload-PulpGain-PulpEffect PROPERTIES
+        LABELS "clap;objc"
+        TIMEOUT 60)
+endif()
 if(TARGET pulp::host AND NOT TARGET sample-region-allpass-core)
     add_subdirectory(sample-region-allpass)
 endif()
