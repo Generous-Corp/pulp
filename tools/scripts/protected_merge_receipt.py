@@ -96,11 +96,20 @@ def _escape_command_data(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def render_notes(notes: list[dict[str, Any]]) -> tuple[list[str], str]:
-    """Workflow-command annotation lines and a job-summary table for `notes`."""
+def render_notes(notes: list[dict[str, Any]],
+                 no_decision_reason: str = "") -> tuple[list[str], str]:
+    """Workflow-command annotation lines and a job-summary table for `notes`.
+
+    With no notes, `no_decision_reason` says why no target was evaluated. It is
+    a plain notice, never a `NOTE_TITLE` annotation: nothing was decided, so
+    reporting a verdict would misstate what the merge group ran.
+    """
     lines = [f"::notice title={NOTE_TITLE}::"
              + _escape_command_data(json.dumps(n, separators=(",", ":"), sort_keys=True))
              for n in notes]
+    why = " ".join(no_decision_reason.split())
+    if not notes and why:
+        lines.append("::notice::receipt reuse not evaluated: " + _escape_command_data(why))
     md = ["### Protected receipt decisions", "",
           "| Target | Decision | Evidence | Reason |", "|---|---|---|---|"]
     for n in notes:
@@ -116,7 +125,8 @@ def render_notes(notes: list[dict[str, Any]]) -> tuple[list[str], str]:
         reason = str(n["reason"]).replace("|", "\\|")
         md.append(f"| {n['target']} | {decision} | {evidence} | {reason} |")
     if not notes:
-        md.append("| — | no receipt decision was needed | | |")
+        cell = why.replace("|", "\\|")
+        md.append(f"| — | no receipt decision was needed | | {cell} |")
     return lines, "\n".join(md) + "\n"
 
 
@@ -689,6 +699,8 @@ def _parser() -> argparse.ArgumentParser:
         "publish-notes", help="print decision annotations and append a job-summary table")
     publish.add_argument("notes", type=Path, nargs="*")
     publish.add_argument("--summary", type=Path, help="markdown file to append to")
+    publish.add_argument("--no-decision-reason", default="",
+                         help="why no target was evaluated, reported when there are no notes")
 
     fetch = subparsers.add_parser("download", parents=[common])
     fetch.add_argument("--api-url", default="https://api.github.com")
@@ -730,7 +742,7 @@ def _cmd_publish_notes(args: argparse.Namespace) -> int:
             notes.append(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, ValueError) as error:
             print(f"protected receipt: unreadable decision note {path}: {error}", file=sys.stderr)
-    lines, table = render_notes(notes)
+    lines, table = render_notes(notes, args.no_decision_reason)
     for line in lines:
         print(line)
     if args.summary is not None:

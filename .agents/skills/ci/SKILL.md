@@ -423,6 +423,16 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+When measuring reuse from job logs, read only the emitted `##[notice]` lines.
+The `protected-receipt-reuse` log also echoes the step's whole script, so a
+plain grep finds every refusal message in every run, including runs that made
+no decision. A merge group with no native build input is one of those: it
+publishes no `shipyard-receipt-decision` annotation, only a
+`receipt reuse not evaluated` notice, and its `macos` check is the
+near-instant bootstrap. The job writes decision notes for `macos` and `linux`
+in file-name order, so the log prints `linux` first; `shipyard landing` shows
+both.
+
 ### `source-selftest` tests gate on `Enforce version & skill sync`, not on `macos`
 
 The gate events also exclude `source-selftest`: ~140 Python registrations that
