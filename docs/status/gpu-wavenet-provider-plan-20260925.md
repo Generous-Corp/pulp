@@ -157,3 +157,26 @@ The `-j2` invocation was the leaseless floor. No executable or runtime receipt
 was produced, so this attempt says nothing about GPU correctness, latency, or
 GPU-NAM integration. It is evidence only that the first dependency build did
 not complete within five minutes under the observed host load.
+
+## Downstream validation boundary
+
+The downstream projects are useful validation targets, but they are not yet
+consumers of this private provider proof. Their order should be:
+
+1. **GPU-NAM:** keep the existing staged `GpuAudioNode`, continuously primed
+   CPU fallback, and blocking worker path. Add a one-channel shared proof only
+   after Pulp publishes the owned neural-program adapter. Validate NAM model
+   weight layout, output parity, terminal disposition, and fallback continuity.
+2. **Forge:** use the same public node/program contract for a prepared neural
+   module. Its acceptance gate is SDK-only compilation plus a host-side
+   prepare/release test; it must not include `core/gpu_audio/src/detail` or
+   depend on Dawn handles.
+3. **Spectr:** treat the path as an opt-in analysis/processing workload until
+   long-tail scheduling evidence supports realtime use. Validate that CPU and
+   GPU paths can be selected through the same capability report and that
+   device loss or a late result produces the declared terminal disposition.
+
+These downstream checks can prove integration and fallback behavior, but they
+cannot turn the current one-array, one-layer private proof into a general
+multi-channel realtime guarantee. Stereo routing, multiple arrays/layers, and
+deadline reliability remain separate evidence gates.
