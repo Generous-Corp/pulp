@@ -283,10 +283,18 @@ jobs:
         # un-excluded. Keep remaining exclusions named, not path-wide, so the
         # rest of the ASan matrix still gates (#3113).
         run: |
+          # A timing assertion measures the sanitizer, not the code: ASan and
+          # UBSan add interception and shadow-memory work on every access, so a
+          # throughput or latency bound written for an ordinary build cannot
+          # hold here. Exclude the same label groups the required `macos` gate
+          # excludes, for the same reason it excludes them. Race and RT-safety
+          # tests are deliberately NOT excluded — catching those is why this
+          # lane exists.
           ctest --test-dir build-asan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
+            --label-exclude 'validation|slow|performance|bench|quality-lab' \
             --exclude-regex 'hover -> click -> drag record/replay produces matching motion fixture|cmake-ios-auv3-configure|cmake-ios-hostapp-links|fdn reverb stays bounded and decaying for every parameter vector|WebSocketChannel echoes a >126-byte message'
 
   tsan:
@@ -395,10 +403,18 @@ jobs:
         # ConnectedChildProcess is process/IPC timing-sensitive under sanitizer
         # instrumentation and remains covered by the regular Build/Test lane.
         run: |
+          # A timing assertion measures the sanitizer, not the code: ASan and
+          # UBSan add interception and shadow-memory work on every access, so a
+          # throughput or latency bound written for an ordinary build cannot
+          # hold here. Exclude the same label groups the required `macos` gate
+          # excludes, for the same reason it excludes them. Race and RT-safety
+          # tests are deliberately NOT excluded — catching those is why this
+          # lane exists.
           ctest --test-dir build-ubsan --output-on-failure \
             --repeat until-pass:2 \
             -j$(sysctl -n hw.ncpu) \
             --timeout 120 \
+            --label-exclude 'validation|slow|performance|bench|quality-lab' \
             --exclude-regex 'Toolbar add items|deflate empty payload round-trips through raw helpers|IPC named pipe observes abrupt peer death|cmake-ios-auv3-configure|cmake-ios-hostapp-links|MountedVolumeListChangeDetector stop wakes a long poll promptly|ConnectedChildProcess'
 
   rtsan:

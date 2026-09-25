@@ -352,6 +352,40 @@ If you add a target that links option-gated sources, gate the `add_subdirectory`
 on the same option. A target whose implementation is compiled out still
 participates in `all`.
 
+## A timing test under a sanitizer measures the sanitizer
+
+ASan and UBSan add interception and shadow-memory work to every memory access.
+A throughput or latency assertion calibrated for an ordinary build therefore
+cannot hold under them, and its failure says nothing about the code. The nightly
+`Sanitizer Tests` lane sat red on main for days largely on this: `bench::modal
+bank throughput scales to large banks in real time` and `slow::Analog VCF stays
+finite at worst-case drive and oversampling` fail there and nowhere else.
+
+The ASan and UBSan broad passes therefore exclude
+`validation|slow|performance|bench|quality-lab` — the same label groups the
+required `macos` gate excludes, for the same underlying reason. On the gate the
+noise source is a shared runner's load; under a sanitizer it is the instrument
+itself.
+
+Two things worth keeping straight when reading that lane:
+
+- **Race and RT-safety tests are not excluded, deliberately.** `[threads]`,
+  `[rt-safety]` and the TSan name-regex lane all still run, because catching
+  that class is the reason the lane exists. A failing race test there is a
+  finding, not label noise.
+- **A timing-sensitive test is not always labelled.** `Runtime clock transitions
+  preserve invariant measured latency` (`[clock][latency]`) and `drift wanders
+  the pitch slowly at ~the commanded RMS` (`[drift]`) time out under ASan while
+  carrying no timing label, so the exclusion does not reach them. Grep the
+  registration, not the name: a `bench::` or `slow::` prefix comes from
+  `catch_discover_tests(... TEST_PREFIX ... LABELS ...)`, and a Catch2 tag alone
+  does **not** become a ctest label.
+
+Environment failures in the same lane (`visual-python-deps-present`, a missing
+numpy/Pillow on the host, `cmake-*-sdk-consumer`,
+`pulp-browser-capture-node-integration`) are host gaps, not timing. They each
+want their own fix; a label would only hide them.
+
 ## Test lanes — what gates the required `macos` check
 
 For native pull requests, Shipyard `workflow_dispatch` validation, and merge
