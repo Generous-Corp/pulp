@@ -89,6 +89,61 @@ TEST_CASE("GpuAudioProgramDescriptor rejects unsafe provider and fallback claims
     CHECK(validate_gpu_audio_program(program).accepted());
 }
 
+TEST_CASE("GpuAudioProgramDescriptor binds only to an authenticated capability",
+          "[gpu_audio][program]") {
+    const auto program = valid_shared_program();
+    GpuAudioCapabilityReport capability;
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
+    capability.eligibility = GpuAudioEligibility::Eligible;
+    capability.fallback_policy = MissPolicy::CpuFallback;
+    capability.prepared_lead_blocks = 2;
+    capability.prepared = true;
+    capability.fallback_available = true;
+
+    CHECK(validate_gpu_audio_program(program, capability).accepted());
+
+    capability.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityProviderMismatch);
+
+    capability = {};
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityNotPrepared);
+}
+
+TEST_CASE("GpuAudioProgramDescriptor rejects capability drift before execution",
+          "[gpu_audio][program]") {
+    const auto program = valid_shared_program();
+    GpuAudioCapabilityReport capability;
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
+    capability.eligibility = GpuAudioEligibility::Eligible;
+    capability.fallback_policy = MissPolicy::CpuFallback;
+    capability.prepared_lead_blocks = 2;
+    capability.prepared = true;
+    capability.fallback_available = true;
+
+    capability.path = GpuAudioExecutionPath::Staged;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityPathMismatch);
+
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.prepared_lead_blocks = 4;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityLeadMismatch);
+
+    capability.prepared_lead_blocks = 2;
+    capability.fallback_available = false;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityFallbackUnavailable);
+
+    capability.fallback_available = true;
+    capability.fallback_policy = MissPolicy::Silence;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityFallbackPolicyMismatch);
+}
+
 namespace pulp::gpu_audio::test_detail {
 
 class RealtimeHookNode : public GpuAudioNode {

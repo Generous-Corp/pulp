@@ -54,6 +54,16 @@ enum class GpuAudioProgramError : std::uint8_t {
     ProviderOnCpu = 12,
     CpuPipelineOnCpu = 13,
     CpuFallbackNotPrepared = 14,
+    // The descriptor is valid in isolation, but the prepared transport did
+    // not authenticate the same path/provider contract.  These values are
+    // appended so the existing wire/debug values remain stable.
+    CapabilityNotPrepared = 15,
+    CapabilityIneligible = 16,
+    CapabilityPathMismatch = 17,
+    CapabilityProviderMismatch = 18,
+    CapabilityLeadMismatch = 19,
+    CapabilityFallbackPolicyMismatch = 20,
+    CapabilityFallbackUnavailable = 21,
 };
 
 /// Backend-neutral metadata for a typed program prepared for a fixed audio
@@ -131,6 +141,42 @@ validate_gpu_audio_program(const GpuAudioProgramDescriptor& program) noexcept {
             return {GpuAudioProgramError::CpuPipelineOnCpu};
     }
 
+    return {};
+}
+
+/// Validate a prepared program against the capability snapshot returned by
+/// the host transport.  The descriptor alone is a declaration and can be
+/// authored by an SDK consumer; this overload is the fail-closed preparation
+/// boundary that proves the selected transport actually accepted the same
+/// path, provider identity, lead, and fallback policy.  It still carries no
+/// backend handle and performs no provider or callback operation.
+constexpr GpuAudioProgramValidation
+validate_gpu_audio_program(const GpuAudioProgramDescriptor& program,
+                           const GpuAudioCapabilityReport& capability) noexcept {
+    const auto descriptor = validate_gpu_audio_program(program);
+    if (!descriptor.accepted())
+        return descriptor;
+    if (!capability.prepared)
+        return {GpuAudioProgramError::CapabilityNotPrepared};
+    if (capability.eligibility != GpuAudioEligibility::Eligible)
+        return {GpuAudioProgramError::CapabilityIneligible};
+    if (capability.path != program.path)
+        return {GpuAudioProgramError::CapabilityPathMismatch};
+    if (capability.fallback_policy != program.miss_policy)
+        return {GpuAudioProgramError::CapabilityFallbackPolicyMismatch};
+    if (program.algorithmic_lead_blocks != capability.prepared_lead_blocks)
+        return {GpuAudioProgramError::CapabilityLeadMismatch};
+    if (program.path == GpuAudioExecutionPath::SharedMemory &&
+        capability.provider != program.provider)
+        return {GpuAudioProgramError::CapabilityProviderMismatch};
+    // A known descriptor provider must still be witnessed by the prepared
+    // capability for staged paths.  Unknown is the honest generic staged
+    // value and remains valid when both sides leave identity unspecified.
+    if (program.path == GpuAudioExecutionPath::Staged &&
+        program.provider != GpuAudioProvider::Unknown && capability.provider != program.provider)
+        return {GpuAudioProgramError::CapabilityProviderMismatch};
+    if (program.miss_policy == MissPolicy::CpuFallback && !capability.fallback_available)
+        return {GpuAudioProgramError::CapabilityFallbackUnavailable};
     return {};
 }
 
