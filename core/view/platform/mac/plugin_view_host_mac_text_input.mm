@@ -1,4 +1,6 @@
 #include "pulp_mac_objc_names.h"
+#include "plugin_view_host_mac_view.h"
+#include "mac_text_input_ranges.h"
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -20,35 +22,7 @@
 
 extern "C" void pulp_mac_plugin_text_input_client_category_anchor() {}
 
-@interface PulpPluginView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, assign) float designW;
-@property (nonatomic, assign) float designH;
-@property (nonatomic, assign) BOOL designTopAlign;
-@end
-
-#ifdef PULP_HAS_SKIA
-@interface PulpGpuPluginView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, assign) float designW;
-@property (nonatomic, assign) float designH;
-@property (nonatomic, assign) BOOL designTopAlign;
-@end
-#endif
-
 namespace {
-
-std::size_t nsrange_location_or_zero(NSRange range) noexcept {
-    return range.location == NSNotFound ? 0 : static_cast<std::size_t>(range.location);
-}
-
-std::size_t nsrange_end_or_zero(NSRange range) noexcept {
-    if (range.location == NSNotFound) return 0;
-    const auto start = static_cast<std::size_t>(range.location);
-    const auto length = static_cast<std::size_t>(range.length);
-    const auto max = std::numeric_limits<std::size_t>::max();
-    return length > max - start ? max : start + length;
-}
 
 NSString* pulp_plugin_string_from_input(id string) {
     if ([string isKindOfClass:[NSAttributedString class]])
@@ -76,9 +50,9 @@ bool pulp_plugin_apply_replacement_range(pulp::view::TextEditor* te,
     if (!te || replacement_range.location == NSNotFound) return false;
     const auto& text = te->text();
     const auto start8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_location_or_zero(replacement_range));
+        text, pulp::view::mac_text_input::nsrange_location_or_zero(replacement_range));
     const auto end8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_end_or_zero(replacement_range));
+        text, pulp::view::mac_text_input::nsrange_end_or_zero(replacement_range));
     if (te->has_marked_text())
         te->unmark_text();
     te->set_selection(static_cast<int>(std::min(start8, end8)),
@@ -202,8 +176,8 @@ void pulp_plugin_set_marked_text(NSView* host,
     NSString* str = pulp_plugin_string_from_input(string);
     const char* utf8 = str.UTF8String;
     std::string marked = utf8 ? utf8 : "";
-    const auto selected_start16 = nsrange_location_or_zero(selected_range);
-    const auto selected_end16 = nsrange_end_or_zero(selected_range);
+    const auto selected_start16 = pulp::view::mac_text_input::nsrange_location_or_zero(selected_range);
+    const auto selected_end16 = pulp::view::mac_text_input::nsrange_end_or_zero(selected_range);
     const auto selected_start8 = pulp::canvas::utf8_offset_for_utf16_offset(
         marked, selected_start16);
     const auto selected_end8 = pulp::canvas::utf8_offset_for_utf16_offset(
@@ -244,9 +218,9 @@ NSAttributedString* pulp_plugin_attributed_substring(pulp::view::View* root,
     }
     const auto& text = te->text();
     const auto start8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_location_or_zero(range));
+        text, pulp::view::mac_text_input::nsrange_location_or_zero(range));
     const auto end8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_end_or_zero(range));
+        text, pulp::view::mac_text_input::nsrange_end_or_zero(range));
     if (start8 >= text.size()) return nil;
     const auto clamped_end8 = std::min(end8, text.size());
     const auto sub = text.substr(start8, clamped_end8 - start8);

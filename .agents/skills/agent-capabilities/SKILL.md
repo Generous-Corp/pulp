@@ -1190,6 +1190,14 @@ than the new one. The binary still builds and still runs; it collides only when
 a second Pulp plug-in is loaded beside it, in somebody else's host. The
 `mac-objc-source-list-guard` ctest and its selftest exist to catch that.
 
+The private headers those `.mm` files quote-include are in the same install
+list, and the guard checks them too: a consumer compiles the cluster as one
+generated per-binary translation unit that includes each `.mm` by absolute
+path, so a header missing from the install breaks the consumer's compile
+rather than its class names. `plugin_view_host_mac_view.h` (the shared
+PulpPluginView / PulpGpuPluginView interfaces) and `mac_text_input_ranges.h`
+are the ones a reader is least likely to expect there.
+
 ## A green `--check` says nothing about a module outside `PUBLIC_ROOTS`
 
 `PUBLIC_ROOTS` in `tools/scripts/agent_capability_surface.py` lists exactly
