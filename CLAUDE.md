@@ -737,10 +737,6 @@ detached, stale-SHA, and unclassified worktrees inject a warning before the
 agent begins. A superseded warning is a stop sign: move to its recorded
 successor rather than continuing in the old checkout.
 
-On macOS, `pulp build --seed-build` (or `PULP_SEED_BUILD=1`) starts a fresh
-worktree WARM: it APFS-clones and retargets the closest sibling's Ninja build
-dir, so the first build is only what differs (`docs/reference/cli.md#build`).
-
 Fresh worktrees must use the shared dependency path delivered by the normal
 Pulp workflow. Prefer `pulp build`, `pulp dev`, or `pulp loop`: a cold or
 pin-stale source checkout bootstraps immutable dependency sources into the
