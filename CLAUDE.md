@@ -737,6 +737,10 @@ detached, stale-SHA, and unclassified worktrees inject a warning before the
 agent begins. A superseded warning is a stop sign: move to its recorded
 successor rather than continuing in the old checkout.
 
+On macOS, `pulp build --seed-build` (or `PULP_SEED_BUILD=1`) starts a fresh
+worktree WARM: it APFS-clones and retargets the closest sibling's Ninja build
+dir, so the first build is only what differs (`docs/reference/cli.md#build`).
+
 Fresh worktrees must use the shared dependency path delivered by the normal
 Pulp workflow. Prefer `pulp build`, `pulp dev`, or `pulp loop`: a cold or
 pin-stale source checkout bootstraps immutable dependency sources into the
@@ -1011,6 +1015,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **build** — build and test only what a diff touches
 - Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py). → `pulp affected`
+- Starting a new worktree that a sibling worktree a few commits away has already built — seed its build dir by APFS clone + retarget instead of paying the full configure, compile and link again. → `pulp build`
+  - ⚠ **Cannot see:** Removes gratuitous work only. A binary is trusted only if it does not embed the donor path, so `-D` defines that carry the source dir (and `__FILE__` without ccache's base_dir) recompile as usual; a Debug donor with `-g` embeds the path in every object and gains nothing. The closing `ninja -n` count is the receipt, not a proof the outputs are right — the tests are.
 
 **build-speed** — measure build, gate and merge-queue speed
 - Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
