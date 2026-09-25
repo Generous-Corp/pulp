@@ -542,9 +542,10 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
     // never reachable from the realtime shared-I/O callback.
     if (trial_staged_sync_reference_) {
         const auto now_ns = []() noexcept {
-            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                   std::chrono::steady_clock::now().time_since_epoch())
-                                                   .count());
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count());
         };
         detail::SharedIoTraceRecord trace;
         trace.generation = trial_generation_;
@@ -564,7 +565,8 @@ void GpuConvolver::process_block(const audio::BufferView<const float>& input,
         }
         trace.set(detail::SharedIoTraceStage::EncodeEnd, now_ns());
         trace.set(detail::SharedIoTraceStage::SubmitBegin, now_ns());
-        const bool success = gpu_->convolve_batch(in_pad_.data(), time_.data(), fft_size_, channels_);
+        const bool success =
+            gpu_->convolve_batch(in_pad_.data(), time_.data(), fft_size_, channels_);
         trace.set(detail::SharedIoTraceStage::SubmitEnd, now_ns());
         trace.set(detail::SharedIoTraceStage::CompletionObserved, now_ns());
         const auto after = gpu_->async_stats();

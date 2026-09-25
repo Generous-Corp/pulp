@@ -12,8 +12,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -103,7 +103,8 @@ TrialResult run_staged_sync_trial(const std::vector<std::vector<float>>& input,
         delivery.result_visible_ns = end;
         result.delivery_records.push_back(delivery);
     }
-    result.available = pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, result.records);
+    result.available =
+        pulp::gpu_audio::detail::drain_gpu_convolver_trial_records(node, result.records);
     result.records_valid = result.available && result.records.size() == kBlocks &&
                            std::all_of(result.records.begin(), result.records.end(),
                                        [](const auto& record) { return record.valid(); });
@@ -178,9 +179,9 @@ std::uint64_t digest(std::span<const float> values) {
 }
 
 const char* path_name(GpuConvolverTrialPath path) {
-    return path == GpuConvolverTrialPath::StagedSync
-               ? "staged_sync"
-               : path == GpuConvolverTrialPath::StagedAsync ? "staged_async" : "shared_async";
+    return path == GpuConvolverTrialPath::StagedSync    ? "staged_sync"
+           : path == GpuConvolverTrialPath::StagedAsync ? "staged_async"
+                                                        : "shared_async";
 }
 
 void emit_record(const TrialResult& result, std::size_t ordinal, const SharedIoTraceRecord& record,
@@ -372,8 +373,7 @@ std::size_t terminal_record_count(const TrialResult& result) {
         }));
 }
 
-bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync,
-                                       const TrialResult& staged,
+bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const TrialResult& staged,
                                        const TrialResult& shared) {
     // The campaign is deliberately opt-in. Missing provenance must leave the
     // existing matched diagnostic intact rather than producing an anonymous
@@ -491,8 +491,8 @@ int main() {
     const auto staged_sync_terminal_records = terminal_record_count(staged_sync);
     const auto staged_terminal_records = terminal_record_count(staged);
     const auto shared_terminal_records = terminal_record_count(shared);
-    const bool matched = staged_sync.records_valid && staged.records_valid && shared.records_valid &&
-                         staged_sync_terminal_records == kBlocks &&
+    const bool matched = staged_sync.records_valid && staged.records_valid &&
+                         shared.records_valid && staged_sync_terminal_records == kBlocks &&
                          staged_terminal_records == kBlocks && shared_terminal_records == kBlocks;
     std::cout << "{\"schema\":\"pulp.gpu-audio.p4.matched.v1\",\"status\":\""
               << (matched ? "screening_complete" : "screening_failed")

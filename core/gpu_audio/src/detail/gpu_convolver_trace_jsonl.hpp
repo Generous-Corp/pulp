@@ -18,10 +18,9 @@ inline bool write_gpu_convolver_trace_jsonl(std::ostream& output,
     if (!valid_gpu_convolver_trial_context(context) || records.empty())
         return false;
 
-    const auto path = context.path == GpuConvolverTrialPath::StagedSync
-                          ? "staged_sync"
-                          : context.path == GpuConvolverTrialPath::StagedAsync ? "staged_async"
-                                                                              : "shared_async";
+    const auto path = context.path == GpuConvolverTrialPath::StagedSync    ? "staged_sync"
+                      : context.path == GpuConvolverTrialPath::StagedAsync ? "staged_async"
+                                                                           : "shared_async";
     const auto load = [&] {
         switch (context.load) {
         case GpuConvolverTrialLoad::Quiet:

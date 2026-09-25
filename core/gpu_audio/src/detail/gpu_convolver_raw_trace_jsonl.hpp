@@ -289,9 +289,9 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         manifest.expected_matched_pairs == 0 || manifest.bootstrap_resamples < 100 ||
         !manifest.paced || manifest.block_frames == 0 || manifest.sample_rate_hz == 0 ||
         manifest.channels == 0 || manifest.ir_frames == 0 || manifest.inflight_depth == 0 ||
-        manifest.expected_blocks_per_trial == 0 ||
-        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 ||
-        manifest.watchdog_ns <= manifest.deadline_ns || !valid_load(manifest.load))
+        manifest.expected_blocks_per_trial == 0 || manifest.lead_blocks == 0 ||
+        manifest.deadline_ns == 0 || manifest.watchdog_ns <= manifest.deadline_ns ||
+        !valid_load(manifest.load))
         return false;
     bool has_o3 = false;
     bool has_ndebug = false;
