@@ -1,10 +1,17 @@
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/dawn_shared_io_wavenet_spec.hpp"
+#include "detail/dawn_shared_io_provider.hpp"
+#include "detail/shared_io_arena.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <algorithm>
+#include <chrono>
+#include <optional>
 #include <vector>
+#include <thread>
+#include <cmath>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -109,4 +116,54 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
     };
     result = validate_dawn_shared_io_wavenet_spec(instance_spec);
     CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidShape);
+}
+
+TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][shared_io][wavenet]") {
+    Fixture fixture;
+    fixture.dilations = {1, 1};
+    fixture.layer.channels = 1;
+    fixture.layer.kernel = 1;
+    fixture.layer.head_size = 1;
+    fixture.layer.gated = 0;
+    fixture.layer.head_bias = 0;
+    fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
+    fixture.weights = {1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    const DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 4,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    auto created = DawnSharedIoProvider::create({});
+    if (!created.provider)
+        SKIP("Dawn/Metal provider unavailable on this host");
+    auto program = created.provider->make_wavenet_program(spec);
+    REQUIRE(program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*created.provider,
+                          {.slots = 1, .input_bytes_per_slot = 4 * sizeof(float),
+                           .output_bytes_per_slot = 4 * sizeof(float)}, std::move(program)));
+    auto write = arena.grant_write(1);
+    REQUIRE(write);
+    const float input[] = {0.0f, 0.5f, -1.0f, 2.0f};
+    std::copy(std::begin(input), std::end(input), reinterpret_cast<float*>(write->bytes.data()));
+    REQUIRE(arena.publish_written({write->token}));
+    REQUIRE(arena.submit(write->token));
+    std::optional<SharedIoArena::OutputLease> output;
+    for (int i = 0; i < 200 && !output; ++i) {
+        created.provider->poll();
+        arena.drain_completions();
+        output = arena.acquire_output(arena.preparation_epoch(), 1);
+        if (!output)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(output);
+    const auto* actual = reinterpret_cast<const float*>(output->bytes.data());
+    for (std::size_t i = 0; i < std::size(input); ++i)
+        CHECK(actual[i] == Catch::Approx(std::tanh(input[i])).margin(1.0e-5));
+    const auto token = output->token;
+    output.reset();
+    REQUIRE(arena.release_output({token}));
+    REQUIRE(arena.release());
 }

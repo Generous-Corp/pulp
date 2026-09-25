@@ -11,12 +11,15 @@
 
 namespace pulp::gpu_audio::detail {
 
-// Private preparation boundary for the future Dawn WaveNet adapter. It owns
-// immutable model data and causal-history storage, but intentionally has no
-// Dawn types or raw handles until an authenticated provider implementation is
-// available. submit() therefore fails closed in this slice.
+class DawnSharedIoProvider;
+
+// Private preparation boundary for the authenticated Dawn WaveNet adapter.
+// Dawn objects remain provider-owned; this object only carries the immutable
+// shape and delegates preparation/submission to that provider.
 class DawnSharedIoWavenetProgram final : public SharedIoPreparedProgram {
   public:
+    static std::unique_ptr<DawnSharedIoWavenetProgram>
+    create(DawnSharedIoProvider& provider, const DawnSharedIoWavenetProgramSpec& spec);
     static std::unique_ptr<DawnSharedIoWavenetProgram>
     create(const DawnSharedIoWavenetProgramSpec& spec);
 
@@ -41,13 +44,17 @@ class DawnSharedIoWavenetProgram final : public SharedIoPreparedProgram {
     }
 
   private:
-    explicit DawnSharedIoWavenetProgram(std::uint32_t block_size, std::uint32_t stream_instances,
-                                        std::vector<float> weights, std::size_t history_bytes);
+    DawnSharedIoWavenetProgram(DawnSharedIoProvider* provider,
+                               const DawnSharedIoWavenetProgramSpec& spec);
 
+    DawnSharedIoProvider* provider_ = nullptr;
     std::uint32_t block_size_ = 0;
     std::uint32_t stream_instances_ = 0;
     std::vector<float> weights_;
     std::vector<std::byte> history_;
+    std::vector<DawnSharedIoWavenetLayerSpec> arrays_;
+    std::vector<std::vector<std::uint32_t>> dilations_;
+    float head_scale_ = 1.0f;
     bool prepared_ = false;
 };
 
