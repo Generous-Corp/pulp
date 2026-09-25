@@ -485,7 +485,11 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
    allocation probe suites (`harness/rt_allocation_probe.cpp`) replace the
    global allocation operators for the whole process, so they never join a
    group of ordinary suites; they may share a group made only of probe suites
-   on the same compile line (`dsp_rt_contract_tests.cmake` does).
+   on the same compile line (`dsp_rt_contract_tests.cmake` does). A member
+   whose whole TU sits behind a platform or build option
+   (`#if defined(__APPLE__)`, `#if PULP_ENABLE_AUDIO_PROBES`) must be
+   registered behind that same condition: standalone it silently listed no
+   cases there, grouped it fails discovery.
 3. **Find duplicate case names across the group** (`TEST_CASE`, `SCENARIO`,
    `TEST_CASE_METHOD`) and rename one side with a short suffix. Catch2 aborts
    at startup on a duplicate with equal tags, and CTest would register the

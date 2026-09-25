@@ -710,7 +710,9 @@ class BuildMetricRecordTests(unittest.TestCase):
         self.assertTrue(args, "no metrics record was made")
         self.assertEqual(args[:2], ["metrics", "record"])
         self.assertEqual(self._value(args, "--target"), "local-build/focused")
-        self.assertEqual(self._value(args, "--workflow"), "targets:pulp-test-widgets")
+        self.assertEqual(self._value(args, "--workflow"), "targets:1/?:pulp-test-widgets")
+        self.assertEqual(self._value(args, "--provider"), "governed-build")
+        self.assertEqual(self._value(args, "--job"), "governed-build")
         self.assertEqual(self._value(args, "--status"), "failure")
         self.assertEqual(self._value(args, "--exit-code"), "3")
         self.assertEqual(self._value(args, "--routing-decision"), "tier0")
@@ -721,6 +723,70 @@ class BuildMetricRecordTests(unittest.TestCase):
         r = self._run(0, "0")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._recorded(), [])
+
+
+class RecordBuildMetricScriptTests(unittest.TestCase):
+    """record_build_metric.sh is the one local-build metrics contract, shared by
+    this wrapper and the `pulp build` CLI; pin what it sends and when it sends
+    nothing."""
+
+    SCRIPT = Path(__file__).with_name("record_build_metric.sh")
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.bindir = Path(self._tmp.name)
+        sy = self.bindir / "shipyard"
+        sy.write_text(BuildMetricRecordTests.RECORDER)
+        sy.chmod(0o755)
+        self.out = self.bindir / "args.txt"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, *fields: str, path: str | None = None, metrics: str = "1") -> list[str]:
+        env = {**os.environ, "PULP_BUILD_METRICS": metrics, "SHIPYARD_ARGS_OUT": str(self.out),
+               "PATH": path if path is not None else f"{self.bindir}{os.pathsep}{os.environ['PATH']}"}
+        t0 = time.monotonic()
+        r = subprocess.run(["bash", str(self.SCRIPT), *fields], capture_output=True, text=True,
+                           check=False, env=env)
+        self.assertLess(time.monotonic() - t0, 2.0, "the recorder must return immediately")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        for _ in range(60):
+            if self.out.exists() and self.out.read_text().strip():
+                return self.out.read_text().splitlines()
+            time.sleep(0.05)
+        return []
+
+    BASE = ("--provider", "pulp-cli", "--start", "1790000000", "--end", "1790000012",
+            "--exit-code", "0", "--jobs", "6", "--grant", "host-profile")
+
+    def test_focused_build_carries_count_total_and_targets(self) -> None:
+        args = self._run(*self.BASE, "--duration-ms", "12345", "--total-targets", "1708",
+                         "--target", "pulp-view-core", "--target", "pulp-test-widgets")
+        v = lambda flag: args[args.index(flag) + 1]
+        self.assertEqual(args[:6], ["metrics", "record", "--project", "pulp", "--job", "governed-build"])
+        self.assertEqual(v("--target"), "local-build/focused")
+        self.assertEqual(v("--workflow"), "targets:2/1708:pulp-view-core,pulp-test-widgets")
+        self.assertEqual(v("--provider"), "pulp-cli")
+        self.assertEqual(v("--duration-ms"), "12345")
+        self.assertEqual(v("--profile"), "j6")
+        self.assertEqual(v("--routing-decision"), "host-profile")
+        self.assertEqual(v("--status"), "success")
+        self.assertEqual(v("--started-at"), "2026-09-21T14:13:20Z")
+        self.assertEqual(v("--completed-at"), "2026-09-21T14:13:32Z")
+
+    def test_full_build_without_precise_duration(self) -> None:
+        args = self._run(*self.BASE)
+        v = lambda flag: args[args.index(flag) + 1]
+        self.assertEqual(v("--target"), "local-build/all")
+        self.assertEqual(v("--workflow"), "targets:all")
+        self.assertEqual(v("--duration-ms"), "12000")
+
+    def test_records_nothing_when_disabled_absent_or_malformed(self) -> None:
+        self.assertEqual(self._run(*self.BASE, metrics="0"), [])
+        self.assertEqual(self._run(*self.BASE, path="/usr/bin:/bin"), [])
+        self.assertEqual(self._run("--start", "x", "--end", "1", "--exit-code", "0"), [])
+        self.assertEqual(self._run(*self.BASE, "--from-the-future", "1"), [])
 
 
 if __name__ == "__main__":

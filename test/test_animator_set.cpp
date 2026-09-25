@@ -35,7 +35,7 @@ TEST_CASE("AnimatorSetBuilder sequential tweens run in order", "[view][animation
     REQUIRE(b == Catch::Approx(20.0f));
 }
 
-TEST_CASE("AnimatorSetBuilder delay", "[view][animation]") {
+TEST_CASE("AnimatorSetBuilder delay (animator set suite)", "[view][animation]") {
     float v = 0;
     auto runner = AnimatorSetBuilder()
         .delay(0.5f)
@@ -157,7 +157,7 @@ TEST_CASE("Vector3D dot and cross product", "[view][3d]") {
 
 // ── Quaternion ──────────────────────────────────────────────────────────
 
-TEST_CASE("Quaternion identity", "[view][3d]") {
+TEST_CASE("Quaternion identity (animator set suite)", "[view][3d]") {
     auto q = Quaternion::identity();
     REQUIRE(q.w == Catch::Approx(1.0f));
     REQUIRE(q.length() == Catch::Approx(1.0f));

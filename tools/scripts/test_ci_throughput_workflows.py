@@ -152,8 +152,12 @@ def pulp_test_suite_call(text: str, name: str) -> str:
 
 
 def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
+    # A split suite registers its second tag spec either as a raw
+    # catch_discover_tests() call on a standalone target or as a second
+    # pulp_add_test_suite() call when the suite is a grouped member; both
+    # carry the spec as TEST_SPEC.
     calls = re.findall(
-        rf"catch_discover_tests\(\s*{re.escape(name)}\b.*?\)",
+        rf"(?:catch_discover_tests|pulp_add_test_suite)\(\s*{re.escape(name)}\b.*?\)",
         text,
         re.S,
     )
@@ -164,7 +168,7 @@ def catch_test_suite_call(text: str, name: str, test_spec: str) -> str:
     ]
     if len(matches) != 1:
         raise AssertionError(
-            f"expected one catch_discover_tests registration for {name} {test_spec}"
+            f"expected one registration for {name} with TEST_SPEC {test_spec}"
         )
     return matches[0]
 

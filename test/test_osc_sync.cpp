@@ -243,7 +243,7 @@ double improvement_db(VaShape shape, double master_hz, double carrier_hz, double
 
 // ── The measurement, before anything is measured with it ──────────────────
 
-TEST_CASE("alias measurement separates a clean signal from a known-bad one",
+TEST_CASE("alias measurement separates a clean signal from a known-bad one (sync suite)",
           "[signal][osc][alias][sync]") {
     // The negative control. Every gate below is read through this measurement,
     // and a gate whose measurement cannot see failure passes silently. The
