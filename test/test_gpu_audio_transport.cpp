@@ -37,8 +37,7 @@ GpuAudioProgramDescriptor valid_shared_program() {
 
 } // namespace
 
-TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program",
-          "[gpu_audio][program]") {
+TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu_audio][program]") {
     const auto program = valid_shared_program();
     const auto validation = validate_gpu_audio_program(program);
     CHECK(validation.accepted());
