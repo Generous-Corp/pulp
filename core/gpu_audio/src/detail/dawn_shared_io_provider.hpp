@@ -1,7 +1,7 @@
 #pragma once
 
-#include "shared_io_arena.hpp"
 #include "dawn_shared_io_wavenet_spec.hpp"
+#include "shared_io_arena.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -157,8 +157,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
                                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept;
     bool release_convolution_program() noexcept;
     bool submit_impl(const SlotResources&, SlotToken,
-                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
-                     unsigned kind) noexcept;
+                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox, unsigned kind) noexcept;
     struct Impl;
     explicit DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;

@@ -945,8 +945,8 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
     }
 }
 
-std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_wavenet_program(
-    const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+std::unique_ptr<SharedIoPreparedProgram>
+DawnSharedIoProvider::make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
     // The submit token currently carries no stream-instance identity. Refuse
     // multi-instance plans rather than risking causal-history aliasing.
     if (spec.stream_instances != 1)
@@ -1395,7 +1395,7 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
     const DawnSharedIoWavenetProgramSpec& spec,
     std::span<const SlotBufferHandle> handles) noexcept {
     if (!impl_ || !impl_->accepting || impl_->wavenet || handles.empty() ||
-        !validate_dawn_shared_io_wavenet_spec(spec) .accepted() || spec.arrays.size() != 1 ||
+        !validate_dawn_shared_io_wavenet_spec(spec).accepted() || spec.arrays.size() != 1 ||
         spec.arrays[0].dilations.size() != 1)
         return false;
     const auto& s = spec.arrays[0];
@@ -1432,10 +1432,24 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             wgpu::BufferDescriptor d{};
             d.size = size;
             d.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc |
-                       wgpu::BufferUsage::CopyDst;
+                      wgpu::BufferUsage::CopyDst;
             return impl_->device.CreateBuffer(&d);
         };
         impl_->push_error_scopes();
+        struct ErrorScopeGuard {
+            Impl* impl;
+            bool active = true;
+            ~ErrorScopeGuard() {
+                if (active)
+                    (void)impl->pop_error_scopes();
+            }
+            bool close() noexcept {
+                if (!active)
+                    return true;
+                active = false;
+                return impl->pop_error_scopes();
+            }
+        } error_scope{impl_.get()};
         plan->rechannel = make_pipeline(kSharedIoWavenetRechannelWgsl);
         plan->layer = make_pipeline(kSharedIoWavenetLayerWgsl);
         plan->head = make_pipeline(kSharedIoWavenetHeadWgsl);
@@ -1445,11 +1459,21 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             return false;
         impl_->queue.WriteBuffer(plan->weights, 0, spec.weights.data(),
                                  spec.weights.size() * sizeof(float));
-        struct RcU { std::uint32_t C, B, pad, woff; };
-        struct LyU { std::uint32_t C, K, B, dil, Z, gated, pad, conv_w, conv_b, mix_w, l1_w,
-            l1_b, p0, p1, p2, p3; };
-        struct HdU { std::uint32_t C, H, B, hr_w, hr_b, bias, p0, p1; };
-        struct ScU { std::uint32_t B, H; float scale; std::uint32_t p0; };
+        struct RcU {
+            std::uint32_t C, B, pad, woff;
+        };
+        struct LyU {
+            std::uint32_t C, K, B, dil, Z, gated, pad, conv_w, conv_b, mix_w, l1_w, l1_b, p0, p1,
+                p2, p3;
+        };
+        struct HdU {
+            std::uint32_t C, H, B, hr_w, hr_b, bias, p0, p1;
+        };
+        struct ScU {
+            std::uint32_t B, H;
+            float scale;
+            std::uint32_t p0;
+        };
         plan->rechannel_u = make_storage(sizeof(RcU));
         plan->layer_u = make_storage(sizeof(LyU));
         plan->head_u = make_storage(sizeof(HdU));
@@ -1465,8 +1489,9 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         const std::uint32_t head_w = l1_b + C;
         const std::uint32_t head_b = head_w + H * C;
         const RcU rcu{C, spec.block_size, pad, rc_w};
-        const LyU lyu{C, s.kernel, spec.block_size, s.dilations[0], Z, s.gated, pad,
-                     conv_w, conv_b, mix_w, l1_w, l1_b, 0, 0, 0, 0};
+        const LyU lyu{C,      s.kernel, spec.block_size, s.dilations[0], Z,    s.gated, pad,
+                      conv_w, conv_b,   mix_w,           l1_w,           l1_b, 0,       0,
+                      0,      0};
         const HdU hdu{C, H, spec.block_size, head_w, head_b, s.head_bias, 0, 0};
         const ScU scu{spec.block_size, H, spec.head_scale, 0};
         const auto uniform_usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -1501,7 +1526,8 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             g.act1 = make_storage(bytes);
             g.headacc = make_storage(static_cast<std::size_t>(C) * spec.block_size * sizeof(float));
             g.headout = make_storage(static_cast<std::size_t>(H) * spec.block_size * sizeof(float));
-            g.history_temp = make_storage(std::max<std::size_t>(1, static_cast<std::size_t>(C) * pad * sizeof(float)));
+            g.history_temp = make_storage(
+                std::max<std::size_t>(1, static_cast<std::size_t>(C) * pad * sizeof(float)));
             if (!g.act0 || !g.act1 || !g.headacc || !g.headout || !g.history_temp)
                 return false;
             if (pad != 0) {
@@ -1518,39 +1544,72 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
                 return impl_->device.CreateBindGroup(&d);
             };
             wgpu::BindGroupEntry r_entries[4]{};
-            r_entries[0].binding = 0; r_entries[0].buffer = plan->weights; r_entries[0].size = plan->weights.GetSize();
-            r_entries[1].binding = 1; r_entries[1].buffer = *in; r_entries[1].size = spec.block_size * sizeof(float);
-            r_entries[2].binding = 2; r_entries[2].buffer = g.act0; r_entries[2].size = bytes;
-            r_entries[3].binding = 3; r_entries[3].buffer = plan->rechannel_u; r_entries[3].size = sizeof(RcU);
+            r_entries[0].binding = 0;
+            r_entries[0].buffer = plan->weights;
+            r_entries[0].size = plan->weights.GetSize();
+            r_entries[1].binding = 1;
+            r_entries[1].buffer = *in;
+            r_entries[1].size = spec.block_size * sizeof(float);
+            r_entries[2].binding = 2;
+            r_entries[2].buffer = g.act0;
+            r_entries[2].size = bytes;
+            r_entries[3].binding = 3;
+            r_entries[3].buffer = plan->rechannel_u;
+            r_entries[3].size = sizeof(RcU);
             g.rechannel = bind(plan->rechannel, r_entries, 4);
             wgpu::BindGroupEntry l_entries[6]{};
-            l_entries[0].binding = 0; l_entries[0].buffer = plan->weights; l_entries[0].size = plan->weights.GetSize();
-            l_entries[1].binding = 1; l_entries[1].buffer = g.act0; l_entries[1].size = bytes;
-            l_entries[2].binding = 2; l_entries[2].buffer = g.act1; l_entries[2].size = bytes;
-            l_entries[3].binding = 3; l_entries[3].buffer = *in; l_entries[3].size = spec.block_size * sizeof(float);
-            l_entries[4].binding = 4; l_entries[4].buffer = g.headacc; l_entries[4].size = g.headacc.GetSize();
-            l_entries[5].binding = 5; l_entries[5].buffer = plan->layer_u; l_entries[5].size = sizeof(LyU);
+            l_entries[0].binding = 0;
+            l_entries[0].buffer = plan->weights;
+            l_entries[0].size = plan->weights.GetSize();
+            l_entries[1].binding = 1;
+            l_entries[1].buffer = g.act0;
+            l_entries[1].size = bytes;
+            l_entries[2].binding = 2;
+            l_entries[2].buffer = g.act1;
+            l_entries[2].size = bytes;
+            l_entries[3].binding = 3;
+            l_entries[3].buffer = *in;
+            l_entries[3].size = spec.block_size * sizeof(float);
+            l_entries[4].binding = 4;
+            l_entries[4].buffer = g.headacc;
+            l_entries[4].size = g.headacc.GetSize();
+            l_entries[5].binding = 5;
+            l_entries[5].buffer = plan->layer_u;
+            l_entries[5].size = sizeof(LyU);
             g.layer = bind(plan->layer, l_entries, 6);
             wgpu::BindGroupEntry h_entries[4]{};
-            h_entries[0].binding = 0; h_entries[0].buffer = plan->weights; h_entries[0].size = plan->weights.GetSize();
-            h_entries[1].binding = 1; h_entries[1].buffer = g.headacc; h_entries[1].size = g.headacc.GetSize();
-            h_entries[2].binding = 2; h_entries[2].buffer = g.headout; h_entries[2].size = g.headout.GetSize();
-            h_entries[3].binding = 3; h_entries[3].buffer = plan->head_u; h_entries[3].size = sizeof(HdU);
+            h_entries[0].binding = 0;
+            h_entries[0].buffer = plan->weights;
+            h_entries[0].size = plan->weights.GetSize();
+            h_entries[1].binding = 1;
+            h_entries[1].buffer = g.headacc;
+            h_entries[1].size = g.headacc.GetSize();
+            h_entries[2].binding = 2;
+            h_entries[2].buffer = g.headout;
+            h_entries[2].size = g.headout.GetSize();
+            h_entries[3].binding = 3;
+            h_entries[3].buffer = plan->head_u;
+            h_entries[3].size = sizeof(HdU);
             g.head = bind(plan->head, h_entries, 4);
             wgpu::BindGroupEntry s_entries[3]{};
-            s_entries[0].binding = 0; s_entries[0].buffer = g.headout; s_entries[0].size = g.headout.GetSize();
-            s_entries[1].binding = 1; s_entries[1].buffer = *out; s_entries[1].size = spec.block_size * sizeof(float);
-            s_entries[2].binding = 2; s_entries[2].buffer = plan->scale_u; s_entries[2].size = sizeof(ScU);
+            s_entries[0].binding = 0;
+            s_entries[0].buffer = g.headout;
+            s_entries[0].size = g.headout.GetSize();
+            s_entries[1].binding = 1;
+            s_entries[1].buffer = *out;
+            s_entries[1].size = spec.block_size * sizeof(float);
+            s_entries[2].binding = 2;
+            s_entries[2].buffer = plan->scale_u;
+            s_entries[2].size = sizeof(ScU);
             g.scale = bind(plan->scale, s_entries, 3);
             if (!g.rechannel || !g.layer || !g.head || !g.scale)
                 return false;
         }
-        if (!impl_->pop_error_scopes())
+        if (!error_scope.close())
             return false;
         impl_->wavenet = std::move(plan);
         return true;
     } catch (...) {
-        (void)impl_->pop_error_scopes();
         return false;
     }
 }
@@ -1703,11 +1762,15 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         scale_pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
         scale_pass.End();
         if (plan.pad != 0) {
-            const auto history_bytes = static_cast<std::uint64_t>(plan.channels) * plan.pad * sizeof(float);
-            const auto tail_offset = static_cast<std::uint64_t>(plan.channels) * plan.block_size * sizeof(float);
-            encoder.CopyBufferToBuffer(groups.act0, tail_offset, groups.history_temp, 0, history_bytes);
+            const auto history_bytes =
+                static_cast<std::uint64_t>(plan.channels) * plan.pad * sizeof(float);
+            const auto tail_offset =
+                static_cast<std::uint64_t>(plan.channels) * plan.block_size * sizeof(float);
+            encoder.CopyBufferToBuffer(groups.act0, tail_offset, groups.history_temp, 0,
+                                       history_bytes);
             encoder.CopyBufferToBuffer(groups.history_temp, 0, groups.act0, 0, history_bytes);
-            encoder.CopyBufferToBuffer(groups.act1, tail_offset, groups.history_temp, 0, history_bytes);
+            encoder.CopyBufferToBuffer(groups.act1, tail_offset, groups.history_temp, 0,
+                                       history_bytes);
             encoder.CopyBufferToBuffer(groups.history_temp, 0, groups.act1, 0, history_bytes);
         }
     } else {
