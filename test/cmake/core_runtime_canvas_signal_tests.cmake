@@ -457,6 +457,14 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Public, backend-neutral WaveNet adapter boundary. This is deliberately a
+# shape/fallback contract; provider handles remain private until an execution
+# owner can be safely attached to GpuAudioNode.
+pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
+    SOURCES test_gpu_wavenet_descriptor.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+
 # Dawn-free shape contract for the future provider-owned WaveNet program. This
 # validates model metadata before any provider resource or handle is created.
 pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
