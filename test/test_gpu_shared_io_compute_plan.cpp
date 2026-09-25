@@ -11,6 +11,10 @@
 using namespace pulp::gpu_audio::detail;
 
 namespace {
+struct FakeLifecycleState {
+    bool program_released = false;
+};
+
 class FakeProvider final : public SharedIoArenaProvider {
     struct Slot {
         std::byte* input;
@@ -123,6 +127,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool retired_before_program_release = false;
     CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
+    std::shared_ptr<FakeLifecycleState> lifecycle_state =
+        std::make_shared<FakeLifecycleState>();
     std::vector<Slot*> slots_;
 };
 
@@ -158,6 +164,7 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
         if (!allow_release)
             return false;
         expected_.program_released = true;
+        expected_.lifecycle_state->program_released = true;
         prepared = false;
         return true;
     }
@@ -193,7 +200,7 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
 TEST_CASE("shared IO program session owns generic provider lifecycle",
           "[gpu_audio][shared_io][p2]") {
     auto provider = std::make_unique<FakeProvider>();
-    auto* provider_raw = provider.get();
+    const auto lifecycle_state = provider->lifecycle_state;
     auto program = std::make_unique<FakePreparedProgram>(*provider);
     auto* control = program.get();
     control->allow_release = true;
@@ -217,7 +224,7 @@ TEST_CASE("shared IO program session owns generic provider lifecycle",
     REQUIRE(session.release_output({output->token}));
     output.reset();
     REQUIRE(session.release());
-    CHECK(provider_raw->program_released);
+    CHECK(lifecycle_state->program_released);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",
