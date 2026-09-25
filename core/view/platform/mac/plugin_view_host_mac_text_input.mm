@@ -1,6 +1,7 @@
 #include "pulp_mac_objc_names.h"
-#include "plugin_view_host_mac_view.h"
+
 #include "mac_text_input_ranges.h"
+#include "plugin_view_host_mac_view.h"
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -176,7 +177,8 @@ void pulp_plugin_set_marked_text(NSView* host,
     NSString* str = pulp_plugin_string_from_input(string);
     const char* utf8 = str.UTF8String;
     std::string marked = utf8 ? utf8 : "";
-    const auto selected_start16 = pulp::view::mac_text_input::nsrange_location_or_zero(selected_range);
+    const auto selected_start16 =
+        pulp::view::mac_text_input::nsrange_location_or_zero(selected_range);
     const auto selected_end16 = pulp::view::mac_text_input::nsrange_end_or_zero(selected_range);
     const auto selected_start8 = pulp::canvas::utf8_offset_for_utf16_offset(
         marked, selected_start16);

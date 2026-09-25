@@ -15,7 +15,8 @@ inline std::size_t nsrange_location_or_zero(NSRange range) noexcept {
 }
 
 inline std::size_t nsrange_end_or_zero(NSRange range) noexcept {
-    if (range.location == NSNotFound) return 0;
+    if (range.location == NSNotFound)
+        return 0;
     const auto start = static_cast<std::size_t>(range.location);
     const auto length = static_cast<std::size_t>(range.length);
     const auto max = std::numeric_limits<std::size_t>::max();

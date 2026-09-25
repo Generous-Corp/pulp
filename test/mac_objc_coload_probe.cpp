@@ -53,8 +53,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> bases(argv + 5, argv + argc);
 
     if (suffix_a == suffix_b) {
-        std::fprintf(stderr, "the two suffixes must differ (both are '%s')\n",
-                     suffix_a.c_str());
+        std::fprintf(stderr, "the two suffixes must differ (both are '%s')\n", suffix_a.c_str());
         return 2;
     }
 
@@ -63,8 +62,9 @@ int main(int argc, char** argv) {
     // check below meaningless.
     for (const auto& base : bases) {
         if (class_exists(base)) {
-            std::fprintf(stderr, "instrument broken: class %s already exists before "
-                                 "any bundle is loaded\n",
+            std::fprintf(stderr,
+                         "instrument broken: class %s already exists before "
+                         "any bundle is loaded\n",
                          base.c_str());
             return 2;
         }

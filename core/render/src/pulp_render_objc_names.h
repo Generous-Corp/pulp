@@ -29,6 +29,6 @@
 // the view layer's own `PulpMetalView` (window_host_mac.mm) so the two never
 // share a name, suffixed or not, and both clusters can be compiled into one
 // translation unit without one header's rename shadowing the other's.
-#define PulpMetalSurfaceView           PULP_RENDER_OBJC_NAME(PulpMetalSurfaceView)
+#define PulpMetalSurfaceView PULP_RENDER_OBJC_NAME(PulpMetalSurfaceView)
 
 #endif  // PULP_VIEW_OBJC_SUFFIX

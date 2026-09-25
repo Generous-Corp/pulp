@@ -28,11 +28,11 @@
 // ── PulpPluginView: NSView subclass for DAW embedding ────────────────────────
 
 @interface PulpPluginView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
+@property(nonatomic, assign) pulp::view::View* rootView;
+@property(nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
 // Fired from -viewDidMoveToWindow so the host can start/stop its CPU frame
 // driver only while the view actually lives in a window.
-@property (nonatomic, copy) void (^onWindowChange)(void);
+@property(nonatomic, copy) void (^onWindowChange)(void);
 // Fired from -setNeedsDisplay: (flag=YES) — the ONE funnel every "this editor
 // is dirty" signal already passes through: the event handlers below, the host's
 // repaint() override (and therefore View::request_repaint), resize, and AppKit
@@ -41,18 +41,18 @@
 // (see should_dispatch_host_frame). Without a dirty signal the gate could never
 // re-open: a static editor would idle forever and never see the hover that woke
 // it. Nil-ed in the host destructor before `this` is freed.
-@property (nonatomic, copy) void (^onNeedsDisplay)(void);
+@property(nonatomic, copy) void (^onNeedsDisplay)(void);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test, mirroring the standalone PulpView. nil = identity. Set
 // by MacPluginViewHost::set_design_viewport.
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
+@property(nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
 // Design viewport size. (0, 0) = identity (paint at host bounds, no
 // scale/letterbox). When set, drawRect pins root to (designW, designH),
 // fills letterbox bars at host bounds, then translate+scale before
 // paint_all so the rendered surface matches the standalone host.
-@property (nonatomic, assign) float designW;
-@property (nonatomic, assign) float designH;
-@property (nonatomic, assign) BOOL designTopAlign;
+@property(nonatomic, assign) float designW;
+@property(nonatomic, assign) float designH;
+@property(nonatomic, assign) BOOL designTopAlign;
 // Reconcile first-responder with the pulp text-input focus slot. Declared here
 // so the host's frame-tick block (below the @implementation) can call it every
 // vsync — the event-independent cadence that hands the DAW keyboard back the
@@ -102,18 +102,18 @@
 // attach_to_parent) never drive `attach_to_parent`-time rendering — they all
 // funnel through `-viewDidMoveToWindow`.
 @interface PulpGpuPluginView : NSView
-@property (nonatomic, readonly) CAMetalLayer* metalLayer;
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, copy) void (^onWindowChange)(void);
-@property (nonatomic, copy) void (^onBackingChange)(void);
-@property (nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
+@property(nonatomic, readonly) CAMetalLayer* metalLayer;
+@property(nonatomic, assign) pulp::view::View* rootView;
+@property(nonatomic, copy) void (^onWindowChange)(void);
+@property(nonatomic, copy) void (^onBackingChange)(void);
+@property(nonatomic, copy) void (^onResize)(uint32_t, uint32_t);
 // Inverse-design-viewport transform applied to every host-space input point
 // before hit_test. Mirrors PulpPluginView + the standalone host. nil =
 // identity. Set by MacGpuPluginViewHost::set_design_viewport.
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
-@property (nonatomic, assign) float designW;
-@property (nonatomic, assign) float designH;
-@property (nonatomic, assign) BOOL designTopAlign;
+@property(nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
+@property(nonatomic, assign) float designW;
+@property(nonatomic, assign) float designH;
+@property(nonatomic, assign) BOOL designTopAlign;
 // See PulpPluginView::syncKeyFocus — declared so the GPU host's display-link
 // frame-tick block can reconcile first-responder every vsync.
 - (void)syncKeyFocus;
@@ -148,6 +148,6 @@
 /// slow, which is the hardest failure of this mechanism to notice.
 - (BOOL)coalescingPointerInput;
 @end
-#endif  // PULP_HAS_SKIA
+#endif // PULP_HAS_SKIA
 
-#endif  // TARGET_OS_OSX
+#endif // TARGET_OS_OSX
