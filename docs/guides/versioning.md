@@ -182,6 +182,16 @@ invariants over Pulp's own source, both hard-failing:
 
 It also runs in the pre-push `gates.sh`, so a violation is caught before the push.
 
+The workflow's last step, **Source-only selftests**, runs every registration
+listed in `tools/ci/source_selftests.json` with
+`tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that
+read only the checkout; the required `macos` gate excludes their
+`source-selftest` label on gate events, so this required context is where they
+block a merge. The step needs the full-history checkout this job already does
+and nothing but the standard library. See
+[test-lanes.md](test-lanes.md#the-source-selftest-lane) for how a test joins or
+leaves the lane.
+
 ### Action-major pins in the gate workflows
 
 The gate workflows (`version-skill-check.yml`, `coverage.yml`) run their scripts

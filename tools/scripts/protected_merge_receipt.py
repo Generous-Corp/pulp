@@ -40,8 +40,12 @@ POLICY_PATHS = (
 # The test selection a merge group itself runs. A receipt stands in for that
 # run, so it must record the same selection: a narrower tier (an include label,
 # an include regex, or more excluded labels) is evidence about a different test
-# set and can never be reused as full validation.
-REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
+# set and can never be reused as full validation. The literal must equal
+# tools/ci/ctest_gate_args.GATE_LABEL_EXCLUDE; it is not imported because the
+# workflow runs a copy of this file extracted from the protected base.
+# `source-selftest` tests run on the required `Enforce version & skill sync`
+# context for every merge group, receipt or not.
+REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab|source-selftest"
 MIN_SELECTED_PERCENT = 80
 SELECTION_KEYS = ("label_exclude", "exclude_regex", "label_include", "include_regex")
 VALIDATION_KEYS = (

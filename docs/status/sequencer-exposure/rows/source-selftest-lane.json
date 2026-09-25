@@ -1,0 +1,49 @@
+{
+  "id": "source-selftest-lane",
+  "title": "Source-only Python selftests run on the build-free required context instead of the macOS gate",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "75cffa75-82e0-426a-aa90-d9d95080d2b6",
+  "owned_paths": [
+    ".github/workflows/version-skill-check.yml",
+    "docs/status/sequencer-exposure/rows/source-selftest-lane.json"
+  ],
+  "evidence": [
+    {
+      "path": ".github/workflows/version-skill-check.yml",
+      "needles": [
+        "Source-only selftests (moved off the macOS gate)",
+        "python3 tools/ci/source_selftests.py run --min-count 130",
+        "Sequencer exposure ledger"
+      ]
+    },
+    {
+      "path": "tools/ci/ctest_gate_args.py",
+      "needles": [
+        "SOURCE_SELFTEST_LABEL = \"source-selftest\""
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "The change moves where existing repository selftests execute. No header, target, symbol or installed file changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No command, flag or projection changes."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool, request or response shape changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No operation, executor binding, grant or profile policy is added."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "No design-time capability row is added or changed. The sequencer exposure ledger step in this workflow is unchanged and still runs on every pull request and merge group."
+    }
+  }
+}

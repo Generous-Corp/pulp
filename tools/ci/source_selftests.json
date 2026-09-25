@@ -1,0 +1,930 @@
+{
+  "schema_version": 1,
+  "_comment": "Source-only Python ctest registrations run on the build-free required lane (`Enforce version & skill sync`) instead of the required macOS gate. Each entry is the registered command with the interpreter dropped and the source root written as {repo}. test/cmake/source_selftest_lane_tests.cmake labels every entry `source-selftest`; tools/ci/ctest_gate_args.py excludes that label on gate events; `tools/ci/source_selftests.py check` (the source-selftest-lane-contract ctest, on the gate) fails when the two drift. Refresh commands with `python3 tools/ci/source_selftests.py write --build-dir build`; add a test with `--add <name>`. An entry must import only the standard library, read only the checkout, and not carry pr-fast. See docs/guides/test-lanes.md.",
+  "tests": [
+    {
+      "name": "affected-targets-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_affected_targets.py"
+      ]
+    },
+    {
+      "name": "agent-capability-installed-sdk-helper-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_agent_capability_installed_sdk_helpers.py"
+      ]
+    },
+    {
+      "name": "agent-capability-manifest-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_agent_capability_manifest.py"
+      ],
+      "resource_lock": [
+        "agent-capability-manifest-source"
+      ],
+      "processors": 8
+    },
+    {
+      "name": "agent-capability-rederive-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_agent_capability_rederive.py"
+      ],
+      "timeout": 300.0,
+      "resource_lock": [
+        "agent-capability-manifest-source"
+      ],
+      "processors": 8
+    },
+    {
+      "name": "agent-capability-sdk-handoff-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_sdk_capability_handoff.py"
+      ]
+    },
+    {
+      "name": "agent-panel-gate-classifier-selftest",
+      "argv": [
+        "{repo}/tools/import-validation/test_check_agent_panel_invariants.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "auval-helper-worker-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_run_auval_component.py"
+      ]
+    },
+    {
+      "name": "build-matrix-contract",
+      "argv": [
+        "{repo}/tools/ci/test_build_matrix_contract.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "build-parallelism-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_build_parallelism_guard.py"
+      ]
+    },
+    {
+      "name": "build-speed-scorecard-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_build_speed_scorecard"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 120.0
+    },
+    {
+      "name": "build-time-report-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_build_time_report"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 120.0
+    },
+    {
+      "name": "canvas-path-flush-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_check_canvas_path_flush.py"
+      ]
+    },
+    {
+      "name": "changed-surface-policy-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_changed_surface_policy.py"
+      ]
+    },
+    {
+      "name": "ci-python-selector-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_find_python311.py"
+      ]
+    },
+    {
+      "name": "ci-routing-digest-check",
+      "argv": [
+        "{repo}/tools/scripts/ci_routing_digest.py",
+        "--check"
+      ]
+    },
+    {
+      "name": "ci-routing-digest-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_ci_routing_digest.py"
+      ]
+    },
+    {
+      "name": "clean-build-cov-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_build_cov"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 300.0
+    },
+    {
+      "name": "clean-worktree-builds-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_worktree_builds"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 600.0
+    },
+    {
+      "name": "clean-worktrees-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_clean_worktrees"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 600.0
+    },
+    {
+      "name": "cmake-link-floor-selftest",
+      "argv": [
+        "{repo}/tools/scripts/link_floor_selftest.py",
+        "--mutate"
+      ],
+      "timeout": 600.0
+    },
+    {
+      "name": "cmake-test-group-discovery",
+      "argv": [
+        "{repo}/tools/scripts/test_pulp_test_group.py"
+      ],
+      "timeout": 180.0
+    },
+    {
+      "name": "ctest-gate-args-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_ctest_gate_args.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "ctest-inventory-parity-self-check",
+      "argv": [
+        "{repo}/tools/scripts/ctest_inventory_parity.py",
+        "self-check"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "ctest-label-exclusion-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_ctest_label_exclusion_guard.py"
+      ]
+    },
+    {
+      "name": "decisions-contract-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_decisions_contract.py"
+      ]
+    },
+    {
+      "name": "diff-cover-targets-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_diff_cover_targets"
+      ],
+      "cwd": "{repo}/tools/scripts",
+      "timeout": 180.0
+    },
+    {
+      "name": "doxygen-installed-header-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_doxygen_installed_header_check.py"
+      ]
+    },
+    {
+      "name": "dsp-provenance-audit-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_dsp_provenance_audit.py"
+      ]
+    },
+    {
+      "name": "dsp-vocabulary-selftest",
+      "argv": [
+        "{repo}/tools/test_dsp_vocabulary.py"
+      ]
+    },
+    {
+      "name": "fleet-remote-probe-selftest",
+      "argv": [
+        "{repo}/tools/fleet/test_probe_remote.py"
+      ]
+    },
+    {
+      "name": "fleet-runner-policy-selftest",
+      "argv": [
+        "{repo}/tools/fleet/test_fleet_lib.py"
+      ]
+    },
+    {
+      "name": "fleet-snapshot-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_fleet_snapshot.py"
+      ]
+    },
+    {
+      "name": "forced-restore-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_forced_restore_lint.py"
+      ]
+    },
+    {
+      "name": "format-baseline-diff-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_format_baseline_diff.py"
+      ]
+    },
+    {
+      "name": "framework-neutrality-selftest",
+      "argv": [
+        "{repo}/tools/scripts/framework_neutrality_check.py",
+        "--selftest"
+      ]
+    },
+    {
+      "name": "gallery-diff-selftest",
+      "argv": [
+        "-m",
+        "unittest",
+        "test_gallery_visual_diff"
+      ],
+      "cwd": "{repo}/tools/scripts"
+    },
+    {
+      "name": "gate-common-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gate_common.py"
+      ]
+    },
+    {
+      "name": "gate-suite-executed-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gate_suite_executed.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "governed-build-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_governed_build.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "gpu-audio-p4-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_audio_p4_evidence.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "gpu-audio-trace-validator-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_validate_gpu_audio_trace_captures.py"
+      ]
+    },
+    {
+      "name": "gpu-connected-git-history-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_connected_git_history.py"
+      ]
+    },
+    {
+      "name": "gpu-dpr-experiment-contract-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_dpr_experiment.py"
+      ]
+    },
+    {
+      "name": "gpu-dpr-inconclusive-receipt-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"
+      ]
+    },
+    {
+      "name": "gpu-dpr-pulp-native-adapter-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+      ]
+    },
+    {
+      "name": "gpu-dpr-runner-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_dpr_runner.py"
+      ],
+      "timeout": 300.0,
+      "processors": 8
+    },
+    {
+      "name": "gpu-dpr-v2-evidence-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_dpr_v2_evidence.py"
+      ],
+      "timeout": 300.0,
+      "processors": 8
+    },
+    {
+      "name": "gpu-dpr-web-adapter-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_dpr_web_adapter.py"
+      ]
+    },
+    {
+      "name": "gpu-first-visible-acceptance-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_first_visible_a3_acceptance.py"
+      ]
+    },
+    {
+      "name": "gpu-first-visible-acceptance-v2-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py"
+      ]
+    },
+    {
+      "name": "gpu-first-visible-campaign-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_first_visible_a3_campaign.py"
+      ]
+    },
+    {
+      "name": "gpu-first-visible-external-adapter-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_first_visible_a3_external_adapter.py"
+      ],
+      "processors": 8
+    },
+    {
+      "name": "gpu-handoff-pin-freshness-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_handoff_pin_freshness.py"
+      ]
+    },
+    {
+      "name": "gpu-handoff-provenance-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_handoff_provenance.py"
+      ],
+      "timeout": 300.0
+    },
+    {
+      "name": "gpu-health-contract-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_health_contract.py"
+      ]
+    },
+    {
+      "name": "gpu-health-read-contract-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_health_read_contract.py"
+      ]
+    },
+    {
+      "name": "gpu-health-run-attestation",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_health_run_attestation.py"
+      ],
+      "timeout": 180.0
+    },
+    {
+      "name": "gpu-probe-acceptance-verifier-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_verify_gpu_probe_acceptance.py"
+      ]
+    },
+    {
+      "name": "gpu-provenance-hydration-real-git-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_hydrate_real_git.py"
+      ]
+    },
+    {
+      "name": "gpu-provenance-hydration-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_hydrate_gpu_provenance_commits.py"
+      ]
+    },
+    {
+      "name": "gpu-recipe-catalog-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_gpu_recipe_catalog.py"
+      ],
+      "timeout": 300.0
+    },
+    {
+      "name": "gpu-trace-overhead-verifier-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+      ],
+      "timeout": 300.0
+    },
+    {
+      "name": "inspector-truth-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_inspector_truth_check.py"
+      ]
+    },
+    {
+      "name": "interchange-capability-emit-selftest",
+      "argv": [
+        "{repo}/core/interchange/tools/test_capability_emit.py"
+      ]
+    },
+    {
+      "name": "linux-runner-group-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_verify_linux_runner_group.py"
+      ]
+    },
+    {
+      "name": "live-build-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_live_build_check.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "mac-objc-source-list-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_mac_objc_source_list_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "measure-min-os-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_measure_min_os.py"
+      ]
+    },
+    {
+      "name": "minos-registry-absent-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_minos_registry_absent.py"
+      ]
+    },
+    {
+      "name": "native-intel-runner-group-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_verify_native_intel_runner_group.py"
+      ]
+    },
+    {
+      "name": "native-intel-runner-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_native_intel_runner.py"
+      ]
+    },
+    {
+      "name": "palette-health-selftest",
+      "argv": [
+        "{repo}/test/../tools/import-validation/test_check_palette_health.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "planning-gitlink-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_planning_gitlink_guard.py"
+      ]
+    },
+    {
+      "name": "playback-negative-capability-selftest",
+      "argv": [
+        "{repo}/tools/scripts/negative_capability_check.py",
+        "--selftest"
+      ]
+    },
+    {
+      "name": "pr-check-triage-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_pr_check_triage.py"
+      ]
+    },
+    {
+      "name": "prepush-gate-output",
+      "argv": [
+        "{repo}/tools/scripts/test_prepush_gate_output.py"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "prepush-gate-supervisor",
+      "argv": [
+        "{repo}/tools/scripts/test_prepush_gate_supervisor.py"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "process-deadline-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_run_with_deadline.py"
+      ]
+    },
+    {
+      "name": "queue-batch-attribute-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_queue_batch_attribute.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "rack-acid-behavior",
+      "argv": [
+        "{repo}/test/../tools/rack/test_acid_behavior.py"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "rack-acid-preflight",
+      "argv": [
+        "{repo}/test/../tools/rack/test_acid_preflight.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-acid-runtime-gate",
+      "argv": [
+        "{repo}/test/../tools/rack/test_acid_runtime_gate.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-acid-taps",
+      "argv": [
+        "{repo}/test/../tools/rack/test_acid_taps.py"
+      ],
+      "timeout": 30.0
+    },
+    {
+      "name": "rack-adjudicate-scenes",
+      "argv": [
+        "{repo}/test/../tools/rack/test_adjudicate_scenes.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-capability-lessons",
+      "argv": [
+        "{repo}/test/../tools/rack/test_capability_lessons.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-capability-verify",
+      "argv": [
+        "{repo}/test/../tools/rack/test_capability_verify.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-corpus-audit",
+      "argv": [
+        "{repo}/test/../tools/rack/test_corpus_audit.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-corpus-export",
+      "argv": [
+        "{repo}/test/../tools/rack/test_corpus_export.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-cv-depth",
+      "argv": [
+        "{repo}/test/../tools/rack/test_cv_depth.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-deterministic-repair",
+      "argv": [
+        "{repo}/test/../tools/rack/test_deterministic_repair.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-fidelity",
+      "argv": [
+        "{repo}/test/../tools/rack/test_fidelity.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "rack-generation-eligibility",
+      "argv": [
+        "{repo}/test/../tools/rack/test_generation_eligibility.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-generator-endings",
+      "argv": [
+        "{repo}/test/../tools/rack/test_generator_endings.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-inert-input-cause",
+      "argv": [
+        "{repo}/test/../tools/rack/test_inert_input_cause.py"
+      ],
+      "timeout": 300.0
+    },
+    {
+      "name": "rack-knowledge-admission",
+      "argv": [
+        "{repo}/test/../tools/rack/test_knowledge_admission.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-licence-fix-replay",
+      "argv": [
+        "{repo}/test/../tools/rack/test_replay_licence_fix.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "rack-measure-ranges",
+      "argv": [
+        "{repo}/test/../tools/rack/test_measure_ranges.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-param-units",
+      "argv": [
+        "{repo}/test/../tools/rack/test_param_units.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-patch-replay",
+      "argv": [
+        "{repo}/test/../tools/rack/test_patch_replay.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-physical-targets",
+      "argv": [
+        "{repo}/test/../tools/rack/test_physical_targets.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-recover-subset-font-pdf",
+      "argv": [
+        "{repo}/test/../tools/rack/test_recover_subset_font_pdf.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-run-state",
+      "argv": [
+        "{repo}/test/../tools/rack/test_run_state.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-signal-path",
+      "argv": [
+        "{repo}/test/../tools/rack/test_signal_path.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-source-index",
+      "argv": [
+        "{repo}/test/../tools/rack/test_source_index.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "rack-with-app-model-selection",
+      "argv": [
+        "{repo}/test/../tools/rack/test_with_app_model_selection.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "raw-this-async-selftest",
+      "argv": [
+        "{repo}/tools/scripts/raw_this_async_check.py",
+        "--selftest"
+      ]
+    },
+    {
+      "name": "release-trailer-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_release_trailer_guard.py"
+      ]
+    },
+    {
+      "name": "runner-topology-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_runner_topology_check.py"
+      ]
+    },
+    {
+      "name": "sample-region-compat-baseline-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_sample_region_compat_baseline.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "sdk-consumer-update-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_sdk_consumer_update.py"
+      ]
+    },
+    {
+      "name": "sequencer-control-skill-coverage-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_sequencer_control_skill_check.py"
+      ]
+    },
+    {
+      "name": "setup-bootstrap-plan-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_setup_bootstrap_plan_guard.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "silent-revert-guard-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_silent_revert_guard.py"
+      ]
+    },
+    {
+      "name": "skills-doc-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_skills_doc_check.py"
+      ]
+    },
+    {
+      "name": "test-pch-wiring-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_pch_wiring_check.py"
+      ]
+    },
+    {
+      "name": "thread-safe-assertions-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_thread_assert_check.py"
+      ]
+    },
+    {
+      "name": "timeline-api-docs-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/timeline_api_docs_check.py",
+        "--self-test"
+      ]
+    },
+    {
+      "name": "timeline-engine-dependency-floor-selftest",
+      "argv": [
+        "{repo}/tools/scripts/timeline_engine_dependency_floor_check.py",
+        "--selftest"
+      ]
+    },
+    {
+      "name": "timeline-fixture-coverage-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_timeline_fixture_coverage_check.py"
+      ]
+    },
+    {
+      "name": "timeline-live-capture-verifier-self-test",
+      "argv": [
+        "{repo}/tools/scripts/verify_timeline_live_capture.py",
+        "--self-test"
+      ]
+    },
+    {
+      "name": "timeline-mcp-selftest",
+      "argv": [
+        "{repo}/core/timeline/tools/test_schema_mcp_emit.py"
+      ]
+    },
+    {
+      "name": "timeline-schema-cli-selftest",
+      "argv": [
+        "{repo}/core/timeline/tools/test_schema_cli_emit.py"
+      ]
+    },
+    {
+      "name": "timeline-schema-drift-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_schema_drift_check.py"
+      ]
+    },
+    {
+      "name": "timeline-schema-js-selftest",
+      "argv": [
+        "{repo}/core/timeline/tools/test_schema_js_emit.py"
+      ]
+    },
+    {
+      "name": "timeline-schema-ts-selftest",
+      "argv": [
+        "{repo}/core/timeline/tools/test_schema_ts_emit.py"
+      ]
+    },
+    {
+      "name": "timeline-sync-soak-verifier-self-test",
+      "argv": [
+        "{repo}/tools/scripts/verify_timeline_sync_soak.py",
+        "--self-test"
+      ]
+    },
+    {
+      "name": "tools-registry-check-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_tools_registry_check.py"
+      ]
+    },
+    {
+      "name": "trace-span-category-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_trace_span_category_lint.py"
+      ]
+    },
+    {
+      "name": "transient-interaction-trace-budget-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_check_transient_interaction_trace.py"
+      ]
+    },
+    {
+      "name": "unbounded-wait-lint-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_unbounded_wait_lint.py"
+      ]
+    },
+    {
+      "name": "vellum-trusted-merge-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_vellum_trusted_merge.py"
+      ],
+      "timeout": 120.0
+    },
+    {
+      "name": "vellum-watch-preflight-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_vellum_watch_preflight.py"
+      ],
+      "timeout": 180.0
+    },
+    {
+      "name": "verify-rendered-panel-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_verify_rendered_panel.py"
+      ]
+    },
+    {
+      "name": "version-at-land-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_version_at_land.py"
+      ],
+      "timeout": 180.0
+    },
+    {
+      "name": "visual-python-deps-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_check_visual_python_deps.py"
+      ],
+      "timeout": 60.0
+    },
+    {
+      "name": "web-timeline-source-closure-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_web_timeline_source_closure_check.py"
+      ]
+    },
+    {
+      "name": "yoga-oracle-pin-lockstep-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_check_yoga_oracle_pin.py"
+      ]
+    }
+  ]
+}
