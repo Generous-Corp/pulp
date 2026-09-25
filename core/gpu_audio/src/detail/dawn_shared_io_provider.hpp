@@ -144,6 +144,12 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     CompletionPolicy completion_policy() const noexcept;
     AdapterIdentity adapter_identity() const;
 
+    bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
+                                 std::span<const SlotBufferHandle> slots) noexcept;
+    bool submit_wavenet_program(const SlotResources&, SlotToken,
+                                std::shared_ptr<SharedIoTerminalInbox>) noexcept;
+    bool release_wavenet_program() noexcept;
+
   private:
     friend class DawnSharedIoConvolutionProgram;
     bool prepare_convolution_program(const SharedIoConvolutionProgramSpec&) noexcept;
@@ -152,7 +158,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool release_convolution_program() noexcept;
     bool submit_impl(const SlotResources&, SlotToken,
                      std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
-                     bool use_convolution) noexcept;
+                     unsigned kind) noexcept;
     struct Impl;
     explicit DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;
