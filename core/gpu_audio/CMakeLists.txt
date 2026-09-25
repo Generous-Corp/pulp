@@ -15,6 +15,14 @@ target_include_directories(pulp-gpu-audio
         $<INSTALL_INTERFACE:include>
 )
 
+# The required macOS lane reuses warm CMake trees.  Keep additions/removals in
+# this exported public root as configure inputs so the consumption-census facts
+# are regenerated when a new SDK header lands, rather than retaining the prior
+# header count until an unrelated CMakeLists change occurs.
+file(GLOB _pulp_gpu_audio_public_headers CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/pulp/gpu_audio/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/pulp/gpu_audio/*.hpp")
+
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
