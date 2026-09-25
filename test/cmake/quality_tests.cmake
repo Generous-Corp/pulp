@@ -361,6 +361,10 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-hosting=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-core-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-core-runtime=pulp-test-pch-cxx20
         --expect pulp-test-group-core-view=pulp-test-pch-cxx20
@@ -391,6 +395,11 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-cap-state=pulp-test-pch-cxx20
         --expect pulp-test-group-cap-format=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-app-audio-support=pulp-test-pch-cxx${_pulp_pch_format_std})
+    if(APPLE AND NOT PULP_IOS)
+        # The ObjC++ view-host group is NO_PCH by construction (CMake refuses
+        # a CXX carrier for an OBJCXX TU); pin that it never picks one up.
+        list(APPEND _pulp_pch_expect --expect pulp-test-group-view-host-mac=none)
+    endif()
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
@@ -411,6 +420,9 @@ if(Python3_Interpreter_FOUND)
     if(TARGET pulp-test-group-mac-view)
         list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
@@ -1178,6 +1190,18 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktrees
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktrees-selftest PROPERTIES TIMEOUT 600)
+
+        # seed_build_dir.py clones and retargets a warm build dir. Its suite
+        # builds a real CMake + Ninja fixture whose executable bakes the source
+        # dir in through a -D define (the case a naive retarget gets wrong),
+        # seeds worktrees at the same and at a changed commit, and audits the
+        # donor (inode + mtime) so a retarget that writes back into it fails.
+        # Skips itself off macOS or off APFS; refusals (cross-volume, Makefiles
+        # donor, unbuilt donor, busy donor) must leave nothing behind.
+        add_test(NAME seed-build-dir-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_seed_build_dir
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(seed-build-dir-selftest PROPERTIES TIMEOUT 300)
     endif()
     # Tool registry: docs/status/tools.yaml must stay valid (every path and
     # invocation resolves) AND complete (every committed entry point under the

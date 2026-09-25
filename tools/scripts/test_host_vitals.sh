@@ -212,6 +212,24 @@ if grep -q '"build"' "$SDIR/host_vitals.log"; then
 else
   PASS=$((PASS+1)); printf '  [PASS] sensor: history log stays health-only\n'
 fi
+# Between the health-first write and the build write the published reading
+# still carries the previous tick's build snapshot (with its own sampled_at).
+# The build probe is stalled here so that window is wide enough to read.
+prev_sampled="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build"]["sampled_at"])' "$SDIR/host_vitals.json")"
+log_lines="$(wc -l < "$SDIR/host_vitals.log")"
+HOME="$BHOME" PULP_VITALS_TOOL_PATH="$STALL" PULP_VITALS_PROBE_TIMEOUT=4 \
+  PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSCTL="$STUB" PULP_VITALS_REPORTS_DIR="$WORK/empty" \
+  bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1 &
+sensor_pid=$!
+for _ in $(seq 1 100); do
+  [ "$(wc -l < "$SDIR/host_vitals.log")" -gt "$log_lines" ] && break
+  sleep 0.1
+done
+sleep 0.5
+mid="$(cat "$SDIR/host_vitals.json")"
+wait "$sensor_pid"
+jcheck "sensor: the health-first write carries the previous build snapshot" "$mid" \
+  '"level" in d and d["build"]["sampled_at"] == '"$prev_sampled"
 HOME="$BHOME" PULP_VITALS_BUILD=0 PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSCTL="$STUB" \
   PULP_VITALS_REPORTS_DIR="$WORK/empty" bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1
 jcheck "sensor: PULP_VITALS_BUILD=0 omits the snapshot" "$(cat "$SDIR/host_vitals.json")" '"build" not in d'

@@ -45,6 +45,9 @@ commands:
       - name: --examples
         kind: flag
         description: "Source checkout only: configure with `-DPULP_BUILD_EXAMPLES=ON`. A fresh `pulp build` configure leaves the example projects off for a faster dev build; an existing build dir keeps its setting, and `--examples` reconfigures one that has them off."
+      - name: --seed-build
+        kind: option
+        description: "Source checkout, macOS/APFS only: before the first configure of a worktree with no build dir, clone a sibling worktree's warm Ninja build dir (copy-on-write) and retarget it via `tools/scripts/seed_build_dir.py`, so the first build compiles and links only what differs. Bare `--seed-build` picks the eligible sibling closest to HEAD; `--seed-build=<worktree>` names the donor; `PULP_SEED_BUILD=1` opts in without the flag. Unsupported cases fall back to a plain configure."
       - name: --allow-unsupported-sdk
         kind: flag
         description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)

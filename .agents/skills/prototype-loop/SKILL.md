@@ -46,6 +46,45 @@ Each step has tooling. The CLI loop is available now; deeper archive-splice, iss
 | `pulp loop --watch-issues` PR-monitor | deferred |
 | Lift `@pulp/css-adapt`, `pulp-css-analyze`, `extract-html-bundle` | deferred |
 
+## Step 0 — Start a new worktree warm, not cold
+
+A fresh worktree's first build is a full configure plus every compile and
+link, even when the worktree you branched from built the same tree minutes
+ago. On macOS/APFS, `pulp build --seed-build` (or `PULP_SEED_BUILD=1` in the
+environment so every first build does it) runs
+`tools/scripts/seed_build_dir.py` before the first configure. It clonefiles
+the warm Ninja build dir of the sibling worktree closest to `HEAD` (shared
+blocks, no data copied) and retargets it: text files that name the donor
+path are rewritten, `.ninja_deps` is re-emitted, `.ninja_log` command hashes
+are recomputed, binaries that embed the donor path are dropped, and unchanged
+clean sources get the donor's mtimes. The first build is then only what
+differs from the donor. Receipt: `build/.pulp-seed-receipt.json` (edges left
+to build, path-tainted binaries dropped, timings).
+
+What to know before trusting it:
+
+- It only ever removes gratuitous work. Anything Ninja cannot prove up to
+  date is rebuilt, and it reads the donor without writing it (the suite
+  audits the donor's inodes and mtimes).
+- Eligible donors are Ninja, built, same `CMAKE_BUILD_TYPE` and
+  `PULP_BUILD_EXAMPLES`, same APFS volume, and not mid-build. Anything else
+  is refused with exit 3 and nothing left behind, and `pulp build` configures
+  from scratch as usual. Cross-volume never silently copies.
+- A Release donor built through ccache with `base_dir` gains almost
+  everything; a Debug donor (`-g`) embeds the path in every object and gains
+  only the configure. Targets whose `-D` defines carry the source dir
+  recompile regardless.
+- `dirty_edges` in the receipt is Ninja's planned total from a dry run of a
+  copy of `build.ninja`. A plain `ninja -n` stops at CMake's always-dirty
+  glob check and reports 2, and counting its status lines undercounts,
+  because a dry run skips the status line of edges that finish together.
+  When `cmake_rerun_pending` is non-empty (a `CMakeLists.txt` differs from
+  the donor's, e.g. a VERSION bump) CMake re-runs first and the count is a
+  lower bound.
+- `pulp build` in a fresh worktree has an empty diff, so its focused
+  selector widens to `all`; on a seeded dir that is exactly the leftover
+  edges, not a full build.
+
 ## Step 1 — AOT analyze the consumer's bundle
 
 Run `pulp-css-analyze` over the consumer's pre-built React bundle. The output is a coverage report listing unmapped CSS props with occurrence counts.

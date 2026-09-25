@@ -705,6 +705,10 @@
             "kind": "flag"
           },
           {
+            "name": "--seed-build",
+            "kind": "option"
+          },
+          {
             "name": "--allow-unsupported-sdk",
             "kind": "flag"
           },

@@ -2373,7 +2373,10 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   health and snapshot together. Probes now run under a process-group deadline
   (`PULP_VITALS_PROBE_TIMEOUT`, 15 s; killing only the parent leaves a grandchild
   holding the output pipe) and health is published first, so m3's host ccache
-  reads null ("stats timed out"), not stale. tartci's version on a sealed host
+  reads null ("stats timed out"), not stale. That health-first write carries the
+  previous tick's `build` object forward (with its own `sampled_at`), because the
+  fresh snapshot lands 12-25 s later and a reader in that window otherwise saw no
+  `build` at all; judge snapshot age by `build.sampled_at`, not the file mtime. tartci's version on a sealed host
   comes from the launcher bundle's `source_commit` (`installed_generation`), the
   same source `tartci fleet-macos self-update` reports as "installed"; a sealed
   host has no checkout to read.
