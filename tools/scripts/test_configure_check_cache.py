@@ -157,6 +157,32 @@ def main() -> int:
         expect(dep_try_compiles(root / "b4") == 5, "the edited dependency re-runs its checks")
         expect(len(list(cache_dir.glob("FakeDep-*.cmake"))) == 2, "the new key gets its own results file")
 
+        # With CMAKE_OSX_SYSROOT unset (CMake's default) the key must still
+        # name the SDK the compiler will use, so a switched SDK misses.
+        key_script = root / "key.cmake"
+        key_script.write_text(
+            f'include("{MODULE.as_posix()}")\n'
+            f'pulp_configure_check_cache_key_text(k FakeDep "{(src / "fakedep").as_posix()}")\n'
+            'message("${k}")\n')
+
+        def key_text(**env_extra: str) -> str:
+            env = {k: v for k, v in os.environ.items() if k != "SDKROOT"}
+            env.update(env_extra)
+            proc = subprocess.run(["cmake", "-P", str(key_script)], env=env,
+                                  capture_output=True, text=True)
+            return proc.stderr
+
+        real_sdk = subprocess.run(["xcrun", "--show-sdk-path"], capture_output=True,
+                                  text=True).stdout.strip()
+        other_sdk = root / "OtherSDK.sdk"
+        other_sdk.mkdir()
+        (other_sdk / "SDKSettings.json").write_text('{"Version": "0.0"}')
+        default_key = key_text()
+        expect(bool(real_sdk) and f"sdk={real_sdk}\n" in default_key,
+               "an unset CMAKE_OSX_SYSROOT keys on the SDK xcrun resolves")
+        expect(key_text(SDKROOT=str(other_sdk)) != default_key,
+               "a different effective SDK (SDKROOT) changes the key")
+
         off_dir = root / "checks-off"
         out5 = configure(src, root / "b5", off_dir, "-DPULP_CONFIGURE_CHECK_CACHE=OFF")
         expect(not off_dir.exists() and "recorded" not in out5, "PULP_CONFIGURE_CHECK_CACHE=OFF writes nothing")

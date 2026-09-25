@@ -85,10 +85,16 @@ function(pulp_configure_check_cache_key_text out_var name source_dir)
     endforeach()
 
     # The SDK a check compiles against, identified by its own version record
-    # (an Xcode update can keep the path and change the contents).
+    # (an Xcode update can keep the path and change the contents). CMake
+    # leaves CMAKE_OSX_SYSROOT empty by default and the compiler driver then
+    # picks the SDK itself (SDKROOT, DEVELOPER_DIR, xcode-select), so resolve
+    # that effective SDK the same way rather than keying on an empty string.
     set(_sdk "${CMAKE_OSX_SYSROOT}")
     if(_sdk AND NOT IS_ABSOLUTE "${_sdk}")
         execute_process(COMMAND xcrun --sdk "${_sdk}" --show-sdk-path
+            OUTPUT_VARIABLE _sdk OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    elseif(NOT _sdk)
+        execute_process(COMMAND xcrun --show-sdk-path
             OUTPUT_VARIABLE _sdk OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     endif()
     if(_sdk AND EXISTS "${_sdk}/SDKSettings.json")
