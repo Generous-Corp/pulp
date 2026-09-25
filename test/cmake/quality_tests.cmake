@@ -337,7 +337,7 @@ if(Python3_Interpreter_FOUND)
         endif()
     endif()
     set(_pulp_pch_expect
-        --expect pulp-test-biquad=pulp-test-pch-cxx20
+        --expect pulp-test-tilt-eq=pulp-test-pch-cxx20
         --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
@@ -354,6 +354,14 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-analysis=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-standalone=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-core-events=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-platform=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-audio=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-host-graph=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-sampler-format=pulp-test-pch-cxx${_pulp_pch_format_std}
