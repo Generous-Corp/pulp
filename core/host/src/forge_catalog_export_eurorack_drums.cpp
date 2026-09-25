@@ -1,15 +1,14 @@
 #include "forge_catalog_export_detail.hpp"
 
-#include <pulp/host/forge_eurorack_utility_catalog.hpp>
 #include <pulp/host/forge_drum_catalog.hpp>
+#include <pulp/host/forge_eurorack_utility_catalog.hpp>
 
 namespace pulp::host::forge_catalog_export_detail {
 
 void append_eurorack_drums(Nodes& nodes) {
     add(nodes, eurorack::attenuverter_descriptor(),
         {realization("default", eurorack::make_attenuverter_node())});
-    add(nodes, eurorack::slew_descriptor(),
-        {realization("default", eurorack::make_slew_node())});
+    add(nodes, eurorack::slew_descriptor(), {realization("default", eurorack::make_slew_node())});
     add(nodes, eurorack::clock_divider_descriptor(),
         {realization("default", eurorack::make_clock_divider_node())});
     add(nodes, eurorack::sample_hold_descriptor(),

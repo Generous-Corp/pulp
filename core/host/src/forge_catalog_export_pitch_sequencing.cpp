@@ -1,14 +1,15 @@
 #include "forge_catalog_export_detail.hpp"
 
+#include <pulp/host/forge_multiband_catalog.hpp>
 #include <pulp/host/forge_pitch_catalog.hpp>
 #include <pulp/host/forge_sequencing_catalog.hpp>
-#include <pulp/host/forge_multiband_catalog.hpp>
 #include <pulp/host/forge_sidechain_catalog.hpp>
 
 namespace pulp::host::forge_catalog_export_detail {
 
 void append_pitch_sequencing(Nodes& nodes) {
-    add(nodes, pitch::whammy::descriptor(), {realization("default", pitch::whammy::make_whammy_node())});
+    add(nodes, pitch::whammy::descriptor(),
+        {realization("default", pitch::whammy::make_whammy_node())});
     add(nodes, pitch::harmony::descriptor(),
         {realization("default", pitch::harmony::make_harmony_engine_node())});
 
@@ -17,9 +18,9 @@ void append_pitch_sequencing(Nodes& nodes) {
     add(nodes, sequencing::cartesian::descriptor(),
         {
             realization("cartesian", sequencing::cartesian::make_cartesian_walk_node(
-                            sequencing::cartesian::default_grid(), false)),
+                                         sequencing::cartesian::default_grid(), false)),
             realization("row_major", sequencing::cartesian::make_cartesian_walk_node(
-                            sequencing::cartesian::default_grid(), true)),
+                                         sequencing::cartesian::default_grid(), true)),
         });
     add(nodes, sequencing::rungler::descriptor(),
         {realization("default", sequencing::rungler::make_rungler_node())});

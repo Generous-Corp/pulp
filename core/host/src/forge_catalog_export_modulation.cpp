@@ -10,42 +10,42 @@ void append_modulation(Nodes& nodes) {
     add(nodes, modulation::chorus::chorus_descriptor(),
         {
             realization("ce2_clean", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::ce2,
-                            modulation::chorus::JunoMode::mode_I, false)),
+                                         modulation::chorus::Voicing::ce2,
+                                         modulation::chorus::JunoMode::mode_I, false)),
             realization("ce2_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::ce2,
-                            modulation::chorus::JunoMode::mode_I, true)),
+                                       modulation::chorus::Voicing::ce2,
+                                       modulation::chorus::JunoMode::mode_I, true)),
             realization("juno_i_clean", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::juno_ensemble,
-                            modulation::chorus::JunoMode::mode_I, false)),
+                                            modulation::chorus::Voicing::juno_ensemble,
+                                            modulation::chorus::JunoMode::mode_I, false)),
             realization("juno_i_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::juno_ensemble,
-                            modulation::chorus::JunoMode::mode_I, true)),
+                                          modulation::chorus::Voicing::juno_ensemble,
+                                          modulation::chorus::JunoMode::mode_I, true)),
             realization("juno_ii_clean", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::juno_ensemble,
-                            modulation::chorus::JunoMode::mode_II, false)),
+                                             modulation::chorus::Voicing::juno_ensemble,
+                                             modulation::chorus::JunoMode::mode_II, false)),
             realization("juno_ii_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::juno_ensemble,
-                            modulation::chorus::JunoMode::mode_II, true)),
+                                           modulation::chorus::Voicing::juno_ensemble,
+                                           modulation::chorus::JunoMode::mode_II, true)),
             realization("juno_i_ii_clean",
                         modulation::chorus::make_chorus_node(
                             modulation::chorus::Voicing::juno_ensemble,
                             modulation::chorus::JunoMode::mode_I_plus_II, false)),
             realization("juno_i_ii_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::juno_ensemble,
-                            modulation::chorus::JunoMode::mode_I_plus_II, true)),
+                                             modulation::chorus::Voicing::juno_ensemble,
+                                             modulation::chorus::JunoMode::mode_I_plus_II, true)),
             realization("dimension_d_clean", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::dimension_d,
-                            modulation::chorus::JunoMode::mode_I, false)),
+                                                 modulation::chorus::Voicing::dimension_d,
+                                                 modulation::chorus::JunoMode::mode_I, false)),
             realization("dimension_d_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::dimension_d,
-                            modulation::chorus::JunoMode::mode_I, true)),
+                                               modulation::chorus::Voicing::dimension_d,
+                                               modulation::chorus::JunoMode::mode_I, true)),
             realization("tri_chorus_clean", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::tri_chorus,
-                            modulation::chorus::JunoMode::mode_I, false)),
+                                                modulation::chorus::Voicing::tri_chorus,
+                                                modulation::chorus::JunoMode::mode_I, false)),
             realization("tri_chorus_bbd", modulation::chorus::make_chorus_node(
-                            modulation::chorus::Voicing::tri_chorus,
-                            modulation::chorus::JunoMode::mode_I, true)),
+                                              modulation::chorus::Voicing::tri_chorus,
+                                              modulation::chorus::JunoMode::mode_I, true)),
         });
     add(nodes, modulation::phaser::phaser_descriptor(),
         {
@@ -72,9 +72,9 @@ void append_modulation(Nodes& nodes) {
             realization("classic",
                         modulation::flanger::make_flanger_node(modulation::flanger::Mode::classic)),
             realization("through_zero", modulation::flanger::make_flanger_node(
-                            modulation::flanger::Mode::through_zero)),
+                                            modulation::flanger::Mode::through_zero)),
             realization("barberpole", modulation::flanger::make_flanger_node(
-                            modulation::flanger::Mode::barberpole)),
+                                          modulation::flanger::Mode::barberpole)),
             realization("through_zero_1ms", modulation::flanger::make_flanger_node(
                                                 modulation::flanger::Mode::through_zero, 1.0)),
             realization("through_zero_2ms", modulation::flanger::make_flanger_node(

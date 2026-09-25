@@ -49,7 +49,7 @@ DesignIR capture_overlay_ir() {
     return ir;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("web-compat overlay controls carry their designed position",
           "[view][import][web-compat][overlay]") {
@@ -76,7 +76,7 @@ TEST_CASE("web-compat overlay controls carry their designed position",
     // Three distinct x values, not three copies of one. A lowering that emitted
     // the same left for every control would satisfy a mere "left is present"
     // check and still render the stacked column this test exists to catch.
-    REQUIRE(count_occurrences(js, ".style.left = '0px';") == 1);  // backdrop only
+    REQUIRE(count_occurrences(js, ".style.left = '0px';") == 1); // backdrop only
 
     // And NO z-index, however the design declared one. `position:absolute`
     // with z-index >= 10 makes web-compat claim the single global overlay slot,
@@ -144,8 +144,7 @@ TEST_CASE("discrete control emitters configure choices, defaults, and designed o
     selector.attributes["designed_body"] = "underlay";
     ir.root.children.push_back(std::move(selector));
 
-    for (const auto mode : {CodeGenMode::web_compat,
-                            CodeGenMode::bridge_native_js}) {
+    for (const auto mode : {CodeGenMode::web_compat, CodeGenMode::bridge_native_js}) {
         CodeGenOptions opts;
         opts.mode = mode;
         opts.include_comments = false;
@@ -171,8 +170,7 @@ TEST_CASE("selector emitters keep a usable fallback segment",
     selector.text_content = "Only";
     ir.root.children.push_back(std::move(selector));
 
-    for (const auto mode : {CodeGenMode::web_compat,
-                            CodeGenMode::bridge_native_js}) {
+    for (const auto mode : {CodeGenMode::web_compat, CodeGenMode::bridge_native_js}) {
         CodeGenOptions opts;
         opts.mode = mode;
         opts.include_comments = false;
@@ -222,8 +220,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     full_box_ir.root.type = "frame";
     IRNode full_box_gradient;
     full_box_gradient.type = "frame";
-    full_box_gradient.style.background_gradient =
-        "linear-gradient(to right, #123456, #654321)";
+    full_box_gradient.style.background_gradient = "linear-gradient(to right, #123456, #654321)";
     full_box_ir.root.children.push_back(std::move(full_box_gradient));
     for (const char* position : {"0% 0%", "0.0% 0.0%", "0 0", "50% 50%", "0px 50%", "50% 0px"}) {
         full_box_ir.root.children.front().style.background_position = position;
@@ -232,22 +229,20 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
         inert_options.fidelity_report = &inert_issues;
         (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, inert_options);
         INFO("inert full-box background-position: " << position);
-        CHECK_FALSE(std::any_of(inert_issues.begin(), inert_issues.end(),
-                                [](const FidelityIssue& issue) {
-                                    return issue.kind == "swiftui-background-position" &&
-                                        !issue.informational;
-                                }));
+        CHECK_FALSE(
+            std::any_of(inert_issues.begin(), inert_issues.end(), [](const FidelityIssue& issue) {
+                return issue.kind == "swiftui-background-position" && !issue.informational;
+            }));
     }
     full_box_ir.root.children.front().style.background_position = "0% 0%, 0% 0%";
     std::vector<FidelityIssue> layered_default_issues;
     SwiftExportOptions layered_default_options;
     layered_default_options.fidelity_report = &layered_default_issues;
-    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
-                              layered_default_options);
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, layered_default_options);
     CHECK_FALSE(std::any_of(layered_default_issues.begin(), layered_default_issues.end(),
                             [](const FidelityIssue& issue) {
                                 return issue.kind == "swiftui-background-position" &&
-                                    !issue.informational;
+                                       !issue.informational;
                             }));
 
     // Unlike percentage positions, a non-zero absolute offset changes the
@@ -257,13 +252,12 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
         std::vector<FidelityIssue> absolute_offset_issues;
         SwiftExportOptions absolute_offset_options;
         absolute_offset_options.fidelity_report = &absolute_offset_issues;
-        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
-                                  absolute_offset_options);
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, absolute_offset_options);
         INFO("material full-box background-position: " << position);
         CHECK(std::any_of(absolute_offset_issues.begin(), absolute_offset_issues.end(),
                           [](const FidelityIssue& issue) {
                               return issue.kind == "swiftui-background-position" &&
-                                  !issue.informational;
+                                     !issue.informational;
                           }));
     }
 
@@ -271,19 +265,18 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     // can retain either axis spelling or a comma-separated default list; none
     // changes a gradient with no intrinsic dimensions.
     full_box_ir.root.children.front().style.background_position.reset();
-    for (const char* size : {"auto, auto", "100% auto", "auto 100%", "100.0% 100%", "contain", "cover"}) {
+    for (const char* size :
+         {"auto, auto", "100% auto", "auto 100%", "100.0% 100%", "contain", "cover"}) {
         full_box_ir.root.children.front().style.background_size = size;
         std::vector<FidelityIssue> default_size_issues;
         SwiftExportOptions default_size_options;
         default_size_options.fidelity_report = &default_size_issues;
-        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
-                                  default_size_options);
+        (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, default_size_options);
         INFO("inert full-box background-size: " << size);
-        CHECK_FALSE(std::any_of(default_size_issues.begin(), default_size_issues.end(),
-                                [](const FidelityIssue& issue) {
-                                    return issue.kind == "swiftui-background-size" &&
-                                        !issue.informational;
-                                }));
+        CHECK_FALSE(std::any_of(
+            default_size_issues.begin(), default_size_issues.end(), [](const FidelityIssue& issue) {
+                return issue.kind == "swiftui-background-size" && !issue.informational;
+            }));
     }
 
     // CSS cycles lists only across image layers. Surplus values and values on
@@ -320,21 +313,19 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     SwiftExportOptions inert_axis_options;
     inert_axis_options.fidelity_report = &inert_axis_issues;
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, inert_axis_options);
-    CHECK_FALSE(std::any_of(inert_axis_issues.begin(), inert_axis_issues.end(),
-                            [](const FidelityIssue& issue) {
-                                return issue.kind == "swiftui-background-position" &&
-                                    !issue.informational;
-                            }));
+    CHECK_FALSE(std::any_of(
+        inert_axis_issues.begin(), inert_axis_issues.end(), [](const FidelityIssue& issue) {
+            return issue.kind == "swiftui-background-position" && !issue.informational;
+        }));
     full_box_ir.root.children.front().style.background_position = "50% 0%";
     std::vector<FidelityIssue> material_axis_issues;
     SwiftExportOptions material_axis_options;
     material_axis_options.fidelity_report = &material_axis_issues;
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, material_axis_options);
-    CHECK(std::any_of(material_axis_issues.begin(), material_axis_issues.end(),
-                      [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-position" &&
-                              !issue.informational;
-                      }));
+    CHECK(std::any_of(
+        material_axis_issues.begin(), material_axis_issues.end(), [](const FidelityIssue& issue) {
+            return issue.kind == "swiftui-background-position" && !issue.informational;
+        }));
 
     // Even default size/position cannot make a second actual CSS image layer
     // representable by one SwiftUI LinearGradient.
@@ -349,8 +340,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, multiple_layer_options);
     CHECK(std::any_of(multiple_layer_issues.begin(), multiple_layer_issues.end(),
                       [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-layers" &&
-                              !issue.informational;
+                          return issue.kind == "swiftui-background-layers" && !issue.informational;
                       }));
 
     // The image-layer count is not a gradient-only count: a URL under/over a
@@ -366,8 +356,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, mixed_layer_options);
     CHECK(std::any_of(mixed_layer_issues.begin(), mixed_layer_issues.end(),
                       [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-layers" &&
-                              !issue.informational;
+                          return issue.kind == "swiftui-background-layers" && !issue.informational;
                       }));
 
     // A single unsupported CSS gradient is also a hard divergence: accepting
@@ -387,11 +376,9 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
         (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
                                   unsupported_gradient_options);
         INFO("unsupported Swift gradient: " << gradient);
-        CHECK(std::any_of(unsupported_gradient_issues.begin(),
-                          unsupported_gradient_issues.end(),
+        CHECK(std::any_of(unsupported_gradient_issues.begin(), unsupported_gradient_issues.end(),
                           [](const FidelityIssue& issue) {
-                              return issue.kind == "swiftui-gradient" &&
-                                  !issue.informational;
+                              return issue.kind == "swiftui-gradient" && !issue.informational;
                           }));
     }
 
@@ -407,11 +394,10 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
                               none_then_linear_inert_options);
     CHECK_FALSE(std::any_of(none_then_linear_inert_issues.begin(),
-                            none_then_linear_inert_issues.end(),
-                            [](const FidelityIssue& issue) {
+                            none_then_linear_inert_issues.end(), [](const FidelityIssue& issue) {
                                 return (issue.kind == "swiftui-background-size" ||
                                         issue.kind == "swiftui-background-position") &&
-                                    !issue.informational;
+                                       !issue.informational;
                             }));
     full_box_ir.root.children.front().style.background_size = "auto, 12px 100%";
     full_box_ir.root.children.front().style.background_position = "0% 0%, 50% 0%";
@@ -421,16 +407,13 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
                               none_then_linear_material_options);
     CHECK(std::any_of(none_then_linear_material_issues.begin(),
-                      none_then_linear_material_issues.end(),
-                      [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-size" &&
-                              !issue.informational;
+                      none_then_linear_material_issues.end(), [](const FidelityIssue& issue) {
+                          return issue.kind == "swiftui-background-size" && !issue.informational;
                       }));
     CHECK(std::any_of(none_then_linear_material_issues.begin(),
-                      none_then_linear_material_issues.end(),
-                      [](const FidelityIssue& issue) {
+                      none_then_linear_material_issues.end(), [](const FidelityIssue& issue) {
                           return issue.kind == "swiftui-background-position" &&
-                              !issue.informational;
+                                 !issue.informational;
                       }));
 
     // A non-default size is material even without a position: SwiftUI's
@@ -440,12 +423,10 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     std::vector<FidelityIssue> size_only_issues;
     SwiftExportOptions size_only_options;
     size_only_options.fidelity_report = &size_only_issues;
-    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest,
-                              size_only_options);
+    (void)generate_pulp_swift(full_box_ir, full_box_ir.asset_manifest, size_only_options);
     CHECK(std::any_of(size_only_issues.begin(), size_only_issues.end(),
                       [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-size" &&
-                              !issue.informational;
+                          return issue.kind == "swiftui-background-size" && !issue.informational;
                       }));
 
     // Unlike the unsized full-box controls, this is a real two-layer tiled
@@ -470,8 +451,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     CHECK(size_at < position_at);
 
     const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
-    CHECK(cpp.source.find("set_background_position(\"0 0, 2px 2px\")") !=
-          std::string::npos);
+    CHECK(cpp.source.find("set_background_position(\"0 0, 2px 2px\")") != std::string::npos);
     CHECK(cpp.source.find("set_captured_box_paint_rect(5.0f, 6.0f, 105.0f, 56.0f, 2.0f)") !=
           std::string::npos);
 
@@ -482,7 +462,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     CHECK(std::any_of(painted_box_swift_issues.begin(), painted_box_swift_issues.end(),
                       [](const FidelityIssue& issue) {
                           return issue.kind == "swiftui-browser-box-paint-rect" &&
-                              !issue.informational;
+                                 !issue.informational;
                       }));
 
     // Browser capture records the same tuple on transparent layout/text
@@ -501,12 +481,11 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     std::vector<FidelityIssue> inert_box_swift_issues;
     SwiftExportOptions inert_box_swift_options;
     inert_box_swift_options.fidelity_report = &inert_box_swift_issues;
-    (void)generate_pulp_swift(inert_box_ir, inert_box_ir.asset_manifest,
-                              inert_box_swift_options);
+    (void)generate_pulp_swift(inert_box_ir, inert_box_ir.asset_manifest, inert_box_swift_options);
     CHECK_FALSE(std::any_of(inert_box_swift_issues.begin(), inert_box_swift_issues.end(),
                             [](const FidelityIssue& issue) {
                                 return issue.kind == "swiftui-browser-box-paint-rect" &&
-                                    !issue.informational;
+                                       !issue.informational;
                             }));
 
     DesignIR raster_ir;
@@ -540,8 +519,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     // color. Generated C++ must leave that fallback theme-resolvable rather
     // than introducing a second hardcoded widget color.
     raster_ir.root.children[0].attributes.erase("knob_ind_color");
-    const auto tokenized_pointer_cpp =
-        generate_pulp_cpp(raster_ir, raster_ir.asset_manifest, {});
+    const auto tokenized_pointer_cpp = generate_pulp_cpp(raster_ir, raster_ir.asset_manifest, {});
     CHECK(tokenized_pointer_cpp.source.find(
               "resolve_color(\"knob.thumb\", pulp::canvas::Color::rgba8(235, 235, 235))") !=
           std::string::npos);
@@ -549,8 +527,7 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     SwiftExportOptions raster_swift_options;
     raster_swift_options.fidelity_report = &raster_swift_issues;
     (void)generate_pulp_swift(raster_ir, raster_ir.asset_manifest, raster_swift_options);
-    for (const char* kind : {"swiftui-captured-raster-origin",
-                             "swiftui-knob-captured-indicator"}) {
+    for (const char* kind : {"swiftui-captured-raster-origin", "swiftui-knob-captured-indicator"}) {
         CHECK(std::any_of(raster_swift_issues.begin(), raster_swift_issues.end(),
                           [kind](const FidelityIssue& issue) {
                               return issue.kind == kind && !issue.informational;
@@ -562,11 +539,10 @@ TEST_CASE("the JS emitter carries tiled background size and position after the s
     swift_options.fidelity_report = &swift_issues;
     (void)generate_pulp_swift(ir, ir.asset_manifest, swift_options);
     REQUIRE_FALSE(swift_issues.empty());
-    CHECK(std::any_of(swift_issues.begin(), swift_issues.end(),
-                      [](const FidelityIssue& issue) {
-                          return issue.kind == "swiftui-background-position" &&
-                              issue.detail.find("0 0, 2px 2px") != std::string::npos;
-                      }));
+    CHECK(std::any_of(swift_issues.begin(), swift_issues.end(), [](const FidelityIssue& issue) {
+        return issue.kind == "swiftui-background-position" &&
+               issue.detail.find("0 0, 2px 2px") != std::string::npos;
+    }));
 }
 
 TEST_CASE("the web-compat JS emitter carries white-space nowrap",
@@ -590,8 +566,7 @@ TEST_CASE("the web-compat JS emitter carries white-space nowrap",
     const auto native_js = generate_pulp_js(ir, opts);
     const auto native_white_space = native_js.find("setWhiteSpace(");
     REQUIRE(native_white_space != std::string::npos);
-    CHECK(native_js.substr(native_white_space, 120).find("'nowrap'") !=
-          std::string::npos);
+    CHECK(native_js.substr(native_white_space, 120).find("'nowrap'") != std::string::npos);
 }
 
 TEST_CASE("web-compat attributed text keeps responsive paragraph wrapping",
@@ -619,12 +594,10 @@ TEST_CASE("web-compat attributed text keeps responsive paragraph wrapping",
 
     const auto paragraph_at = js.find("setTextRuns(paragraph0._id");
     REQUIRE(paragraph_at != std::string::npos);
-    CHECK(js.find("setMultiLine(paragraph0._id, true)", paragraph_at) !=
-          std::string::npos);
+    CHECK(js.find("setMultiLine(paragraph0._id, true)", paragraph_at) != std::string::npos);
     const auto nowrap_at = js.find("setTextRuns(nowrap1._id");
     REQUIRE(nowrap_at != std::string::npos);
-    CHECK(js.find("setMultiLine(nowrap1._id, true)", nowrap_at) ==
-          std::string::npos);
+    CHECK(js.find("setMultiLine(nowrap1._id, true)", nowrap_at) == std::string::npos);
 }
 
 // The colour the DESIGN drew a control in. Without it the widget falls back to
@@ -717,8 +690,7 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         return ir;
     };
 
-    for (const auto mode : {CodeGenMode::web_compat,
-                            CodeGenMode::bridge_native_js}) {
+    for (const auto mode : {CodeGenMode::web_compat, CodeGenMode::bridge_native_js}) {
         CodeGenOptions opts;
         opts.mode = mode;
         opts.include_comments = false;
@@ -729,10 +701,8 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         const auto fader_at = authored.rfind("setFaderSkin(");
         REQUIRE(knob_at != std::string::npos);
         REQUIRE(fader_at != std::string::npos);
-        const auto knob_stmt = authored.substr(
-            knob_at, authored.find('\n', knob_at) - knob_at);
-        const auto fader_stmt = authored.substr(
-            fader_at, authored.find('\n', fader_at) - fader_at);
+        const auto knob_stmt = authored.substr(knob_at, authored.find('\n', knob_at) - knob_at);
+        const auto fader_stmt = authored.substr(fader_at, authored.find('\n', fader_at) - fader_at);
         CHECK(knob_stmt.find("#ffffffff") != std::string::npos);
         CHECK(knob_stmt.find("#000000ff") != std::string::npos);
         CHECK(knob_stmt.find(", 1)") != std::string::npos);
@@ -753,8 +723,8 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         const auto invalid_fader_at = invalid.find("setFaderSkin(");
         REQUIRE(invalid_knob_at != std::string::npos);
         REQUIRE(invalid_fader_at != std::string::npos);
-        const auto invalid_knob_stmt = invalid.substr(
-            invalid_knob_at, invalid.find('\n', invalid_knob_at) - invalid_knob_at);
+        const auto invalid_knob_stmt =
+            invalid.substr(invalid_knob_at, invalid.find('\n', invalid_knob_at) - invalid_knob_at);
         const auto invalid_fader_stmt = invalid.substr(
             invalid_fader_at, invalid.find('\n', invalid_fader_at) - invalid_fader_at);
         CHECK(invalid_knob_stmt.find("#ff0000ff") != std::string::npos);
@@ -768,13 +738,12 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         const auto panel_fader_at = panel.find("setFaderSkin(");
         REQUIRE(panel_knob_at != std::string::npos);
         REQUIRE(panel_fader_at != std::string::npos);
-        CHECK(panel.substr(panel_knob_at,
-                           panel.find('\n', panel_knob_at) - panel_knob_at)
+        CHECK(panel.substr(panel_knob_at, panel.find('\n', panel_knob_at) - panel_knob_at)
                   .find("#ff0000ff") != std::string::npos);
-        const auto panel_knob_stmt = panel.substr(
-            panel_knob_at, panel.find('\n', panel_knob_at) - panel_knob_at);
-        const auto panel_fader_stmt = panel.substr(
-            panel_fader_at, panel.find('\n', panel_fader_at) - panel_fader_at);
+        const auto panel_knob_stmt =
+            panel.substr(panel_knob_at, panel.find('\n', panel_knob_at) - panel_knob_at);
+        const auto panel_fader_stmt =
+            panel.substr(panel_fader_at, panel.find('\n', panel_fader_at) - panel_fader_at);
         CHECK(panel_knob_stmt.find(", false,") != std::string::npos);
         CHECK(panel_fader_stmt.find("#ff0000ff") != std::string::npos);
         CHECK(panel_fader_stmt.find(", false)") != std::string::npos);
@@ -783,11 +752,9 @@ TEST_CASE("generated JS keeps durable per-control indicator colours without spri
         INFO(themed);
         const auto themed_knob_at = themed.find("setKnobCapturedIndicator(");
         REQUIRE(themed_knob_at != std::string::npos);
-        CHECK(themed.substr(themed_knob_at,
-                            themed.find('\n', themed_knob_at) - themed_knob_at)
+        CHECK(themed.substr(themed_knob_at, themed.find('\n', themed_knob_at) - themed_knob_at)
                   .find(", '', ") != std::string::npos);
-        CHECK(themed.substr(themed_knob_at,
-                            themed.find('\n', themed_knob_at) - themed_knob_at)
+        CHECK(themed.substr(themed_knob_at, themed.find('\n', themed_knob_at) - themed_knob_at)
                   .find(", false,") != std::string::npos);
         // No authored track/fill/thumb means no synthetic fader skin: the
         // runtime's control.thumb/theme remains the authority.

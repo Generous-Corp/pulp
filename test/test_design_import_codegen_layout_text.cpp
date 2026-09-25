@@ -5,7 +5,8 @@
 // Yoga-constrained audio widgets, container padding, multi-line text and font
 // lowering, knob tapers, and the web-compat parameter-gesture path.
 
-TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yoga constraints", "[view][import]") {
+TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yoga constraints",
+          "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root.type = "frame";
@@ -49,7 +50,7 @@ TEST_CASE("generate_pulp_js bridge_native_js mode handles audio widgets with Yog
 
     // Fader with min width >= 40, label as separate element
     REQUIRE(js.find("createFader('MixFader") != std::string::npos);
-    REQUIRE(js.find("createLabel('MixFader") != std::string::npos);  // Separate label
+    REQUIRE(js.find("createLabel('MixFader") != std::string::npos); // Separate label
     REQUIRE(js.find("'Mix'") != std::string::npos);
     REQUIRE(js.find("'width', 40)") != std::string::npos);
 
@@ -82,8 +83,8 @@ TEST_CASE("parse_design_ir_json keeps uniform-float and per-side padding forms",
           "[view][import][issue-3192]") {
     // Back-compat: the legacy float and camelCase per-side forms must keep
     // working alongside the new nested-object form.
-    const auto uniform = parse_design_ir_json(
-        R"json({ "type": "frame", "layout": { "padding": 10 } })json");
+    const auto uniform =
+        parse_design_ir_json(R"json({ "type": "frame", "layout": { "padding": 10 } })json");
     REQUIRE(uniform.root.layout.padding_top == Catch::Approx(10.0f));
     REQUIRE(uniform.root.layout.padding_left == Catch::Approx(10.0f));
 
@@ -132,7 +133,7 @@ TEST_CASE("native codegen wraps multi-line text at its design width (issue-3192)
     subtitle.name = "Subtitle";
     subtitle.text_content = "A long subtitle that should soft-wrap inside its box";
     subtitle.style.width = 720.0f;
-    subtitle.style.height = 26.0f;     // two lines at 11px
+    subtitle.style.height = 26.0f; // two lines at 11px
     subtitle.style.font_size = 11.0f;
     ir.root.children.push_back(subtitle);
 
@@ -143,7 +144,7 @@ TEST_CASE("native codegen wraps multi-line text at its design width (issue-3192)
     title.name = "Title";
     title.text_content = "Title that fits one line";
     title.style.width = 284.0f;
-    title.style.height = 22.0f;        // one line at 18px
+    title.style.height = 22.0f; // one line at 18px
     title.style.font_size = 18.0f;
     title.style.font_weight = 600;
     ir.root.children.push_back(title);
@@ -181,8 +182,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     single.style.font_size = 12.0f;
     single.style.font_family = "Inter";
     single.text_line_boxes.push_back({0.0f, 0.0f, 53.6719f, 15.0f, 0, 8});
-    single.text_layout_basis = IRTextLayoutBasis{
-        53.6719f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    single.text_layout_basis =
+        IRTextLayoutBasis{53.6719f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
     ir.root.children.push_back(single);
 
     IRNode wrapped;
@@ -200,8 +201,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     wrapped.text_line_boxes.push_back({5.0f, 0.0f, 30.0f, 15.0f, 0, 5});
     wrapped.text_line_boxes.push_back({8.0f, 15.0f, 24.0f, 15.0f, 6, 4});
     wrapped.text_layout_basis = IRTextLayoutBasis{
-        40.0f, pulp::canvas::resolved_face_identity(
-                   "Inter", 400.0f, pulp::canvas::FontSlant::Italic)};
+        40.0f,
+        pulp::canvas::resolved_face_identity("Inter", 400.0f, pulp::canvas::FontSlant::Italic)};
     IRTextRun wrapped_red;
     wrapped_red.start = 0;
     wrapped_red.end = 5;
@@ -238,8 +239,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     deferred_face.style.font_size = 12.0f;
     deferred_face.style.font_family = "Not Registered Until Runtime";
     deferred_face.text_line_boxes.push_back({0.0f, 0.0f, 72.0f, 15.0f, 0, 12});
-    deferred_face.text_layout_basis = IRTextLayoutBasis{
-        72.0f, "captured-face-id-not-known-to-generator"};
+    deferred_face.text_layout_basis =
+        IRTextLayoutBasis{72.0f, "captured-face-id-not-known-to-generator"};
     ir.root.children.push_back(deferred_face);
 
     IRNode nowrap;
@@ -252,8 +253,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     nowrap.style.font_family = "Inter";
     nowrap.style.white_space = "nowrap";
     nowrap.text_line_boxes.push_back({0.0f, 0.0f, 40.0f, 15.0f, 0, 10});
-    nowrap.text_layout_basis = IRTextLayoutBasis{
-        40.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    nowrap.text_layout_basis =
+        IRTextLayoutBasis{40.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
     ir.root.children.push_back(nowrap);
 
     IRNode ellipsis;
@@ -267,8 +268,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     ellipsis.style.white_space = "nowrap";
     ellipsis.style.text_overflow = "ellipsis";
     ellipsis.text_line_boxes.push_back({0.0f, 0.0f, 30.0f, 15.0f, 0, 10});
-    ellipsis.text_layout_basis = IRTextLayoutBasis{
-        30.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    ellipsis.text_layout_basis =
+        IRTextLayoutBasis{30.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
     ir.root.children.push_back(ellipsis);
 
     IRNode uncached_ellipsis = ellipsis;
@@ -291,8 +292,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     styled_single.style.text_transform = "uppercase";
     styled_single.style.text_overflow = "ellipsis";
     styled_single.text_line_boxes.push_back({0.0f, 0.0f, 60.0f, 15.0f, 0, 4});
-    styled_single.text_layout_basis = IRTextLayoutBasis{
-        25.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    styled_single.text_layout_basis =
+        IRTextLayoutBasis{25.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
     IRTextRun red_run;
     red_run.start = 0;
     red_run.end = 2;
@@ -312,8 +313,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     oblique.style.font_style = "oblique 12deg";
     oblique.text_line_boxes = {{0.0f, 0.0f, 50.0f, 15.0f, 0, 7}};
     oblique.text_layout_basis = IRTextLayoutBasis{
-        50.0f, pulp::canvas::resolved_face_identity(
-                   "Inter", 400.0f, pulp::canvas::FontSlant::Oblique)};
+        50.0f,
+        pulp::canvas::resolved_face_identity("Inter", 400.0f, pulp::canvas::FontSlant::Oblique)};
     ir.root.children.push_back(oblique);
 
     CodeGenOptions opts;
@@ -335,8 +336,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     REQUIRE(wrapped_line_height != std::string::npos);
     CHECK(wrapped_style < wrapped_cache);
     CHECK(wrapped_line_height < wrapped_cache);
-    CHECK(js.substr(wrapped_cache, 320).find("start: 6, length: 4") !=
-          std::string::npos);
+    CHECK(js.substr(wrapped_cache, 320).find("start: 6, length: 4") != std::string::npos);
     CHECK(js.find("setMultiLine('Wrapped") != std::string::npos);
     CHECK(js.find("setTextAlign('Wrapped") == std::string::npos);
     CHECK(js.find("setCapturedLineBoxes('Stale") == std::string::npos);
@@ -361,19 +361,16 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     CHECK(js.find("setCapturedLineBoxes('StyledSingle") != std::string::npos);
     CHECK(js.find("setMultiLine('StyledSingle") == std::string::npos);
     CHECK(js.find("setTextRuns('StyledSingle") != std::string::npos);
-    CHECK(js.find("setTextRuns('StyledSingle") <
-          js.find("setCapturedLineBoxes('StyledSingle"));
+    CHECK(js.find("setTextRuns('StyledSingle") < js.find("setCapturedLineBoxes('StyledSingle"));
     CHECK(js.find("setWhiteSpace('StyledSingle") != std::string::npos);
     CHECK(js.find("setFontStyle('Oblique") != std::string::npos);
 
     const auto cpp = generate_pulp_cpp(ir, ir.asset_manifest, {});
     CHECK(cpp.source.find("pulp::canvas::AttributedString") != std::string::npos);
-    CHECK(cpp.source.find("span.font_family = \"Courier\"") !=
-          std::string::npos);
+    CHECK(cpp.source.find("span.font_family = \"Courier\"") != std::string::npos);
     CHECK(cpp.source.find("span.font_weight = 700") != std::string::npos);
     CHECK(cpp.source.find("span.font_slant = 2") != std::string::npos);
-    CHECK(cpp.source.find("set_attributed_string(std::move(") !=
-          std::string::npos);
+    CHECK(cpp.source.find("set_attributed_string(std::move(") != std::string::npos);
     CHECK(cpp.source.find("set_cached_line_boxes(") != std::string::npos);
 
     ScriptEngine engine;
@@ -392,18 +389,24 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     Label* live_oblique = nullptr;
     const auto find_wrapped = [&](auto&& self, View& view) -> void {
         if (auto* label = dynamic_cast<Label*>(&view)) {
-            if (label->text() == "01  RATE") live_single = label;
+            if (label->text() == "01  RATE")
+                live_single = label;
             if (label->text() == "alpha beta" && label->multi_line())
                 live_wrapped = label;
             if (label->text() == "alpha beta" && !label->multi_line())
                 live_nowrap = label;
-            if (label->text() == "stale basis") live_stale = label;
-            if (label->text() == "long label") live_ellipsis = label;
-            if (label->text() == "abcd") live_styled_single = label;
-            if (label->text() == "slanted") live_oblique = label;
+            if (label->text() == "stale basis")
+                live_stale = label;
+            if (label->text() == "long label")
+                live_ellipsis = label;
+            if (label->text() == "abcd")
+                live_styled_single = label;
+            if (label->text() == "slanted")
+                live_oblique = label;
         }
         for (size_t i = 0; i < view.child_count(); ++i)
-            if (auto* child = view.child_at(i)) self(self, *child);
+            if (auto* child = view.child_at(i))
+                self(self, *child);
     };
     find_wrapped(find_wrapped, host);
     REQUIRE(live_single != nullptr);
@@ -439,15 +442,14 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     bool saw_oblique_run = false;
     for (const auto& command : italic_cached_canvas.commands())
         if (command.type == pulp::canvas::DrawCommand::Type::set_font_full) {
-            if (command.text == "Courier") saw_courier = true;
-            if (command.text == "Courier" &&
-                command.f[2] == Catch::Approx(2.0f))
+            if (command.text == "Courier")
+                saw_courier = true;
+            if (command.text == "Courier" && command.f[2] == Catch::Approx(2.0f))
                 saw_oblique_run = true;
         }
     CHECK(saw_courier);
     CHECK(saw_oblique_run);
-    CHECK(italic_cached_canvas.count(
-              pulp::canvas::DrawCommand::Type::stroke_line) == 1);
+    CHECK(italic_cached_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 1);
     REQUIRE(live_stale != nullptr);
     CHECK(live_stale->multi_line());
 
@@ -459,11 +461,11 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     live_ellipsis->set_bounds({0, 0, 30.0f, 20.0f});
     pulp::canvas::RecordingCanvas ellipsis_canvas;
     live_ellipsis->paint(ellipsis_canvas);
-    const auto ellipsis_text = std::find_if(
-        ellipsis_canvas.commands().begin(), ellipsis_canvas.commands().end(),
-        [](const auto& command) {
-            return command.type == pulp::canvas::DrawCommand::Type::fill_text;
-        });
+    const auto ellipsis_text =
+        std::find_if(ellipsis_canvas.commands().begin(), ellipsis_canvas.commands().end(),
+                     [](const auto& command) {
+                         return command.type == pulp::canvas::DrawCommand::Type::fill_text;
+                     });
     REQUIRE(ellipsis_text != ellipsis_canvas.commands().end());
     REQUIRE(ellipsis_text->text.size() >= 3);
     CHECK(ellipsis_text->text.ends_with("\xe2\x80\xa6"));
@@ -496,8 +498,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     live_single->paint(cached_canvas);
     CHECK(Label::line_break_path_counts().cached == 1);
     const auto cached_text = std::find_if(
-        cached_canvas.commands().begin(), cached_canvas.commands().end(),
-        [](const auto& command) {
+        cached_canvas.commands().begin(), cached_canvas.commands().end(), [](const auto& command) {
             return command.type == pulp::canvas::DrawCommand::Type::fill_text;
         });
     REQUIRE(cached_text != cached_canvas.commands().end());
@@ -536,10 +537,8 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     // than merely invalidating the captured cache.
     constexpr std::string_view tracked_text = "alpha beta";
     auto& shaper = pulp::canvas::global_text_shaper();
-    const auto plain_prepared = shaper.prepare(
-        tracked_text, "Inter", 12.0f, 400, 0, 0.0f);
-    const auto tracked_prepared = shaper.prepare(
-        tracked_text, "Inter", 12.0f, 400, 0, 4.0f);
+    const auto plain_prepared = shaper.prepare(tracked_text, "Inter", 12.0f, 400, 0, 0.0f);
+    const auto tracked_prepared = shaper.prepare(tracked_text, "Inter", 12.0f, 400, 0, 4.0f);
     REQUIRE(tracked_prepared.total_width() > plain_prepared.total_width());
     const float tracked_wrap_width =
         (plain_prepared.total_width() + tracked_prepared.total_width()) * 0.5f;
@@ -548,13 +547,11 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     live_single->set_bounds({0, 0, tracked_wrap_width, 40.0f});
     pulp::canvas::RecordingCanvas plain_wrap_canvas;
     live_single->paint(plain_wrap_canvas);
-    CHECK(plain_wrap_canvas.count(
-              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+    CHECK(plain_wrap_canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 1);
     live_single->set_letter_spacing(4.0f);
     pulp::canvas::RecordingCanvas tracked_wrap_canvas;
     live_single->paint(tracked_wrap_canvas);
-    CHECK(tracked_wrap_canvas.count(
-              pulp::canvas::DrawCommand::Type::fill_text) == 2);
+    CHECK(tracked_wrap_canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 2);
 
     REQUIRE(live_nowrap != nullptr);
     REQUIRE_FALSE(live_nowrap->multi_line());
@@ -566,8 +563,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     live_nowrap->set_text("gamma delta");
     pulp::canvas::RecordingCanvas nowrap_stale_canvas;
     live_nowrap->paint(nowrap_stale_canvas);
-    CHECK(nowrap_stale_canvas.count(
-              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+    CHECK(nowrap_stale_canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 1);
 
     auto direct = build_native_view_tree(ir, {}, {});
     REQUIRE(direct != nullptr);
@@ -581,11 +577,14 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
                 direct_nowrap = label;
             if (label->text() == "alpha beta" && label->multi_line())
                 direct_wrapped = label;
-            if (label->text() == "long label") direct_ellipsis = label;
-            if (label->text() == "abcd") direct_styled = label;
+            if (label->text() == "long label")
+                direct_ellipsis = label;
+            if (label->text() == "abcd")
+                direct_styled = label;
         }
         for (size_t i = 0; i < view.child_count(); ++i)
-            if (auto* child = view.child_at(i)) self(self, *child);
+            if (auto* child = view.child_at(i))
+                self(self, *child);
     };
     find_direct_nowrap(find_direct_nowrap, *direct);
     REQUIRE(direct_nowrap != nullptr);
@@ -593,8 +592,7 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     direct_wrapped->set_bounds({0, 0, 40.0f, 36.0f});
     pulp::canvas::RecordingCanvas direct_wrapped_canvas;
     direct_wrapped->paint(direct_wrapped_canvas);
-    CHECK(direct_wrapped_canvas.count(
-              pulp::canvas::DrawCommand::Type::stroke_line) == 1);
+    CHECK(direct_wrapped_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) == 1);
     direct_nowrap->set_bounds({0, 0, 40.0f, 40.0f});
     Label::reset_line_break_path_counts();
     pulp::canvas::RecordingCanvas direct_cached_canvas;
@@ -603,18 +601,17 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     direct_nowrap->set_text("gamma delta");
     pulp::canvas::RecordingCanvas direct_stale_canvas;
     direct_nowrap->paint(direct_stale_canvas);
-    CHECK(direct_stale_canvas.count(
-              pulp::canvas::DrawCommand::Type::fill_text) == 1);
+    CHECK(direct_stale_canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 1);
 
     REQUIRE(direct_ellipsis != nullptr);
     direct_ellipsis->set_bounds({0, 0, 30.0f, 20.0f});
     pulp::canvas::RecordingCanvas direct_ellipsis_canvas;
     direct_ellipsis->paint(direct_ellipsis_canvas);
-    const auto direct_ellipsis_text = std::find_if(
-        direct_ellipsis_canvas.commands().begin(),
-        direct_ellipsis_canvas.commands().end(), [](const auto& command) {
-            return command.type == pulp::canvas::DrawCommand::Type::fill_text;
-        });
+    const auto direct_ellipsis_text =
+        std::find_if(direct_ellipsis_canvas.commands().begin(),
+                     direct_ellipsis_canvas.commands().end(), [](const auto& command) {
+                         return command.type == pulp::canvas::DrawCommand::Type::fill_text;
+                     });
     REQUIRE(direct_ellipsis_text != direct_ellipsis_canvas.commands().end());
     CHECK(direct_ellipsis_text->text.ends_with("\xe2\x80\xa6"));
 
@@ -634,13 +631,9 @@ TEST_CASE("native codegen preserves the browser's captured line-breaking decisio
     CodeGenOptions web_opts;
     web_opts.mode = CodeGenMode::web_compat;
     const auto web_js = generate_pulp_js(ir, web_opts);
-    CHECK(web_js.find(".style.textDecoration = 'underline';") !=
-          std::string::npos);
-    CHECK(web_js.find("textDecoration: 'none'") !=
-          std::string::npos);
-    CHECK(count_occurrences(
-              web_js, ".style.textDecoration = 'underline';") == 1);
-
+    CHECK(web_js.find(".style.textDecoration = 'underline';") != std::string::npos);
+    CHECK(web_js.find("textDecoration: 'none'") != std::string::npos);
+    CHECK(count_occurrences(web_js, ".style.textDecoration = 'underline';") == 1);
 }
 
 TEST_CASE("direct native text runs snap malformed byte offsets to UTF-8 boundaries",
@@ -666,9 +659,11 @@ TEST_CASE("direct native text runs snap malformed byte offsets to UTF-8 boundari
     REQUIRE(root != nullptr);
     Label* label = nullptr;
     const auto find_label = [&](auto&& self, View& view) -> void {
-        if (auto* candidate = dynamic_cast<Label*>(&view)) label = candidate;
+        if (auto* candidate = dynamic_cast<Label*>(&view))
+            label = candidate;
         for (size_t i = 0; i < view.child_count(); ++i)
-            if (auto* child = view.child_at(i)) self(self, *child);
+            if (auto* child = view.child_at(i))
+                self(self, *child);
     };
     find_label(find_label, *root);
     REQUIRE(label != nullptr);
@@ -715,15 +710,14 @@ TEST_CASE("direct native text-run gaps retain inherited dominant typography",
     bool saw_base = false;
     bool saw_run = false;
     for (const auto& command : canvas.commands()) {
-        if (command.type != pulp::canvas::DrawCommand::Type::set_font_full) continue;
-        if (command.text == "Courier" &&
-            command.f[0] == Catch::Approx(18.0f) &&
-            command.f[1] == Catch::Approx(500.0f) &&
-            command.f[3] == Catch::Approx(1.5f)) saw_base = true;
-        if (command.text == "Courier" &&
-            command.f[0] == Catch::Approx(18.0f) &&
-            command.f[1] == Catch::Approx(700.0f) &&
-            command.f[3] == Catch::Approx(1.5f)) saw_run = true;
+        if (command.type != pulp::canvas::DrawCommand::Type::set_font_full)
+            continue;
+        if (command.text == "Courier" && command.f[0] == Catch::Approx(18.0f) &&
+            command.f[1] == Catch::Approx(500.0f) && command.f[3] == Catch::Approx(1.5f))
+            saw_base = true;
+        if (command.text == "Courier" && command.f[0] == Catch::Approx(18.0f) &&
+            command.f[1] == Catch::Approx(700.0f) && command.f[3] == Catch::Approx(1.5f))
+            saw_run = true;
     }
     CHECK(saw_base);
     CHECK(saw_run);
@@ -758,7 +752,8 @@ TEST_CASE("web text-run gaps retain the node dominant typography",
     CHECK(js.find("Mixed0.style.fontSize = '18px';") != std::string::npos);
     CHECK(js.find("Mixed0.style.fontWeight = '500';") != std::string::npos);
     CHECK(js.find("Mixed0.style.color = '#223344';") != std::string::npos);
-    CHECK(js.find("setTextRuns(Mixed0._id, [{ start: 5, end: 9, fontWeight: 700 }])") != std::string::npos);
+    CHECK(js.find("setTextRuns(Mixed0._id, [{ start: 5, end: 9, fontWeight: 700 }])") !=
+          std::string::npos);
     CHECK(js.find("Mixed0_r0") == std::string::npos);
 }
 
@@ -785,9 +780,11 @@ TEST_CASE("direct native styled paragraphs use responsive multiline layout",
     REQUIRE(root != nullptr);
     Label* label = nullptr;
     const auto find_label = [&](auto&& self, View& view) -> void {
-        if (auto* candidate = dynamic_cast<Label*>(&view)) label = candidate;
+        if (auto* candidate = dynamic_cast<Label*>(&view))
+            label = candidate;
         for (size_t i = 0; i < view.child_count(); ++i)
-            if (auto* child = view.child_at(i)) self(self, *child);
+            if (auto* child = view.child_at(i))
+                self(self, *child);
     };
     find_label(find_label, *root);
     REQUIRE(label != nullptr);
@@ -807,8 +804,8 @@ TEST_CASE("captured line decisions reject UTF-16 surrogate-pair splits",
     label.style.height = 24.0f;
     label.style.font_size = 14.0f;
     label.text_line_boxes.push_back({0, 0, 100, 18, 1, 1});
-    label.text_layout_basis = IRTextLayoutBasis{
-        100.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
+    label.text_layout_basis =
+        IRTextLayoutBasis{100.0f, pulp::canvas::resolved_face_identity("Inter", 400.0f)};
     ir.root.children.push_back(std::move(label));
 
     CodeGenOptions opts;
@@ -918,7 +915,7 @@ TEST_CASE("native codegen uses linear taper for non-frequency knobs (issue-3192)
     knob.audio_label = "Drive";
     knob.audio_min = 0.0f;
     knob.audio_max = 10.0f;
-    knob.audio_default = 5.0f;        // linear midpoint → 0.5
+    knob.audio_default = 5.0f; // linear midpoint → 0.5
     knob.attributes["units"] = "dB";
     ir.root.children.push_back(knob);
 
@@ -978,9 +975,7 @@ TEST_CASE("generate_pulp_js web-compat mode handles audio widgets", "[view][impo
     // DesignIR lowering must also route a user change back to the parameter.
     // Without this handler the control renders and turns but is acoustically
     // inert.
-    REQUIRE(js.find(
-        "'change', function (v) { setParam('gain', v); })") !=
-        std::string::npos);
+    REQUIRE(js.find("'change', function (v) { setParam('gain', v); })") != std::string::npos);
     REQUIRE(js.find("bindMeter(") != std::string::npos);
     REQUIRE(js.find("setParam('output'") == std::string::npos);
     REQUIRE(js.find("setAnchor(") != std::string::npos);
@@ -1032,7 +1027,8 @@ TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
         });
     auto listener = store.add_listener(
         [&](pulp::state::ParamID id, float) {
-            if (id == gain.id) events.push_back("value");
+            if (id == gain.id)
+                events.push_back("value");
         },
         pulp::state::ListenerThread::Audio);
     WidgetBridge bridge(engine, root, store);
@@ -1049,7 +1045,8 @@ TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
             return;
         }
         for (std::size_t i = 0; i < view.child_count() && !live_knob; ++i)
-            if (auto* child = view.child_at(i)) self(self, *child);
+            if (auto* child = view.child_at(i))
+                self(self, *child);
     };
     find_knob(find_knob, root);
     REQUIRE(live_knob != nullptr);
@@ -1064,12 +1061,9 @@ TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
     // The real pointer router delivers Knob::on_mouse_event before
     // Knob::on_mouse_down. A reset must still write inside the gesture.
     events.clear();
-    REQUIRE(deliver_mouse_down(
-        root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2));
-    deliver_mouse_up(
-        root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2, {});
-    REQUIRE(events == std::vector<std::string>{
-                          "begin", "value", "end", "begin", "end"});
+    REQUIRE(deliver_mouse_down(root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2));
+    deliver_mouse_up(root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2, {});
+    REQUIRE(events == std::vector<std::string>{"begin", "value", "end", "begin", "end"});
 }
 
 TEST_CASE("web-compat parameter gesture routing survives deferred creation and rebinding",
@@ -1093,18 +1087,13 @@ TEST_CASE("web-compat parameter gesture routing survives deferred creation and r
             .range = {0.0f, 1.0f, 0.5f},
         });
         store.set_gesture_callbacks(
-            [&](pulp::state::ParamID id) {
-                events.push_back("begin:" + std::to_string(id));
-            },
-            [&](pulp::state::ParamID id) {
-                events.push_back("end:" + std::to_string(id));
-            });
+            [&](pulp::state::ParamID id) { events.push_back("begin:" + std::to_string(id)); },
+            [&](pulp::state::ParamID id) { events.push_back("end:" + std::to_string(id)); });
 
         {
             WidgetBridge bridge(engine, root, store);
-            bridge.load_script(
-                "bindWidgetToParam('deferred', 'gain');"
-                "createKnob('deferred', '');");
+            bridge.load_script("bindWidgetToParam('deferred', 'gain');"
+                               "createKnob('deferred', '');");
             live_knob = dynamic_cast<Knob*>(bridge.widget("deferred"));
             REQUIRE(live_knob != nullptr);
 
@@ -1115,14 +1104,11 @@ TEST_CASE("web-compat parameter gesture routing survives deferred creation and r
 
             live_knob->on_mouse_down({40.0f, 40.0f});
             live_knob->on_mouse_up({40.0f, 40.0f});
-            REQUIRE(events == std::vector<std::string>{
-                                  "begin:1", "end:1", "begin:2", "end:2"});
+            REQUIRE(events == std::vector<std::string>{"begin:1", "end:1", "begin:2", "end:2"});
 
-            bridge.load_script(
-                "createKnob('second', '');"
-                "bindWidgetToParam('second', 'tone');");
-            auto* second_knob =
-                dynamic_cast<Knob*>(bridge.widget("second"));
+            bridge.load_script("createKnob('second', '');"
+                               "bindWidgetToParam('second', 'tone');");
+            auto* second_knob = dynamic_cast<Knob*>(bridge.widget("second"));
             REQUIRE(second_knob != nullptr);
             events.clear();
             live_knob->on_mouse_down({40.0f, 40.0f});
@@ -1131,8 +1117,7 @@ TEST_CASE("web-compat parameter gesture routing survives deferred creation and r
             REQUIRE(events == std::vector<std::string>{"begin:2"});
             REQUIRE(store.open_gesture_count() == 1);
             live_knob->on_mouse_up({40.0f, 40.0f});
-            REQUIRE(events ==
-                    std::vector<std::string>{"begin:2", "end:2"});
+            REQUIRE(events == std::vector<std::string>{"begin:2", "end:2"});
 
             // Teardown while pressed must close the host gesture. The root
             // remains externally owned and retains the widget after the bridge.
@@ -1162,18 +1147,17 @@ TEST_CASE("web-compat parameter gesture teardown tolerates hostile callbacks",
 
     WidgetBridge* live_bridge = nullptr;
     bool reenter = true;
-    store.set_gesture_callbacks(
-        [](pulp::state::ParamID) {},
-        [&](pulp::state::ParamID) {
-            if (!reenter) return;
-            reenter = false;
-            live_bridge->clear();
-        });
+    store.set_gesture_callbacks([](pulp::state::ParamID) {},
+                                [&](pulp::state::ParamID) {
+                                    if (!reenter)
+                                        return;
+                                    reenter = false;
+                                    live_bridge->clear();
+                                });
     WidgetBridge bridge(engine, root, store);
     live_bridge = &bridge;
-    bridge.load_script(
-        "createKnob('gain', '');"
-        "bindWidgetToParam('gain', 'gain');");
+    bridge.load_script("createKnob('gain', '');"
+                       "bindWidgetToParam('gain', 'gain');");
     auto* knob = dynamic_cast<Knob*>(bridge.widget("gain"));
     REQUIRE(knob != nullptr);
     knob->on_mouse_down({40.0f, 40.0f});
@@ -1191,16 +1175,11 @@ TEST_CASE("web-compat parameter gesture teardown tolerates hostile callbacks",
         });
         throwing_store.set_gesture_callbacks(
             [](pulp::state::ParamID) {},
-            [](pulp::state::ParamID) {
-                throw std::runtime_error("intentional teardown failure");
-            });
-        WidgetBridge throwing_bridge(
-            throwing_engine, throwing_root, throwing_store);
-        throwing_bridge.load_script(
-            "createKnob('gain', '');"
-            "bindWidgetToParam('gain', 'gain');");
-        auto* throwing_knob =
-            dynamic_cast<Knob*>(throwing_bridge.widget("gain"));
+            [](pulp::state::ParamID) { throw std::runtime_error("intentional teardown failure"); });
+        WidgetBridge throwing_bridge(throwing_engine, throwing_root, throwing_store);
+        throwing_bridge.load_script("createKnob('gain', '');"
+                                    "bindWidgetToParam('gain', 'gain');");
+        auto* throwing_knob = dynamic_cast<Knob*>(throwing_bridge.widget("gain"));
         REQUIRE(throwing_knob != nullptr);
         throwing_knob->on_mouse_down({40.0f, 40.0f});
     }
@@ -1215,9 +1194,8 @@ TEST_CASE("web-compat parameter gestures share ownership across bridges",
         .range = {0.0f, 1.0f, 0.5f},
     });
     std::vector<std::string> events;
-    store.set_gesture_callbacks(
-        [&](pulp::state::ParamID) { events.push_back("begin"); },
-        [&](pulp::state::ParamID) { events.push_back("end"); });
+    store.set_gesture_callbacks([&](pulp::state::ParamID) { events.push_back("begin"); },
+                                [&](pulp::state::ParamID) { events.push_back("end"); });
 
     ScriptEngine first_engine;
     ScriptEngine second_engine;
@@ -1225,12 +1203,10 @@ TEST_CASE("web-compat parameter gestures share ownership across bridges",
     View second_root;
     WidgetBridge first_bridge(first_engine, first_root, store);
     WidgetBridge second_bridge(second_engine, second_root, store);
-    first_bridge.load_script(
-        "createKnob('gain', '');"
-        "bindWidgetToParam('gain', 'gain');");
-    second_bridge.load_script(
-        "createKnob('gain', '');"
-        "bindWidgetToParam('gain', 'gain');");
+    first_bridge.load_script("createKnob('gain', '');"
+                             "bindWidgetToParam('gain', 'gain');");
+    second_bridge.load_script("createKnob('gain', '');"
+                              "bindWidgetToParam('gain', 'gain');");
     auto* first = dynamic_cast<Knob*>(first_bridge.widget("gain"));
     auto* second = dynamic_cast<Knob*>(second_bridge.widget("gain"));
     REQUIRE(first != nullptr);
@@ -1246,8 +1222,7 @@ TEST_CASE("web-compat parameter gestures share ownership across bridges",
     REQUIRE(store.open_gesture_count() == 0);
 }
 
-TEST_CASE("web-compat audio widget escapes an authored label",
-          "[view][import]") {
+TEST_CASE("web-compat audio widget escapes an authored label", "[view][import]") {
     // The label was interpolated raw into a single-quoted literal, so a design
     // could terminate the string and inject executable bridge JavaScript. Every
     // other emission in this file escapes; this one must too.
@@ -1265,15 +1240,14 @@ TEST_CASE("web-compat audio widget escapes an authored label",
 
     CodeGenOptions opts;
     opts.mode = CodeGenMode::web_compat;
-    opts.include_comments = false;   // the live lowering Forge runs
+    opts.include_comments = false; // the live lowering Forge runs
     const auto js = generate_pulp_js(ir, opts);
 
     CHECK(js.find("setTheme('light');") == std::string::npos);
     CHECK(js.find("\\'") != std::string::npos);
 }
 
-TEST_CASE("web-compat audio widget label cannot escape its own comment",
-          "[view][import]") {
+TEST_CASE("web-compat audio widget label cannot escape its own comment", "[view][import]") {
     // The other half of the same hole. With comments on, the label was written
     // into a `//` line verbatim — and a comment is only a comment until the
     // text ends the line, so a newline in an authored label closed it and the
@@ -1506,7 +1480,8 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
     REQUIRE(js.find("panelRoot.style.alignItems = 'center'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.flexWrap = 'wrap'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.flexGrow = '1'") != std::string::npos);
-    REQUIRE(js.find("panelRoot.style.background = 'linear-gradient(#101010,#202020)'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.background = 'linear-gradient(#101010,#202020)'") !=
+            std::string::npos);
     REQUIRE(js.find("panelRoot.style.opacity = '0.5'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.borderRadius = '3.5px'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.boxShadow = '0 1px 2px #000'") != std::string::npos);

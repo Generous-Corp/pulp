@@ -89,7 +89,7 @@ size_t count_occurrences(const std::string& haystack, const std::string& needle)
     return n;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("native codegen fades text, image, widget and container alike",
           "[view][import][visual-overrides]") {
@@ -113,8 +113,9 @@ TEST_CASE("native codegen fades text, image, widget and container alike",
     REQUIRE(js.find("'All'") == std::string::npos);
 }
 
-TEST_CASE("native codegen lowers a layer blur to setFilter and a background blur to setBackdropFilter",
-          "[view][import][visual-overrides]") {
+TEST_CASE(
+    "native codegen lowers a layer blur to setFilter and a background blur to setBackdropFilter",
+    "[view][import][visual-overrides]") {
     // A Figma LAYER_BLUR reaches the IR as `filter: blur(Npx)` and a
     // BACKGROUND_BLUR as `backdrop_filter: blur(Npx)` (all three producers).
     // The bridge's setFilter takes the CSS string (it walks the function
@@ -228,7 +229,7 @@ TEST_CASE("native codegen emits an audio widget's shadow, blend and opacity",
     knob.audio_widget = AudioWidgetType::knob;
     knob.style.width = 48.0f;
     knob.style.height = 48.0f;
-    knob.style.opacity = 0.3f;  // designer's "disabled" fade
+    knob.style.opacity = 0.3f; // designer's "disabled" fade
     knob.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
     ir.root.children.push_back(knob);
 
@@ -258,7 +259,7 @@ TEST_CASE("native codegen emits every box-shadow layer, in CSS author order",
     knob.style.height = 48.0f;
     knob.style.box_shadow =
         parse_css_box_shadow("0px 16px 6px 0px #0000001a, 0px 4px 4px 0px #00000040");
-    REQUIRE(knob.style.box_shadow.size() == 2);  // the parser already keeps both
+    REQUIRE(knob.style.box_shadow.size() == 2); // the parser already keeps both
     ir.root.children.push_back(knob);
 
     const auto js = native_js(ir);
@@ -304,8 +305,8 @@ TEST_CASE("native codegen positions an unlabeled non-knob widget absolutely",
     // Only the knob sub-branch emitted the position, so every other widget kind
     // lost it. Fader is the canonical miss: a channel-strip fader pinned at an
     // absolute offset drifted to wherever flex put it.
-    for (auto wtype : {AudioWidgetType::fader, AudioWidgetType::meter,
-                       AudioWidgetType::xy_pad, AudioWidgetType::waveform}) {
+    for (auto wtype : {AudioWidgetType::fader, AudioWidgetType::meter, AudioWidgetType::xy_pad,
+                       AudioWidgetType::waveform}) {
         DesignIR ir;
         ir.source = DesignSource::figma;
         ir.root.type = "frame";
@@ -313,7 +314,7 @@ TEST_CASE("native codegen positions an unlabeled non-knob widget absolutely",
 
         IRNode w;
         w.type = "frame";
-        w.audio_widget = wtype;   // no label/value/range → no wrapper column
+        w.audio_widget = wtype; // no label/value/range → no wrapper column
         w.style.width = 40.0f;
         w.style.height = 120.0f;
         w.style.position = "absolute";
@@ -325,8 +326,8 @@ TEST_CASE("native codegen positions an unlabeled non-knob widget absolutely",
 
         INFO("widget kind index " << static_cast<int>(wtype) << " js:\n" << js);
         REQUIRE(js.find("setPosition('") != std::string::npos);
-        REQUIRE(js.find("', 72)") != std::string::npos);   // setLeft
-        REQUIRE(js.find("', 24)") != std::string::npos);   // setTop
+        REQUIRE(js.find("', 72)") != std::string::npos); // setLeft
+        REQUIRE(js.find("', 24)") != std::string::npos); // setTop
     }
 }
 
@@ -355,8 +356,8 @@ TEST_CASE("native codegen paints a childless non-frame node's gradient and fade"
     const auto js = native_js(ir);
     INFO(js);
 
-    REQUIRE(js.find("setBackgroundGradient('input0', 'linear-gradient(90deg, #0f0, #00f)')")
-            != std::string::npos);
+    REQUIRE(js.find("setBackgroundGradient('input0', 'linear-gradient(90deg, #0f0, #00f)')") !=
+            std::string::npos);
     REQUIRE(js.find("setOpacity('input0', 0.25)") != std::string::npos);
     REQUIRE(js.find("setCornerRadius('input0', 'All', 6)") != std::string::npos);
 }
@@ -378,8 +379,8 @@ TEST_CASE("native codegen paints a text node's background gradient",
     const auto js = native_js(ir);
     INFO(js);
 
-    REQUIRE(js.find("setBackgroundGradient('span0', 'linear-gradient(90deg, #f00, #00f)')")
-            != std::string::npos);
+    REQUIRE(js.find("setBackgroundGradient('span0', 'linear-gradient(90deg, #f00, #00f)')") !=
+            std::string::npos);
 }
 
 TEST_CASE("native codegen never emits a gradient box behind an SVG path",
@@ -482,8 +483,7 @@ TEST_CASE("a synthesized ellipse carries its gradient stroke onto the path",
     REQUIRE(js.find("createSvgPath('") != std::string::npos);
     REQUIRE(js.find("setSvgFill('") != std::string::npos);
     REQUIRE(js.find("setSvgStrokeGradient('") != std::string::npos);
-    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #31313140 100%)")
-            != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #31313140 100%)") != std::string::npos);
     REQUIRE(js.find("setSvgStrokeWidth(") != std::string::npos);
 }
 
@@ -516,8 +516,7 @@ TEST_CASE("native codegen paints a gradient behind a transparent image",
     REQUIRE(js.find("setImageSource(") != std::string::npos);
 }
 
-TEST_CASE("native codegen lowers the Figma paint-stack fields",
-          "[view][import][paints]") {
+TEST_CASE("native codegen lowers the Figma paint-stack fields", "[view][import][paints]") {
     // Audit item 7: paint-level opacity rides in the emitted rgba color; image
     // scale modes ride in object-fit (image nodes, honored by ImageView::paint)
     // or background-size/background-repeat (frame-shaped nodes); a solid plate
@@ -670,10 +669,9 @@ IRNode make_slider(float fill_x, float fill_w, float thumb_x) {
     return container;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("a detached slider fill is reconnected to its thumb",
-          "[view][import][slider]") {
+TEST_CASE("a detached slider fill is reconnected to its thumb", "[view][import][slider]") {
     // The real TRIAZ geometry: thumb at [8,16], fill floating at [30,48] with a
     // 14px gap between them. Faithfully rendering the stored fill draws a broken
     // detached red bar; Figma's live component render keeps the fill on the
@@ -710,8 +708,7 @@ TEST_CASE("slider reconnection leaves an already-connected fill untouched",
     REQUIRE(ok.children[1].style.width == Catch::Approx(20.0f));
 }
 
-TEST_CASE("slider reconnection ignores non-slider structures",
-          "[view][import][slider]") {
+TEST_CASE("slider reconnection ignores non-slider structures", "[view][import][slider]") {
     // A track-plus-thumb fader with no distinct colored fill (the TRIAZ "fx vol"
     // faders) has nothing to bridge — leave it alone and never crash.
     IRNode fader;
@@ -720,13 +717,17 @@ TEST_CASE("slider reconnection ignores non-slider structures",
     fader.style.height = 7.0f;
     IRNode track;
     track.type = "frame";
-    track.style.left = 0.0f; track.style.top = 3.0f;
-    track.style.width = 74.0f; track.style.height = 1.0f;
+    track.style.left = 0.0f;
+    track.style.top = 3.0f;
+    track.style.width = 74.0f;
+    track.style.height = 1.0f;
     track.style.background_color = "#00000059";
     IRNode thumb;
     thumb.type = "ellipse";
-    thumb.style.left = 50.0f; thumb.style.top = 0.0f;
-    thumb.style.width = 7.0f; thumb.style.height = 7.0f;
+    thumb.style.left = 50.0f;
+    thumb.style.top = 0.0f;
+    thumb.style.width = 7.0f;
+    thumb.style.height = 7.0f;
     thumb.style.background_color = "#aeafb1";
     fader.children = {track, thumb};
     reconnect_slider_fill(fader);
@@ -738,16 +739,20 @@ TEST_CASE("slider reconnection ignores non-slider structures",
     IRNode panel;
     panel.type = "frame";
     panel.style.width = 60.0f;
-    panel.style.height = 40.0f;  // not short: fails the wide-and-short gate
+    panel.style.height = 40.0f; // not short: fails the wide-and-short gate
     IRNode a, b, c;
     for (auto* r : {&a, &b, &c}) {
         r->type = "frame";
-        r->style.top = 0.0f; r->style.height = 10.0f;
+        r->style.top = 0.0f;
+        r->style.height = 10.0f;
         r->style.background_color = "#123456";
     }
-    a.style.left = 0.0f;  a.style.width = 60.0f;
-    b.style.left = 30.0f; b.style.width = 18.0f;
-    c.style.left = 8.0f;  c.style.width = 8.0f;
+    a.style.left = 0.0f;
+    a.style.width = 60.0f;
+    b.style.left = 30.0f;
+    b.style.width = 18.0f;
+    c.style.left = 8.0f;
+    c.style.width = 8.0f;
     panel.children = {a, b, c};
     reconnect_slider_fill(panel);
     REQUIRE(panel.children[1].style.left == Catch::Approx(30.0f));
@@ -770,8 +775,7 @@ TEST_CASE("the border shorthand splits without losing a functional color",
     REQUIRE(*n.style.border_style == "dashed");
 }
 
-TEST_CASE("border shorthand normalization defers and declines",
-          "[view][import][border]") {
+TEST_CASE("border shorthand normalization defers and declines", "[view][import][border]") {
     // A producer that set the discrete field said what it meant more precisely
     // than the shorthand can, so the shorthand must not overwrite it.
     IRNode explicit_color;
@@ -802,8 +806,10 @@ TEST_CASE("border shorthand normalization defers and declines",
     // Recurses: a stroke on a deep child is exactly the case that was lost.
     IRNode root;
     root.type = "frame";
-    IRNode mid; mid.type = "frame";
-    IRNode leaf; leaf.type = "frame";
+    IRNode mid;
+    mid.type = "frame";
+    IRNode leaf;
+    leaf.type = "frame";
     leaf.style.border = "2px solid #123456";
     mid.children.push_back(leaf);
     root.children.push_back(mid);
@@ -826,9 +832,9 @@ TEST_CASE("a border on a generic-frame fall-through node survives to setBorder",
     ir.root.name = "root";
 
     IRNode cta;
-    cta.type = "button";              // unmapped kind, no children -> generic frame
+    cta.type = "button"; // unmapped kind, no children -> generic frame
     cta.name = "cta";
-    cta.style.border = "1px solid #475569";  // shorthand: normalize splits it
+    cta.style.border = "1px solid #475569"; // shorthand: normalize splits it
     cta.style.border_radius = 6.0f;
     ir.root.children.push_back(cta);
 
@@ -877,8 +883,7 @@ TEST_CASE("generated C++ carries rgba() colors like the materializer does",
     CHECK(hex_gen.source.find("rgba8(26, 26, 46, 255)") != std::string::npos);
 }
 
-TEST_CASE("generated JS opts its layout pass into sub-pixel geometry",
-          "[view][import][subpixel]") {
+TEST_CASE("generated JS opts its layout pass into sub-pixel geometry", "[view][import][subpixel]") {
     // Imported designs replay geometry the design tool solved at fractional
     // coordinates; Yoga's whole-pixel rounding visibly de-centered every
     // knob ring in "A Channel FX" relative to its body ellipse. The bundle
@@ -935,13 +940,13 @@ TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child
     ir.root.children.push_back(std::move(outer_button));
 
     const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
-    REQUIRE(count_occurrences(
-                result.source,
-                "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
+    REQUIRE(count_occurrences(result.source,
+                              "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") ==
+            1);
     // ...and the parent re-opened, or that box_none reaches nothing.
-    REQUIRE(count_occurrences(
-                result.source,
-                "->set_pointer_events(pulp::view::View::PointerEvents::auto_);") == 1);
+    REQUIRE(count_occurrences(result.source,
+                              "->set_pointer_events(pulp::view::View::PointerEvents::auto_);") ==
+            1);
 }
 
 TEST_CASE("generate_pulp_js escapes raw box shadows and keeps audio labels escaped",
@@ -1017,8 +1022,10 @@ TEST_CASE("generate_pulp_js escapes raw box shadows and keeps audio labels escap
     while (std::getline(lines, line)) {
         std::size_t quotes = 0;
         for (std::size_t i = 0; i < line.size(); ++i) {
-            if (line[i] != '\'') continue;
-            if (i > 0 && line[i - 1] == '\\') continue;  // an escaped quote is data
+            if (line[i] != '\'')
+                continue;
+            if (i > 0 && line[i - 1] == '\\')
+                continue; // an escaped quote is data
             ++quotes;
         }
         INFO("unbalanced quotes on: " << line);

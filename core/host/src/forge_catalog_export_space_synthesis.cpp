@@ -18,18 +18,18 @@ void append_space_synthesis(Nodes& nodes) {
     add(nodes, synthesis::additive::descriptor(),
         {
             realization("organ", synthesis::additive::make_additive_bank_node(
-                            synthesis::additive::Voice::organ)),
+                                     synthesis::additive::Voice::organ)),
             realization("bell", synthesis::additive::make_additive_bank_node(
-                            synthesis::additive::Voice::bell)),
+                                    synthesis::additive::Voice::bell)),
         });
     add(nodes, synthesis::vocoder::descriptor(),
         {realization("default", synthesis::vocoder::make_vocoder_node())});
     add(nodes, synthesis::cyclic::descriptor(),
         {
             realization("short", synthesis::cyclic::make_cyclic_stretch_node(
-                            synthesis::cyclic::Regime::short_frame)),
+                                     synthesis::cyclic::Regime::short_frame)),
             realization("long", synthesis::cyclic::make_cyclic_stretch_node(
-                            synthesis::cyclic::Regime::long_frame)),
+                                    synthesis::cyclic::Regime::long_frame)),
         });
     add(nodes, synthesis::granular::descriptor(),
         {realization("default", synthesis::granular::make_granular_node())});
