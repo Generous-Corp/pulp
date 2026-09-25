@@ -139,3 +139,21 @@ include them or reach through raw Dawn handles. After the private proof is
 green, expose a narrow Pulp-owned public adapter/node contract and keep
 GPU-NAM's existing staged `GpuAudioNode` plus continuously primed CPU fallback
 as the fallback integration until that public seam has receipts.
+
+## Baseline build timeout receipt
+
+An exact baseline attempt was stopped during dependency/build preparation, before
+the GPU-NAM executable existed:
+
+```text
+timeout 300 pulp/tools/ci/governed-build.sh cmake --build build --target gpu-nam-gpu-test -j2
+rc=124 (timeout wrapper)
+governed child rc=143 (terminated after the timeout)
+progress: 41% while compiling SDL/Catch2
+host load: 49/64/69 -> 40/45/58 on 18 cores
+```
+
+The `-j2` invocation was the leaseless floor. No executable or runtime receipt
+was produced, so this attempt says nothing about GPU correctness, latency, or
+GPU-NAM integration. It is evidence only that the first dependency build did
+not complete within five minutes under the observed host load.
