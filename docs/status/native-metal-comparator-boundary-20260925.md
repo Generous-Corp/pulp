@@ -85,6 +85,14 @@ Metal 4 feedback p50 333.916 us, with GPU p50 7.292 us. These are construction
 smoke measurements only, not a backend result; the polling and per-trial
 allocation differences invalidate a performance comparison.
 
+The same controls also ran without source changes on the other available
+Apple Silicon hosts. An M3 Ultra on macOS 27.0 reported ordinary p50 199.666
+us and Metal 4 feedback p50 322.916 us, with GPU p50 6.792 us. An M1 Max on
+macOS 27.0 reported ordinary p50 186.958 us and Metal 4 feedback p50 313.000
+us, with GPU p50 10.250 us. These repeated observations show that the control
+can run across generations; they do not turn the two paths into a matched
+benchmark because the observer and allocation confounders are unchanged.
+
 Before merging that control, replace the timed sleep with a semaphore or
 condition signaled by the feedback handler, and add a persistent-resource mode.
 Keep the current output schema explicit about CPU observation versus provider
