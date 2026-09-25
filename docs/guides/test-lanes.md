@@ -482,7 +482,10 @@ has a positive pattern, and the `[#<stem>]` term is one, so a member whose own
    `$<TARGET_FILE:...>`, `-fno-exceptions`, RT allocation probes,
    `PASS_REGULAR_EXPRESSION` probes, and any test source compiled together
    with a library `.cpp` that the group's libraries also contain (duplicate
-   symbols at link).
+   symbols at link). A member whose whole TU sits behind a platform or build
+   option (`#if defined(__APPLE__)`, `#if PULP_ENABLE_AUDIO_PROBES`) must be
+   registered behind that same condition: standalone it silently listed no
+   cases there, grouped it fails discovery.
 3. **Find duplicate case names across the group** (`TEST_CASE`, `SCENARIO`,
    `TEST_CASE_METHOD`) and rename one side with a short suffix. Catch2 aborts
    at startup on a duplicate with equal tags, and CTest would register the
