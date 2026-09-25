@@ -253,6 +253,16 @@ consumers. Until that contract exists, downstream neural or spectral plugins
 should treat `GpuAudioTransport` as a staged compatibility path and must not
 claim UMA shared execution from `capability_report()` alone.
 
+When a capability change affects the installed GPU-audio surface, the required
+macOS ARM64 build publishes an exact SDK artifact named
+`pulp-gpu-audio-sdk-<tested-sha>-macos`. The archive contains the installed
+`PulpConfig.cmake`, public headers, libraries, and a receipt with the source
+SHA and per-file hashes. A downstream consumer should unpack that artifact and
+pass the receipt's `source_sha` to its installed-SDK validator. A build-tree
+compile or a target-presence check is not a substitute for this artifact: the
+consumer must bind its result to the exact tested SDK prefix before claiming
+compatibility.
+
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
 - `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.

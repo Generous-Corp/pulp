@@ -1060,6 +1060,16 @@ Four things bite when touching this:
   separate changes; make the skip readable first, and promote only against a
   measured population.
 
+### Exact GPU-audio SDK artifacts
+
+When `agent-capability-installed-sdk` is required for an ARM64 macOS capability
+change, `build.yml` installs the tested Release build and publishes
+`pulp-gpu-audio-sdk-<sha>-macos`. The archive and adjacent JSON receipt contain
+the same checkout's `PulpConfig.cmake`, public headers, libraries, source SHA,
+and per-file hashes. Downstream validation must use that exact prefix and the
+receipt's `source_sha`; a build-tree target check or an unbound SDK directory is
+not installed-SDK evidence.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not

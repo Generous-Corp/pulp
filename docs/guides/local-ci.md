@@ -5869,3 +5869,10 @@ succeeded. Verification refuses any receipt that:
 A pull-request run that skips its tests therefore issues no receipt, and the
 merge group validates in full. Any receipt that is missing, stale, or
 rejected also falls back to full validation.
+
+Capability changes that affect `Pulp::gpu-audio` also publish the exact tested
+ARM64 macOS install prefix as `pulp-gpu-audio-sdk-<sha>-macos`. The artifact is
+created by `cmake --install` from the Release build after the installed-SDK
+contract passes and includes a source-bound JSON file manifest. Downstream
+consumer validation must use that prefix and its `source_sha`; the build tree
+or an unrelated SDK directory is not equivalent evidence.
