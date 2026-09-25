@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_program.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 
 #include "detail/gpu_audio_transport_trial_observer.hpp"
@@ -16,6 +17,132 @@
 
 using namespace pulp::gpu_audio;
 using pulp::audio::BufferView;
+
+namespace {
+
+GpuAudioProgramDescriptor valid_shared_program() {
+    return {.kind = GpuAudioProgramKind::Neural,
+            .path = GpuAudioExecutionPath::SharedMemory,
+            .provider = GpuAudioProvider::Dawn,
+            .miss_policy = MissPolicy::CpuFallback,
+            .channels = 2,
+            .block_size = 32,
+            .sample_rate = 48000,
+            .algorithmic_lead_blocks = 2,
+            .pipeline_depth = 4,
+            .provider_slots = 4,
+            .provider_owned_resources = true,
+            .cpu_fallback_prepared = true};
+}
+
+} // namespace
+
+TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu_audio][program]") {
+    const auto program = valid_shared_program();
+    const auto validation = validate_gpu_audio_program(program);
+    CHECK(validation.accepted());
+    CHECK(program.provider == GpuAudioProvider::Dawn);
+    CHECK(program.provider_owned_resources);
+}
+
+TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
+          "[gpu_audio][program]") {
+    auto program = valid_shared_program();
+
+    program.algorithmic_lead_blocks = 0;
+    CHECK(validate_gpu_audio_program(program).error ==
+          GpuAudioProgramError::MissingAlgorithmicLead);
+
+    program.algorithmic_lead_blocks = 2;
+    program.pipeline_depth = 2;
+    CHECK(validate_gpu_audio_program(program).error ==
+          GpuAudioProgramError::InsufficientPipelineDepth);
+
+    program.pipeline_depth = 4;
+    program.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_program(program).error ==
+          GpuAudioProgramError::MissingProviderIdentity);
+}
+
+TEST_CASE("GpuAudioProgramDescriptor rejects unsafe provider and fallback claims",
+          "[gpu_audio][program]") {
+    auto program = valid_shared_program();
+
+    program.provider_owned_resources = false;
+    CHECK(validate_gpu_audio_program(program).error ==
+          GpuAudioProgramError::ProviderResourcesNotOwned);
+
+    program = valid_shared_program();
+    program.miss_policy = MissPolicy::CpuFallback;
+    program.cpu_fallback_prepared = false;
+    CHECK(validate_gpu_audio_program(program).error ==
+          GpuAudioProgramError::CpuFallbackNotPrepared);
+
+    program = valid_shared_program();
+    program.path = GpuAudioExecutionPath::Cpu;
+    program.provider = GpuAudioProvider::Unknown;
+    program.provider_owned_resources = false;
+    program.algorithmic_lead_blocks = 0;
+    program.pipeline_depth = 0;
+    program.provider_slots = 0;
+    program.miss_policy = MissPolicy::Silence;
+    CHECK(validate_gpu_audio_program(program).accepted());
+}
+
+TEST_CASE("GpuAudioProgramDescriptor binds only to an authenticated capability",
+          "[gpu_audio][program]") {
+    const auto program = valid_shared_program();
+    GpuAudioCapabilityReport capability;
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
+    capability.eligibility = GpuAudioEligibility::Eligible;
+    capability.fallback_policy = MissPolicy::CpuFallback;
+    capability.prepared_lead_blocks = 2;
+    capability.prepared = true;
+    capability.fallback_available = true;
+
+    CHECK(validate_gpu_audio_program(program, capability).accepted());
+
+    capability.provider = GpuAudioProvider::Unknown;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityProviderMismatch);
+
+    capability = {};
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityNotPrepared);
+}
+
+TEST_CASE("GpuAudioProgramDescriptor rejects capability drift before execution",
+          "[gpu_audio][program]") {
+    const auto program = valid_shared_program();
+    GpuAudioCapabilityReport capability;
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.provider = GpuAudioProvider::Dawn;
+    capability.eligibility = GpuAudioEligibility::Eligible;
+    capability.fallback_policy = MissPolicy::CpuFallback;
+    capability.prepared_lead_blocks = 2;
+    capability.prepared = true;
+    capability.fallback_available = true;
+
+    capability.path = GpuAudioExecutionPath::Staged;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityPathMismatch);
+
+    capability.path = GpuAudioExecutionPath::SharedMemory;
+    capability.prepared_lead_blocks = 4;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityLeadMismatch);
+
+    capability.prepared_lead_blocks = 2;
+    capability.fallback_available = false;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityFallbackUnavailable);
+
+    capability.fallback_available = true;
+    capability.fallback_policy = MissPolicy::Silence;
+    CHECK(validate_gpu_audio_program(program, capability).error ==
+          GpuAudioProgramError::CapabilityFallbackPolicyMismatch);
+}
 
 namespace pulp::gpu_audio::test_detail {
 

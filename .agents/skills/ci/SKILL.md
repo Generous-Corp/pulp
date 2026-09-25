@@ -352,6 +352,40 @@ If you add a target that links option-gated sources, gate the `add_subdirectory`
 on the same option. A target whose implementation is compiled out still
 participates in `all`.
 
+## A timing test under a sanitizer measures the sanitizer
+
+ASan and UBSan add interception and shadow-memory work to every memory access.
+A throughput or latency assertion calibrated for an ordinary build therefore
+cannot hold under them, and its failure says nothing about the code. The nightly
+`Sanitizer Tests` lane sat red on main for days largely on this: `bench::modal
+bank throughput scales to large banks in real time` and `slow::Analog VCF stays
+finite at worst-case drive and oversampling` fail there and nowhere else.
+
+The ASan and UBSan broad passes therefore exclude
+`validation|slow|performance|bench|quality-lab` — the same label groups the
+required `macos` gate excludes, for the same underlying reason. On the gate the
+noise source is a shared runner's load; under a sanitizer it is the instrument
+itself.
+
+Two things worth keeping straight when reading that lane:
+
+- **Race and RT-safety tests are not excluded, deliberately.** `[threads]`,
+  `[rt-safety]` and the TSan name-regex lane all still run, because catching
+  that class is the reason the lane exists. A failing race test there is a
+  finding, not label noise.
+- **A timing-sensitive test is not always labelled.** `Runtime clock transitions
+  preserve invariant measured latency` (`[clock][latency]`) and `drift wanders
+  the pitch slowly at ~the commanded RMS` (`[drift]`) time out under ASan while
+  carrying no timing label, so the exclusion does not reach them. Grep the
+  registration, not the name: a `bench::` or `slow::` prefix comes from
+  `catch_discover_tests(... TEST_PREFIX ... LABELS ...)`, and a Catch2 tag alone
+  does **not** become a ctest label.
+
+Environment failures in the same lane (`visual-python-deps-present`, a missing
+numpy/Pillow on the host, `cmake-*-sdk-consumer`,
+`pulp-browser-capture-node-integration`) are host gaps, not timing. They each
+want their own fix; a label would only hide them.
+
 ## Test lanes — what gates the required `macos` check
 
 For native pull requests, Shipyard `workflow_dispatch` validation, and merge
@@ -10127,6 +10161,31 @@ every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+
+### Its `--lines` output is not always what clang-format would produce
+
+Running the fixer the failure message tells you to run can make a file **less**
+conformant. Passing the full set of changed-line ranges at once can de-indent a
+class body that neither a whole-file run nor a single-range run touches.
+Measured on `core/canvas/include/pulp/canvas/canvas.hpp`:
+
+| | `public:` | members |
+|---|---|---|
+| committed | 0 | 4 |
+| `clang-format --style=file` (whole file) | 2 | **4** |
+| `--style=file --lines=239:246` (one range) | 2 | **4** |
+| `format_changed.sh` (all ranges together) | 0 | **2** |
+
+`.clang-format` is `IndentWidth: 4` with LLVM's `AccessModifierOffset: -2`, so
+2/4 is canonical; the script's answer leaves a 2-space island inside a 4-space
+class. On the branch where this surfaced it rewrote 1,034 lines across 18 files,
+including blocks the branch never touched.
+
+The cost is the opposite of a false failure: the gate is advisory and not a
+required check, so nothing blocks — but an author who does the obvious thing
+commits output the formatter would not reproduce. **Diff a class body before
+committing the fixer's result**; if it de-indents, do not commit it. Tracked as
+issue #8753, which carries the full reproduction.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 
