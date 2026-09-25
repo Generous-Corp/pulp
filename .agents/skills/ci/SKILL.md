@@ -2118,6 +2118,19 @@ unknown runner prefix); jobs attach to a registration by runner-name prefix and
 labels, not by the registration's workflow list, because GitHub assigns by
 labels alone (release-cli darwin legs have run on pulp-gate runners).
 
+## A new download in `build.yml` must be in tartci's relay contract first
+
+The self-hosted macOS gate VMs reach the internet only through tartci's egress
+relay (`profiles/pulp-protected-macos-bootstrap-hosts.toml`). A download from a
+host it does not admit fails inside EVERY gate VM at once, and reads like a
+flaky network, not like your diff: a `pip install` added before the relay
+admitted PyPI failed every m5 gate job for a day. The `relay-contract-hosts`
+ctest (`tools/scripts/relay_contract_check.py`) now fails such a PR, naming the
+host and what needs it. Fix order: land the host in tartci first, then refresh
+the copy with `relay_contract_check.py --tartci <checkout> --write` in the Pulp
+PR. It counts literal URLs in macOS-capable `run:` scripts plus pip/npm/brew
+invocations; a download a TEST makes itself goes in its `CORPUS_HOSTS` list.
+
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
 A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and

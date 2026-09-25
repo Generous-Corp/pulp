@@ -2588,6 +2588,34 @@ same finding and tracking issue as a live routing violation; a failed clone is
 reported as unreadable state (exit 2), never as green. Pulp reads only labels,
 workflows, and repository from the snapshot, never tartci internals.
 
+### Egress-relay contract for the protected macOS gate
+
+The gate VMs reach the internet only through an egress relay whose allowlist
+tartci publishes as `profiles/pulp-protected-macos-bootstrap-hosts.toml`
+(`literal_hosts` plus `transitive_hosts`). A download from any other host fails
+inside every gate VM at once: a `pip install` added to `build.yml` before the
+relay admitted PyPI failed every m5 gate job for a day. Pulp keeps a copy,
+`tools/scripts/relay_contract_hosts.toml`, and the `relay-contract-hosts`
+ctest fails when the gate needs a host the copy lacks, naming the host, the
+step or file that needs it, and the tartci file to update:
+
+```bash
+python3 tools/scripts/relay_contract_check.py                                  # gate check (the ctest)
+python3 tools/scripts/relay_contract_check.py --tartci /path/to/tartci --check  # copy vs tartci: 1 = drift, 2 = unreadable
+python3 tools/scripts/relay_contract_check.py --tartci /path/to/tartci --write  # refresh the copy
+```
+
+The required hosts are derived, not listed: literal `http(s)://` hosts in
+`run:` scripts of `build.yml` jobs that can run on self-hosted macOS (steps
+confined to Linux or Windows by `if:` are skipped), the hosts of the package
+managers those scripts invoke (`pip` ⇒ `pypi.org` and `files.pythonhosted.org`,
+`npm` ⇒ `registry.npmjs.org`, `brew` ⇒ `ghcr.io` and `formulae.brew.sh`), and a
+short `CORPUS_HOSTS` list for downloads a registered test makes itself, each
+pinned to the source text that performs it. Adding a host is a tartci change
+first: land the relay entry, then `--write` the copy in the Pulp PR that needs
+it. The hourly runner-topology sweep runs `--check` against the same fresh
+tartci clone as the snapshot check and reports drift in the same finding.
+
 `decisions_contract.py --mode probe --live` needs Shipyard >= 0.208.0, the first
 release with `shipyard landing`; an older binary is reported as
 `shipyard landing unavailable (need >= 0.208.0; found ...)` with exit 2, never
