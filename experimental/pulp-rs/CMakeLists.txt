@@ -133,33 +133,49 @@ set(_pulp_rs_bin_name "pulp${CMAKE_EXECUTABLE_SUFFIX}")
 set(_pulp_rs_cargo_bin "${_pulp_rs_target_dir}/${_pulp_rs_target_subdir}/${_pulp_rs_bin_name}")
 set(_pulp_rs_dest_bin   "${CMAKE_BINARY_DIR}/${_pulp_rs_bin_name}")
 
-# `cargo build` is itself incremental and stamps the output binary
-# only when something changed — but CMake's add_custom_target ALL
-# fires on every `cmake --build` regardless. That's the desired
-# behavior: cargo decides whether work is needed; CMake just makes
-# sure the bridge target is reached every build.
-add_custom_target(pulp-rust-cli ALL
+# Ninja decides whether cargo runs at all, so a no-op build never spawns it.
+# The inputs come from two places:
+#
+#   - Cargo's own dep-info file (`target/<profile>/pulp.d`) lists every Rust
+#     source rustc read, `include_str!` targets, `build.rs`, and the build
+#     script's `rerun-if-changed` paths. It is the DEPFILE, so a new module or
+#     a new embedded file is tracked without a hand-maintained list.
+#   - The manifests are not in dep-info, so they are explicit DEPENDS.
+#
+# The `--release`/`--target` flags and PULP_RS_BUILD_VERSION are part of the
+# command line, and Ninja re-runs an edge whose command changed.
+#
+# Ninja only honours a depfile whose first target is the edge's first OUTPUT,
+# so Cargo's binary is that output. Cargo leaves the binary untouched when it
+# decides nothing needs rebuilding (for example after a comment-only manifest
+# edit), which would keep the edge dirty forever, so the command touches it.
+set(_pulp_rs_manifest_inputs
+    "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock"
+    "${CMAKE_CURRENT_SOURCE_DIR}/rust-toolchain.toml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/build.rs")
+add_custom_command(
+    OUTPUT "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}"
     COMMAND ${CMAKE_COMMAND} -E env
         "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
         "PULP_RS_BUILD_VERSION=${PROJECT_VERSION}"
         ${CARGO_EXECUTABLE} build ${_pulp_rs_cargo_args}
         --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
-    BYPRODUCTS "${_pulp_rs_cargo_bin}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${_pulp_rs_cargo_bin}"
+    # Surface the binary at `${CMAKE_BINARY_DIR}/pulp[.exe]` so every
+    # consumer (tests, scripts, packagers, the sandbox-e2e harness) has a
+    # stable path independent of the Cargo target layout.
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}"
+    DEPENDS ${_pulp_rs_manifest_inputs}
+    DEPFILE "${_pulp_rs_target_dir}/${_pulp_rs_target_subdir}/pulp.d"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building pulp-rs (Rust CLI) via cargo (${PULP_RUST_CLI_PROFILE} profile)"
     USES_TERMINAL
     VERBATIM)
 
-# Surface the binary at `${CMAKE_BINARY_DIR}/pulp[.exe]` so
-# every consumer (tests, scripts, packagers, the sandbox-e2e
-# harness #732) has a stable path independent of the Cargo target
-# layout.
-add_custom_command(TARGET pulp-rust-cli POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_pulp_rs_cargo_bin}"
-            "${_pulp_rs_dest_bin}"
-    COMMENT "Staging Rust pulp at ${_pulp_rs_dest_bin}"
-    VERBATIM)
+add_custom_target(pulp-rust-cli ALL
+    DEPENDS "${_pulp_rs_cargo_bin}" "${_pulp_rs_dest_bin}")
 
 # PulpDependencies deliberately forces BUILD_TESTING=OFF so dependency
 # subprojects do not register their own suites. PULP_BUILD_TESTS is Pulp's
@@ -190,6 +206,20 @@ if(PULP_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_trace_gpu_analysis_ctest.py")
     set_tests_properties(pulp-rust-gpu-trace-analysis-ctest-selftest
         PROPERTIES LABELS "trace;gpu;rust")
+
+    # A no-op build must not spawn cargo: the cargo step has to stay an edge
+    # with real outputs, Cargo's dep-info as its depfile, and the manifests as
+    # inputs. Skips (77) on non-Ninja generators.
+    add_test(NAME rust-cli-build-edge COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/rust_cli_build_edge_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(rust-cli-build-edge PROPERTIES
+        LABELS "rust"
+        SKIP_RETURN_CODE 77)
+    add_test(NAME rust-cli-build-edge-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_rust_cli_build_edge_check.py")
+    set_tests_properties(rust-cli-build-edge-selftest PROPERTIES
+        LABELS "rust")
 
     # This is the installed user-facing CLI (unlike the C++ pulp-cpp delegate).
     # Keep its bytes inside the Product B absence boundary after cargo stages it.

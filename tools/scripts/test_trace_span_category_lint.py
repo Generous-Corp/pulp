@@ -179,6 +179,51 @@ class KnownPositivesTest(unittest.TestCase):
             self.assertEqual(len(lint.violations(root)), 1)
 
 
+class LayerCategoryRuleTest(unittest.TestCase):
+    """A `*_layer` span must sit under `canvas`.
+
+    Compositing layers are the expensive canvas operation, and `canvas` is the
+    category a reader filters on to find them. Emitted under `render` a layer
+    span is not mislabelled — it is invisible, buried among frame scopes, which
+    is the same failure the gpu_ rule exists to prevent.
+    """
+
+    def _scan(self, text: str) -> list:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.cpp").write_text(text, encoding="utf-8")
+            return lint.violations(root)
+
+    def test_a_layer_span_outside_canvas_is_caught(self):
+        found = self._scan(
+            '  PULP_TRACE_BEGIN_ARGS("render", "effect_layer", "layers", 1);\n')
+        self.assertEqual([name for *_rest, name in found], ["effect_layer"])
+
+    def test_a_layer_span_under_canvas_is_clean(self):
+        """The control: the rule must not fire on the correct category, or it
+        would report every layer span in the tree."""
+        self.assertEqual(
+            self._scan(
+                '  PULP_TRACE_BEGIN_ARGS("canvas", "effect_layer", "layers", 1);\n'
+                '  PULP_TRACE_BEGIN_ARGS("canvas", "backdrop_layer", "w", 2);\n'),
+            [])
+
+    def test_the_gpu_rule_still_applies_alongside_it(self):
+        """Adding a rule must not displace the existing one."""
+        found = self._scan(
+            '  PULP_TRACE_SCOPE_NAMED("render", "gpu_submit");\n'
+            '  PULP_TRACE_BEGIN_ARGS("render", "effect_layer", "layers", 1);\n')
+        self.assertEqual(
+            sorted(name for *_rest, name in found),
+            ["effect_layer", "gpu_submit"])
+
+    def test_a_skip_marker_still_escapes(self):
+        self.assertEqual(
+            self._scan('  PULP_TRACE_BEGIN_ARGS("render", "effect_layer", "l", 1);'
+                       '  // trace-span-category-lint: skip deliberate\n'),
+            [])
+
+
 class ExitCodeTest(unittest.TestCase):
     def test_main_returns_zero_on_a_clean_tree(self):
         with tempfile.TemporaryDirectory() as tmp:

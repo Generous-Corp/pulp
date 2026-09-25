@@ -357,7 +357,13 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-view-host=pulp-test-pch-cxx20
         --expect pulp-test-group-view-host-format=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-view-host-hosting=pulp-test-pch-cxx${_pulp_pch_format_std}
-        --expect pulp-test-group-view-host-midi=pulp-test-pch-cxx20)
+        --expect pulp-test-group-view-host-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-sampler-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-sampler-host-graph=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-sampler-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-sampler-timebase=pulp-test-pch-cxx20
+        --expect pulp-test-group-sampler-graph-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-sampler-view=pulp-test-pch-cxx20)
     if(APPLE AND NOT PULP_IOS)
         # The ObjC++ view-host group is NO_PCH by construction (CMake refuses
         # a CXX carrier for an OBJCXX TU); pin that it never picks one up.
@@ -366,12 +372,28 @@ if(Python3_Interpreter_FOUND)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-dsp-rt-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-dsp-rt-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-dsp-rt-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-dsp-rt-signal-fft=pulp-test-pch-cxx20)
+    if(TARGET pulp-test-group-mac-view)
+        list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
+    endif()
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
         ${_pulp_pch_expect})
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+
+    # Dependency configure-check replay (PulpConfigureCheckCache.cmake): drives
+    # real CMake configures of a toy dependency, so it is Apple-only like the
+    # module and skips (77) elsewhere.
+    add_test(NAME configure-check-cache COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_configure_check_cache.py")
+    set_tests_properties(configure-check-cache PROPERTIES
+        LABELS "build;tools" SKIP_RETURN_CODE 77 TIMEOUT 120)
 
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds

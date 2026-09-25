@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/drawlist_format.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include <pulp/view/theme.hpp>
 
+#include <string>
 #include <vector>
 
 using namespace pulp::view;
@@ -27,6 +30,62 @@ bool has(const std::vector<Color>& cs, Color want) {
 
 // Phase 4 gap widgets — each must paint from theme tokens (reskinnable) and the
 // interactive ones must respond to input.
+
+namespace {
+
+// The drawlist for one tone, with every colour-setting command removed.
+// What survives is the GEOMETRY: if two tones reduce to the same geometry,
+// they are distinguishable by hue alone.
+std::string shape_only(pulp::view::Tone tone) {
+    pulp::view::InlineBanner b;
+    b.set_tone(tone);
+    b.set_label("Status.");
+    b.set_bounds({0, 0, 360, 46});
+    pulp::canvas::RecordingCanvas rc;
+    b.paint(rc);
+
+    std::string out;
+    for (const auto& c : rc.commands()) {
+        switch (c.type) {
+        case pulp::canvas::DrawCommand::Type::set_fill_color:
+        case pulp::canvas::DrawCommand::Type::set_stroke_color:
+            continue; // the colour is exactly what we are ignoring
+        default:
+            break;
+        }
+        out += pulp::canvas::format_command(c);
+        out += '\n';
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("status tones differ by more than colour", "[view][gap-widgets][a11y]") {
+    // The light theme cannot separate success from danger by colour under
+    // protanopia, and no token value fixes it. So the widget owes a second
+    // signal, and this asserts it survives when colour is stripped out.
+    const auto success = shape_only(pulp::view::Tone::success);
+    const auto danger = shape_only(pulp::view::Tone::danger);
+    const auto warning = shape_only(pulp::view::Tone::warning);
+    const auto info = shape_only(pulp::view::Tone::info);
+
+    CHECK(success != danger);
+    CHECK(success != warning);
+    CHECK(danger != warning);
+    CHECK(info != success);
+
+    // Control: the comparison is not trivially true. The SAME tone twice must
+    // reduce to the same geometry, or the check above would pass on noise.
+    CHECK(shape_only(pulp::view::Tone::success) == success);
+}
+
+TEST_CASE("a neutral tone carries no mark", "[view][gap-widgets][a11y]") {
+    // Neutral means "no status", so it must not gain a glyph that implies one.
+    const auto neutral = shape_only(pulp::view::Tone::neutral);
+    CHECK(neutral != shape_only(pulp::view::Tone::success));
+    CHECK_FALSE(neutral.empty());
+}
 
 TEST_CASE("Badge paints its tone fill from the theme", "[view][gap][badge]") {
     Badge b("VST3", Tone::danger);

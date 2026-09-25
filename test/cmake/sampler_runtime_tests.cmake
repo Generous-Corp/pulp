@@ -1,9 +1,34 @@
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. Members are grouped
+# by the compile line they already had: pulp::audio, the pulp::host +
+# pulp::format + pulp::graph line (C++23; pulp::audio, pulp::runtime,
+# pulp::signal and pulp::state add nothing to it), pulp::format alone,
+# pulp::timebase, pulp::graph alone and pulp::view. A suite stays on its own
+# when it needs its own process or compile line: the RT allocation probes
+# (harness/rt_allocation_probe.cpp), the heritage shipping gates (compiles the
+# PulpSampler implementation with its test hooks), signal-graph-audio-parity
+# (compiles audio_signal_generators.cpp against the analysis lib), and
+# sample-heritage-record-commit (a pulp::audio + pulp::audio-analysis line no
+# non-probe sibling shares).
+pulp_add_test_group(pulp-test-group-sampler-audio LIBRARIES pulp::audio)
+pulp_add_test_group(pulp-test-group-sampler-host-graph
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime
+              pulp::signal pulp::state)
+pulp_add_test_group(pulp-test-group-sampler-format LIBRARIES pulp::format)
+pulp_add_test_group(pulp-test-group-sampler-timebase LIBRARIES pulp::timebase)
+pulp_add_test_group(pulp-test-group-sampler-graph-runtime LIBRARIES pulp::graph)
+pulp_add_test_group(pulp-test-group-sampler-view LIBRARIES pulp::view)
+
 # Sampler/looper transport quantization helper. Schedules block-relative
 # offsets for immediate, beat, bar, grid, and host-loop boundaries from
 # ProcessContext.
-pulp_add_test_suite(pulp-test-transport-quantizer LIBRARIES pulp::format)
-pulp_add_test_suite(pulp-test-timebase LIBRARIES pulp::timebase TIMEOUT 60)
-pulp_add_test_suite(pulp-test-timebase-continuous LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-transport-quantizer GROUP pulp-test-group-sampler-format
+    LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-timebase GROUP pulp-test-group-sampler-timebase
+    LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-continuous GROUP pulp-test-group-sampler-timebase
+    LIBRARIES pulp::timebase TIMEOUT 60)
 pulp_add_test_suite(pulp-test-timebase-tempo-map-capability
     SOURCES test_timebase_tempo_map_capability.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timebase
@@ -12,13 +37,16 @@ pulp_add_test_suite(pulp-test-timebase-groove-kernels
     SOURCES test_timebase_groove_kernels.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timebase pulp::playback pulp::timeline
     TIMEOUT 60)
-pulp_add_test_suite(pulp-test-timebase-ratchet LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-ratchet GROUP pulp-test-group-sampler-timebase
+    LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Sample asset drop target adapter over cheap extension classification.
-pulp_add_test_suite(pulp-test-sample-asset-drop-target LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-sample-asset-drop-target GROUP pulp-test-group-sampler-view
+    LIBRARIES pulp::view)
 
 # Additive process-block contract for graph/offline/sampler runtime paths.
-pulp_add_test_suite(pulp-test-process-block LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-process-block GROUP pulp-test-group-sampler-format
+    LIBRARIES pulp::format)
 
 # Release-safe no-allocation probes for graph/event/sampler DSP hot paths.
 pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
@@ -26,28 +54,36 @@ pulp_add_test_suite(pulp-test-dsp-runtime-no-alloc
     LIBRARIES pulp::format pulp::audio pulp::graph pulp::midi pulp::state pulp::signal)
 
 # Deterministic multi-block offline rendering over HeadlessHost.
-pulp_add_test_suite(pulp-test-offline-render-host LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-offline-render-host GROUP pulp-test-group-sampler-format
+    LIBRARIES pulp::format)
 
 # Fixed-capacity authored rhythm projection over the shared tick domain.
-pulp_add_test_suite(pulp-test-timebase-trigger-grid LIBRARIES pulp::timebase TIMEOUT 60)
+pulp_add_test_suite(pulp-test-timebase-trigger-grid GROUP pulp-test-group-sampler-timebase
+    LIBRARIES pulp::timebase TIMEOUT 60)
 
 # Portable host/runtime matrix for automation, buses, events, state, latency, and offline bounce.
-pulp_add_test_suite(pulp-test-host-runtime-matrix LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-host-runtime-matrix GROUP pulp-test-group-sampler-format
+    LIBRARIES pulp::format)
 
 # Offline bounce-to-sample policy and sample-slot publication.
-pulp_add_test_suite(pulp-test-offline-sample-bounce LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-offline-sample-bounce GROUP pulp-test-group-sampler-format
+    LIBRARIES pulp::format)
 
 # Backend-neutral waveform GPU/static-layer planning over WaveformOverview data.
-pulp_add_test_suite(pulp-test-waveform-gpu-primitives LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-waveform-gpu-primitives GROUP pulp-test-group-sampler-view
+    LIBRARIES pulp::view)
 
 # Backend-neutral waveform GPU render/upload/cache lifecycle orchestration.
-pulp_add_test_suite(pulp-test-waveform-gpu-render-controller LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-waveform-gpu-render-controller GROUP pulp-test-group-sampler-view
+    LIBRARIES pulp::view)
 
 # Concrete CPU/headless consumer for waveform render-controller lifecycle decisions.
-pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-waveform-headless-render-backend GROUP pulp-test-group-sampler-view
+    LIBRARIES pulp::view)
 
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
-pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-rt-safety-contract GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Resident, manually-pumped, and prepared-page transport must remain
 # bit-identical across callback partitions, preload/page boundaries, seeks,
@@ -59,15 +95,15 @@ pulp_add_test_suite(pulp-test-sampler-stream-parity
             support/sample_page_transport_parity.cpp
             harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sampler-loop-oracle
+pulp_add_test_suite(pulp-test-sampler-loop-oracle GROUP pulp-test-group-sampler-audio
     SOURCES test_sampler_loop_oracle.cpp
             support/sampler_loop_parity.cpp
     LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sampler-loop-cursor-parity
+pulp_add_test_suite(pulp-test-sampler-loop-cursor-parity GROUP pulp-test-group-sampler-audio
     SOURCES test_sampler_loop_cursor_parity.cpp
             support/sampler_loop_parity.cpp
     LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sampler-paged-loop-oracle
+pulp_add_test_suite(pulp-test-sampler-paged-loop-oracle GROUP pulp-test-group-sampler-audio
     SOURCES test_sampler_paged_loop_oracle.cpp
             support/sampler_paged_loop_parity.cpp
             support/sampler_loop_parity.cpp
@@ -92,13 +128,16 @@ pulp_add_test_suite(pulp-test-sample-stream-loop-voice-reader
 pulp_add_test_suite(pulp-test-sample-sinc-kernel
     SOURCES test_sample_sinc_kernel.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sample-bank LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sample-memory-governor LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-asset GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-bank GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-memory-governor GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-heritage
     SOURCES test_sample_heritage.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::audio-analysis)
-pulp_add_test_suite(pulp-test-sample-heritage-json
+pulp_add_test_suite(pulp-test-sample-heritage-json GROUP pulp-test-group-sampler-audio
     SOURCES test_sample_heritage_json.cpp
             test_sample_heritage_runtime_state_json.cpp
     LIBRARIES pulp::audio)
@@ -163,16 +202,19 @@ pulp_add_test_suite(pulp-test-sample-starvation-envelope
     LIBRARIES pulp::audio)
 # Sibling drift check for the core-runtime RT-safety contract registry
 # (lock-free primitives, automation queue, graph walk, Processor entry).
-pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # The canonical GraphRuntimeExecutor gain output must match SignalGraph
 # bit-for-bit (regression baseline for the host-graph-on-executor seam).
-pulp_add_test_suite(pulp-test-graph-executor-parity
+pulp_add_test_suite(pulp-test-graph-executor-parity GROUP pulp-test-group-sampler-host-graph
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Off-RT scratch-slot buffer-assignment layout + reuse.
-pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment LIBRARIES pulp::graph)
+pulp_add_test_suite(pulp-test-graph-runtime-buffer-assignment GROUP pulp-test-group-sampler-graph-runtime
+    LIBRARIES pulp::graph)
 # Off-RT levelization (parallel-schedule levels) for static multicore.
-pulp_add_test_suite(pulp-test-graph-runtime-levelization LIBRARIES pulp::graph)
+pulp_add_test_suite(pulp-test-graph-runtime-levelization GROUP pulp-test-group-sampler-graph-runtime
+    LIBRARIES pulp::graph)
 # Persistent fork-join worker pool for the levelized parallel executor.
 pulp_add_test_suite(pulp-test-graph-runtime-worker-pool
     SOURCES test_graph_runtime_worker_pool.cpp harness/rt_allocation_probe.cpp
@@ -186,13 +228,13 @@ pulp_add_test_suite(pulp-test-graph-executor-routing
     LIBRARIES pulp::host pulp::format pulp::graph)
 # A SignalGraph translated to the executor produces bit-identical output to its
 # own walk for the eligible node/connection subset.
-pulp_add_test_suite(pulp-test-crossfade-plugin-slot
+pulp_add_test_suite(pulp-test-crossfade-plugin-slot GROUP pulp-test-group-sampler-host-graph
     SOURCES test_crossfade_plugin_slot.cpp
     LIBRARIES pulp::host pulp::signal pulp::audio)
-pulp_add_test_suite(pulp-test-live-swap-admission
+pulp_add_test_suite(pulp-test-live-swap-admission GROUP pulp-test-group-sampler-host-graph
     SOURCES test_live_swap_admission.cpp
     LIBRARIES pulp::host pulp::audio)
-pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging
+pulp_add_test_suite(pulp-test-signal-graph-live-swap-staging GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_live_swap_staging.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 pulp_add_test_suite(pulp-test-signal-graph-executor-parity
@@ -217,7 +259,7 @@ pulp_add_test_suite(pulp-test-signal-graph-offline-parity
 # frozen plan through the SAME GraphRuntimeExecutor::process_routed as the live
 # graph, so its output is bit-identical for the lowerable subset; non-lowerable
 # graphs are refused loudly.
-pulp_add_test_suite(pulp-test-baked-codec
+pulp_add_test_suite(pulp-test-baked-codec GROUP pulp-test-group-sampler-host-graph
     SOURCES test_baked_codec.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime)
 pulp_add_test_suite(pulp-test-baked-graph-processor-parity
@@ -225,46 +267,46 @@ pulp_add_test_suite(pulp-test-baked-graph-processor-parity
     LIBRARIES pulp::host pulp::format pulp::graph pulp::runtime)
 # Parallel SignalGraph plugin bindings must not share fallback MIDI/parameter
 # scratch when the routed executor runs same-level Plugin nodes concurrently.
-pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch
+pulp_add_test_suite(pulp-test-signal-graph-parallel-plugin-scratch GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_parallel_plugin_scratch.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Host-facing coverage for the parallel executor's break-even threshold wiring.
-pulp_add_test_suite(pulp-test-signal-graph-parallel-cost
+pulp_add_test_suite(pulp-test-signal-graph-parallel-cost GROUP pulp-test-group-sampler-host-graph
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Differential routing parity: random audio-only DAGs driven through both
 # SignalGraph (oracle) and the routed executor must agree, fuzzing the gather /
 # fan-in / scratch-reuse / feedback paths the fixed shapes above only sample.
-pulp_add_test_suite(pulp-test-graph-routing-differential-parity
+pulp_add_test_suite(pulp-test-graph-routing-differential-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_graph_routing_differential_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Pins the single connection-classification surface (classify): every host
 # Connection variant maps to one runtime lane, so the routed gather and the
 # reference-walk bucketer can never drift apart.
-pulp_add_test_suite(pulp-test-connection-classify
+pulp_add_test_suite(pulp-test-connection-classify GROUP pulp-test-group-sampler-host-graph
     SOURCES test_connection_classify.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Anticipative-rendering safety contract: the static eligibility analysis must
 # exclude every live-input / feedback / sidechain-dependent node and propagate
 # those exclusions downstream, so no unsafe subgraph is ever rendered ahead.
-pulp_add_test_suite(pulp-test-anticipation-eligibility
+pulp_add_test_suite(pulp-test-anticipation-eligibility GROUP pulp-test-group-sampler-host-graph
     SOURCES test_anticipation_eligibility.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # The eligible interior + boundary edges carved out for anticipative rendering:
 # live sinks stay out of the interior, every interior->outside edge is a splice
 # point, and a live-only graph yields nothing worth anticipating.
-pulp_add_test_suite(pulp-test-anticipation-partition
+pulp_add_test_suite(pulp-test-anticipation-partition GROUP pulp-test-group-sampler-host-graph
     SOURCES test_anticipation_partition.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # The renderable sub-graph carved from a partition: interior nodes + internal
 # edges + one synthesized AudioOutput sink whose input ports carry the distinct
 # boundary outputs, with a fresh non-colliding id.
-pulp_add_test_suite(pulp-test-anticipation-subgraph
+pulp_add_test_suite(pulp-test-anticipation-subgraph GROUP pulp-test-group-sampler-host-graph
     SOURCES test_anticipation_subgraph.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Render-path proof: the extracted sub-graph, driven through the real executor,
 # reproduces the full graph's boundary signals with each captured port on its own
 # output channel (the guard the structural extraction tests cannot give).
-pulp_add_test_suite(pulp-test-anticipation-subgraph-render
+pulp_add_test_suite(pulp-test-anticipation-subgraph-render GROUP pulp-test-group-sampler-host-graph
     SOURCES test_anticipation_subgraph_render.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
 # Render-ahead lane: pre-render the eligible sub-graph into a ring off the audio
@@ -277,19 +319,19 @@ pulp_add_test_suite(pulp-test-anticipation-lane
 # Acceptance: anticipation wired into SignalGraph::process — the pre-rendered
 # interior splice is bit-identical to the canonical interior-live render, and the
 # interior is advanced exactly once per block (by the producer pump), never twice.
-pulp_add_test_suite(pulp-test-signal-graph-anticipation
+pulp_add_test_suite(pulp-test-signal-graph-anticipation GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_anticipation.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # 2.2a no-silence-swap contract: compile_() runs race-free against a live
 # process() (TSan). Proves compile_() never mutates state the audio thread reads —
 # the invariant the compile-first prepared-swap (2.2b) is built on.
-pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
+pulp_add_test_suite(pulp-test-signal-graph-prepared-swap GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_prepared_swap.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # 2.2b prerequisite (H2): compile_()/routing read cached plugin metadata, never
 # the live PluginSlot — a CountingSlot asserts zero metadata calls after prepare()
 # + a compile-vs-process race check on a plugin-bearing graph.
-pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
+pulp_add_test_suite(pulp-test-signal-graph-metadata-cache GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_metadata_cache.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Per-node live-DSP telemetry wired through SignalGraph: default-off, per-node
@@ -301,75 +343,92 @@ pulp_add_test_suite(pulp-test-live-dsp-telemetry-graph
 # reinit-free gain-graph edit with no silent block under a concurrent render, and
 # rejects non-reinit-free edits (SR change / removed node / anticipation) as
 # NeedsEagerPrepare.
-pulp_add_test_suite(pulp-test-signal-graph-prepared-swap-live
+pulp_add_test_suite(pulp-test-signal-graph-prepared-swap-live GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_prepared_swap_live.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Feed-forward PDC delay history survives a gap-free structural edit in the
 # legacy walk and both routed execution domains. A 97-sample delay rendered in
 # 64-frame blocks catches cursor resets that block-aligned fixtures would miss.
-pulp_add_test_suite(pulp-test-signal-graph-pdc-swap-continuity
+pulp_add_test_suite(pulp-test-signal-graph-pdc-swap-continuity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_pdc_swap_continuity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Transport plumbing for SignalGraph::process: the transport-aware overload is
 # bit-identical for transport-inert routed nodes, populates the routed block so a
 # ProcessorNode consumer receives the host transport / process_mode / render-speed
 # hint, and suppresses (and counts) the transport whenever anticipation is active.
-pulp_add_test_suite(pulp-test-signal-graph-transport
+pulp_add_test_suite(pulp-test-signal-graph-transport GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_transport.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::state)
 
 # Live plugin-instance swap produces no dropout/xrun and a sample-continuous
 # output across the swap block, for every hosted format. CI-runnable mirror of
 # the local-only REAPER live-plugin-swap smoke.
-pulp_add_test_suite(pulp-test-signal-graph-live-swap-continuity
+pulp_add_test_suite(pulp-test-signal-graph-live-swap-continuity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_signal_graph_live_swap_continuity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 
 # First sampler/looper storage primitives split by ownership so failures point
 # to the actual layer instead of a catch-all primitive bucket.
-pulp_add_test_suite(pulp-test-planar-audio-ring-buffer LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-rolling-audio-capture LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-sample-slot-bank-store LIBRARIES pulp::audio)
-pulp_add_test_suite(pulp-test-realtime-sample-recorder LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-planar-audio-ring-buffer GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-rolling-audio-capture GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-slot-bank-store GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-realtime-sample-recorder GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Resampled generated-audio handoff accounting and split-pull regressions.
-pulp_add_test_suite(pulp-test-audio-stream-handoff LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-audio-stream-handoff GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Sampler key/pitch/slice mapping policy kept out of renderers and slot storage.
-pulp_add_test_suite(pulp-test-sample-key-map LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-key-map GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Undoable sample edit document metadata kept separate from audio storage/import/export.
-pulp_add_test_suite(pulp-test-sample-edit-document LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-edit-document GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Sample asset import/export policy and platform-neutral drop classification.
-pulp_add_test_suite(pulp-test-sample-asset-io LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-asset-io GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Prepared sample-pool resolver over existing published sample stores.
-pulp_add_test_suite(pulp-test-sample-pool LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-pool GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Prepared planar page/window storage for streaming sample playback.
-pulp_add_test_suite(pulp-test-sample-stream-window LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-window GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Sampler zone selection policy for key/velocity ranges, round-robin, slices, and keytracking.
-pulp_add_test_suite(pulp-test-sample-zone-map LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-zone-map GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Scalar sample voice rendering from sample-pool resolutions.
-pulp_add_test_suite(pulp-test-sample-voice-renderer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-voice-renderer GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Prepared per-voice modulation lane storage for sampler/instrument renderers.
-pulp_add_test_suite(pulp-test-voice-modulation-buffer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-voice-modulation-buffer GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # SIMD-backed voice scratch summing for sampler/instrument renderers.
-pulp_add_test_suite(pulp-test-voice-sum-mixer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-voice-sum-mixer GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Pool-backed instrument trigger resolver over sample zones.
-pulp_add_test_suite(pulp-test-instrument-runtime LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-instrument-runtime GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # AHDSR/ADSR envelope primitive for future sample voices.
-pulp_add_test_suite(pulp-test-instrument-envelope LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-instrument-envelope GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Prepared voice-slot allocation, stealing, release, and choke-group policy.
-pulp_add_test_suite(pulp-test-instrument-voice-allocator LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-instrument-voice-allocator GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-unison-voice-stack
     SOURCES test_unison_voice_stack.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
@@ -380,52 +439,62 @@ pulp_add_test_suite(pulp-test-voice-runtime-facade
     LIBRARIES pulp::audio)
 
 # Loop metadata validation and off-RT loop candidate analysis.
-pulp_add_test_suite(pulp-test-loop-analysis LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-loop-analysis GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Built-in onset detection and slice-map analysis primitives.
-pulp_add_test_suite(pulp-test-onset-slice-analysis LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-onset-slice-analysis GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Analysis provider descriptors, package availability policy, and provenance sidecars.
-pulp_add_test_suite(pulp-test-analyzer-provider LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-analyzer-provider GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Built-in package-free key/tempo analyzer baseline.
-pulp_add_test_suite(pulp-test-built-in-key-tempo-analyzer LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-built-in-key-tempo-analyzer GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Built-in package-free transient classification baseline.
-pulp_add_test_suite(pulp-test-built-in-transient-classifier LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-built-in-transient-classifier GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Optional time/pitch processor contract and Signalsmith Stretch package adapter.
-pulp_add_test_suite(pulp-test-time-pitch-processor LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-time-pitch-processor GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Loop reader and renderer primitives, including interpolation, fades, and crossfades.
-pulp_add_test_suite(pulp-test-loop-rendering LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-loop-rendering GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 # PF-2 null test: wrap-crossfade output is bit-exact after hoisting the
 # equal-power gains to one per-frame CrossfadePlan.
-pulp_add_test_suite(pulp-test-loop-renderer-crossfade-null
+pulp_add_test_suite(pulp-test-loop-renderer-crossfade-null GROUP pulp-test-group-sampler-audio
     SOURCES test_loop_renderer_crossfade_null.cpp LIBRARIES pulp::audio)
 
 # End-to-end synthetic generated looper harness over core primitives only.
-pulp_add_test_suite(pulp-test-sampler-looper-integration LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-looper-integration GROUP pulp-test-group-sampler-audio
+    LIBRARIES pulp::audio)
 
 # Fixed-capacity graph command/event queues for runtime v2 handoff.
-pulp_add_test_suite(pulp-test-graph-runtime-queue LIBRARIES pulp::graph)
+pulp_add_test_suite(pulp-test-graph-runtime-queue GROUP pulp-test-group-sampler-graph-runtime
+    LIBRARIES pulp::graph)
 
 # Dense graph runtime plan and bounded topology validation for runtime v2.
-pulp_add_test_suite(pulp-test-graph-runtime-plan LIBRARIES pulp::graph)
+pulp_add_test_suite(pulp-test-graph-runtime-plan GROUP pulp-test-group-sampler-graph-runtime
+    LIBRARIES pulp::graph)
 
 if(TARGET pulp-host)
     # Compatibility coverage for legacy host graph-runtime include paths.
-    pulp_add_test_suite(pulp-test-graph-runtime-host-compat
+    pulp_add_test_suite(pulp-test-graph-runtime-host-compat GROUP pulp-test-group-sampler-host-graph
         SOURCES test_graph_runtime_host_compat.cpp
         LIBRARIES pulp::host)
 endif()
 
 # Additive ProcessBlock graph executor/snapshot primitive for runtime v2.
-pulp_add_test_suite(pulp-test-graph-runtime-executor
+pulp_add_test_suite(pulp-test-graph-runtime-executor GROUP pulp-test-group-sampler-format
     LIBRARIES pulp::format)
 
 # ProcessBlock to legacy Processor::process() adapter for migration compatibility.
-pulp_add_test_suite(pulp-test-processor-block-adapter
+pulp_add_test_suite(pulp-test-processor-block-adapter GROUP pulp-test-group-sampler-format
     LIBRARIES pulp::format)
 
 # I2 parity: the same Processor produces identical output standalone (HeadlessHost)
@@ -437,6 +506,6 @@ pulp_add_test_suite(pulp-test-processor-node-adapter
 # A generated/native DSP core (C-ABI native_core) reaches a graph through the
 # SAME ProcessorNode path as any Processor — no separate generated-DSP runtime.
 # Standalone (HeadlessHost) and in-graph (ProcessorNode) output must be bit-exact.
-pulp_add_test_suite(pulp-test-generated-dsp-graph-parity
+pulp_add_test_suite(pulp-test-generated-dsp-graph-parity GROUP pulp-test-group-sampler-host-graph
     SOURCES test_generated_dsp_graph_parity.cpp
     LIBRARIES pulp::host pulp::format pulp::graph)
