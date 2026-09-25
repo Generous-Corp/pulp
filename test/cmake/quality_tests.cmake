@@ -397,6 +397,9 @@ if(Python3_Interpreter_FOUND)
     if(TARGET pulp-test-group-mac-view)
         list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}

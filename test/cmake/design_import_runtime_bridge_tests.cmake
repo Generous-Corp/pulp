@@ -1,15 +1,27 @@
 # Design import runtime bridge test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Grouped executable for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration,
+# labels and properties; only the binary behind them is shared. Every grouped
+# suite here compiles against pulp::view alone (PULP_REPO_ROOT and the
+# widget-promotion include root become per-source properties). A suite stays on
+# its own when it needs its own process or compile line: the Apple-only GPU
+# silhouette fill, host-param-surface (the RT allocation probe replaces global
+# operator new), faithful-port-toolkit (links pulp-annotated-capture),
+# offscreen-capture-rt-contract (the RT intercept shim), design-swift-codegen
+# (pulp::view-core + pulp::platform), design-import-designmd (compiles
+# import_detect.cpp and runs from the source root), and
+# design-import-react-runtime, which the import-validation roundtrip scripts
+# and source-contracts.json build and run by its executable name.
+pulp_add_test_group(pulp-test-group-design-import-bridge LIBRARIES pulp::view)
+
 # Value-driven silhouette fill (design-import shape-fill — item 3): exercises
 # ImageView::set_fill_value + the canvas url() image mask on the Skia raster
 # backend (no GPU window).
-add_executable(pulp-test-image-view-fill
-    test_image_view_fill.cpp)
-target_link_libraries(pulp-test-image-view-fill
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-image-view-fill
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-image-view-fill GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # GPU regression for the same silhouette fill on the LIVE Graphite path: the
 # url() mask shader must upload its image to a GPU texture or Graphite drops the
@@ -25,12 +37,9 @@ if(APPLE)
 endif()
 
 # DesignFrameView (Plan B / B1) — faithful SVG render + typed interactive knobs.
-add_executable(pulp-test-design-frame-view
-    test_design_frame_view.cpp)
-target_link_libraries(pulp-test-design-frame-view
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-frame-view
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-design-frame-view GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # HostParamSurface / HostActionSurface — the SDK runtime host-param + action
 # surfaces: StateStore backing, DesignFrameView
@@ -58,20 +67,14 @@ catch_discover_tests(pulp-test-faithful-port-toolkit
 
 # MusicalTypingKeyboard — Ink & Signal catalog component (faithful Figma SVG
 # via DesignFrameView). Pins SVG load, headless render, catalog registration.
-add_executable(pulp-test-musical-typing-keyboard
-    test_musical_typing_keyboard.cpp)
-target_link_libraries(pulp-test-musical-typing-keyboard
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-musical-typing-keyboard
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-musical-typing-keyboard GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # ChannelStripView — faithful Figma-vector catalog component.
-add_executable(pulp-test-channel-strip-view
-    test_channel_strip_view.cpp)
-target_link_libraries(pulp-test-channel-strip-view
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-channel-strip-view
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-channel-strip-view GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # Offscreen capture must suspend the paint no-alloc contract.
 add_executable(pulp-test-offscreen-capture-rt-contract
@@ -86,23 +89,19 @@ catch_discover_tests(pulp-test-offscreen-capture-rt-contract
     PROPERTIES LABELS "view")
 
 # Faithful Figma-vector specimen catalog components (generated).
-add_executable(pulp-test-faithful-specimens
-    test_faithful_specimens.cpp)
-target_link_libraries(pulp-test-faithful-specimens
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-faithful-specimens
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-faithful-specimens GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # W3C Design Tokens cluster extracted from test_design_import.cpp.
 # Covers parse_w3c_tokens, export_w3c_tokens,
 # composite typography/shadow shapes, alias resolution, math
 # expressions, group $type inheritance, ir_tokens_to_theme +
 # theme_to_ir_tokens round-trips.
-add_executable(pulp-test-design-import-w3c-tokens test_design_import_w3c_tokens.cpp)
-target_link_libraries(pulp-test-design-import-w3c-tokens PRIVATE pulp::view Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-design-import-w3c-tokens PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-design-import-w3c-tokens
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-w3c-tokens GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+    LABELS "parser-import")
 
 # Baked SwiftUI emitter. Golden-string asserts plus a swiftc type-check
 # gate (find_program; the test skips when swiftc / the SwiftUI SDK is
@@ -134,26 +133,23 @@ catch_discover_tests(pulp-test-design-import-react-runtime
 # stable_anchor_id assignment for imported design nodes. PULP_REPO_ROOT lets
 # the cross-language conformance cases read test/fixtures/anchor_vectors.json,
 # the shared vector table the @pulp/import-ir vitest suite reads too.
-add_executable(pulp-test-design-import-anchors test_design_import_anchors.cpp)
-target_link_libraries(pulp-test-design-import-anchors PRIVATE pulp::view Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-design-import-anchors PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
-catch_discover_tests(pulp-test-design-import-anchors
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-anchors GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
+    LABELS "parser-import")
 
 # Inspector lock-to-source, Path A (generated-TSX/JS rewrite).
 # Proves the tweak -> lock-to-source -> re-import round-trip.
-add_executable(pulp-test-lock-to-source test_lock_to_source.cpp)
-target_link_libraries(pulp-test-lock-to-source PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-lock-to-source
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-lock-to-source GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # WYSIWYG T3 — ui-preview settle-probe design-viewport sizing. The probe
 # algorithm lives in examples/ui-preview/design_viewport_probe.hpp (header-
 # only) so it can be tested headlessly without linking the ui-preview app.
-add_executable(pulp-test-ui-preview-viewport test_ui_preview_viewport.cpp)
-target_link_libraries(pulp-test-ui-preview-viewport PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-ui-preview-viewport
-    PROPERTIES LABELS "view")
+pulp_add_test_suite(pulp-test-ui-preview-viewport GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # DESIGN.md import (Google design.md, Apache-2.0)
 # Compiles import_detect.cpp directly into the test target so the
@@ -174,55 +170,44 @@ catch_discover_tests(pulp-test-design-import-designmd
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Token lock-to-source via DESIGN.md rewrite.
-add_executable(pulp-test-token-lock test_token_lock.cpp)
-target_link_libraries(pulp-test-token-lock PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-token-lock
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-token-lock GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # Inspector lock-to-source, Path B (hand-authored JSX/TSX patch).
 # Proves the tweak -> JSX/TSX surgical patch -> formatting-preserving
 # round-trip, plus the ambiguous / not-found / too-dynamic failure paths.
-add_executable(pulp-test-jsx-lock test_jsx_lock.cpp)
-target_link_libraries(pulp-test-jsx-lock PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-jsx-lock
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-jsx-lock GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # Library-backed post-parse widget promotion: <div onClick> / role=button /
 # cursor:pointer → button. The pass now lives in pulp::view so
 # parser API users and the CLI share one normalization path.
-add_executable(pulp-test-widget-promotion
-    test_widget_promotion.cpp)
-target_include_directories(pulp-test-widget-promotion PRIVATE
-    ${CMAKE_SOURCE_DIR})
-target_link_libraries(pulp-test-widget-promotion PRIVATE
-    pulp::view
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-widget-promotion
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-widget-promotion GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}
+    LABELS "parser-import")
+
+# Keyboard navigation for a menu no trigger owns. The popup owner's roving
+# cursor was reachable only through an `aria-haspopup` trigger, so a context
+# menu -- summoned at coordinates, owned by nothing -- got no cursor and
+# ignored arrow keys. Adoption is gated, and most of this suite is the
+# negative controls for that gate: nothing open, a trigger-owned menu, two
+# open menus, an empty menu, and the explicit opt-out.
+pulp_add_test_suite(pulp-test-web-compat-menu-keynav GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    LABELS "view")
 
 # Web-compat preludes shipped for bundled-React imports
 # (nodeType / nodeName, observer no-ops, scheduler shims). Uses
 # WidgetBridge to evaluate the same prelude stack the runtime ships.
-# Keyboard navigation for a menu no trigger owns. The popup owner's roving
-# cursor was reachable only through an `aria-haspopup` trigger, so a context
-# menu -- summoned at coordinates, owned by nothing -- got no cursor and
-# ignored arrow keys. Adoption is gated, and most of this binary is the
-# negative controls for that gate: nothing open, a trigger-owned menu, two
-# open menus, an empty menu, and the explicit opt-out.
-add_executable(pulp-test-web-compat-menu-keynav test_web_compat_menu_keynav.cpp)
-target_link_libraries(pulp-test-web-compat-menu-keynav PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-web-compat-menu-keynav
-    PROPERTIES LABELS "view")
-
-add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
-target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
-# Bound-pump test runs the 1M-job cap; budget headroom for slow CI runners.
+# The bound-pump test runs the 1M-job cap; budget headroom for slow CI runners.
 # Default discover timeout is too tight when a regression of the bound would
 # hang indefinitely. Instrumented builds get their multiplier from the resolver
 # rather than from padding baked into this number. Other shim scenarios in this
-# binary stay in fast-CI — they're cheap and important — so this binary is *not*
-# labeled `slow` even though one of its tests pays a 1-3 sec wall cost.
-pulp_scaled_test_timeout(_pulp_react_shims_timeout 180)
-catch_discover_tests(pulp-test-web-compat-react-shims
-    PROPERTIES TIMEOUT "${_pulp_react_shims_timeout}"
-)
+# suite stay in fast-CI — they're cheap and important — so it is *not* labeled
+# `slow` even though one of its tests pays a 1-3 sec wall cost.
+pulp_add_test_suite(pulp-test-web-compat-react-shims GROUP pulp-test-group-design-import-bridge
+    LIBRARIES pulp::view
+    TIMEOUT 180)
