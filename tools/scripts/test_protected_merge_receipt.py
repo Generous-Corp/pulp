@@ -391,5 +391,89 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
                 receipt.download(self.download_args())
 
 
+    def test_decision_note_carries_the_verified_receipts_evidence(self) -> None:
+        issued = receipt.issue(self.issue_args())
+        receipt.verify_receipt(issued, self.verify_args())
+        note = receipt.decision_note("macos", "reuse", "exact-tree receipt revalidated", issued)
+        self.assertEqual(note, {
+            "schema": "shipyard-receipt-decision/v1", "target": "macos", "verdict": "reuse",
+            "reason": "exact-tree receipt revalidated", "source_run_id": "42",
+            "selected": 1, "passed": 1, "skipped": 0, "inventory_count": 1,
+        })
+
+
+class DecisionNoteCliTest(unittest.TestCase):
+    """The notes Shipyard reads describe a decision; they never make one."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.temp.name)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def note(self, *args: str) -> dict:
+        out = self.dir / f"note-{len(list(self.dir.iterdir()))}.json"
+        self.assertEqual(receipt.main(["note", *args, "--output", str(out)]), 0)
+        return json.loads(out.read_text())
+
+    def test_refusal_reason_is_the_verifiers_last_stderr_line(self) -> None:
+        stderr = self.dir / "stderr.txt"
+        stderr.write_text("Traceback noise\nprotected receipt: receipt records a narrowed "
+                          "test tier, not full validation\n")
+        forged = self.dir / "receipt.json"
+        forged.write_text(json.dumps({"run_id": "77", "validation": {
+            "selected": 9, "passed": 9, "skipped": 0, "inventory_count": 3000}}))
+        note = self.note("--target", "linux", "--verdict", "refuse",
+                         "--reason-file", str(stderr), "--receipt", str(forged))
+        self.assertEqual(note["verdict"], "refuse")
+        self.assertEqual(note["reason"], "receipt records a narrowed test tier, not full validation")
+        self.assertEqual((note["selected"], note["inventory_count"], note["source_run_id"]),
+                         (9, 3000, "77"))
+
+    def test_absent_or_malformed_evidence_reads_as_unknown_not_zero(self) -> None:
+        garbage = self.dir / "garbage.json"
+        garbage.write_text("{not json")
+        note = self.note("--target", "macos", "--verdict", "refuse",
+                         "--reason", "no protected receipt for this head and base",
+                         "--receipt", str(garbage))
+        self.assertEqual([note[k] for k in receipt.NOTE_COUNT_KEYS], [None] * 4)
+        self.assertIsNone(note["source_run_id"])
+        blank = self.note("--target", "macos", "--verdict", "refuse",
+                          "--reason-file", str(self.dir / "missing.txt"))
+        self.assertEqual(blank["reason"], "no reason recorded")
+
+    def test_publish_emits_one_parseable_annotation_per_note_and_a_table(self) -> None:
+        reuse = receipt.decision_note("macos", "reuse", "exact-tree receipt revalidated",
+                                      {"run_id": "42", "validation": {
+                                          "selected": 3500, "passed": 3490, "skipped": 10,
+                                          "inventory_count": 3540}})
+        refuse = receipt.decision_note("linux", "refuse", "100% | odd\nreason")
+        paths = []
+        for n in (reuse, refuse):
+            paths.append(self.dir / f"{n['target']}.json")
+            paths[-1].write_text(json.dumps(n))
+        summary = self.dir / "summary.md"
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            self.assertEqual(receipt.main(["publish-notes", *map(str, paths),
+                                           "--summary", str(summary)]), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        prefix = "::notice title=shipyard-receipt-decision::"
+        self.assertTrue(all(line.startswith(prefix) for line in lines), lines)
+        # GitHub unescapes %25/%0A/%0D before storing the annotation message.
+        decoded = [json.loads(line[len(prefix):].replace("%0A", "\n").replace("%0D", "\r")
+                              .replace("%25", "%")) for line in lines]
+        self.assertEqual(decoded, [reuse, refuse])
+        # A bare `%` would start an escape sequence and corrupt the message.
+        self.assertIn('"reason":"100%25 | odd reason"', lines[1])
+        table = summary.read_text()
+        self.assertIn("| macos | reused receipt from run 42 | 3500 selected / 3490 passed / "
+                      "10 skipped of 3540 built | exact-tree receipt revalidated |", table)
+        self.assertIn("| linux | validated in full (receipt refused) | n/a | 100% \\| odd reason |",
+                      table)
+
+
 if __name__ == "__main__":
     unittest.main()

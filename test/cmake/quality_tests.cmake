@@ -360,8 +360,11 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-sampler-timebase=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-graph-runtime=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-view=pulp-test-pch-cxx20
-        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
-        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
+        --expect pulp-test-group-timeline=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-playback=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
@@ -373,6 +376,9 @@ if(Python3_Interpreter_FOUND)
     if(TARGET pulp-test-group-mac-view)
         list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}

@@ -155,6 +155,52 @@ class PipelineStatsTests(unittest.TestCase):
         self.assertIsNone(secs["merge_group failure rate (%)"]["values"]["window"])
 
 
+class SplitTests(unittest.TestCase):
+    SINCE = dt.datetime(2026, 9, 20, tzinfo=UTC)
+    SPLIT = dt.datetime(2026, 9, 24, 13, 12, tzinfo=UTC)
+
+    def test_rows_fall_on_the_side_of_the_split_they_completed_on(self) -> None:
+        jobs = [_row("macos-gate/pull_request", 40, "success", "2026-09-24T13:11:59+00:00"),
+                _row("macos-gate/pull_request", 50, "success", "2026-09-22T00:00:00+00:00"),
+                _row("macos-gate/pull_request", 20, "success", "2026-09-24T13:12:00+00:00"),
+                _row("macos-gate/pull_request", 99, "failure", "2026-09-25T00:00:00+00:00"),
+                _row("macos-gate/pull_request", 77, "success", "2026-09-19T00:00:00+00:00")]
+        steps = [_row("macos-gate/merge_group/Test", 30, "success", "2026-09-23T00:00:00+00:00"),
+                 _row("macos-gate/merge_group/Test", 15, "success", "2026-09-25T00:00:00+00:00")]
+        sp = sc.split_stats(jobs, steps, self.SINCE, self.SPLIT)
+        by = {(r["event"], r["stage"]): r for r in sp["rows"]}
+        gate = by[("pull_request", "gate job")]
+        # before the window start (77) and failures (99) are not samples
+        self.assertEqual(gate["before"], {"n": 2, "p50": 45.0, "p90": 49.0})
+        self.assertEqual(gate["after"], {"n": 1, "p50": 20.0, "p90": 20.0})
+        self.assertAlmostEqual(gate["p50_change_pct"], (20 - 45) / 45 * 100)
+        test = by[("merge_group", "Test")]
+        self.assertEqual((test["before"]["p50"], test["after"]["p50"]), (30.0, 15.0))
+        empty = by[("merge_group", "gate job")]
+        self.assertIsNone(empty["p50_change_pct"])  # no samples is unknown, not 0%
+        md = "\n".join(sc.render_split_markdown(sp))
+        self.assertIn("| pull_request | gate job | 2 | 45.0 min | 49.0 min | 1 | 20.0 min | 20.0 min | -56% |", md)
+        self.assertNotIn("| merge_group | gate job |", md)  # empty on both sides
+
+    def test_split_before_the_window_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            sc.split_stats([], [], self.SPLIT, self.SINCE)
+
+    def test_split_argument_accepts_minute_precision_z(self) -> None:
+        self.assertEqual(sc._parse_split("2026-09-24T13:12Z"), self.SPLIT)
+
+
+class TartciCellTests(unittest.TestCase):
+    def test_installed_generation_names_a_sealed_host(self) -> None:
+        self.assertEqual(sc.tartci_cell({"installed_generation": "3dd84d9b099f",
+                                         "executing_generation": None, "checkout_head": None}),
+                         "3dd84d9b099f / n/a / n/a")
+
+    def test_sensor_older_than_the_field_says_so(self) -> None:
+        self.assertEqual(sc.tartci_cell({"executing_generation": "abc", "checkout_head": "def"}),
+                         "not published / abc / def")
+
+
 class FleetTests(unittest.TestCase):
     def test_unreachable_host_is_labelled(self) -> None:
         st = sc.read_host_state("nowhere", "nowhere.invalid", HERE / "host_vitals.sh")

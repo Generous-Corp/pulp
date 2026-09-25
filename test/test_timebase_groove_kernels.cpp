@@ -754,6 +754,61 @@ TEST_CASE("host grid projection recovers an integer delta representation error m
     }
 }
 
+TEST_CASE("grid placement policy is Floor by default and Nearest on request", "[timebase][grid]") {
+    using pulp::timebase::GridPlacement;
+    using pulp::timebase::detail::grid_integral_frame_delta;
+
+    // A budget of 0 isolates the PLACEMENT decision from the epsilon recovery:
+    // nothing is close enough to an integer to be snapped, so what comes back
+    // is purely the policy.
+    constexpr double kNoSnap = 0.0;
+
+    SECTION("the default is Floor, so nothing that exists today moves") {
+        // Load-bearing: Pulp's timeline has always floored. If the default ever
+        // became Nearest, every projected event in the product would shift.
+        REQUIRE(pulp::timebase::GridProjectionRequest{}.placement == GridPlacement::Floor);
+        REQUIRE(grid_integral_frame_delta(55.6, kNoSnap) == 55.0);
+        REQUIRE(grid_integral_frame_delta(55.4, kNoSnap) == 55.0);
+    }
+
+    SECTION("Floor never fires late") {
+        for (const double fraction : {0.01, 0.25, 0.5, 0.75, 0.99}) {
+            const auto placed =
+                grid_integral_frame_delta(55.0 + fraction, kNoSnap, GridPlacement::Floor);
+            REQUIRE(placed == 55.0);
+        }
+    }
+
+    SECTION("Nearest takes the closer sample in either direction") {
+        REQUIRE(grid_integral_frame_delta(55.4, kNoSnap, GridPlacement::Nearest) == 55.0);
+        REQUIRE(grid_integral_frame_delta(55.6, kNoSnap, GridPlacement::Nearest) == 56.0);
+        REQUIRE(grid_integral_frame_delta(-55.6, kNoSnap, GridPlacement::Nearest) == -56.0);
+    }
+
+    SECTION("Nearest breaks a tie away from zero, matching llround") {
+        // This is why the policy is std::round rather than std::nearbyint.
+        // nearbyint honours the current FP rounding mode, which defaults to
+        // half-to-EVEN: it answers 56 for both 55.5 and 56.5. A consumer clock
+        // using llround answers 56 and 57. The policy exists to match such a
+        // consumer, so it must not disagree at the tie.
+        REQUIRE(grid_integral_frame_delta(55.5, kNoSnap, GridPlacement::Nearest) == 56.0);
+        REQUIRE(grid_integral_frame_delta(56.5, kNoSnap, GridPlacement::Nearest) == 57.0);
+        REQUIRE(static_cast<double>(std::llround(56.5)) ==
+                grid_integral_frame_delta(56.5, kNoSnap, GridPlacement::Nearest));
+    }
+
+    SECTION("the epsilon recovery still applies under both placements") {
+        // Representation error must be recovered before the placement decides,
+        // or a delta a few ulp below an integer floors a whole sample early --
+        // the defect the epsilon exists for, which the policy must not reopen.
+        const auto budget = pulp::timebase::detail::grid_frame_error_budget(
+            -2'499'704'529.012294, -2'554'068'054.6532755, 96.1478374170194, 565'416.0);
+        const auto low = std::nextafter(565'416.0, 0.0);
+        REQUIRE(grid_integral_frame_delta(low, budget, GridPlacement::Floor) == 565'416.0);
+        REQUIRE(grid_integral_frame_delta(low, budget, GridPlacement::Nearest) == 565'416.0);
+    }
+}
+
 TEST_CASE("host grid projection never rounds a genuinely early event forward", "[timebase][grid]") {
     using pulp::timebase::detail::grid_frame_error_budget;
     using pulp::timebase::detail::grid_integral_frame_delta;

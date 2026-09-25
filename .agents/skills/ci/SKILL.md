@@ -2353,7 +2353,30 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   counted from `com.apple.Virtualization.VirtualMachine` processes (their RSS is
   the VM's memory; the `tart run` launcher's is not). A sensor installed before
   the snapshot existed publishes none; `build_speed_scorecard.py report` then
-  probes live and labels it — reinstall the sensor to fix.
+  probes live and labels it — reinstall the sensor to fix. **A snapshot probe can
+  hang under launchd:** on m3 the host ccache lives on `/Volumes/Workshop`, and a
+  launchd agent's `ccache -s` blocked in `open()` for minutes (interactively it
+  takes 0.25 s), which froze the published reading because the sensor wrote
+  health and snapshot together. Probes now run under a process-group deadline
+  (`PULP_VITALS_PROBE_TIMEOUT`, 15 s; killing only the parent leaves a grandchild
+  holding the output pipe) and health is published first, so m3's host ccache
+  reads null ("stats timed out"), not stale. tartci's version on a sealed host
+  comes from the launcher bundle's `source_commit` (`installed_generation`), the
+  same source `tartci fleet-macos self-update` reports as "installed"; a sealed
+  host has no checkout to read.
+- **Before/after a change, use `report --split <ISO time>`, not the drift
+  section.** `shipyard metrics watch` halves a fixed window, so a window that
+  straddles a fix mixes both regimes; `shipyard metrics compare` splits only on
+  whole days ago and cannot filter by target, so the split is computed from the
+  same `metrics list` rows.
+- **"Did this merge group actually run tests?"** The `protected-receipt-reuse`
+  job publishes a `shipyard-receipt-decision` annotation per target (reused, with
+  the receipt's selected/passed counts and source run, or refused, with the
+  protected-base verifier's reason) and a job-summary table; every gate test step
+  publishes a `shipyard-test-tier` annotation (`fast` on PR heads, `full`,
+  `receipt-reused`, `not-required`). The checked-out script only renders these
+  after the base verifier decided — `test_build_workflow.py` pins that the
+  workspace copy is only ever called for `note`/`publish-notes`.
 - **"Is the gate slower than usual on this host?"** is `shipyard metrics watch
   --project pulp-gate-steps --json` after `tools/scripts/build_speed_scorecard.py
   ingest`. Plain `shipyard metrics import github` keys self-hosted jobs by their
