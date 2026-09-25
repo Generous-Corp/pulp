@@ -463,6 +463,10 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
     SOURCES test_gpu_shared_io_wavenet_spec.cpp
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+if(PULP_HAS_SKIA)
+    target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
+        PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
 
 # Dawn-free private reducer for exact lead-delivery and typed miss handling.
 # prepare() owns the only allocation; callback delivery is bounded and atomic.

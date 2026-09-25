@@ -1,17 +1,18 @@
+#include "detail/dawn_shared_io_provider.hpp"
 #include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/dawn_shared_io_wavenet_spec.hpp"
-#include "detail/dawn_shared_io_provider.hpp"
 #include "detail/shared_io_arena.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <chrono>
-#include <optional>
-#include <vector>
-#include <thread>
 #include <cmath>
+#include <optional>
+#include <thread>
+#include <vector>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -118,6 +119,7 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
     CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidShape);
 }
 
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
 TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.dilations = {1, 1};
@@ -142,8 +144,10 @@ TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][sha
     REQUIRE(program);
     SharedIoArena arena;
     REQUIRE(arena.prepare(*created.provider,
-                          {.slots = 1, .input_bytes_per_slot = 4 * sizeof(float),
-                           .output_bytes_per_slot = 4 * sizeof(float)}, std::move(program)));
+                          {.slots = 1,
+                           .input_bytes_per_slot = 4 * sizeof(float),
+                           .output_bytes_per_slot = 4 * sizeof(float)},
+                          std::move(program)));
     auto write = arena.grant_write(1);
     REQUIRE(write);
     const float input[] = {0.0f, 0.5f, -1.0f, 2.0f};
@@ -167,3 +171,4 @@ TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][sha
     REQUIRE(arena.release_output({token}));
     REQUIRE(arena.release());
 }
+#endif

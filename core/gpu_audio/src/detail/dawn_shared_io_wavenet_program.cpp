@@ -29,8 +29,8 @@ std::optional<std::size_t> history_size(const DawnSharedIoWavenetProgramSpec& sp
 }
 } // namespace
 
-DawnSharedIoWavenetProgram::DawnSharedIoWavenetProgram(
-    DawnSharedIoProvider* provider, const DawnSharedIoWavenetProgramSpec& spec)
+DawnSharedIoWavenetProgram::DawnSharedIoWavenetProgram(DawnSharedIoProvider* provider,
+                                                       const DawnSharedIoWavenetProgramSpec& spec)
     : provider_(provider), block_size_(spec.block_size), stream_instances_(spec.stream_instances),
       weights_(spec.weights.begin(), spec.weights.end()), head_scale_(spec.head_scale) {
     arrays_.reserve(spec.arrays.size());
@@ -81,19 +81,18 @@ bool DawnSharedIoWavenetProgram::prepare(SharedIoArenaProvider& provider,
     for (const auto& slot : slots)
         if (!provider.validate_slot_buffers(slot))
             return false;
-    prepared_ = provider_->prepare_wavenet_program(
-        {.block_size = block_size_,
-         .head_scale = head_scale_,
-         .stream_instances = stream_instances_,
-         .arrays = arrays_,
-         .weights = weights_},
-        slots);
+    prepared_ = provider_->prepare_wavenet_program({.block_size = block_size_,
+                                                    .head_scale = head_scale_,
+                                                    .stream_instances = stream_instances_,
+                                                    .arrays = arrays_,
+                                                    .weights = weights_},
+                                                   slots);
     return prepared_;
 }
 
-bool DawnSharedIoWavenetProgram::submit(SharedIoArenaProvider& provider,
-                                        const SlotResources& resources, SlotToken token,
-                                        std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
+bool DawnSharedIoWavenetProgram::submit(
+    SharedIoArenaProvider& provider, const SlotResources& resources, SlotToken token,
+    std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept {
     return prepared_ && provider_ == &provider &&
            provider_->submit_wavenet_program(resources, token, std::move(terminal_inbox));
 }

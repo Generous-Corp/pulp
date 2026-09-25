@@ -83,3 +83,59 @@ This is still a lifecycle seam, not WaveNet execution. The next evidence gate
 is a real provider-owned neural program with authenticated provider identity,
 zero-transfer receipts, numerical and stereo-isolation checks, fallback, and
 terminal dispositions in GPU-NAM.
+
+## CI follow-up for the authenticated slice
+
+PR #8858 exposed two portability requirements that are now part of this
+boundary. The Linux GPU-off build compiled the WaveNet test but correctly
+omitted the Dawn provider implementation, so an unconditional authenticated
+case produced undefined references to `DawnSharedIoProvider`. The test now
+keeps its metadata and validation cases in GPU-off builds and compiles the
+authenticated Dawn case only when `PULP_HAS_SKIA` defines
+`PULP_GPU_AUDIO_WAVENET_RUNTIME`. This preserves useful CPU-side validation
+without pretending that Dawn exists on Linux GPU-off configurations.
+
+The same CI run also found that the test used Catch2's `Approx` through a
+transitive include. It now includes `catch2/catch_approx.hpp` explicitly.
+The focused Release build remains green with 21 assertions in 5 cases. The
+remaining CI failures were consumption-census drift and negative-contract
+checks from the pre-guard test target; they should be re-evaluated against the
+fresh head rather than treated as WaveNet runtime failures.
+
+## ABI and private-boundary audit
+
+The GPU-NAM model already has the data needed to describe a WaveNet plan:
+`pulp-gpu-nam/src/nam_model.hpp::NamModel` exposes `arrays()`
+(`LayerArrayConfig`), `weights_data()`, `weights_size()`, and `head_scale()`.
+`pulp-gpu-nam/src/gpu_nam.hpp::GpuNam::prepare_with` translates those arrays
+to `render::GpuCompute::WavenetLayerArraySpec`, retaining the NAM flat-weight
+order and per-channel instance selection. The public
+`GpuAudioProgramDescriptor` is intentionally only scheduling/capability
+metadata; it carries no model weights or native resources.
+
+The smallest Pulp-owned shared proof therefore stays private. Build a
+one-channel adapter test around `DawnSharedIoWavenetProgramSpec` and
+`DawnSharedIoProvider` that accepts one array with one dilation layer,
+translates a `NamModel`-equivalent fixture, prepares one persistent shared-I/O
+slot, submits a block, and compares the terminal output with the prewarmed CPU
+reference. The receipt must include provider identity, zero `WriteBuffer` /
+readback activity for the audio slot, numeric parity, terminal retirement, and
+CPU fallback continuity. This is a bounded provider proof, not full GPU-NAM
+support.
+
+The private implementation contract is explicit in
+`core/gpu_audio/src/detail/dawn_shared_io_wavenet_spec.hpp`,
+`dawn_shared_io_wavenet_program.hpp`, and `dawn_shared_io_provider.hpp`:
+resident weights, uniforms, pipelines, per-slot activations/head/history
+buffers, imported input/output buffers, and one authenticated submit path. The
+current token has no stream-instance field, so the first proof must require
+`stream_instances == 1`. Stereo, multiple arrays, and multiple dilation layers
+need an instance-qualified private submission context before they can be
+enabled safely.
+
+GPU-NAM cannot consume this path today because those headers live under
+`core/gpu_audio/src/detail` and are not installed SDK headers. It must not
+include them or reach through raw Dawn handles. After the private proof is
+green, expose a narrow Pulp-owned public adapter/node contract and keep
+GPU-NAM's existing staged `GpuAudioNode` plus continuously primed CPU fallback
+as the fallback integration until that public seam has receipts.
