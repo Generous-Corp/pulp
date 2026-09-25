@@ -1,4 +1,5 @@
 #include "detail/shared_io_compute_plan.hpp"
+#include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -187,6 +188,36 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     CHECK(completion->late);
     CHECK(completion->status == SharedIoArena::CompletionStatus::RetiredSuccess);
     REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO program session owns generic provider lifecycle",
+          "[gpu_audio][shared_io][p2]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto* provider_raw = provider.get();
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    auto* control = program.get();
+    control->allow_release = true;
+
+    SharedIoProgramSession session;
+    CHECK_FALSE(
+        session.prepare({}, {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    REQUIRE(session.prepared());
+    auto input = session.acquire_input(7, 100);
+    REQUIRE(input);
+    reinterpret_cast<float*>(input->bytes.data())[0] = 2.0f;
+    REQUIRE(session.submit({input->token, 100}));
+    REQUIRE(session.service(100) == 1);
+    auto completion = session.pop_completion();
+    REQUIRE(completion);
+    auto output = session.acquire_output(*completion);
+    REQUIRE(output);
+    CHECK(reinterpret_cast<const float*>(output->bytes.data())[0] == 6.0f);
+    REQUIRE(session.release_output({output->token}));
+    output.reset();
+    REQUIRE(session.release());
+    CHECK(provider_raw->program_released);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",

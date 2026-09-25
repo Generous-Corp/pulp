@@ -67,3 +67,19 @@ generic session first, then add the provider-owned WaveNet plan behind it.
 Until those pieces land, GPU-NAM remains a valid staged worker integration with
 CPU fallback and must not report `SharedMemory` or provider-owned WaveNet
 resources.
+
+## Implementation slice
+
+This branch adds the private `SharedIoProgramSession` wrapper over
+`SharedIoComputePlan`. It owns the provider/program pair, rejects incomplete
+or zero-sized preparations, forwards fixed-slot input, submit, service,
+completion, output, cancellation, expiry, discard, and reprime operations, and
+keeps the provider alive until the plan's physical release barrier succeeds.
+The focused lifecycle test exercises a fake provider and program through a
+complete input/submit/retire/output/release cycle, including the requirement
+that program release precedes provider slot retirement.
+
+This is still a lifecycle seam, not WaveNet execution. The next evidence gate
+is a real provider-owned neural program with authenticated provider identity,
+zero-transfer receipts, numerical and stereo-isolation checks, fallback, and
+terminal dispositions in GPU-NAM.
