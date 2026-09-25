@@ -177,8 +177,104 @@ jobs:
             echo "::warning::no .clap plugins built — nothing to smoke (not a failure)"
           fi
 
+      # Decide, once, whether this run signs and notarizes. Secrets cannot be
+      # read in a step `if:`, and a step-level `env:` is not visible to that
+      # step's own `if:` either, so a guard like `if: env.MACOS_CERTIFICATE != ''`
+      # is never true and silently skips signing. Compute the decision here from
+      # the secrets' presence and gate every signing step on these outputs.
+      #
+      # When no signing inputs are configured the run is marked UNSIGNED loudly
+      # (warning annotation, job summary, a SIGNING-STATUS.txt inside the
+      # artifact, and an `-UNSIGNED` artifact-name suffix) and continues.
+      # `vars.PULP_RELEASE_UNSIGNED_POLICY=fail` turns an unsigned run into a
+      # failure instead; the default is `mark`. A PARTIAL signing configuration
+      # always fails: it is an attempt to sign that cannot succeed.
+      - name: Detect signing inputs
+        id: signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          UNSIGNED_POLICY: ${{ vars.PULP_RELEASE_UNSIGNED_POLICY || 'mark' }}
+        run: |
+          set -euo pipefail
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          missing() {
+            local out=""
+            for name in "$@"; do
+              [ -n "${!name:-}" ] || out="$out $name"
+            done
+            echo "${out# }"
+          }
+          sign_vars="MACOS_CERTIFICATE MACOS_CERTIFICATE_PWD KEYCHAIN_PASSWORD SIGNING_IDENTITY"
+          notary_vars="APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD"
+          sign_missing="$(missing $sign_vars)"
+          notary_missing="$(missing $notary_vars)"
+          count() { set -- $1; echo $#; }
+          n_sign_missing=$(count "$sign_missing")
+          n_notary_missing=$(count "$notary_missing")
+
+          case "$UNSIGNED_POLICY" in
+            mark|fail) ;;
+            *)
+              echo "::error::PULP_RELEASE_UNSIGNED_POLICY='$UNSIGNED_POLICY' is not a policy. Set it to 'mark' (default: publish marked UNSIGNED) or 'fail'."
+              exit 1
+              ;;
+          esac
+
+          if [ "$n_sign_missing" -ne 0 ] && [ "$n_sign_missing" -ne 4 ]; then
+            echo "::error::Signing is partially configured: missing secret(s): $sign_missing. Add them, or remove every signing secret to publish explicitly UNSIGNED."
+            exit 1
+          fi
+          if [ "$n_notary_missing" -ne 0 ] && [ "$n_notary_missing" -ne 3 ]; then
+            echo "::error::Notarization is partially configured: missing secret(s): $notary_missing. Add them, or remove every notarization secret."
+            exit 1
+          fi
+          if [ "$n_sign_missing" -eq 4 ] && [ "$n_notary_missing" -eq 0 ]; then
+            echo "::error::Notarization secrets are set but signing secrets are not ($sign_vars). Apple notarizes only signed code; add the signing secrets."
+            exit 1
+          fi
+
+          mkdir -p artifacts
+          if [ "$n_sign_missing" -eq 0 ] && [ "$n_notary_missing" -eq 0 ]; then
+            status="signed-notarized"; sign=true; notarize=true; suffix=""
+            line="Signed with Developer ID and notarized."
+          elif [ "$n_sign_missing" -eq 0 ]; then
+            status="signed-not-notarized"; sign=true; notarize=false; suffix="-NOT-NOTARIZED"
+            line="NOT NOTARIZED — codesigned, but no notarization secrets ($notary_vars) are configured."
+          else
+            status="unsigned"; sign=false; notarize=false; suffix="-UNSIGNED"
+            line="UNSIGNED — not codesigned or notarized (no signing secrets configured: $sign_vars)."
+          fi
+
+          {
+            echo "status=$status"
+            echo "sign=$sign"
+            echo "notarize=$notarize"
+            echo "artifact_suffix=$suffix"
+          } >> "$GITHUB_OUTPUT"
+          echo "$line" > artifacts/SIGNING-STATUS.txt
+          {
+            echo "### macOS signing: \`$status\`"
+            echo
+            echo "$line"
+          } >> "$summary"
+          echo "Signing status: $status"
+
+          if [ "$status" != "signed-notarized" ]; then
+            echo "::warning title=Release ${GITHUB_REF_NAME:-} is $status::$line"
+            if [ "$UNSIGNED_POLICY" = "fail" ]; then
+              echo "::error::PULP_RELEASE_UNSIGNED_POLICY=fail and this release is $status."
+              exit 1
+            fi
+          fi
+
       - name: Import signing certificate
-        if: env.MACOS_CERTIFICATE != ''
+        if: steps.signing.outputs.sign == 'true'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
@@ -202,10 +298,11 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
 
       - name: Sign plugins
-        if: env.SIGNING_IDENTITY != ''
+        if: steps.signing.outputs.sign == 'true'
         env:
           SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
         run: |
+          set -euo pipefail
           for plugin in build/VST3/*.vst3 build/CLAP/*.clap build/AU/*.component; do
             [ -e "$plugin" ] || continue
             echo "Signing $(basename $plugin)..."
@@ -246,22 +343,31 @@ jobs:
               "artifacts/${NAME}-AU-${VERSION}.pkg" || true
           done
 
+      # A notarization or staple failure fails the job. `notarytool submit
+      # --wait` exits 0 even when Apple returns `Invalid`, so the status line
+      # is checked too; a package that was not accepted is never stapled.
       - name: Notarize packages
-        if: env.APPLE_ID != ''
+        if: steps.signing.outputs.notarize == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
         run: |
+          set -euo pipefail
           for pkg in artifacts/*.pkg; do
             [ -e "$pkg" ] || continue
-            echo "Notarizing $(basename $pkg)..."
-            xcrun notarytool submit "$pkg" \
+            echo "Notarizing $(basename "$pkg")..."
+            out="$(xcrun notarytool submit "$pkg" \
               --apple-id "$APPLE_ID" \
               --team-id "$APPLE_TEAM_ID" \
               --password "$APPLE_PASSWORD" \
-              --wait || echo "Notarization failed for $pkg"
-            xcrun stapler staple "$pkg" || true
+              --wait)"
+            echo "$out"
+            if ! printf '%s\n' "$out" | grep -Eq '^[[:space:]]*status: Accepted[[:space:]]*$'; then
+              echo "::error::Notarization of $(basename "$pkg") was not Accepted."
+              exit 1
+            fi
+            xcrun stapler staple "$pkg"
           done
 
       # appcast.xml is NOT generated here any more, and this workflow no longer
@@ -284,7 +390,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: pulp-macos-${{ github.ref_name }}
+          name: pulp-macos-${{ github.ref_name }}${{ steps.signing.outputs.artifact_suffix }}
           path: artifacts/
           retention-days: 30
 
