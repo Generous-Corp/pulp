@@ -87,22 +87,25 @@ CMake cache value is easier to audit.
 
 ## Verification
 
-The SDK-independent interface tests are the public-CI gate. The SDK-present
+The SDK-independent interface tests are the public-CI gate. They compile into
+the grouped `pulp-test-group-timeline-playback` executable, so build that
+target and select the suite by its file tag. The SDK-present
 test is always registered: a stock build exits 77 and CTest reports `Skipped`
 with the enablement flags, while an enabled local build executes the real
 adapter.
 
 ```bash
 cmake --build build --target \
-  pulp-test-playback-tempo-sync \
+  pulp-test-group-timeline-playback \
   pulp-test-ableton-link-sdk \
   timeline-program-threadless-no-exceptions-check
 
-build/test/pulp-test-playback-tempo-sync --reporter compact
+build/test/pulp-test-group-timeline-playback -# "[#test_playback_tempo_sync]" \
+  --reporter compact
 ctest --test-dir build -V -R '^playback-ableton-link-sdk-present$'
 
 cmake --build build-link --target \
-  pulp-test-playback-tempo-sync pulp-test-ableton-link-sdk
+  pulp-test-group-timeline-playback pulp-test-ableton-link-sdk
 ctest --test-dir build-link -V -R '^playback-ableton-link-sdk-present$'
 ```
 
