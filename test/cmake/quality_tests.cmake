@@ -338,7 +338,6 @@ if(Python3_Interpreter_FOUND)
     endif()
     set(_pulp_pch_expect
         --expect pulp-test-tilt-eq=pulp-test-pch-cxx20
-        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
         --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20
@@ -384,7 +383,18 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-timeline-playback=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
-        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20)
+        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-host=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-cap-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-app-audio-support=pulp-test-pch-cxx${_pulp_pch_format_std})
     if(APPLE AND NOT PULP_IOS)
         # The ObjC++ view-host group is NO_PCH by construction (CMake refuses
         # a CXX carrier for an OBJCXX TU); pin that it never picks one up.
@@ -392,6 +402,10 @@ if(Python3_Interpreter_FOUND)
     endif()
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    if(PULP_HAS_CLAP)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-cap-clap=pulp-test-pch-cxx${_pulp_pch_format_std})
     endif()
     # Registered in format_reload_tests.cmake, which is included after this file.
     if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
