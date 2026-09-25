@@ -710,7 +710,7 @@ projects so they never inflate `pulp`'s worker-minute totals:
 | Project | Targets |
 |---|---|
 | `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` |
-| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,SDK contract}` |
+| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,Fast tier,SDK contract}` |
 | `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `merge-group-run` |
 
 Ingest is idempotent (rows already in the store are skipped by external id),
@@ -730,22 +730,45 @@ python3 tools/scripts/build_speed_scorecard.py report --since 7d \
 
 # The local section needs an existing Ninja build dir; it never builds one.
 python3 tools/scripts/build_speed_scorecard.py report --build-dir build --runs last
+
+# Gate job and step p50/p90 either side of one instant (a merge, an incident's
+# end), within the --since window.
+python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17 \
+  --split 2026-09-24T13:12Z --no-local --no-fleet
 ```
+
+The drift section comes from `shipyard metrics watch`, which halves a fixed
+window, so a window that spans a change mixes both regimes. `--split` compares
+either side of an explicit instant instead. It reads the `metrics list` rows
+the pipeline section already fetched, because `shipyard metrics compare` splits
+only on whole days ago and cannot filter by target.
 
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate
-cache, gate-VM count and memory, tartci executing generation and checkout,
-lease usage and host profile, wheelhouse contents. A host whose installed
+cache, gate-VM count and memory, tartci's installed commit (the sealed
+launcher bundle's `source_commit`, else the fleet install record, as
+`tartci fleet-macos self-update` reports it), executing generation and
+checkout, lease usage and host profile, wheelhouse contents. Each probe runs
+under a deadline (`PULP_VITALS_PROBE_TIMEOUT`, 15 s): under launchd a
+`ccache -s` against a cache on an external volume can block in `open()`
+indefinitely, and it then reads as null rather than freezing the published
+reading, which the sensor writes before the snapshot. A host whose installed
 sensor predates that snapshot is probed live with the in-repo
 `host_vitals.sh --build-json` and labelled so; re-run
 `tools/scripts/install_host_vitals_sensor.sh` on it to publish the snapshot.
 An unreachable host is reported as UNREACHABLE, never as zeros.
 
-`tools/ci/governed-build.sh` also records each governed build (wall time,
-granted `-j`, lease/floor/tier-0 grant, focused target set) as
-`local-build/{all,focused}` in the `pulp` project when `shipyard` is on PATH.
-The record is detached and silent; `PULP_BUILD_METRICS=0` turns it off.
+Every local build is recorded as `local-build/{all,focused}` in the `pulp`
+project (job `governed-build`) when `shipyard` is on PATH: the governed
+wrapper `tools/ci/governed-build.sh` (`--provider governed-build`) and the
+`pulp build` CLI (`--provider pulp-cli`) both call the one recorder,
+`tools/ci/record_build_metric.sh`, which owns the fields: wall time, granted
+`-j` (`--profile j<N>`), where the grant came from (`--routing-decision`), and
+for a focused build `--workflow targets:<count>/<graph size>:<list>`. The record
+is detached, silent and returns in tens of milliseconds;
+`PULP_BUILD_METRICS=0` turns it off. `pulp dev`/`pulp loop` rebuilds that run
+through the C++ watch loop are not recorded yet.
 
 For the local build itself, `tools/scripts/build_time_report.py` has three
 subcommands: `log` (edge-seconds by category from `.ninja_log`, deduplicated
@@ -1865,6 +1888,22 @@ that target in the original native matrix. The required `macos` bootstrap may
 report success only from the new subject-bound decision; a PR receipt alone can
 never satisfy the merge-group check. Fork PRs use the same public Actions
 artifact contract and keep the existing hosted-runner trust boundary.
+
+Each merge group's decision per target is published by the
+`protected-receipt-reuse` job as a job-summary table and as a check-run
+annotation titled `shipyard-receipt-decision` (one JSON object:
+`verdict` `reuse`/`refuse`, `reason`, `source_run_id`, and the receipt's
+`selected`/`passed`/`skipped`/`inventory_count`), so `shipyard landing`
+answers "did this merge actually run tests?" directly. A refusal carries the
+protected-base verifier's own reason (for example "receipt selection covers too
+little of the built test inventory"). The notes are rendered by the checked-out
+script after the protected-base verifier has decided; they never decide.
+
+The test step of each gate job likewise emits a `shipyard-test-tier`
+annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
+there; the full suite runs in the merge queue), `full` where the full suite
+ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
+fast-tier green is never read as full validation.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 
