@@ -295,6 +295,29 @@ struct ControlGpuHealthProvider::Impl {
     bool active_trial_lost_events = false;
 };
 
+std::vector<std::string>
+ControlGpuHealthProvider::derive_missing_trace_categories(const FrameObservation& frame) const {
+    std::vector<std::string> missing;
+    const auto require = [&missing](bool present, std::string_view category) {
+        if (!present)
+            missing.emplace_back(category);
+    };
+    require(bounded_measurement(frame.hidden_frame_ms).has_value(), "hidden_frame");
+    require(frame.native_present_observed && frame.native_presented_at.has_value(),
+            "native_present_timing");
+    require(bounded_measurement(frame.shader_compile_ms).has_value(), "pipeline_compile");
+    require(bounded_measurement(frame.upload_ms).has_value(), "resource_upload");
+    require(impl_->config.shader_signature_sha256 && frame.observed_shader_signature_sha256 &&
+                sha256(*impl_->config.shader_signature_sha256) &&
+                *frame.observed_shader_signature_sha256 == *impl_->config.shader_signature_sha256,
+            "shader_identity");
+    require(impl_->config.source_signature_sha256 && frame.observed_source_signature_sha256 &&
+                sha256(*impl_->config.source_signature_sha256) &&
+                *frame.observed_source_signature_sha256 == *impl_->config.source_signature_sha256,
+            "source_identity");
+    return missing;
+}
+
 ControlGpuHealthProvider::ControlGpuHealthProvider(Config config)
     : impl_(std::make_unique<Impl>(std::move(config))) {}
 ControlGpuHealthProvider::~ControlGpuHealthProvider() {

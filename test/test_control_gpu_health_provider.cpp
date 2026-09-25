@@ -119,6 +119,28 @@ pulp::inspect::ControlGpuHealthProvider::Config ratified_campaign_config() {
     };
 }
 
+TEST_CASE("GPU health derives missing trace categories from frame evidence") {
+    auto config = ratified_campaign_config();
+    pulp::inspect::ControlGpuHealthProvider provider(config);
+    auto observed = frame(true);
+    REQUIRE(provider.derive_missing_trace_categories(observed) ==
+            std::vector<std::string>{"hidden_frame", "native_present_timing", "pipeline_compile",
+                                     "resource_upload", "shader_identity", "source_identity"});
+
+    observed.native_present_observed = true;
+    observed.native_presented_at = std::chrono::steady_clock::time_point{} + 10ms;
+    observed.shader_compile_ms = 2.0;
+    observed.upload_ms = 1.0;
+    observed.hidden_frame_ms = 0.0;
+    observed.observed_shader_signature_sha256 = *config.shader_signature_sha256;
+    observed.observed_source_signature_sha256 = *config.source_signature_sha256;
+    REQUIRE(provider.derive_missing_trace_categories(observed).empty());
+
+    observed.observed_source_signature_sha256 = "not-a-sha256";
+    REQUIRE(provider.derive_missing_trace_categories(observed) ==
+            std::vector<std::string>{"source_identity"});
+}
+
 void record_complete_campaign_trial(pulp::inspect::ControlGpuHealthProvider& provider,
                                     std::uint32_t index) {
     const auto requested_at =

@@ -149,8 +149,17 @@ class ControlGpuHealthProvider final {
         std::uint64_t non_transparent_pixel_count = 0;
         std::uint64_t distinct_color_count = 0;
         std::string observed_signature_sha256;
+        /// Optional trace bindings supplied by a producer that can correlate
+        /// the frame with exact source and shader identities.
+        std::optional<std::string> observed_source_signature_sha256;
+        std::optional<std::string> observed_shader_signature_sha256;
         std::chrono::steady_clock::time_point observed_at;
     };
+
+    /// Derives the trace categories that this exact frame did not prove.
+    /// Missing producer evidence remains explicit rather than being inferred
+    /// from a screenshot, adapter identity, or caller-declared cache state.
+    std::vector<std::string> derive_missing_trace_categories(const FrameObservation& frame) const;
 
     explicit ControlGpuHealthProvider(Config config);
     ~ControlGpuHealthProvider();
