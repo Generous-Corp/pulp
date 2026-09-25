@@ -763,6 +763,12 @@
         "tools/launchd/pulp-qemu-runner-windows.plist.template"
       ]
     },
+    "test-audit": {
+      "_doc": {
+        "empty-ok": "Process/guidance skill (whether a test earns its place: authoring gate, junk patterns, retention bar, lane routing) — applies whenever a test is written or reviewed anywhere, so mapping it to test/** would demand a SKILL.md edit on every test change. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+      },
+      "paths": []
+    },
     "text-metrics": {
       "paths": [
         ".agents/skills/text-metrics/**",
