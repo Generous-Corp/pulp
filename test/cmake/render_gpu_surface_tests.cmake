@@ -541,6 +541,27 @@
                     RESOURCE_LOCK pulp_gpu
                     SKIP_RETURN_CODE 77
                     TIMEOUT 120)
+
+                # Release-only entry point for the strict raw campaign. The
+                # executable shares the matched harness, but emits p4.raw.v1
+                # only when the wrapper supplies complete authenticated
+                # provenance and an output path; otherwise it remains the
+                # ordinary p4.matched.v1 diagnostic.
+                add_executable(pulp-gpu-audio-p4-raw-screening
+                    test_gpu_audio_p4_matched_convolution_benchmark.cpp)
+                target_link_libraries(pulp-gpu-audio-p4-raw-screening PRIVATE
+                    pulp::gpu-audio)
+                target_include_directories(pulp-gpu-audio-p4-raw-screening PRIVATE
+                    ../core/gpu_audio/src)
+                add_dependencies(pulp-gpu-audio-p4-raw-screening
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-audio-p4-raw-screening
+                    COMMAND pulp-gpu-audio-p4-raw-screening)
+                set_tests_properties(pulp-gpu-audio-p4-raw-screening PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    SKIP_RETURN_CODE 77
+                    TIMEOUT 120)
             endif()
         endif()
 

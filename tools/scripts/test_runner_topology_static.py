@@ -149,11 +149,23 @@ class RealConfig(unittest.TestCase):
                               and set(row.labels) <= set(reg.labels)})
             self.assertEqual(row.served_by, minting)
 
-    def test_release_rollback_fallback_is_reported_unserved_but_not_blocking(self):
+    def test_release_unset_fallback_is_reported_unserved_but_not_blocking(self):
         rows = _for(_rows(), RELEASE, source="unset_fallback")
         self.assertTrue(rows)
         self.assertTrue(all(r.verdict == st.UNSERVED for r in rows))
         self.assertFalse(any(r.blocking for r in rows))
+
+    def test_release_break_glass_rollback_is_served(self):
+        rows = _for(_rows(), RELEASE, source=st.ROLLBACK_SOURCE)
+        self.assertEqual([r.verdict for r in rows], [st.HOSTED])
+        self.assertFalse(any(r.blocking for r in rows))
+
+    def test_release_contract_does_not_call_unsetting_a_rollback(self):
+        purpose = next(l for l in _raw()["lanes"] if l["variable"] == RELEASE)["purpose"]
+        self.assertIn("UNSETTING this variable is NOT a rollback", purpose)
+        guide = (REPO_ROOT / "docs" / "guides" / "local-ci.md").read_text()
+        self.assertNotIn("Unsetting the variable is the break-glass rollback", guide)
+        self.assertIn("Unsetting the variable is not a rollback", guide)
 
     def test_overflow_lane_is_a_sentinel_backed_by_an_override(self):
         rows = _for(_rows(), OVERFLOW)
@@ -219,6 +231,46 @@ class FleetScaling(unittest.TestCase):
         self.assertTrue(all(r.verdict == st.UNSERVED and r.blocking for r in rows))
         contract = gate.load_contract(CONTRACT)
         self.assertEqual(st.exit_code(st.evaluate(contract, snap, WORKFLOWS, REPO), []), 1)
+
+
+class BreakGlassRollback(unittest.TestCase):
+    """A rollback the contract documents must be one the fleet can serve."""
+
+    def _release(self, raw):
+        return next(l for l in raw["lanes"] if l["variable"] == RELEASE)
+
+    def test_unserved_fallback_without_a_rollback_fails_the_required_lane(self):
+        raw = _raw()
+        self._release(raw).pop("break_glass_rollback")
+        rows = _for(_rows(raw), RELEASE, source=st.ROLLBACK_SOURCE)
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].blocking)
+        self.assertIn("declares no break_glass_rollback", rows[0].detail)
+        self.assertEqual(st.exit_code(_rows(raw), []), 1)
+
+    def test_an_unserved_rollback_fails_the_required_lane(self):
+        raw = _raw()
+        self._release(raw)["break_glass_rollback"] = [
+            "self-hosted", "macOS", "ARM64", "pulp-build", "pulp-build-vm"]
+        rows = _for(_rows(raw), RELEASE, source=st.ROLLBACK_SOURCE)
+        self.assertTrue(rows)
+        self.assertTrue(all(r.verdict == st.UNSERVED and r.blocking for r in rows))
+        self.assertEqual(st.exit_code(_rows(raw), []), 1)
+
+    def test_a_served_fallback_needs_no_rollback(self):
+        raw = _raw()
+        lane = self._release(raw)
+        lane.pop("break_glass_rollback")
+        lane["unset_fallback"] = ["macos-15"]
+        self.assertEqual(_for(_rows(raw), RELEASE, source=st.ROLLBACK_SOURCE), [])
+
+    def test_advisory_lane_with_unserved_fallback_is_not_blocking(self):
+        raw = _raw()
+        lane = self._release(raw)
+        lane.pop("break_glass_rollback")
+        lane["severity"] = "advisory"
+        rows = _rows(raw)
+        self.assertEqual(_for(rows, RELEASE, source=st.ROLLBACK_SOURCE), [])
 
 
 class Reachability(unittest.TestCase):

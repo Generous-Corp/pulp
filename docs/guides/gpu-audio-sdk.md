@@ -185,6 +185,14 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+`GpuConvolver` exposes a host-thread-only provider policy for experiments that
+need an explicit selection: `Auto` keeps the normal shared-then-staged
+behavior, `StagedOnly` forces the legacy staged provider, and `SharedRequired`
+fails `prepare()` unless the exact authenticated shared Dawn provider is ready.
+Set the policy before `prepare()`; changing it while prepared is rejected. This
+is a preparation capability contract, not a realtime scheduling guarantee, and
+it exposes no Dawn handles, queues, rings, or callback controls.
+
 The ordinary staged transport copies between its CPU rings and the provider.
 The experimental shared path instead keeps provider-owned slots persistently
 imported from host-visible storage. The callback still publishes and consumes

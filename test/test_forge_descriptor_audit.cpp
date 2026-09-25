@@ -10,6 +10,8 @@
 #include <iterator>
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 using namespace pulp::host;
 
@@ -283,6 +285,39 @@ TEST_CASE("an orphan export node is a failure", "[forge][catalog]") {
     INFO(render(findings));
     REQUIRE(has_fault(findings, ForgeAuditFault::missing_catalog_node));
     REQUIRE(has_fault(findings, ForgeAuditFault::unexpected_catalog_node));
+}
+
+TEST_CASE("the export appends its catalog families in a fixed order", "[forge][catalog]") {
+    // Each family is constructed in its own translation unit and appended by
+    // forge_catalog_export_nodes(); the export order is the append order, and
+    // consumers of the catalog JSON read it positionally. One representative
+    // node per family, in the order the families are appended.
+    const auto nodes = forge_catalog_export_nodes();
+    std::vector<std::string_view> keys;
+    keys.reserve(nodes.size());
+    for (const auto& node : nodes)
+        keys.push_back(node.descriptor.key);
+
+    const std::vector<std::string_view> representatives{
+        "fuzz",                         // effects
+        "eurorack_attenuverter",        // eurorack + drums
+        "feedforward_compressor",       // dynamics
+        "frequency_shifter",            // modulation effects
+        "fdn_reverb",                   // fdn + lo-fi + modulation sources
+        "whammy",                       // pitch + sequencing + multiband + sidechain
+        "convolution_reverb",           // space + synthesis + tape + wavetable
+        "sample_region_input_boundary", // exact sample-region routes, last
+    };
+    std::size_t previous = 0;
+    for (std::size_t i = 0; i < representatives.size(); ++i) {
+        const auto found = std::find(keys.begin(), keys.end(), representatives[i]);
+        INFO("family representative " << representatives[i]);
+        REQUIRE(found != keys.end());
+        const auto position = static_cast<std::size_t>(found - keys.begin());
+        if (i > 0)
+            REQUIRE(previous < position);
+        previous = position;
+    }
 }
 
 TEST_CASE("the export joins semantic descriptors to baked numeric ranges", "[forge][catalog]") {

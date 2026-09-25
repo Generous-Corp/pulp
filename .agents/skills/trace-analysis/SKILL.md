@@ -196,33 +196,45 @@ stat-then-reopen flow over the caller-controlled path.
 
 `trace.hpp` declares ten categories — `dsp`, `dsp.node`, `render`, `layout`,
 `canvas`, `text`, `js`, `gpu`, `state`, `io`. **Declared is not the same as
-emitted, and the difference reads as a finding.**
+emitted, and the difference reads as a finding rather than as a gap.**
 
-Measured on `origin/main`: `render` has 7 emit sites and `gpu` has 10, but
-**`canvas` has 3 — all of them in `core/view` window hosts, and none in
-`core/canvas` itself.** So a trace contains essentially no Canvas-2D drawing
-events, and the category description ("Canvas 2D drawing") promises something
-the data does not carry.
+Some of those categories emit from nowhere. A query filtered on one of them
+returns no rows, which is indistinguishable from "that subsystem did no work".
 
-This is the vacuous-zero trap in its most expensive form, because the query
-succeeds:
+**Measure it; do not trust a number written here.** Any count in a document
+goes stale the moment someone instruments something — this section previously
+stated a frozen count for `canvas`, which its own instrumentation then made
+wrong:
+
+```sh
+for c in dsp dsp.node render layout canvas text js gpu state io; do
+  printf '%-10s %s\n' "$c" \
+    "$(git grep -oE "PULP_TRACE_[A-Z_]+\(\s*\"$c\"" origin/main -- core inspect | wc -l)"
+done
+```
+
+Run that before drawing any conclusion about a category. A zero there means
+the category emits from nowhere, so no trace can contain it.
+
+The trap is expensive because the query SUCCEEDS:
 
 ```sql
--- Returns 0 rows today. That is NOT "canvas drawing is free".
+-- Zero rows is NOT "this subsystem is free".
 SELECT SUM(dur) FROM slice
   JOIN track ON slice.track_id = track.id
- WHERE slice.category GLOB 'canvas';
+ WHERE slice.category GLOB '<category>';
 ```
 
 Before concluding that a subsystem costs nothing, **pair the question with a
-control on a category you know is populated** (`gpu` or `render`). If your
-target returns zero and the control returns rows, you have measured an
-instrumentation gap, not a fast subsystem. Say that, and stop — do not report
-a performance verdict about a subsystem the trace cannot see.
+control on a category the sweep above shows is populated.** If your target
+returns zero and the control returns rows, you have measured an instrumentation
+gap, not a fast subsystem. Say that, and stop — do not report a performance
+verdict about a subsystem the trace cannot see.
 
-Where canvas cost actually shows up today: inside the `render` frame scopes
-and the `gpu` submit/present slices that contain it, aggregated. That tells
-you a frame was expensive; it cannot tell you which draw calls made it so.
+Where an uninstrumented subsystem's cost still shows up: inside whatever
+`render` frame scope and `gpu` submit/present slices contain it, aggregated.
+That tells you a frame was expensive; it cannot tell you which work inside it
+was responsible.
 
 ## The investigation protocol
 
