@@ -57,8 +57,8 @@ validate_gpu_wavenet_descriptor(const GpuWaveNetDescriptor& descriptor) noexcept
         return {GpuWaveNetError::InvalidShape};
     const auto& layer = descriptor.layers.front();
     if (layer.input_size != 1 || layer.condition_size != 1 || layer.channels == 0 ||
-        layer.kernel == 0 || layer.head_size == 0 || layer.dilation == 0 || layer.gated ||
-        layer.head_bias || !layer.tanh_activation)
+        layer.channels > 64 || layer.kernel == 0 || layer.head_size != 1 ||
+        layer.dilation == 0 || layer.gated || layer.head_bias || !layer.tanh_activation)
         return {GpuWaveNetError::UnsupportedTopology};
 
     const auto required = static_cast<std::uint64_t>(layer.channels) * layer.input_size +
