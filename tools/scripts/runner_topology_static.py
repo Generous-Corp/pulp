@@ -52,6 +52,8 @@ from typing import Any
 
 REACHABLE = "REACHABLE"
 UNSERVED = "UNSERVED"
+# Row source for a lane's declared break-glass rollback.
+ROLLBACK_SOURCE = "break_glass_rollback"
 HOSTED = "HOSTED"
 SENTINEL = "SENTINEL"
 UNKNOWN = "UNKNOWN"
@@ -114,8 +116,11 @@ class Row:
 
     @property
     def blocking(self) -> bool:
+        # A required lane's contracted value, and the rollback its contract
+        # tells an operator to apply, must both be served. The unset fallback
+        # alone stays advisory: it is only reached by an edit nobody made.
         return (self.verdict == UNSERVED and self.severity == "required"
-                and self.source == "expect")
+                and self.source in ("expect", ROLLBACK_SOURCE))
 
 
 @dataclass
@@ -339,6 +344,20 @@ def evaluate_lane(lane: Any, contract: Any, snapshot: Snapshot,
     # The unset fallback is dispatched verbatim by the consuming workflow; no
     # event rewrite applies to a value the workflow's `||` supplies.
     one("unset_fallback", lane.unset_fallback, project=False)
+    rollback = getattr(lane, "break_glass_rollback", None)
+    one(ROLLBACK_SOURCE, rollback, project=False)
+    # "Unset the variable" is the rollback an operator reaches for first. When
+    # that fallback cannot be served, a required lane must name the rollback
+    # that can, or the only recovery on record queues release work forever.
+    fallback_unserved = any(row.source == "unset_fallback" and row.verdict == UNSERVED
+                            for row in rows)
+    if lane.severity == "required" and fallback_unserved and rollback is None:
+        rows.append(Row(variable=lane.variable, severity=lane.severity,
+                        source=ROLLBACK_SOURCE, event="*", workflow=None,
+                        labels=None, verdict=UNSERVED,
+                        detail="unsetting this variable routes to an UNSERVED "
+                               "fallback, and the lane declares no "
+                               "break_glass_rollback that is served"))
     return rows
 
 
@@ -454,7 +473,8 @@ def render_table(rows: list[Row], snapshot: Snapshot, statuses: list[OverrideSta
         f"{'VARIABLE':42} {'SEV':8} {'SRC':8} {'EVENT':17} {'WORKFLOW':22} VERDICT     DETAIL",
     ]
     for row in rows:
-        src = "fallback" if row.source == "unset_fallback" else "expect"
+        src = {"unset_fallback": "fallback",
+               ROLLBACK_SOURCE: "rollback"}.get(row.source, "expect")
         out.append(f"{row.variable:42} {row.severity:8} {src:8} {row.event:17} "
                    f"{(row.workflow or '-'):22} {row.verdict:11} {row.detail}")
     out.append("")

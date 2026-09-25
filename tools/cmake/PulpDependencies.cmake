@@ -14,6 +14,7 @@
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFetchContent.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConfigureCheckCache.cmake)
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
@@ -443,7 +444,11 @@ set(SDL_TEST OFF CACHE BOOL "" FORCE)
 # is a plain, cacheable compile. Scoped to this FetchContent only.
 set(_pulp_sdl3_saved_disable_pch "${CMAKE_DISABLE_PRECOMPILE_HEADERS}")
 set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+# SDL3's ~180 configure checks are most of a fresh configure; replay them from
+# the results this machine recorded for the identical toolchain (Apple only).
+pulp_configure_check_cache_begin(SDL3 "${FETCHCONTENT_SOURCE_DIR_SDL3}")
 FetchContent_MakeAvailable(SDL3)
+pulp_configure_check_cache_end(SDL3)
 set(CMAKE_DISABLE_PRECOMPILE_HEADERS "${_pulp_sdl3_saved_disable_pch}")
 unset(_pulp_sdl3_saved_disable_pch)
 set(PULP_HAS_SDL3 TRUE)

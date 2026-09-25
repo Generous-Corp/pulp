@@ -613,19 +613,32 @@ carries the leaked depth as a value rather than a count of incidents.
 
 ## Check the category is populated before trusting a zero
 
-`trace.hpp` declares ten categories, and not all of them emit. On
-`origin/main` the `canvas` category has three emit sites, none inside
-`core/canvas`, so a `WHERE category GLOB 'canvas'` filter returns no rows —
-which looks identical to "the canvas did no work".
+`trace.hpp` declares ten categories and not all of them emit. A
+`WHERE category GLOB '<name>'` filter over one that emits from nowhere returns
+no rows — which looks identical to "that subsystem did no work".
 
-Pair any per-category question with a control that must return rows:
+Which categories are empty CHANGES as code is instrumented, so measure rather
+than trust a list:
+
+```sh
+for c in dsp dsp.node render layout canvas text js gpu state io; do
+  printf '%-10s %s\n' "$c" \
+    "$(git grep -oE "PULP_TRACE_[A-Z_]+\(\s*\"$c\"" origin/main -- core inspect | wc -l)"
+done
+```
+
+Then pair any per-category question with a control that must return rows:
 
 ```sql
 -- the finding
-SELECT COUNT(*) AS n FROM slice WHERE category GLOB 'canvas';
--- the control: a category known to be populated
+SELECT COUNT(*) AS n FROM slice WHERE category GLOB '<target>';
+-- the control: a category the sweep above shows is populated
 SELECT COUNT(*) AS n FROM slice WHERE category GLOB 'gpu';
 ```
 
-Control non-zero and finding zero means the instrumentation is absent, not
-the work. Report the gap; do not report a timing verdict.
+Control non-zero and finding zero means the instrumentation is absent, not the
+work. Report the gap; do not report a timing verdict.
+
+The same discipline is written up at more length in the `trace-analysis`
+skill under "A declared category is not a populated one" — keep the two in
+step if either changes.
