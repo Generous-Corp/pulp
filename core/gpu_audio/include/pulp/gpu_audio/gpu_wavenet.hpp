@@ -62,7 +62,7 @@ validate_gpu_wavenet_descriptor(const GpuWaveNetDescriptor& descriptor) noexcept
         return {GpuWaveNetError::UnsupportedTopology};
 
     const auto required = static_cast<std::uint64_t>(layer.channels) * layer.input_size +
-                          static_cast<std::uint64_t>(layer.channels) * layer.kernel +
+                          static_cast<std::uint64_t>(layer.channels) * layer.channels * layer.kernel +
                           layer.channels + layer.channels +
                           static_cast<std::uint64_t>(layer.channels) * layer.channels +
                           layer.channels +
