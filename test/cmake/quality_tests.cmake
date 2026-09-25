@@ -359,7 +359,12 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-sampler-format=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-sampler-timebase=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-graph-runtime=pulp-test-pch-cxx20
-        --expect pulp-test-group-sampler-view=pulp-test-pch-cxx20)
+        --expect pulp-test-group-sampler-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-playback=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20)
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()

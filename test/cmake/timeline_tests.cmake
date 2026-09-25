@@ -2,7 +2,33 @@
 # validation. Keeping these registrations together prevents timeline changes
 # from invalidating evidence bundles owned by unrelated subsystems.
 
-pulp_add_test_suite(pulp-test-timeline-model
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration,
+# labels and properties; only the binary behind them is shared. Members are
+# grouped by the compile line they already had: pulp::timeline, the
+# pulp::playback line (pulp::dawproject-import adds nothing to it), the
+# pulp::timeline-editor line, the pulp::timeline-view line and the
+# timeline-session example sources. A suite stays on its own when it needs its
+# own process or compile line: the RT allocation probes and RT-intercept suites
+# (harness/rt_allocation_probe.cpp, native_components/rt_intercept_test_support.cpp),
+# the fixture-runner CLI (spawns $<TARGET_FILE:pulp-fixture-runner>), the
+# phase1 examples, the document fuzz replay (built by name in
+# timeline-fuzz.yml), the project-package suites (their target names are
+# checked by the compile-out fixture), the performance-labelled scale suite,
+# and suites whose library set no sibling shares.
+pulp_add_test_group(pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_group(pulp-test-group-timeline-playback
+    LIBRARIES pulp::playback pulp::dawproject-import)
+pulp_add_test_group(pulp-test-group-timeline-editor
+    LIBRARIES pulp::timeline-editor pulp::timeline)
+pulp_add_test_group(pulp-test-group-timeline-view
+    LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
+        pulp::canvas)
+pulp_add_test_group(pulp-test-group-timeline-session
+    LIBRARIES pulp::playback pulp::timeline pulp::timebase
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-session)
+
+pulp_add_test_suite(pulp-test-timeline-model GROUP pulp-test-group-timeline
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
         test_timeline_automation_attachment.cpp
         test_timeline_note_modifiers.cpp
@@ -14,10 +40,11 @@ pulp_add_test_suite(pulp-test-timeline-model
 pulp_add_test_suite(pulp-test-timeline-modulation
     SOURCES test_timeline_modulation.cpp
     LIBRARIES pulp::timeline pulp::interchange)
-pulp_add_test_suite(pulp-test-timeline-dawproject-import
+pulp_add_test_suite(pulp-test-timeline-dawproject-import GROUP pulp-test-group-timeline-playback
     SOURCES test_timeline_dawproject_import.cpp
         test_timeline_dawproject_import_runtime.cpp
-    LIBRARIES pulp::playback pulp::dawproject-import)
+    LIBRARIES pulp::playback pulp::dawproject-import
+    COMPILE_DEFINITIONS PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 # Bounded DAWproject export. Registered with the dawproject subsystem rather
 # than the interchange hub: a format adapter owns its own tests, and this one
@@ -26,8 +53,6 @@ pulp_add_test_suite(pulp-test-dawproject-export
     SOURCES test_dawproject_export.cpp
     LIBRARIES pulp::dawproject-export pulp::dawproject-import pulp::interchange
         pulp::timeline)
-target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
-    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 # pulp::midi supplies the shared MIDI 2.0 velocity scaling the SMF interop
 # module reimplements under its -fno-exceptions contract; linking it here keeps
 # the two provably in agreement.
@@ -38,14 +63,14 @@ pulp_add_test_suite(pulp-test-smf-interchange
     SOURCES test_smf_interchange.cpp
     LIBRARIES pulp::smf-interchange pulp::smf-interop pulp::interchange
     INCLUDE_DIRS ${choc_SOURCE_DIR})
-pulp_add_test_suite(pulp-test-timeline-production-mode
+pulp_add_test_suite(pulp-test-timeline-production-mode GROUP pulp-test-group-timeline
     SOURCES test_timeline_production_mode.cpp
     LIBRARIES pulp::timeline)
 # SequencerUiHost is the editor rung's only coupling toward playback, so the
 # link list is part of what this suite proves: it names the editor interface and
 # the document model, and never pulp::playback. A member of the interface that
 # grew into an engine type would fail to build here.
-pulp_add_test_suite(pulp-test-sequencer-ui-host
+pulp_add_test_suite(pulp-test-sequencer-ui-host GROUP pulp-test-group-timeline-editor
     SOURCES test_sequencer_ui_host.cpp test_timeline_grid_lines.cpp test_timeline_snap_grid.cpp
             test_timeline_viewport_projection.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
@@ -73,7 +98,7 @@ pulp_add_test_suite(pulp-test-playback-production
 # are proven by separate suites: a link list naming only the editor rung and the
 # document model is what shows an arranger needs no view layer to rearrange
 # tracks, unlike the clip parity fixture below.
-pulp_add_test_suite(pulp-test-timeline-track-edit-intents
+pulp_add_test_suite(pulp-test-timeline-track-edit-intents GROUP pulp-test-group-timeline-editor
     SOURCES test_timeline_track_edit_intents.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-edit-intents
@@ -83,25 +108,25 @@ pulp_add_test_suite(pulp-test-timeline-edit-intents
 # be named together: the prediction is only worth anything if a real session
 # refuses at exactly the step it names. Linking the model alone would leave the
 # prediction untested, and the editor alone could not reach a session at all.
-pulp_add_test_suite(pulp-test-timeline-gesture-budget
+pulp_add_test_suite(pulp-test-timeline-gesture-budget GROUP pulp-test-group-timeline-editor
     SOURCES test_timeline_gesture_budget.cpp
     LIBRARIES pulp::timeline-editor pulp::timeline)
 # The arranger rung. It links pulp::timeline-view and nothing from playback or
 # project_package: the acceptance vehicle here is a serialize round trip, which
 # is what makes the editor stack usable without a package format underneath it.
-pulp_add_test_suite(pulp-test-timeline-arranger-view
+pulp_add_test_suite(pulp-test-timeline-arranger-view GROUP pulp-test-group-timeline-view
     SOURCES test_timeline_arranger_view.cpp
     LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
         pulp::canvas)
 # The piano roll: the same rung as the arranger, over one MIDI clip's notes.
 # Its acceptance vehicle is likewise a serialize round trip, so the editor stack
 # is proven durable without a package format underneath it.
-pulp_add_test_suite(pulp-test-timeline-piano-roll-view
+pulp_add_test_suite(pulp-test-timeline-piano-roll-view GROUP pulp-test-group-timeline-view
     SOURCES test_timeline_piano_roll_view.cpp
     LIBRARIES pulp::timeline-view pulp::timeline-editor pulp::timeline pulp::view
         pulp::canvas)
-pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-automation-curve GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-automation-lane GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
     SOURCES test_playback_transport.cpp test_playback_transport_epoch.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -132,10 +157,10 @@ pulp_add_test_suite(pulp-test-playback-program-wire
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
-pulp_add_test_suite(pulp-test-playback-external-sync
+pulp_add_test_suite(pulp-test-playback-external-sync GROUP pulp-test-group-timeline-playback
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
-pulp_add_test_suite(pulp-test-playback-tempo-sync
+pulp_add_test_suite(pulp-test-playback-tempo-sync GROUP pulp-test-group-timeline-playback
     SOURCES test_playback_tempo_sync.cpp
     LIBRARIES pulp::playback)
 
@@ -208,7 +233,7 @@ pulp_add_test_suite(pulp-test-playback-automation-cursor
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
-pulp_add_test_suite(pulp-test-playback-track-automation-program
+pulp_add_test_suite(pulp-test-playback-track-automation-program GROUP pulp-test-group-timeline-playback
     SOURCES test_playback_track_automation_program.cpp
     LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-playback-track-automation-renderer
@@ -269,22 +294,22 @@ if(Python3_Interpreter_FOUND)
         SKIP_RETURN_CODE 77)
 endif()
 
-pulp_add_test_suite(pulp-test-timeline-commands
+pulp_add_test_suite(pulp-test-timeline-commands GROUP pulp-test-group-timeline
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
         test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
         test_timeline_marker_commands.cpp test_timeline_track_mixer.cpp
         test_timeline_track_commands.cpp
     LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-writer-capabilities LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-transactions GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-writer-capabilities GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-note-transform GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal
     SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp
         harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-undo GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-schema-registry GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-schema-codegen GROUP pulp-test-group-timeline LIBRARIES pulp::timeline)
 if(PULP_ENABLE_PROJECT_PACKAGE)
     pulp_add_test_suite(pulp-test-timeline-agent
         SOURCES test_timeline_agent.cpp
@@ -312,54 +337,54 @@ endif()
 # The chord/scale context lane plus the compile-context subscription contract
 # it carries: the document type, its schema migrations, and the read side that
 # only resolves context a renderer declared.
-pulp_add_test_suite(pulp-test-timeline-context-lane
+pulp_add_test_suite(pulp-test-timeline-context-lane GROUP pulp-test-group-timeline
     SOURCES test_timeline_context_lane.cpp
     LIBRARIES pulp::timeline)
 # The intensity context lane on the same contract: its validation and curve
 # resolution, the read side that resolves it only for a renderer that declared
 # Dynamics, and the rebuild paths that must carry it.
-pulp_add_test_suite(pulp-test-timeline-dynamics-lane
+pulp_add_test_suite(pulp-test-timeline-dynamics-lane GROUP pulp-test-group-timeline
     SOURCES test_timeline_dynamics_lane.cpp
     LIBRARIES pulp::timeline)
 # The clip-scoped controller/expression lane commands: insert, remove, and the
 # gated point edit, plus the authority split that lets a non-destructive writer
 # author and edit a stream without being able to abandon one.
-pulp_add_test_suite(pulp-test-timeline-midi-expression-commands
+pulp_add_test_suite(pulp-test-timeline-midi-expression-commands GROUP pulp-test-group-timeline
     SOURCES test_timeline_midi_expression_commands.cpp
     LIBRARIES pulp::timeline)
 # Document tuning on both its owners, and the region edit that makes a section
 # role correctable by the writer profile that authored it.
-pulp_add_test_suite(pulp-test-timeline-tuning-region-commands
+pulp_add_test_suite(pulp-test-timeline-tuning-region-commands GROUP pulp-test-group-timeline
     SOURCES test_timeline_tuning_region_commands.cpp
     LIBRARIES pulp::timeline)
 # Track-owned modulation sources and macros: the insert/remove pair, the whole
 # value gate, the narrow position gate beside it, and the identity pinning that
 # keeps a Modify from performing the removal a proposal writer is denied.
-pulp_add_test_suite(pulp-test-timeline-modulation-commands
+pulp_add_test_suite(pulp-test-timeline-modulation-commands GROUP pulp-test-group-timeline
     SOURCES test_timeline_modulation_commands.cpp
     LIBRARIES pulp::timeline)
 # The connections those sources drive: the insert/remove pair, the whole-route
 # gate that covers the bypass as well as the depth, the source reference a route
 # may not dangle or mistype, and the identity pinning that keeps a Modify from
 # performing the removal a proposal writer is denied.
-pulp_add_test_suite(pulp-test-timeline-modulation-route-commands
+pulp_add_test_suite(pulp-test-timeline-modulation-route-commands GROUP pulp-test-group-timeline
     SOURCES test_timeline_modulation_route_commands.cpp
     LIBRARIES pulp::timeline)
 # The groove a sequence plays with, carried on the same contract: the swing and
 # step-table transform, the document type and its migrations, and the read side
 # that resolves a groove only for a renderer that declared it.
-pulp_add_test_suite(pulp-test-timeline-groove
+pulp_add_test_suite(pulp-test-timeline-groove GROUP pulp-test-group-timeline
     SOURCES test_timeline_groove.cpp
     LIBRARIES pulp::timeline)
 # The invalidation side of the same contract, driven through the real program
 # compiler so "did not recompile" is observed rather than assumed.
-pulp_add_test_suite(pulp-test-playback-compile-context
+pulp_add_test_suite(pulp-test-playback-compile-context GROUP pulp-test-group-timeline-playback
     SOURCES test_playback_compile_context.cpp
     LIBRARIES pulp::playback)
-pulp_add_test_suite(pulp-test-playback-chord-pattern-renderer
+pulp_add_test_suite(pulp-test-playback-chord-pattern-renderer GROUP pulp-test-group-timeline-playback
     SOURCES test_playback_chord_pattern_renderer.cpp
     LIBRARIES pulp::playback)
-pulp_add_test_suite(pulp-test-timeline-persistence
+pulp_add_test_suite(pulp-test-timeline-persistence GROUP pulp-test-group-timeline
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
         test_timeline_asset_loop_info.cpp
@@ -374,14 +399,12 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
         test_timeline_tuning.cpp
-    LIBRARIES pulp::timeline)
-target_compile_definitions(pulp-test-timeline-persistence PRIVATE
-    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
-pulp_add_test_suite(pulp-test-timeline-replay-golden
+    LIBRARIES pulp::timeline
+    COMPILE_DEFINITIONS PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+pulp_add_test_suite(pulp-test-timeline-replay-golden GROUP pulp-test-group-timeline-playback
     SOURCES test_timeline_replay_golden.cpp
-    LIBRARIES pulp::playback)
-target_compile_definitions(pulp-test-timeline-replay-golden PRIVATE
-    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+    LIBRARIES pulp::playback
+    COMPILE_DEFINITIONS PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 
 # Transport-aware offline render (P1-7). Separate suite rather than a case in
 # the binding suite: it drives its own MasterTransport across a whole region and
@@ -440,7 +463,7 @@ pulp_add_test_suite(pulp-test-timeline-multitrack-pdc
 # Worked example (d): the clip-launching session. Engine-only (no pulp::host),
 # so it exercises launch quantization, per-track provider arbitration, and the
 # capture flatten on every platform the document model builds on.
-pulp_add_test_suite(pulp-test-timeline-launch-session
+pulp_add_test_suite(pulp-test-timeline-launch-session GROUP pulp-test-group-timeline-session
     SOURCES
         ${CMAKE_SOURCE_DIR}/examples/timeline-session/timeline_launch_session.cpp
         ${CMAKE_SOURCE_DIR}/examples/timeline-session/test_timeline_launch_session.cpp
@@ -450,7 +473,7 @@ pulp_add_test_suite(pulp-test-timeline-launch-session
 # Worked example (e): the full DAW-style project. Hybrid per-track arbitration,
 # nested SequenceRef with one diverged copy, take lanes with a comp, an agent
 # batch, and journal-backed autosave — all on one document.
-pulp_add_test_suite(pulp-test-timeline-daw-project
+pulp_add_test_suite(pulp-test-timeline-daw-project GROUP pulp-test-group-timeline-session
     SOURCES
         ${CMAKE_SOURCE_DIR}/examples/timeline-session/timeline_daw_project.cpp
         ${CMAKE_SOURCE_DIR}/examples/timeline-session/test_timeline_daw_project.cpp

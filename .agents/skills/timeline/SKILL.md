@@ -2785,6 +2785,9 @@ Build and run `pulp-test-timeline-model`, the automation curve and lane suites,
 the commands, transactions, journal, and undo suites, plus
 `pulp-test-timeline-schema-registry`, `pulp-test-timeline-schema-codegen`, and
 `pulp-test-timeline-persistence` in Release and UBSan configurations.
+All but the journal suite (an RT-probe binary of its own) share the grouped
+`pulp-test-group-timeline` executable (their CTest names are unchanged), so build that target and run them through
+`ctest -R`, or run one suite with `-# "[#<source stem>]"`.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
 Keep the 4k-scene/16k-slot launcher test proving bounded node creation, high
