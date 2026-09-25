@@ -670,8 +670,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
           "state": "pulp-owned-retained",
-          "revision": "bc2d0400732cd6a9f9b4e8f5fe0de49a70dc9c51",
-          "object_id": "690da712c63c2d7229215530d50743a040a872a7",
+          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
+          "object_id": "a4609077713d41f2ed281f4210a9912a7b71fb5a",
           "object_type": "blob"
         },
         {
@@ -694,8 +694,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "f3c21381bbce5ba2a84726d12ffa96d03065c97b",
-          "object_id": "f51fd7fee0a4bfbc4954fbed49339eed9a999e0c",
+          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
+          "object_id": "af3b30d33e233b89fbb0f91df69f5056cea180d5",
           "object_type": "blob"
         },
         {
@@ -734,8 +734,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/test_control_gpu_health_provider.cpp",
           "state": "pulp-owned-retained",
-          "revision": "75c99ea7f47be2ee74bc4559f30255e594d93eec",
-          "object_id": "1ea0d37754a7d46bf2a64a9cb1325717d8df35fc",
+          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
+          "object_id": "ea0a32a2d3b0d149de8370d9769a6fa814fe0621",
           "object_type": "blob"
         },
         {
@@ -2035,8 +2035,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-adoption",
-          "revision": "f3c21381bbce5ba2a84726d12ffa96d03065c97b",
-          "object_id": "f51fd7fee0a4bfbc4954fbed49339eed9a999e0c",
+          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
+          "object_id": "af3b30d33e233b89fbb0f91df69f5056cea180d5",
           "object_type": "blob"
         }
       ],
@@ -2301,8 +2301,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "inspect/src/control_gpu_health_provider.cpp",
           "state": "pulp-owned-adoption",
-          "revision": "f3c21381bbce5ba2a84726d12ffa96d03065c97b",
-          "object_id": "f51fd7fee0a4bfbc4954fbed49339eed9a999e0c",
+          "revision": "f88c905ec19ba1715c72d00a90b8205bf57fd69c",
+          "object_id": "af3b30d33e233b89fbb0f91df69f5056cea180d5",
           "object_type": "blob"
         }
       ],
