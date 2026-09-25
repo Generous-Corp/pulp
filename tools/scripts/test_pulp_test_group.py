@@ -16,6 +16,8 @@ checks then read what CTest registered:
     the hidden cases a standalone suite never registered stay unregistered,
   * a member whose tags match nothing fails the BUILD with a named
     diagnostic rather than silently registering no tests,
+  * a platform-gated member may explicitly opt into zero cases without
+    weakening the fail-closed default for other members,
   * a member that links a library its group does not fails CONFIGURE,
   * the group reuses the shared Catch2 PCH even though its members'
     COMPILE_DEFINITIONS became per-source properties (the ledger names the
@@ -57,6 +59,7 @@ def fixture_project(
     root: pathlib.Path,
     *,
     empty_member: bool = False,
+    empty_member_may_be_empty: bool = False,
     foreign_library: bool = False,
     cxx_standard: int = 17,
     group_no_pch: bool = False,
@@ -66,7 +69,11 @@ def fixture_project(
     member_options = "\n    NO_PCH" if member_no_pch else ""
     empty = ""
     if empty_member:
-        empty = "pulp_add_test_suite(pulp-test-gamma GROUP pulp-test-group-fixture SOURCES gamma.cpp)"
+        may_be_empty = " MAY_BE_EMPTY" if empty_member_may_be_empty else ""
+        empty = (
+            "pulp_add_test_suite(pulp-test-gamma GROUP pulp-test-group-fixture "
+            f"SOURCES gamma.cpp{may_be_empty})"
+        )
     foreign = ""
     if foreign_library:
         foreign = (
@@ -250,6 +257,26 @@ def test_member_matching_nothing_fails_the_build() -> None:
         assert "[#gamma]" in combined, combined
 
 
+def test_member_may_be_empty_is_explicit() -> None:
+    with tempfile.TemporaryDirectory(prefix="pulp-test-group-may-empty-") as temporary:
+        source = pathlib.Path(temporary) / "source"
+        build = pathlib.Path(temporary) / "build"
+        source.mkdir()
+        fixture_project(source, empty_member=True, empty_member_may_be_empty=True)
+
+        require_success(run(["cmake", "-S", str(source), "-B", str(build)]), "configure")
+        require_success(run(["cmake", "--build", str(build), "--parallel", "2"]), "build")
+        listing = run(["ctest", "--test-dir", str(build), "--show-only=json-v1"])
+        require_success(listing, "ctest listing")
+        tests = json.loads(listing.stdout)["tests"]
+        assert {test["name"] for test in tests} == {
+            "alpha one",
+            "alpha two",
+            "beta fast",
+            "slow::beta slow",
+        }, tests
+
+
 def test_member_may_not_link_beyond_its_group() -> None:
     with tempfile.TemporaryDirectory(prefix="pulp-test-group-foreign-") as temporary:
         source = pathlib.Path(temporary) / "source"
@@ -325,6 +352,7 @@ def test_no_pch_is_a_group_option() -> None:
 def main() -> int:
     test_group_registers_each_member_with_its_own_properties()
     test_member_matching_nothing_fails_the_build()
+    test_member_may_be_empty_is_explicit()
     test_member_may_not_link_beyond_its_group()
     test_group_reuses_the_shared_pch_with_per_source_definitions()
     test_no_pch_is_a_group_option()
