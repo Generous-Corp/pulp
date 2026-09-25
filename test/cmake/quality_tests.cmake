@@ -1167,6 +1167,18 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktrees
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktrees-selftest PROPERTIES TIMEOUT 600)
+
+        # seed_build_dir.py clones and retargets a warm build dir. Its suite
+        # builds a real CMake + Ninja fixture whose executable bakes the source
+        # dir in through a -D define (the case a naive retarget gets wrong),
+        # seeds worktrees at the same and at a changed commit, and audits the
+        # donor (inode + mtime) so a retarget that writes back into it fails.
+        # Skips itself off macOS or off APFS; refusals (cross-volume, Makefiles
+        # donor, unbuilt donor, busy donor) must leave nothing behind.
+        add_test(NAME seed-build-dir-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_seed_build_dir
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(seed-build-dir-selftest PROPERTIES TIMEOUT 300)
     endif()
     # Tool registry: docs/status/tools.yaml must stay valid (every path and
     # invocation resolves) AND complete (every committed entry point under the

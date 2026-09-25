@@ -13,6 +13,7 @@ sweep:
   - tools/scripts/gpu_trace_overhead_acceptance.py
   - tools/scripts/gpu_audio_p4_evidence.py
   - tools/scripts/render-figma-import.sh
+  - tools/scripts/seed_build_dir.py
 tools:
 - name: affected-targets
   path: tools/scripts/affected_targets.py
@@ -266,6 +267,17 @@ tools:
   availability: always
   skill: trace-analysis
   docs: validation/gpu-trace-overhead/README.md
+- name: seed-build-dir
+  path: tools/scripts/seed_build_dir.py
+  category: build
+  use_when: Starting a new worktree that a sibling worktree a few commits away has already built — seed its build dir by APFS clone + retarget instead of paying the full configure, compile and link again.
+  invocation: pulp build --seed-build  (or python3 tools/scripts/seed_build_dir.py --from auto --to <worktree>)
+  inputs: A target worktree with no build dir and a donor worktree whose Ninja build dir was built (same build type, same PULP_BUILD_EXAMPLES, same APFS volume, not mid-build).
+  outputs: A retargeted build dir at the target plus `build/.pulp-seed-receipt.json` (clone/rewrite/rehash timings, path-tainted binaries dropped, source mtimes synced, edges left to build); exit 3 with nothing left behind when not applicable.
+  caveat: Removes gratuitous work only. A binary is trusted only if it does not embed the donor path, so `-D` defines that carry the source dir (and `__FILE__` without ccache's base_dir) recompile as usual; a Debug donor with `-g` embeds the path in every object and gains nothing. The closing `ninja -n` count is the receipt, not a proof the outputs are right — the tests are.
+  availability: always
+  skill: prototype-loop
+  docs: reference/cli.md#build
 - name: visual-harness-docker-build
   path: tools/harness/visual/docker-build.sh
   category: harness
