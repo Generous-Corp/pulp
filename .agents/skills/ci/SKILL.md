@@ -4157,6 +4157,16 @@ down this list before touching build code:
    `macos-15`, where they queue behind *advisory* lanes — sanitizers (×4 per PR),
    coverage, `sandbox-e2e`, Android, Intel-portability, consumer smoke. None of
    those are required checks; the release is. It loses to all of them.
+4. **The m5 `pulp-release` lane YIELDS to `Build and Test`.** Its tartci profile
+   sets `yield_to_workflow = "Build and Test"` and it shares m5's 2-VM cap with
+   the two gate lanes, so whenever gate demand exists its log reads
+   `yielding 20s … priority lane 'Build and Test' has the slot`. Under a busy
+   merge queue that is most of the day: on 2026-09-21/22 release darwin legs
+   waited 8.5 h and 10 h and were cancelled. The runner is not missing and the
+   static audit reports the lane `REACHABLE` (declared supply) — it is starved by
+   design. So pointing `PULP_RELEASE_MACOS_RUNS_ON_JSON` at
+   `pulp-build-vm-release` takes release work off gate slots only at the cost of
+   release latency, until the lane has reserved capacity or a bounded yield.
 
 **Diagnose, don't guess.** `tartci observe macos` on the VM host shows what the
 runner is *actually* running (it prints the live `Running job:` line), and
