@@ -563,6 +563,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Dawn-free shape contract for the future provider-owned WaveNet program. This
+# validates model metadata before any provider resource or handle is created.
+pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
+    SOURCES test_gpu_shared_io_wavenet_spec.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
 # Dawn-free private reducer for exact lead-delivery and typed miss handling.
 # prepare() owns the only allocation; callback delivery is bounded and atomic.
 pulp_add_test_suite(pulp-test-gpu-audio-execution-controller
