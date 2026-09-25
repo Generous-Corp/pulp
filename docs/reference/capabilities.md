@@ -384,7 +384,7 @@ false`, falling back to the `signal::*` CPU path.
 | GPU spectral toolkit (STFT / freeze / morph) | experimental | [gpu_audio](modules.md#gpu_audio) | [Spectral Lab example](../examples/spectral-lab.md) |
 | GPU WaveNet neural-inference primitive | experimental | [render](modules.md#render) | [GPU NAM example](../examples/gpu-nam.md) |
 
-Key headers: `pulp/gpu_audio/gpu_audio_transport.hpp`, `pulp/gpu_audio/gpu_convolver.hpp`, `pulp/render/gpu_compute.hpp`
+Key headers: `pulp/gpu_audio/gpu_audio_transport.hpp`, `pulp/gpu_audio/gpu_convolver.hpp`, `pulp/gpu_audio/gpu_wavenet.hpp`, `pulp/render/gpu_compute.hpp`
 
 **Not available on the web.** No GPU-compute code compiles to wasm. The Skia wasm
 slice is Ganesh on WebGL2, and WebGL2 has no compute shaders, so a plugin with a
