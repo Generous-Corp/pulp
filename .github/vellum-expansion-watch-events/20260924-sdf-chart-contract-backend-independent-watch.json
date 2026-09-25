@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260924-sdf-chart-contract-backend-independent-watch",
+  "created_at": "2026-09-24T20:50:52Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The lines selecting this family move the SDF chart admission predicate and its refusal message out of the Skia-only unit so both backends share one answer. No backend, renderer, asset path or authority boundary changes and the with-Skia result is unchanged, while the transferred rendering slice remains under watch.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-canvas SDF chart refuses and names every shape it cannot chart",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

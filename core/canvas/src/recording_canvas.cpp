@@ -1,5 +1,7 @@
 #include <pulp/canvas/recording_canvas.hpp>
 
+#include "sdf_chart_contract.hpp"
+
 #include <algorithm>
 #include <cctype>
 
@@ -1024,8 +1026,16 @@ std::string Canvas::compile_sksl(const std::string& sksl) {
     return "Skia not available — shader compilation requires GPU build";
 }
 
-std::string Canvas::compile_sdf_chart_sksl(SDFShape, const std::string& sksl) {
-    return sksl.empty() ? "Empty shader code" : "Skia not available: SDF chart shaders require Skia";
+std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl) {
+    if (sksl.empty()) return "Empty shader code";
+    // Whether a shape has a stroke chart is a property of the geometry, not of
+    // the renderer, so answer it here too rather than reporting only the
+    // missing backend. Without this the same call names the shape under Skia
+    // and reports a capability gap without it, and a caller that branches on
+    // the message gets a different answer per build.
+    if (!sdf_chart::shape_has_chart(shape) && sdf_chart::source_uses_chart(sksl))
+        return sdf_chart::refusal_for(shape);
+    return "Skia not available: SDF chart shaders require Skia";
 }
 
 // Without Skia there is no compiler to ask, so scan the declarations directly.

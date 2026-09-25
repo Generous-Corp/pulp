@@ -947,14 +947,10 @@ TEST_CASE("SDF chart refuses and names every shape it cannot chart",
             c.shape, "half4 shade(PulpChart g) { return half4(g.t); }");
         INFO("shape " << c.name << " error=" << error);
         REQUIRE_FALSE(error.empty());
-#ifdef PULP_HAS_SKIA
-        // Naming the shape is what makes the refusal actionable, but only the
-        // Skia path gets far enough to know which shape was asked for.
+        // One contract, both backends: whether a shape has a chart is geometry,
+        // not rendering, so the refusal names the shape with or without Skia.
         REQUIRE(error.find("no stroke chart") != std::string::npos);
         REQUIRE(error.find(c.name) != std::string::npos);
-#else
-        REQUIRE(error.find("Skia not available") != std::string::npos);
-#endif
     }
 
     // Control: the one charted shape must still compile, or the check above
