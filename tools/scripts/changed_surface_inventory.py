@@ -1340,7 +1340,12 @@ def project_affected(model: CodeModel, changed: list[str], deleted: list[str],
             resolved += 1
             selected |= owners
             for owner in owners:
-                if not model.targets[owner].is_library:
+                if model.targets[owner].type == "OBJECT_LIBRARY":
+                    # Its objects are linked into every dependent, so each
+                    # one must relink (a static library's consumers pull a
+                    # rebuilt archive only when they themselves are built).
+                    selected |= rev.get(owner, set())
+                elif not model.targets[owner].is_library:
                     selected |= test_dependents(owner, rev, model)
             selected |= companion_test_targets(file_stem(rel), model)
             continue

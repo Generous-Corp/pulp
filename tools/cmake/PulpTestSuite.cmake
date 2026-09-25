@@ -24,6 +24,7 @@
 include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/PulpTestTimeout.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/PulpTestSharedObjects.cmake)
 
 # ---------------------------------------------------------------------------
 # Shared precompiled header for Catch2 suites
@@ -240,7 +241,8 @@ function(_pulp_test_pch_classify out target)
     endif()
     get_target_property(_sources ${target} SOURCES)
     foreach(_s IN LISTS _sources)
-        if(_s MATCHES "^\\$<TARGET_OBJECTS:[^>]+>$")
+        if(_s MATCHES "^\\$<TARGET_OBJECTS:[^>]+>$"
+                OR _s MATCHES "^\\$<\\$<.*>:\\$<TARGET_OBJECTS:[^>]+>>$")
             continue()  # already-compiled objects, not a TU of this target
         endif()
         if(_s MATCHES "^\\$<\\$<.*>:([^<>]+)>$")
@@ -709,3 +711,9 @@ function(pulp_add_test_suite NAME)
     endif()
     catch_discover_tests(${_target} ${_discover_args})
 endfunction()
+
+# The test directory compiles its shared support sources once (see
+# PulpTestSharedObjects.cmake).
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL "${CMAKE_SOURCE_DIR}/test")
+    pulp_test_shared_objects_arm()
+endif()

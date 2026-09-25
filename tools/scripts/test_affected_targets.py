@@ -223,6 +223,30 @@ class SelectorRules(unittest.TestCase):
         self.assertEqual(sel.unmapped, ["tools/scripts/test_policy.py"])
         self.assertIn("nothing to build", sel.banner)
 
+    def test_object_library_source_relinks_every_dependent(self) -> None:
+        graph = GRAPH + [
+            _target("pulp-test-rt-allocation-probe", "OBJECT_LIBRARY", "test",
+                    ["test/harness/rt_allocation_probe.cpp"]),
+            _target("pulp-test-host", "EXECUTABLE", "test", ["test/test_host.cpp"],
+                    ["pulp-runtime", "pulp-test-rt-allocation-probe"],
+                    ["test/pulp-test-host"]),
+            _target("pulp-test-state", "EXECUTABLE", "test", ["test/test_state.cpp"],
+                    ["pulp-runtime", "pulp-test-rt-allocation-probe"],
+                    ["test/pulp-test-state"]),
+        ]
+        write_reply(self.fx.build, self.fx.root, graph)
+        model = at.load_codemodel_targets(self.fx.build)
+        sel = at.project_affected(model, ["test/harness/rt_allocation_probe.cpp"], [],
+                                  None, None, 1.0)
+        self.assertEqual(sel.mode, "focused")
+        self.assertEqual(sel.targets, ["pulp-test-host", "pulp-test-rt-allocation-probe",
+                                       "pulp-test-state"])
+
+    def test_static_library_source_does_not_pull_every_dependent(self) -> None:
+        sel = self.select(["core/runtime/src/log.cpp"], threshold=1.0)
+        self.assertNotIn("pulp-cli", sel.targets)
+        self.assertNotIn("pulp-view-core", sel.targets)
+
     def test_empty_diff_falls_back_to_all(self) -> None:
         sel = self.select([])
         self.assertEqual(sel.mode, "all")
