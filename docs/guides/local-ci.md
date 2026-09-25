@@ -1918,6 +1918,15 @@ protected-base verifier's own reason (for example "receipt selection covers too
 little of the built test inventory"). The notes are rendered by the checked-out
 script after the protected-base verifier has decided; they never decide.
 
+A merge group whose commit is not two-parent is refused for both targets with
+the parent count it actually has (or "parents could not be read" when the
+history is unavailable). A merge group that changed no native build input is
+not evaluated at all: it publishes no decision annotation, only a plain
+`receipt reuse not evaluated: merge group changed no native build input` notice
+and a summary row. Those are the near-instant `macos` bootstrap jobs. Read the
+emitted `##[notice]` lines, not a grep of the whole log: the job log also
+echoes the step's script, which contains every refusal message verbatim.
+
 The test step of each gate job likewise emits a `shipyard-test-tier`
 annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
 there; the full suite runs in the merge queue), `full` where the full suite

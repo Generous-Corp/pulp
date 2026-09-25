@@ -474,6 +474,124 @@ class DecisionNoteCliTest(unittest.TestCase):
         self.assertIn("| linux | validated in full (receipt refused) | n/a | 100% \\| odd reason |",
                       table)
 
+    def test_no_decision_reason_is_a_plain_notice_never_a_verdict(self) -> None:
+        summary = self.dir / "summary.md"
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            self.assertEqual(receipt.main([
+                "publish-notes", "--summary", str(summary),
+                "--no-decision-reason", "merge group changed no native build input"]), 0)
+        # Nothing was decided, so no shipyard-receipt-decision annotation may
+        # appear: Shipyard would render it as a verdict the merge never made.
+        self.assertEqual(buf.getvalue().splitlines(), [
+            "::notice::receipt reuse not evaluated: merge group changed no native build input"])
+        self.assertIn("| — | no receipt decision was needed | | "
+                      "merge group changed no native build input |", summary.read_text())
+
+    def test_no_decision_reason_is_ignored_when_targets_were_decided(self) -> None:
+        refuse = receipt.decision_note("macos", "refuse",
+                                       "the merge-group commit has 3 parent(s); reuse needs "
+                                       "exactly two")
+        lines, table = receipt.render_notes([refuse], "merge group changed no native build input")
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("::notice title=shipyard-receipt-decision::"))
+        self.assertNotIn("not evaluated", "\n".join(lines) + table)
+        self.assertIn("3 parent(s); reuse needs exactly two", table)
+
+
+class ReuseStepRefusalReasonTest(unittest.TestCase):
+    """The build.yml reuse step names why a merge group's shape refused reuse.
+
+    Runs the step's own bash against commits whose parent shape is built on
+    purpose, so the recorded reason is checked against a known count.
+    """
+
+    WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "build.yml"
+
+    @classmethod
+    def step_script(cls) -> str:
+        lines = cls.WORKFLOW.read_text(encoding="utf-8").splitlines()
+        start = lines.index("      - id: reuse")
+        run = next(i for i in range(start, len(lines)) if lines[i] == "        run: |")
+        body = []
+        for line in lines[run + 1:]:
+            if line.strip() and not line.startswith(" " * 10):
+                break
+            body.append(line[10:])
+        return "\n".join(body) + "\n"
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo"
+        (self.repo / "tools" / "scripts").mkdir(parents=True)
+        (self.repo / "tools" / "scripts" / "protected_merge_receipt.py").write_bytes(
+            Path(receipt.__file__).read_bytes())
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.email", "ci@example.invalid")
+        git(self.repo, "config", "user.name", "CI")
+        self.commits = []
+        for name in ("a", "b", "c"):
+            (self.repo / name).write_text(name, encoding="utf-8")
+            git(self.repo, "add", name)
+            git(self.repo, "commit", "-qm", name)
+            self.commits.append(git(self.repo, "rev-parse", "HEAD"))
+        self.tree = git(self.repo, "rev-parse", "HEAD^{tree}")
+        (self.root / "step.sh").write_text(self.step_script(), encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def octopus(self, parents: list[str]) -> str:
+        # Distinct parents only: commit-tree collapses a repeated -p.
+        self.assertEqual(len(set(parents)), len(parents))
+        args = [arg for sha in parents for arg in ("-p", sha)]
+        sha = git(self.repo, "commit-tree", self.tree, *args, input_text="group\n")
+        self.assertEqual(len(git(self.repo, "rev-list", "--parents", "-n", "1", sha).split()),
+                         len(parents) + 1)
+        return sha
+
+    def run_step(self, sha: str, native: str = "true") -> tuple[str, str]:
+        runner_temp = self.root / f"rt-{sha[:12]}-{native}"
+        runner_temp.mkdir()
+        summary, output = runner_temp / "summary.md", runner_temp / "output"
+        env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", NATIVE_BUILD_REQUIRED=native,
+                   GITHUB_SHA=sha, RUNNER_TEMP=str(runner_temp),
+                   GITHUB_STEP_SUMMARY=str(summary), GITHUB_OUTPUT=str(output),
+                   ORIGINAL_MATRIX='{"include":[{"key":"macos"},{"key":"linux"}]}',
+                   RECEIPT_TOKEN="unused", A2T_RECEIPT_VERIFICATION_REQUIRED="false",
+                   GITHUB_REPOSITORY="example/repo", GITHUB_WORKSPACE=str(self.repo))
+        done = subprocess.run(["bash", "-e", str(self.root / "step.sh")], cwd=self.repo,
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("build_required=true", output.read_text())
+        return done.stdout, summary.read_text() if summary.exists() else ""
+
+    def decided_reasons(self, stdout: str) -> dict[str, str]:
+        prefix = "::notice title=shipyard-receipt-decision::"
+        notes = [json.loads(line[len(prefix):]) for line in stdout.splitlines()
+                 if line.startswith(prefix)]
+        return {note["target"]: note["reason"] for note in notes}
+
+    def test_single_and_octopus_parents_are_named_by_count(self) -> None:
+        # The second commit has exactly one parent; the octopus has three.
+        for sha, count in ((self.commits[1], 1), (self.octopus(self.commits), 3)):
+            stdout, _ = self.run_step(sha)
+            reason = f"the merge-group commit has {count} parent(s); reuse needs exactly two"
+            self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+
+    def test_unreadable_commit_is_not_reported_as_a_parent_count(self) -> None:
+        stdout, _ = self.run_step("0" * 40)
+        reason = "the merge-group commit's parents could not be read"
+        self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+
+    def test_merge_group_without_native_input_says_nothing_was_evaluated(self) -> None:
+        stdout, summary = self.run_step(self.octopus(self.commits[:2]), native="false")
+        self.assertEqual(self.decided_reasons(stdout), {})
+        self.assertIn("::notice::receipt reuse not evaluated: merge group changed no native "
+                      "build input", stdout)
+        self.assertIn("merge group changed no native build input |", summary)
+
 
 if __name__ == "__main__":
     unittest.main()
