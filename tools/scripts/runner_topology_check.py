@@ -121,6 +121,10 @@ class Lane:
     # value is a deliberate temporary state rather than the steady design.
     override_id: str | None = None
     supervisor: str | None = None
+    # The value an operator SETS the variable to when the lane's own pool is
+    # down. Static mode adjudicates it like `expect`, so a documented rollback
+    # that would queue forever is a failure rather than advice.
+    break_glass_rollback: Any = None
 
     @property
     def is_self_hosted(self) -> bool:
@@ -235,6 +239,7 @@ def load_contract(path: Path) -> Contract:
             dispatch_only=bool(raw.get("dispatch_only", False)),
             override_id=raw.get("override_id"),
             supervisor=raw.get("supervisor"),
+            break_glass_rollback=raw.get("break_glass_rollback"),
         )
         for raw in data.get("lanes", [])
     ]
