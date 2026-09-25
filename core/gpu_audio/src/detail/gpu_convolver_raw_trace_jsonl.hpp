@@ -43,6 +43,7 @@ struct GpuConvolverRawManifest {
     std::uint32_t expected_trials = 0;
     std::uint32_t expected_matched_pairs = 0;
     std::uint32_t expected_staged_sync_trials = 0;
+    std::uint32_t expected_blocks_per_trial = 0;
     std::uint64_t bootstrap_seed = 0;
     std::uint32_t bootstrap_resamples = 0;
     bool paced = false;
@@ -288,8 +289,9 @@ inline bool valid_manifest(const GpuConvolverRawManifest& manifest) noexcept {
         manifest.expected_matched_pairs == 0 || manifest.bootstrap_resamples < 100 ||
         !manifest.paced || manifest.block_frames == 0 || manifest.sample_rate_hz == 0 ||
         manifest.channels == 0 || manifest.ir_frames == 0 || manifest.inflight_depth == 0 ||
-        manifest.lead_blocks == 0 || manifest.deadline_ns == 0 ||
-        manifest.watchdog_ns <= manifest.deadline_ns || !valid_load(manifest.load))
+        manifest.expected_blocks_per_trial == 0 || manifest.lead_blocks == 0 ||
+        manifest.deadline_ns == 0 || manifest.watchdog_ns <= manifest.deadline_ns ||
+        !valid_load(manifest.load))
         return false;
     bool has_o3 = false;
     bool has_ndebug = false;
@@ -562,7 +564,8 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
             }
             ++ordinal;
         }
-        if (trial.path != GpuConvolverRawTrialPath::StagedSync && ordinal != manifest.block_frames)
+        if (trial.path != GpuConvolverRawTrialPath::StagedSync &&
+            ordinal != manifest.expected_blocks_per_trial)
             return false;
         if (trial.path == GpuConvolverRawTrialPath::StagedAsync &&
             std::none_of(trial_records.begin(), trial_records.end(), [](const auto& item) {
@@ -683,7 +686,7 @@ inline bool write_gpu_convolver_raw_jsonl(std::ostream& output,
                   << R"(,"expected_trials":)" << manifest.expected_trials
                   << R"(,"expected_matched_pairs":)" << manifest.expected_matched_pairs
                   << R"(,"expected_staged_sync_trials":)" << manifest.expected_staged_sync_trials
-                  << R"(,"expected_blocks_per_trial":)" << manifest.block_frames
+                  << R"(,"expected_blocks_per_trial":)" << manifest.expected_blocks_per_trial
                   << R"(,"bootstrap_seed":)" << manifest.bootstrap_seed
                   << R"(,"bootstrap_resamples":)" << manifest.bootstrap_resamples
                   << R"(,"row":{"block_frames":)" << manifest.block_frames

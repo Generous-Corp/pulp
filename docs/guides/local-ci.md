@@ -815,9 +815,28 @@ VM lane, it is JIT: a runner registers only while serving a job and deregisters
 after, so an idle release lane shows **zero** runners in the GitHub inventory.
 That is its healthy state, not an outage — judge the lane on service history
 (`runner_topology.json`'s `service_evidence`), never on a point-in-time runner
-census. Unsetting the variable is the break-glass rollback: the resolver chain
-falls through to `PULP_LOCAL_MACOS_RUNS_ON_JSON`, sharing the gate pool
-(safe for a tag-only, clean-checkout workflow, but not the preferred state).
+census.
+
+**Unsetting the variable is not a rollback.** The resolver chain
+(`resolve_release_runners.py`, and `release-path-pr-gate.yml`) falls through to
+`PULP_LOCAL_MACOS_RUNS_ON_JSON`, whose label set carries `pulp-gate-fast`. No
+registration advertises that label (`build.yml` rewrites it per event; the
+release workflows do not), and the gate slots mint only `Build and Test`
+anyway, so a release darwin-arm64 leg routed there queues forever.
+`runner_topology_check.py --mode=static` shows it:
+
+```text
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required fallback  Release CLI  UNSERVED  no Generous-Corp/pulp registration advertises ['pulp-gate-fast']
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required rollback  -            HOSTED    GitHub-hosted allowlist
+```
+
+The served break-glass rollback is to **set** the variable to the lane's
+`break_glass_rollback`, GitHub-hosted `["macos-15"]`
+(`ghapp variable set PULP_RELEASE_MACOS_RUNS_ON_JSON --body '["macos-15"]'`).
+It schedules slower when the hosted pool is congested, but it always
+dispatches. Static mode fails when a required lane's unset fallback is
+UNSERVED and its contract names no served `break_glass_rollback`, so a
+rollback that cannot run cannot be documented as one.
 
 A release slot admits a job only when **three independent gates** all pass;
 labels are necessary but not sufficient:

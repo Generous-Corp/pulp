@@ -31,6 +31,28 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
         PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     catch_discover_tests(pulp-test-mac-platform-harness)
 endif()
+
+# Grouped executable (pulp_add_test_group in tools/cmake/PulpTestSuite.cmake):
+# the AppKit suites that link only pulp::view share one binary; each keeps its
+# own registration and properties. The group links the union of their
+# frameworks and pulls the PulpView / PulpPluginView archive members with -u,
+# because several cases message those classes without referencing a C++
+# symbol from window_host_mac.mm. A suite stays on its own when it needs its
+# own process or compile line: the Skia-only platform harness (pulp::view-script
+# plus the miniz include root), foreign-framework coexistence (pulp::events;
+# it measures a process shared with one foreign window), the CoreMIDI
+# client (pulp::midi; one client per process is the invariant), and the live
+# hover-cursor suite, which drives the real system pointer.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_group(pulp-test-group-mac-view LIBRARIES pulp::view)
+    target_link_libraries(pulp-test-group-mac-view PRIVATE
+        "-framework AppKit"
+        "-framework CoreVideo"
+        "-framework QuartzCore")
+    target_link_options(pulp-test-group-mac-view PRIVATE
+        "LINKER:-u,_OBJC_CLASS_$_PulpView"
+        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView")
+endif()
 if(APPLE AND NOT PULP_IOS)
     # Frame-timing seam of the CVDisplayLink-driven macOS hosts: the nominal
     # (first-frame / wake) interval seed, whether the CPU plugin-view host runs a
@@ -38,39 +60,21 @@ if(APPLE AND NOT PULP_IOS)
     # the editor is static (it runs inside a DAW), and that PulpView's teardown
     # drops its pointers into the freed host. All four answers come from
     # CoreVideo/AppKit, so they cannot be pinned from a portable C++ test.
-    add_executable(pulp-test-mac-frame-timing
-        test_mac_frame_timing.mm
-    )
-    target_link_libraries(pulp-test-mac-frame-timing PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-        "-framework CoreVideo"
-        "-framework QuartzCore"
-    )
-    # Pull the PulpView archive member (the teardown case sends it messages but
-    # references no C++ symbol from window_host_mac.mm).
-    target_link_options(pulp-test-mac-frame-timing PRIVATE
-        "LINKER:-u,_OBJC_CLASS_$_PulpView"
-    )
+    pulp_add_test_suite(pulp-test-mac-frame-timing GROUP pulp-test-group-mac-view
+        SOURCES test_mac_frame_timing.mm
+        LIBRARIES pulp::view)
     # CVDisplayLink is deprecated in macOS 15 but is still the only vsync source
     # the hosts use (see window_host_mac.mm); the header under test calls it.
-    target_compile_options(pulp-test-mac-frame-timing PRIVATE
-        -Wno-deprecated-declarations)
-    catch_discover_tests(pulp-test-mac-frame-timing)
+    set_source_files_properties(test_mac_frame_timing.mm PROPERTIES
+        COMPILE_OPTIONS -Wno-deprecated-declarations)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Pin the invariant -[PulpView liveFocusedView] depends on:
     # ~View() must auto-clear focused_input_ so the
     # accessor can safely re-sync the ivar to nullptr before any deref.
-    add_executable(pulp-test-mac-mousedown-stale-focus
-        test_mac_mousedown_stale_focus.mm
-    )
-    target_link_libraries(pulp-test-mac-mousedown-stale-focus PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-    )
-    catch_discover_tests(pulp-test-mac-mousedown-stale-focus)
+    pulp_add_test_suite(pulp-test-mac-mousedown-stale-focus GROUP pulp-test-group-mac-view
+        SOURCES test_mac_mousedown_stale_focus.mm
+        LIBRARIES pulp::view)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # The runtime half of opening a document: the NSApplication delegate that
@@ -78,32 +82,16 @@ if(APPLE AND NOT PULP_IOS)
     # because nothing in a unit test can produce the Apple Event the OS sends.
     # The declaration half (CFBundleDocumentTypes) is covered by
     # test_standalone_document_types.cmake; neither half works alone.
-    add_executable(pulp-test-mac-open-document
-        test_mac_open_document.mm
-    )
-    target_link_libraries(pulp-test-mac-open-document PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-    )
-    catch_discover_tests(pulp-test-mac-open-document)
+    pulp_add_test_suite(pulp-test-mac-open-document GROUP pulp-test-group-mac-view
+        SOURCES test_mac_open_document.mm
+        LIBRARIES pulp::view)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Pin macOS performKeyEquivalent routing, text-input
     # protocol conformance, and TextEditor-specific command priority.
-    add_executable(pulp-test-mac-perform-key-equivalent
-        test_mac_perform_key_equivalent.mm
-    )
-    target_link_libraries(pulp-test-mac-perform-key-equivalent PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-    )
-    # Pull the PulpView archive member without force-loading unrelated view-core objects.
-    target_link_options(pulp-test-mac-perform-key-equivalent PRIVATE
-        "LINKER:-u,_OBJC_CLASS_$_PulpView"
-    )
-    catch_discover_tests(pulp-test-mac-perform-key-equivalent)
+    pulp_add_test_suite(pulp-test-mac-perform-key-equivalent GROUP pulp-test-group-mac-view
+        SOURCES test_mac_perform_key_equivalent.mm
+        LIBRARIES pulp::view)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # Foreign-framework coexistence (PAM WS-6 / G8): a raw non-Pulp NSWindow
@@ -144,21 +132,9 @@ if(APPLE AND NOT PULP_IOS)
     # click, and assert the cursor AppKit is told to display follows the region
     # that slid under the pointer. Nothing portable can pin it: the answer lives
     # in +[NSCursor currentCursor].
-    add_executable(pulp-test-mac-hover-cursor-stationary
-        test_mac_hover_cursor_stationary.mm
-    )
-    target_link_libraries(pulp-test-mac-hover-cursor-stationary PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-    )
-    # Pull the host archive members; the cases message the classes but
-    # reference no C++ symbol from either .mm.
-    target_link_options(pulp-test-mac-hover-cursor-stationary PRIVATE
-        "LINKER:-u,_OBJC_CLASS_$_PulpView"
-        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView"
-    )
-    catch_discover_tests(pulp-test-mac-hover-cursor-stationary)
+    pulp_add_test_suite(pulp-test-mac-hover-cursor-stationary GROUP pulp-test-group-mac-view
+        SOURCES test_mac_hover_cursor_stationary.mm
+        LIBRARIES pulp::view)
 endif()
 if(APPLE AND NOT PULP_IOS)
     # PULP_TEST_POINTER_DRAG spelling contract. The drive it feeds needs a real
@@ -166,14 +142,9 @@ if(APPLE AND NOT PULP_IOS)
     # portable test can pin — and it is where a typo turns an unattended
     # measurement into a silently idle window. Links pulp::view because the
     # parser is defined beside its consumer in window_host_mac.mm.
-    add_executable(pulp-test-mac-test-pointer-drag
-        test_mac_test_pointer_drag.cpp
-    )
-    target_link_libraries(pulp-test-mac-test-pointer-drag PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-    )
-    catch_discover_tests(pulp-test-mac-test-pointer-drag)
+    pulp_add_test_suite(pulp-test-mac-test-pointer-drag GROUP pulp-test-group-mac-view
+        SOURCES test_mac_test_pointer_drag.cpp
+        LIBRARIES pulp::view)
 endif()
 
 if(APPLE AND NOT PULP_IOS)
@@ -219,20 +190,9 @@ if(APPLE AND NOT PULP_IOS)
     # resolvable by hit-test alone and cannot see this defect, so the scene
     # carries one only as the positive control. Nothing portable can pin the
     # result: the answer lives in +[NSCursor currentCursor].
-    add_executable(pulp-test-mac-hover-cursor-delivery
-        test_mac_hover_cursor_delivery.mm
-    )
-    target_link_libraries(pulp-test-mac-hover-cursor-delivery PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-    )
-    # Pull the host archive member; the case messages the class but references
-    # no C++ symbol from window_host_mac.mm.
-    target_link_options(pulp-test-mac-hover-cursor-delivery PRIVATE
-        "LINKER:-u,_OBJC_CLASS_$_PulpView"
-    )
-    catch_discover_tests(pulp-test-mac-hover-cursor-delivery)
+    pulp_add_test_suite(pulp-test-mac-hover-cursor-delivery GROUP pulp-test-group-mac-view
+        SOURCES test_mac_hover_cursor_delivery.mm
+        LIBRARIES pulp::view)
 endif()
 
 if(APPLE AND NOT PULP_IOS)
@@ -242,19 +202,7 @@ if(APPLE AND NOT PULP_IOS)
     # gets -mouseMoved: over it. These cases pin that a button-less move there
     # leaves the child's cursor alone, with a control move over Pulp-owned
     # content that must still publish the tree's cursor.
-    add_executable(pulp-test-mac-native-child-cursor
-        test_mac_native_child_cursor.mm
-    )
-    target_link_libraries(pulp-test-mac-native-child-cursor PRIVATE
-        pulp::view
-        Catch2::Catch2WithMain
-        "-framework AppKit"
-    )
-    # Pull the host archive members; the cases message the classes but
-    # reference no C++ symbol from either .mm.
-    target_link_options(pulp-test-mac-native-child-cursor PRIVATE
-        "LINKER:-u,_OBJC_CLASS_$_PulpView"
-        "LINKER:-u,_OBJC_CLASS_$_PulpPluginView"
-    )
-    catch_discover_tests(pulp-test-mac-native-child-cursor)
+    pulp_add_test_suite(pulp-test-mac-native-child-cursor GROUP pulp-test-group-mac-view
+        SOURCES test_mac_native_child_cursor.mm
+        LIBRARIES pulp::view)
 endif()

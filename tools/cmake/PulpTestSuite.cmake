@@ -465,8 +465,9 @@ endfunction()
 #     LIBRARIES define the compile line every member gets; a member that needs
 #     something more belongs in a group that declares it (or on its own).
 # Suites that need process isolation — a custom main(), a fixture they spawn
-# by path, a codesign step on the binary, `-fno-exceptions`, RT allocation
-# probes — stay ungrouped. So does a suite that must opt out of the shared
+# by path, a codesign step on the binary, `-fno-exceptions` — stay ungrouped.
+# RT allocation probe suites replace the global allocation operators, so they
+# only ever share a group with other probe suites. So does a suite that must opt out of the shared
 # Catch2 PCH: the PCH decision (above) is made once per executable, recorded
 # in the ledger under the group's name, and NO_PCH is a pulp_add_test_group
 # option, not a member one.

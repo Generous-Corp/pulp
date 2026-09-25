@@ -28,6 +28,67 @@ constexpr float kPad = 12.0f;
 // Drag-to-scrub tuning, shared by Stepper and NumberBox: how many vertical
 // pixels of drag equal one `step_`, and the pixel threshold below which a press
 // counts as a click (type / nudge) rather than the start of a scrub.
+// A per-tone glyph, so status does not rest on hue alone.
+//
+// The light theme cannot separate success from danger by colour under
+// red-green colour vision deficiency, and no token value fixes it: the
+// measured pair retains ~8.3 dE00 under protanopia, and darkening success
+// makes it WORSE, because protanopia darkens red until a dark green lands on
+// top of it. Roughly 8% of men are affected, and these two tones carry
+// opposite meanings, so a second signal is not decoration.
+//
+// Drawn rather than typeset: a font glyph would depend on what the host has
+// installed, and the fallback for a missing glyph is a blank box — which is
+// how a legibility fix becomes a legibility bug.
+const char* tone_glyph(Tone tone) {
+    switch (tone) {
+    case Tone::success:
+        return "check";
+    case Tone::danger:
+        return "cross";
+    case Tone::warning:
+        return "bang";
+    case Tone::info:
+        return "info";
+    case Tone::neutral:
+        return "";
+    }
+    return "";
+}
+
+/// Paint the tone's mark in `size` px, centred on (cx, cy), in the current
+/// fill colour. Shapes are distinguishable by SILHOUETTE, which is what
+/// survives when hue does not.
+void paint_tone_glyph(canvas::Canvas& canvas, Tone tone, float cx, float cy, float size) {
+    const float r = size * 0.5f;
+    const float t = std::max(1.5f, size * 0.16f); // stroke weight
+    canvas.set_line_width(t);
+    switch (tone) {
+    case Tone::success: { // check mark
+        canvas.stroke_line(cx - r * 0.7f, cy, cx - r * 0.15f, cy + r * 0.55f);
+        canvas.stroke_line(cx - r * 0.15f, cy + r * 0.55f, cx + r * 0.75f, cy - r * 0.6f);
+        break;
+    }
+    case Tone::danger: { // cross
+        canvas.stroke_line(cx - r * 0.6f, cy - r * 0.6f, cx + r * 0.6f, cy + r * 0.6f);
+        canvas.stroke_line(cx + r * 0.6f, cy - r * 0.6f, cx - r * 0.6f, cy + r * 0.6f);
+        break;
+    }
+    case Tone::warning: { // exclamation: stem plus a detached dot
+        canvas.stroke_line(cx, cy - r * 0.75f, cx, cy + r * 0.15f);
+        canvas.fill_circle(cx, cy + r * 0.62f, t * 0.6f);
+        break;
+    }
+    case Tone::info: { // lower-case i: dot above a stem
+        canvas.fill_circle(cx, cy - r * 0.62f, t * 0.6f);
+        canvas.stroke_line(cx, cy - r * 0.15f, cx, cy + r * 0.75f);
+        break;
+    }
+    case Tone::neutral:
+        break;
+    }
+}
+
 constexpr float kScrubPxPerStep = 6.0f;
 constexpr float kScrubThreshold = 3.0f;
 }  // namespace
@@ -42,10 +103,25 @@ void Badge::paint(canvas::Canvas& canvas) {
                          : resolve_color("accent.text", Color::rgba8(5, 35, 32));
     canvas.set_fill_color(fill);
     canvas.fill_rounded_rect(0, 0, w, h, r);
-    canvas.set_fill_color(text);
     canvas.set_font("system", 12.0f);
     const float tw = canvas.measure_text(text_);
-    canvas.fill_text(text_, (w - tw) / 2.0f, h * 0.68f);
+    // A badge carries its own text, so it already reads without colour when
+    // that text names the state. It does NOT when the text is a count or a
+    // unit ("3", "48 kHz") and the tone is the only thing saying whether that
+    // is good or bad — so the tone mark leads, exactly as in InlineBanner.
+    if (!neutral) {
+        const float glyph = std::min(10.0f, h * 0.46f);
+        const float total = glyph + 5.0f + tw;
+        const float x0 = (w - total) / 2.0f;
+        canvas.set_fill_color(text);
+        canvas.set_stroke_color(text);
+        paint_tone_glyph(canvas, tone_, x0 + glyph * 0.5f, h * 0.5f, glyph);
+        canvas.set_fill_color(text);
+        canvas.fill_text(text_, x0 + glyph + 5.0f, h * 0.68f);
+    } else {
+        canvas.set_fill_color(text);
+        canvas.fill_text(text_, (w - tw) / 2.0f, h * 0.68f);
+    }
 }
 
 // ── InlineBanner ──────────────────────────────────────────────────────────
@@ -64,13 +140,23 @@ void InlineBanner::paint(canvas::Canvas& canvas) {
     canvas.set_stroke_color(resolve_color("control.border", Color::rgba8(80, 80, 100)));
     canvas.set_line_width(1.0f);
     canvas.stroke_rounded_rect(0, 0, w, h, r);
+    // The tone mark leads the text. Colour alone cannot carry success against
+    // danger for a red-green deficient reader, so the silhouette does.
+    float text_x = 16.0f;
+    if (tone_ != Tone::neutral) {
+        const float glyph = std::min(14.0f, h * 0.42f);
+        canvas.set_fill_color(accent);
+        canvas.set_stroke_color(accent);
+        paint_tone_glyph(canvas, tone_, 16.0f + glyph * 0.5f, h * 0.5f, glyph);
+        text_x = 16.0f + glyph + 10.0f;
+    }
     canvas.set_font("system", 13.0f);
     canvas.set_fill_color(resolve_color("text.primary", Color::rgba8(230, 230, 240)));
     const float lw = canvas.measure_text(label_);
-    canvas.fill_text(label_, 16.0f, h * 0.62f);
+    canvas.fill_text(label_, text_x, h * 0.62f);
     if (!message_.empty()) {
         canvas.set_fill_color(accent);
-        canvas.fill_text(message_, 16.0f + lw + 8.0f, h * 0.62f);
+        canvas.fill_text(message_, text_x + lw + 8.0f, h * 0.62f);
     }
 }
 

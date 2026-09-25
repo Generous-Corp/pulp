@@ -23,6 +23,13 @@ struct GpuConvolver::SharedIoState {};
 
 GpuConvolver::~GpuConvolver() = default;
 
+bool GpuConvolver::set_provider_policy(ProviderPolicy policy) noexcept {
+    if (prepared_)
+        return false;
+    provider_policy_ = policy;
+    return true;
+}
+
 bool GpuConvolver::has_realtime_shared_io() const noexcept {
     return false;
 }
@@ -42,6 +49,8 @@ GpuAudioNodeDescriptor GpuConvolver::descriptor() const {
 
 bool GpuConvolver::prepare() {
     prepared_ = false;
+    if (provider_policy_ == ProviderPolicy::SharedRequired)
+        return false;
     if (channels_ == 0 || block_ == 0 || ir_.empty() || latency_blocks_ == 0 ||
         latency_blocks_ > kMaxLatencyBlocks)
         return false;
