@@ -146,6 +146,11 @@ function(_pulp_test_pch_carrier out std)
             # in ccache. With it, the same inputs produce the same .pch.
             target_compile_options(${_carrier} PRIVATE -Xclang -fno-pch-timestamp)
         endif()
+        # The .pch embeds this build tree's absolute paths; never let ccache
+        # serve it to another tree (see Ccache.cmake).
+        if(COMMAND pulp_ccache_key_on_build_path)
+            pulp_ccache_key_on_build_path(${_carrier})
+        endif()
         set(_headers "")
         foreach(_h IN LISTS PULP_TEST_PCH_HEADERS)
             list(APPEND _headers "$<$<COMPILE_LANGUAGE:CXX>:${_h}>")
