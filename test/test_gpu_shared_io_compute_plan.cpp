@@ -7,10 +7,17 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 using namespace pulp::gpu_audio::detail;
 
 namespace {
+struct LifecycleState {
+    bool program_released = false;
+    bool program_destroyed = false;
+    bool retired_before_program_release = false;
+};
+
 class FakeProvider final : public SharedIoArenaProvider {
     struct Slot {
         std::byte* input;
@@ -20,6 +27,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     };
 
   public:
+    std::shared_ptr<LifecycleState> state = std::make_shared<LifecycleState>();
+
     bool create_slot(std::uint32_t, std::size_t in, std::size_t out,
                      SlotResources& resources) noexcept override {
         auto* slot = new (std::nothrow)
@@ -44,8 +53,8 @@ class FakeProvider final : public SharedIoArenaProvider {
         return true;
     }
     void retire_slot(SlotResources& resources) noexcept override {
-        if (require_program_release && !program_released)
-            retired_before_program_release = true;
+        if (require_program_release && !state->program_released)
+            state->retired_before_program_release = true;
         auto* slot = static_cast<Slot*>(resources.opaque);
         if (slot) {
             slot->retired = true;
@@ -118,9 +127,6 @@ class FakeProvider final : public SharedIoArenaProvider {
     }
     bool accept_submissions = true;
     bool require_program_release = false;
-    bool program_released = false;
-    bool program_destroyed = false;
-    bool retired_before_program_release = false;
     CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
     std::vector<Slot*> slots_;
@@ -130,7 +136,7 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
   public:
     explicit FakePreparedProgram(FakeProvider& expected) : expected_(expected) {}
     ~FakePreparedProgram() override {
-        expected_.program_destroyed = true;
+        expected_.state->program_destroyed = true;
     }
 
     bool prepare(SharedIoArenaProvider& provider,
@@ -157,7 +163,7 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
     bool release() noexcept override {
         if (!allow_release)
             return false;
-        expected_.program_released = true;
+        expected_.state->program_released = true;
         prepared = false;
         return true;
     }
@@ -193,7 +199,7 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
 TEST_CASE("shared IO program session owns generic provider lifecycle",
           "[gpu_audio][shared_io][p2]") {
     auto provider = std::make_unique<FakeProvider>();
-    auto* provider_raw = provider.get();
+    auto state = provider->state;
     auto program = std::make_unique<FakePreparedProgram>(*provider);
     auto* control = program.get();
     control->allow_release = true;
@@ -217,7 +223,7 @@ TEST_CASE("shared IO program session owns generic provider lifecycle",
     REQUIRE(session.release_output({output->token}));
     output.reset();
     REQUIRE(session.release());
-    CHECK(provider_raw->program_released);
+    CHECK(state->program_released);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",
@@ -246,12 +252,12 @@ TEST_CASE("shared IO prepared program retains generic lifecycle and releases bef
 
     CHECK_FALSE(plan.release());
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.state->program_released);
+    CHECK_FALSE(provider.state->retired_before_program_release);
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.state->program_released);
+    CHECK_FALSE(provider.state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO prepared program keeps failed preparation alive until cleanup succeeds",
@@ -266,13 +272,13 @@ TEST_CASE("shared IO prepared program keeps failed preparation alive until clean
                              {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16},
                              std::move(program)));
     CHECK(plan.prepared());
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.state->program_released);
+    CHECK_FALSE(provider.state->retired_before_program_release);
 
     control->allow_release = true;
     REQUIRE(plan.release());
-    CHECK(provider.program_released);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK(provider.state->program_released);
+    CHECK_FALSE(provider.state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO destructor quarantines a program when release cannot prove safety",
@@ -291,9 +297,9 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
         // transaction instead of destroying the program or retiring its slots.
     }
     REQUIRE(control != nullptr);
-    CHECK_FALSE(provider.program_released);
-    CHECK_FALSE(provider.program_destroyed);
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.state->program_released);
+    CHECK_FALSE(provider.state->program_destroyed);
+    CHECK_FALSE(provider.state->retired_before_program_release);
     REQUIRE(provider.slots_.size() == 1);
 
     // Test-only reclamation after observing the quarantine. Production has no
@@ -302,9 +308,9 @@ TEST_CASE("shared IO destructor quarantines a program when release cannot prove 
     REQUIRE(control->release());
     delete control;
     provider.cleanup_abandoned_for_test();
-    CHECK(provider.program_destroyed);
+    CHECK(provider.state->program_destroyed);
     CHECK(provider.slots_.empty());
-    CHECK_FALSE(provider.retired_before_program_release);
+    CHECK_FALSE(provider.state->retired_before_program_release);
 }
 
 TEST_CASE("shared IO bridge never leapfrogs a delayed head", "[gpu_audio][shared_io][p2]") {
