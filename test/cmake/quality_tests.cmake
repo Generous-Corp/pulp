@@ -362,6 +362,10 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-hosting=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-core-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-core-runtime=pulp-test-pch-cxx20
         --expect pulp-test-group-core-view=pulp-test-pch-cxx20
@@ -381,6 +385,11 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20)
+    if(APPLE AND NOT PULP_IOS)
+        # The ObjC++ view-host group is NO_PCH by construction (CMake refuses
+        # a CXX carrier for an OBJCXX TU); pin that it never picks one up.
+        list(APPEND _pulp_pch_expect --expect pulp-test-group-view-host-mac=none)
+    endif()
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
     endif()
