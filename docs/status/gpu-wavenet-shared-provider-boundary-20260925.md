@@ -59,3 +59,21 @@ zero transfer calls, stereo instance isolation, and CPU fallback behavior.
 Until that program and adapter exist, GPU-NAM's capability report must remain
 staged-only and no integration should claim persistent shared WaveNet
 execution.
+
+## Compile-gated preparation slice
+
+This follow-up adds `DawnSharedIoWavenetProgram` as a private
+`SharedIoPreparedProgram`. It validates the typed WaveNet shape before any
+provider interaction, copies the flat weights into owned immutable storage,
+and allocates per-stream causal-history storage sized from the maximum layer
+dilation. Its `prepare()` method validates every provider slot capability and
+its `release()` clears the prepared state. `submit()` currently refuses before
+submission because no provider-owned Dawn pipeline/device context has been
+authenticated for WaveNet yet. The refusal is deliberate and keeps callers on
+their prepared CPU fallback path.
+
+This proves the resource and lifecycle boundary only. It does not prove Dawn
+execution, zero-copy transfer, realtime safety, or GPU-NAM integration. Those
+claims remain blocked on a real provider implementation and receipts for
+provider identity, numerical output, stereo isolation, fallback, and terminal
+retirement.

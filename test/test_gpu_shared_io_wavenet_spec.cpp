@@ -1,3 +1,4 @@
+#include "detail/dawn_shared_io_wavenet_program.hpp"
 #include "detail/dawn_shared_io_wavenet_spec.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -36,6 +37,10 @@ TEST_CASE("WaveNet shared spec accepts the authenticated flat-weight shape",
         .weights = fixture.weights,
     };
     CHECK(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+    auto program = DawnSharedIoWavenetProgram::create(spec);
+    REQUIRE(program);
+    CHECK(program->weight_count() == fixture.weights.size());
+    CHECK(program->history_bytes() != 0);
 }
 
 TEST_CASE("WaveNet shared spec rejects mismatched flat weights before allocation",
