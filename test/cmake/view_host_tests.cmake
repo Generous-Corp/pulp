@@ -15,100 +15,162 @@ set_tests_properties(overlay-dismissal-wiring PROPERTIES
     LABELS "view;host;gate"
     TIMEOUT 60)
 
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. Members are grouped
+# by the compile line they already had: the pulp::view line (pulp::state,
+# pulp::audio and pulp::canvas add nothing to it), pulp::format, pulp::host,
+# pulp::midi, pulp::audio with the source root on the include path, and the
+# pulp::view + pulp::format line. The ObjC++ suites cannot reuse the C++ test
+# PCH (CMake refuses a CXX carrier for an OBJCXX TU), so on macOS they share a
+# NO_PCH group of their own; the two suites that carry a .mm companion there
+# join that group on macOS and the plain C++ group elsewhere. A suite stays on
+# its own when it needs its own process or compile line: the isolated scanner
+# (fixture paths baked in with $<TARGET_FILE:...>), the CLAP editor
+# audio-continuity RT allocation probe, the plugin-view-host design-viewport
+# bundle (its own pulp::view-script + Skia-conditional link line, and it
+# swizzles NSTextInputContext for the whole process), the two host-editor
+# ObjC++ suites and hosted-editor-migration (a pulp::host line no sibling
+# shares), cfrunloop-cooperation (pulp::events + CoreFoundation),
+# audio-system-hotplug and udev-monitor (a line no sibling shares), and the
+# JACK suite (only built with a JACK dev package).
+pulp_add_test_group(pulp-test-group-view-host
+    LIBRARIES pulp::view pulp::state pulp::audio pulp::canvas)
+pulp_add_test_group(pulp-test-group-view-host-format LIBRARIES pulp::format)
+pulp_add_test_group(pulp-test-group-view-host-hosting LIBRARIES pulp::host)
+pulp_add_test_group(pulp-test-group-view-host-midi LIBRARIES pulp::midi)
+pulp_add_test_group(pulp-test-group-view-host-audio-devices
+    LIBRARIES pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR})
+pulp_add_test_group(pulp-test-group-view-host-format-view
+    LIBRARIES pulp::view pulp::format pulp::state pulp::audio pulp::midi)
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_group(pulp-test-group-view-host-mac NO_PCH
+        LIBRARIES pulp::view "-framework AppKit")
+    set(_pulp_view_host_native_group pulp-test-group-view-host-mac)
+else()
+    set(_pulp_view_host_native_group pulp-test-group-view-host)
+endif()
+
 # TableModel data/sort layer
-pulp_add_test_suite(pulp-test-table-model LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-table-model GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # ModulationMatrix data model
-pulp_add_test_suite(pulp-test-modulation-matrix LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-modulation-matrix GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # ModulationMatrixWidget canvas widget
-pulp_add_test_suite(pulp-test-modulation-matrix-widget LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-modulation-matrix-widget GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Lasso selection overlay
-pulp_add_test_suite(pulp-test-lasso LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-lasso GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # WaveformRecorder three-state recorder widget (Ink & Signal design system)
-pulp_add_test_suite(pulp-test-waveform-recorder LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-design-frame-momentary LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-waveform-recorder GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-design-frame-momentary GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Split pane layout widget
-pulp_add_test_suite(pulp-test-split-view LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-split-view GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # CommandRegistry + KeyMappingEditor (Pulp-native names)
-pulp_add_test_suite(pulp-test-command-registry LIBRARIES pulp::view pulp::state)
+pulp_add_test_suite(pulp-test-command-registry GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view pulp::state)
 # Audio Inspector developer tool window
-pulp_add_test_suite(pulp-test-audio-inspector-window LIBRARIES pulp::view pulp::audio)
+pulp_add_test_suite(pulp-test-audio-inspector-window GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view pulp::audio)
 # PluginDescriptor vendor_url + vendor_email
-pulp_add_test_suite(pulp-test-vendor-url LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-vendor-url GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # Image cache + ImageView↔ImageCache wiring
-pulp_add_test_suite(pulp-test-image-cache LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-image-view-cache LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-image-cache GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-image-view-cache GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Accessibility tree snapshot
-pulp_add_test_suite(pulp-test-accessibility-tree LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-accessibility-tree GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Per-class recycling ViewPool + View::prepare_for_reuse
-pulp_add_test_suite(pulp-test-view-pool LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-view-pool GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Hover-cursor tracking: platform cursor APIs re-ask only on pointer motion, so
 # this is the portable half of keeping the cursor correct under a still pointer.
-pulp_add_test_suite(pulp-test-hover-cursor LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-hover-cursor GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # View mutation/lifetime contract: identity across callbacks, transactional
 # attach, root-owned retirement, exactly-once frame-clock propagation.
-pulp_add_test_suite(pulp-test-view-lifecycle-contract LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-view-lifecycle-contract GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Recycling virtualized list primitive
-pulp_add_test_suite(pulp-test-virtual-list LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-virtual-list-sample-manager LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-virtual-list GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-virtual-list-sample-manager GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Recycling virtualized 2D grid primitive
-pulp_add_test_suite(pulp-test-virtual-grid LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-virtual-grid GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Text-accessibility scaffold
-pulp_add_test_suite(pulp-test-text-accessibility LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-accessibility GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # macOS NSAccessibility backend for TextAccessibilityNode
 # macOS menu-bar assembly: app-menu placement, Quit ordering, separator rules.
 # The menu is written once via [NSApp setMainMenu:] and never read back by
 # other code, so nothing else can catch a regression here.
 if(APPLE AND NOT PULP_IOS)
-    add_executable(pulp-test-app-menu-macos test_app_menu_mac.mm)
-    target_link_libraries(pulp-test-app-menu-macos
-        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
-    catch_discover_tests(pulp-test-app-menu-macos)
+    pulp_add_test_suite(pulp-test-app-menu-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_app_menu_mac.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 if(APPLE AND NOT PULP_IOS)
-    add_executable(pulp-test-text-accessibility-macos test_text_accessibility_macos.mm)
-    target_link_libraries(pulp-test-text-accessibility-macos
-        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
-    catch_discover_tests(pulp-test-text-accessibility-macos)
+    pulp_add_test_suite(pulp-test-text-accessibility-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_text_accessibility_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 # macOS hover delivery for a hosted PluginViewHost (tracking area +
 # host-window acceptsMouseMovedEvents).
 if(APPLE AND NOT PULP_IOS)
-    add_executable(pulp-test-plugin-view-hover-macos test_plugin_view_host_hover_macos.mm)
-    target_link_libraries(pulp-test-plugin-view-hover-macos
-        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
-    catch_discover_tests(pulp-test-plugin-view-hover-macos)
+    pulp_add_test_suite(pulp-test-plugin-view-hover-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_plugin_view_host_hover_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
-pulp_add_test_suite(pulp-test-text-accessibility-windows LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-accessibility-windows GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Linux AccessKit backend — compile-gated on
 # __linux__ && !__ANDROID__; sentinel on other hosts.
-pulp_add_test_suite(pulp-test-text-accessibility-linux LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-text-accessibility-linux GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # A/B compare
-pulp_add_test_suite(pulp-test-ab-compare LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-ab-compare GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # ViewSize::aspect_ratio field
-pulp_add_test_suite(pulp-test-view-size-aspect LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-view-size-aspect GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 
 # Declarative gesture recognizers and arbiter state.
-pulp_add_test_suite(pulp-test-gesture-recognizer LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-gesture-recognizer GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # WindowHost::set_design_viewport pure-math
 # coverage. Locks down the scale + letterbox transform that the mac
 # GPU host (and any other future platform host) uses to fit
 # fixed-design content into the current window.
-pulp_add_test_suite(pulp-test-view-design-viewport LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-view-design-viewport GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Shared continuous-frame predicate (needs_continuous_frames) the window /
 # plugin-view hosts and a foreign-host embed tick gate repaint on.
-pulp_add_test_suite(pulp-test-continuous-frames LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-continuous-frames GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Frame-pipeline Perfetto instrumentation: drives frames headlessly through the
 # offscreen GPU path and proves the render/layout/canvas/gpu spans land in the
 # flushed trace (PULP_TRACING=ON), or the no-op contract holds (OFF). Self-skips
 # without a GPU capture backend. pulp::view carries the tracing interface + GPU
 # frame path transitively.
-pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-trace-frame-pipeline GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Presentation + GPU-diagnostics policy (WAH-13): the embedded-editor
 # non-blocking default that both the Windows and Linux hosts now read from one
@@ -116,55 +178,63 @@ pulp_add_test_suite(pulp-test-trace-frame-pipeline LIBRARIES pulp::view)
 # pulp::view only: pulp::render does not exist in a no-GPU build, which is
 # the configuration the diff-coverage lane uses. The GpuSurface::Config
 # assertions are __has_include-guarded in the source.
-pulp_add_test_suite(pulp-test-present-policy LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-present-policy GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Shared window->root inverse transform (WAH-10). Round-trip against the
 # forward transform, because that is the property that matters: the point paint
 # places at X must be the point input recovers from a click at X.
-pulp_add_test_suite(pulp-test-design-viewport-inverse LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-design-viewport-inverse GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Sub-view rect-level partial invalidation: View::request_repaint(Rect) →
 # WindowHost dirty-region accumulation. Pins the local->root mapping, the
 # bounding-box union, and the full-repaint escalations (no-arg, transform,
 # empty rect, sticky-full).
-pulp_add_test_suite(pulp-test-partial-invalidation LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-partial-invalidation GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Host-side consumption of the accumulated dirty region: WindowHost::paint_root
 # clips the canvas to pending_dirty_bounds() for a bounded frame and paints
 # unclipped for a full one, clearing the pending region after each paint.
-pulp_add_test_suite(pulp-test-dirty-region-consumption LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-dirty-region-consumption GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # PendingDamage's take()/restore() consume-and-return contract — the operation
 # that stops a host from reading three accessors and then clearing a different
 # logical state, and that lets a frame which never reached the screen keep its
 # damage for the retry.
-pulp_add_test_suite(pulp-test-pending-damage LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pending-damage GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # PluginViewHost GPU-surface lifecycle notification: delayed creation (the
 # Windows attach-time ordering), detach, destruction, reattach, mid-session
 # recreation, and no-callback-after-unsubscribe. Deliberately does NOT link
 # pulp::render — the contract is about pointer publication, so the suite runs
 # in no-GPU configurations too.
-pulp_add_test_suite(pulp-test-gpu-surface-lifecycle LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-gpu-surface-lifecycle GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # The SHARED adapter binding (bind_gpu_surface) that wires a host's surface
 # lifecycle into a scripted UI session, plus the CPU-fallback diagnostic that
 # must stay silent while the surface is merely `pending`. Five format adapters
 # depend on this one helper.
-pulp_add_test_suite(pulp-test-gpu-surface-binding
+pulp_add_test_suite(pulp-test-gpu-surface-binding GROUP pulp-test-group-view-host-format-view
     LIBRARIES pulp::format pulp::view pulp::state)
 
 # The PURE half of the shared Windows/Linux frame pipeline: the damage -> clip
 # decision (hazard model, design-viewport mapping, pixel snapping) and the
 # scene paint body. Skia-free on purpose, so the logic the Windows and Linux
 # hosts share is exercised by the macOS gate.
-pulp_add_test_suite(pulp-test-plugin-frame-clip LIBRARIES pulp::view pulp::canvas)
+pulp_add_test_suite(pulp-test-plugin-frame-clip GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view pulp::canvas)
 
 # The GPU drive on top of it: the visible-frame success contract (a failed
 # native wrap / blit / submit is never a rendered frame), damage retention
 # across a failed frame, and the bounded surface-recreate policy. Compiles to a
 # sentinel without Skia.
-pulp_add_test_suite(pulp-test-plugin-frame-renderer LIBRARIES pulp::view pulp::canvas)
+pulp_add_test_suite(pulp-test-plugin-frame-renderer GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view pulp::canvas)
 
 # paint_all compositing-layer contract (WI-27). After the FU-4 decomposition,
 # pins the push_effect_layers / pop_effect_layers save-depth invariant across
@@ -172,13 +242,15 @@ pulp_add_test_suite(pulp-test-plugin-frame-renderer LIBRARIES pulp::view pulp::c
 # backdrop / effect-chain / combos) with and without an overflow clip: save
 # stack balanced, save_layer* count == expected layers_pushed, backdrop wraps
 # the effect layer. RecordingCanvas — no raster backend.
-pulp_add_test_suite(pulp-test-paint-layer-balance LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-paint-layer-balance GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Root-View "◉ TRACING" reminder badge: painted only in a PULP_TRACING=ON build
 # and suppressible via set_tracing_badge_visible(). Config-agnostic — asserts the
 # badge is present under ON and wholly absent under the default OFF build, using a
 # RecordingCanvas (no raster backend).
-pulp_add_test_suite(pulp-test-tracing-badge LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-tracing-badge GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # PluginViewHost design-viewport wiring (mac CPU + GPU). The pure
 # math is already pinned by `pulp-test-view-design-viewport`; covers the
@@ -190,7 +262,8 @@ pulp_add_test_suite(pulp-test-tracing-badge LIBRARIES pulp::view)
 # must hand back to the DAW (transport, Musical Typing, host shortcuts). The
 # policy is portable, so this suite runs on every lane; the macOS NSView seam
 # that consumes it is pinned by the [host-forward] case below.
-pulp_add_test_suite(pulp-test-plugin-key-routing LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-plugin-key-routing GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 if(APPLE AND NOT PULP_IOS)
     add_executable(pulp-test-plugin-view-host-design-viewport
@@ -215,32 +288,39 @@ endif()
 # yoga-measured-height path that the design-tool
 # example uses to auto-size its window for grid + row trees where
 # View::intrinsic_height returns 0.
-pulp_add_test_suite(pulp-test-design-tool-viewport-resolver LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-design-tool-viewport-resolver GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # NativeViewHost widget (R1) — native child embed geometry + lifecycle
-pulp_add_test_suite(pulp-test-native-view-host LIBRARIES pulp::view)
+set(_pulp_native_view_host_sources test_native_view_host.cpp)
 if(APPLE AND NOT PULP_IOS)
     # macOS companion: exercises the real CALayer-mask clip helper.
-    target_sources(pulp-test-native-view-host PRIVATE test_native_view_host_mac.mm)
+    list(APPEND _pulp_native_view_host_sources test_native_view_host_mac.mm)
 endif()
+pulp_add_test_suite(pulp-test-native-view-host GROUP ${_pulp_view_host_native_group}
+    SOURCES ${_pulp_native_view_host_sources}
+    LIBRARIES pulp::view)
 
 # View host bridges — screenshot/window/plugin-view
-add_executable(pulp-test-view-host-bridge test_view_host_bridge.cpp)
+set(_pulp_view_host_bridge_sources test_view_host_bridge.cpp)
 if(APPLE AND NOT PULP_IOS)
-    target_sources(pulp-test-view-host-bridge PRIVATE test_view_host_bridge_mac.mm)
+    list(APPEND _pulp_view_host_bridge_sources test_view_host_bridge_mac.mm)
 endif()
-target_link_libraries(pulp-test-view-host-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-view-host-bridge)
-catch_discover_tests(pulp-test-view-host-bridge
+pulp_add_test_suite(pulp-test-view-host-bridge GROUP ${_pulp_view_host_native_group}
+    SOURCES ${_pulp_view_host_bridge_sources}
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-view-host-bridge GROUP ${_pulp_view_host_native_group}
+    SOURCES ${_pulp_view_host_bridge_sources}
+    LIBRARIES pulp::view
     TEST_SPEC "[lifecycle]"
     TEST_PREFIX "lifecycle::"
-    PROPERTIES LABELS lifecycle)
+    LABELS lifecycle)
 # Scan blacklist
-add_executable(pulp-test-scan-blacklist test_scan_blacklist.cpp)
-target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2WithMain)
 # `slow`: file-mtime sleep loops (rebuilt-plugin-not-blacklisted
 # flow waits on filesystem timestamp resolution). Each test ~1s.
-catch_discover_tests(pulp-test-scan-blacklist PROPERTIES LABELS slow)
+pulp_add_test_suite(pulp-test-scan-blacklist GROUP pulp-test-group-view-host-hosting
+    LIBRARIES pulp::host
+    LABELS slow)
 # Crash-isolated scanner. Skipped on iOS/Android
 # where pulp-scan-worker isn't built (sandboxed platforms can't fork).
 if(NOT IOS AND NOT ANDROID)
@@ -266,7 +346,8 @@ if(NOT IOS AND NOT ANDROID)
     catch_discover_tests(pulp-test-isolated-scanner)
 endif()
 # Hosted editor API
-pulp_add_test_suite(pulp-test-hosted-editor LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-hosted-editor GROUP pulp-test-group-view-host-hosting
+    LIBRARIES pulp::host)
 # HostedEditor → WindowHost attachment migration
 pulp_add_test_suite(pulp-test-hosted-editor-migration LIBRARIES pulp::view pulp::host)
 # CLAP gui-extension negotiation against a fake plugin. Reaches into
@@ -306,78 +387,87 @@ if(APPLE)
     target_link_libraries(pulp-test-cfrunloop-cooperation PRIVATE "-framework CoreFoundation")
 endif()
 # High-level window classes
-pulp_add_test_suite(pulp-test-document-window LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-document-window GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Accessibility announcements
-pulp_add_test_suite(pulp-test-announce LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-announce GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # ARA core type layer
-pulp_add_test_suite(pulp-test-ara-types LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-ara-types GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # Processor on_host_transport_changed hook
-pulp_add_test_suite(pulp-test-transport-hook LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-transport-hook GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # Scan cache
-add_executable(pulp-test-scan-cache test_scan_cache.cpp)
-target_link_libraries(pulp-test-scan-cache PRIVATE pulp::host Catch2::Catch2WithMain)
 # `slow`: each scenario waits for filesystem mtime resolution
 # (~1s each on every platform). Excluded from fast-CI.
-catch_discover_tests(pulp-test-scan-cache PROPERTIES LABELS slow)
+pulp_add_test_suite(pulp-test-scan-cache GROUP pulp-test-group-view-host-hosting
+    LIBRARIES pulp::host
+    LABELS slow)
 # Processor memory-pressure hook
-pulp_add_test_suite(pulp-test-memory-pressure LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-memory-pressure GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # iOS background-audio descriptor flag
-pulp_add_test_suite(pulp-test-ios-background-audio-flag LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-ios-background-audio-flag GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 
 # MidiBuffer UMP sidecar
-pulp_add_test_suite(pulp-test-midi-buffer-ump LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-buffer-ump GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
 # MidiBuffer SysEx sidecar — full MIDI vocabulary
-pulp_add_test_suite(pulp-test-midi-buffer-sysex LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-midi-buffer-sysex GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
 # Win MIDI MIM_LONGDATA SysEx + QPC timestamps. Cross-platform, with
 # Windows-only cases guarded by #ifdef _WIN32.
-pulp_add_test_suite(pulp-test-winmidi-sysex LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-winmidi-sysex GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
 # WinRT MIDI 2.0 (UMP) backend — W3 (UMP↔MIDI1 + shared sysex7 reassembly + F0..F7 framing; WinRT TU opt-in via PULP_HAS_WINRT_MIDI, #error-guarded off non-Windows).
-pulp_add_test_suite(pulp-test-winrt-midi LIBRARIES pulp::midi)
+pulp_add_test_suite(pulp-test-winrt-midi GROUP pulp-test-group-view-host-midi
+    LIBRARIES pulp::midi)
 # Accessibility provider cross-platform entry
-pulp_add_test_suite(pulp-test-accessibility-provider LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-accessibility-provider GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # PluginDescriptor validation
-pulp_add_test_suite(pulp-test-descriptor-validation LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-descriptor-validation GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # PluginInfo metadata shape
-pulp_add_test_suite(pulp-test-plugin-info-metadata LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-plugin-info-metadata GROUP pulp-test-group-view-host-hosting
+    LIBRARIES pulp::host)
 # A11y role mapping tables — UIA + AT-SPI
-pulp_add_test_suite(pulp-test-uia-mapping LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-atspi-mapping LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-uia-mapping GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-atspi-mapping GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # ARIA role token -> View::AccessRole (shared by the JS bridge).
-pulp_add_test_suite(pulp-test-aria-roles LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-aria-roles GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # macOS NSAccessibility role table (shared by the window host and the
 # plug-in editor host).
 if(APPLE AND NOT PULP_IOS)
-    add_executable(pulp-test-ns-role-mapping test_ns_role_mapping.mm)
-    target_link_libraries(pulp-test-ns-role-mapping
-        PRIVATE pulp::view Catch2::Catch2WithMain "-framework AppKit")
-    catch_discover_tests(pulp-test-ns-role-mapping)
+    pulp_add_test_suite(pulp-test-ns-role-mapping GROUP pulp-test-group-view-host-mac
+        SOURCES test_ns_role_mapping.mm
+        LIBRARIES pulp::view "-framework AppKit")
 endif()
 # AudioSystem hotplug base plumbing
 pulp_add_test_suite(pulp-test-audio-system-hotplug LIBRARIES pulp::audio)
 
 # WASAPI capture path. Windows-only; cross-platform stub keeps
 # CI green elsewhere. Skips at runtime on hosts without a default
-# capture endpoint.
-add_executable(pulp-test-wasapi-input test_wasapi_input.cpp)
-target_link_libraries(pulp-test-wasapi-input PRIVATE pulp::audio Catch2::Catch2WithMain)
-target_include_directories(pulp-test-wasapi-input PRIVATE ${CMAKE_SOURCE_DIR})
-catch_discover_tests(pulp-test-wasapi-input)
+# capture endpoint. The source root is on the group's include path.
+pulp_add_test_suite(pulp-test-wasapi-input GROUP pulp-test-group-view-host-audio-devices
+    LIBRARIES pulp::audio)
 
 # WASAPI share-mode coverage contract. Pins "shared-mode only"
 # surface; static_asserts fire on every platform so a Windows-only
 # DeviceConfig extension still trips this on macOS/Linux CI.
-add_executable(pulp-test-wasapi-share-modes test_wasapi_share_modes.cpp)
-target_link_libraries(pulp-test-wasapi-share-modes PRIVATE pulp::audio Catch2::Catch2WithMain)
-target_include_directories(pulp-test-wasapi-share-modes PRIVATE ${CMAKE_SOURCE_DIR})
-catch_discover_tests(pulp-test-wasapi-share-modes)
+pulp_add_test_suite(pulp-test-wasapi-share-modes GROUP pulp-test-group-view-host-audio-devices
+    LIBRARIES pulp::audio)
 
 # ALSA capture + real device metadata. Linux-only;
 # cross-platform stub keeps CI green elsewhere. Skips at runtime on
 # hosts without an ALSA-routable default device.
-add_executable(pulp-test-alsa-input test_alsa_input.cpp)
-target_link_libraries(pulp-test-alsa-input PRIVATE pulp::audio Catch2::Catch2WithMain)
-target_include_directories(pulp-test-alsa-input PRIVATE ${CMAKE_SOURCE_DIR})
-catch_discover_tests(pulp-test-alsa-input)
+pulp_add_test_suite(pulp-test-alsa-input GROUP pulp-test-group-view-host-audio-devices
+    LIBRARIES pulp::audio)
 
 # Cross-platform device-hotplug monitor. Lives in pulp::runtime so
 # both audio (AlsaSystem) and MIDI (AlsaMidiSystem) share it; libudev is the
@@ -399,11 +489,14 @@ if(PULP_JACK_AVAILABLE)
     catch_discover_tests(pulp-test-jack-device)
 endif()
 # Processor on_host_tempo_changed hook.
-pulp_add_test_suite(pulp-test-tempo-hook LIBRARIES pulp::format)
+pulp_add_test_suite(pulp-test-tempo-hook GROUP pulp-test-group-view-host-format
+    LIBRARIES pulp::format)
 # Resizable plugin shell.
-pulp_add_test_suite(pulp-test-resizable-shell LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-resizable-shell GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # Background scanner.
-pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
+pulp_add_test_suite(pulp-test-background-scanner GROUP pulp-test-group-view-host-hosting
+    LIBRARIES pulp::host)
 
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
@@ -412,40 +505,50 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # reentrancy, and gestures — four subjects with four reasons to change, where a
 # failure in one told you little about where to look. Fixtures stayed LOCAL to
 # each suite rather than moving to a shared helper.
-pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-pointer-coalescer LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-focus-lifecycle GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coordinate-mapping GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coalescer GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # The host-side half of coalescing — fail-safe, one-dirty-edge-per-run, the
 # flush-before-transition ordering, and the summed relative delta. Portable, so
 # the rules the macOS plug-in editor host relies on are covered on the required
 # gate without a window.
-pulp_add_test_suite(pulp-test-host-drag-coalescer LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-host-drag-coalescer GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-delivery GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-gestures GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 # The Windows editor's input state machine. Deliberately NOT gated on WIN32:
 # win_plugin_input_router.hpp carries no <windows.h> dependency precisely so its
 # re-entrancy and capture rules run on the required macOS gate.
-pulp_add_test_suite(pulp-test-win-plugin-input-router LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-win-plugin-input-router GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
 # (test/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32 — the
 # logic is HWND-free precisely so it runs on the required macOS gate.
-pulp_add_test_suite(pulp-test-win-pointer-input LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-win-pointer-input GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Headless characterization of the hosting/DAW input stack — mouse down/up/click
 # routing, keyboard focus protocol, and overlay/popup lifecycle — that the
 # window hosts drive. Anchors the S11 (root-owned interaction context) and S31
 # (portable mouse down/up dispatch) refactors under pulp #6223
 # (test/test_hosting_input_smoke.cpp).
-pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-hosting-input-smoke GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Multi-instance ISOLATION proof for S11 (pulp #6223): two independent root
 # View trees in one process must not share a focus slot, active overlay, open
 # popup, or overlay paint queue. This is the delta the root-owned interaction
 # context delivers — it cannot be expressed with the pre-S11 process-wide
 # statics (test/test_interaction_multiinstance.cpp).
-pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-interaction-multiinstance GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)
 
 # Three REAL plugin instances — a MIDI effect, an instrument, and an audio
 # effect — alive in one process at the same time, the shape macOS gives a DAW
@@ -454,7 +557,7 @@ pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
 # concurrent render threads, three editors painting side by side, and the
 # pointer-ROUTING verbs the hosts call (which read the process-global popup
 # mirror, not just the per-root slots) (test/test_multi_plugin_coexistence.cpp).
-pulp_add_test_suite(pulp-test-multi-plugin-coexistence
+pulp_add_test_suite(pulp-test-multi-plugin-coexistence GROUP pulp-test-group-view-host-format-view
     LIBRARIES pulp::view pulp::format pulp::state pulp::audio pulp::midi)
 
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
@@ -462,4 +565,5 @@ pulp_add_test_suite(pulp-test-multi-plugin-coexistence
 # from core/view/include/pulp/view/web/web_event_translate.hpp. Header-only and
 # Emscripten-free by design, so it runs on every native host; the live canvas
 # host is proven by the web-UI headless-Chrome pixel fixture.
-pulp_add_test_suite(pulp-test-window-host-web LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-window-host-web GROUP pulp-test-group-view-host
+    LIBRARIES pulp::view)

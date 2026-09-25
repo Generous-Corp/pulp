@@ -71,7 +71,7 @@ TEST_CASE("aspect lock respects min bounds",
     REQUIRE(got.width == static_cast<uint32_t>(got.height * 2));
 }
 
-TEST_CASE("serialize + deserialize round-trip", "[ui][resizable-shell]") {
+TEST_CASE("serialize + deserialize round-trip (resizable shell)", "[ui][resizable-shell]") {
     ResizableShell s({.initial_size = {1024, 768}});
     s.apply({1000, 700});
     auto blob = s.serialize();
