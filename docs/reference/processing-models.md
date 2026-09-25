@@ -15,6 +15,19 @@ interchangeable. This page is the canonical answer to "should I write a
 A `SignalGraph` **node** wraps a unit (a hosted plugin, or a `CustomNodeType`); it
 is not a new way to *write* DSP. Authoring still happens in a `Processor`.
 
+### Sample regions: the bounded graph extension
+
+Sample regions are a narrow extension of this same `SignalGraph` for a bounded,
+author-declared scalar DSP program that must remain editable at sample cadence.
+They are composition metadata, not a second authoring model, routing backend, or
+generated-DSP ABI. The canonical `GraphRuntimeExecutor` lowers an accepted
+region into one prepared binding; a `BakedGraphProcessor` uses that executor too.
+Every recurrence crosses an explicit `UnitDelay`; an instantaneous cycle remains
+refused. Exact kernel versions, boundaries, state limits, promoted `StateStore`
+parameters, and causality are proved before publication. Live edits adopt
+immutable snapshots and retain state only for exact identities, so changed
+identities start fresh and old/new bindings cannot execute concurrently.
+
 ## The decision
 
 > **Is the signal topology fixed when you build the plugin? → `Processor`.

@@ -269,6 +269,20 @@ the authoring model; reach for the graph only when routing is dynamic at run tim
   `SignalGraph`.
 - A `CustomNodeType` is a graph utility node, **not** a plugin authoring surface.
 
+#### Bounded sample regions
+
+Sample regions are a narrow, experimental extension of the canonical
+`SignalGraph` for author-declared scalar DSP that must execute per sample while
+remaining graph-editable. They do not add a second graph runtime or generated
+DSP ABI; `GraphRuntimeExecutor` lowers an accepted region into the same prepared
+runtime used by the graph and its baked processor. Every feedback recurrence
+places an explicit `UnitDelay`; instantaneous cycles are refused. Promoted
+values use the ordinary `StateStore` contract, and exact kernel versions,
+boundaries, limits, and causality are proved before publication. Immutable
+snapshot adoption retains state only for exact identities; changed identities
+start fresh and old/new bindings cannot execute concurrently. See
+`docs/guides/sample-granular-graphs.md` for the authoring and proof path.
+
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
