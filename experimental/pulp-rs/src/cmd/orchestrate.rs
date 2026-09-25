@@ -4013,8 +4013,12 @@ mod tests {
 
     #[test]
     fn seed_build_runs_the_script_before_the_first_configure() {
-        let _guard = EnvVarGuard::set(affected::FOCUS_ENV, "0");
-        let _bt = EnvVarGuard::set("PULP_BUILD_TYPE", "Debug");
+        // One guard: EnvVarGuard holds a process-wide lock, so a second
+        // guard in the same test would wait on the first forever.
+        let _env = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("0")),
+            ("PULP_BUILD_TYPE", Some("Debug")),
+        ]);
         let td = tempfile::tempdir().unwrap();
         let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
         std::fs::remove_dir_all(&proj.build_dir).unwrap();
@@ -4082,8 +4086,7 @@ mod tests {
 
     #[test]
     fn seed_build_env_opts_in_without_the_flag() {
-        let _guard = EnvVarGuard::set(affected::FOCUS_ENV, "0");
-        let _seed = EnvVarGuard::set(SEED_ENV, "1");
+        let _env = EnvVarGuard::set_many(&[(affected::FOCUS_ENV, Some("0")), (SEED_ENV, Some("1"))]);
         let td = tempfile::tempdir().unwrap();
         let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
         std::fs::remove_dir_all(&proj.build_dir).unwrap();
