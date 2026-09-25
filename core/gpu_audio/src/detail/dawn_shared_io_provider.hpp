@@ -1,7 +1,7 @@
 #pragma once
 
-#include "shared_io_arena.hpp"
 #include "dawn_shared_io_wavenet_spec.hpp"
+#include "shared_io_arena.hpp"
 
 #include <cstddef>
 #include <cstdint>

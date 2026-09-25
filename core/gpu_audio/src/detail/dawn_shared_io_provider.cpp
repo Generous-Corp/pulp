@@ -890,8 +890,8 @@ std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_convolution_
     }
 }
 
-std::unique_ptr<SharedIoPreparedProgram> DawnSharedIoProvider::make_wavenet_program(
-    const DawnSharedIoWavenetProgramSpec& spec) noexcept {
+std::unique_ptr<SharedIoPreparedProgram>
+DawnSharedIoProvider::make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept {
     // The submit token currently carries no stream-instance identity. Refuse
     // multi-instance plans rather than risking causal-history aliasing.
     if (spec.stream_instances != 1)
