@@ -364,6 +364,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
 
+    # Test-support sources compiled once into OBJECT libraries
+    # (tools/cmake/PulpTestSharedObjects.cmake) must stay compiled once.
+    set(_pulp_shared_test_objects
+        --shared test/harness/rt_allocation_probe.cpp=pulp-test-rt-allocation-probe)
+    if(TARGET pulp-test-rt-intercept)
+        list(APPEND _pulp_shared_test_objects --shared
+            test/native_components/rt_intercept_test_support.cpp=pulp-test-rt-intercept)
+    endif()
+    add_test(NAME test-shared-objects COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/shared_test_objects_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" ${_pulp_shared_test_objects})
+    set_tests_properties(test-shared-objects PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME test-shared-objects-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_shared_test_objects_check.py")
+
     # MSVC string-literal cap: a single literal over 16380 bytes is C2026. Only
     # the MSVC ARM64 cross-compiler enforces it, so an over-long literal builds
     # clean on every machine a developer or reviewer uses and breaks one release
