@@ -309,12 +309,17 @@ endif()
 pulp_add_test_suite(pulp-test-view-host-bridge GROUP ${_pulp_view_host_native_group}
     SOURCES ${_pulp_view_host_bridge_sources}
     LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-view-host-bridge GROUP ${_pulp_view_host_native_group}
-    SOURCES ${_pulp_view_host_bridge_sources}
-    LIBRARIES pulp::view
-    TEST_SPEC "[lifecycle]"
-    TEST_PREFIX "lifecycle::"
-    LABELS lifecycle)
+# The only [lifecycle] case lives in the macOS companion, so the lifecycle
+# registration exists only where that source is compiled; elsewhere a grouped
+# member spec that matches nothing fails the post-build discovery.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-view-host-bridge GROUP ${_pulp_view_host_native_group}
+        SOURCES ${_pulp_view_host_bridge_sources}
+        LIBRARIES pulp::view
+        TEST_SPEC "[lifecycle]"
+        TEST_PREFIX "lifecycle::"
+        LABELS lifecycle)
+endif()
 # Scan blacklist
 # `slow`: file-mtime sleep loops (rebuilt-plugin-not-blacklisted
 # flow waits on filesystem timestamp resolution). Each test ~1s.
