@@ -22,6 +22,8 @@
 #include <cstdint>
 #include <regex>
 
+#include "sdf_chart_contract.hpp"
+
 #ifdef PULP_HAS_SKIA
 
 #include "include/core/SkBitmap.h"
@@ -64,35 +66,6 @@
 #ifdef PULP_HAS_SKIA
 
 namespace pulp::canvas {
-
-static const char* sdf_shape_name(Canvas::SDFShape shape) {
-    switch (shape) {
-        case Canvas::SDFShape::rect: return "rect";
-        case Canvas::SDFShape::circle: return "circle";
-        case Canvas::SDFShape::rounded_rect: return "rounded_rect";
-        case Canvas::SDFShape::arc: return "arc";
-        case Canvas::SDFShape::diamond: return "diamond";
-        case Canvas::SDFShape::squircle: return "squircle";
-        case Canvas::SDFShape::triangle: return "triangle";
-        case Canvas::SDFShape::ring: return "ring";
-        case Canvas::SDFShape::stadium: return "stadium";
-        case Canvas::SDFShape::cross: return "cross";
-        case Canvas::SDFShape::flat_segment: return "flat_segment";
-        case Canvas::SDFShape::rounded_segment: return "rounded_segment";
-        case Canvas::SDFShape::flat_arc: return "flat_arc";
-        case Canvas::SDFShape::quadratic_bezier: return "quadratic_bezier";
-    }
-    return "unknown";
-}
-
-// The set of shapes that actually emit a usable chart, which is exactly the
-// set main() marks `valid`. Advertising a shape here that main() then reports
-// invalid would trade a precise install-time error for a silent zero at every
-// fragment, which is the failure mode the chart's absence rule exists to
-// prevent.
-static bool sdf_shape_has_chart(Canvas::SDFShape shape) {
-    return shape == Canvas::SDFShape::flat_arc;
-}
 
 namespace {
 // IEEE-754 float32 -> binary16 conversion for the RGBA_F16 raster upload.
@@ -594,12 +567,10 @@ static std::string remap_sksl_author_lines(const std::string& error,
 
 std::string Canvas::compile_sdf_chart_sksl(SDFShape shape, const std::string& sksl) {
     if (sksl.empty()) return "Empty shader code";
-    if (!sdf_shape_has_chart(shape) &&
+    if (!sdf_chart::shape_has_chart(shape) &&
         (sksl.find("PulpChart") != std::string::npos ||
          sksl.find("pulp_chart") != std::string::npos))
-        return std::string("Shape '") + sdf_shape_name(shape) +
-               "' has no stroke chart (t/d/side); chart shaders require a band "
-               "shape whose chart is implemented (flat_arc)";
+        return sdf_chart::refusal_for(shape);
     std::string error;
     const bool structured = sksl.find("PulpFragment shade") != std::string::npos;
     const auto source = structured
@@ -615,7 +586,7 @@ bool SkiaCanvas::draw_sdf_shape_with_shader(SDFShape shape, float x, float y,
                                               const std::string& author_sksl,
                                               const ShaderDrawOptions& options) {
     if (!canvas_ || author_sksl.empty()) return false;
-    if (!sdf_shape_has_chart(shape) &&
+    if (!sdf_chart::shape_has_chart(shape) &&
         (author_sksl.find("PulpChart") != std::string::npos ||
          author_sksl.find("pulp_chart") != std::string::npos))
         return false;
