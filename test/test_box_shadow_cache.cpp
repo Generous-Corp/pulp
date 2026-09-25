@@ -64,7 +64,7 @@ float measured_edge_sigma(const std::vector<std::uint8_t>& px, int w, int row,
 }  // namespace
 
 TEST_CASE("outset blur sigma is half the CSS blur radius, as the browser paints it",
-          "[canvas][shadow][parity]") {
+          "[canvas][shadow][parity][test_box_shadow_cache]") {
     // Characterization, not a bug fix: this pins the conversion so it cannot be
     // "corrected" to something that looks more principled but does not match
     // the oracle. Measured off Chrome 151 (DPR 1, black shadow on white,
@@ -118,7 +118,7 @@ TEST_CASE("outset blur sigma is half the CSS blur radius, as the browser paints 
 }
 
 TEST_CASE("box shadow cache matches the direct path within tolerance",
-          "[canvas][shadow][cache]") {
+          "[canvas][shadow][cache][test_box_shadow_cache]") {
     auto& cache = BoxShadowCache::instance();
     const Color col = Color::rgba(0.0f, 0.0f, 0.0f, 0.5f);
 
@@ -146,7 +146,8 @@ TEST_CASE("box shadow cache matches the direct path within tolerance",
     REQUIRE(worst < 16);
 }
 
-TEST_CASE("moving shadow re-blits without re-blurring", "[canvas][shadow][cache]") {
+TEST_CASE("moving shadow re-blits without re-blurring",
+          "[canvas][shadow][cache][test_box_shadow_cache]") {
     auto& cache = BoxShadowCache::instance();
     cache.clear();
     cache.set_enabled(true);
@@ -165,7 +166,7 @@ TEST_CASE("moving shadow re-blits without re-blurring", "[canvas][shadow][cache]
 }
 
 TEST_CASE("color/opacity change re-tints without re-blurring",
-          "[canvas][shadow][cache]") {
+          "[canvas][shadow][cache][test_box_shadow_cache]") {
     auto& cache = BoxShadowCache::instance();
     cache.clear();
     cache.set_enabled(true);
@@ -186,7 +187,7 @@ TEST_CASE("color/opacity change re-tints without re-blurring",
     REQUIRE(max_abs_diff(red, blue) > 10);
 }
 
-TEST_CASE("geometry change triggers a re-blur", "[canvas][shadow][cache]") {
+TEST_CASE("geometry change triggers a re-blur", "[canvas][shadow][cache][test_box_shadow_cache]") {
     auto& cache = BoxShadowCache::instance();
     cache.clear();
     cache.set_enabled(true);
@@ -203,7 +204,7 @@ TEST_CASE("geometry change triggers a re-blur", "[canvas][shadow][cache]") {
 }
 
 TEST_CASE("box shadow cache skips an oversized shadow (falls through to direct path)",
-          "[canvas][shadow][cache]") {
+          "[canvas][shadow][cache][test_box_shadow_cache]") {
     // Regression: a shadow whose device extent exceeds Skia's 16384px max must NOT
     // be cached. The old code clamped the coverage surface to the max and stretched
     // it across the destination (squished shadow); the fix returns nullptr from the
@@ -222,7 +223,7 @@ TEST_CASE("box shadow cache skips an oversized shadow (falls through to direct p
 }
 
 TEST_CASE("BoxShadowKey::q handles non-finite and out-of-range inputs",
-          "[canvas][shadow][cache]") {
+          "[canvas][shadow][cache][test_box_shadow_cache]") {
     using pulp::canvas::BoxShadowKey;
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
