@@ -214,6 +214,17 @@ the API implementation (`Dawn`). `Eligible` means the path was accepted by
 read-only and deliberately exposes no rings, queues, callback hooks, or live
 path-switching controls.
 
+At present, the authenticated shared provider is a concrete `GpuConvolver`
+integration. A custom `GpuAudioNode` passed to `GpuAudioTransport` uses the
+staged path unless it is implemented by a Pulp-owned shared-provider adapter;
+the generic node API cannot opt into shared execution merely by reporting a
+Metal backend. This is intentional. A future generic shared-program contract
+must carry provider identity, prepared resources, fallback behavior, and
+terminal delivery diagnostics without exposing Dawn or Metal handles to SDK
+consumers. Until that contract exists, downstream neural or spectral plugins
+should treat `GpuAudioTransport` as a staged compatibility path and must not
+claim UMA shared execution from `capability_report()` alone.
+
 ## Layer 3 — ready-made processors (`pulp::gpu_audio`)
 
 - `GpuConvolver` — FFT overlap-add convolution with a fixed IR; a continuously-fed, zero-latency `signal::PartitionedConvolver` CPU fallback that stays latency-aligned so a GPU miss is filled seamlessly.
