@@ -1,5 +1,6 @@
 #include "sequence_content_lowerer.hpp"
 
+#include <pulp/timebase/groove_timing_reach.hpp>
 #include <pulp/timebase/quantize.hpp>
 
 #include <algorithm>
@@ -81,23 +82,6 @@ bool span_reaches(const LoweredPlacementFade& span, timebase::TickPosition start
 ///
 /// The result is a supremum, not an estimate: a selection window widened by this
 /// many ticks cannot miss a note the groove would have pulled into view.
-std::int64_t groove_timing_reach(const timeline::GrooveTemplate& groove) noexcept {
-    if (groove.states_no_feel() || groove.timing_strength() == 0)
-        return 0;
-    std::int64_t reach = 0;
-    if (const auto grid = groove.swing_grid(); grid.value != 0) {
-        const auto extreme = timebase::swing_displacement(timebase::TickPosition{grid.value}, grid,
-                                                          groove.swing());
-        reach = extreme.value < 0 ? -extreme.value : extreme.value;
-    }
-    std::int64_t widest_step = 0;
-    for (const auto& step : groove.steps()) {
-        const auto offset = step.timing_offset.value;
-        widest_step = std::max(widest_step, offset < 0 ? -offset : offset);
-    }
-    return reach + widest_step;
-}
-
 /// Every way a nesting can change what a sealed artifact sounds.
 ///
 /// A sealed artifact — a track freeze, or the takes a comp selects — is
@@ -964,7 +948,7 @@ class SequenceContentLowerer::Impl {
         std::int64_t pad_left = 0;
         std::int64_t pad_right = 0;
         if (std::holds_alternative<timeline::MidiContent>(child.content())) {
-            const auto reach = groove_timing_reach(frame.sequence->groove());
+            const auto reach = timebase::groove_timing_reach(frame.sequence->groove());
             pad_left = std::min(reach, left_trim);
             pad_right = std::min(reach, right_trim);
         }
