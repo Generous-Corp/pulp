@@ -492,7 +492,9 @@ tools:
   inputs: Shipyard metrics (filled by `build_speed_scorecard.py ingest --since 14d` from the GitHub API), each
     host's published host_vitals.json over ssh, and optionally a Ninja build dir.
   outputs: Markdown scorecard (local build, PR pipeline, fleet) or `--json`; `--baseline` renders the before/after
-    delta through bench_diff.py; `--split` adds gate job and step p50/p90 either side of one instant.
+    delta through bench_diff.py; `--split` adds gate job and step p50/p90 either side of one instant,
+    and time to merge (open→merged, enqueue→merged), gate-minutes per merged PR, cancelled gate-minutes,
+    receipt reuse, merge_group failure and ejection rates, gate starvation and release-lane competition.
   caveat: Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own
     (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build
     snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
