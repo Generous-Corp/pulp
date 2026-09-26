@@ -989,6 +989,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Re-export/re-embed the Musical Typing Keyboard's two faithful Figma frames specifically. → `tools/import-design/reembed_mtk.py`
 
 **import-roundtrip** — validate an import lane end to end
+- Run the real-browser capture integration files with concurrency sized to the TartCI guest. → `tools/import-design/browser_capture/run_integration.mjs`
+  - ⚠ **Cannot see:** Uses one-at-a-time execution on small guests because every concurrent file drives its own Chrome.
 - Check the importer's IR actually captured the UI text the reference shows. → `tools/import-validation/check_label_coverage.sh`
 - Check the import source-contract registry for drift. → `tools/import-validation/check-source-contracts.py`
 - Normalize a Canvas/SVG differential report into the stable receipt shape, so a browser run and a native run can be compared field-by-field instead of eyeballed. → `python3 -m tools.harness.differential`

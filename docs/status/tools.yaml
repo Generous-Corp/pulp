@@ -464,6 +464,17 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: browser-capture-integration
+  path: tools/import-design/browser_capture/run_integration.mjs
+  category: import-roundtrip
+  use_when: Run the real-browser capture integration files with concurrency sized to the TartCI guest.
+  invocation: node tools/import-design/browser_capture/run_integration.mjs <integration-test-files...>
+  inputs: One or more browser capture integration test files.
+  outputs: The Node test result for each integration file; failures preserve the underlying test exit status.
+  caveat: Uses one-at-a-time execution on small guests because every concurrent file drives its own Chrome.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: ctest-nonruns
   path: tools/scripts/ctest_nonruns.py
   category: test-evidence
