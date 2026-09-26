@@ -122,18 +122,21 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
 }
 
 #if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
-TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][shared_io][wavenet]") {
+TEST_CASE("authenticated Dawn WaveNet preserves causal history across rotating slots",
+          "[gpu_audio][shared_io][wavenet]") {
     Fixture fixture;
     fixture.dilations = {1, 1};
     fixture.layer.channels = 1;
-    fixture.layer.kernel = 1;
+    fixture.layer.kernel = 2;
     fixture.layer.head_size = 1;
     fixture.layer.gated = 0;
     fixture.layer.head_bias = 0;
     fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
-    fixture.weights = {1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f};
+    // rechannel=1; conv reads 0.5 * the immediately previous sample and
+    // ignores the current sample; the residual path is disabled; head=1.
+    fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
     const DawnSharedIoWavenetProgramSpec spec{
-        .block_size = 4,
+        .block_size = 2,
         .head_scale = 1.0f,
         .stream_instances = 1,
         .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
@@ -146,31 +149,70 @@ TEST_CASE("authenticated Dawn WaveNet executes one mono block", "[gpu_audio][sha
     REQUIRE(program);
     SharedIoArena arena;
     REQUIRE(arena.prepare(*created.provider,
-                          {.slots = 1,
-                           .input_bytes_per_slot = 4 * sizeof(float),
-                           .output_bytes_per_slot = 4 * sizeof(float)},
+                          {.slots = 2,
+                           .input_bytes_per_slot = 2 * sizeof(float),
+                           .output_bytes_per_slot = 2 * sizeof(float)},
                           std::move(program)));
-    auto write = arena.grant_write(1);
-    REQUIRE(write);
-    const float input[] = {0.0f, 0.5f, -1.0f, 2.0f};
-    std::copy(std::begin(input), std::end(input), reinterpret_cast<float*>(write->bytes.data()));
-    REQUIRE(arena.publish_written({write->token}));
-    REQUIRE(arena.submit(write->token));
-    std::optional<SharedIoArena::OutputLease> output;
-    for (int i = 0; i < 200 && !output; ++i) {
-        created.provider->poll();
-        arena.drain_completions();
-        output = arena.acquire_output(arena.preparation_epoch(), 1);
-        if (!output)
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    REQUIRE(output);
-    const auto* actual = reinterpret_cast<const float*>(output->bytes.data());
-    for (std::size_t i = 0; i < std::size(input); ++i)
-        CHECK(actual[i] == Catch::Approx(std::tanh(input[i])).margin(1.0e-5));
-    const auto token = output->token;
-    output.reset();
-    REQUIRE(arena.release_output({token}));
+
+    const auto submit = [&](std::uint64_t sequence, std::array<float, 2> input) {
+        auto write = arena.grant_write(sequence);
+        REQUIRE(write);
+        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+        REQUIRE(arena.publish_written({write->token}));
+        REQUIRE(arena.submit(write->token));
+    };
+    const auto collect = [&](std::uint64_t sequence) {
+        std::optional<SharedIoArena::OutputLease> output;
+        for (int i = 0; i < 200 && !output; ++i) {
+            created.provider->poll();
+            arena.drain_completions();
+            output = arena.acquire_output(arena.preparation_epoch(), sequence);
+            if (!output)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(output);
+        const auto* values = reinterpret_cast<const float*>(output->bytes.data());
+        const std::array<float, 2> result{values[0], values[1]};
+        const auto token = output->token;
+        output.reset();
+        REQUIRE(arena.release_output({token}));
+        return result;
+    };
+
+    // Submit two blocks before either completes so the provider must rotate
+    // physical slots while advancing one causal stream in queue order.
+    submit(1, {1.0f, 2.0f});
+    submit(2, {3.0f, 4.0f});
+    const auto first = collect(1);
+    const auto second = collect(2);
+    submit(3, {5.0f, 6.0f}); // wrap to the first physical slot
+    const auto third = collect(3);
+
+    // A gap would advance the one causal state with the wrong logical block.
+    // Reject it before queue submission, then prove the missing sequence can
+    // still advance the stream without the rejected input contaminating it.
+    auto skipped = arena.grant_write(5);
+    REQUIRE(skipped);
+    const std::array<float, 2> skipped_input{99.0f, 100.0f};
+    std::copy(skipped_input.begin(), skipped_input.end(),
+              reinterpret_cast<float*>(skipped->bytes.data()));
+    REQUIRE(arena.publish_written({skipped->token}));
+    CHECK_FALSE(arena.submit(skipped->token));
+    submit(4, {7.0f, 8.0f});
+    const auto fourth = collect(4);
+
+    const std::array<float, 8> actual{first[0], first[1], second[0], second[1],
+                                      third[0], third[1], fourth[0], fourth[1]};
+    const std::array<float, 8> expected{0.0f,
+                                        std::tanh(0.5f),
+                                        std::tanh(1.0f),
+                                        std::tanh(1.5f),
+                                        std::tanh(2.0f),
+                                        std::tanh(2.5f),
+                                        std::tanh(3.0f),
+                                        std::tanh(3.5f)};
+    for (std::size_t index = 0; index < actual.size(); ++index)
+        CHECK(actual[index] == Catch::Approx(expected[index]).margin(1.0e-5));
     REQUIRE(arena.release());
 }
 #endif

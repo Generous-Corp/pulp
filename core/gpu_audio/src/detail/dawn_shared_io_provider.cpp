@@ -383,8 +383,14 @@ struct DawnSharedIoProvider::Impl {
         std::uint32_t gated = 0, head_size = 0, head_bias = 0;
         wgpu::ComputePipeline rechannel, layer, head, scale;
         wgpu::Buffer weights, rechannel_u, layer_u, head_u, scale_u;
+        // WaveNet history belongs to the causal stream, not to a transport
+        // slot. Queue submissions are ordered, so every block advances these
+        // buffers before the next slot's command buffer reads them.
+        wgpu::Buffer act0, act1, history_temp;
+        std::uint64_t last_submitted_sequence = 0;
+        bool has_submitted_sequence = false;
         struct SlotGroups {
-            wgpu::Buffer act0, act1, headacc, headout, history_temp;
+            wgpu::Buffer headacc, headout;
             wgpu::BindGroup rechannel, layer, head, scale;
         };
         std::vector<SlotGroups> slots;
@@ -1514,6 +1520,15 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
         plan->scale_u = make_uniform(&scu, sizeof(scu));
         if (!plan->rechannel_u || !plan->layer_u || !plan->head_u || !plan->scale_u)
             return false;
+        plan->act0 = make_storage(bytes);
+        plan->act1 = make_storage(bytes);
+        plan->history_temp = make_storage(std::max<std::size_t>(
+            sizeof(float), static_cast<std::size_t>(C) * pad * sizeof(float)));
+        if (!plan->act0 || !plan->act1 || !plan->history_temp)
+            return false;
+        std::vector<std::byte> zero(bytes);
+        impl_->queue.WriteBuffer(plan->act0, 0, zero.data(), zero.size());
+        impl_->queue.WriteBuffer(plan->act1, 0, zero.data(), zero.size());
         plan->slots.resize(impl_->slots.size());
         for (const auto& handle : handles) {
             if (handle.slot >= plan->slots.size() || !validate_slot_buffers(handle))
@@ -1523,19 +1538,10 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             if (in == nullptr || out == nullptr)
                 return false;
             auto& g = plan->slots[handle.slot];
-            g.act0 = make_storage(bytes);
-            g.act1 = make_storage(bytes);
             g.headacc = make_storage(static_cast<std::size_t>(C) * spec.block_size * sizeof(float));
             g.headout = make_storage(static_cast<std::size_t>(H) * spec.block_size * sizeof(float));
-            g.history_temp = make_storage(
-                std::max<std::size_t>(1, static_cast<std::size_t>(C) * pad * sizeof(float)));
-            if (!g.act0 || !g.act1 || !g.headacc || !g.headout || !g.history_temp)
+            if (!g.headacc || !g.headout)
                 return false;
-            if (pad != 0) {
-                std::vector<std::byte> zero(bytes);
-                impl_->queue.WriteBuffer(g.act0, 0, zero.data(), zero.size());
-                impl_->queue.WriteBuffer(g.act1, 0, zero.data(), zero.size());
-            }
             auto bind = [&](const wgpu::ComputePipeline& pipeline,
                             const wgpu::BindGroupEntry* entries, std::uint32_t count) {
                 wgpu::BindGroupDescriptor d{};
@@ -1552,7 +1558,7 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             r_entries[1].buffer = *in;
             r_entries[1].size = spec.block_size * sizeof(float);
             r_entries[2].binding = 2;
-            r_entries[2].buffer = g.act0;
+            r_entries[2].buffer = plan->act0;
             r_entries[2].size = bytes;
             r_entries[3].binding = 3;
             r_entries[3].buffer = plan->rechannel_u;
@@ -1563,10 +1569,10 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
             l_entries[0].buffer = plan->weights;
             l_entries[0].size = plan->weights.GetSize();
             l_entries[1].binding = 1;
-            l_entries[1].buffer = g.act0;
+            l_entries[1].buffer = plan->act0;
             l_entries[1].size = bytes;
             l_entries[2].binding = 2;
-            l_entries[2].buffer = g.act1;
+            l_entries[2].buffer = plan->act1;
             l_entries[2].size = bytes;
             l_entries[3].binding = 3;
             l_entries[3].buffer = *in;
@@ -1624,7 +1630,18 @@ bool DawnSharedIoProvider::submit_convolution_program(
 bool DawnSharedIoProvider::submit_wavenet_program(
     const SlotResources& resources, SlotToken token,
     std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-    return submit_impl(resources, token, std::move(inbox), 2);
+    if (!impl_ || !impl_->wavenet)
+        return false;
+    auto& plan = *impl_->wavenet;
+    if (plan.has_submitted_sequence &&
+        (plan.last_submitted_sequence == std::numeric_limits<std::uint64_t>::max() ||
+         token.stream_sequence != plan.last_submitted_sequence + 1u))
+        return false;
+    if (!submit_impl(resources, token, std::move(inbox), 2))
+        return false;
+    plan.last_submitted_sequence = token.stream_sequence;
+    plan.has_submitted_sequence = true;
+    return true;
 }
 
 bool DawnSharedIoProvider::submit(const SlotResources& resources, SlotToken token,
@@ -1767,12 +1784,10 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
                 static_cast<std::uint64_t>(plan.channels) * plan.pad * sizeof(float);
             const auto tail_offset =
                 static_cast<std::uint64_t>(plan.channels) * plan.block_size * sizeof(float);
-            encoder.CopyBufferToBuffer(groups.act0, tail_offset, groups.history_temp, 0,
-                                       history_bytes);
-            encoder.CopyBufferToBuffer(groups.history_temp, 0, groups.act0, 0, history_bytes);
-            encoder.CopyBufferToBuffer(groups.act1, tail_offset, groups.history_temp, 0,
-                                       history_bytes);
-            encoder.CopyBufferToBuffer(groups.history_temp, 0, groups.act1, 0, history_bytes);
+            encoder.CopyBufferToBuffer(plan.act0, tail_offset, plan.history_temp, 0, history_bytes);
+            encoder.CopyBufferToBuffer(plan.history_temp, 0, plan.act0, 0, history_bytes);
+            encoder.CopyBufferToBuffer(plan.act1, tail_offset, plan.history_temp, 0, history_bytes);
+            encoder.CopyBufferToBuffer(plan.history_temp, 0, plan.act1, 0, history_bytes);
         }
     } else {
         auto pass = encoder.BeginComputePass();
