@@ -97,20 +97,18 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
         impl->block_size = config.descriptor.block_size;
         impl->session = std::make_unique<detail::SharedIoProgramSession>();
         const auto bytes = static_cast<std::size_t>(config.descriptor.block_size) * sizeof(float);
-        if (!impl->session->prepare(
-                {std::move(created.provider), std::move(program)},
-                {.slots = config.slots,
-                 .input_bytes_per_slot = bytes,
-                 .output_bytes_per_slot = bytes})) {
+        if (!impl->session->prepare({std::move(created.provider), std::move(program)},
+                                    {.slots = config.slots,
+                                     .input_bytes_per_slot = bytes,
+                                     .output_bytes_per_slot = bytes})) {
             result.error = GpuWaveNetSessionError::PreparationFailed;
             // Keep the owner alive so its provider can retry a physical drain
             // barrier if preparation had already allocated shared resources.
-            result.session = std::unique_ptr<GpuWaveNetSession>(
-                new GpuWaveNetSession(std::move(impl)));
+            result.session =
+                std::unique_ptr<GpuWaveNetSession>(new GpuWaveNetSession(std::move(impl)));
             return result;
         }
-        result.session = std::unique_ptr<GpuWaveNetSession>(
-            new GpuWaveNetSession(std::move(impl)));
+        result.session = std::unique_ptr<GpuWaveNetSession>(new GpuWaveNetSession(std::move(impl)));
         result.error = GpuWaveNetSessionError::None;
         return result;
     } catch (...) {
@@ -164,8 +162,7 @@ std::size_t GpuWaveNetSession::service(std::uint64_t now_ns) noexcept {
     return 0;
 }
 
-std::optional<GpuWaveNetBlockResult>
-GpuWaveNetSession::receive(std::span<float> output) noexcept {
+std::optional<GpuWaveNetBlockResult> GpuWaveNetSession::receive(std::span<float> output) noexcept {
 #if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     (void)output;
     return std::nullopt;

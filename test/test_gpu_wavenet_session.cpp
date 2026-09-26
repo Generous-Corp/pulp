@@ -26,8 +26,7 @@ struct Fixture {
         .head_bias = false,
         .tanh_activation = true,
     };
-    std::array<float, 9> weights{1.0f, 0.5f, 0.0f, 0.0f, 0.0f,
-                                  0.0f, 0.0f, 1.0f, 1.0f};
+    std::array<float, 9> weights{1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
 
     GpuWaveNetDescriptor descriptor() const noexcept {
         return {.block_size = 2,
@@ -55,9 +54,8 @@ TEST_CASE("public WaveNet session rejects a weight span that disagrees with the 
 TEST_CASE("public WaveNet session reports provider capability without exposing detail types",
           "[gpu_audio][wavenet][session]") {
     Fixture fixture;
-    const auto result = GpuWaveNetSession::create({.descriptor = fixture.descriptor(),
-                                                   .weights = fixture.weights,
-                                                   .slots = 2});
+    const auto result = GpuWaveNetSession::create(
+        {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = 2});
 
     if (!result.session) {
         CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
@@ -74,10 +72,10 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
 
     std::optional<GpuWaveNetBlockResult> completion;
     for (int attempt = 0; attempt < 200 && !completion; ++attempt) {
-        session.service(static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count()));
+        session.service(
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count()));
         completion = session.receive(output);
         if (!completion)
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
