@@ -1668,7 +1668,7 @@
             ]
           },
           "public_headers": {
-            "count": 31,
+            "count": 32,
             "roots": [
               "core/gpu_audio/include",
               "core/render/include"
