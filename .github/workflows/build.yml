@@ -1850,7 +1850,7 @@ jobs:
         # fast tier. The rule and its fail-closed probe live in
         # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
         id: pr_suite
-        if: runner.os != 'Windows' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && runner.os != 'Windows'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
