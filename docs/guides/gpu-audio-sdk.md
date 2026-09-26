@@ -214,6 +214,18 @@ does not expose Dawn or Metal handles, queues, rings, or callbacks, and it does
 not by itself activate a generic shared provider. `GpuConvolver` remains the
 authenticated shared consumer until a typed execution implementation is added.
 
+The installed SDK also includes `<pulp/gpu_audio/gpu_wavenet.hpp>`. Its
+`GpuWaveNetDescriptor` is the narrow, model-neutral admission boundary for a
+one-stream WaveNet model, and `GpuWaveNetSession` is the corresponding opaque
+model/session lifecycle seam. A session accepts the descriptor and flat weights,
+keeps the authenticated provider resources and causal history resident, and
+offers block submission, non-blocking service, completion, and quiescent
+release without exposing Dawn or Metal handles. The first session requires
+`stream_instances == 1` and contiguous sequence numbers. Its submission and
+service methods are serialized non-realtime operations; it does not turn GPU
+scheduling into a hard-realtime contract. Consumers must keep a continuously
+prepared CPU fallback for unavailable, failed, or late blocks.
+
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
 `validate_gpu_audio_program()`. That overload binds the declaration to the
@@ -242,9 +254,10 @@ the API implementation (`Dawn`). `Eligible` means the path was accepted by
 read-only and deliberately exposes no rings, queues, callback hooks, or live
 path-switching controls.
 
-At present, the authenticated shared provider is a concrete `GpuConvolver`
-integration. A custom `GpuAudioNode` passed to `GpuAudioTransport` uses the
-staged path unless it is implemented by a Pulp-owned shared-provider adapter;
+At present, the authenticated shared provider has concrete `GpuConvolver` and
+one-stream `GpuWaveNetSession` integrations. A custom `GpuAudioNode` passed to
+`GpuAudioTransport` uses the staged path unless it is implemented by a Pulp-owned
+shared-provider adapter;
 the generic node API cannot opt into shared execution merely by reporting a
 Metal backend. This is intentional. A future generic shared-program contract
 must carry provider identity, prepared resources, fallback behavior, and

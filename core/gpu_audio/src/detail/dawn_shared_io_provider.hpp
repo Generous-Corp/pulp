@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dawn_shared_io_wavenet_spec.hpp"
 #include "shared_io_arena.hpp"
 
 #include <cstddef>
@@ -114,6 +115,11 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     static CreateResult create(const Options& options) noexcept;
     std::unique_ptr<SharedIoPreparedProgram>
     make_convolution_program(const SharedIoConvolutionProgramSpec& spec) noexcept;
+    // Factory for the authenticated WaveNet preparation boundary. The current
+    // private implementation is intentionally mono-only; multi-instance models
+    // require an instance-qualified submit token before they can be enabled.
+    std::unique_ptr<SharedIoPreparedProgram>
+    make_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec) noexcept;
     ~DawnSharedIoProvider() override;
 
     DawnSharedIoProvider(const DawnSharedIoProvider&) = delete;
@@ -138,6 +144,12 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     CompletionPolicy completion_policy() const noexcept;
     AdapterIdentity adapter_identity() const;
 
+    bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
+                                 std::span<const SlotBufferHandle> slots) noexcept;
+    bool submit_wavenet_program(const SlotResources&, SlotToken,
+                                std::shared_ptr<SharedIoTerminalInbox>) noexcept;
+    bool release_wavenet_program() noexcept;
+
   private:
     friend class DawnSharedIoConvolutionProgram;
     bool prepare_convolution_program(const SharedIoConvolutionProgramSpec&) noexcept;
@@ -145,8 +157,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
                                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox) noexcept;
     bool release_convolution_program() noexcept;
     bool submit_impl(const SlotResources&, SlotToken,
-                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox,
-                     bool use_convolution) noexcept;
+                     std::shared_ptr<SharedIoTerminalInbox> terminal_inbox, unsigned kind) noexcept;
     struct Impl;
     explicit DawnSharedIoProvider(std::unique_ptr<Impl> impl) noexcept;
     std::unique_ptr<Impl> impl_;

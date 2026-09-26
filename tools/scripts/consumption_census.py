@@ -978,6 +978,51 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
         lines.append("the profile's feature set changed")
     if header_count_drifted(committed, current):
         lines.append(HEADER_DRIFT_CAUSE)
+    if lines:
+        return lines
+
+    # Keep an otherwise-unclassified drift actionable.  The profile contains
+    # provenance fields as well as the target graph; when one of those changes
+    # the old generic message sent CI readers back to a local regeneration
+    # without identifying what differed between machines.
+    def changed_paths(old: object, new: object, path: str) -> None:
+        if type(old) is not type(new):
+            lines.append(f"profile field changed: {path}")
+            return
+        if isinstance(old, dict):
+            for key in sorted(set(old) | set(new)):
+                if key not in old or key not in new:
+                    lines.append(f"profile field changed: {path}.{key}")
+                else:
+                    changed_paths(old[key], new[key], f"{path}.{key}")
+            return
+        if isinstance(old, list):
+            if old != new:
+                first_difference = next(
+                    (
+                        index
+                        for index, (old_item, new_item) in enumerate(zip(old, new))
+                        if old_item != new_item
+                    ),
+                    min(len(old), len(new)),
+                )
+                old_item = old[first_difference] if first_difference < len(old) else "<missing>"
+                new_item = new[first_difference] if first_difference < len(new) else "<missing>"
+                lines.append(
+                    f"profile field changed: {path}[{first_difference}] "
+                    f"({old_item!r} -> {new_item!r}); lengths {len(old)} -> {len(new)}"
+                )
+            return
+        if old != new:
+            lines.append(f"profile field changed: {path} ({old!r} -> {new!r})")
+
+    for key in sorted(set(committed) | set(current)):
+        if key in {"targets", "features", "link_probe"}:
+            continue
+        if key not in committed or key not in current:
+            lines.append(f"profile field changed: {key}")
+        else:
+            changed_paths(committed[key], current[key], key)
     return lines or ["the profile differs from the build tree"]
 
 
