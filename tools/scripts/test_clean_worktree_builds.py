@@ -463,6 +463,39 @@ class GateTests(FixtureTestCase):
         self.assertIn("records it active", r.stdout)
         self.assertTrue((wt / "build").is_dir())
 
+    def test_unmarked_merged_head_is_reaped_with_no_lineage_row_at_all(self) -> None:
+        # The case the fleet actually produces. Closing a worktree out is a step
+        # someone has to take and most agent sessions end without it, so the
+        # common shape is not a stale row — it is NO row. "Absence of a record is
+        # not evidence of non-merge": git can answer this on demand, and nobody
+        # should have to run worktree_lineage.sh by hand first.
+        #
+        # Measured 2026-09-25: a host running a build of this script from before
+        # the ancestry relaxation reported 0 of 54 build dirs reapable and held
+        # ~192 GB, because every candidate was waiting on bookkeeping.
+        wt = self.fx.add_worktree("wt-unmarked")
+        branch = git(wt, "branch", "--show-current").strip()
+        git(self.fx.main, "merge", "--ff-only", branch)
+        git(self.fx.main, "push")
+        self.fx.advance_main("after-unmarked.txt")
+        # No mark_lineage() anywhere, and assert that rather than trusting it:
+        # a fixture that quietly wrote a row would make this pass for the wrong
+        # reason and the break-confirm below would still look correct.
+        for field in ("Status", "DurableSha", "Pr"):
+            self.assertEqual(
+                git(self.fx.main, "config", "--local", "--default", "", "--get",
+                    f"branch.{branch}.pulpWorktree{field}").strip(), "",
+                f"fixture must leave branch.{branch}.pulpWorktree{field} unset")
+        r = run_script(self.fx, "--verbose", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse(
+            (wt / "build").exists(),
+            "an unmarked worktree whose head landed must be reapable without a "
+            "manual reconcile:\n" + r.stdout + r.stderr)
+        # Only build/ goes; the checkout and its committed work stay.
+        self.assertTrue((wt / "wt-unmarked.txt").is_file())
+
     def test_stale_lineage_head_is_reaped_on_git_ancestry(self) -> None:
         # The row records `merged` against a sha that is not this head, so the
         # registry proves nothing. It is a bookkeeping gap, not a claim that
