@@ -2105,6 +2105,18 @@ array containing bracket characters is conclusive:
 ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
 ```
 
+### Gotcha: release class labels are opt-in, and enabling them early strands releases
+
+`PULP_RELEASE_CLASS_TOKENS` (exactly `1`/`true`) makes release-cli's darwin legs
+and `sign-and-release.yml` append `pulp-release-tagged`, and
+`release-path-pr-gate.yml` append `pulp-release-pr-gate`, to a self-hosted
+selector (dropping `pulp-gate-fast`, as `build.yml` does for its event classes).
+Unset is byte-identical routing; any other value is ignored with a `::notice::`.
+Enable it only once tartci's hosts register those classes: a class-labelled job
+with no serving registration queues forever (see the next gotcha). Unsetting it
+is the rollback. The single implementation is
+`resolve_release_runners.py --apply-class-label`.
+
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
 The trap behind step 3. Before concluding "the pool is saturated", check that the
