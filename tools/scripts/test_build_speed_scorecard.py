@@ -364,6 +364,9 @@ class MergeLatencyAndCostTests(unittest.TestCase):
         self.assertEqual(a["receipt_reuse"]["rate"], 0.5)
         self.assertEqual(b["merge_group_runs"], {"completed": 3, "failed": 1, "cancelled": 1,
                                                  "failure_rate": 0.5})
+        # the required gate failed 1 of its 2 self-hosted runs before, 0 of 1 after
+        self.assertEqual(b["merge_group_gate"], {"completed": 2, "failed": 1, "failure_rate": 0.5})
+        self.assertEqual(a["merge_group_gate"]["failure_rate"], 0.0)
         self.assertEqual(b["ejections"]["by_reason"], {"failed_checks": 1, "merge_conflict": 1})
         self.assertAlmostEqual(b["ejections"]["per_merged_pr"], 2 / 3)
         self.assertEqual(a["ejections"]["total"], 0)

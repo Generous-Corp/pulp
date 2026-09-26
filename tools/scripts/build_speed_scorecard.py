@@ -929,6 +929,13 @@ def merge_split_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: l
                               "skip_safe": kinds.get("skip-safe", 0),
                               "unclassified": max(0, placeholders - sum(kinds.values())),
                               "unknown": kinds.get("unknown", 0)},
+            # The required check itself: a failed Build and Test run can be an
+            # advisory leg (hosted Linux) that ejects nothing.
+            "merge_group_gate": {"completed": len(selfhosted_mg),
+                                 "failed": sum(1 for r in selfhosted_mg if r["status"] == "failure"),
+                                 "failure_rate": (sum(1 for r in selfhosted_mg
+                                                      if r["status"] == "failure") / len(selfhosted_mg)
+                                                  if selfhosted_mg else None)},
             "merge_group_runs": {
                 "completed": len(mg), "failed": sum(1 for r in mg_done if r["status"] == "failure"),
                 "cancelled": sum(1 for r in mg if r.get("status") == "cancelled"),
@@ -992,6 +999,10 @@ def render_merge_split_markdown(ms: dict) -> list[str]:
     m_b, m_a = b["merge_group_runs"], a["merge_group_runs"]
     line("merge_group run failure rate", m_b["completed"], m_b["failure_rate"] and m_b["failure_rate"] * 100,
          m_a["completed"], m_a["failure_rate"] and m_a["failure_rate"] * 100, "%", 0)
+    g_b2, g_a2 = b["merge_group_gate"], a["merge_group_gate"]
+    line("merge_group `macos` gate failure rate", g_b2["completed"],
+         g_b2["failure_rate"] and g_b2["failure_rate"] * 100, g_a2["completed"],
+         g_a2["failure_rate"] and g_a2["failure_rate"] * 100, "%", 0)
     e_b, e_a = b["ejections"], a["ejections"]
     line("ejections per 100 merged PRs", e_b["total"],
          e_b["per_merged_pr"] and e_b["per_merged_pr"] * 100, e_a["total"],
