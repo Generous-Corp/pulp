@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 55,
+  "manifest_revision": 56,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -11411,6 +11411,7 @@
               "reset()",
               "set_coefficients(std::vector<SampleType> coeffs)",
               "order()",
+              "coefficients()",
               "lowpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)",
               "highpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)"
             ],
@@ -13250,7 +13251,17 @@
             "template": null,
             "methods": [
               "process(double input)",
-              "reset()"
+              "reset()",
+              "coefficients()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "ParityHistory",
+            "qualified_name": "pulp::signal::detail::ParityHistory",
+            "template": null,
+            "methods": [
+              "compact()"
             ],
             "enums": []
           },

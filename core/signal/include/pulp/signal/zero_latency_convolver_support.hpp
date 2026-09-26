@@ -584,7 +584,10 @@ struct ZeroLatencyConvolverCell {
     int dst = 0;
     int ir_channel = 0;
     double l1 = 0.0;
-    std::vector<SampleType> head;  // N0 direct-FIR taps
+    std::vector<SampleType> head; // N0 direct-FIR taps; head[t] weighs x[n - t]
+    // head reversed (oldest-first) for pulp::simd::correlate over a linear
+    // window of the input history.
+    std::vector<SampleType> head_reversed;
 };
 
 struct ZeroLatencyConvolverOnePole {

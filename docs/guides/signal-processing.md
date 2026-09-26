@@ -21,7 +21,11 @@ All processors live in `core/signal/include/pulp/signal/`.
   [modules: simd](../reference/modules.md#simd).
 - **Keep history linear for FIR work.** A wrapping ring buffer forces a
   branch or mask per tap; a linear window of `taps - 1 + block` samples lets
-  one `correlate()` produce the whole block.
+  one `correlate()` produce the whole block. `FirFilterT` works this way:
+  `process(buffer, n)` is one `correlate()` per block and `process(sample)`
+  one `dot()` per sample, which measured about 30x (64 taps) and 40x (256
+  taps) faster than its former ring-buffer loop on Apple silicon. The
+  linear-phase `Oversampler` lane and the drum output stage run on it.
 - **Recursive filters vectorize across channels or voices, not time.** A
   biquad or SVF cannot be vectorized along its own output, but N independent
   instances stored struct-of-arrays (one array per coefficient and state

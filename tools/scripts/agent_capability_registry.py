@@ -614,7 +614,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/fast_math.hpp",
-        "fingerprint": "sha256:6fb9907ba6984a2b76af66bd3a8f9a4e3008f4f0f29526beb6fbed64cafa6400",
+        "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
@@ -1155,6 +1155,54 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "primitive a plugin drives from its own process() at a fixed block size, and its "
             "generator-facing shape is already published through the signal compatibility "
             "vocabulary, so it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/fir_filter.hpp",
+        "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "General FIR filter over a linear sample history whose outputs are pulp::simd "
+            "dot and correlate calls. A bounded DSP primitive a processor drives from its "
+            "own process(); its coefficient generators and taps are documented in the "
+            "signal guide, and it makes no installed agent capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/oversampling_fir.hpp",
+        "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Linear-phase half-band and 2x FIR stages behind the Oversampler linear-phase "
+            "lane, the drum output stage, character-delay hysteresis and the OTA cascade "
+            "filter. Implementation infrastructure for those consumers rather than an "
+            "advertised generator surface."
+        ),
+    },
+    {
+        "include": "pulp/signal/zero_latency_convolver.hpp",
+        "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Zero-latency multilevel convolution engine (direct-form head on pulp::simd "
+            "correlate plus FFT partitions). Like the uniform PartitionedConvolver it is "
+            "a bounded DSP primitive a plugin drives from its own process(), documented "
+            "in the space-convolution guide; it makes no installed agent capability claim "
+            "of its own."
+        ),
+    },
+    {
+        "include": "pulp/signal/zero_latency_convolver_support.hpp",
+        "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Design constants, schedule groups and per-cell state behind "
+            "ZeroLatencyConvolverT. Support infrastructure for that engine rather than an "
+            "advertised generator surface; it carries no capability claim of its own."
         ),
     },
     {

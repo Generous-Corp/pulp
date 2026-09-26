@@ -104,10 +104,12 @@ struct FastMath {
 #if defined(__APPLE__) && defined(__clang__)
     /// Four-wide Apple implementation of the precise bounded-cycle profile.
     /// Input lanes must already be in `[0, 1)`, matching the scalar contract.
+    /// Apple's vector library is spelled `::simd` here: inside namespace pulp
+    /// an unqualified `simd::` names Pulp's own pulp::simd kernel namespace.
     static simd_float4 sin_cycles_precise(simd_float4 phase_cycles) noexcept {
-        simd_float4 x = phase_cycles - simd::floor(phase_cycles + 0.5f);
-        const simd_float4 magnitude = simd::abs(x);
-        x = simd::copysign(simd::min(magnitude, 0.5f - magnitude), x);
+        simd_float4 x = phase_cycles - ::simd::floor(phase_cycles + 0.5f);
+        const simd_float4 magnitude = ::simd::abs(x);
+        x = ::simd::copysign(::simd::min(magnitude, 0.5f - magnitude), x);
         const simd_float4 x2 = x * x;
         return x *
                (precise_c0 +
