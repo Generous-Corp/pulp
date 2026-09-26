@@ -1916,7 +1916,10 @@ void View::claim_overlay(const View* stacks_on) {
     if (std::find(s.overlay_stack.begin(), s.overlay_stack.end(), this) ==
         s.overlay_stack.end()) {
         // Whatever the sweep above left on top is what this claim nests on:
-        // it stopped only at an overlay this one descends from or named.
+        // it stopped only at an overlay this one descends from or named. The
+        // outside-press walk reads it (`overlay_nests_on`) so a press outside
+        // a whole nest of menus closes every level, not only the top. It is
+        // compared, never dereferenced, and cleared when the claim leaves.
         overlay_nested_on_ =
             s.overlay_stack.empty() ? nullptr : s.overlay_stack.back();
         s.overlay_stack.push_back(this);
