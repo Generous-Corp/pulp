@@ -117,8 +117,8 @@
     },
     {
       "path": "test/test_design_import_codegen.cpp",
-      "max_loc": 2101,
-      "note": "design-import codegen test split; +7 for the interactive-element param_key + host-param routing codegen assertions"
+      "max_loc": 2095,
+      "note": "design-import codegen tests; the layout/text, paint and web-control cases live in test_design_import_codegen_{layout_text,paint,web_controls}.cpp so the suite's slowest object compiles in four parts. Add new cases to the part they belong with."
     },
     {
       "path": "test/test_design_import_fidelity.cpp",

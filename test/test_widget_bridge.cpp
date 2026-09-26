@@ -4832,17 +4832,50 @@ TEST_CASE("WidgetBridge shader uniforms validate, round-trip, and carry reach",
     REQUIRE(engine.evaluate("read.tint[2]").getWithDefault<double>(0.0) == Catch::Approx(0.25));
     REQUIRE(engine.evaluate("reach.success").getWithDefault<bool>(false));
     REQUIRE_FALSE(engine.evaluate("badReach.success").getWithDefault<bool>(true));
+#ifdef PULP_HAS_SKIA
     REQUIRE(engine.evaluate("chart.success").getWithDefault<bool>(false));
+#else
+    // Chart compilation needs the Skia backend. The previously installed
+    // shader remains valid when this optional chart install is rejected.
+    REQUIRE_FALSE(engine.evaluate("chart.success").getWithDefault<bool>(true));
+#endif
+#ifdef PULP_HAS_SKIA
     REQUIRE(engine.evaluate("feathered.success").getWithDefault<bool>(false));
+#else
+    REQUIRE_FALSE(engine.evaluate("feathered.success").getWithDefault<bool>(true));
+#endif
+#ifdef PULP_HAS_SKIA
     REQUIRE_FALSE(engine.evaluate("badName.success").getWithDefault<bool>(true));
+#else
+    // A no-GPU build has no shader source available for declaration checks;
+    // uniform writes remain deferred until a GPU shader is installed.
+    REQUIRE(engine.evaluate("badName.success").getWithDefault<bool>(false));
+#endif
+#ifdef PULP_HAS_SKIA
     REQUIRE_FALSE(engine.evaluate("badArity.success").getWithDefault<bool>(true));
     REQUIRE_FALSE(engine.evaluate("badReserved.success").getWithDefault<bool>(true));
+#else
+    REQUIRE(engine.evaluate("badArity.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("badReserved.success").getWithDefault<bool>(false));
+#endif
     REQUIRE_FALSE(engine.evaluate("bad.success").getWithDefault<bool>(true));
     auto* knob = dynamic_cast<Knob*>(bridge.widget("knob"));
     REQUIRE(knob != nullptr);
+#ifdef PULP_HAS_SKIA
     REQUIRE(knob->shader_reach() == Catch::Approx(6.0f));
+#else
+    REQUIRE(knob->shader_reach() == Catch::Approx(12.0f));
+#endif
+#ifdef PULP_HAS_SKIA
     REQUIRE(knob->shader_uniforms().size() == 2);
+#else
+    REQUIRE(knob->shader_uniforms().size() == 1);
+#endif
+#ifdef PULP_HAS_SKIA
     REQUIRE_FALSE(knob->chart_shader().empty());
+#else
+    REQUIRE(knob->chart_shader().empty());
+#endif
 }
 
 TEST_CASE("WidgetBridge binds shader scalar uniforms to live value channels",
@@ -4913,7 +4946,13 @@ TEST_CASE("Shader uniform bindings report declaration and source failures",
     REQUIRE_FALSE(engine.evaluate("missing.success").getWithDefault<bool>(true));
     REQUIRE_FALSE(engine.evaluate("unknown.success").getWithDefault<bool>(true));
     REQUIRE(bridge.binding_attempts().size() == 2);
+#ifdef PULP_HAS_SKIA
     REQUIRE(bridge.binding_attempts()[0].outcome == BindingOutcome::undeclared_uniform);
+#else
+    // Without Skia, the shader source is unavailable to declaration
+    // validation, so the value-channel lookup is the first applicable check.
+    REQUIRE(bridge.binding_attempts()[0].outcome == BindingOutcome::unknown_value_channel);
+#endif
     REQUIRE(bridge.binding_attempts()[1].outcome == BindingOutcome::unknown_param);
 }
 

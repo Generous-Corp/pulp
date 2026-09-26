@@ -1,0 +1,49 @@
+{
+  "id": "timeline-test-executable-grouping",
+  "title": "Timeline manifest suites compile into grouped test executables",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "timeline-test-executable-grouping-20260925",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/timeline-test-executable-grouping.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "pulp_add_test_group(pulp-test-group-timeline LIBRARIES pulp::timeline)",
+        "pulp_add_test_group(pulp-test-group-timeline-playback"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "`pulp-test-group-timeline` executable (their CTest names are unchanged)"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Only the test executables behind existing CTest registrations change; no SDK header, target or symbol is installed or altered."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command gains, loses or changes behaviour; the change is how test suites are linked."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added or altered."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Linking test suites into shared executables creates no product capability, grant or policy projection."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change describes no authoring capability; every test keeps its name, labels and properties."
+    }
+  }
+}

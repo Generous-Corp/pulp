@@ -364,6 +364,16 @@ fn strip_bare_job_flags(args: &[String]) -> Vec<String> {
 /// nested cmake the build spawns.
 #[must_use]
 pub fn finish_build_command(inv: Invocation, passthrough: &[String]) -> Invocation {
+    finish_build_command_planned(inv, passthrough).0
+}
+
+/// [`finish_build_command`], also returning the decision it applied, for a
+/// caller that reports what the build ran with.
+#[must_use]
+pub fn finish_build_command_planned(
+    inv: Invocation,
+    passthrough: &[String],
+) -> (Invocation, BuildPlan) {
     let plan = plan(passthrough);
     let mut inv = match plan.jobs {
         Some(jobs) => inv
@@ -375,7 +385,7 @@ pub fn finish_build_command(inv: Invocation, passthrough: &[String]) -> Invocati
     for arg in &plan.passthrough {
         inv = inv.arg(arg.clone());
     }
-    inv
+    (inv, plan)
 }
 
 #[cfg(test)]

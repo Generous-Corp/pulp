@@ -143,7 +143,7 @@ BHOME="$WORK/home"; mkdir -p "$BHOME"
 bj="$(HOME="$BHOME" PULP_VITALS_TOOL_PATH="" PULP_VITALS_SYSCTL="$STUB" STUB_NCPU=18 \
   PULP_VITALS_NOW="$NOW" bash "$VITALS" --build-json 2>/dev/null)"
 jcheck "build-json: no tools -> nulls, not zeros" "$bj" \
-  'd["ccache_host"] is None and d["ccache_gate"] is None and d["tartci"]["leases"] is None and d["wheelhouse_wheels"] is None and d["ncpu"] == 18 and d["sampled_at"] == '"$NOW"
+  'd["ccache_host"] is None and d["ccache_gate"] is None and d["tartci"]["leases"] is None and d["tartci"]["installed_generation"] is None and d["wheelhouse_wheels"] is None and d["ncpu"] == 18 and d["sampled_at"] == '"$NOW"
 
 TOOLS="$WORK/tools"; mkdir -p "$TOOLS" "$BHOME/.cache/pulp-ci/ccache" "$BHOME/.cache/pulp-ci/pip-wheelhouse"
 : > "$BHOME/.cache/pulp-ci/pip-wheelhouse/numpy-2.0-cp311.whl"
@@ -166,6 +166,39 @@ jcheck "build-json: gate ccache read from its own dir" "$bj" \
   'd["ccache_gate"]["hit_pct"] == 91.0 and d["ccache_gate"]["max_gb"] == 5 and d["ccache_gate"]["dir"].endswith("/.cache/pulp-ci/ccache")'
 jcheck "build-json: wheelhouse counted" "$bj" 'd["wheelhouse_wheels"] == 2'
 
+# The installed tartci commit on a sealed host: the launcher bundle's
+# source_commit, else the fleet install record's (pretty-printed, nested).
+THOME="$WORK/thome"; mkdir -p "$THOME/.config/tartci"
+cat > "$THOME/.config/tartci/macos-fleet-install.json" <<'EOF2'
+{
+  "launch_helper": {
+    "identifier": "com.example.launcher",
+    "source_commit": "1111111111111111111111111111111111111111"
+  },
+  "schema": 1
+}
+EOF2
+bj="$(HOME="$THOME" PULP_VITALS_TOOL_PATH="" PULP_VITALS_SYSCTL="$STUB" bash "$VITALS" --build-json 2>/dev/null)"
+jcheck "build-json: installed tartci from the fleet install record" "$bj" \
+  'd["tartci"]["installed_generation"] == "111111111111"'
+mkdir -p "$THOME/.local/libexec/TartCILauncher.app/Contents/Resources"
+printf '{"schema":1,"source_commit":"3dd84d9b099f6679a1ed2f75d9410a368d5d4be2","tart_home":"/v"}' \
+  > "$THOME/.local/libexec/TartCILauncher.app/Contents/Resources/bundle.json"
+bj="$(HOME="$THOME" PULP_VITALS_TOOL_PATH="" PULP_VITALS_SYSCTL="$STUB" bash "$VITALS" --build-json 2>/dev/null)"
+jcheck "build-json: sealed launcher bundle wins over the install record" "$bj" \
+  'd["tartci"]["installed_generation"] == "3dd84d9b099f"'
+
+# A probe that blocks (a launchd agent stuck in open() on an external volume)
+# costs its own field, not the snapshot.
+STALL="$WORK/stall"; mkdir -p "$STALL"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$STALL/ccache"; chmod +x "$STALL/ccache"
+t0=$(date +%s)
+bj="$(HOME="$BHOME" PULP_VITALS_TOOL_PATH="$STALL" PULP_VITALS_PROBE_TIMEOUT=1 \
+  PULP_VITALS_SYSCTL="$STUB" bash "$VITALS" --build-json 2>/dev/null)"
+elapsed=$(( $(date +%s) - t0 ))
+jcheck "build-json: a stalled probe reads as null within its deadline (${elapsed}s)" "$bj" \
+  'd["ccache_host"] is None and d["ccache_gate"] is None and '"$elapsed"' < 10'
+
 # 17-18. the sensor publishes the snapshot under "build", and PULP_VITALS_BUILD=0
 # keeps it out; the history log never carries it.
 SDIR="$WORK/state"
@@ -179,6 +212,24 @@ if grep -q '"build"' "$SDIR/host_vitals.log"; then
 else
   PASS=$((PASS+1)); printf '  [PASS] sensor: history log stays health-only\n'
 fi
+# Between the health-first write and the build write the published reading
+# still carries the previous tick's build snapshot (with its own sampled_at).
+# The build probe is stalled here so that window is wide enough to read.
+prev_sampled="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build"]["sampled_at"])' "$SDIR/host_vitals.json")"
+log_lines="$(wc -l < "$SDIR/host_vitals.log")"
+HOME="$BHOME" PULP_VITALS_TOOL_PATH="$STALL" PULP_VITALS_PROBE_TIMEOUT=4 \
+  PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSCTL="$STUB" PULP_VITALS_REPORTS_DIR="$WORK/empty" \
+  bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1 &
+sensor_pid=$!
+for _ in $(seq 1 100); do
+  [ "$(wc -l < "$SDIR/host_vitals.log")" -gt "$log_lines" ] && break
+  sleep 0.1
+done
+sleep 0.5
+mid="$(cat "$SDIR/host_vitals.json")"
+wait "$sensor_pid"
+jcheck "sensor: the health-first write carries the previous build snapshot" "$mid" \
+  '"level" in d and d["build"]["sampled_at"] == '"$prev_sampled"
 HOME="$BHOME" PULP_VITALS_BUILD=0 PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSCTL="$STUB" \
   PULP_VITALS_REPORTS_DIR="$WORK/empty" bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1
 jcheck "sensor: PULP_VITALS_BUILD=0 omits the snapshot" "$(cat "$SDIR/host_vitals.json")" '"build" not in d'

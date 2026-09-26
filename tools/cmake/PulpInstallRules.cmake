@@ -947,6 +947,8 @@ if(APPLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_open_documents.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_view.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/mac_text_input_ranges.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_view.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_script_keys.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/plugin_view_host_mac_text_input.mm"
@@ -958,8 +960,8 @@ if(APPLE)
         DESTINATION src/pulp/view/platform/mac
     )
     # Shared macOS render ObjC source (metal_surface_mac.mm), compiled per-binary
-    # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalView (the GPU-surface
-    # NSView, renamed to PulpMetalSurfaceView) doesn't collide across plug-ins. The
+    # by _pulp_apply_view_mac_objc_suffix() so its PulpMetalSurfaceView (the
+    # GPU-surface NSView) doesn't collide across plug-ins. The
     # helper probes src/pulp/render in an installed SDK; ship the source + the
     # render names header it includes there.
     install(FILES

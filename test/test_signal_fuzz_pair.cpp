@@ -583,7 +583,7 @@ TEST_CASE("8 oversampling suppresses the aliased image band", "[fuzz][aliasing]"
 
 // ── 9. Determinism ────────────────────────────────────────────────────────
 
-TEST_CASE("9 render, reset, re-render is bit-identical", "[fuzz][determinism]") {
+TEST_CASE("9 render, reset, re-render is bit-identical (fuzz pair)", "[fuzz][determinism]") {
     for (bool drift : {false, true}) {
         for (auto device : {FuzzDevice::germanium, FuzzDevice::silicon}) {
             auto f = make_fuzz(device, 0.8, 0.3);
@@ -645,7 +645,7 @@ TEST_CASE("10 latency is reported exactly and matches the measured delay",
 
 // ── float/double parity ───────────────────────────────────────────────────
 
-TEST_CASE("the float and double instantiations agree", "[fuzz]") {
+TEST_CASE("the float and double instantiations agree (fuzz pair)", "[fuzz]") {
     FuzzPairT<float> single;
     FuzzPairT<double> dbl;
     for (auto* p : {static_cast<void*>(&single), static_cast<void*>(&dbl)}) (void)p;

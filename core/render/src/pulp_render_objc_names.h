@@ -3,8 +3,8 @@
 // Per-binary-unique Objective-C class names for the macOS render layer, the
 // render-side companion to core/view/platform/mac/pulp_mac_objc_names.h.
 //
-// metal_surface_mac.mm defines an ObjC class (PulpMetalView, the CAMetalLayer-
-// backed GPU surface view) compiled once into the shared pulp-render static
+// metal_surface_mac.mm defines an ObjC class (PulpMetalSurfaceView, the
+// CAMetalLayer-backed GPU surface view) compiled once into the shared pulp-render static
 // library, so every plug-in linking pulp-render registers the SAME class name.
 // Loading two Pulp plug-ins into one host then makes the objc runtime emit
 // "Class X is implemented in both ..." and lets the first-loaded copy shadow the
@@ -25,10 +25,10 @@
 #define PULP_RENDER_OBJC_PASTE(a, b) PULP_RENDER_OBJC_PASTE2(a, b)
 #define PULP_RENDER_OBJC_NAME(base) PULP_RENDER_OBJC_PASTE(base, PULP_VIEW_OBJC_SUFFIX)
 
-// GPU surface NSView (metal_surface_mac.mm). Renamed to a DISTINCT base
-// (PulpMetalSurfaceView) — the view layer's window_host_mac.mm defines a separate
-// `PulpMetalView`, so a shared suffix alone would still collide; the distinct
-// base also resolves that pre-existing same-name ambiguity between the two.
-#define PulpMetalView                  PULP_RENDER_OBJC_NAME(PulpMetalSurfaceView)
+// GPU surface NSView (metal_surface_mac.mm). Its base name is distinct from
+// the view layer's own `PulpMetalView` (window_host_mac.mm) so the two never
+// share a name, suffixed or not, and both clusters can be compiled into one
+// translation unit without one header's rename shadowing the other's.
+#define PulpMetalSurfaceView PULP_RENDER_OBJC_NAME(PulpMetalSurfaceView)
 
 #endif  // PULP_VIEW_OBJC_SUFFIX

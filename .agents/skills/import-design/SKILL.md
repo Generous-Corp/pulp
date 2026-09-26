@@ -3897,9 +3897,11 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
 - **The Node capture tests do NOT share the C++ discovery order above.**
-  `browser_capture/capture.integration.test.mjs` carries its own
+  `browser_capture/capture_integration_support.mjs` carries their own
   `installedBrowser()` resolver, and it is the only browser resolution in the
-  repository written in JavaScript. Whatever the C++ probe learns about managed
+  repository written in JavaScript. Under GitHub Actions it accepts only
+  `PULP_DESIGN_BROWSER`: a lane that did not provision the pinned build skips
+  the real-browser cases instead of launching the runner image's Chrome. Whatever the C++ probe learns about managed
   browsers, `current.json`, or config modes is invisible to it, so a provisioned
   browser reaches the Node suite only through the environment. Hand it
   `PULP_DESIGN_BROWSER`, the same variable `collect_browser_candidates` reads.
@@ -3911,6 +3913,17 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   add a browser-driven `.mjs` test, read that variable rather than growing a
   second candidate list, and remember that on a host with no system Chrome the
   cost of getting this wrong is a silent skip rather than a failure.
+- **Real-browser cases live in `*.integration.test.mjs` files, and they run
+  concurrently.** The ctest `pulp-browser-capture-node-integration` is
+  `RUN_SERIAL` (a CDP screenshot once crossed its 20 s deadline while unrelated
+  ctest work shared the VM) and runs every `*.integration.test.mjs` file under
+  `node --test --test-concurrency=3`. Node runs the cases *within* one file in
+  sequence, so the files are the unit of parallelism: each case mostly waits on
+  a cold Chrome launch, so three files overlap well inside the serial slot. Add
+  a new real-browser case to the file whose theme it shares (capture,
+  interactions, frame fitting) and keep the three roughly balanced by runtime;
+  a new integration file is picked up by the glob and excluded from the unit
+  aggregate automatically.
 - **"Could not read the version" is not "wrong version".** Reading `--version`
   has been observed to fail once and then succeed moments later on the same
   browser, and it used to surface as "too old or incompatible" — a message that

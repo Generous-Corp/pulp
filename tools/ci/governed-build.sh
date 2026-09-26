@@ -475,38 +475,22 @@ start_epoch="$(date +%s 2>/dev/null || echo 0)"
 
 # Record the build in Shipyard's metrics store, so "is this build slower than
 # usual on this host?" is a `shipyard metrics watch --project pulp` query rather
-# than a guess. Best-effort and silent: no shipyard (a build VM, a contributor
-# checkout) or PULP_BUILD_METRICS=0 records nothing, and the record runs in the
-# background with its output detached so it can neither fail nor delay the
-# build, nor hold a caller's command-substitution pipe open.
+# than a guess. record_build_metric.sh owns the contract (shared with the
+# `pulp build` CLI) and is best-effort, silent, and returns immediately.
 record_build_metric() {
-  local rc="$1" sy host end_epoch scope grant targets="" prev="" arg
-  [ "${PULP_BUILD_METRICS:-1}" = "0" ] && return 0
-  sy="$(command -v shipyard 2>/dev/null)" || return 0
-  end_epoch="$(date +%s 2>/dev/null || echo 0)"
-  [ "$start_epoch" -gt 0 ] 2>/dev/null && [ "$end_epoch" -ge "$start_epoch" ] || return 0
-  host="$(hostname -s 2>/dev/null || hostname)"
+  local rc="$1" grant prev="" arg
+  shift
+  local -a fields=()
   for arg in "$@"; do
-    if [ "$prev" = "--target" ] || [ "$prev" = "-t" ]; then targets="${targets:+$targets,}$arg"; fi
+    if [ "$prev" = "--target" ] || [ "$prev" = "-t" ]; then fields+=(--target "$arg"); fi
     prev="$arg"
   done
-  if [ -n "$targets" ]; then scope="focused"; else scope="all"; targets="all"; fi
   if [ -n "$LEASE_ID" ]; then grant="lease"
   elif [ -n "$TARTCI_BIN" ]; then grant="floor"
   else grant="tier0"; fi
-  (
-    "$sy" metrics record --project pulp --job governed-build \
-      --target "local-build/$scope" --platform "$(uname -s | tr '[:upper:]' '[:lower:]')" \
-      --backend local --provider governed-build --host "$host" --runner "$host" \
-      --step build --duration-ms "$(( (end_epoch - start_epoch) * 1000 ))" \
-      --status "$([ "$rc" -eq 0 ] && echo success || echo failure)" --exit-code "$rc" \
-      --profile "j$jobs" --routing-decision "$grant" --workflow "targets:${targets:0:200}" \
-      --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
-      --sha "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
-      --started-at "$(date -u -r "$start_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$start_epoch" +%Y-%m-%dT%H:%M:%SZ)" \
-      --completed-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      --external-id "local:$host:$$:$start_epoch"
-  ) >/dev/null 2>&1 </dev/null &
+  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/record_build_metric.sh" --provider governed-build \
+    --start "$start_epoch" --end "$(date +%s 2>/dev/null || echo 0)" --exit-code "$rc" \
+    --jobs "$jobs" --grant "$grant" ${fields[@]+"${fields[@]}"} >/dev/null 2>&1 </dev/null || true
   return 0
 }
 

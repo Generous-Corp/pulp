@@ -269,6 +269,20 @@ the authoring model; reach for the graph only when routing is dynamic at run tim
   `SignalGraph`.
 - A `CustomNodeType` is a graph utility node, **not** a plugin authoring surface.
 
+#### Bounded sample regions
+
+Sample regions are a narrow, experimental extension of the canonical
+`SignalGraph` for author-declared scalar DSP that must execute per sample while
+remaining graph-editable. They do not add a second graph runtime or generated
+DSP ABI; `GraphRuntimeExecutor` lowers an accepted region into the same prepared
+runtime used by the graph and its baked processor. Every feedback recurrence
+places an explicit `UnitDelay`; instantaneous cycles are refused. Promoted
+values use the ordinary `StateStore` contract, and exact kernel versions,
+boundaries, limits, and causality are proved before publication. Immutable
+snapshot adoption retains state only for exact identities; changed identities
+start fresh and old/new bindings cannot execute concurrently. See
+`docs/guides/sample-granular-graphs.md` for the authoring and proof path.
+
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
@@ -1011,6 +1025,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **build** — build and test only what a diff touches
 - Build or test only what your diff touches — the selection behind `pulp build/dev/loop/test` in a source checkout (projection lives in changed_surface_inventory.py). → `pulp affected`
+- Starting a new worktree that a sibling worktree a few commits away has already built — seed its build dir by APFS clone + retarget instead of paying the full configure, compile and link again. → `pulp build`
+  - ⚠ **Cannot see:** Removes gratuitous work only. A binary is trusted only if it does not embed the donor path, so `-D` defines that carry the source dir (and `__FILE__` without ccache's base_dir) recompile as usual; a Debug donor with `-g` embeds the path in every object and gains nothing. The closing `ninja -n` count is the receipt, not a proof the outputs are right — the tests are.
 
 **build-speed** — measure build, gate and merge-queue speed
 - Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`

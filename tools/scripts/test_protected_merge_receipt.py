@@ -391,5 +391,207 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
                 receipt.download(self.download_args())
 
 
+    def test_decision_note_carries_the_verified_receipts_evidence(self) -> None:
+        issued = receipt.issue(self.issue_args())
+        receipt.verify_receipt(issued, self.verify_args())
+        note = receipt.decision_note("macos", "reuse", "exact-tree receipt revalidated", issued)
+        self.assertEqual(note, {
+            "schema": "shipyard-receipt-decision/v1", "target": "macos", "verdict": "reuse",
+            "reason": "exact-tree receipt revalidated", "source_run_id": "42",
+            "selected": 1, "passed": 1, "skipped": 0, "inventory_count": 1,
+        })
+
+
+class DecisionNoteCliTest(unittest.TestCase):
+    """The notes Shipyard reads describe a decision; they never make one."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.temp.name)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def note(self, *args: str) -> dict:
+        out = self.dir / f"note-{len(list(self.dir.iterdir()))}.json"
+        self.assertEqual(receipt.main(["note", *args, "--output", str(out)]), 0)
+        return json.loads(out.read_text())
+
+    def test_refusal_reason_is_the_verifiers_last_stderr_line(self) -> None:
+        stderr = self.dir / "stderr.txt"
+        stderr.write_text("Traceback noise\nprotected receipt: receipt records a narrowed "
+                          "test tier, not full validation\n")
+        forged = self.dir / "receipt.json"
+        forged.write_text(json.dumps({"run_id": "77", "validation": {
+            "selected": 9, "passed": 9, "skipped": 0, "inventory_count": 3000}}))
+        note = self.note("--target", "linux", "--verdict", "refuse",
+                         "--reason-file", str(stderr), "--receipt", str(forged))
+        self.assertEqual(note["verdict"], "refuse")
+        self.assertEqual(note["reason"], "receipt records a narrowed test tier, not full validation")
+        self.assertEqual((note["selected"], note["inventory_count"], note["source_run_id"]),
+                         (9, 3000, "77"))
+
+    def test_absent_or_malformed_evidence_reads_as_unknown_not_zero(self) -> None:
+        garbage = self.dir / "garbage.json"
+        garbage.write_text("{not json")
+        note = self.note("--target", "macos", "--verdict", "refuse",
+                         "--reason", "no protected receipt for this head and base",
+                         "--receipt", str(garbage))
+        self.assertEqual([note[k] for k in receipt.NOTE_COUNT_KEYS], [None] * 4)
+        self.assertIsNone(note["source_run_id"])
+        blank = self.note("--target", "macos", "--verdict", "refuse",
+                          "--reason-file", str(self.dir / "missing.txt"))
+        self.assertEqual(blank["reason"], "no reason recorded")
+
+    def test_publish_emits_one_parseable_annotation_per_note_and_a_table(self) -> None:
+        reuse = receipt.decision_note("macos", "reuse", "exact-tree receipt revalidated",
+                                      {"run_id": "42", "validation": {
+                                          "selected": 3500, "passed": 3490, "skipped": 10,
+                                          "inventory_count": 3540}})
+        refuse = receipt.decision_note("linux", "refuse", "100% | odd\nreason")
+        paths = []
+        for n in (reuse, refuse):
+            paths.append(self.dir / f"{n['target']}.json")
+            paths[-1].write_text(json.dumps(n))
+        summary = self.dir / "summary.md"
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            self.assertEqual(receipt.main(["publish-notes", *map(str, paths),
+                                           "--summary", str(summary)]), 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        prefix = "::notice title=shipyard-receipt-decision::"
+        self.assertTrue(all(line.startswith(prefix) for line in lines), lines)
+        # GitHub unescapes %25/%0A/%0D before storing the annotation message.
+        decoded = [json.loads(line[len(prefix):].replace("%0A", "\n").replace("%0D", "\r")
+                              .replace("%25", "%")) for line in lines]
+        self.assertEqual(decoded, [reuse, refuse])
+        # A bare `%` would start an escape sequence and corrupt the message.
+        self.assertIn('"reason":"100%25 | odd reason"', lines[1])
+        table = summary.read_text()
+        self.assertIn("| macos | reused receipt from run 42 | 3500 selected / 3490 passed / "
+                      "10 skipped of 3540 built | exact-tree receipt revalidated |", table)
+        self.assertIn("| linux | validated in full (receipt refused) | n/a | 100% \\| odd reason |",
+                      table)
+
+    def test_no_decision_reason_is_a_plain_notice_never_a_verdict(self) -> None:
+        summary = self.dir / "summary.md"
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            self.assertEqual(receipt.main([
+                "publish-notes", "--summary", str(summary),
+                "--no-decision-reason", "merge group changed no native build input"]), 0)
+        # Nothing was decided, so no shipyard-receipt-decision annotation may
+        # appear: Shipyard would render it as a verdict the merge never made.
+        self.assertEqual(buf.getvalue().splitlines(), [
+            "::notice::receipt reuse not evaluated: merge group changed no native build input"])
+        self.assertIn("| — | no receipt decision was needed | | "
+                      "merge group changed no native build input |", summary.read_text())
+
+    def test_no_decision_reason_is_ignored_when_targets_were_decided(self) -> None:
+        refuse = receipt.decision_note("macos", "refuse",
+                                       "the merge-group commit has 3 parent(s); reuse needs "
+                                       "exactly two")
+        lines, table = receipt.render_notes([refuse], "merge group changed no native build input")
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("::notice title=shipyard-receipt-decision::"))
+        self.assertNotIn("not evaluated", "\n".join(lines) + table)
+        self.assertIn("3 parent(s); reuse needs exactly two", table)
+
+
+class ReuseStepRefusalReasonTest(unittest.TestCase):
+    """The build.yml reuse step names why a merge group's shape refused reuse.
+
+    Runs the step's own bash against commits whose parent shape is built on
+    purpose, so the recorded reason is checked against a known count.
+    """
+
+    WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "build.yml"
+
+    @classmethod
+    def step_script(cls) -> str:
+        lines = cls.WORKFLOW.read_text(encoding="utf-8").splitlines()
+        start = lines.index("      - id: reuse")
+        run = next(i for i in range(start, len(lines)) if lines[i] == "        run: |")
+        body = []
+        for line in lines[run + 1:]:
+            if line.strip() and not line.startswith(" " * 10):
+                break
+            body.append(line[10:])
+        return "\n".join(body) + "\n"
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo"
+        (self.repo / "tools" / "scripts").mkdir(parents=True)
+        (self.repo / "tools" / "scripts" / "protected_merge_receipt.py").write_bytes(
+            Path(receipt.__file__).read_bytes())
+        git(self.repo, "init", "-q")
+        git(self.repo, "config", "user.email", "ci@example.invalid")
+        git(self.repo, "config", "user.name", "CI")
+        self.commits = []
+        for name in ("a", "b", "c"):
+            (self.repo / name).write_text(name, encoding="utf-8")
+            git(self.repo, "add", name)
+            git(self.repo, "commit", "-qm", name)
+            self.commits.append(git(self.repo, "rev-parse", "HEAD"))
+        self.tree = git(self.repo, "rev-parse", "HEAD^{tree}")
+        (self.root / "step.sh").write_text(self.step_script(), encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def octopus(self, parents: list[str]) -> str:
+        # Distinct parents only: commit-tree collapses a repeated -p.
+        self.assertEqual(len(set(parents)), len(parents))
+        args = [arg for sha in parents for arg in ("-p", sha)]
+        sha = git(self.repo, "commit-tree", self.tree, *args, input_text="group\n")
+        self.assertEqual(len(git(self.repo, "rev-list", "--parents", "-n", "1", sha).split()),
+                         len(parents) + 1)
+        return sha
+
+    def run_step(self, sha: str, native: str = "true") -> tuple[str, str]:
+        runner_temp = self.root / f"rt-{sha[:12]}-{native}"
+        runner_temp.mkdir()
+        summary, output = runner_temp / "summary.md", runner_temp / "output"
+        env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", NATIVE_BUILD_REQUIRED=native,
+                   GITHUB_SHA=sha, RUNNER_TEMP=str(runner_temp),
+                   GITHUB_STEP_SUMMARY=str(summary), GITHUB_OUTPUT=str(output),
+                   ORIGINAL_MATRIX='{"include":[{"key":"macos"},{"key":"linux"}]}',
+                   RECEIPT_TOKEN="unused", A2T_RECEIPT_VERIFICATION_REQUIRED="false",
+                   GITHUB_REPOSITORY="example/repo", GITHUB_WORKSPACE=str(self.repo))
+        done = subprocess.run(["bash", "-e", str(self.root / "step.sh")], cwd=self.repo,
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("build_required=true", output.read_text())
+        return done.stdout, summary.read_text() if summary.exists() else ""
+
+    def decided_reasons(self, stdout: str) -> dict[str, str]:
+        prefix = "::notice title=shipyard-receipt-decision::"
+        notes = [json.loads(line[len(prefix):]) for line in stdout.splitlines()
+                 if line.startswith(prefix)]
+        return {note["target"]: note["reason"] for note in notes}
+
+    def test_single_and_octopus_parents_are_named_by_count(self) -> None:
+        # The second commit has exactly one parent; the octopus has three.
+        for sha, count in ((self.commits[1], 1), (self.octopus(self.commits), 3)):
+            stdout, _ = self.run_step(sha)
+            reason = f"the merge-group commit has {count} parent(s); reuse needs exactly two"
+            self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+
+    def test_unreadable_commit_is_not_reported_as_a_parent_count(self) -> None:
+        stdout, _ = self.run_step("0" * 40)
+        reason = "the merge-group commit's parents could not be read"
+        self.assertEqual(self.decided_reasons(stdout), {"macos": reason, "linux": reason})
+
+    def test_merge_group_without_native_input_says_nothing_was_evaluated(self) -> None:
+        stdout, summary = self.run_step(self.octopus(self.commits[:2]), native="false")
+        self.assertEqual(self.decided_reasons(stdout), {})
+        self.assertIn("::notice::receipt reuse not evaluated: merge group changed no native "
+                      "build input", stdout)
+        self.assertIn("merge group changed no native build input |", summary)
+
+
 if __name__ == "__main__":
     unittest.main()

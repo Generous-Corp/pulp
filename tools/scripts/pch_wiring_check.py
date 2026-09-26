@@ -15,6 +15,10 @@ Makefile build) and verifies:
     (clang accepts a PCH macro the consumer lacks WITHOUT a diagnostic, so
     this is the one mismatch nothing else would ever report);
   * no consumer carries -fno-exceptions / -fno-rtti;
+  * every compile that produces a PCH and runs through ccache turns base_dir
+    off (`CCACHE_BASEDIR=` in its launcher). A .pch embeds its build tree's
+    absolute paths, so a base_dir-relative key would hand one worktree's PCH
+    to another (see pulp_ccache_key_on_build_path in Ccache.cmake);
   * named expectations hold (`--expect target=carrier` or `=none`), which
     covers a representative C++20 suite, a C++23 suite, an excluded suite,
     and SDL3-static (whose own PCH is turned off so ccache can store it).
@@ -41,6 +45,7 @@ class CompileLine:
     output: str
     flags: str
     defines: str
+    launcher: str = ""
 
     @property
     def uses_pch(self) -> bool:
@@ -118,7 +123,8 @@ def parse_ninja(build_dir: Path) -> list[CompileLine]:
                 t = _NINJA_TARGET_DIR.search(output)
                 if not t:
                     continue
-                current = {"target": t.group("target"), "output": output, "flags": "", "defines": ""}
+                current = {"target": t.group("target"), "output": output, "flags": "", "defines": "",
+                           "launcher": ""}
                 continue
             if current is not None and raw.startswith("  "):
                 key, _, value = raw.strip().partition(" = ")
@@ -126,6 +132,8 @@ def parse_ninja(build_dir: Path) -> list[CompileLine]:
                     current["flags"] = value
                 elif key == "DEFINES":
                     current["defines"] = value
+                elif key == "LAUNCHER":
+                    current["launcher"] = value
         if current:
             lines.append(CompileLine(**current))
     return lines
@@ -160,6 +168,37 @@ def parse_compile_lines(build_dir: Path) -> list[CompileLine]:
     if "Makefiles" in generator:
         return parse_makefiles(build_dir)
     raise SystemExit(f"pch-wiring: unsupported generator for this check: {generator}")
+
+
+_BASEDIR_OFF = re.compile(r"(?:^|\s)CCACHE_BASEDIR=(?:\s|$)")
+
+
+def pch_producers(build_dir: Path) -> list[tuple[str, str]]:
+    """(label, launcher-and-command) for every compile that emits a PCH."""
+    if "Ninja" in detect_generator(build_dir):
+        return [(line.output, line.launcher) for line in parse_ninja(build_dir)
+                if "-emit-pch" in line.flags]
+    out: list[tuple[str, str]] = []
+    for build_make in build_dir.rglob("build.make"):
+        for raw in build_make.read_text(encoding="utf-8", errors="replace").splitlines():
+            # Skip the `-x c++-header -E` / `-S` preprocess and assembly
+            # helper rules CMake writes next to the real compile.
+            if "-emit-pch" in raw and not re.search(r"-x\s+\S+-header\s+-[ES]\s", raw):
+                out.append((str(build_make.relative_to(build_dir)), raw.strip()))
+    return out
+
+
+def check_pch_ccache_keys(build_dir: Path) -> tuple[int, list[str]]:
+    """PCH compiles through ccache must key on the absolute build path."""
+    producers = pch_producers(build_dir)
+    problems = [
+        f"{label}: produces a PCH through ccache without CCACHE_BASEDIR= in its launcher; "
+        "a base_dir-relative key serves this tree's .pch (which embeds its absolute paths) "
+        "to other worktrees -- call pulp_ccache_key_on_build_path() on the target"
+        for label, cmd in producers
+        if "ccache" in cmd and not _BASEDIR_OFF.search(cmd)
+    ]
+    return len(producers), problems
 
 
 def group_by_target(lines: list[CompileLine]) -> dict[str, list[CompileLine]]:
@@ -218,6 +257,11 @@ def check(build_dir: Path, option_on: bool, expectations: dict[str, str]) -> lis
                 problems.append(
                     f"{target}: carrier {carrier} was built with {sorted(missing)} which the consumer lacks "
                     "(clang would accept that silently)")
+
+    n_producers, key_problems = check_pch_ccache_keys(build_dir)
+    problems.extend(key_problems)
+    if option_on and pch_targets and n_producers == 0:
+        problems.append("targets reuse a carrier but no PCH-producing compile line was found")
 
     for target, expected in sorted(expectations.items()):
         lines = by_target.get(target)
@@ -278,7 +322,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {p}", file=sys.stderr)
         return 1
     n = len({t for t, (s, _) in read_ledger(build_dir).entries.items() if s == "pch"})
-    print(f"pch-wiring: OK ({n} test executables reuse a carrier; {len(expectations)} expectations hold)")
+    n_producers, _ = check_pch_ccache_keys(build_dir)
+    print(f"pch-wiring: OK ({n} test executables reuse a carrier; {n_producers} PCH compile(s) "
+          f"keyed on their build path; {len(expectations)} expectations hold)")
     return 0
 
 

@@ -745,6 +745,22 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
   empty `std::filesystem::path::parent_path()` before creating directories and
   add shellout coverage for the bare-filename case.
 
+### `pulp build --seed-build` is best-effort by contract
+
+`--seed-build[=<donor>]` (and `PULP_SEED_BUILD`) hands a fresh source
+checkout's build dir to `tools/scripts/seed_build_dir.py` before the first
+configure. The CLI side is deliberately thin: it decides applicability
+(source checkout, no `--trace`, build dir absent and directly under the
+root), passes the requested build type and `--examples` so the script only
+accepts a matching donor, and treats exit 3 ("not applicable, nothing left
+behind") and any failure the same way — print why, then configure from
+scratch. Never let a seeding problem fail a build; the flag's whole value is
+that it can be on by default in an agent's environment. The mechanics (APFS
+`clonefile`, path retarget, `.ninja_deps` rewrite, `.ninja_log` rehash with
+ninja 1.13's rapidhash, path-tainted binary drop) live in the script and its
+`test_seed_build_dir.py` fixture, not in Rust; the Rust tests only pin the
+argv contract and the fallback.
+
 ### `pulp build --trace` and the `trace` SDK profile
 
 Perfetto is a build-time option, so making it reachable is a CLI problem, not a

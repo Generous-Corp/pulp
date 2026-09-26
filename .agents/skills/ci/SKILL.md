@@ -352,6 +352,40 @@ If you add a target that links option-gated sources, gate the `add_subdirectory`
 on the same option. A target whose implementation is compiled out still
 participates in `all`.
 
+## A timing test under a sanitizer measures the sanitizer
+
+ASan and UBSan add interception and shadow-memory work to every memory access.
+A throughput or latency assertion calibrated for an ordinary build therefore
+cannot hold under them, and its failure says nothing about the code. The nightly
+`Sanitizer Tests` lane sat red on main for days largely on this: `bench::modal
+bank throughput scales to large banks in real time` and `slow::Analog VCF stays
+finite at worst-case drive and oversampling` fail there and nowhere else.
+
+The ASan and UBSan broad passes therefore exclude
+`validation|slow|performance|bench|quality-lab` — the same label groups the
+required `macos` gate excludes, for the same underlying reason. On the gate the
+noise source is a shared runner's load; under a sanitizer it is the instrument
+itself.
+
+Two things worth keeping straight when reading that lane:
+
+- **Race and RT-safety tests are not excluded, deliberately.** `[threads]`,
+  `[rt-safety]` and the TSan name-regex lane all still run, because catching
+  that class is the reason the lane exists. A failing race test there is a
+  finding, not label noise.
+- **A timing-sensitive test is not always labelled.** `Runtime clock transitions
+  preserve invariant measured latency` (`[clock][latency]`) and `drift wanders
+  the pitch slowly at ~the commanded RMS` (`[drift]`) time out under ASan while
+  carrying no timing label, so the exclusion does not reach them. Grep the
+  registration, not the name: a `bench::` or `slow::` prefix comes from
+  `catch_discover_tests(... TEST_PREFIX ... LABELS ...)`, and a Catch2 tag alone
+  does **not** become a ctest label.
+
+Environment failures in the same lane (`visual-python-deps-present`, a missing
+numpy/Pillow on the host, `cmake-*-sdk-consumer`,
+`pulp-browser-capture-node-integration`) are host gaps, not timing. They each
+want their own fix; a label would only hide them.
+
 ## Test lanes — what gates the required `macos` check
 
 For native pull requests, Shipyard `workflow_dispatch` validation, and merge
@@ -388,6 +422,16 @@ include label or regex) can never be reused. When changing which tests a
 pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
+
+When measuring reuse from job logs, read only the emitted `##[notice]` lines.
+The `protected-receipt-reuse` log also echoes the step's whole script, so a
+plain grep finds every refusal message in every run, including runs that made
+no decision. A merge group with no native build input is one of those: it
+publishes no `shipyard-receipt-decision` annotation, only a
+`receipt reuse not evaluated` notice, and its `macos` check is the
+near-instant bootstrap. The job writes decision notes for `macos` and `linux`
+in file-name order, so the log prints `linux` first; `shipyard landing` shows
+both.
 
 ### `source-selftest` tests gate on `Enforce version & skill sync`, not on `macos`
 
@@ -1059,6 +1103,16 @@ Four things bite when touching this:
   it in the Build step took the iOS gate out. Visibility and enforcement are
   separate changes; make the skip readable first, and promote only against a
   measured population.
+
+### Exact GPU-audio SDK artifacts
+
+When `agent-capability-installed-sdk` is required for an ARM64 macOS capability
+change, `build.yml` installs the tested Release build and publishes
+`pulp-gpu-audio-sdk-<sha>-macos`. The archive and adjacent JSON receipt contain
+the same checkout's `PulpConfig.cmake`, public headers, libraries, source SHA,
+and per-file hashes. Downstream validation must use that exact prefix and the
+receipt's `source_sha`; a build-tree target check or an unbound SDK directory is
+not installed-SDK evidence.
 
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
@@ -2118,6 +2172,19 @@ unknown runner prefix); jobs attach to a registration by runner-name prefix and
 labels, not by the registration's workflow list, because GitHub assigns by
 labels alone (release-cli darwin legs have run on pulp-gate runners).
 
+## A new download in `build.yml` must be in tartci's relay contract first
+
+The self-hosted macOS gate VMs reach the internet only through tartci's egress
+relay (`profiles/pulp-protected-macos-bootstrap-hosts.toml`). A download from a
+host it does not admit fails inside EVERY gate VM at once, and reads like a
+flaky network, not like your diff: a `pip install` added before the relay
+admitted PyPI failed every m5 gate job for a day. The `relay-contract-hosts`
+ctest (`tools/scripts/relay_contract_check.py`) now fails such a PR, naming the
+host and what needs it. Fix order: land the host in tartci first, then refresh
+the copy with `relay_contract_check.py --tartci <checkout> --write` in the Pulp
+PR. It counts literal URLs in macOS-capable `run:` scripts plus pip/npm/brew
+invocations; a download a TEST makes itself goes in its `CORPUS_HOSTS` list.
+
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
 A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and
@@ -2353,7 +2420,33 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   counted from `com.apple.Virtualization.VirtualMachine` processes (their RSS is
   the VM's memory; the `tart run` launcher's is not). A sensor installed before
   the snapshot existed publishes none; `build_speed_scorecard.py report` then
-  probes live and labels it — reinstall the sensor to fix.
+  probes live and labels it — reinstall the sensor to fix. **A snapshot probe can
+  hang under launchd:** on m3 the host ccache lives on `/Volumes/Workshop`, and a
+  launchd agent's `ccache -s` blocked in `open()` for minutes (interactively it
+  takes 0.25 s), which froze the published reading because the sensor wrote
+  health and snapshot together. Probes now run under a process-group deadline
+  (`PULP_VITALS_PROBE_TIMEOUT`, 15 s; killing only the parent leaves a grandchild
+  holding the output pipe) and health is published first, so m3's host ccache
+  reads null ("stats timed out"), not stale. That health-first write carries the
+  previous tick's `build` object forward (with its own `sampled_at`), because the
+  fresh snapshot lands 12-25 s later and a reader in that window otherwise saw no
+  `build` at all; judge snapshot age by `build.sampled_at`, not the file mtime. tartci's version on a sealed host
+  comes from the launcher bundle's `source_commit` (`installed_generation`), the
+  same source `tartci fleet-macos self-update` reports as "installed"; a sealed
+  host has no checkout to read.
+- **Before/after a change, use `report --split <ISO time>`, not the drift
+  section.** `shipyard metrics watch` halves a fixed window, so a window that
+  straddles a fix mixes both regimes; `shipyard metrics compare` splits only on
+  whole days ago and cannot filter by target, so the split is computed from the
+  same `metrics list` rows.
+- **"Did this merge group actually run tests?"** The `protected-receipt-reuse`
+  job publishes a `shipyard-receipt-decision` annotation per target (reused, with
+  the receipt's selected/passed counts and source run, or refused, with the
+  protected-base verifier's reason) and a job-summary table; every gate test step
+  publishes a `shipyard-test-tier` annotation (`fast` on PR heads, `full`,
+  `receipt-reused`, `not-required`). The checked-out script only renders these
+  after the base verifier decided — `test_build_workflow.py` pins that the
+  workspace copy is only ever called for `note`/`publish-notes`.
 - **"Is the gate slower than usual on this host?"** is `shipyard metrics watch
   --project pulp-gate-steps --json` after `tools/scripts/build_speed_scorecard.py
   ingest`. Plain `shipyard metrics import github` keys self-hosted jobs by their
@@ -4074,6 +4167,16 @@ down this list before touching build code:
    `macos-15`, where they queue behind *advisory* lanes — sanitizers (×4 per PR),
    coverage, `sandbox-e2e`, Android, Intel-portability, consumer smoke. None of
    those are required checks; the release is. It loses to all of them.
+4. **The m5 `pulp-release` lane YIELDS to `Build and Test`.** Its tartci profile
+   sets `yield_to_workflow = "Build and Test"` and it shares m5's 2-VM cap with
+   the two gate lanes, so whenever gate demand exists its log reads
+   `yielding 20s … priority lane 'Build and Test' has the slot`. Under a busy
+   merge queue that is most of the day: on 2026-09-21/22 release darwin legs
+   waited 8.5 h and 10 h and were cancelled. The runner is not missing and the
+   static audit reports the lane `REACHABLE` (declared supply) — it is starved by
+   design. So pointing `PULP_RELEASE_MACOS_RUNS_ON_JSON` at
+   `pulp-build-vm-release` takes release work off gate slots only at the cost of
+   release latency, until the lane has reserved capacity or a bounded yield.
 
 **Diagnose, don't guess.** `tartci observe macos` on the VM host shows what the
 runner is *actually* running (it prints the live `Running job:` line), and
@@ -10078,6 +10181,31 @@ every surface: a gate that reports "no binary" as "misformatted" is the
 false-verdict class this repo keeps paying for. The wiring — exit codes kept
 apart, the PyPI pin, hosted runner — is asserted by
 `tools/scripts/test_prepush_format_gate.py` (ctest `prepush-format-gate-wiring`).
+
+### Its `--lines` output is not always what clang-format would produce
+
+Running the fixer the failure message tells you to run can make a file **less**
+conformant. Passing the full set of changed-line ranges at once can de-indent a
+class body that neither a whole-file run nor a single-range run touches.
+Measured on `core/canvas/include/pulp/canvas/canvas.hpp`:
+
+| | `public:` | members |
+|---|---|---|
+| committed | 0 | 4 |
+| `clang-format --style=file` (whole file) | 2 | **4** |
+| `--style=file --lines=239:246` (one range) | 2 | **4** |
+| `format_changed.sh` (all ranges together) | 0 | **2** |
+
+`.clang-format` is `IndentWidth: 4` with LLVM's `AccessModifierOffset: -2`, so
+2/4 is canonical; the script's answer leaves a 2-space island inside a 4-space
+class. On the branch where this surfaced it rewrote 1,034 lines across 18 files,
+including blocks the branch never touched.
+
+The cost is the opposite of a false failure: the gate is advisory and not a
+required check, so nothing blocks — but an author who does the obvious thing
+commits output the formatter would not reproduce. **Diff a class body before
+committing the fixer's result**; if it de-indents, do not commit it. Tracked as
+issue #8753, which carries the full reproduction.
 
 ## A workflow that matches a bypass trailer with its own grep will honour a quoted one
 

@@ -35,6 +35,28 @@ ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '%s %s\n' "$ts" "$json" >> "$STATE_DIR/host_vitals.log"
 health_json="$json"
 
+# Publish the health reading before the slower build snapshot, so a probe that
+# stalls there can delay only the snapshot, never the back-off signal. The
+# previous tick's "build" object is carried into this early write, so a reader
+# between the two writes still sees a build snapshot; it keeps its own
+# sampled_at, so its age stays visible. "build" is always the last key of a
+# published reading, which is what makes the suffix extraction exact.
+early="$json"
+if [ "${PULP_VITALS_BUILD:-1}" != "0" ] && [ -r "$STATE_DIR/host_vitals.json" ]; then
+    prev="$(cat "$STATE_DIR/host_vitals.json" 2>/dev/null)"
+    case "$prev" in
+        *',"build":{'*'}}')
+            prev_build="${prev##*,\"build\":}"
+            prev_build="${prev_build%\}}"
+            case "$json" in
+                *'}') early="${json%\}},\"build\":${prev_build}}" ;;
+            esac
+            ;;
+    esac
+fi
+printf '%s\n' "$early" > "$STATE_DIR/host_vitals.json.tmp" \
+    && mv -f "$STATE_DIR/host_vitals.json.tmp" "$STATE_DIR/host_vitals.json"
+
 # The published reading also carries a build-capacity snapshot (ccache, gate
 # VMs, tartci leases/commit, wheelhouse) under "build", for the build-speed
 # scorecard. It is kept out of the history log so that log still holds hours of

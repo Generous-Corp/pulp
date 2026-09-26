@@ -1,6 +1,21 @@
 # Design import tool and CLI test registrations.
 # Included by test/CMakeLists.txt; keep related test registrations here.
 
+# Grouped executable for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): the pulp::view + pulp::runtime suites that
+# drive the Claude bundle harness, shortcut extraction and WidgetBridge key and
+# document dispatch share one binary; each keeps its own registration, labels
+# and properties. A suite stays on its own when it needs its own process or
+# compile line: the browser-capture suites (a $<TARGET_FILE> launcher fixture,
+# and tools/import-design sources compiled in), the CLI shell-out suites that
+# depend on the built pulp / pulp-import-design binaries (cli-import-design,
+# cli-designmd-subcommands, import-design-tool, cli-import-figma-url), the
+# Apple-only screenshot comparison, and design-import-jsx-runtime, which
+# jsx-roundtrip.sh and source-contracts.json build and run by its executable
+# name.
+pulp_add_test_group(pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime)
+
 # Browser-solved HTML capture discovery, subprocess argv, cleanup, and artifact
 # freshness. The launcher fixture behaves like the configured Node executable,
 # so these tests exercise ChildProcess without depending on a real browser.
@@ -29,11 +44,12 @@ if(_PULP_NODE_FOR_TESTS)
     file(GLOB _PULP_MATERIALIZED_RUNTIME_NODE_TESTS CONFIGURE_DEPENDS
          ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/*.test.mjs)
 
-    # The real-browser cases are intentionally slow and serial within their
-    # file. Keeping them in the unit aggregate made one growing integration
-    # file consume the aggregate's entire timeout before later unit files ran.
-    set(_PULP_BROWSER_CAPTURE_INTEGRATION_TEST
-        ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/capture.integration.test.mjs)
+    # The real-browser cases are slow and serial within each file. Keeping them
+    # in the unit aggregate made the integration suite consume the aggregate's
+    # entire timeout before later unit files ran, so every
+    # *.integration.test.mjs file is its own serial group, run below.
+    file(GLOB _PULP_BROWSER_CAPTURE_INTEGRATION_TEST CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.integration.test.mjs)
     list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
          ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
 
@@ -76,13 +92,19 @@ if(_PULP_NODE_FOR_TESTS)
         LABELS "parser-import;browser-capture;node")
 
     add_test(NAME pulp-browser-capture-node-integration
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test --test-concurrency=3
                      ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
     # Real Chrome capture is itself load-sensitive: in production a screenshot
     # CDP call crossed its bounded 20-second deadline while unrelated CTest work
     # shared the VM, even though the same suite normally finishes cleanly. Make
     # the isolation independent of the caller's `-j` width; retaining the 600s
     # outer timeout keeps a genuine capture hang bounded and named.
+    #
+    # Isolation from OTHER tests is the requirement; the cases themselves are
+    # mostly waiting on cold Chrome launches and bounded settles (about a third
+    # of one core per file), so the files run concurrently inside the slot.
+    # Run file by file it held the machine alone for minutes: the longest
+    # single item on the required gate's test step.
     set_tests_properties(pulp-browser-capture-node-integration PROPERTIES
         RUN_SERIAL TRUE
         TIMEOUT 600
@@ -155,50 +177,38 @@ catch_discover_tests(pulp-test-browser-capture-import
 
 # Claude Design bundle envelope parser (base64+gzip JSON
 # envelope unpacking, template script-order resolution).
-add_executable(pulp-test-design-import-claude-bundle test_design_import_claude_bundle.cpp)
-target_link_libraries(pulp-test-design-import-claude-bundle
-    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-claude-bundle
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-claude-bundle GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime
+    LABELS "parser-import")
 
 # Keyboard-shortcut extraction from React source (UX best-practice
 # default — design-import emits a shortcuts manifest the runtime can
 # auto-register).
-add_executable(pulp-test-design-import-shortcuts test_design_import_shortcuts.cpp)
-target_link_libraries(pulp-test-design-import-shortcuts
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-shortcuts
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-shortcuts GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # Design-tool platform key wire-up E2E. Pins the
 # `WindowHost → root.on_global_key → bridge.forward_key_event →
 # registerShortcut + __dispatch__('__global__','keydown',...)` chain that
 # every auto-bound default chord (and Spectr's mode-switch) depends on.
-add_executable(pulp-test-platform-key-wireup test_platform_key_wireup.cpp)
-target_link_libraries(pulp-test-platform-key-wireup
-    PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-platform-key-wireup
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-platform-key-wireup GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view
+    LABELS "parser-import")
 
 # Pin WidgetBridge::dispatch_global_key fan-out
 # across the static all_bridges_ registry. Every live bridge gets the
 # key without any per-app on_global_key wiring; this is the framework
 # contract platform hosts depend on.
-add_executable(pulp-test-widget-bridge-dispatch-global-key
-    test_widget_bridge_dispatch_global_key.cpp)
-target_link_libraries(pulp-test-widget-bridge-dispatch-global-key
-    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-widget-bridge-dispatch-global-key)
+pulp_add_test_suite(pulp-test-widget-bridge-dispatch-global-key GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime)
 
 # Pin WidgetBridge::dispatch_document_event and the real
 # document.addEventListener. Platform hosts fire synthetic
 # outside-click events on Esc through this path so React popovers
 # (Spectr's PickerDropdown, ContextMenu, etc.) close automatically.
-add_executable(pulp-test-widget-bridge-dispatch-document-event
-    test_widget_bridge_dispatch_document_event.cpp)
-target_link_libraries(pulp-test-widget-bridge-dispatch-document-event
-    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-widget-bridge-dispatch-document-event)
+pulp_add_test_suite(pulp-test-widget-bridge-dispatch-document-event GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime)
 
 # `pulp import-design --from claude` classnames.json
 # emission. Combines library-level fixture coverage (no binary
@@ -318,11 +328,9 @@ endif()
 # the fly, asserts the materialized DOM walker produces an IR deeper
 # than the loader-shell baseline. The optional [.fixture] case runs
 # against PULP_CLAUDE_BUNDLE_FIXTURE if set (Spectr's editor.html).
-add_executable(pulp-test-design-import-claude-runtime test_design_import_claude_runtime.cpp)
-target_link_libraries(pulp-test-design-import-claude-runtime
-    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-claude-runtime
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-claude-runtime GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime
+    LABELS "parser-import")
 
 # Inline `<script>` evaluation in the `--execute-bundle`
 # harness. Asserts that inline `text/javascript`, inline `text/babel`
@@ -331,11 +339,9 @@ catch_discover_tests(pulp-test-design-import-claude-runtime
 # against PULP_CLAUDE_BUNDLE_FIXTURE if set (canonical Spectr
 # editor.html — should now produce >20 nodes, not the 11-element
 # loader shell previously seen before the full editor materialized).
-add_executable(pulp-test-design-import-inline-babel test_design_import_inline_babel.cpp)
-target_link_libraries(pulp-test-design-import-inline-babel
-    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-design-import-inline-babel
-    PROPERTIES LABELS "parser-import")
+pulp_add_test_suite(pulp-test-design-import-inline-babel GROUP pulp-test-group-design-import-tool
+    LIBRARIES pulp::view pulp::runtime
+    LABELS "parser-import")
 
 # JSX instrument import harness. Loads a
 # pre-compiled JSX bundle from PULP_JSX_BUNDLE and asserts that the

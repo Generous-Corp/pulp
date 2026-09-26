@@ -7,6 +7,10 @@
 // the drag category attaches to when a shipped binary defines
 // PULP_VIEW_OBJC_SUFFIX). Must precede the first reference to those classes.
 #include "pulp_mac_objc_names.h"
+// The categories below extend the host NSViews; their interfaces are shared
+// with the files that implement them.
+#include "plugin_view_host_mac_view.h"
+#include "window_host_mac_view.h"
 
 #include <unordered_map>
 
@@ -62,14 +66,6 @@ static DragSession& mac_drag_session(const void* view) {
 }
 
 }  // namespace pulp::view
-
-// PulpView's full @interface is private to window_host_mac.mm; redeclare the
-// slice this category needs. These property declarations must match that file
-// exactly (rootView + the design-viewport pointTransform used for input).
-@interface PulpView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
-@end
 
 @interface PulpView (PulpDragDrop) <NSDraggingDestination>
 @end
@@ -151,21 +147,11 @@ static DragSession& mac_drag_session(const void* view) {
 // VST3/CLAP. Give them the identical NSDraggingDestination behavior, routing into
 // the same view-tree dispatch core. They register for dragged types from their
 // own -viewDidMoveToWindow (plugin_view_host_mac.mm); this is the arrival path.
-@interface PulpPluginView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
-@end
 // PulpGpuPluginView (and its drag category below) only exist when the GPU host
 // is compiled in — its @implementation in plugin_view_host_mac.mm sits inside
 // that file's PULP_HAS_SKIA guard. A CoreGraphics-only build has no such class,
 // so a category here referencing it would emit an unresolved
-// _OBJC_CLASS_$_PulpGpuPluginView at link. Mirror the same guard.
-#ifdef PULP_HAS_SKIA
-@interface PulpGpuPluginView : NSView
-@property (nonatomic, assign) pulp::view::View* rootView;
-@property (nonatomic, copy) pulp::view::Point (^pointTransform)(pulp::view::Point);
-@end
-#endif  // PULP_HAS_SKIA
+// _OBJC_CLASS_$_PulpGpuPluginView at link. Mirror the same guard below.
 
 namespace pulp::view {
 // Shared bodies so the CPU + GPU categories don't duplicate the dispatch.

@@ -71,6 +71,32 @@ function(_pulp_ccache_launcher out ccache)
     set(${out} "${_launcher}" PARENT_SCOPE)
 endfunction()
 
+# A precompiled header is not relocatable. Clang records the absolute path of
+# every input it read (cmake_pch.hxx.cxx, cmake_pch.hxx, headers generated into
+# the build tree) and every consumer re-opens those paths when it loads the
+# .pch. ccache's base_dir rewrites the same paths to relative ones before
+# hashing, so two build trees under one base_dir share a single cache entry for
+# the PCH compile, and the second tree is handed a .pch that points into the
+# first: "malformed or corrupted precompiled file: could not find file ..."
+# once that tree is deleted, or a PCH validated against another tree's files
+# while it still exists. pulp_ccache_key_on_build_path(<target>) turns base_dir
+# off for <target>'s compiles only, so its key carries the absolute paths and a
+# cached PCH is only ever served back to the build tree that produced it. The
+# objects that include the PCH stay on the shared launcher: ccache hashes the
+# .pch they load, so they can only hit an entry made against identical PCH
+# bytes. Call it on every target that produces a PCH; test-pch-wiring checks
+# that each PCH compile line carries it.
+function(pulp_ccache_key_on_build_path target)
+    foreach(_lang C CXX OBJC OBJCXX)
+        set(_launcher "${CMAKE_${_lang}_COMPILER_LAUNCHER}")
+        if(NOT _launcher MATCHES "ccache")
+            continue()
+        endif()
+        set_property(TARGET ${target} PROPERTY ${_lang}_COMPILER_LAUNCHER
+            "${CMAKE_COMMAND};-E;env;CCACHE_BASEDIR=;${_launcher}")
+    endforeach()
+endfunction()
+
 if(PULP_USE_CCACHE)
     find_program(CCACHE_PROGRAM ccache)
     if(CCACHE_PROGRAM)

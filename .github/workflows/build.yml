@@ -1073,33 +1073,60 @@ jobs:
           set -u
           matrix="$ORIGINAL_MATRIX"
           macos_reused=false
+          # One decision note per target, published below as the
+          # `shipyard-receipt-decision` annotation `shipyard landing` reads and
+          # as a job-summary table. Notes describe the decision the verifier's
+          # exit status made; the workspace copy of the script only renders.
+          notes_dir="$RUNNER_TEMP/receipt-decisions"
+          mkdir -p "$notes_dir"
+          note() {  # note <target> <verdict> <reason> [extra note args...]
+            python3 tools/scripts/protected_merge_receipt.py note --target "$1" \
+              --verdict "$2" --reason "$3" "${@:4}" \
+              --output "$notes_dir/$1.json" || true
+          }
           if [ "$GITHUB_EVENT_NAME" = merge_group ] \
             && [ "$NATIVE_BUILD_REQUIRED" = true ]; then
-            read -r group base head extra <<EOF
-          $(git rev-list --parents -n 1 "$GITHUB_SHA")
-          EOF
+            # Name the parent count (or the unreadable history) so the refusal
+            # says which of those it was rather than a generic shape claim.
+            parents="$(git rev-list --parents -n 1 "$GITHUB_SHA" 2>/dev/null)" || parents=""
+            read -r group base head extra <<< "$parents"
+            if [ -z "$parents" ]; then
+              shape="the merge-group commit's parents could not be read"
+            else
+              set -- $parents
+              shape="the merge-group commit has $(( $# - 1 )) parent(s); reuse needs exactly two"
+            fi
             if [ -n "${extra:-}" ] || [ -z "${base:-}" ] || [ -z "${head:-}" ]; then
-              echo "::notice::receipt reuse unavailable: merge group is not exactly two-parent"
+              echo "::notice::receipt reuse unavailable: $shape"
+              for target in macos linux; do
+                note "$target" refuse "$shape"
+              done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
               for target in macos linux; do
                 if [ "$target" = macos ] \
                     && [ "$A2T_RECEIPT_VERIFICATION_REQUIRED" = true ]; then
                   echo "::notice::macos receipt reuse disabled: A2T receipt changed"
+                  note macos refuse "A2T receipt changed; macos reuse is disabled"
                   continue
                 fi
                 artifact_name="protected-validation-${target}-${head}-${base}"
                 receipt_path="$RUNNER_TEMP/${target}-receipt.json"
                 decision_path="$RUNNER_TEMP/${target}-decision.json"
-                if python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
+                verify_err="$RUNNER_TEMP/${target}-verify.err"
+                if ! python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
                     --repository "$GITHUB_REPOSITORY" --target "$target" \
                     --token "$RECEIPT_TOKEN" --artifact-name "$artifact_name" \
                     --base-sha "$base" --head-sha "$head" \
-                    --output "$receipt_path" \
-                  && python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
+                    --output "$receipt_path" 2> "$verify_err"; then
+                  cat "$verify_err" >&2
+                  echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
+                  note "$target" refuse "no usable receipt for this head and base" \
+                    --reason-file "$verify_err"
+                elif python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
                     --repo "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
                     --target "$target" --group-sha "$group" \
-                    --receipt "$receipt_path" --output "$decision_path"; then
+                    --receipt "$receipt_path" --output "$decision_path" 2> "$verify_err"; then
                   matrix="$(MATRIX_JSON="$matrix" TARGET="$target" python3 - <<'PY'
           import json, os
           matrix = json.loads(os.environ["MATRIX_JSON"])
@@ -1111,13 +1138,31 @@ jobs:
           )"
                   [ "$target" != macos ] || macos_reused=true
                   echo "::notice::exact protected receipt reused for ${target}"
+                  note "$target" reuse "exact-tree receipt revalidated against the protected base" \
+                    --receipt "$receipt_path"
                 else
+                  cat "$verify_err" >&2
                   echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
+                  note "$target" refuse "receipt failed verification" \
+                    --reason-file "$verify_err" --receipt "$receipt_path"
                 fi
               done
             else
               echo "::notice::protected base has no receipt verifier; full validation retained"
+              for target in macos linux; do
+                note "$target" refuse "protected base has no receipt verifier"
+              done
             fi
+            shopt -s nullglob
+            python3 tools/scripts/protected_merge_receipt.py publish-notes \
+              "$notes_dir"/*.json --summary "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
+          elif [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            # No native build input changed, so no target was evaluated. Say so
+            # in the log and summary: without it the only match for a refusal
+            # reason in this job's log is the echoed script text above.
+            python3 tools/scripts/protected_merge_receipt.py publish-notes \
+              --no-decision-reason "merge group changed no native build input" \
+              --summary "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
           fi
           build_required="$(MATRIX_JSON="$matrix" python3 - <<'PY'
           import json, os
@@ -1822,6 +1867,9 @@ jobs:
             -L '^pr-fast$' -LE "$label_exclude" \
             --no-tests=error --timeout 120 -j4 \
             --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+          # A green check here means the fast tier passed, not the suite. Say
+          # so where `shipyard landing` reads it (a check-run annotation).
+          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
 
       - name: Test (non-Windows)
         id: ctest
@@ -1970,6 +2018,8 @@ jobs:
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
           ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
+          # Tell `shipyard landing` which tier this check's green means.
+          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
           exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
@@ -2037,6 +2087,81 @@ jobs:
           set -euo pipefail
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure \
             -C Release --no-tests=error -R '^agent-capability-installed-sdk$'
+
+      # The installed-SDK contract above exercises the install tree inside the
+      # build job, but downstream consumers such as GPU-NAM need the exact
+      # tested prefix. Publish that prefix only for the ARM64 macOS capability
+      # lane; this keeps the artifact tied to the same checkout, build, and
+      # required gate rather than asking consumers to guess which SDK was used.
+      - name: Install and publish exact GPU-audio SDK (macOS ARM64)
+        if: >-
+          runner.os == 'macOS'
+          && matrix.key == 'macos'
+          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
+          && (github.event_name == 'pull_request'
+              || github.event_name == 'merge_group'
+              || github.event_name == 'workflow_dispatch')
+        shell: bash
+        env:
+          SDK_ARTIFACT_DIR: ${{ runner.temp }}/pulp-gpu-audio-sdk
+          SDK_ARTIFACT_TAR: ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+          SDK_ARTIFACT_RECEIPT: ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+        run: |
+          set -euo pipefail
+          rm -rf "$SDK_ARTIFACT_DIR"
+          cmake --install "$PULP_BUILD_DIR" --prefix "$SDK_ARTIFACT_DIR" --config Release
+          test -s "$SDK_ARTIFACT_DIR/lib/cmake/Pulp/PulpConfig.cmake"
+          test -d "$SDK_ARTIFACT_DIR/include/pulp/gpu_audio"
+          test -s "$SDK_ARTIFACT_DIR/lib/libpulp-gpu-audio.a"
+          source_sha="$(git rev-parse HEAD)"
+          python3 - "$SDK_ARTIFACT_DIR" "$SDK_ARTIFACT_RECEIPT" "$source_sha" <<'PY'
+          import hashlib
+          import json
+          import pathlib
+          import platform
+          import sys
+
+          prefix = pathlib.Path(sys.argv[1]).resolve()
+          receipt_path = pathlib.Path(sys.argv[2])
+          source_sha = sys.argv[3]
+          tracked = []
+          for path in sorted(prefix.rglob('*')):
+              if path.is_file():
+                  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                  tracked.append({"path": str(path.relative_to(prefix)), "sha256": digest})
+          receipt = {
+              "schema_version": "pulp.gpu-audio.sdk-artifact.v1",
+              "repository": "Generous-Corp/pulp",
+              "source_sha": source_sha,
+              "platform": platform.platform(),
+              "machine": platform.machine(),
+              "prefix_sha256": hashlib.sha256(
+                  json.dumps(tracked, separators=(",", ":"), sort_keys=True).encode()
+              ).hexdigest(),
+              "files": tracked,
+          }
+          receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+          PY
+          tar -czf "$SDK_ARTIFACT_TAR" -C "$SDK_ARTIFACT_DIR" .
+          test -s "$SDK_ARTIFACT_TAR"
+
+      - name: Upload exact GPU-audio SDK (macOS ARM64)
+        if: >-
+          runner.os == 'macOS'
+          && matrix.key == 'macos'
+          && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
+          && (github.event_name == 'pull_request'
+              || github.event_name == 'merge_group'
+              || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v5
+        with:
+          name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
+          path: |
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
       - name: Test A2T structural receipt issuer
         if: runner.os == 'macOS' && matrix.key == 'macos'
@@ -2478,6 +2603,11 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"receipt-reused"}'
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
+          fi
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
@@ -2536,6 +2666,11 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "::notice title=macos gate did not run the suite::$REASON"
+          if [ "${{ needs.classify.outputs.native_build_required }}" = "true" ]; then
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"receipt-reused"}'
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
+          fi
 
   linux:
     needs: [build, classify]

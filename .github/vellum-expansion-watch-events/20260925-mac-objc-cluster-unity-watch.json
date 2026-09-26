@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260925-mac-objc-cluster-unity-watch",
+  "created_at": "2026-09-25T05:28:50Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "The lines selecting this family rename the render layer's CAMetalLayer-backed GPU surface NSView in core/render/src/metal_surface_mac.mm from PulpMetalView to PulpMetalSurfaceView, the distinct base name its per-binary names header (pulp_render_objc_names.h) already mapped it to, so the render and view ObjC clusters can be compiled into one per-binary translation unit without the two clusters' PulpMetalView renames shadowing each other. The class's behavior, the Metal surface, the renderer, every asset path and the per-binary suffix are unchanged; the co-load probe registered as mac-objc-coload-PulpGain-PulpEffect requires PulpMetalSurfaceView to exist under both binaries' suffixes and never bare. No authority moves and no Vellum artifact changes; the transferred rendering slice remains under watch.",
+  "tests": [
+    "mac-objc-coload-PulpGain-PulpEffect",
+    "mac-objc-source-list-guard",
+    "Vellum freeze",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
