@@ -45,10 +45,12 @@ TEST_CASE("WaveNet shared spec accepts the authenticated flat-weight shape",
         .weights = fixture.weights,
     };
     CHECK(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+#if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
     auto program = DawnSharedIoWavenetProgram::create(spec);
     REQUIRE(program);
     CHECK(program->weight_count() == fixture.weights.size());
     CHECK(program->history_bytes() != 0);
+#endif
 }
 
 TEST_CASE("WaveNet shared spec rejects mismatched flat weights before allocation",
