@@ -201,6 +201,8 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
     def test_duplicate_heads_are_checked_from_the_same_census_before_steward_health(self) -> None:
         self.assertIn("shipyard_duplicate_pr_heads.py", self.text)
         self.assertIn("duplicate-pr-heads.json", self.text)
+        self.assertIn("pull-request-commits.json", self.text)
+        self.assertIn("pulls/${number}/commits", self.text)
         census = self.text.index("id: pull_request_cleanup_census")
         duplicate = self.text.index("id: duplicate_pr_heads")
         health = self.text.index("name: Preserve unhealthy controller result")

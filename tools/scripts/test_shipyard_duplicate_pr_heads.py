@@ -15,11 +15,16 @@ def row(number, sha="sha", head_repo="Generous-Corp/pulp", base_repo="Generous-C
 
 
 class DuplicateHeadTests(unittest.TestCase):
-    def run_check(self, rows):
+    def run_check(self, rows, commits=None):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "pulls.json"
             path.write_text(json.dumps(rows), encoding="utf-8")
-            return subprocess.run(["python3", str(SCRIPT), "--pulls", str(path)],
+            command = ["python3", str(SCRIPT), "--pulls", str(path)]
+            if commits is not None:
+                commits_path = pathlib.Path(directory) / "commits.json"
+                commits_path.write_text(json.dumps(commits), encoding="utf-8")
+                command += ["--commits", str(commits_path)]
+            return subprocess.run(command,
                                   text=True, capture_output=True)
 
     def test_same_head_and_base_is_duplicate(self):
@@ -39,6 +44,14 @@ class DuplicateHeadTests(unittest.TestCase):
         result = self.run_check([{"number": 1}])
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["status"], "invalid_census")
+
+    def test_shared_unmerged_commit_is_duplicate_even_with_different_heads(self):
+        result = self.run_check([row(8846, sha="head-a"), row(8851, sha="head-b")],
+                                {"8846": ["shared"], "8851": ["shared"]})
+        self.assertEqual(result.returncode, 1)
+        finding = json.loads(result.stdout)["duplicates"][0]
+        self.assertEqual(finding["kind"], "shared_unmerged_commit")
+        self.assertEqual(finding["pull_requests"], [8846, 8851])
 
     def test_output_file_matches_stdout(self):
         with tempfile.TemporaryDirectory() as directory:

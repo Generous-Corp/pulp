@@ -51,7 +51,7 @@ def load(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def report(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def report(rows: list[dict[str, Any]], commit_sets: dict[str, list[str]] | None = None) -> dict[str, Any]:
     groups: defaultdict[tuple[str, str, str, str], list[int]] = defaultdict(list)
     for row in rows:
         key = (
@@ -66,12 +66,29 @@ def report(rows: list[dict[str, Any]]) -> dict[str, Any]:
     for (head_repo, head_sha, base_repo, base_ref), numbers in sorted(groups.items()):
         if len(numbers) > 1:
             duplicates.append({
+                "kind": "duplicate_head",
                 "head_repo": head_repo,
                 "head_sha": head_sha,
                 "base_repo": base_repo,
                 "base_ref": base_ref,
                 "pull_requests": sorted(numbers),
             })
+
+    if commit_sets:
+        by_commit: defaultdict[str, list[int]] = defaultdict(list)
+        for row in rows:
+            number = value(row, ("number",))
+            for commit in commit_sets.get(str(number), []):
+                if commit not in by_commit[commit]:
+                    by_commit[commit].append(number)
+        for commit, numbers in sorted(by_commit.items()):
+            if len(numbers) > 1:
+                duplicates.append({
+                    "kind": "shared_unmerged_commit",
+                    "commit": commit,
+                    "pull_requests": sorted(numbers),
+                })
+        duplicates.sort(key=lambda item: (item["kind"], item["pull_requests"]))
     return {
         "status": "duplicate_heads" if duplicates else "clean",
         "open_pr_count": len(rows),
@@ -83,9 +100,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pulls", required=True, type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--commits", type=Path,
+                        help="optional JSON object mapping PR number to unmerged commit SHAs")
     args = parser.parse_args()
     try:
-        result = report(load(args.pulls))
+        commit_sets = None
+        if args.commits:
+            commit_sets = json.loads(args.commits.read_text(encoding="utf-8"))
+            if not isinstance(commit_sets, dict):
+                raise ValueError("commit census must be an object")
+        result = report(load(args.pulls), commit_sets)
     except ValueError as exc:
         result = {"status": "invalid_census", "error": str(exc)}
         status = 2
