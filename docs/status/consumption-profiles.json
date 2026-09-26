@@ -11150,7 +11150,7 @@
           {
             "exported_as": "Pulp::gpu-audio",
             "closure_node_count": 70,
-            "public_header_count": 31
+            "public_header_count": 32
           },
           {
             "exported_as": "Pulp::render",
@@ -12608,7 +12608,7 @@
             ]
           },
           "public_headers": {
-            "count": 30,
+            "count": 32,
             "roots": [
               "core/gpu_audio/include",
               "core/render/include"
