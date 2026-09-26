@@ -94,6 +94,7 @@
     "pulp-sequence",
     "pulp-signal-fft-backend",
     "pulp-signal-modal-spec",
+    "pulp-simd",
     "pulp-smf-interchange",
     "pulp-smf-interop",
     "pulp-standalone",

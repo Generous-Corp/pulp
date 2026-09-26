@@ -331,6 +331,17 @@ usually means the processor emitted (almost) nothing, which is the finding.
   All three executions reproduced identical per-domain checksums for each lane.
   These numbers document this host/compiler decision; rerun before drawing a
   conclusion on another architecture or toolchain.
+- **Vectorized kernels live in `pulp::simd`, and `pulp::signal` can call
+  them.** `<pulp/simd/simd.hpp>` (target `pulp-simd`, Highway runtime
+  dispatch) is linked INTERFACE by `pulp::signal`; its only link item is
+  Highway, so a DSP header may call it without dragging in `pulp::runtime`
+  and its TLS stack (`pulp-test-simd-signal-link` fails configure if that
+  ever changes). `<pulp/runtime/simd.hpp>`'s `simd_*` names are inline
+  wrappers kept for existing callers. Two traps: every call pays a dispatch
+  hop, so a short elementwise loop is usually faster written inline (it
+  auto-vectorizes); and `sum` reduces in the backend's order, so it is not
+  bit-equal to a left-to-right loop. Compare a kernel against a scalar
+  reference with a tolerance, never `==`.
 - **Fast trigonometry is accepted per consumer, not per primitive.** Read
   `docs/validation/fast-trigonometry.md` before changing a realtime sine/cosine
   path. It records the shipped profiles, licensing pin, Release methodology,

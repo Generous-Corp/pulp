@@ -26,25 +26,40 @@ use without hard-coding macOS, Windows, Linux, iOS, or Web behavior.
 
 ---
 
+## simd
+
+Portable block kernels for DSP. Each kernel is compiled once in the
+`pulp-simd` library with Google Highway and dispatches at run time to the best
+instruction set the CPU offers (SSE2 through AVX-512 on x86, NEON on arm64), so
+the baseline ISA of the calling code does not limit it. `pulp::signal` links
+this module, so DSP headers can call it without acquiring `pulp::runtime`.
+
+**Link:** `pulp::simd` (also reached through `pulp::signal` and `pulp::runtime`) · **Include prefix:** `<pulp/simd/...>`
+
+```cpp
+#include <pulp/simd/simd.hpp>
+
+float a[256], b[256], result[256];
+pulp::simd::add(a, b, result, 256);        // result[i] = a[i] + b[i]
+pulp::simd::scale(a, 0.5f, result, 256);   // result[i] = a[i] * 0.5
+float peak = pulp::simd::maximum(a, 256);
+float total = pulp::simd::sum(a, 256);     // backend summation order
+```
+
+Each call pays one dispatch hop, so the kernels suit reductions and long
+buffers. A short elementwise loop written inline usually auto-vectorizes and is
+faster at audio block sizes. None of the kernels allocate, lock or throw.
+
 ## runtime
 
 Core utilities — the foundation everything else builds on.
 
 **Link:** `pulp::runtime` · **Include prefix:** `<pulp/runtime/...>`
 
-### SIMD — Portable vectorized math
+### SIMD — compatibility spelling
 
-Hardware-accelerated math via Google Highway. Dispatches to the best instruction set at runtime (SSE2, AVX2, NEON). Use for inner-loop DSP where every cycle counts.
-
-```cpp
-#include <pulp/runtime/simd.hpp>
-using namespace pulp::runtime;
-
-float a[256], b[256], result[256];
-simd_add(a, b, result, 256);        // result[i] = a[i] + b[i]
-simd_scale(a, 0.5f, result, 256);   // result[i] = a[i] * 0.5
-float peak = simd_reduce_max(a, 256);
-```
+`<pulp/runtime/simd.hpp>` keeps the `simd_*` names working as inline wrappers
+over the [`simd`](#simd) module. New code should include `<pulp/simd/simd.hpp>`.
 
 ### XML — Parse and generate XML
 

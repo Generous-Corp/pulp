@@ -1,19 +1,19 @@
-// SIMD operations — Highway dynamic dispatch implementation
+// pulp::simd kernels, Highway backend.
 // This file uses Highway's foreach_target mechanism to generate code
 // for multiple SIMD instruction sets, dispatching at runtime to the best one.
 
-#include <pulp/runtime/simd.hpp>
+#include <pulp/simd/simd.hpp>
 #include <cmath>
 #include <algorithm>
 
 #undef HWY_TARGET_INCLUDE
-#define HWY_TARGET_INCLUDE "simd.cpp"
+#define HWY_TARGET_INCLUDE "src/highway.cpp"
 #include <hwy/foreach_target.h>
 #include <hwy/highway.h>
 
 HWY_BEFORE_NAMESPACE();
 
-namespace pulp::runtime {
+namespace pulp::simd {
 namespace HWY_NAMESPACE {
 
 namespace hn = hwy::HWY_NAMESPACE;
@@ -343,13 +343,13 @@ void ClampF64(const double* HWY_RESTRICT a, double lo, double hi,
 }
 
 }  // namespace HWY_NAMESPACE
-}  // namespace pulp::runtime
+}  // namespace pulp::simd
 
 HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 
-namespace pulp::runtime {
+namespace pulp::simd {
 
 // Cross-arch (macOS x86_64 + arm64 universal) portability invariant.
 //
@@ -392,35 +392,35 @@ HWY_EXPORT(ReduceMinF64);
 HWY_EXPORT(AbsF64);
 HWY_EXPORT(ClampF64);
 
-size_t simd_float_lanes() {
+size_t float_lanes() {
     return HWY_DYNAMIC_DISPATCH(FloatLanes)();
 }
 
-size_t simd_double_lanes() {
+size_t double_lanes() {
     return HWY_DYNAMIC_DISPATCH(DoubleLanes)();
 }
 
-void simd_add(const float* a, const float* b, float* dst, size_t count) {
+void add(const float* a, const float* b, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AddF32)(a, b, dst, count);
 }
 
-void simd_add(const double* a, const double* b, double* dst, size_t count) {
+void add(const double* a, const double* b, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AddF64)(a, b, dst, count);
 }
 
-void simd_mul(const float* a, const float* b, float* dst, size_t count) {
+void mul(const float* a, const float* b, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(MulF32)(a, b, dst, count);
 }
 
-void simd_mul(const double* a, const double* b, double* dst, size_t count) {
+void mul(const double* a, const double* b, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(MulF64)(a, b, dst, count);
 }
 
-void simd_fma(const float* a, const float* b, const float* c, float* dst, size_t count) {
+void fma(const float* a, const float* b, const float* c, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(FmaF32)(a, b, c, dst, count);
 }
 
-void simd_fma(const double* a,
+void fma(const double* a,
               const double* b,
               const double* c,
               double* dst,
@@ -428,70 +428,70 @@ void simd_fma(const double* a,
     HWY_DYNAMIC_DISPATCH(FmaF64)(a, b, c, dst, count);
 }
 
-void simd_set(float value, float* dst, size_t count) {
+void set(float value, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(SetF32)(value, dst, count);
 }
 
-void simd_set(double value, double* dst, size_t count) {
+void set(double value, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(SetF64)(value, dst, count);
 }
 
-void simd_scale(const float* a, float scalar, float* dst, size_t count) {
+void scale(const float* a, float scalar, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(ScaleF32)(a, scalar, dst, count);
 }
 
-void simd_scale(const double* a, double scalar, double* dst, size_t count) {
+void scale(const double* a, double scalar, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(ScaleF64)(a, scalar, dst, count);
 }
 
-void simd_add_scaled(const float* a, float scalar, float* dst, size_t count) {
+void add_scaled(const float* a, float scalar, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AddScaledF32)(a, scalar, dst, count);
 }
 
-void simd_add_scaled(const double* a, double scalar, double* dst, size_t count) {
+void add_scaled(const double* a, double scalar, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AddScaledF64)(a, scalar, dst, count);
 }
 
-float simd_reduce_add(const float* data, size_t count) {
+float sum(const float* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceAddF32)(data, count);
 }
 
-double simd_reduce_add(const double* data, size_t count) {
+double sum(const double* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceAddF64)(data, count);
 }
 
-float simd_reduce_max(const float* data, size_t count) {
+float maximum(const float* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceMaxF32)(data, count);
 }
 
-double simd_reduce_max(const double* data, size_t count) {
+double maximum(const double* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceMaxF64)(data, count);
 }
 
-float simd_reduce_min(const float* data, size_t count) {
+float minimum(const float* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceMinF32)(data, count);
 }
 
-double simd_reduce_min(const double* data, size_t count) {
+double minimum(const double* data, size_t count) {
     return HWY_DYNAMIC_DISPATCH(ReduceMinF64)(data, count);
 }
 
-void simd_abs(const float* a, float* dst, size_t count) {
+void abs(const float* a, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AbsF32)(a, dst, count);
 }
 
-void simd_abs(const double* a, double* dst, size_t count) {
+void abs(const double* a, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(AbsF64)(a, dst, count);
 }
 
-void simd_clamp(const float* a, float lo, float hi, float* dst, size_t count) {
+void clamp(const float* a, float lo, float hi, float* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(ClampF32)(a, lo, hi, dst, count);
 }
 
-void simd_clamp(const double* a, double lo, double hi, double* dst, size_t count) {
+void clamp(const double* a, double lo, double hi, double* dst, size_t count) {
     HWY_DYNAMIC_DISPATCH(ClampF64)(a, lo, hi, dst, count);
 }
 
-}  // namespace pulp::runtime
+}  // namespace pulp::simd
 
 #endif  // HWY_ONCE

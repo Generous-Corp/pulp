@@ -219,6 +219,13 @@ pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
 # SIMD operations and aligned buffer tests
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
+# The DSP layer's kernel library must stay reachable from pulp::signal without
+# pulp-runtime, whose archive carries the HTTP/TLS stack. The binary proves the
+# symbols resolve; a closure walk proves nothing heavier came with them.
+pulp_add_test_suite(pulp-test-simd-signal-link LIBRARIES pulp::signal)
+# The closure assertion runs from the root CMakeLists.txt, after
+# PulpLinkFloor is loaded.
+
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd GROUP pulp-test-group-core-view
     SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp
