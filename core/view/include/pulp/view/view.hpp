@@ -1568,6 +1568,14 @@ public:
     bool overlay_consumes_outside_click() const {
         return overlay_consumes_outside_click_;
     }
+    /// Whether this open overlay NESTS on `below` -- it was claimed while
+    /// `below` was the top of the stack and stacked on it (by descending from
+    /// it, or by naming it through `claim_overlay(stacks_on)`). An outside
+    /// press uses it to let a submenu defer its consumption to its menu, so a
+    /// press outside the whole nest closes every level instead of only the top.
+    bool overlay_nests_on(const View* below) const {
+        return below != nullptr && overlay_nested_on_ == below;
+    }
     /// Mark this view as a control that OPENS an overlay — a dropdown field, a
     /// menu button, a popover trigger.
     ///
@@ -2900,6 +2908,9 @@ private:
     bool requires_gpu_host_ = false;
     bool contains_native_overlay_ = false;
     bool overlay_consumes_outside_click_ = false;
+    // The stack entry this overlay nested on when it was claimed; compared,
+    // never dereferenced, and cleared when the claim leaves the stack.
+    const View* overlay_nested_on_ = nullptr;
     bool overlay_trigger_ = false;
     FrameClock* frame_clock_ = nullptr;
     // Lazily allocated on the first set_meter_source / set_scalar_source, so a
