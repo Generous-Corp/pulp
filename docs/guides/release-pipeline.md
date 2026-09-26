@@ -196,6 +196,29 @@ pool, the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` override, then hosted
 `macos-15`. The x64 row still cross-compiles on ARM and smokes under Rosetta;
 the native Intel Mac Mini remains a separate advisory/nightly portability lane.
 
+### Release class labels (opt-in)
+
+tartci's event-class-v2 gate supervisors boot a slot only for jobs carrying their
+class label, so an unlabelled release job can only ride whichever gate runner
+happens to be idle. Setting the repo variable `PULP_RELEASE_CLASS_TOKENS` to
+exactly `1` or `true` makes each release macOS job carry its class, the same way
+`build.yml` adds `pulp-build-pr-head` / `pulp-build-merge-group`:
+
+| workflow | class label |
+|---|---|
+| `release-cli.yml` (darwin-arm64, darwin-x64) | `pulp-release-tagged` |
+| `sign-and-release.yml` | `pulp-release-tagged` |
+| `release-path-pr-gate.yml` | `pulp-release-pr-gate` |
+
+The label is appended only to a **self-hosted** list selector, `pulp-gate-fast`
+is dropped (v2 registrations do not advertise it), and an existing class is never
+duplicated. Hosted selectors such as `["macos-15"]` pass through. Unset (or
+empty), every workflow dispatches today's selector byte-for-byte; any other
+value is ignored with a `::notice::`. The one implementation lives in
+`resolve_release_runners.py` (`--apply-class-label` for the two shell resolvers).
+Enable it only after the hosts serve these classes: a class-labelled job on hosts
+without that class queues forever. Unsetting the variable is the rollback.
+
 ### What can and cannot go local
 
 | leg | local? | why |

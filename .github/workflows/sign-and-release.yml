@@ -39,21 +39,37 @@ jobs:
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
     steps:
+      # Only the resolver is needed; it owns the opt-in class-label rewrite so
+      # the three release workflows share one tested implementation.
+      - uses: actions/checkout@v5
+        with:
+          # Resolver policy comes from the default branch, like release-cli.yml.
+          ref: ${{ github.event.repository.default_branch }}
+          lfs: false
+          sparse-checkout: tools/scripts/resolve_release_runners.py
+          sparse-checkout-cone-mode: false
       - id: resolve
         env:
           RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          # Opt-in (exactly `1`/`true`): append `pulp-release-tagged` to a
+          # self-hosted selector. Unset = the selector below, verbatim.
+          PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
         run: |
+          set -euo pipefail
           if [ -n "${RELEASE_JSON:-}" ]; then
-            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${RELEASE_JSON}"
             echo "Routing macOS sign-and-release via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
           elif [ -n "${NAMESPACE_JSON:-}" ]; then
-            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${NAMESPACE_JSON}"
             echo "Routing macOS sign-and-release through Namespace: ${NAMESPACE_JSON}"
           else
-            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
+            selector='["macos-15"]'
             echo "Routing macOS sign-and-release through GitHub-hosted macos-15"
           fi
+          selector="$(python3 tools/scripts/resolve_release_runners.py \
+            --apply-class-label pulp-release-tagged --selector "$selector")"
+          echo "runs_on_json=${selector}" >> "$GITHUB_OUTPUT"
 
   build-and-sign-macos:
     needs: resolve-macos-runner

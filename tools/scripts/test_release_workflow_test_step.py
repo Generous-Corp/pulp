@@ -2280,7 +2280,7 @@ class SignAndReleaseMacosRoutingTest(unittest.TestCase):
     def test_dedicated_release_runner_precedes_hosted_fallback(self) -> None:
         release_pos = self.text.index("PULP_RELEASE_MACOS_RUNS_ON_JSON")
         namespace_pos = self.text.index("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON")
-        fallback_pos = self.text.index('runs_on_json=["macos-15"]')
+        fallback_pos = self.text.index('selector=\'["macos-15"]\'')
         self.assertNotIn("PULP_LOCAL_MACOS_RUNS_ON_JSON", self.text)
         self.assertLess(release_pos, namespace_pos)
         self.assertLess(namespace_pos, fallback_pos)
@@ -2293,6 +2293,137 @@ class SignAndReleaseMacosRoutingTest(unittest.TestCase):
         self.assertIn("name: Clean up signing keychain", self.text)
         self.assertIn("if: always() && env.SIGNING_KEYCHAIN != ''", self.text)
         self.assertIn('security delete-keychain "$SIGNING_KEYCHAIN"', self.text)
+
+
+class ReleaseClassLabelOptIn(unittest.TestCase):
+    """PULP_RELEASE_CLASS_TOKENS gates the release class label on all three
+    release workflows. Unset must dispatch exactly today's runs-on; `1`/`true`
+    appends the class once (dropping the legacy gate label, as build.yml does);
+    any other value is ignored with a `::notice::` naming the fix.
+
+    Each workflow's real resolve step is executed, so the assertion is on the
+    `runs_on_json` the job would actually dispatch."""
+
+    GATE = '["self-hosted","macOS","ARM64","pulp-build-vm","pulp-gate-fast"]'
+    # Deliberately non-canonical spacing: "unchanged" means byte-identical.
+    SPACED = '[ "self-hosted", "macOS", "ARM64", "pulp-build-vm", "pulp-gate-fast" ]'
+
+    CASES = (
+        # (workflow, class label, env key holding the selector)
+        (SIGN_AND_RELEASE, "pulp-release-tagged", "RELEASE_JSON"),
+        (RELEASE_PATH_PR_GATE, "pulp-release-pr-gate", "PR_GATE_JSON"),
+        (RELEASE_CLI, "pulp-release-tagged", "DARWIN_ARM64"),
+    )
+
+    @staticmethod
+    def _step(workflow: Path) -> dict:
+        doc = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        steps = doc["jobs"]["resolve-macos-runner"]["steps"]
+        return next(step for step in steps if step.get("id") == "resolve")
+
+    def _run(self, workflow: Path, env: dict[str, str]) -> tuple[str, str]:
+        step = self._step(workflow)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            out.write_text("", encoding="utf-8")
+            run_env = {
+                "PATH": os.environ.get("PATH", ""),
+                "GITHUB_OUTPUT": str(out),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+            run_env.update(env)
+            proc = subprocess.run(
+                ["bash", "-c", step["run"]], cwd=REPO_ROOT, env=run_env,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            lines = [
+                line for line in out.read_text(encoding="utf-8").splitlines()
+                if line.startswith("runs_on_json=")
+            ]
+        self.assertEqual(len(lines), 1, lines)
+        return lines[0].removeprefix("runs_on_json="), proc.stderr
+
+    def test_every_workflow_wires_the_opt_in_variable(self) -> None:
+        for workflow, _label, _key in self.CASES:
+            with self.subTest(workflow=workflow.name):
+                env = self._step(workflow)["env"]
+                self.assertEqual(
+                    env["PULP_RELEASE_CLASS_TOKENS"],
+                    "${{ vars.PULP_RELEASE_CLASS_TOKENS }}",
+                )
+
+    def test_unset_dispatches_todays_selector_byte_for_byte(self) -> None:
+        for workflow, _label, key in self.CASES:
+            for flag in (None, ""):
+                with self.subTest(workflow=workflow.name, flag=flag):
+                    env = {key: self.SPACED}
+                    if flag is not None:
+                        env["PULP_RELEASE_CLASS_TOKENS"] = flag
+                    got, err = self._run(workflow, env)
+                    if workflow is RELEASE_CLI:
+                        # release-cli re-serialises through json.dumps today.
+                        self.assertEqual(got, json.dumps(json.loads(self.SPACED)))
+                    else:
+                        self.assertEqual(got, self.SPACED)
+                    self.assertNotIn("::notice::", err)
+
+    def test_unset_hosted_fallback_is_unchanged(self) -> None:
+        for workflow, _label, _key in self.CASES:
+            with self.subTest(workflow=workflow.name):
+                got, _err = self._run(workflow, {})
+                self.assertEqual(json.loads(got), ["macos-15"])
+
+    def test_opt_in_appends_the_class_once(self) -> None:
+        for workflow, label, key in self.CASES:
+            for flag in ("1", "true"):
+                with self.subTest(workflow=workflow.name, flag=flag):
+                    got, _err = self._run(
+                        workflow, {key: self.GATE, "PULP_RELEASE_CLASS_TOKENS": flag}
+                    )
+                    labels = json.loads(got)
+                    self.assertEqual(
+                        labels,
+                        ["self-hosted", "macOS", "ARM64", "pulp-build-vm", label],
+                    )
+                    already = json.dumps(labels)
+                    again, _err = self._run(
+                        workflow, {key: already, "PULP_RELEASE_CLASS_TOKENS": flag}
+                    )
+                    self.assertEqual(json.loads(again).count(label), 1)
+
+    def test_opt_in_leaves_hosted_selectors_alone(self) -> None:
+        for workflow, _label, _key in self.CASES:
+            with self.subTest(workflow=workflow.name):
+                got, _err = self._run(workflow, {"PULP_RELEASE_CLASS_TOKENS": "1"})
+                self.assertEqual(json.loads(got), ["macos-15"])
+
+    def test_unrecognised_value_is_ignored_with_a_notice(self) -> None:
+        for workflow, _label, key in self.CASES:
+            for flag in ("0", "yes", "TRUE", " 1"):
+                with self.subTest(workflow=workflow.name, flag=flag):
+                    got, err = self._run(
+                        workflow, {key: self.GATE, "PULP_RELEASE_CLASS_TOKENS": flag}
+                    )
+                    self.assertEqual(json.loads(got), json.loads(self.GATE))
+                    self.assertIn("::notice::PULP_RELEASE_CLASS_TOKENS", err)
+                    self.assertIn("exactly '1' or 'true'", err)
+
+    def test_shell_resolvers_check_out_the_resolver_script(self) -> None:
+        for workflow in (SIGN_AND_RELEASE, RELEASE_PATH_PR_GATE):
+            with self.subTest(workflow=workflow.name):
+                doc = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+                steps = doc["jobs"]["resolve-macos-runner"]["steps"]
+                self.assertTrue(str(steps[0].get("uses", "")).startswith("actions/checkout"))
+                self.assertIn(
+                    "tools/scripts/resolve_release_runners.py",
+                    steps[0]["with"]["sparse-checkout"],
+                )
+        sign = yaml.safe_load(SIGN_AND_RELEASE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            sign["jobs"]["resolve-macos-runner"]["steps"][0]["with"]["ref"],
+            "${{ github.event.repository.default_branch }}",
+        )
 
 
 class ReleaseBuildParallelismExplicit(unittest.TestCase):

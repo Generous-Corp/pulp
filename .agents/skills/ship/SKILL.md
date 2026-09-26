@@ -1643,6 +1643,18 @@ to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
 pinned to the repository default branch; never expose the persistent pool to
 `pull_request` or `merge_group` code through this fallback.
 
+**Release class labels are opt-in (`PULP_RELEASE_CLASS_TOKENS`).** Exactly `1` or
+`true` appends `pulp-release-tagged` (release-cli darwin legs, sign-and-release)
+or `pulp-release-pr-gate` (release-path-pr-gate) to a self-hosted selector,
+dropping `pulp-gate-fast` exactly as `build.yml` does for its event classes; any
+other value is ignored with a `::notice::`, and unset is byte-identical routing.
+One implementation, `resolve_release_runners.py --apply-class-label`, serves all
+three workflows. Gotcha: never enable it before tartci's hosts advertise these
+classes, because GitHub matches only runners carrying EVERY label, so a
+class-labelled job with no serving registration queues forever. Unsetting is the
+rollback. The two shell resolvers sparse-checkout that script, so they fail
+at once if it is renamed.
+
 Facts worth keeping (measured):
 
 - The local macOS VM built `darwin-arm64` in **6.4 min after a 0.8 min wait**.
