@@ -978,6 +978,18 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
         lines.append("the profile's feature set changed")
     if header_count_drifted(committed, current):
         lines.append(HEADER_DRIFT_CAUSE)
+    if lines:
+        return lines
+
+    # Keep an otherwise-unclassified drift actionable.  The profile contains
+    # provenance fields as well as the target graph; when one of those changes
+    # the old generic message sent CI readers back to a local regeneration
+    # without identifying what differed between machines.
+    for key in sorted(set(committed) | set(current)):
+        if key in {"targets", "features"}:
+            continue
+        if committed.get(key) != current.get(key):
+            lines.append(f"profile field changed: {key}")
     return lines or ["the profile differs from the build tree"]
 
 
