@@ -154,7 +154,7 @@ TEST_CASE("default tempo hook is a no-op",
     SUCCEED("default tempo hook returned cleanly");
 }
 
-TEST_CASE("exception thrown by tempo hook propagates to the caller",
+TEST_CASE("exception thrown by tempo hook propagates to the caller (transport suite)",
           "[processor][transport]") {
     class ThrowingTempoProcessor : public PlainProcessor {
     public:

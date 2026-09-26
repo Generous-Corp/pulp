@@ -565,13 +565,11 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
                             // never read as evidence.
                             frame.gpu_submission_observed =
                                 window_ && window_->last_frame_gpu_submission_observed();
-                            // "gpu_submission" is no longer listed: a host producer
-                            // now answers for it. This list only selects a
-                            // diagnostic string; it is not a pass gate, so dropping
-                            // the entry unblocks nothing.
-                            frame.missing_trace_categories = {"native_present_timing",
-                                                              "pipeline_compile", "resource_upload",
-                                                              "shader_identity", "source_identity"};
+                            // Submission is producer evidence rather than a
+                            // missing-trace category. Derive every remaining
+                            // category from the evidence this frame actually has.
+                            frame.missing_trace_categories =
+                                gpu_health_provider_->derive_missing_trace_categories(frame);
                             const auto* surface = window_ ? window_->gpu_surface() : nullptr;
                             if (!surface)
                                 return frame;

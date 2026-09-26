@@ -1086,13 +1086,20 @@ jobs:
           }
           if [ "$GITHUB_EVENT_NAME" = merge_group ] \
             && [ "$NATIVE_BUILD_REQUIRED" = true ]; then
-            read -r group base head extra <<EOF
-          $(git rev-list --parents -n 1 "$GITHUB_SHA")
-          EOF
+            # Name the parent count (or the unreadable history) so the refusal
+            # says which of those it was rather than a generic shape claim.
+            parents="$(git rev-list --parents -n 1 "$GITHUB_SHA" 2>/dev/null)" || parents=""
+            read -r group base head extra <<< "$parents"
+            if [ -z "$parents" ]; then
+              shape="the merge-group commit's parents could not be read"
+            else
+              set -- $parents
+              shape="the merge-group commit has $(( $# - 1 )) parent(s); reuse needs exactly two"
+            fi
             if [ -n "${extra:-}" ] || [ -z "${base:-}" ] || [ -z "${head:-}" ]; then
-              echo "::notice::receipt reuse unavailable: merge group is not exactly two-parent"
+              echo "::notice::receipt reuse unavailable: $shape"
               for target in macos linux; do
-                note "$target" refuse "merge group is not exactly two-parent"
+                note "$target" refuse "$shape"
               done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
@@ -1149,6 +1156,13 @@ jobs:
             shopt -s nullglob
             python3 tools/scripts/protected_merge_receipt.py publish-notes \
               "$notes_dir"/*.json --summary "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
+          elif [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            # No native build input changed, so no target was evaluated. Say so
+            # in the log and summary: without it the only match for a refusal
+            # reason in this job's log is the echoed script text above.
+            python3 tools/scripts/protected_merge_receipt.py publish-notes \
+              --no-decision-reason "merge group changed no native build input" \
+              --summary "${GITHUB_STEP_SUMMARY:-/dev/null}" || true
           fi
           build_required="$(MATRIX_JSON="$matrix" python3 - <<'PY'
           import json, os

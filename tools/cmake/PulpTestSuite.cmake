@@ -24,6 +24,7 @@
 include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/PulpTestTimeout.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/PulpTestSharedObjects.cmake)
 
 # ---------------------------------------------------------------------------
 # Shared precompiled header for Catch2 suites
@@ -145,6 +146,11 @@ function(_pulp_test_pch_carrier out std)
             # in ccache. With it, the same inputs produce the same .pch.
             target_compile_options(${_carrier} PRIVATE -Xclang -fno-pch-timestamp)
         endif()
+        # The .pch embeds this build tree's absolute paths; never let ccache
+        # serve it to another tree (see Ccache.cmake).
+        if(COMMAND pulp_ccache_key_on_build_path)
+            pulp_ccache_key_on_build_path(${_carrier})
+        endif()
         set(_headers "")
         foreach(_h IN LISTS PULP_TEST_PCH_HEADERS)
             list(APPEND _headers "$<$<COMPILE_LANGUAGE:CXX>:${_h}>")
@@ -240,7 +246,8 @@ function(_pulp_test_pch_classify out target)
     endif()
     get_target_property(_sources ${target} SOURCES)
     foreach(_s IN LISTS _sources)
-        if(_s MATCHES "^\\$<TARGET_OBJECTS:[^>]+>$")
+        if(_s MATCHES "^\\$<TARGET_OBJECTS:[^>]+>$"
+                OR _s MATCHES "^\\$<\\$<.*>:\\$<TARGET_OBJECTS:[^>]+>>$")
             continue()  # already-compiled objects, not a TU of this target
         endif()
         if(_s MATCHES "^\\$<\\$<.*>:([^<>]+)>$")
@@ -474,7 +481,9 @@ endfunction()
 #
 # A member whose tag expression matches no case would otherwise vanish from
 # CTest without a diagnostic, so group discovery uses FAIL_IF_EMPTY and the
-# build fails instead.
+# build fails instead. Platform-gated sources that are intentionally empty on
+# a configuration may opt into MAY_BE_EMPTY on that member; the opt-in is
+# explicit and local, so unrelated tag drift still fails closed.
 # ---------------------------------------------------------------------------
 
 # pulp_add_test_group(NAME
@@ -609,15 +618,21 @@ endfunction()
 #     [INCLUDE_DIRS dir1 dir2 ...]       # extra include directories
 #     [COMPILE_DEFINITIONS def1 ...]     # extra compile definitions
 #     [NO_PCH]                           # compile without the shared Catch2 PCH
+#     [MAY_BE_EMPTY]                     # allow zero cases for a gated member
 # )
 function(pulp_add_test_suite NAME)
-    set(options NO_PCH)
+    set(options NO_PCH MAY_BE_EMPTY)
     set(oneValueArgs TIMEOUT TEST_SPEC TEST_PREFIX GROUP)
     set(multiValueArgs SOURCES LIBRARIES INCLUDE_DIRS COMPILE_DEFINITIONS PROPERTIES DISCOVERY_ARGS LABELS)
     cmake_parse_arguments(P "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     if(P_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR
             "pulp_add_test_suite(${NAME}): unparsed arguments: ${P_UNPARSED_ARGUMENTS}")
+    endif()
+    if(P_MAY_BE_EMPTY AND NOT P_GROUP)
+        message(FATAL_ERROR
+            "pulp_add_test_suite(${NAME}): MAY_BE_EMPTY requires GROUP because "
+            "standalone discovery does not use the grouped empty-case guard")
     endif()
 
     # Default source file: strip the conventional "pulp-test-" prefix and
@@ -672,7 +687,7 @@ function(pulp_add_test_suite NAME)
     if(_spec_args)
         list(APPEND _discover_args TEST_SPEC ${_spec_args})
     endif()
-    if(P_GROUP)
+    if(P_GROUP AND NOT P_MAY_BE_EMPTY)
         list(APPEND _discover_args FAIL_IF_EMPTY)
     endif()
     if(P_TEST_PREFIX)
@@ -701,3 +716,9 @@ function(pulp_add_test_suite NAME)
     endif()
     catch_discover_tests(${_target} ${_discover_args})
 endfunction()
+
+# The test directory compiles its shared support sources once (see
+# PulpTestSharedObjects.cmake).
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL "${CMAKE_SOURCE_DIR}/test")
+    pulp_test_shared_objects_arm()
+endif()

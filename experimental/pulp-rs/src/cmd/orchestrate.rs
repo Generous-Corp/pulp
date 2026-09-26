@@ -104,6 +104,15 @@ pub struct BuildArgs {
     /// the native one. `wam` (Emscripten → AudioWorklet) or `wclap` (wasi-sdk
     /// → CLAP-in-WebAssembly). `None` builds the native plugin formats.
     pub web_format: Option<String>,
+    /// `--seed-build[=<donor>]` — before the first configure of a source
+    /// checkout whose build dir does not exist yet, clone a sibling
+    /// worktree's warm Ninja build dir (APFS copy-on-write, no data copied)
+    /// and retarget it, so the first build compiles and links only what
+    /// differs from the donor. `auto` picks the eligible worktree closest to
+    /// HEAD. Every unsupported case (other platform, cross-volume, no warm
+    /// Ninja donor, build type mismatch) falls back to a plain configure.
+    /// `PULP_SEED_BUILD=1|auto|<donor>` opts in without the flag.
+    pub seed_build: Option<String>,
     /// `--examples` — configure a source checkout with
     /// `-DPULP_BUILD_EXAMPLES=ON`. A fresh dev configure leaves examples off.
     pub examples: bool,
@@ -161,6 +170,10 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             "--examples" => out.examples = true,
+            "--seed-build" => out.seed_build = Some(SEED_AUTO.to_owned()),
+            _ if a.starts_with("--seed-build=") => {
+                out.seed_build = Some(seed_build_value(a.trim_start_matches("--seed-build=")));
+            }
             // `--format <fmt>` / `-f <fmt>` consume the next token as the value.
             "--format" | "-f" => {
                 if i + 1 < args.len() {
@@ -261,7 +274,120 @@ pub fn build_with<S: Spawner>(
 ) -> Result<i32> {
     let skip_dependency_bootstrap =
         std::env::var_os("PULP_SKIP_DEPENDENCY_BOOTSTRAP").is_some_and(|value| value != "0");
+    let env_seed = std::env::var(SEED_ENV).ok();
+    if args.seed_build.is_none() {
+        if let Some(v) = env_seed.as_deref().map(str::trim).filter(|v| !v.is_empty() && *v != "0") {
+            let mut args = args.clone();
+            args.seed_build = Some(seed_build_value(v));
+            return build_with_dependency_policy(proj, &args, spawner, out, skip_dependency_bootstrap);
+        }
+    }
     build_with_dependency_policy(proj, args, spawner, out, skip_dependency_bootstrap)
+}
+
+/// `--seed-build` with no value, and the spelling `PULP_SEED_BUILD=1` share.
+pub const SEED_AUTO: &str = "auto";
+/// Environment opt-in for `--seed-build` (`1`/`auto`, or a donor path).
+pub const SEED_ENV: &str = "PULP_SEED_BUILD";
+/// The seeding script inside a source checkout.
+pub const SEED_SCRIPT_RELATIVE: &str = "tools/scripts/seed_build_dir.py";
+/// Exit code the seeding script uses for "not applicable here" (nothing was
+/// left behind), as opposed to a failure.
+const SEED_UNSUPPORTED_RC: i32 = 3;
+
+fn seed_build_value(raw: &str) -> String {
+    match raw.trim() {
+        "" | "1" | "true" | "yes" => SEED_AUTO.to_owned(),
+        v => v.to_owned(),
+    }
+}
+
+/// Seed `build_dir` from a warm sibling worktree before the first configure.
+///
+/// Best-effort by design: the script leaves nothing behind when it declines
+/// (exit 3) or fails, and the caller then configures from scratch exactly as
+/// it would have without the flag. A seeded dir carries the donor's
+/// CMakeCache.txt, so the ordinary "is it configured?" check downstream sees
+/// it as configured and the first build is the retarget's leftover edges.
+fn seed_build_dir<S: Spawner>(
+    proj: &ActiveProject,
+    build_dir: &Path,
+    donor: &str,
+    args: &BuildArgs,
+    spawner: &S,
+    out: &mut impl Write,
+) -> Result<()> {
+    if proj.standalone {
+        writeln!(out, "--seed-build applies to a Pulp source checkout only; configuring from scratch")
+            .map_err(io_err)?;
+        return Ok(());
+    }
+    if args.trace {
+        writeln!(out, "--seed-build does not apply to a traced build dir; configuring from scratch")
+            .map_err(io_err)?;
+        return Ok(());
+    }
+    if build_dir.exists() {
+        writeln!(
+            out,
+            "--seed-build: {} already exists; leaving it as is",
+            build_dir.display()
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+    let script = proj.root.join(SEED_SCRIPT_RELATIVE);
+    if !script.is_file() {
+        writeln!(
+            out,
+            "--seed-build: {SEED_SCRIPT_RELATIVE} is missing from this checkout; configuring from scratch"
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+    let (Some(parent), Some(name)) = (build_dir.parent(), build_dir.file_name()) else {
+        return Ok(());
+    };
+    if parent != proj.root {
+        writeln!(
+            out,
+            "--seed-build: build dir {} is not directly under the checkout; configuring from scratch",
+            build_dir.display()
+        )
+        .map_err(io_err)?;
+        return Ok(());
+    }
+    let build_type = std::env::var("PULP_BUILD_TYPE")
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_BUILD_TYPE.to_owned());
+    let inv = Invocation::new("python3")
+        .arg(script.to_string_lossy().into_owned())
+        .arg("--from")
+        .arg(donor)
+        .arg("--to")
+        .arg(proj.root.to_string_lossy().into_owned())
+        .arg("--build-dir")
+        .arg(name.to_string_lossy().into_owned())
+        .arg("--build-type")
+        .arg(build_type)
+        .arg("--examples")
+        .arg(if args.examples { "on" } else { "off" })
+        .cwd(&proj.root);
+    writeln!(out, "Seeding {} from a warm sibling build dir", build_dir.display()).map_err(io_err)?;
+    match spawner.run(&inv)? {
+        0 => {}
+        SEED_UNSUPPORTED_RC => {
+            writeln!(out, "--seed-build: not applicable here (see above); configuring from scratch")
+                .map_err(io_err)?;
+        }
+        rc => {
+            writeln!(out, "--seed-build: seeding failed (rc={rc}); configuring from scratch")
+                .map_err(io_err)?;
+        }
+    }
+    Ok(())
 }
 
 fn build_with_dependency_policy<S: Spawner>(
@@ -374,6 +500,9 @@ fn build_with_dependency_policy<S: Spawner>(
     };
     if reject_stale_cmake_context(proj, &build_dir, out)? {
         return Ok(1);
+    }
+    if let Some(donor) = &args.seed_build {
+        seed_build_dir(proj, &build_dir, donor, args, spawner, out)?;
     }
     let configured = if args.trace {
         // Only a cache that really says PULP_TRACING=ON counts as configured.
@@ -3996,6 +4125,117 @@ mod tests {
             vec!["pulp-view-core", "pulp-test-widgets"]
         );
         assert!(String::from_utf8(out).unwrap().contains("Configuring once"));
+    }
+
+    #[test]
+    fn seed_build_flag_parses_auto_and_explicit_donor() {
+        let a = parse_build_args(&["--seed-build".to_owned()]);
+        assert_eq!(a.seed_build.as_deref(), Some(SEED_AUTO));
+        assert!(a.passthrough.is_empty(), "--seed-build must not reach cmake --build");
+        let b = parse_build_args(&["--seed-build=/wt/other".to_owned()]);
+        assert_eq!(b.seed_build.as_deref(), Some("/wt/other"));
+        let c = parse_build_args(&["--seed-build=1".to_owned()]);
+        assert_eq!(c.seed_build.as_deref(), Some(SEED_AUTO));
+        assert!(parse_build_args(&[]).seed_build.is_none());
+    }
+
+    fn seed_calls(calls: &[Invocation]) -> Vec<Invocation> {
+        calls
+            .iter()
+            .filter(|c| c.program == "python3" && c.args.iter().any(|a| a.ends_with(SEED_SCRIPT_RELATIVE)))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn seed_build_runs_the_script_before_the_first_configure() {
+        // One guard: EnvVarGuard holds a process-wide lock, so a second
+        // guard in the same test would wait on the first forever.
+        let _env = EnvVarGuard::set_many(&[
+            (affected::FOCUS_ENV, Some("0")),
+            ("PULP_BUILD_TYPE", Some("Debug")),
+        ]);
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        std::fs::remove_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = parse_build_args(&["--seed-build".to_owned(), "--examples".to_owned()]);
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+        let calls = spawner.calls.borrow();
+        let seeds = seed_calls(&calls);
+        assert_eq!(seeds.len(), 1, "{calls:?}");
+        assert_eq!(calls[0].program, "python3", "seeding must come first: {calls:?}");
+        let a = &seeds[0].args;
+        let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].clone());
+        assert_eq!(after("--from").as_deref(), Some(SEED_AUTO));
+        assert_eq!(after("--to").as_deref(), Some(proj.root.to_string_lossy().as_ref()));
+        assert_eq!(after("--build-dir").as_deref(), Some("build"));
+        assert_eq!(after("--build-type").as_deref(), Some("Debug"));
+        assert_eq!(after("--examples").as_deref(), Some("on"));
+        // The recording spawner created no cache, so the ordinary configure follows.
+        assert!(calls.iter().any(|c| c.program == "cmake" && c.args.iter().any(|x| x == "-B")));
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("Seeding"), "{text}");
+    }
+
+    #[test]
+    fn seed_build_declining_falls_back_to_configure() {
+        let _guard = EnvVarGuard::set(affected::FOCUS_ENV, "0");
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        std::fs::remove_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
+        let spawner = RecordingSpawner::with_codes(vec![SEED_UNSUPPORTED_RC, 0]);
+        let mut out = Vec::new();
+        let args = parse_build_args(&["--seed-build=/nowhere".to_owned()]);
+        let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let calls = spawner.calls.borrow();
+        assert_eq!(seed_calls(&calls).len(), 1);
+        assert!(calls.iter().any(|c| c.program == "cmake" && c.args.iter().any(|x| x == "-B")));
+        assert!(String::from_utf8(out).unwrap().contains("configuring from scratch"));
+    }
+
+    #[test]
+    fn seed_build_skips_an_existing_build_dir_and_standalone_projects() {
+        let _guard = EnvVarGuard::set(affected::FOCUS_ENV, "0");
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        let args = parse_build_args(&["--seed-build".to_owned()]);
+        build_with(&proj, &args, &spawner, &mut out).unwrap();
+        assert!(seed_calls(&spawner.calls.borrow()).is_empty(), "existing build dir must not be seeded");
+        assert!(String::from_utf8(out).unwrap().contains("already exists"));
+
+        let td2 = tempfile::tempdir().unwrap();
+        std::fs::write(td2.path().join("CMakeLists.txt"), "project(x)\n").unwrap();
+        let standalone = ActiveProject::new(td2.path().to_path_buf(), true);
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with(&standalone, &args, &spawner, &mut out).unwrap();
+        assert!(seed_calls(&spawner.calls.borrow()).is_empty());
+    }
+
+    #[test]
+    fn seed_build_env_opts_in_without_the_flag() {
+        let _env = EnvVarGuard::set_many(&[(affected::FOCUS_ENV, Some("0")), (SEED_ENV, Some("1"))]);
+        let td = tempfile::tempdir().unwrap();
+        let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
+        std::fs::remove_dir_all(&proj.build_dir).unwrap();
+        std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
+        let spawner = RecordingSpawner::ok();
+        let mut out = Vec::new();
+        build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
+        let calls = spawner.calls.borrow();
+        let seeds = seed_calls(&calls);
+        assert_eq!(seeds.len(), 1, "{calls:?}");
+        let a = &seeds[0].args;
+        let i = a.iter().position(|x| x == "--from").unwrap();
+        assert_eq!(a[i + 1], SEED_AUTO);
     }
 
     #[test]

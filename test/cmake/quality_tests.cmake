@@ -337,8 +337,7 @@ if(Python3_Interpreter_FOUND)
         endif()
     endif()
     set(_pulp_pch_expect
-        --expect pulp-test-biquad=pulp-test-pch-cxx20
-        --expect pulp-test-headless=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-tilt-eq=pulp-test-pch-cxx20
         --expect pulp-test-signal-no-exceptions=none
         --expect pulp-test-cross-platform-audio-golden=none
         --expect pulp-test-group-view-widgets=pulp-test-pch-cxx20
@@ -350,10 +349,30 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-render-helpers=pulp-test-pch-cxx20
         --expect pulp-test-group-canvas-text=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-fmt-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-ship=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-httplib=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-reload-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-fmt-format-view=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-late-midi=pulp-test-pch-cxx20
         --expect pulp-test-group-late-signal=pulp-test-pch-cxx20
         --expect pulp-test-group-motion=pulp-test-pch-cxx20
         --expect pulp-test-group-native-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host=pulp-test-pch-cxx20
+        --expect pulp-test-group-view-host-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-hosting=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-view-host-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-runtime=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-analysis=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-standalone=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-core-events=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-platform=pulp-test-pch-cxx20
+        --expect pulp-test-group-core-canvas=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-audio=pulp-test-pch-cxx20
         --expect pulp-test-group-sampler-host-graph=pulp-test-pch-cxx${_pulp_pch_format_std}
         --expect pulp-test-group-sampler-format=pulp-test-pch-cxx${_pulp_pch_format_std}
@@ -364,9 +383,34 @@ if(Python3_Interpreter_FOUND)
         --expect pulp-test-group-timeline-playback=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-editor=pulp-test-pch-cxx20
         --expect pulp-test-group-timeline-view=pulp-test-pch-cxx20
-        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20)
+        --expect pulp-test-group-timeline-session=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-view=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-signal=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-app-host=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-cap-audio=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-midi=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-state=pulp-test-pch-cxx20
+        --expect pulp-test-group-cap-format=pulp-test-pch-cxx${_pulp_pch_format_std}
+        --expect pulp-test-group-app-audio-support=pulp-test-pch-cxx${_pulp_pch_format_std})
+    if(APPLE AND NOT PULP_IOS)
+        # The ObjC++ view-host group is NO_PCH by construction (CMake refuses
+        # a CXX carrier for an OBJCXX TU); pin that it never picks one up.
+        list(APPEND _pulp_pch_expect --expect pulp-test-group-view-host-mac=none)
+    endif()
     if(TARGET SDL3-static)
         list(APPEND _pulp_pch_expect --expect SDL3-static=none)
+    endif()
+    if(PULP_HAS_CLAP)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-cap-clap=pulp-test-pch-cxx${_pulp_pch_format_std})
+    endif()
+    # Registered in format_reload_tests.cmake, which is included after this file.
+    if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
+        list(APPEND _pulp_pch_expect
+            --expect pulp-test-group-fmt-au-v2=pulp-test-pch-cxx23)
     endif()
     list(APPEND _pulp_pch_expect
         --expect pulp-test-group-dsp-rt-midi=pulp-test-pch-cxx20
@@ -376,12 +420,39 @@ if(Python3_Interpreter_FOUND)
     if(TARGET pulp-test-group-mac-view)
         list(APPEND _pulp_pch_expect --expect pulp-test-group-mac-view=none)
     endif()
+    list(APPEND _pulp_pch_expect
+        --expect pulp-test-group-design-import-bridge=pulp-test-pch-cxx20
+        --expect pulp-test-group-design-import-tool=pulp-test-pch-cxx20)
     add_test(NAME test-pch-wiring COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/pch_wiring_check.py"
         --build-dir "${CMAKE_BINARY_DIR}" --option ${_pulp_pch_option}
         ${_pulp_pch_expect})
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+    # A .pch embeds its build tree's absolute paths, so ccache must never serve
+    # one tree's PCH to another. Builds a two-tree CMake + Ninja fixture against
+    # an isolated ccache (base_dir over both trees), deletes the first tree and
+    # builds the second; a negative control without the carrier's path-keyed
+    # launcher must fail with the stale-PCH error. Skips without ccache, Ninja
+    # or clang.
+    add_test(NAME ccache-pch-isolation COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ccache_pch_isolation.py")
+    set_tests_properties(ccache-pch-isolation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
+    # Test-support sources compiled once into OBJECT libraries
+    # (tools/cmake/PulpTestSharedObjects.cmake) must stay compiled once.
+    set(_pulp_shared_test_objects
+        --shared test/harness/rt_allocation_probe.cpp=pulp-test-rt-allocation-probe)
+    if(TARGET pulp-test-rt-intercept)
+        list(APPEND _pulp_shared_test_objects --shared
+            test/native_components/rt_intercept_test_support.cpp=pulp-test-rt-intercept)
+    endif()
+    add_test(NAME test-shared-objects COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/shared_test_objects_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}" ${_pulp_shared_test_objects})
+    set_tests_properties(test-shared-objects PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME test-shared-objects-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_shared_test_objects_check.py")
 
     # Dependency configure-check replay (PulpConfigureCheckCache.cmake): drives
     # real CMake configures of a toy dependency, so it is Apple-only like the
@@ -754,6 +825,15 @@ if(Python3_Interpreter_FOUND)
     # are discovered by glob, so adding or removing a machine needs no edit here.
     add_test(NAME fleet-snapshot-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_fleet_snapshot.py")
+    # Every host the protected macOS gate downloads from must be in tartci's
+    # egress-relay contract (checked-in copy); a missing one fails every gate
+    # job at once. Offline: the hourly sweep compares the copy with tartci.
+    if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+        add_test(NAME relay-contract-hosts COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/relay_contract_check.py")
+        add_test(NAME relay-contract-hosts-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_relay_contract_check.py")
+    endif()
     add_test(NAME native-intel-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_verify_native_intel_runner_group.py")
     add_test(NAME linux-runner-group-selftest COMMAND ${Python3_EXECUTABLE}
@@ -1119,6 +1199,18 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktrees
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktrees-selftest PROPERTIES TIMEOUT 600)
+
+        # seed_build_dir.py clones and retargets a warm build dir. Its suite
+        # builds a real CMake + Ninja fixture whose executable bakes the source
+        # dir in through a -D define (the case a naive retarget gets wrong),
+        # seeds worktrees at the same and at a changed commit, and audits the
+        # donor (inode + mtime) so a retarget that writes back into it fails.
+        # Skips itself off macOS or off APFS; refusals (cross-volume, Makefiles
+        # donor, unbuilt donor, busy donor) must leave nothing behind.
+        add_test(NAME seed-build-dir-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_seed_build_dir
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(seed-build-dir-selftest PROPERTIES TIMEOUT 300)
     endif()
     # Tool registry: docs/status/tools.yaml must stay valid (every path and
     # invocation resolves) AND complete (every committed entry point under the

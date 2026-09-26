@@ -173,7 +173,8 @@ pulp_add_test_suite(pulp-test-canvas-color GROUP pulp-test-group-canvas
 # Outset box-shadow coverage cache (Skia path). Test body is gated on
 # PULP_HAS_SKIA, which pulp::canvas propagates; without Skia it has zero cases.
 pulp_add_test_suite(pulp-test-box-shadow-cache GROUP pulp-test-group-canvas
-    LIBRARIES pulp::canvas)
+    LIBRARIES pulp::canvas
+    MAY_BE_EMPTY)
 
 # CoreGraphicsCanvas tests build a CGBitmapContext directly to verify
 # CGContextClearRect actually clears destination pixels; ImageIO provides
@@ -195,7 +196,8 @@ pulp_add_test_suite(pulp-test-canvas GROUP pulp-test-group-canvas
 # BlendMode every-value round-trip. Companion to test_canvas_cg_gradients.cpp;
 # the non-Apple parts stay in test_canvas.cpp.
 pulp_add_test_suite(pulp-test-canvas-cg-paths GROUP pulp-test-group-canvas
-    LIBRARIES pulp::canvas)
+    LIBRARIES pulp::canvas
+    MAY_BE_EMPTY)
 
 # Canvas font tests. Covers bundled-font registration via
 # match_bundled_typeface plus the public register_font(path) API.

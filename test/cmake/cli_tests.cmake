@@ -257,13 +257,18 @@ target_link_libraries(pulp-test-cli-tweaks-shellout PRIVATE pulp::platform Catch
 pulp_bind_cli_shellout_target(pulp-test-cli-tweaks-shellout)
 catch_discover_tests(pulp-test-cli-tweaks-shellout)
 
-# Pin shell_quote's per-platform contract so it can't
-# silently regress to the pre-fix shape that broke `git fetch origin`
-# on Windows by writing doubled backslashes into clone URLs.
-add_executable(pulp-test-cli-shell-quote
-    test_cli_shell_quote.cpp
+# CLI support sources shared by the lease / checkout / git-lock / docs tests,
+# compiled once. Those tests compiled these sources with the same include
+# directories, pulp::runtime's usage requirements and no definition the sources
+# read (the docs test's PULP_SOURCE_DIR is read only by its test source), so one
+# object per source serves all of them. A test that needs these sources built
+# with different definitions must list them itself instead.
+add_library(pulp-test-cli-support-objects OBJECT EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
@@ -272,6 +277,18 @@ add_executable(pulp-test-cli-shell-quote
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
 )
+target_include_directories(pulp-test-cli-support-objects PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-support-objects PRIVATE pulp::runtime)
+
+# Pin shell_quote's per-platform contract so it can't
+# silently regress to the pre-fix shape that broke `git fetch origin`
+# on Windows by writing doubled backslashes into clone URLs.
+add_executable(pulp-test-cli-shell-quote
+    test_cli_shell_quote.cpp
+    $<TARGET_OBJECTS:pulp-test-cli-support-objects>)
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
 configure_file(
     "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
@@ -288,17 +305,7 @@ catch_discover_tests(pulp-test-cli-shell-quote)
 
 add_executable(pulp-test-cli-checkout-dependencies
     test_cli_checkout_dependencies.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
+    $<TARGET_OBJECTS:pulp-test-cli-support-objects>)
 target_include_directories(pulp-test-cli-checkout-dependencies PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli
@@ -310,18 +317,7 @@ catch_discover_tests(pulp-test-cli-checkout-dependencies)
 
 add_executable(pulp-test-cli-tartci-lease
     test_cli_tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
-)
+    $<TARGET_OBJECTS:pulp-test-cli-support-objects>)
 target_include_directories(pulp-test-cli-tartci-lease PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli
@@ -336,17 +332,7 @@ catch_discover_tests(pulp-test-cli-tartci-lease)
 # rest of the doctor helper surface.
 add_executable(pulp-test-cli-git-lock-health
     test_cli_git_lock_health.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
+    $<TARGET_OBJECTS:pulp-test-cli-support-objects>)
 target_include_directories(pulp-test-cli-git-lock-health PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli
@@ -361,16 +347,7 @@ add_executable(pulp-test-cli-docs-command
     test_cli_docs_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cmd_docs.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/authority_navigation.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/tartci_lease.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp ${CMAKE_SOURCE_DIR}/tools/cli/focused_build.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_quote.cpp ${CMAKE_SOURCE_DIR}/tools/cli/shell_redirect.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_sdk.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/cli_doctor_helpers.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
-)
+    $<TARGET_OBJECTS:pulp-test-cli-support-objects>)
 target_include_directories(pulp-test-cli-docs-command PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli

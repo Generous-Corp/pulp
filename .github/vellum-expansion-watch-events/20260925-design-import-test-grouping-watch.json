@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260925-design-import-test-grouping-watch",
+  "created_at": "2026-09-25T07:32:09Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record that regrouping test executables crosses the design-source-ingest selector without touching anything that family is about. The selector is crossed by test/cmake/design_import_runtime_bridge_tests.cmake and test/cmake/design_import_tool_cli_tests.cmake: 21 Catch2 suites move from one executable each into two grouped executables (pulp-test-group-design-import-bridge, pulp-test-group-design-import-tool) through pulp_add_test_suite(... GROUP ...), while process-isolation suites (browser capture, CLI shell-outs, RT probes, the Apple-only GPU and screenshot suites, and the react-runtime / jsx-runtime binaries the roundtrip scripts run by name) stay standalone. Every ctest name and per-test property is preserved, verified by tools/scripts/ctest_inventory_parity.py against main (948 tests, no renames). No importer, DesignIR, fixture, capture, renderer, threshold or Vellum-owned source changes, and no test's verdict changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "cmake-test-group-discovery",
+    "ctest-inventory-parity-self-check",
+    "test-pch-wiring",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

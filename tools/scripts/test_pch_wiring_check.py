@@ -20,6 +20,8 @@ import pch_wiring_check as pwc  # noqa: E402
 
 PCH20 = "CMakeFiles/pulp-test-pch-cxx20.dir/cmake_pch.hxx"
 PCH23 = "CMakeFiles/pulp-test-pch-cxx23.dir/cmake_pch.hxx"
+CCACHE = "/usr/bin/cmake -E env CCACHE_SLOPPINESS=pch_defines,time_macros /usr/bin/ccache"
+CCACHE_ISOLATED = f"/usr/bin/cmake -E env CCACHE_BASEDIR= {CCACHE}"
 
 
 def _use(pch: str) -> str:
@@ -35,6 +37,7 @@ def ninja_tree(
     sdl_flags: str = "-O3 -std=gnu11",
     carrier20_defines: str = "",
     carrier23_defines: str = "",
+    carrier_launcher: str = CCACHE_ISOLATED,
 ) -> str:
     return "\n".join([
         "rule CXX_COMPILER__x",
@@ -42,12 +45,15 @@ def ninja_tree(
         f"build {PCH20}.pch: CXX_COMPILER__pulp-test-pch-cxx20_Release /b/pulp-test-pch/cxx20_stub.cpp",
         "  FLAGS = -O3 -std=gnu++20 -Xclang -fno-pch-timestamp -Xclang -emit-pch -x c++-header",
         f"  DEFINES = {carrier20_defines}",
+        f"  LAUNCHER = {carrier_launcher}",
         f"build {PCH23}.pch: CXX_COMPILER__pulp-test-pch-cxx23_Release /b/pulp-test-pch/cxx23_stub.cpp",
         "  FLAGS = -O3 -std=gnu++23 -Xclang -fno-pch-timestamp -Xclang -emit-pch -x c++-header",
         f"  DEFINES = {carrier23_defines}",
+        f"  LAUNCHER = {carrier_launcher}",
         "build test/CMakeFiles/pulp-test-biquad.dir/test_biquad.cpp.o: CXX_COMPILER__pulp-test-biquad_Release /w/test/test_biquad.cpp",
         f"  FLAGS = {biquad_flags}",
         f"  DEFINES = {biquad_defines}",
+        f"  LAUNCHER = {CCACHE}",
         "build test/CMakeFiles/pulp-test-headless.dir/test_headless.cpp.o: CXX_COMPILER__pulp-test-headless_Release /w/test/test_headless.cpp",
         f"  FLAGS = {headless_flags}",
         "  DEFINES = ",
@@ -142,6 +148,21 @@ class PchWiringCheckTest(unittest.TestCase):
         self._write("Ninja", ninja_tree(biquad_defines="-DFIXTURE=1 -DEXTRA=2"), LEDGER_ON)
         self.assertEqual(pwc.check(self.build, True, EXPECT), [])
 
+    def test_pch_compile_through_shared_ccache_key_fails(self) -> None:
+        self._write("Ninja", ninja_tree(carrier_launcher=CCACHE), LEDGER_ON)
+        problems = pwc.check(self.build, True, EXPECT)
+        self.assertEqual(sum("CCACHE_BASEDIR=" in p for p in problems), 2, problems)
+
+    def test_pch_compile_without_ccache_passes(self) -> None:
+        self._write("Ninja", ninja_tree(carrier_launcher=""), LEDGER_ON)
+        self.assertEqual(pwc.check(self.build, True, EXPECT), [])
+
+    def test_basedir_set_to_a_path_is_not_isolation(self) -> None:
+        launcher = f"/usr/bin/cmake -E env CCACHE_BASEDIR=/w {CCACHE}"
+        self._write("Ninja", ninja_tree(carrier_launcher=launcher), LEDGER_ON)
+        problems = pwc.check(self.build, True, EXPECT)
+        self.assertTrue(any("CCACHE_BASEDIR=" in p for p in problems), problems)
+
     def test_option_on_with_no_pch_targets_fails(self) -> None:
         self._write("Ninja", ninja_tree(), LEDGER_OFF)
         problems = pwc.check(self.build, True, {})
@@ -162,11 +183,25 @@ class PchWiringCheckTest(unittest.TestCase):
 
         flags("pulp-test-pch-cxx20", ".", "CXX", "-O3 -std=gnu++20 -Xclang -emit-pch")
         flags("pulp-test-pch-cxx23", ".", "CXX", "-O3 -std=gnu++23 -Xclang -emit-pch")
+
+        def build_make(launcher: str) -> None:
+            d_ = self.build / "CMakeFiles" / "pulp-test-pch-cxx20.dir"
+            pch = "-Xclang -emit-pch -Xclang -include -Xclang /b/x/cmake_pch.hxx -x c++-header"
+            (d_ / "build.make").write_text(
+                f"\t{launcher} /usr/bin/c++ $(CXX_FLAGS) {pch} -o x/cmake_pch.hxx.pch -c x.cxx\n"
+                f"\t/usr/bin/c++ $(CXX_FLAGS) {pch} -E x.cxx > x.i\n")
+
+        build_make(CCACHE_ISOLATED)
         flags("pulp-test-biquad", "test", "CXX", f"-O3 -std=gnu++20 {_use(PCH20)}", "-DFIXTURE=1")
         flags("pulp-test-headless", "test", "CXX", f"-O3 -std=gnu++23 {_use(PCH23)}")
         flags("pulp-test-signal-no-exceptions", "test", "CXX", "-O3 -std=gnu++20 -fno-exceptions")
         flags("SDL3-static", "_deps/sdl3-build", "C", "-O3 -std=gnu11")
         self.assertEqual(pwc.check(self.build, True, EXPECT), [])
+        # A PCH compile through the shared ccache key is rejected.
+        build_make(CCACHE)
+        problems = pwc.check(self.build, True, EXPECT)
+        self.assertTrue(any("CCACHE_BASEDIR=" in p for p in problems), problems)
+        build_make(CCACHE_ISOLATED)
         # And the same tree with SDL3's PCH back on is rejected.
         flags("SDL3-static", "_deps/sdl3-build", "C", "-O3 -Xclang -include-pch -Xclang x/cmake_pch.h.pch")
         problems = pwc.check(self.build, True, EXPECT)

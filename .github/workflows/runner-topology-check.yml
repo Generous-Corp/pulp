@@ -98,11 +98,34 @@ jobs:
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"
           cat snapshot.txt
 
+      # The gate VMs reach the internet only through tartci's egress relay. A
+      # checked-in copy of its allowlist lets the relay-contract-hosts ctest
+      # stop a workflow download the relay would refuse; this keeps that copy
+      # honest against tartci. Reuses the clone above; same exit codes.
+      - name: Check relay-contract copy freshness
+        id: relay
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          if [ -d "$RUNNER_TEMP/tartci" ]; then
+            python3 tools/scripts/relay_contract_check.py --check --tartci "$RUNNER_TEMP/tartci" \
+              > relay.txt 2>&1
+            rc=$?
+          else
+            echo "tartci clone unavailable" > relay.txt
+            rc=2
+          fi
+          set -e
+          echo "rc=${rc}" >> "$GITHUB_OUTPUT"
+          cat relay.txt
+
       - name: Reconcile topology
         id: reconcile
         shell: bash
         env:
           SNAPSHOT_RC: ${{ steps.snapshot.outputs.rc }}
+          RELAY_RC: ${{ steps.relay.outputs.rc }}
         run: |
           set -uo pipefail
           set +e
@@ -119,12 +142,18 @@ jobs:
             echo "── advertised-labels snapshot (fleet_snapshot.py --check) ──"
             cat snapshot.txt 2>/dev/null || echo "(snapshot check did not run)"
           } >> report.txt
-          snapshot_rc="${SNAPSHOT_RC:-2}"
-          if [ "${rc}" = "0" ] && [ "${snapshot_rc}" != "0" ]; then
-            rc="${snapshot_rc}"
-          elif [ "${rc}" = "2" ] && [ "${snapshot_rc}" = "1" ]; then
-            rc=1
-          fi
+          {
+            echo ""
+            echo "── relay-contract copy (relay_contract_check.py --check) ──"
+            cat relay.txt 2>/dev/null || echo "(relay-contract check did not run)"
+          } >> report.txt
+          for side_rc in "${SNAPSHOT_RC:-2}" "${RELAY_RC:-2}"; do
+            if [ "${rc}" = "0" ] && [ "${side_rc}" != "0" ]; then
+              rc="${side_rc}"
+            elif [ "${rc}" = "2" ] && [ "${side_rc}" = "1" ]; then
+              rc=1
+            fi
+          done
 
           echo "rc=${rc}" >> "$GITHUB_OUTPUT"
           cat report.txt
@@ -164,7 +193,9 @@ jobs:
               echo "label set nothing can serve, or a repo variable drifted from the"
               echo "reviewed contract in \`tools/scripts/runner_topology.json\`, or"
               echo "the advertised-labels snapshot no longer matches tartci's fleet"
-              echo "profiles (regenerate with \`tools/scripts/fleet_snapshot.py --write\`)."
+              echo "profiles (regenerate with \`tools/scripts/fleet_snapshot.py --write\`),"
+              echo "or the relay-contract copy no longer matches tartci's egress"
+              echo "allowlist (refresh with \`tools/scripts/relay_contract_check.py --write\`)."
               echo ""
               echo "This failure mode is SILENT in GitHub: jobs routed at a label no"
               echo "runner carries are queued, not rejected. The symptom operators see"

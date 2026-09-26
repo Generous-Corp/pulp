@@ -2403,5 +2403,234 @@ class StdlibGuardStepExtractionMatchesYaml(unittest.TestCase):
             )
 
 
+
+SIGNING_SECRETS = (
+    "MACOS_CERTIFICATE",
+    "MACOS_CERTIFICATE_PWD",
+    "KEYCHAIN_PASSWORD",
+    "SIGNING_IDENTITY",
+)
+NOTARY_SECRETS = ("APPLE_ID", "APPLE_TEAM_ID", "APPLE_PASSWORD")
+
+
+def _sign_and_release_steps() -> list[dict]:
+    document = yaml.safe_load(SIGN_AND_RELEASE.read_text(encoding="utf-8"))
+    return document["jobs"]["build-and-sign-macos"]["steps"]
+
+
+def _step(name: str) -> dict:
+    matches = [s for s in _sign_and_release_steps() if s.get("name") == name]
+    if len(matches) != 1:
+        raise AssertionError(f"sign-and-release.yml has {len(matches)} `{name}` steps")
+    return matches[0]
+
+
+class SignAndReleaseSigningIsHonest(unittest.TestCase):
+    """A release whose signing inputs are absent must SAY it is unsigned.
+
+    The signing steps were guarded with `if: env.MACOS_CERTIFICATE != ''` and
+    friends, where the variable was defined in the step's own `env:`. A step's
+    `env:` is not in scope for its own `if:`, so every guard was false and every
+    release shipped unsigned with no annotation at all. Notarization failures
+    were also swallowed with `|| echo` / `stapler ... || true`.
+
+    These tests run the real `Detect signing inputs` script out of the workflow
+    under each secret configuration, so they exercise the shipped text.
+    """
+
+    def _run_detect(self, present: tuple[str, ...], policy: str | None = None):
+        script = _step("Detect signing inputs")["run"]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            output = tmp_path / "output"
+            summary = tmp_path / "summary"
+            env = {
+                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                "GITHUB_OUTPUT": str(output),
+                "GITHUB_STEP_SUMMARY": str(summary),
+                "GITHUB_REF_NAME": "v9.9.9",
+                "UNSIGNED_POLICY": policy or "mark",
+            }
+            for name in SIGNING_SECRETS + NOTARY_SECRETS:
+                env[name] = "value" if name in present else ""
+            result = subprocess.run(
+                ["bash", "-e", "-c", script],
+                cwd=tmp,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            outputs = {}
+            if output.exists():
+                for line in output.read_text().splitlines():
+                    key, _, value = line.partition("=")
+                    outputs[key] = value
+            status_file = tmp_path / "artifacts" / "SIGNING-STATUS.txt"
+            return (
+                result,
+                outputs,
+                summary.read_text() if summary.exists() else "",
+                status_file.read_text() if status_file.exists() else "",
+            )
+
+    def test_no_secrets_is_marked_unsigned_loudly_and_does_not_fail(self) -> None:
+        result, outputs, summary, status_file = self._run_detect(())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outputs.get("status"), "unsigned")
+        self.assertEqual(outputs.get("sign"), "false")
+        self.assertEqual(outputs.get("notarize"), "false")
+        self.assertEqual(outputs.get("artifact_suffix"), "-UNSIGNED")
+        self.assertIn("::warning", result.stdout)
+        self.assertIn("UNSIGNED — not codesigned or notarized", result.stdout)
+        self.assertIn("UNSIGNED — not codesigned or notarized", summary)
+        self.assertIn("UNSIGNED — not codesigned or notarized", status_file)
+
+    def test_fail_policy_turns_unsigned_into_a_failure(self) -> None:
+        result, outputs, _summary, _status = self._run_detect((), policy="fail")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(outputs.get("status"), "unsigned")
+        self.assertIn("::error::", result.stdout)
+
+    def test_unknown_policy_is_refused_and_names_the_fix(self) -> None:
+        result, _outputs, _summary, _status = self._run_detect((), policy="ignore")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("'mark'", result.stdout)
+        self.assertIn("'fail'", result.stdout)
+
+    def test_full_configuration_signs_and_notarizes_without_a_warning(self) -> None:
+        result, outputs, _summary, status_file = self._run_detect(
+            SIGNING_SECRETS + NOTARY_SECRETS
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outputs.get("status"), "signed-notarized")
+        self.assertEqual(outputs.get("sign"), "true")
+        self.assertEqual(outputs.get("notarize"), "true")
+        self.assertEqual(outputs.get("artifact_suffix"), "")
+        self.assertNotIn("::warning", result.stdout)
+        self.assertNotIn("UNSIGNED", status_file)
+
+    def test_signed_without_notary_secrets_is_marked_not_notarized(self) -> None:
+        result, outputs, _summary, _status = self._run_detect(SIGNING_SECRETS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outputs.get("status"), "signed-not-notarized")
+        self.assertEqual(outputs.get("sign"), "true")
+        self.assertEqual(outputs.get("notarize"), "false")
+        self.assertIn("::warning", result.stdout)
+
+    def test_partial_signing_configuration_fails_and_names_what_is_missing(self) -> None:
+        result, _outputs, _summary, _status = self._run_detect(
+            ("MACOS_CERTIFICATE",) + NOTARY_SECRETS
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SIGNING_IDENTITY", result.stdout)
+
+    def test_partial_notary_configuration_fails(self) -> None:
+        result, _outputs, _summary, _status = self._run_detect(
+            SIGNING_SECRETS + ("APPLE_ID",)
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("APPLE_PASSWORD", result.stdout)
+
+    def test_notary_without_signing_fails(self) -> None:
+        result, _outputs, _summary, _status = self._run_detect(NOTARY_SECRETS)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_every_detect_input_comes_from_the_secret_it_names(self) -> None:
+        env = _step("Detect signing inputs")["env"]
+        for name in SIGNING_SECRETS + NOTARY_SECRETS:
+            self.assertEqual(env.get(name), "${{ secrets.%s }}" % name)
+        self.assertIn("vars.PULP_RELEASE_UNSIGNED_POLICY", env.get("UNSIGNED_POLICY", ""))
+        self.assertIn("'mark'", env.get("UNSIGNED_POLICY", ""))
+
+    def test_detect_runs_before_any_signing_step(self) -> None:
+        names = [s.get("name") for s in _sign_and_release_steps()]
+        detect = names.index("Detect signing inputs")
+        for gated in ("Import signing certificate", "Sign plugins", "Notarize packages"):
+            self.assertLess(detect, names.index(gated))
+
+    def test_signing_steps_are_gated_on_the_computed_decision(self) -> None:
+        self.assertEqual(
+            _step("Import signing certificate").get("if"),
+            "steps.signing.outputs.sign == 'true'",
+        )
+        self.assertEqual(
+            _step("Sign plugins").get("if"), "steps.signing.outputs.sign == 'true'"
+        )
+        self.assertEqual(
+            _step("Notarize packages").get("if"),
+            "steps.signing.outputs.notarize == 'true'",
+        )
+
+    def test_no_step_guard_reads_a_variable_only_its_own_env_defines(self) -> None:
+        """The never-true shape: `if: env.X` where X comes from the step's `env:`."""
+        for step in _sign_and_release_steps():
+            guard = str(step.get("if") or "")
+            for name in (step.get("env") or {}):
+                self.assertNotIn(
+                    f"env.{name}",
+                    guard,
+                    f"step `{step.get('name')}` guards on env.{name}, which its own "
+                    "`env:` defines; that is never in scope for the step's `if:`.",
+                )
+
+    def test_notarize_and_staple_failures_are_not_masked(self) -> None:
+        run = _step("Notarize packages")["run"]
+        self.assertIn("set -euo pipefail", run)
+        self.assertNotRegex(run, r"\|\|\s*(true|echo|:)")
+        self.assertIn("status: Accepted", run)
+        self.assertIn('xcrun stapler staple "$pkg"', run)
+
+    def test_sign_plugins_failures_are_not_masked(self) -> None:
+        run = _step("Sign plugins")["run"]
+        self.assertIn("set -euo pipefail", run)
+        self.assertNotRegex(run, r"codesign[^\n]*\|\|")
+
+    def test_uploaded_artifact_name_carries_the_signing_suffix(self) -> None:
+        upload = _step("Upload artifacts")
+        self.assertIn("steps.signing.outputs.artifact_suffix", upload["with"]["name"])
+
+
+class ReleaseRunnerVariableConsumersAreAudited(unittest.TestCase):
+    """`runner_topology_check.py --mode=static` must see EVERY consumer of the
+    release macOS runner variable, so a mis-set value is adjudicated for each
+    workflow that dispatches on it, not only release-cli.yml."""
+
+    VARIABLE = "PULP_RELEASE_MACOS_RUNS_ON_JSON"
+    EXPECTED = {"Release CLI", "Sign and Release", "Release-path PR gate"}
+
+    def test_static_audit_finds_all_three_consumers(self) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+        import runner_topology_static
+
+        found = runner_topology_static.consuming_workflows(
+            self.VARIABLE, REPO_ROOT / ".github" / "workflows"
+        )
+        names = {name for _file, name in found}
+        self.assertTrue(self.EXPECTED.issubset(names), f"found only {sorted(names)}")
+
+    def test_static_mode_emits_a_contract_row_per_consumer(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "tools" / "scripts" / "runner_topology_check.py"),
+                "--mode=static",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+        )
+        self.assertIn(result.returncode, (0, 1), result.stderr)
+        rows = json.loads(result.stdout)["rows"]
+        audited = {
+            row["workflow"]
+            for row in rows
+            if row["variable"] == self.VARIABLE and row["source"] == "expect"
+        }
+        # Control: the instrument must see some row for this variable at all.
+        self.assertTrue(any(row["variable"] == self.VARIABLE for row in rows))
+        self.assertEqual(self.EXPECTED, audited & self.EXPECTED)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -21,8 +21,51 @@ if(TARGET pulp::inspect-control)
         LABELS "control;ship")
 endif()
 
+# Grouped executables for this manifest (pulp_add_test_group in
+# tools/cmake/PulpTestSuite.cmake): each member keeps its own registration
+# and properties; only the binary behind them is shared. Members are grouped
+# by the compile line they already had: pulp::signal, pulp::runtime,
+# pulp::view (pulp::audio, pulp::canvas and pulp::runtime add nothing to it),
+# pulp::signal + pulp::audio-analysis, pulp::standalone (the one C++23 line
+# here), pulp::events, pulp::platform, pulp::canvas, pulp::gpu-audio with and
+# without the private source root on the include path, the two private
+# gpu_audio TUs compiled without a library, pulp::audio (+ pulp::signal),
+# pulp::runtime + httplib, pulp::osc and pulp::state. A suite stays on its
+# own when it needs its own process or compile line: the RT allocation
+# probes (harness/rt_allocation_probe.cpp, incl. the three shared-io
+# session suites), the RT-intercept dsl-processor, the two -fno-exceptions
+# header probes, the tracing guard whose binary is nm-scanned after the
+# build, ipc (its fixture path is baked in with $<TARGET_FILE:...>), the
+# wav-memory-decoder POST_BUILD symbol check, and the suites whose line no
+# sibling shares (simd, crossfade, live-kernel-crossfade-null).
+pulp_add_test_group(pulp-test-group-core-signal
+    LIBRARIES pulp::signal pulp::signal-fft-backend)
+pulp_add_test_group(pulp-test-group-core-runtime LIBRARIES pulp::runtime)
+pulp_add_test_group(pulp-test-group-core-view
+    LIBRARIES pulp::view pulp::audio pulp::canvas pulp::runtime)
+pulp_add_test_group(pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis pulp::signal-modal-spec)
+pulp_add_test_group(pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone pulp::audio pulp::view)
+pulp_add_test_group(pulp-test-group-core-events LIBRARIES pulp::events pulp::runtime)
+pulp_add_test_group(pulp-test-group-core-platform LIBRARIES pulp::platform)
+pulp_add_test_group(pulp-test-group-core-canvas LIBRARIES pulp::canvas)
+pulp_add_test_group(pulp-test-group-core-gpu-audio-signal
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::signal)
+pulp_add_test_group(pulp-test-group-core-gpu-audio-private
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+pulp_add_test_group(pulp-test-group-core-gpu-shared-io-private
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+pulp_add_test_group(pulp-test-group-core-audio LIBRARIES pulp::audio pulp::signal)
+pulp_add_test_group(pulp-test-group-core-runtime-http
+    LIBRARIES pulp::runtime pulp-cpp-httplib)
+pulp_add_test_group(pulp-test-group-core-osc LIBRARIES pulp::osc)
+pulp_add_test_group(pulp-test-group-core-state LIBRARIES pulp::state pulp::runtime)
+
 # Analytics tests
-pulp_add_test_suite(pulp-test-analytics LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-analytics GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # runtime::Slot<T> / runtime::Handoff<T> — the two real-time publication modes.
 # Includes N-thread hammer tests that assert reclamation never runs on the
@@ -37,20 +80,22 @@ pulp_add_test_suite(pulp-test-runtime-slot
 pulp_add_test_suite(pulp-test-tracing LIBRARIES pulp::runtime)
 # Session lifecycle + macro smoke. Config-agnostic: OFF verifies the no-op
 # contract; ON emits spans from two threads and byte-checks the flushed trace.
-pulp_add_test_suite(pulp-test-tracing-session LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-tracing-session GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # The canvas trace category must stay populated. Drives a compositing layer
 # through a RecordingCanvas, so it needs no GPU and runs in the PULP_TRACING=ON
 # lane, which configures GPU off. test_trace_frame_pipeline asserts the same
 # spans but requires GPU capture, so it can never be the guard.
-pulp_add_test_suite(pulp-test-tracing-canvas-layers
+pulp_add_test_suite(pulp-test-tracing-canvas-layers GROUP pulp-test-group-core-view
     LIBRARIES pulp::runtime pulp::view pulp::canvas)
 
 # Perfetto auto-flush timeout: cancel-before-deadline, join-on-cancel (the
 # property that makes plug-in module unload safe), re-arm replacing rather than
 # adding a timer, and the session-generation guard that stops a stale timer
 # truncating a later capture. Runs in the DEFAULT PULP_TRACING=OFF build.
-pulp_add_test_suite(pulp-test-trace-timeout LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-trace-timeout GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 if(NOT PULP_TRACING AND NOT WIN32)
     add_custom_command(TARGET pulp-test-tracing POST_BUILD
         COMMAND ${CMAKE_COMMAND}
@@ -61,11 +106,14 @@ if(NOT PULP_TRACING AND NOT WIN32)
 endif()
 
 # Crypto tests (SHA-256, MD5, AES, machine ID)
-pulp_add_test_suite(pulp-test-crypto LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-crypto GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # Ed25519 (RFC 8032).
-pulp_add_test_suite(pulp-test-ed25519 LIBRARIES pulp::runtime)
-pulp_add_test_suite(pulp-test-x25519 LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-ed25519 GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-x25519 GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # IPC (InterprocessConnection) tests
 add_executable(pulp-connected-child-process-fixture
@@ -87,30 +135,39 @@ catch_discover_tests(pulp-test-ipc
     TEST_PREFIX "lifecycle::"
     PROPERTIES LABELS lifecycle)
 
-pulp_add_test_suite(pulp-test-ipc-endpoints LIBRARIES pulp::events pulp::runtime)
+pulp_add_test_suite(pulp-test-ipc-endpoints GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events pulp::runtime)
 
 # AttributedString and TextLayout tests
-pulp_add_test_suite(pulp-test-attributed-string LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-attributed-string GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # i18n translation tests
-pulp_add_test_suite(pulp-test-i18n LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-i18n GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # StateTree and ObservableValue tests
-pulp_add_test_suite(pulp-test-state-tree LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-state-tree GROUP pulp-test-group-core-state
+    LIBRARIES pulp::state pulp::runtime)
 
 # GUI component tests (table, toolbar, concertina, buttons, lasso)
-pulp_add_test_suite(pulp-test-gui-components LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-gui-components GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
-pulp_add_test_suite(pulp-test-table-list-box LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-table-list-box GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
 # CodeEditor / FileBasedDocument / RecentlyOpenedFilesList tests
-pulp_add_test_suite(pulp-test-code-editor LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-code-editor GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
 # CodeEditor per-language tokenizer coverage.
-pulp_add_test_suite(pulp-test-code-editor-tokenizer LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-code-editor-tokenizer GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
 # PropertiesFile JSON persistence tests
-pulp_add_test_suite(pulp-test-properties SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
+pulp_add_test_suite(pulp-test-properties GROUP pulp-test-group-core-state
+    SOURCES test_properties_file.cpp LIBRARIES pulp::state pulp::runtime)
 
 # AudioDeviceManager persistence + MIDI hub.
 pulp_add_test_suite(pulp-test-audio-device-manager
@@ -118,73 +175,92 @@ pulp_add_test_suite(pulp-test-audio-device-manager
     LIBRARIES pulp::audio pulp::midi pulp::state pulp::runtime)
 
 # DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
-pulp_add_test_suite(pulp-test-dsp-enhancements LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-dsp-enhancements GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 
 # Elliptic / Jacobi special functions (pulp::signal::special). Kept in its
 # own binary so future elliptic IIR design tests can live
 # beside it without bloating pulp-test-dsp-enhancements.
-pulp_add_test_suite(pulp-test-special-functions LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-special-functions GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 
 # Animation & 3D math tests
-pulp_add_test_suite(pulp-test-animation-3d LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-animation-3d GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
 # AnimatorSet / 3D types tests
-pulp_add_test_suite(pulp-test-animator-set LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-animator-set GROUP pulp-test-group-core-view
+    LIBRARIES pulp::view)
 
 # Runtime utility tests (mmap, temp file, dynlib, base64, range, child process)
-pulp_add_test_suite(pulp-test-runtime-utils LIBRARIES pulp::runtime pulp-cpp-httplib)
+pulp_add_test_suite(pulp-test-runtime-utils GROUP pulp-test-group-core-runtime-http
+    LIBRARIES pulp::runtime pulp-cpp-httplib)
 
 # HTTP headers, incremental response delivery, cancellation, and compatibility.
-pulp_add_test_suite(pulp-test-http LIBRARIES pulp::runtime pulp-cpp-httplib)
+pulp_add_test_suite(pulp-test-http GROUP pulp-test-group-core-runtime-http
+    LIBRARIES pulp::runtime pulp-cpp-httplib)
 
 # MAC address parser/formatter.
-pulp_add_test_suite(pulp-test-mac-address LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-mac-address GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # URL parser + percent-encoding + query helpers.
-pulp_add_test_suite(pulp-test-url LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-url GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # Result<T,E> header-only utility.
-pulp_add_test_suite(pulp-test-runtime-result LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-runtime-result GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # XML and ZIP/GZIP compression tests
-pulp_add_test_suite(pulp-test-xml-zip LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # SIMD operations and aligned buffer tests
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
 # Drag-and-drop tests
-pulp_add_test_suite(pulp-test-dnd
+pulp_add_test_suite(pulp-test-dnd GROUP pulp-test-group-core-view
     SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp
     LIBRARIES pulp::view)
-pulp_add_test_suite(pulp-test-musical-typing SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-musical-typing GROUP pulp-test-group-core-view
+    SOURCES test_musical_typing.cpp LIBRARIES pulp::view)
 
 # OSC tests
-pulp_add_test_suite(pulp-test-osc LIBRARIES pulp::osc)
+pulp_add_test_suite(pulp-test-osc GROUP pulp-test-group-core-osc
+    LIBRARIES pulp::osc)
 
 # ImageConvolutionKernel tests
-pulp_add_test_suite(pulp-test-image-convolution LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-image-convolution GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # RectangleList geometry tests
-pulp_add_test_suite(pulp-test-rectangle-list LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-rectangle-list GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # OSC Bundle serialization tests
-pulp_add_test_suite(pulp-test-osc-bundle LIBRARIES pulp::osc)
+pulp_add_test_suite(pulp-test-osc-bundle GROUP pulp-test-group-core-osc
+    LIBRARIES pulp::osc)
 
 # SVG tests
-pulp_add_test_suite(pulp-test-svg LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-svg GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # VectorScene retained scene graph. Pulp-native names; covers
 # SceneRect/SceneTransform math, every SceneNode kind's local_bounds +
 # paint command stream, SVG ingest into a SceneGroup, and the dirty-rect
 # contract (mutating one child's opacity reports a rect bounded by that
 # sub-tree only).
-pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-vector-scene GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
-pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
+pulp_add_test_suite(pulp-test-canvas-image-fit GROUP pulp-test-group-core-canvas
+    LIBRARIES pulp::canvas)
 
 # Signal/DSP tests
-pulp_add_test_suite(pulp-test-signal LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Bounded off-thread body-shaped excitation with independent FIR/string
 # commutation oracles and an allocation-free per-voice cursor.
 pulp_add_test_suite(pulp-test-commuted-string-excitation
@@ -193,28 +269,36 @@ pulp_add_test_suite(pulp-test-commuted-string-excitation
 pulp_add_test_suite(pulp-test-signal-unison
     SOURCES test_signal_unison.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::audio-analysis)
-pulp_add_test_suite(pulp-test-modal-extraction
+pulp_add_test_suite(pulp-test-modal-extraction GROUP pulp-test-group-core-analysis
     LIBRARIES pulp::audio-analysis pulp::signal-modal-spec)
 # Modulation and utility toolkit. Contracts, sources, control tools, events,
 # and voice-level compositions have separate owners so the alias inventory and
 # behavioral suites can evolve without recreating a mixed test hotspot.
-pulp_add_test_suite(pulp-test-signal-mod-contract LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-event-api LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-sources LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-source-api LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-tools LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-contract GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-event-api GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-sources GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-source-api GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-tools GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-analysis-frontends
     SOURCES test_analysis_frontends.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-modulation-language
     SOURCES test_modulation_language.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-units LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-events LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-signal-mod-voice LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-units GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-events GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-mod-voice GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Alias/passband claims here are measured with the shared tone-projection
 # analyzers, hence the analysis lib alongside the DSP under test.
-pulp_add_test_suite(pulp-test-oversampling-quality
+pulp_add_test_suite(pulp-test-oversampling-quality GROUP pulp-test-group-core-analysis
     LIBRARIES pulp::signal pulp::audio-analysis)
 # True-peak look-ahead limiting: independent higher-rate reconstruction oracle,
 # latency, channel-link, deterministic partitioning, and realtime storage.
@@ -226,15 +310,18 @@ target_compile_definitions(pulp-test-true-peak-limiter
 # Fundamental-frequency estimator for harmonically-dense oscillator output plus
 # the f0(t) trajectory extractor — proven accurate to well under a cent, and
 # proven to beat the shipped zero-crossing detector on dense material.
-pulp_add_test_suite(pulp-test-pitch-track LIBRARIES pulp::audio-analysis)
-pulp_add_test_suite(pulp-test-transition-mixer LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-pitch-track GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-transition-mixer GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-routing-primitives
     SOURCES test_routing_primitives.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
 # Signal filter tests extracted from test_signal.cpp.
 # Biquad / SVF / LadderFilter / LinkwitzRiley TEST_CASE clusters moved
 # verbatim into a sibling TU to keep test_signal.cpp under ~1,200 lines.
-pulp_add_test_suite(pulp-test-signal-filters LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-filters GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Fixed-state, pivot-normalized tilt EQ with independent response and
 # time-domain oracles, deterministic block processing, and RT proof.
 pulp_add_test_suite(pulp-test-tilt-eq
@@ -268,10 +355,12 @@ pulp_add_test_suite(pulp-test-graphic-eq
 # Filter analysis: coefficients -> magnitude response -> sampled curve. Asserts
 # the SHAPE of each filter type (a lowpass rolls off, a notch nulls, a shelf
 # plateaus), which is what distinguishes a real response from an approximation.
-pulp_add_test_suite(pulp-test-frequency-response LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-frequency-response GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Signal spectral tests extracted from test_signal.cpp.
 # WindowFunction / FFT / Convolver TEST_CASE clusters moved verbatim.
-pulp_add_test_suite(pulp-test-signal-spectral LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-spectral GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Window coefficient, spectral-shape, STFT-consumer, and RT apply contracts.
 pulp_add_test_suite(pulp-test-windowing
     SOURCES test_windowing.cpp harness/rt_allocation_probe.cpp
@@ -295,7 +384,7 @@ endif()
 add_test(NAME signal-public-headers-no-exceptions
     COMMAND pulp-test-signal-no-exceptions)
 # Spectral primitives: STFT/WOLA engine, pitch/time, formant, smoothing.
-pulp_add_test_suite(pulp-test-spectral-primitives
+pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-signal
     SOURCES test_spectral_frame_engine.cpp test_spectral_band_mask.cpp
             test_spectral_mask_processor.cpp
             test_realtime_pitch_time.cpp
@@ -319,27 +408,37 @@ pulp_add_test_suite(pulp-test-spectral-morph
 pulp_add_test_suite(pulp-test-spectral-cross-synthesis
     SOURCES test_spectral_cross_synthesis.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-stn-decomposer LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-stn-decomposer GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Offline time-stretch/pitch engine (orchestrates the spectral primitives).
-pulp_add_test_suite(pulp-test-offline-stretch LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-noise-morpher LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-sinc-resampler LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-freeze-loop-sampler LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-offline-stretch GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-noise-morpher GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-sinc-resampler GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-freeze-loop-sampler GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Multi-backend FFT facade (vdsp / kissfft / fftw3 / mkl). Verifies
 # selector helpers, env-var routing, round-trip on each available
 # backend, and cross-backend numerical equivalence.
-pulp_add_test_suite(pulp-test-fft-backends LIBRARIES pulp::signal-fft-backend)
+pulp_add_test_suite(pulp-test-fft-backends GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal-fft-backend)
 # Signal meter tests extracted from test_signal.cpp.
 # MultiChannelMeter / MultiChannelBallistics TEST_CASE clusters moved
 # verbatim. Distinct from pulp-test-multi-channel-meter (test_multi_
 # channel_meter.cpp), which keeps its own focused edge-case coverage.
-pulp_add_test_suite(pulp-test-signal-meter LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-signal-meter GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Biquad filter tests
-pulp_add_test_suite(pulp-test-biquad LIBRARIES pulp::signal)
-pulp_add_test_suite(pulp-test-osc-phase LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-biquad GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-osc-phase GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # The BLEP/BLAMP kernels are gated on measured alias rejection, so this suite
 # links the analysis lib for the shared tone-projection analyzers.
-pulp_add_test_suite(pulp-test-osc-blep LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-blep GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # The causal minBLEP accumulator is gated on deterministic RT behavior and
 # measured alias residuals against the current polyBLEP path.
 pulp_add_test_suite(pulp-test-osc-minblep
@@ -353,19 +452,23 @@ if(Python3_Interpreter_FOUND)
             --output ${CMAKE_SOURCE_DIR}/core/signal/include/pulp/signal/osc/detail/minblep_table.hpp)
 endif()
 # The VA shapes are gated on measured alias rejection, hence the analysis lib.
-pulp_add_test_suite(pulp-test-osc-va LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-va GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # Sync and through-zero FM are gated on measured alias rejection too.
-pulp_add_test_suite(pulp-test-osc-sync LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-sync GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # The circuit-flavored VCO's core is gated on measured alias rejection, and its
 # deterministic character stages on level/DC/pitch correctness.
-pulp_add_test_suite(pulp-test-osc-vco LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-vco GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # The divider-clocked DCO front-end: pitch quantization asserted on the derived
 # integer N / rational period AND on the rendered pitch (hence the analysis lib),
 # with the fractional-N jitter and the shared-path alias rejection measured too.
-pulp_add_test_suite(pulp-test-osc-dco LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-dco GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # The modern wavetable tier is gated on alias rejection swept to the top of every
 # band, a click-free band-switch seam, and a zipper-free scan.
-pulp_add_test_suite(pulp-test-osc-wt
+pulp_add_test_suite(pulp-test-osc-wt GROUP pulp-test-group-core-analysis
     LIBRARIES pulp::signal pulp::audio-analysis
     TEST_SPEC "~[slow]")
 # The two exhaustive alias-floor proofs render and analyze complete frequency
@@ -373,17 +476,18 @@ pulp_add_test_suite(pulp-test-osc-wt
 # the required PR gate: a loaded hosted macOS runner can exceed the generic
 # 120-second hang guard even though the exact tests complete normally.  This is
 # the same explicit slow-test split used by the FDN and CharacterDelay suites.
-pulp_scaled_test_timeout(_pulp_osc_wt_slow_timeout 300)
-catch_discover_tests(pulp-test-osc-wt
+pulp_add_test_suite(pulp-test-osc-wt GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis
     TEST_SPEC "[slow]"
     TEST_PREFIX "slow::"
     LABELS slow
-    PROPERTIES TIMEOUT "${_pulp_osc_wt_slow_timeout}")
+    TIMEOUT 300)
 # The lo-fi wavetable tier is a dedicated variable-clock ZOH engine, gated on the
 # pitch-tracking n·L·f0 image ladder matching the analytic sinc model, odd-
 # harmonic 8-bit grit, a reconstruction stage that kills the naive in-band fold,
 # and a faithful stepped wave-scan.
-pulp_add_test_suite(pulp-test-osc-wt-lofi LIBRARIES pulp::signal pulp::audio-analysis)
+pulp_add_test_suite(pulp-test-osc-wt-lofi GROUP pulp-test-group-core-analysis
+    LIBRARIES pulp::signal pulp::audio-analysis)
 # SF-2 crossfade unification: live_kernel structural-swap fade now matches the
 # native signal::TransitionMixer (EqualPower) law bit-for-bit — an intended,
 # documented behavior change (the fade previously used a linear theta).
@@ -426,7 +530,8 @@ set_tests_properties(cmake-faust-rt-sdk-consumer PROPERTIES
     TIMEOUT 300)
 
 # Convolution engine tests
-pulp_add_test_suite(pulp-test-convolver LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-convolver GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 
 # Background-IR-swap tests for PartitionedConvolver. Lock-free
 # pointer-shuttle hand-off from worker thread → audio thread, including
@@ -437,7 +542,8 @@ pulp_add_test_suite(pulp-test-convolver-bg-swap
 
 # Non-uniform partitioned convolver tests. Two-stage Gardner-style
 # head (small block) + tail (K× larger block) with zero-latency mixing.
-pulp_add_test_suite(pulp-test-convolver-non-uniform LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-convolver-non-uniform GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 
 # GPU audio runtime: real-time transport (fixed-latency proxy + non-RT worker
 # pump + lock-free rings + miss policy). GPU-agnostic scheduling logic, so it
@@ -452,7 +558,7 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
 # Dawn-free private contract for P2's explicit algorithmic lead, typed
 # fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
 # does not expose or link raw provider handles.
-pulp_add_test_suite(pulp-test-gpu-audio-execution-contract
+pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_audio_execution_contract.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
@@ -494,26 +600,26 @@ pulp_add_test_suite(pulp-test-gpu-shared-io-slot-ledger
     LIBRARIES Threads::Threads
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
-pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker
+pulp_add_test_suite(pulp-test-gpu-dawn-submission-tracker GROUP pulp-test-group-core-gpu-shared-io-private
     SOURCES test_gpu_dawn_submission_tracker.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/dawn_submission_tracker.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Separate full-library link check keeps the private production TU wired into
 # pulp::gpu-audio without burdening every focused lifecycle rebuild.
-pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link
+pulp_add_test_suite(pulp-test-gpu-shared-io-arena-link GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_shared_io_arena_link.cpp
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
-pulp_add_test_suite(pulp-test-gpu-shared-io-compute-plan
+pulp_add_test_suite(pulp-test-gpu-shared-io-compute-plan GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_shared_io_compute_plan.cpp
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Deterministic Dawn-free chronology/OLA reducer. It compiles the private source
 # directly so this test remains independent of real-provider availability.
-pulp_add_test_suite(pulp-test-gpu-shared-io-convolution-executor
+pulp_add_test_suite(pulp-test-gpu-shared-io-convolution-executor GROUP pulp-test-group-core-gpu-shared-io-private
     SOURCES test_gpu_shared_io_convolution_executor.cpp
             ${CMAKE_SOURCE_DIR}/core/gpu_audio/src/detail/shared_io_convolution_executor.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
@@ -548,7 +654,7 @@ endif()
 # Flow pans: pure per-room constant-power pan math + GpuMultiConvolver::set_flow
 # (an atomic store). GPU-agnostic, so it runs — and keeps the flow math covered —
 # in the no-GPU coverage build too.
-pulp_add_test_suite(pulp-test-flow-pans
+pulp_add_test_suite(pulp-test-flow-pans GROUP pulp-test-group-core-gpu-audio-signal
     SOURCES test_flow_pans.cpp
     LIBRARIES pulp::gpu-audio pulp::audio)
 
@@ -560,167 +666,198 @@ pulp_add_test_suite(pulp-test-flow-pans
 # contention that intermittently trips their numeric checks after a 2s readback
 # timeout leaves a stale frame. (The GPU-agnostic transport/flow-pans suites
 # above do NOT create devices and are intentionally left parallel.)
-pulp_add_test_suite(pulp-test-gpu-convolver
+set(_pulp_gpu_convolver_defs "")
+if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
+    set(_pulp_gpu_convolver_defs
+        COMPILE_DEFINITIONS PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
+endif()
+pulp_add_test_suite(pulp-test-gpu-convolver GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_gpu_convolver.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    ${_pulp_gpu_convolver_defs}
     PROPERTIES RESOURCE_LOCK pulp_gpu)
-if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
-    target_compile_definitions(pulp-test-gpu-convolver PRIVATE
-        PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=1)
-endif()
 
 if(PULP_HAS_SKIA)
     # GPU STFT primitive: window+FFT analyze, inverse-FFT synthesize,
     # and COLA overlap-add reconstruction.
-    pulp_add_test_suite(pulp-test-gpu-stft
+    pulp_add_test_suite(pulp-test-gpu-stft GROUP pulp-test-group-core-gpu-audio-signal
         SOURCES test_gpu_stft.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
         PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral freeze: capture and sustain a spectral frame.
-    pulp_add_test_suite(pulp-test-gpu-spectral-freeze
+    pulp_add_test_suite(pulp-test-gpu-spectral-freeze GROUP pulp-test-group-core-gpu-audio-signal
         SOURCES test_gpu_spectral_freeze.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
         PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral morph: blend between two captured spectra.
-    pulp_add_test_suite(pulp-test-gpu-spectral-morph
+    pulp_add_test_suite(pulp-test-gpu-spectral-morph GROUP pulp-test-group-core-gpu-audio-signal
         SOURCES test_gpu_spectral_morph.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
         PROPERTIES RESOURCE_LOCK pulp_gpu)
     # Spectral stack: multi-layer frozen stack, weighted morph, and spectral
     # smear — the batched engine that superseded the retired GpuHyperFreeze.
-    pulp_add_test_suite(pulp-test-gpu-spectral-stack
+    pulp_add_test_suite(pulp-test-gpu-spectral-stack GROUP pulp-test-group-core-gpu-audio-signal
         SOURCES test_gpu_spectral_stack.cpp
         LIBRARIES pulp::gpu-audio pulp::audio pulp::signal
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 endif()
 
 # Test signal source (sine tone, file playback)
-pulp_add_test_suite(pulp-test-test-signal LIBRARIES pulp::standalone)
+pulp_add_test_suite(pulp-test-test-signal GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
 # Standalone editor chrome helpers. These never call StandaloneApp::start() or
 # open a real audio device, so PROCESSORS remains a scheduling weight, not
 # isolation.
-pulp_add_test_suite(pulp-test-standalone-editor-chrome LIBRARIES pulp::standalone
+pulp_add_test_suite(pulp-test-standalone-editor-chrome GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 # This suite calls StandaloneApp::start(), which opens and starts the real audio
 # device. Keep real-hardware acceptance in the validation tier: virtual/default
 # devices can block inside AudioComponentInstanceNew before Pulp receives a
 # recoverable open failure. RUN_SERIAL preserves device/RT teardown isolation
 # when that tier is requested; PROCESSORS remains its weighted cost.
-pulp_add_test_suite(pulp-test-standalone-apply-config LIBRARIES pulp::standalone
+pulp_add_test_suite(pulp-test-standalone-apply-config GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
 # Screenshot-only launches skip the audio backend; the device lifecycle is
 # asserted through an injected fake system, so this one opens no real device
 # and needs no PROCESSORS reservation.
-pulp_add_test_suite(pulp-test-standalone-capture-audio LIBRARIES pulp::standalone pulp::audio)
-pulp_add_test_suite(pulp-test-standalone-audio-capture-wav
+pulp_add_test_suite(pulp-test-standalone-capture-audio GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone pulp::audio)
+pulp_add_test_suite(pulp-test-standalone-audio-capture-wav GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
-pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav
+pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav GROUP pulp-test-group-core-standalone
     LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
-pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
+pulp_add_test_suite(pulp-test-standalone-transport-midi GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
-pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
+pulp_add_test_suite(pulp-test-standalone-musical-typing GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
 # Synthetic key-sequence driver: spec parsing, the press/capture frame
 # schedule, and the platform driver's refusal contract.
-pulp_add_test_suite(pulp-test-standalone-key-sequence LIBRARIES pulp::standalone)
+pulp_add_test_suite(pulp-test-standalone-key-sequence GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone)
 # One case opens the real output device before exercising its probe wiring;
 # keep only that tagged case in the validation tier.  The in-memory capture
 # ring case remains in ordinary PR coverage.
-pulp_add_test_suite(pulp-test-standalone-audio-inspector
-    LIBRARIES pulp::standalone pulp::view
-    TEST_SPEC "~[hardware]" PROPERTIES PROCESSORS 8)
-catch_discover_tests(pulp-test-standalone-audio-inspector
-    TEST_SPEC "[hardware]"
-    PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
+# Every case in this TU sits behind PULP_ENABLE_AUDIO_PROBES, and a grouped
+# member whose file lists no case fails discovery, so register it only when
+# the option is on (a standalone build registered nothing then either).
+if(PULP_ENABLE_AUDIO_PROBES)
+    pulp_add_test_suite(pulp-test-standalone-audio-inspector GROUP pulp-test-group-core-standalone
+        LIBRARIES pulp::standalone pulp::view
+        TEST_SPEC "~[hardware]" PROPERTIES PROCESSORS 8)
+    pulp_add_test_suite(pulp-test-standalone-audio-inspector GROUP pulp-test-group-core-standalone
+        LIBRARIES pulp::standalone pulp::view
+        TEST_SPEC "[hardware]"
+        PROPERTIES PROCESSORS 8 RUN_SERIAL TRUE LABELS "audio;hardware;validation")
+endif()
 # Headless screenshot capture state machine
-pulp_add_test_suite(pulp-test-screenshot-capture LIBRARIES pulp::standalone
+pulp_add_test_suite(pulp-test-screenshot-capture GROUP pulp-test-group-core-standalone
+    LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
 # STFT and audio visualization signal tests
-pulp_add_test_suite(pulp-test-stft LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-stft GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 # Visualization bridge and widget tests
 pulp_add_test_suite(pulp-test-visualization
     SOURCES test_visualization.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::view)
 
 # Clipboard tests
-add_executable(pulp-test-clipboard test_clipboard.cpp)
-target_link_libraries(pulp-test-clipboard PRIVATE pulp::platform Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-clipboard
+pulp_add_test_suite(pulp-test-clipboard GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform
     PROPERTIES RESOURCE_LOCK system-clipboard)
 
 # FileDialog backend-registration tests
-pulp_add_test_suite(pulp-test-file-dialog LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-file-dialog GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # D-Bus client + Linux xdg-desktop-portal file-dialog backend
-pulp_add_test_suite(pulp-test-dbus LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-dbus GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # Platform tests
-pulp_add_test_suite(pulp-test-platform LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-platform GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # Device capability tier and thermal ladder. The quota table they index is
 # policy and lives above the engine, so it is registered with the format tests
 # instead. Header-only over pulp::platform — linked for the include path only.
-pulp_add_test_suite(pulp-test-device-capability LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-device-capability GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # Permissions tests
-pulp_add_test_suite(pulp-test-permissions LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-permissions GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # Environment API tests
-pulp_add_test_suite(pulp-test-environment LIBRARIES pulp::platform)
+pulp_add_test_suite(pulp-test-environment GROUP pulp-test-group-core-platform
+    LIBRARIES pulp::platform)
 
 # Runtime tests
 pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::runtime)
 
-pulp_add_test_suite(pulp-test-durable-file-replacement LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-durable-file-replacement GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # Lock-free realtime/control-thread occurrence signals (pad flashes, UI triggers).
-pulp_add_test_suite(pulp-test-activity-channel
+pulp_add_test_suite(pulp-test-activity-channel GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime
     PROPERTIES LABELS lifecycle)
 
 # SpscRingIndex (index-pair SPSC ring-buffer cursor management)
-pulp_add_test_suite(pulp-test-spsc-ring-index LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-spsc-ring-index GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # FileSearchPath (ordered directory search list)
-pulp_add_test_suite(pulp-test-file-search-path LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-file-search-path GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)
 
 # Sync-primitive hammer for the TSan-focused race regression.
 # Runs under the tag-scoped TSan subset via the [concurrent][race]
 # tags embedded in each TEST_CASE (matches the 'Race|Concurrent'
 # alternation in sanitizers.yml's --tests-regex).
-add_executable(pulp-test-sync-race-hammer test_sync_race_hammer.cpp)
-target_link_libraries(pulp-test-sync-race-hammer PRIVATE pulp::runtime Catch2::Catch2WithMain)
 # `slow`: N-thread race smoke. Sanitizer builds also pick this
 # up via the dedicated sanitizers.yml workflow, so fast-CI doesn't
 # need to re-run it.
-catch_discover_tests(pulp-test-sync-race-hammer PROPERTIES LABELS slow)
+pulp_add_test_suite(pulp-test-sync-race-hammer GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime
+    PROPERTIES LABELS slow)
 
 # Events tests
-pulp_add_test_suite(pulp-test-events LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-events GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events)
 
-pulp_add_test_suite(pulp-test-events-async-helpers LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-events-async-helpers GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events)
 
 # PushNotifications cross-platform smoke + headless-mock coverage.
-pulp_add_test_suite(pulp-test-push-notifications LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-push-notifications GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events)
 
 # IapClient cross-platform smoke + headless-mock coverage.
-pulp_add_test_suite(pulp-test-in-app-purchase LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-in-app-purchase GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events)
 
 # Message-loop integration cross-platform introspection surface.
-pulp_add_test_suite(pulp-test-message-loop-integration LIBRARIES pulp::events)
+pulp_add_test_suite(pulp-test-message-loop-integration GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events)
 
-add_executable(pulp-test-events-timer-helpers test_events_timer_helpers.cpp)
-target_link_libraries(pulp-test-events-timer-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
 # `slow`: Timer hammer + UAF-free destroy-while-dispatched
 # tests deliberately exercise message-loop pacing (~0.3-1.5 sec each
 # depending on platform). Excluded from fast-CI; sanitizers.yml
 # still covers Timer under TSan.
-catch_discover_tests(pulp-test-events-timer-helpers PROPERTIES LABELS slow)
+pulp_add_test_suite(pulp-test-events-timer-helpers GROUP pulp-test-group-core-events
+    LIBRARIES pulp::events
+    PROPERTIES LABELS slow)
 
 # Audio file I/O tests
-pulp_add_test_suite(pulp-test-audio-file LIBRARIES pulp::audio pulp::signal)
+pulp_add_test_suite(pulp-test-audio-file GROUP pulp-test-group-core-audio
+    LIBRARIES pulp::audio pulp::signal)
 pulp_add_test_suite(pulp-test-wav-memory-decoder
     SOURCES test_wav_memory_decoder.cpp wav_decoder_consumer_drwav.cpp
     LIBRARIES pulp::audio
@@ -735,24 +872,30 @@ if(CMAKE_NM)
 endif()
 
 # Phase-vocoder offline time-stretch / pitch-shift.
-pulp_add_test_suite(pulp-test-phase-vocoder LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-phase-vocoder GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 
 # Click-free soft-bypass wrapper.
-pulp_add_test_suite(pulp-test-soft-bypass LIBRARIES pulp::signal)
+pulp_add_test_suite(pulp-test-soft-bypass GROUP pulp-test-group-core-signal
+    LIBRARIES pulp::signal)
 pulp_add_test_suite(pulp-test-sample-resource
     SOURCES test_sample_resource.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio pulp::runtime)
 
 # WaveformOverview + WaveformOverviewCache (item 6.12).
 # Links pulp::view so the WaveformView integration smoke compiles.
-pulp_add_test_suite(pulp-test-waveform-overview LIBRARIES pulp::audio pulp::view)
+pulp_add_test_suite(pulp-test-waveform-overview GROUP pulp-test-group-core-view
+    LIBRARIES pulp::audio pulp::view)
 
 # WaveformOverviewView: Canvas (non-GPU) min/max-column rendering over a
 # caller-set viewport, asserted headlessly through RecordingCanvas.
-pulp_add_test_suite(pulp-test-waveform-overview-view LIBRARIES pulp::audio pulp::view)
+pulp_add_test_suite(pulp-test-waveform-overview-view GROUP pulp-test-group-core-view
+    LIBRARIES pulp::audio pulp::view)
 
 # Memory-mapped reader: true ranged (seek-based) decode, no whole-file decode.
-pulp_add_test_suite(pulp-test-mmap-reader-ranged LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-mmap-reader-ranged GROUP pulp-test-group-core-audio
+    LIBRARIES pulp::audio)
 
 # SearchIndex — pure ranking/matching core of the off-UI-thread query service (R7).
-pulp_add_test_suite(pulp-test-search-index LIBRARIES pulp::runtime)
+pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
+    LIBRARIES pulp::runtime)

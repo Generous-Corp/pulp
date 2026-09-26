@@ -1,5 +1,7 @@
 // Per-binary-unique ObjC class names (see header).
 #include "pulp_mac_objc_names.h"
+
+#include "mac_text_input_ranges.h"
 #include "window_host_mac_view.h"
 
 #include <TargetConditionals.h>
@@ -14,18 +16,6 @@
 #include <string>
 
 extern "C" void pulp_mac_text_input_client_category_anchor() {}
-
-static std::size_t nsrange_location_or_zero(NSRange range) noexcept {
-    return range.location == NSNotFound ? 0 : static_cast<std::size_t>(range.location);
-}
-
-static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
-    if (range.location == NSNotFound) return 0;
-    const auto start = static_cast<std::size_t>(range.location);
-    const auto length = static_cast<std::size_t>(range.length);
-    const auto max = std::numeric_limits<std::size_t>::max();
-    return length > max - start ? max : start + length;
-}
 
 @interface PulpView (TextInputClient) <NSTextInputClient>
 @end
@@ -107,8 +97,8 @@ static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
         ? [(NSAttributedString*)string string] : (NSString*)string;
     const char* utf8 = [str UTF8String];
     std::string marked = utf8 ? utf8 : "";
-    const auto selected_start16 = nsrange_location_or_zero(sel);
-    const auto selected_end16 = nsrange_end_or_zero(sel);
+    const auto selected_start16 = pulp::view::mac_text_input::nsrange_location_or_zero(sel);
+    const auto selected_end16 = pulp::view::mac_text_input::nsrange_end_or_zero(sel);
     const auto selected_start8 = pulp::canvas::utf8_offset_for_utf16_offset(marked, selected_start16);
     const auto selected_end8 = pulp::canvas::utf8_offset_for_utf16_offset(marked, selected_end16);
     te->set_marked_text(marked,
@@ -135,9 +125,9 @@ static std::size_t nsrange_end_or_zero(NSRange range) noexcept {
     auto& text = te->text();
     if (r.location == NSNotFound) return nil;
     const auto start8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_location_or_zero(r));
+        text, pulp::view::mac_text_input::nsrange_location_or_zero(r));
     const auto end8 = pulp::canvas::utf8_offset_for_utf16_offset(
-        text, nsrange_end_or_zero(r));
+        text, pulp::view::mac_text_input::nsrange_end_or_zero(r));
     if (start8 >= text.size()) return nil;
     const auto clamped_end8 = std::min(end8, text.size());
     auto sub = text.substr(start8, clamped_end8 - start8);
