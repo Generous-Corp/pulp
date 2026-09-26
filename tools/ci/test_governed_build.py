@@ -81,13 +81,30 @@ if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
   exit 0
 fi
 if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
-  [ -n "${STUB_MAX_GRANT:-}" ] || exit 1
   cores=""
+  floor=""
   while [ "$#" -gt 0 ]; do
     [ "$1" = "--cores" ] && cores="$2"
+    [ "$1" = "--allow-floor" ] && floor=1
     shift
   done
   [ -n "$cores" ] || exit 1
+  if [ -n "$floor" ]; then
+    # An older tartci rejects the unknown flag the way argparse does.
+    [ -n "${STUB_NO_FLOOR_FLAG:-}" ] && { echo "unrecognized arguments: --allow-floor" >&2; exit 2; }
+    if [ -n "${STUB_MAX_GRANT:-}" ] && [ "$cores" -le "${STUB_MAX_GRANT}" ]; then
+      printf '{"ok":true,"floor":false,"qos":null,"lease":{"lease_size_cores":%s}}\n' "$cores"
+      exit 0
+    fi
+    if [ -n "${STUB_FLOOR_GRANT:-}" ]; then
+      printf '{"ok":true,"floor":true,"qos":"background","lease":{"floor":true,'
+      printf '"lease_size_cores":%s,"requested_cores":%s}}\n' "${STUB_FLOOR_GRANT}" "$cores"
+      exit 0
+    fi
+    echo '{"ok":false,"reason":"capacity_exceeded"}'
+    exit 75
+  fi
+  [ -n "${STUB_MAX_GRANT:-}" ] || exit 1
   [ "$cores" -le "${STUB_MAX_GRANT}" ] && exit 0
   exit 1
 fi
@@ -103,6 +120,14 @@ class GovernedBuildTests(unittest.TestCase):
         stub = cls.bindir / "tartci"
         stub.write_text(STUB)
         stub.chmod(0o755)
+        # A taskpolicy stand-in that records the QoS the build ran under, so
+        # the background-QoS contract is observable on every platform.
+        taskpolicy = cls.bindir / "taskpolicy"
+        taskpolicy.write_text('#!/usr/bin/env bash\n'
+                              'echo "TASKPOLICY=$1"\n'
+                              'shift\n'
+                              'exec "$@"\n')
+        taskpolicy.chmod(0o755)
         # Pay any first-exec security scan once, outside the timed assertions.
         subprocess.run([str(stub), "host-profile"], capture_output=True,
                        check=False)
@@ -122,6 +147,8 @@ class GovernedBuildTests(unittest.TestCase):
                   "PULP_GOVERNED_TARTCI_BIN", "PULP_REAL_TARTCI_BIN",
                   "STUB_PROFILE_JOBS", "STUB_FREE_CORES", "STUB_MAX_GRANT",
                   "STUB_FAIL_ALL", "STUB_HOLDER_PIDS",
+                  "STUB_FLOOR_GRANT", "STUB_NO_FLOOR_FLAG",
+                  "PULP_TARTCI_TASKPOLICY",
                   "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
         env.update(stub_env)
@@ -208,6 +235,94 @@ class GovernedBuildTests(unittest.TestCase):
                       PULP_GOVERNED_BUILD_MIN_JOBS="not-a-number")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self._granted(r), 2, r.stderr)
+
+    # --- the agent floor: a starved build takes a background-QoS lease -------
+    #
+    # A host with `agent_floor_cores` set answers `--allow-floor` with a small
+    # lease that is not charged against other leases. The build must use the
+    # size tartci grants and must run at background QoS; without the knob, or
+    # with a tartci that predates the flag, nothing changes.
+
+    AGENT_FLOOR = 5
+
+    def test_starved_build_takes_the_agent_floor_lease(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), self.AGENT_FLOOR, r.stderr)
+        self.assertEqual(self._ctest_granted(r), self.AGENT_FLOOR, r.stderr)
+        self.assertIn("agent-floor lease", r.stderr)
+
+    def test_agent_floor_lease_runs_at_background_qos(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR))
+        self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+
+    def test_agent_floor_ignores_the_taskpolicy_opt_out(self) -> None:
+        """Background QoS is the condition of the grant, not a preference."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR),
+                      PULP_TARTCI_TASKPOLICY="0")
+        self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+
+    def test_agent_floor_after_a_lost_race(self) -> None:
+        """Retry at available capacity denied too → still asks for the floor."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                      STUB_FREE_CORES=str(FREE_CORES),
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), self.AGENT_FLOOR, r.stderr)
+
+    def test_agent_floor_is_requested_at_the_admission_size(self) -> None:
+        """The floor request carries the caller's size, so tartci can clamp it."""
+        calls = self.bindir / "calls.log"
+        wrapper = self.bindir / "tartci-logging"
+        wrapper.write_text('#!/usr/bin/env bash\n'
+                           f'echo "$*" >> "{calls}"\n'
+                           f'exec "{self.bindir / "tartci"}" "$@"\n')
+        wrapper.chmod(0o755)
+        calls.unlink(missing_ok=True)
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR),
+                      PULP_TARTCI_BIN=str(wrapper))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        floor_calls = [line for line in calls.read_text().splitlines()
+                       if "--allow-floor" in line]
+        self.assertEqual(len(floor_calls), 1, calls.read_text())
+        self.assertIn(f"--cores {PROFILE_JOBS} ", floor_calls[0] + " ")
+
+    def test_agent_floor_grant_is_released(self) -> None:
+        calls = self.bindir / "calls-release.log"
+        wrapper = self.bindir / "tartci-logging-release"
+        wrapper.write_text('#!/usr/bin/env bash\n'
+                           f'echo "$*" >> "{calls}"\n'
+                           f'exec "{self.bindir / "tartci"}" "$@"\n')
+        wrapper.chmod(0o755)
+        calls.unlink(missing_ok=True)
+        self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                  STUB_FLOOR_GRANT=str(self.AGENT_FLOOR),
+                  PULP_TARTCI_BIN=str(wrapper))
+        self.assertIn("leases release", calls.read_text())
+
+    def test_floor_knob_off_keeps_the_leaseless_floor(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0")
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout)
+
+    def test_tartci_without_the_floor_flag_keeps_the_leaseless_floor(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR),
+                      STUB_NO_FLOOR_FLAG="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout)
+
+    def test_agent_floor_grant_never_exceeds_the_request(self) -> None:
+        """An oversized grant is refused, not run: the lease must bound the build."""
+        r = self._run(STUB_PROFILE_JOBS="3", STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT="40")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
 
     # --- a denial must say WHO holds the cores -------------------------------
     #
@@ -640,6 +755,65 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 body["reaped"],
                 [{"id": "reused-pid-owner", "reason": "identity_mismatch"}],
             )
+
+    def test_real_tartci_agent_floor_grant_drives_the_wrapper(self) -> None:
+        """The wrapper parses the grant a real tartci emits, not only the stub's.
+
+        A private store with 4 cores and a 3-core floor pool is filled by a
+        live holder, so the wrapper's ordinary acquires are refused and the
+        `--allow-floor` retry is the only way in.
+        """
+        probe = subprocess.run([self.tartci, "leases", "acquire", "--help"],
+                               capture_output=True, text=True, check=False)
+        if "--allow-floor" not in probe.stdout:
+            raise unittest.SkipTest("installed tartci predates agent-floor leases")
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            store = tmp / "leases"
+            common = ["--store-dir", str(store), "--capacity", "4",
+                      "--capacity-mem-mb", "0", "--reserved-gate-cores", "0",
+                      "--agent-floor-cores", "3", "--agent-floor-pool-cores", "3"]
+            held = subprocess.run(
+                [self.tartci, "leases", "acquire", *common, "--cores", "4",
+                 "--priority", "build", "--pid", str(os.getpid()),
+                 "--id", "holder", "--kind", "shipyard-local", "--json"],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            shim = tmp / "tartci"
+            quoted = " ".join(f"'{arg}'" for arg in common)
+            shim.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [ "$1" = host-profile ]; then\n'
+                "  echo PULP_BUILD_JOBS=4; echo TARTCI_AGENT_QOS=normal; exit 0\n"
+                "fi\n"
+                'if [ "$1" = leases ]; then\n'
+                '  sub="$2"; shift 2\n'
+                f'  exec "{self.tartci}" leases "$sub" {quoted} "$@"\n'
+                "fi\n"
+                f'exec "{self.tartci}" "$@"\n')
+            shim.chmod(0o755)
+            taskpolicy = tmp / "taskpolicy"
+            taskpolicy.write_text('#!/usr/bin/env bash\n'
+                                  'echo "TASKPOLICY=$1"; shift; exec "$@"\n')
+            taskpolicy.chmod(0o755)
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("PULP_BUILD_JOBS", "PULP_TARTCI_LEASES",
+                                "PULP_TARTCI_TASKPOLICY")}
+            env.update(PULP_TARTCI_BIN=str(shim),
+                       PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}",
+                       PULP_GOVERNED_BUILD_MIN_JOBS="2")
+            r = subprocess.run(
+                ["bash", str(SCRIPT), "sh", "-c",
+                 'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
+                capture_output=True, text=True, check=False, env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("JOBS=3", r.stdout, r.stderr)
+            self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+            after = subprocess.run(
+                [self.tartci, "leases", "status", *common, "--json"],
+                capture_output=True, text=True, check=False)
+            ids = [lease.get("id") for lease in json.loads(after.stdout)["leases"]]
+            self.assertEqual(ids, ["holder"], "the floor lease was not released")
 
     def test_live_pid_from_another_boot_is_reaped(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
