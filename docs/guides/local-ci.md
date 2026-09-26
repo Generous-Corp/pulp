@@ -1383,6 +1383,16 @@ optional and is not part of the checked set.
 
 ## Lane timeouts — and why a timeout looks like a broken PR
 
+**Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
+the host's tartci `job_timeout` (2 h) is what finally ends a hung job, and it
+ends as `failure`, not `timed_out`, because the VM is torn down under the
+runner. A hung step therefore holds a gate VM for two hours unless the step
+carries its own bound. `build.yml` bounds "Bootstrap repository dependencies"
+at 15 minutes (it takes 0.3 min p50 and at most ~1 min on gate VMs): one such
+hang on 2026-09-26 held an m3 gate slot for 2 h 11 min. When a gate job ends in
+`failure` near the 2-hour mark, read its steps list: the last `in_progress`
+step is the one that hung.
+
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
 validation lane may run. The mac lane is **14400s (4h)** as of 2026-08-20,
 raised from 7200s after the earlier 3600s ceiling also proved too short.

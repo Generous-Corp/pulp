@@ -1436,7 +1436,11 @@ jobs:
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-
 
+      # 0.3 min p50 / 1.1 min max on gate VMs, <= 3.5 min on hosted Linux. A
+      # hang here otherwise holds a self-hosted gate VM until the host's
+      # 2-hour job timeout instead of failing in minutes.
       - name: Bootstrap repository dependencies
+        timeout-minutes: 15
         run: ./setup.sh --ci --deps-only
         shell: bash
 
