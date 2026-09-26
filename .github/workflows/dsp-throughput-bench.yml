@@ -1,0 +1,110 @@
+name: DSP Throughput Benchmark (advisory)
+
+# Tracked, never gated. Builds `pulp-dsp-throughput-benchmark` (Release,
+# `-DPULP_BENCHMARK=ON`) on an arm64 macOS and an x86-64 Linux runner, runs it,
+# and uploads the `pulp-bench-sections/1` JSON plus a `bench_diff.py` markdown
+# summary. No step compares a number against a threshold: DSP timing on shared
+# runners is evidence, not a verdict, so this workflow is never a required
+# check and never fails on a slow result.
+#
+# Per-host baselines live outside this repository; download the artifact and
+# run `tools/scripts/bench_diff.py <baseline.json> <artifact.json>` to compare.
+# The job summary renders the run against itself so the table is readable in
+# the Actions UI.
+#
+# Triggers: weekly on main, and on demand:
+#   ghapp workflow run dsp-throughput-bench.yml --ref <branch>
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds of audio per repetition
+        required: false
+        default: '2'
+
+concurrency:
+  group: dsp-throughput-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
+    name: DSP throughput (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runs_on: macos-15
+          - label: linux-x86_64
+            runs_on: ubuntu-latest
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 60
+    env:
+      SECONDS_PER_REP: ${{ github.event.inputs.seconds || '2' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-linux-build-deps
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure (Release, benchmarks on)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-bench \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BENCHMARK=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF
+          grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' build-bench/CMakeCache.txt
+
+      - name: Build
+        run: >-
+          tools/ci/governed-build.sh cmake --build build-bench
+          --target pulp-dsp-throughput-benchmark
+
+      - name: Run
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="dsp-throughput-${{ matrix.label }}.json"
+          ./build-bench/test/pulp-dsp-throughput-benchmark \
+            --seconds "${SECONDS_PER_REP}" \
+            --commit "${GITHUB_SHA}" \
+            --host "github-${{ matrix.label }}" \
+            --json "${out}" | tee "dsp-throughput-${{ matrix.label }}.txt"
+          python3 - "${out}" <<'PY'
+          import json, sys
+          doc = json.load(open(sys.argv[1]))
+          assert doc["schema"] == "pulp-bench-sections/1", doc.get("schema")
+          assert doc["optimized"] and doc["ndebug"], "benchmark binary is not a Release build"
+          assert doc["sections"], "no sections recorded"
+          PY
+          python3 tools/scripts/bench_diff.py --format markdown "${out}" "${out}" \
+            > "dsp-throughput-${{ matrix.label }}.md"
+          cat "dsp-throughput-${{ matrix.label }}.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsp-throughput-${{ matrix.label }}
+          path: |
+            dsp-throughput-${{ matrix.label }}.json
+            dsp-throughput-${{ matrix.label }}.txt
+            dsp-throughput-${{ matrix.label }}.md
+          if-no-files-found: warn

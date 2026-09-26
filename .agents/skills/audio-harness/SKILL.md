@@ -331,6 +331,27 @@ usually means the processor emitted (almost) nothing, which is the finding.
   All three executions reproduced identical per-domain checksums for each lane.
   These numbers document this host/compiler decision; rerun before drawing a
   conclusion on another architecture or toolchain.
+- **Processor-wide throughput lives in one benchmark; extend it, do not
+  fork it.** `pulp-dsp-throughput-benchmark` (`PULP_BENCHMARK=ON`, Release)
+  times the heavy processors at 48 kHz x {32,128,512} plus the scalar kernel
+  shapes they reduce to, and `--json PATH` writes `pulp-bench-sections/1` for
+  `tools/scripts/bench_diff.py baseline.json current.json`. Add a row there
+  when a DSP change needs a before/after number. Read it correctly:
+  - *Mean* is the median over repetitions of whole-run time; *worst-block* p99
+    and max time each block alone, so they carry one timer read per block and
+    the clock's tick (Apple silicon: ~41.7 ns, i.e. ~1.3 ns/frame at B=32).
+    Judge sub-ns rows by the mean, and judge realtime headroom by p99, not
+    mean: a partitioned convolver's mean hides FFT blocks many times its
+    average.
+  - Every case feeds a rolling noise window and publishes output through an
+    asm memory clobber. A row that reads near zero was hoisted, not fast; the
+    JSON notes flag kernel rows under 0.005 ns/element as suspect.
+  - `--smoke` exercises every case in about a second; its numbers mean
+    nothing. `--filter SUBSTR` runs a subset. The JSON records `optimized`
+    and `ndebug`; a baseline without both true is not comparable.
+  - The `dsp-throughput-bench.yml` workflow (weekly + dispatch) uploads the
+    arm64 macOS and x86-64 Linux JSON as artifacts. It is advisory and must
+    never gain a threshold.
 - **Fast trigonometry is accepted per consumer, not per primitive.** Read
   `docs/validation/fast-trigonometry.md` before changing a realtime sine/cosine
   path. It records the shipped profiles, licensing pin, Release methodology,
