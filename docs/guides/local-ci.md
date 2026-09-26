@@ -832,26 +832,36 @@ and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
 
 ### The macOS release VM lane and cross-lane priority
 
-Release builds (`release-cli.yml`) route to a dedicated ephemeral label,
-`pulp-build-vm-release`, via `PULP_RELEASE_MACOS_RUNS_ON_JSON`. Like the gate
-VM lane, it is JIT: a runner registers only while serving a job and deregisters
-after, so an idle release lane shows **zero** runners in the GitHub inventory.
-That is its healthy state, not an outage — judge the lane on service history
-(`runner_topology.json`'s `service_evidence`), never on a point-in-time runner
-census.
+Release macOS legs (`release-cli.yml`, `sign-and-release.yml`, and
+`release-path-pr-gate.yml`'s legacy fallback) route through
+`PULP_RELEASE_MACOS_RUNS_ON_JSON`, which is deliberately **set to the base gate
+label set** (`self-hosted, macOS, ARM64, pulp-build, pulp-build-vm`). TartCI's
+event-class-v2 gate slots mint runners only for `Build and Test` jobs that
+carry a class label, so no slot boots *for* a release job. GitHub, however,
+hands a queued job to any idle registered runner whose labels are a superset,
+so release jobs run on whichever gate runner comes free. Service is
+**opportunistic**: it has served every release since the variable was set, but
+it depends on concurrent gate demand and competes with PRs for the same slots.
+The contract records this as `opportunistic_service`, and static mode reports
+those rows `OPPORTUNISTIC` rather than `REACHABLE` (not blocking; the row goes
+`UNSERVED` and fails if no gate registration carries the labels):
+
+```text
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required expect    Release CLI  OPPORTUNISTIC  no registration mints for 'Release CLI'; idle runners minted for ['Build and Test'] carry the labels (...)
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required fallback  Release CLI  UNSERVED       no Generous-Corp/pulp registration advertises ['pulp-gate-fast']
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required rollback  -            HOSTED         GitHub-hosted allowlist
+```
+
+The dedicated `pulp-build-vm-release` lane (m5's legacy `pulp-release` slot,
+which yields to `Build and Test`) still exists but nothing routes to it, pending
+a redesign that folds the release classes into the v2 gate lane.
 
 **Unsetting the variable is not a rollback.** The resolver chain
 (`resolve_release_runners.py`, and `release-path-pr-gate.yml`) falls through to
 `PULP_LOCAL_MACOS_RUNS_ON_JSON`, whose label set carries `pulp-gate-fast`. No
 registration advertises that label (`build.yml` rewrites it per event; the
-release workflows do not), and the gate slots mint only `Build and Test`
-anyway, so a release darwin-arm64 leg routed there queues forever.
-`runner_topology_check.py --mode=static` shows it:
-
-```text
-PULP_RELEASE_MACOS_RUNS_ON_JSON  required fallback  Release CLI  UNSERVED  no Generous-Corp/pulp registration advertises ['pulp-gate-fast']
-PULP_RELEASE_MACOS_RUNS_ON_JSON  required rollback  -            HOSTED    GitHub-hosted allowlist
-```
+release workflows do not), so a release darwin-arm64 leg routed there queues
+forever.
 
 The served break-glass rollback is to **set** the variable to the lane's
 `break_glass_rollback`, GitHub-hosted `["macos-15"]`
@@ -859,7 +869,8 @@ The served break-glass rollback is to **set** the variable to the lane's
 It schedules slower when the hosted pool is congested, but it always
 dispatches. Static mode fails when a required lane's unset fallback is
 UNSERVED and its contract names no served `break_glass_rollback`, so a
-rollback that cannot run cannot be documented as one.
+rollback that cannot run cannot be documented as one. An
+`opportunistic_service` declaration never rescues a fallback or rollback row.
 
 A release slot admits a job only when **three independent gates** all pass;
 labels are necessary but not sufficient:
@@ -2078,6 +2089,36 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
+## The PR gate settle window is default off
+
+`PULP_PR_GATE_SETTLE_SECONDS` (repo variable, unset by default) holds the
+native `build` matrix on a pull request behind the `pr-gate-settle` job, which
+sleeps that many seconds on the hosted preamble lane. A push that arrives
+during the wait cancels the superseded run through the `build-<ref>`
+concurrency group before its macOS leg claims a self-hosted gate VM, so the
+cancellation costs a hosted sleep instead of VM time.
+
+- Unset, empty, or `0`: the job is skipped at the job level and `build`
+  evaluates exactly as before. `build` gates on `!cancelled()` and never reads
+  the settle result, so a skipped, failed, or timed-out settle can neither skip
+  nor fail the required `macos` context.
+- `1`–`900`: sleep that long, in parallel with `resolve-provider`, `classify`,
+  and `protected-receipt-reuse`. The added latency is the value minus the
+  preamble time (median about 30 s), paid by every native PR run.
+- Anything else (non-integer, negative, above the 900 s cap): a
+  `PR gate settle ignored` notice and no wait.
+- Only `pull_request` waits. `merge_group`, `push`, and `workflow_dispatch`
+  (including Shipyard's PR validation dispatch) never do, and neither
+  skip-safe `macos` bootstrap depends on the job, so a PR with no native work
+  is never delayed.
+
+The window only catches a superseding push that lands before the VM would have
+been claimed. Measure the gap between consecutive pushes on the same PR before
+choosing a value: most pushes that cancel a gate VM arrive many minutes apart,
+which no reasonable settle window catches.
+`tools/scripts/test_build_workflow.py` (`PrGateSettleWorkflowTest`) pins the
+event gating, the unread dependency, and the value validation.
+
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 
 `PULP_PREAMBLE_RUNS_ON_JSON` and `PULP_ALIAS_RUNS_ON_JSON` both contract to
@@ -2522,7 +2563,7 @@ unset variable is frequently a deliberate state rather than a stalled lane, and
 the fallback is not always hosted. `release-cli.yml` resolves
 `PULP_RELEASE_MACOS_RUNS_ON_JSON` through `PULP_LOCAL_MACOS_RUNS_ON_JSON`
 before it ever reaches `macos-15`, so leaving it unset routes releases to the
-self-hosted pool. Reading only the last element of such a chain produces a
+gate's pre-dispatch label set, which no registration serves. Reading only the last element of such a chain produces a
 confident and wrong conclusion in both directions. Record the real terminus as
 `unset_fallback` so the report keeps naming only the lanes that would genuinely
 have nowhere to run.
@@ -2693,13 +2734,12 @@ Four lanes read as broken in the contract while behaving exactly as intended,
 because "unset" and "hosted" each mean something specific per lane. Read the
 consuming workflow before calling one of these a black hole:
 
-- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is deliberately unset, and that is the
-  local-first state.** `release-cli.yml` resolves it, then
-  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, then Namespace (off for cost), then
-  `macos-15`. Leaving it unset therefore routes releases onto the self-hosted
-  pool that already backs the required gate — which is why hosted starvation
-  (2026-05-18, 2026-06-09) no longer blocks publishing. Setting it *overrides*
-  that chain, so it is only correct for a proven dedicated release lane.
+- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is set to the gate's base labels, not
+  unset.** Unsetting it falls through to `PULP_LOCAL_MACOS_RUNS_ON_JSON`, whose
+  `pulp-gate-fast` label no registration advertises, so releases would queue
+  forever. The set value routes releases onto idle gate runners, which is why
+  hosted starvation (2026-05-18, 2026-06-09) no longer blocks publishing; see
+  "The macOS release VM lane and cross-lane priority" above.
 - **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is currently OFF, by contract.**
   The lane is designed to be hosted — overflow exists to add capacity when the
   local pool is saturated, so pointing it at the same local labels is a no-op
@@ -5297,6 +5337,20 @@ You don't need the same VM setup as the original developer. Options:
 - **Physical machines**: A spare Linux box or Windows machine on your network works fine.
 
 Local CI config is intentionally gitignored. Keep your host topology local, and prefer the machine-global config path so every worktree uses the same host map by default.
+
+## Branch refreshes are refused unless they fix something
+
+`.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`.
+`main` lands through a merge queue that builds and validates the merge result
+itself, and `build.yml` cancels an in-flight run whenever the PR ref moves, so
+refreshing a merely `BEHIND` PR (`update-branch`, or merging `origin/main` into
+it) restarts the ~25-40 minute required `macos` gate for nothing. With this
+policy Shipyard's `ghapp` branch-refresh guard refuses an App-authenticated
+refresh when the PR is mergeable and no required check is failing; a
+conflicting PR, a red required check, or any state it cannot read is still
+refreshed. The guard only takes effect on hosts where `shipyard guards status`
+shows `branch-refresh-guard` current. A local `git merge origin/main && git
+push` bypasses it, so do not merge `main` into a PR unless it conflicts.
 
 ## Steward auto-handoff is PAUSED (2026-09-07)
 
