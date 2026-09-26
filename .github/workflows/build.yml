@@ -1049,6 +1049,58 @@ jobs:
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
 
+  # ── PR gate settle window (default OFF) ───────────────────────────────────
+  # A new push to a PR cancels the previous run through the `build-<ref>`
+  # concurrency group. When that cancellation lands after the macOS matrix leg
+  # has claimed a self-hosted gate VM, the VM time already spent is simply
+  # lost, and gate VMs are the scarcest CI capacity. This job holds the native
+  # `build` matrix behind a short wait on a cheap hosted runner, so a push that
+  # is about to be superseded is cancelled while it still costs no VM.
+  #
+  # Controlled by the PULP_PR_GATE_SETTLE_SECONDS repo variable:
+  #   unset / "" / "0"  → the job is skipped at the job level (no runner), and
+  #                       `build` evaluates exactly as it would without it.
+  #   1..900            → sleep that many seconds, in parallel with
+  #                       resolve-provider / classify / protected-receipt-reuse.
+  #   anything else     → a notice, then no sleep.
+  # pull_request only: merge_group, push, and workflow_dispatch never wait.
+  # Fail-open by construction: `build` gates on `!cancelled()` and never reads
+  # this job's result, so a skipped, failed, or timed-out settle cannot skip
+  # or fail the required `macos` context. The skip-safe `macos` alias does not
+  # need this job at all, so a PR with no native work is never delayed.
+  pr-gate-settle:
+    if: >-
+      !inputs.local_proof
+      && github.event_name == 'pull_request'
+      && vars.PULP_PR_GATE_SETTLE_SECONDS != ''
+      && vars.PULP_PR_GATE_SETTLE_SECONDS != '0'
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 17
+    continue-on-error: true
+    permissions: {}
+    steps:
+      - name: Settle before claiming a gate VM
+        shell: bash
+        env:
+          SETTLE_SECONDS: ${{ vars.PULP_PR_GATE_SETTLE_SECONDS }}
+          SETTLE_MAX_SECONDS: "900"
+        run: |
+          set -euo pipefail
+          if [[ ! "$SETTLE_SECONDS" =~ ^[0-9]{1,6}$ ]]; then
+            echo "::notice title=PR gate settle ignored::PULP_PR_GATE_SETTLE_SECONDS='${SETTLE_SECONDS}' is not a non-negative integer; not waiting"
+            exit 0
+          fi
+          seconds=$((10#$SETTLE_SECONDS))
+          if (( seconds > SETTLE_MAX_SECONDS )); then
+            echo "::notice title=PR gate settle ignored::PULP_PR_GATE_SETTLE_SECONDS=${seconds} exceeds the ${SETTLE_MAX_SECONDS}s cap; not waiting"
+            exit 0
+          fi
+          if (( seconds == 0 )); then
+            exit 0
+          fi
+          echo "Settling ${seconds}s so a superseding push cancels this run before a gate VM is claimed."
+          sleep "$seconds"
+
   protected-receipt-reuse:
     if: ${{ !inputs.local_proof }}
     needs: [resolve-provider, classify]
@@ -1215,10 +1267,12 @@ jobs:
           python3 tools/scripts/a2t_structural_verification_ci.py --verify-only
 
   build:
-    needs: [resolve-provider, classify, protected-receipt-reuse]
+    needs: [resolve-provider, classify, protected-receipt-reuse, pr-gate-settle]
     # Skip the entire native build matrix (no runner allocated) when the PR
     # touches no C++/Swift build input. The macos/linux/windows alias jobs
     # below still run and report.
+    # `pr-gate-settle` is waited on but deliberately never read below: its
+    # skipped or failed result must not change whether the matrix runs.
     if: >-
       !inputs.local_proof
       && !cancelled()

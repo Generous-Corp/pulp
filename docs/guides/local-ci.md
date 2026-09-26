@@ -2078,6 +2078,36 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
+## The PR gate settle window is default off
+
+`PULP_PR_GATE_SETTLE_SECONDS` (repo variable, unset by default) holds the
+native `build` matrix on a pull request behind the `pr-gate-settle` job, which
+sleeps that many seconds on the hosted preamble lane. A push that arrives
+during the wait cancels the superseded run through the `build-<ref>`
+concurrency group before its macOS leg claims a self-hosted gate VM, so the
+cancellation costs a hosted sleep instead of VM time.
+
+- Unset, empty, or `0`: the job is skipped at the job level and `build`
+  evaluates exactly as before. `build` gates on `!cancelled()` and never reads
+  the settle result, so a skipped, failed, or timed-out settle can neither skip
+  nor fail the required `macos` context.
+- `1`–`900`: sleep that long, in parallel with `resolve-provider`, `classify`,
+  and `protected-receipt-reuse`. The added latency is the value minus the
+  preamble time (median about 30 s), paid by every native PR run.
+- Anything else (non-integer, negative, above the 900 s cap): a
+  `PR gate settle ignored` notice and no wait.
+- Only `pull_request` waits. `merge_group`, `push`, and `workflow_dispatch`
+  (including Shipyard's PR validation dispatch) never do, and neither
+  skip-safe `macos` bootstrap depends on the job, so a PR with no native work
+  is never delayed.
+
+The window only catches a superseding push that lands before the VM would have
+been claimed. Measure the gap between consecutive pushes on the same PR before
+choosing a value: most pushes that cancel a gate VM arrive many minutes apart,
+which no reasonable settle window catches.
+`tools/scripts/test_build_workflow.py` (`PrGateSettleWorkflowTest`) pins the
+event gating, the unread dependency, and the value validation.
+
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 
 `PULP_PREAMBLE_RUNS_ON_JSON` and `PULP_ALIAS_RUNS_ON_JSON` both contract to
