@@ -1,0 +1,241 @@
+name: Advisory software-GPU proof
+
+# Hosted runners do not provide representative hardware GPUs. This workflow
+# exercises the renderer through lavapipe (Linux) and WARP (Windows) and keeps
+# the result advisory: failures create one staging tracker per platform and
+# never become a required merge check.
+
+on:
+  schedule:
+    - cron: '47 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: advisory-software-gpu-proof
+  cancel-in-progress: false
+
+env:
+  PULP_BUILD_DIR: build-software-gpu
+
+jobs:
+  linux:
+    name: Linux lavapipe proof (advisory)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
+        with:
+          extra-packages: ccache mesa-vulkan-drivers libvulkan1 vulkan-tools
+
+      - name: Bootstrap repository dependencies
+        shell: bash
+        run: ./setup.sh --ci --deps-only
+
+      - name: Fetch pinned Skia/Dawn
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py linux-x64 \
+            --dest external/skia-build --cache-lock-timeout 300
+          test -s external/skia-build/build/linux-gpu/lib/Release/libskia.a
+          test -s external/skia-build/build/linux-gpu/lib/Release/libdawn_combined.a
+
+      - name: Select lavapipe (software Vulkan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          icd=$(find /usr/share/vulkan -type f \( -name 'lvp_icd*.json' -o -name '*lavapipe*.json' \) | head -1)
+          test -n "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+          echo "Selected software Vulkan ICD: $icd"
+
+      - name: Configure proof-only build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
+            -DPULP_ENABLE_GPU=ON -DPULP_ENABLE_SCENE3D=ON \
+            -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
+
+      - name: Build pulp-cpp proof target
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" \
+            --target pulp-cli --config Release 2>&1 | tee software-gpu-build-linux.log
+
+      - name: Render proof and seeded break-confirm
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$PULP_BUILD_DIR/tools/cli/pulp-cpp"
+          test -x "$binary"
+          python3 tools/scripts/run_software_gpu_break_confirm.py \
+            --binary "$binary" --platform linux \
+            --artifacts "$RUNNER_TEMP/software-gpu-linux"
+
+      - name: Upload Linux proof receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisory-software-gpu-linux
+          path: |
+            software-gpu-build-linux.log
+            ${{ runner.temp }}/software-gpu-linux/**
+          retention-days: 14
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows WARP proof (advisory)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Install ccache (Windows)
+        continue-on-error: true
+        run: choco install ccache --no-progress -y
+
+      - name: Bootstrap repository dependencies
+        shell: bash
+        run: ./setup.sh --ci --deps-only
+
+      - name: Fetch pinned Skia/Dawn
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+            --dest external/skia-build --cache-lock-timeout 300
+          test -s external/skia-build/build/win-gpu/lib/Release/skia.lib
+          test -s external/skia-build/build/win-gpu/lib/Release/dawn_combined.lib
+
+      - name: Configure proof-only build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_BUILD_TESTS=ON \
+            -DPULP_ENABLE_GPU=ON -DPULP_ENABLE_SCENE3D=ON \
+            -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
+
+      - name: Build pulp-cpp proof target
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/ci/governed-build.sh cmake --build "$PULP_BUILD_DIR" \
+            --target pulp-cli --config Release 2>&1 | tee software-gpu-build-windows.log
+
+      - name: Render proof and seeded break-confirm
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(find "$PULP_BUILD_DIR" -type f \( -iname pulp-cpp.exe -o -iname pulp-cpp \) | head -1)
+          test -n "$binary"
+          python3 tools/scripts/run_software_gpu_break_confirm.py \
+            --binary "$binary" --platform windows \
+            --artifacts "$RUNNER_TEMP/software-gpu-windows"
+
+      - name: Upload Windows proof receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisory-software-gpu-windows
+          path: |
+            software-gpu-build-windows.log
+            ${{ runner.temp }}/software-gpu-windows/**
+          retention-days: 14
+          if-no-files-found: ignore
+
+  tracking-issues:
+    name: Maintain advisory proof trackers
+    needs: [linux, windows]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LINUX_RESULT: ${{ needs.linux.result }}
+      WINDOWS_RESULT: ${{ needs.windows.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      RUN_SHA: ${{ github.sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Create or close one staging issue per platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+
+          maintain() {
+            local key="$1" title="$2" platform="$3" result="$4" artifact="$5"
+            local existing_json existing state
+            existing_json=$(gh issue list --repo "$repo" --state all \
+              --search "in:title \"$title\"" --json number,title,state \
+              --jq "[.[] | select(.title == \"$title\")] | first // {}")
+            existing=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("number", ""))' <<<"$existing_json")
+            state=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("state", ""))' <<<"$existing_json")
+
+            if [ "$result" = success ]; then
+              if [ -n "$existing" ] && [ "$state" = OPEN ]; then
+                gh issue comment "$existing" --repo "$repo" --body \
+                  "Advisory software-GPU ${key} proof recovered on ${RUN_URL} (sha \`${RUN_SHA}\`). Closing."
+                gh issue close "$existing" --repo "$repo" --reason completed
+              fi
+              return 0
+            fi
+
+            body="$(cat <<BODY
+          _Auto-generated by .github/workflows/software-gpu-proof.yml._
+
+          The advisory software-GPU **${key}** proof failed or was cancelled.
+          This is staging evidence only and is never a required merge check.
+
+          - Platform: \`${platform}\`
+          - Result: \`${result}\`
+          - Run: ${RUN_URL}
+          - SHA: \`${RUN_SHA}\`
+          - Artifact: \`${artifact}\`
+
+          Expected evidence is an authentic software adapter, the platform
+          backend (Vulkan/lavapipe or D3D12/WARP), a non-empty final.png with
+          matching SHA-256, and a seeded negative control ending at
+          \`portable_structure_mismatch\`.
+          BODY
+          )"
+            if [ -z "$existing" ]; then
+              gh issue create --repo "$repo" --title "$title" --body "$body" \
+                --label "staging" --label "platform:${platform}" 2>&1 || \
+                gh issue create --repo "$repo" --title "$title" --body "$body"
+            else
+              gh issue edit "$existing" --repo "$repo" --body "$body"
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+            fi
+          }
+
+          maintain linux "Advisory software-GPU Linux proof is broken" linux \
+            "$LINUX_RESULT" advisory-software-gpu-linux
+          maintain windows "Advisory software-GPU Windows proof is broken" windows \
+            "$WINDOWS_RESULT" advisory-software-gpu-windows
