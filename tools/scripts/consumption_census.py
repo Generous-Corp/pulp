@@ -985,11 +985,31 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
     # provenance fields as well as the target graph; when one of those changes
     # the old generic message sent CI readers back to a local regeneration
     # without identifying what differed between machines.
+    def changed_paths(old: object, new: object, path: str) -> None:
+        if type(old) is not type(new):
+            lines.append(f"profile field changed: {path}")
+            return
+        if isinstance(old, dict):
+            for key in sorted(set(old) | set(new)):
+                if key not in old or key not in new:
+                    lines.append(f"profile field changed: {path}.{key}")
+                else:
+                    changed_paths(old[key], new[key], f"{path}.{key}")
+            return
+        if isinstance(old, list):
+            if old != new:
+                lines.append(f"profile field changed: {path}")
+            return
+        if old != new:
+            lines.append(f"profile field changed: {path} ({old!r} -> {new!r})")
+
     for key in sorted(set(committed) | set(current)):
-        if key in {"targets", "features"}:
+        if key in {"targets", "features", "link_probe"}:
             continue
-        if committed.get(key) != current.get(key):
+        if key not in committed or key not in current:
             lines.append(f"profile field changed: {key}")
+        else:
+            changed_paths(committed[key], current[key], key)
     return lines or ["the profile differs from the build tree"]
 
 
