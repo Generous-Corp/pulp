@@ -741,7 +741,7 @@ class DeletionTests(FixtureTestCase):
     def test_apply_removes_the_build_and_preserves_everything_else(self) -> None:
         wt = self.fx.add_worktree("wt-apply")
         self.fx.merge_and_mark(wt)
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("removed", r.stdout)
         self.assertFalse((wt / "build").exists(), "build/ survived --yes")
@@ -773,9 +773,15 @@ class DeletionTests(FixtureTestCase):
             while time.time() < deadline and not ready.exists():
                 time.sleep(0.01)
             self.assertTrue(ready.exists(), "fixture never acquired the build lock")
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertIn("kept 1 of 1", r.stdout)
             self.assertTrue((wt / "build").is_dir())
         finally:
@@ -790,9 +796,15 @@ class DeletionTests(FixtureTestCase):
             "  time.sleep(10)\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertTrue((wt / "build" / "CMakeCache.txt").exists())
         finally:
             watcher.terminate()
@@ -805,13 +817,19 @@ class DeletionTests(FixtureTestCase):
             "  pathlib.Path(p[0], 'late-object.o').write_text('new')\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             # The watcher exits the moment it acts, so this only has to
             # outlast the script itself -- which on a core-starved host
             # runs far longer than it does on an idle one.
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertEqual((wt / "build" / "late-object.o").read_text(), "new")
         finally:
             if watcher.poll() is None:
@@ -833,10 +851,16 @@ class DeletionTests(FixtureTestCase):
             "  (root/'precious-source').rename(q)\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             quarantines = list(wt.glob(".pulp-reap-build-*"))
             self.assertEqual(len(quarantines), 1)
             self.assertEqual((quarantines[0] / "unique.txt").read_text(), "keep")
@@ -856,10 +880,16 @@ class DeletionTests(FixtureTestCase):
         ), env_extra={"MAIN_ROOT": str(self.fx.main),
                       "KEY": f"branch.{branch}.pulpWorktreeStatus"})
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertTrue((wt / "build" / "CMakeCache.txt").exists())
         finally:
             if watcher.poll() is None:
@@ -878,7 +908,7 @@ class DeletionTests(FixtureTestCase):
         (stray / "build").mkdir(parents=True)
         (stray / "build" / "f").write_text("stray")
 
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((wt / "build").exists())
         for name in ("build2", "buildx", "build-cov", "prebuild"):
@@ -888,7 +918,7 @@ class DeletionTests(FixtureTestCase):
 
     def test_a_worktree_with_no_build_is_left_alone(self) -> None:
         wt = self.fx.add_worktree("wt-nobuild", build=False)
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(wt.is_dir())
 
@@ -937,7 +967,7 @@ class FailureModeTests(FixtureTestCase):
         wt = self.fx.add_worktree("wt-offline")
         git(self.fx.main, "remote", "set-url", "origin",
             str(self.root / "no-such-repo.git"))
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("could not refresh origin/main", r.stderr)
         self.assertIn("Nothing removed", r.stderr)
@@ -950,7 +980,7 @@ class FailureModeTests(FixtureTestCase):
         subprocess.run(["git", "init", "--bare", "-b", "main", str(empty)],
                        check=True, capture_output=True)
         git(self.fx.main, "remote", "set-url", "origin", str(empty))
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("could not refresh origin/main", r.stderr)
         self.assertTrue((wt / "build").is_dir())
