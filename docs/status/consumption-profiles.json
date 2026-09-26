@@ -4903,7 +4903,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 13,
+            "count": 14,
             "roots": [
               "core/timebase/include"
             ],
@@ -11054,7 +11054,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 13,
+            "count": 14,
             "roots": [
               "core/timebase/include"
             ],
