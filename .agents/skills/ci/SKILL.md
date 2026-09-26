@@ -4133,8 +4133,8 @@ belt for any un-baked runner.
 `release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
 `resolve-macos-runner`) and `darwin-x64`, which **cross-compiles on an
 Apple-Silicon runner** via the `macos-15-xcompile` sentinel. Its selector
-priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the
-dedicated `pulp-build-vm-release` Tart pool), the legacy
+priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (currently
+the base gate labels, ridden opportunistically by idle gate runners), the legacy
 `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, then hosted `macos-15`. It builds with
 `-DCMAKE_OSX_ARCHITECTURES=x86_64` plus
 `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, and smoke-tests the thin binary
@@ -4160,7 +4160,10 @@ down this list before touching build code:
    host budget fits exactly one, so `release-cli`'s `darwin-arm64` leg cannot run
    alongside anything else that wants that VM. Anything that *waits* on another
    workflow while holding it deadlocks the release outright.
-2. **Tagged releases and the release-path PR gate need distinct runner classes.**
+2. **Tagged releases and the release-path PR gate need distinct runner classes**
+   (design intent; today `PULP_RELEASE_MACOS_RUNS_ON_JSON` holds the base gate
+   labels, so both ride idle gate runners and the static audit reports them
+   `OPPORTUNISTIC` via the lane's `opportunistic_service` declaration).
    `release-cli.yml` and `sign-and-release.yml` use
    `PULP_RELEASE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-tagged` label. `release-path-pr-gate.yml` prefers

@@ -168,13 +168,20 @@
     },
     {
       "variable": "PULP_RELEASE_MACOS_RUNS_ON_JSON",
-      "purpose": "release-cli arm64 macOS build lane. SET to the dedicated `pulp-build-vm-release` ephemeral Tart pool — a proven dedicated release lane, served by JIT slots that register only while a job runs (judge it on service evidence, never the runner census; see service_evidence). Resolution in release-cli.yml (resolve_release_runners.py) and release-path-pr-gate.yml is PULP_RELEASE_MACOS_RUNS_ON_JSON -> PULP_LOCAL_MACOS_RUNS_ON_JSON -> Namespace (off for cost) -> macos-15, so UNSETTING this variable is NOT a rollback: it dispatches the gate label set recorded in unset_fallback, which carries `pulp-gate-fast` (no registration advertises it; build.yml rewrites it per event, these workflows do not) and whose gate slots mint only `Build and Test` — a release darwin-arm64 leg would queue forever. (sign-and-release.yml skips PULP_LOCAL_MACOS_RUNS_ON_JSON and would fall to macos-15.) The served break-glass rollback is to SET the variable to break_glass_rollback, GitHub-hosted macos-15: slower to schedule (the hosted-pool starvation of 2026-05-18 and 2026-06-09) but always dispatchable. `runner_topology_check.py --mode=static` adjudicates both rows.",
+      "purpose": "Release macOS legs: release-cli darwin-arm64/darwin-x64 (resolve_release_runners.py), sign-and-release, and release-path-pr-gate's legacy fallback. Deliberately SET to the base gate label set, so release jobs ride idle `pulp-gate` runners: TartCI event-class-v2 gate slots mint only for `Build and Test` jobs carrying a class label and skip release jobs, but GitHub hands a queued release job to any idle registered gate runner whose labels are a superset. Service is therefore opportunistic (see opportunistic_service) and depends on concurrent gate demand. The dedicated `pulp-build-vm-release` lane (m5 `pulp-release`, which yields to `Build and Test`) is unused pending the release-class redesign. UNSETTING this variable is NOT a rollback: the resolver falls through to PULP_LOCAL_MACOS_RUNS_ON_JSON (unset_fallback), whose `pulp-gate-fast` no registration advertises. The served break-glass rollback is to SET break_glass_rollback, GitHub-hosted macos-15 (slower to schedule, always dispatchable).",
       "expect": [
         "self-hosted",
         "macOS",
         "ARM64",
-        "pulp-build-vm-release"
+        "pulp-build",
+        "pulp-build-vm"
       ],
+      "opportunistic_service": {
+        "minted_for": [
+          "Build and Test"
+        ],
+        "why": "No registration mints for the release workflows on these labels. Release jobs run when an idle gate runner, minted for `Build and Test`, picks them up; with no gate demand they wait. Recorded so the static audit reports OPPORTUNISTIC instead of pretending the lane is REACHABLE or failing a deliberate routing decision."
+      },
       "provisioning": "ephemeral",
       "severity": "required",
       "hosts": [],

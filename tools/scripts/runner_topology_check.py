@@ -125,6 +125,11 @@ class Lane:
     # down. Static mode adjudicates it like `expect`, so a documented rollback
     # that would queue forever is a failure rather than advice.
     break_glass_rollback: Any = None
+    # Workflow names whose minted runners a deliberately opportunistic lane
+    # rides. Static mode reports such a lane OPPORTUNISTIC, not UNSERVED, when
+    # no registration mints for its own workflow but registrations minting for
+    # one of these carry its labels; with no such carrier it is still UNSERVED.
+    served_opportunistically_by: list[str] = field(default_factory=list)
 
     @property
     def is_self_hosted(self) -> bool:
@@ -240,6 +245,8 @@ def load_contract(path: Path) -> Contract:
             override_id=raw.get("override_id"),
             supervisor=raw.get("supervisor"),
             break_glass_rollback=raw.get("break_glass_rollback"),
+            served_opportunistically_by=list(
+                (raw.get("opportunistic_service") or {}).get("minted_for") or []),
         )
         for raw in data.get("lanes", [])
     ]
