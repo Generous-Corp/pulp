@@ -26,6 +26,7 @@ file(GLOB _pulp_gpu_audio_public_headers CONFIGURE_DEPENDS
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/gpu_wavenet.cpp
         src/detail/realtime_gpu_audio_path.cpp
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp

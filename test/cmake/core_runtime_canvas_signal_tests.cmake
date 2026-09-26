@@ -595,6 +595,18 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
 
+# Public one-stream WaveNet session boundary. The test exercises descriptor
+# and weight ownership on every platform; when Dawn is available it also
+# drives one authenticated shared block through the opaque SDK session.
+pulp_add_test_suite(pulp-test-gpu-wavenet-session
+    SOURCES test_gpu_wavenet_session.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_compile_definitions(pulp-test-gpu-wavenet-session
+        PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
+
 # Dawn-free shape contract for the future provider-owned WaveNet program. This
 # validates model metadata before any provider resource or handle is created.
 pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
