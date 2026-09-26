@@ -36,6 +36,32 @@ that a perceived UX regression in Debug is almost always the build type, not the
 code. Flip to Debug only to step in a debugger, capture fresh traces, or run a
 sanitizer; restore Release immediately after.
 
+## Floating-point numerics
+
+**Default: IEEE semantics, no `-ffast-math`.** Release builds are `-O3 -DNDEBUG`
+with the compiler's default contraction (`-ffp-contract=on`), so a
+sequential sum stays sequential and NaN/Inf behave as the standard says.
+Vectorized reductions come from the `pulp::simd` kernels instead of from a
+global flag, which keeps the reordering explicit and local to one call.
+
+What that means for tests:
+
+- **Same path, bit-exact.** A given binary, CPU dispatch target and OS
+  produce the same bits every run: state reloads, repeat renders and
+  `reset()`-then-render compare with `==`.
+- **Different path, tolerance.** Anything that changes the arithmetic order
+  compares with a tolerance: a SIMD kernel against its scalar reference,
+  Accelerate against Highway, arm64 against x86-64 (arm64 fuses multiply-adds
+  by default), AVX2 against AVX-512 dispatch, and one macOS release against
+  another (Accelerate ships with the OS). Use `assert_null_near` at a floor
+  set from the measured residual plus margin, and prove the floor with a
+  negative control.
+- **Never pin Accelerate output bits in a fixture.**
+
+The escape hatch is per call: `pulp::simd::backend::scalar` is the sequential
+reference, and `-DPULP_SIMD_BACKEND=scalar` routes every unqualified
+`pulp::simd` call through it when you need to rule the kernels out.
+
 ## Build parallelism
 
 **Default: bounded.** Every build command Pulp emits carries an explicit job

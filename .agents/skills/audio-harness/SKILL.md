@@ -332,16 +332,30 @@ usually means the processor emitted (almost) nothing, which is the finding.
   These numbers document this host/compiler decision; rerun before drawing a
   conclusion on another architecture or toolchain.
 - **Vectorized kernels live in `pulp::simd`, and `pulp::signal` can call
-  them.** `<pulp/simd/simd.hpp>` (target `pulp-simd`, Highway runtime
-  dispatch) is linked INTERFACE by `pulp::signal`; its only link item is
-  Highway, so a DSP header may call it without dragging in `pulp::runtime`
-  and its TLS stack (`pulp-test-simd-signal-link` fails configure if that
-  ever changes). `<pulp/runtime/simd.hpp>`'s `simd_*` names are inline
-  wrappers kept for existing callers. Two traps: every call pays a dispatch
-  hop, so a short elementwise loop is usually faster written inline (it
-  auto-vectorizes); and `sum` reduces in the backend's order, so it is not
-  bit-equal to a left-to-right loop. Compare a kernel against a scalar
-  reference with a tolerance, never `==`.
+  them.** `<pulp/simd/simd.hpp>` (target `pulp-simd`) is linked INTERFACE by
+  `pulp::signal`; its link items are Highway and, on Apple, Accelerate, so a
+  DSP header may call it without dragging in `pulp::runtime` and its TLS
+  stack (configure fails if that ever changes). `<pulp/runtime/simd.hpp>`'s
+  `simd_*` names are inline wrappers kept for existing callers. Gotchas:
+  - The unqualified names are a compile-time alias of one backend
+    (`PULP_SIMD_BACKEND`: `auto` = Accelerate on Apple, Highway elsewhere).
+    All compiled backends stay callable as `pulp::simd::backend::{scalar,
+    highway, accelerate}`; `pulp-test-simd-parity` runs every kernel on each
+    against `scalar`. A new kernel lands in all three backends and in that
+    suite in the same change, then gets a row in the throughput benchmark.
+  - Tolerance classes (the parity suite states the derivations): one-rounding
+    elementwise ops and max/min are bit-exact; multiply-adds get one extra
+    rounding; reductions and FIR correlation get `2 * n * eps * sum|terms|`
+    because each backend sums in its own order. Accelerate advances
+    `vDSP_vrampmul`'s gain by repeated addition, so `ramp_mul` error grows
+    with the index. The measured float FIR null is -115.6 dBFS worst
+    (Accelerate, 256 taps), floored at -105 dBFS.
+  - Under flush-to-zero, a scalar `std::clamp` copies a subnormal through
+    unchanged while a vector min/max returns zero; parity with subnormal
+    input needs a `numeric_limits::min()`-scale slack, not bit equality.
+  - A break-confirm that injects an allocation must let the pointer escape
+    (store it in a volatile global): clang elides a paired `new`/`delete`,
+    so the probe sees nothing and the control is void.
 - **Processor-wide throughput lives in one benchmark; extend it, do not
   fork it.** `pulp-dsp-throughput-benchmark` (`PULP_BENCHMARK=ON`, Release)
   times the heavy processors at 48 kHz x {32,128,512} plus the scalar kernel

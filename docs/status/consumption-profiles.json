@@ -127,12 +127,12 @@
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 57,
+            "closure_node_count": 58,
             "public_header_count": 17
           },
           {
             "exported_as": "Pulp::canvas",
-            "closure_node_count": 43,
+            "closure_node_count": 44,
             "public_header_count": 48
           },
           {
@@ -182,103 +182,103 @@
           },
           {
             "exported_as": "Pulp::inspect-client",
-            "closure_node_count": 24,
+            "closure_node_count": 25,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::osc",
-            "closure_node_count": 24,
+            "closure_node_count": 25,
             "public_header_count": 4
           },
           {
             "exported_as": "Pulp::graph",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 5
           },
           {
             "exported_as": "Pulp::inspect-control",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::smf-interchange",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::state",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 24
           },
           {
             "exported_as": "Pulp::dawproject-export",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::midi",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 50
           },
           {
             "exported_as": "Pulp::events",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 13
           },
           {
             "exported_as": "Pulp::interchange",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 7
           },
           {
             "exported_as": "Pulp::project-package",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 2
           },
           {
             "exported_as": "Pulp::smf-interop",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 0
           },
           {
             "exported_as": "Pulp::timeline-agent-view",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::timeline-editor",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 13
           },
           {
             "exported_as": "Pulp::timeline",
-            "closure_node_count": 20,
+            "closure_node_count": 21,
             "public_header_count": 33
           },
           {
             "exported_as": "Pulp::inspect-authoring",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::inspect-protocol",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 113
+          },
+          {
+            "exported_as": "Pulp::runtime",
+            "closure_node_count": 18,
+            "public_header_count": 61
           },
           {
             "exported_as": "Pulp::sdl3-static",
             "closure_node_count": 18,
             "public_header_count": 0
-          },
-          {
-            "exported_as": "Pulp::runtime",
-            "closure_node_count": 17,
-            "public_header_count": 61
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -327,8 +327,8 @@
           },
           {
             "exported_as": "Pulp::simd",
-            "closure_node_count": 2,
-            "public_header_count": 1
+            "closure_node_count": 3,
+            "public_header_count": 2
           },
           {
             "exported_as": "Pulp::timebase",
@@ -711,7 +711,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/canvas",
           "closure": {
-            "node_count": 43,
+            "node_count": 44,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -734,7 +734,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 37,
+            "count": 38,
             "third_party_targets": [
               "SheenBidi",
               "everest",
@@ -762,6 +762,7 @@
             ],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreGraphics",
@@ -836,7 +837,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dawproject",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-dawproject-export",
               "pulp-foundation",
@@ -860,7 +861,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -874,6 +875,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -1066,7 +1068,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/events",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -1086,7 +1088,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -1100,6 +1102,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -1687,7 +1690,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/graph",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-graph",
@@ -1710,7 +1713,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 16,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -1724,6 +1727,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -2088,7 +2092,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -2108,7 +2112,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 14,
+            "count": 15,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2123,6 +2127,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -2149,7 +2154,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -2172,7 +2177,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 19,
+            "count": 20,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2189,6 +2194,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -2218,7 +2224,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -2240,7 +2246,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 18,
+            "count": 19,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2256,6 +2262,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -2432,7 +2439,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -2452,7 +2459,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 14,
+            "count": 15,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2467,6 +2474,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -3293,7 +3301,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/interchange",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-interchange",
@@ -3316,7 +3324,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -3330,6 +3338,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -3499,7 +3508,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/midi",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-midi",
@@ -3521,7 +3530,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 16,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -3535,6 +3544,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -3630,7 +3640,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/osc",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -3653,7 +3663,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -3667,6 +3677,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -3842,7 +3853,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/project_package",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -3865,7 +3876,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -3879,6 +3890,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -3907,7 +3919,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 57,
+            "node_count": 58,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -3934,7 +3946,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 50,
+            "count": 51,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -3966,6 +3978,7 @@
             "imported_targets": [],
             "frameworks": [
               "AVFoundation",
+              "Accelerate",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -4020,7 +4033,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/runtime",
           "closure": {
-            "node_count": 17,
+            "node_count": 18,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -4039,7 +4052,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -4053,6 +4066,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -4089,7 +4103,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/sample_bank_manifest",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -4109,7 +4123,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -4123,6 +4137,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -4468,7 +4483,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/simd",
           "closure": {
-            "node_count": 2,
+            "node_count": 3,
             "pulp_targets": [
               "pulp-simd"
             ],
@@ -4477,23 +4492,26 @@
             ]
           },
           "external_dependencies": {
-            "count": 1,
+            "count": 2,
             "third_party_targets": [
               "hwy"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
-            "frameworks": [],
+            "frameworks": [
+              "Accelerate"
+            ],
             "system_libraries": []
           },
           "public_headers": {
-            "count": 1,
+            "count": 2,
             "roots": [
               "core/simd/include"
             ],
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "framework:Accelerate",
             "hwy"
           ]
         },
@@ -4503,7 +4521,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-interchange",
@@ -4528,7 +4546,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -4542,6 +4560,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -4570,7 +4589,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -4593,7 +4612,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -4607,6 +4626,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -4916,7 +4936,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/state",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -4938,7 +4958,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -4952,6 +4972,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -5015,7 +5036,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline",
           "closure": {
-            "node_count": 20,
+            "node_count": 21,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -5037,7 +5058,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -5051,6 +5072,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -5079,7 +5101,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_agent_view",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -5102,7 +5124,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -5116,6 +5138,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -5143,7 +5166,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_editor",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -5166,7 +5189,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -5180,6 +5203,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -6477,12 +6501,12 @@
           },
           {
             "exported_as": "Pulp::render",
-            "closure_node_count": 57,
+            "closure_node_count": 58,
             "public_header_count": 17
           },
           {
             "exported_as": "Pulp::canvas",
-            "closure_node_count": 43,
+            "closure_node_count": 44,
             "public_header_count": 48
           },
           {
@@ -6532,103 +6556,103 @@
           },
           {
             "exported_as": "Pulp::inspect-client",
-            "closure_node_count": 24,
+            "closure_node_count": 25,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::osc",
-            "closure_node_count": 24,
+            "closure_node_count": 25,
             "public_header_count": 4
           },
           {
             "exported_as": "Pulp::graph",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 5
           },
           {
             "exported_as": "Pulp::inspect-control",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::smf-interchange",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::state",
-            "closure_node_count": 23,
+            "closure_node_count": 24,
             "public_header_count": 24
           },
           {
             "exported_as": "Pulp::dawproject-export",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::midi",
-            "closure_node_count": 22,
+            "closure_node_count": 23,
             "public_header_count": 50
           },
           {
             "exported_as": "Pulp::events",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 13
           },
           {
             "exported_as": "Pulp::interchange",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 7
           },
           {
             "exported_as": "Pulp::project-package",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 2
           },
           {
             "exported_as": "Pulp::smf-interop",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 0
           },
           {
             "exported_as": "Pulp::timeline-agent-view",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 1
           },
           {
             "exported_as": "Pulp::timeline-editor",
-            "closure_node_count": 21,
+            "closure_node_count": 22,
             "public_header_count": 13
           },
           {
             "exported_as": "Pulp::timeline",
-            "closure_node_count": 20,
+            "closure_node_count": 21,
             "public_header_count": 33
           },
           {
             "exported_as": "Pulp::inspect-authoring",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::inspect-protocol",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 78
           },
           {
             "exported_as": "Pulp::sample-bank-manifest",
-            "closure_node_count": 18,
+            "closure_node_count": 19,
             "public_header_count": 113
+          },
+          {
+            "exported_as": "Pulp::runtime",
+            "closure_node_count": 18,
+            "public_header_count": 61
           },
           {
             "exported_as": "Pulp::sdl3-static",
             "closure_node_count": 18,
             "public_header_count": 0
-          },
-          {
-            "exported_as": "Pulp::runtime",
-            "closure_node_count": 17,
-            "public_header_count": 61
           },
           {
             "exported_as": "Pulp::signal-fft-backend",
@@ -6672,8 +6696,8 @@
           },
           {
             "exported_as": "Pulp::simd",
-            "closure_node_count": 2,
-            "public_header_count": 1
+            "closure_node_count": 3,
+            "public_header_count": 2
           },
           {
             "exported_as": "Pulp::timebase",
@@ -7012,7 +7036,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/canvas",
           "closure": {
-            "node_count": 43,
+            "node_count": 44,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -7035,7 +7059,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 37,
+            "count": 38,
             "third_party_targets": [
               "SheenBidi",
               "everest",
@@ -7063,6 +7087,7 @@
             ],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreGraphics",
@@ -7137,7 +7162,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/dawproject",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-dawproject-export",
               "pulp-foundation",
@@ -7161,7 +7186,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -7175,6 +7200,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -7363,7 +7389,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/events",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -7383,7 +7409,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -7397,6 +7423,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -7970,7 +7997,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/graph",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-graph",
@@ -7993,7 +8020,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 16,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8007,6 +8034,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -8366,7 +8394,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -8386,7 +8414,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 14,
+            "count": 15,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8401,6 +8429,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -8427,7 +8456,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -8450,7 +8479,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 19,
+            "count": 20,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8467,6 +8496,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -8496,7 +8526,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -8518,7 +8548,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 18,
+            "count": 19,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8534,6 +8564,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -8706,7 +8737,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -8726,7 +8757,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 14,
+            "count": 15,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -8741,6 +8772,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -9559,7 +9591,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/interchange",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-interchange",
@@ -9582,7 +9614,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -9596,6 +9628,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -9765,7 +9798,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/midi",
           "closure": {
-            "node_count": 22,
+            "node_count": 23,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-midi",
@@ -9787,7 +9820,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 16,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -9801,6 +9834,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreBluetooth",
               "CoreFoundation",
@@ -9896,7 +9930,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/osc",
           "closure": {
-            "node_count": 24,
+            "node_count": 25,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -9919,7 +9953,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -9933,6 +9967,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -10108,7 +10143,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/project_package",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -10131,7 +10166,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -10145,6 +10180,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -10173,7 +10209,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/render",
           "closure": {
-            "node_count": 57,
+            "node_count": 58,
             "pulp_targets": [
               "pulp-bundled-fonts",
               "pulp-canvas",
@@ -10200,7 +10236,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 50,
+            "count": 51,
             "third_party_targets": [
               "SDL3-static",
               "SDL3_Headers",
@@ -10232,6 +10268,7 @@
             "imported_targets": [],
             "frameworks": [
               "AVFoundation",
+              "Accelerate",
               "AudioToolbox",
               "Carbon",
               "Cocoa",
@@ -10286,7 +10323,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/runtime",
           "closure": {
-            "node_count": 17,
+            "node_count": 18,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -10305,7 +10342,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -10319,6 +10356,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -10355,7 +10393,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/sample_bank_manifest",
           "closure": {
-            "node_count": 18,
+            "node_count": 19,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-platform",
@@ -10375,7 +10413,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -10389,6 +10427,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -10730,7 +10769,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/simd",
           "closure": {
-            "node_count": 2,
+            "node_count": 3,
             "pulp_targets": [
               "pulp-simd"
             ],
@@ -10739,23 +10778,26 @@
             ]
           },
           "external_dependencies": {
-            "count": 1,
+            "count": 2,
             "third_party_targets": [
               "hwy"
             ],
             "prebuilt_archives": [],
             "imported_targets": [],
-            "frameworks": [],
+            "frameworks": [
+              "Accelerate"
+            ],
             "system_libraries": []
           },
           "public_headers": {
-            "count": 1,
+            "count": 2,
             "roots": [
               "core/simd/include"
             ],
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "framework:Accelerate",
             "hwy"
           ]
         },
@@ -10765,7 +10807,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-interchange",
@@ -10790,7 +10832,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -10804,6 +10846,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -10832,7 +10875,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/smf",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -10855,7 +10898,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -10869,6 +10912,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -11170,7 +11214,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/state",
           "closure": {
-            "node_count": 23,
+            "node_count": 24,
             "pulp_targets": [
               "pulp-events",
               "pulp-foundation",
@@ -11192,7 +11236,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 16,
+            "count": 17,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -11206,6 +11250,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "CoreServices",
@@ -11269,7 +11314,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline",
           "closure": {
-            "node_count": 20,
+            "node_count": 21,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -11291,7 +11336,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -11305,6 +11350,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -11333,7 +11379,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_agent_view",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -11356,7 +11402,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -11370,6 +11416,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",
@@ -11397,7 +11444,7 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "core/timeline_editor",
           "closure": {
-            "node_count": 21,
+            "node_count": 22,
             "pulp_targets": [
               "pulp-foundation",
               "pulp-music",
@@ -11420,7 +11467,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 13,
+            "count": 14,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -11434,6 +11481,7 @@
             "prebuilt_archives": [],
             "imported_targets": [],
             "frameworks": [
+              "Accelerate",
               "Cocoa",
               "CoreFoundation",
               "Security",

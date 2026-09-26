@@ -13,8 +13,12 @@
 
 namespace pulp::runtime {
 
-inline std::size_t simd_float_lanes() { return pulp::simd::float_lanes(); }
-inline std::size_t simd_double_lanes() { return pulp::simd::double_lanes(); }
+inline std::size_t simd_float_lanes() {
+    return pulp::simd::float_lanes();
+}
+inline std::size_t simd_double_lanes() {
+    return pulp::simd::double_lanes();
+}
 
 inline void simd_add(const float* a, const float* b, float* dst, std::size_t count) {
     pulp::simd::add(a, b, dst, count);
