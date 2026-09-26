@@ -19,6 +19,7 @@
 // The kernel rows are the control: a hoisted loop reports near-zero cost and
 // the run marks that row as suspect in the JSON notes.
 
+#include <pulp/signal/adsr.hpp>
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/character_delay.hpp>
 #include <pulp/signal/compressor.hpp>
@@ -34,10 +35,10 @@
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/realtime_pitch_time_processor.hpp>
 #include <pulp/signal/resampler.hpp>
-#include <pulp/signal/adsr.hpp>
 #include <pulp/signal/smoothed_value.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/zero_latency_convolver.hpp>
+#include <pulp/simd/simd.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -621,6 +622,82 @@ void run_kernels() {
     }
 }
 
+// ── Kernel backends (pulp::simd) ────────────────────────────────────────────
+
+template <typename Sum, typename SumSq, typename MaxAbs, typename Dot, typename Ramp,
+          typename Correlate, typename Decimate>
+void run_backend_kernels(const char* backend, Sum sum, SumSq sum_squares, MaxAbs max_abs, Dot dot,
+                         Ramp ramp_mul, Correlate correlate, Decimate decimate2) {
+    for (int N : {64, 512}) {
+        const auto n = std::size_t(N);
+        auto a = noise(2 * n + 256, 11), b = noise(n + 256, 12), dst = noise(n, 13);
+        const std::string suffix = std::string(" ") + backend;
+        bench_kernel("kernel.sum" + suffix, N, n, [&] {
+            clobber(a.data());
+            g_sink = sum(a.data(), n);
+        });
+        bench_kernel("kernel.sum_squares" + suffix, N, n, [&] {
+            clobber(a.data());
+            g_sink = sum_squares(a.data(), n);
+        });
+        bench_kernel("kernel.max_abs" + suffix, N, n, [&] {
+            clobber(a.data());
+            g_sink = max_abs(a.data(), n);
+        });
+        bench_kernel("kernel.dot" + suffix, N, n, [&] {
+            clobber(a.data());
+            g_sink = dot(a.data(), b.data(), n);
+        });
+        bench_kernel("kernel.ramp_mul" + suffix, N, n, [&] {
+            ramp_mul(a.data(), 0.0f, 1.0f / float(N), dst.data(), n);
+            clobber(dst.data());
+        });
+        for (int taps : {64, 256}) {
+            const auto t = std::size_t(taps);
+            bench_kernel("kernel.correlate " + std::to_string(taps) + " taps (per output)" + suffix,
+                         N, n, [&] {
+                             clobber(a.data());
+                             correlate(a.data(), b.data(), dst.data(), n, t);
+                             clobber(dst.data());
+                         });
+            bench_kernel("kernel.decimate2 " + std::to_string(taps) + " taps (per output)" + suffix,
+                         N, n / 2, [&] {
+                             clobber(a.data());
+                             decimate2(a.data(), b.data(), dst.data(), n / 2, t);
+                             clobber(dst.data());
+                         });
+        }
+    }
+}
+
+#define PULP_BENCH_BACKEND(NAME, NS)                                                               \
+    run_backend_kernels(                                                                           \
+        NAME, [](const float* x, std::size_t n) { return NS::sum(x, n); },                         \
+        [](const float* x, std::size_t n) { return NS::sum_squares(x, n); },                       \
+        [](const float* x, std::size_t n) { return NS::max_abs(x, n); },                           \
+        [](const float* x, const float* y, std::size_t n) { return NS::dot(x, y, n); },            \
+        [](const float* x, float s, float st, float* d, std::size_t n) {                           \
+            NS::ramp_mul(x, s, st, d, n);                                                          \
+        },                                                                                         \
+        [](const float* x, const float* h, float* y, std::size_t n, std::size_t t) {               \
+            NS::correlate(x, h, y, n, t);                                                          \
+        },                                                                                         \
+        [](const float* x, const float* h, float* y, std::size_t n, std::size_t t) {               \
+            NS::decimate2(x, h, y, n, t);                                                          \
+        })
+
+void run_all_backend_kernels() {
+    PULP_BENCH_BACKEND("scalar-backend", pulp::simd::backend::scalar);
+#if defined(PULP_SIMD_HAS_HIGHWAY)
+    PULP_BENCH_BACKEND("highway", pulp::simd::backend::highway);
+#endif
+#if defined(PULP_SIMD_HAS_ACCELERATE)
+    PULP_BENCH_BACKEND("accelerate", pulp::simd::backend::accelerate);
+#endif
+}
+
+#undef PULP_BENCH_BACKEND
+
 // ── Environment and JSON ────────────────────────────────────────────────────
 
 std::string json_escape(const std::string& s) {
@@ -807,6 +884,7 @@ void write_json(const std::string& path, double timer_overhead_ns) {
     o << "  \"sample_rate\": " << json_number(kSampleRate) << ",\n";
     o << "  \"seconds_per_repetition\": " << json_number(g_options.seconds) << ",\n";
     o << "  \"timer_overhead_ns\": " << json_number(timer_overhead_ns) << ",\n";
+    o << "  \"simd_backend\": \"" << pulp::simd::active_backend_name << "\",\n";
     o << "  \"sections\": [\n";
     for (std::size_t i = 0; i < sections.size(); ++i) {
         const auto& s = sections[i];
@@ -880,6 +958,7 @@ int main(int argc, char** argv) {
                 cpu_brand().c_str(), timer_overhead_ns);
     for (int B : kBlockSizes) run_processors(B);
     run_kernels();
+    run_all_backend_kernels();
 
     if (!g_options.json_path.empty()) write_json(g_options.json_path, timer_overhead_ns);
     return 0;

@@ -35,6 +35,7 @@ component_sets:
     - runtime
     - sequence
     - signal
+    - simd
     - smf
     - state
     - timebase

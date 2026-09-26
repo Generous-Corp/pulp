@@ -17,6 +17,11 @@ target_include_directories(pulp-signal
 # link items on the link command of anything that computes filter coefficients.
 target_link_libraries(pulp-signal INTERFACE pulp::music pulp::foundation pulp::timebase)
 
+# Vectorized block kernels (dot products, reductions, FIR correlation). A
+# compiled library, but deliberately not pulp::runtime: its only link item is
+# Highway, so the TLS-free link line above is preserved.
+target_link_libraries(pulp-signal INTERFACE pulp::simd)
+
 # Link Accelerate framework on Apple for vDSP FFT optimization
 if(APPLE)
     target_link_libraries(pulp-signal INTERFACE "-framework Accelerate")

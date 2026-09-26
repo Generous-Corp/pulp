@@ -381,6 +381,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpTracing.cmake)
 option(PULP_ENABLE_JS
     "Build the JS scripting + web-compat layer (pulp::view-script)" ON)
 add_subdirectory(core/platform)
+add_subdirectory(core/simd)
 add_subdirectory(core/runtime)
 add_subdirectory(core/music)
 add_subdirectory(core/timebase)
@@ -625,6 +626,26 @@ endif()
 # included after the module targets exist and before the consumers that assert
 # a bound over them (examples/, tools/).
 include(PulpLinkFloor)
+
+# pulp::signal must reach the pulp-simd kernels without pulp-runtime, whose
+# archive carries the HTTP/TLS stack. pulp-test-simd-signal-link links only
+# pulp::signal, so its closure is the DSP layer's closure.
+if(TARGET pulp-test-simd-signal-link)
+    pulp_link_closure(pulp-test-simd-signal-link TARGETS_OUT _pulp_simd_link_targets)
+    if(NOT pulp-simd IN_LIST _pulp_simd_link_targets)
+        message(FATAL_ERROR "pulp::signal no longer reaches pulp-simd; DSP headers "
+            "that call pulp::simd would fail to link.")
+    endif()
+    foreach(_pulp_simd_forbidden IN ITEMS pulp-runtime mbedcrypto mbedtls mbedx509)
+        if(_pulp_simd_forbidden IN_LIST _pulp_simd_link_targets)
+            message(FATAL_ERROR "pulp::signal's link closure reaches "
+                "${_pulp_simd_forbidden}; the DSP layer must not acquire the runtime "
+                "archive or its TLS stack.")
+        endif()
+    endforeach()
+    unset(_pulp_simd_link_targets)
+    unset(_pulp_simd_forbidden)
+endif()
 
 # This fixture exercises the public pulp_add_plugin target-selection surface,
 # so configure it only after PulpUtils and PulpLinkFloor are available. The
