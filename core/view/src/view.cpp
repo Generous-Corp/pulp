@@ -1920,8 +1920,7 @@ void View::claim_overlay(const View* stacks_on) {
         // outside-press walk reads it (`overlay_nests_on`) so a press outside
         // a whole nest of menus closes every level, not only the top. It is
         // compared, never dereferenced, and cleared when the claim leaves.
-        overlay_nested_on_ =
-            s.overlay_stack.empty() ? nullptr : s.overlay_stack.back();
+        overlay_nested_on_ = s.overlay_stack.empty() ? nullptr : s.overlay_stack.back();
         s.overlay_stack.push_back(this);
         ++overlay_claims_live_;
     }

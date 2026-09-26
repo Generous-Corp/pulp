@@ -74,8 +74,8 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     bool outside_every_overlay = true;
     if (auto* state = root.existing_interaction()) {
         for (View* open : state->overlay_stack)
-            if (open != nullptr && overlay_still_in_tree(open, &root)
-                && open->overlay_contains(root_pt)) {
+            if (open != nullptr && overlay_still_in_tree(open, &root) &&
+                open->overlay_contains(root_pt)) {
                 outside_every_overlay = false;
                 break;
             }
@@ -124,10 +124,8 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         // ON a lower overlay keeps the rule below untouched: a dialog nested
         // on a panel still spends a press on that panel on its own close.
         const auto& stack = state->overlay_stack;
-        const View* below =
-            stack.size() >= 2 ? stack[stack.size() - 2] : nullptr;
-        const bool defers_to_below =
-            outside_every_overlay && overlay->overlay_nests_on(below);
+        const View* below = stack.size() >= 2 ? stack[stack.size() - 2] : nullptr;
+        const bool defers_to_below = outside_every_overlay && overlay->overlay_nests_on(below);
         consume_press = consume_press || entry_consumes;
         View::dismiss_active_overlay(root);
         dismissed_any = true;
@@ -138,7 +136,8 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         // menu behind it. The one exception is a press outside the whole nest
         // (above): every level closes, and the consumption carried so far
         // still holds, so nothing behind the nest receives it.
-        if (entry_consumes && !defers_to_below) break;
+        if (entry_consumes && !defers_to_below)
+            break;
 
         // No-progress guard: a dismissal callback may re-claim the same view,
         // and a loop that kept asking would never terminate.
