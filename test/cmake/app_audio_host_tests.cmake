@@ -290,7 +290,11 @@ pulp_add_test_group(pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
 pulp_add_test_suite(pulp-test-wav-bridge GROUP pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
-add_executable(pulp-osc-render-wav osc_render_wav.cpp)
+# Keep the bridge source on the executable as well as the shared support
+# archive. Some Apple linker invocations do not extract this archive member
+# when the grouped test target is present, leaving the standalone tool's
+# required writer unresolved.
+add_executable(pulp-osc-render-wav osc_render_wav.cpp support/wav_bridge.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
 # CLI argv smoke for the tool above: shells out per --engine and for --seed,
 # asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.
