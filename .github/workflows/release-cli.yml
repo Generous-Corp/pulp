@@ -237,6 +237,10 @@ jobs:
           # Legacy macOS fallbacks, honoured so an existing config keeps working.
           LOCAL_MACOS: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          # Opt-in: exactly `1`/`true` appends the `pulp-release-tagged` class to
+          # self-hosted darwin selectors so event-class-v2 hosts boot a slot for
+          # the release. Unset = byte-identical routing (see the resolver).
+          PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
         shell: bash
         run: |
           set -euo pipefail

@@ -2122,6 +2122,18 @@ array containing bracket characters is conclusive:
 ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
 ```
 
+### Gotcha: release class labels are opt-in, and enabling them early strands releases
+
+`PULP_RELEASE_CLASS_TOKENS` (exactly `1`/`true`) makes release-cli's darwin legs
+and `sign-and-release.yml` append `pulp-release-tagged`, and
+`release-path-pr-gate.yml` append `pulp-release-pr-gate`, to a self-hosted
+selector (dropping `pulp-gate-fast`, as `build.yml` does for its event classes).
+Unset is byte-identical routing; any other value is ignored with a `::notice::`.
+Enable it only once tartci's hosts register those classes: a class-labelled job
+with no serving registration queues forever (see the next gotcha). Unsetting it
+is the rollback. The single implementation is
+`resolve_release_runners.py --apply-class-label`.
+
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
 The trap behind step 3. Before concluding "the pool is saturated", check that the
@@ -4675,6 +4687,20 @@ session. Reap a stale local pile by hand with `shipyard ship-state list` →
 OPEN one). Full design: pulp
 `planning/2026-06-30-ship-queue-resilience-design.md`.
 
+### Do not refresh a `BEHIND` PR — the merge queue validates the merge itself
+
+`main` lands through the merge queue, which builds and validates each merge
+result, and `build.yml` cancels a PR's in-flight run whenever its ref moves. So
+`update-branch`, or merging `origin/main` into a PR, only restarts the ~25-40
+minute required `macos` gate: 663 of 1175 cancelled gate-minutes in one 48h
+window were runs cancelled by exactly that. `BEHIND` is not a blocker here.
+Refresh a PR only to resolve a real conflict (`mergeable: CONFLICTING`) or to
+clear a failing required check; otherwise enqueue it as it is.
+`.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`,
+so Shipyard's `ghapp` branch-refresh guard refuses a pointless App-authenticated
+refresh. A local `git merge origin/main && git push` bypasses that guard, so the
+rule is yours to keep there.
+
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
 An armed auto-merge is a backstop only if it is still armed. Two silent failures
@@ -4684,8 +4710,8 @@ on 2026-08-16 across two independent sessions:
 1. **Clearing `BEHIND` disarms auto-merge.** `gh pr update-branch` on a PR with
    auto-merge armed leaves it `UNARMED` — observed on #7565, #7573, #7556, and
    again on #7572, #7569, #7557. The treadmill this repo already has (strict
-   up-to-date protection, main advancing faster than the ~30-min gate) makes
-   `update-branch` routine, so this fires often. It turns a delay into a trap: an
+   up-to-date protection, main advancing faster than the ~30-min gate) used to
+   make `update-branch` routine, so this fired often. It turns a delay into a trap: an
    agent walks away believing the PR lands on green, and it never does — sitting
    green and unmerged with no failing signal to attract attention.
 2. **The obvious remedy also fails silently.** `update-branch` leaves the PR at

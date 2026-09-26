@@ -91,8 +91,13 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 60
         LABELS "parser-import;browser-capture;node")
 
+    # The launcher picks the file concurrency from the cores of the machine
+    # running the suite: one file at a time on a small gate VM (three Chrome
+    # captures starve a 3-vCPU guest past the capture deadline), three
+    # otherwise. See run_integration.mjs.
     add_test(NAME pulp-browser-capture-node-integration
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test --test-concurrency=3
+             COMMAND ${_PULP_NODE_FOR_TESTS}
+                     ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/run_integration.mjs
                      ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
     # Real Chrome capture is itself load-sensitive: in production a screenshot
     # CDP call crossed its bounded 20-second deadline while unrelated CTest work

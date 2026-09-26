@@ -536,6 +536,7 @@ repository = "Generous-Corp/pulp"
 
 [merge]
 require_platforms = ["macos", "linux", "windows"]
+refresh_branch = "only-if-conflicting"
 
 # PAUSED 2026-09-07. Set back to true once Shipyard's handoff validator is
 # fixed; this is a one-line revert and nothing else here changes.
