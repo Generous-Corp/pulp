@@ -27,6 +27,24 @@ orphan blobs and interrupted private-publish files. Deletion audit records are
 bounded and contain only opaque artifact ID, hash, size, time, and reason; they
 never persist plugin text, consent text, paths, or tokens.
 
+### Sample-region control and proof evidence
+
+Sample-region topology reads and edits use the canonical graph-control
+operations. A capability or inspector row is only a projection: the graph must
+first accept the bounded region proof, including exact kernel versions,
+explicit `UnitDelay` causality, boundaries, limits, and the promoted
+`StateStore` contract. The broker binds each live read, gesture, or topology
+receipt to its admitted instance, lease, graph generation, and operation
+manifest; an unadvertised operation, stale generation, failed proof, or expired
+lease is refused before host dispatch.
+
+Independent proof receipts record source-head, executable, artifact, and log
+digests. Dense per-sample buffers and retained delay history never enter broker
+JSON, telemetry, graph serialization, or bake artifacts. Runtime state is
+retained only by the prepared snapshot and follows the region's explicit reset
+or transfer policy. A static capability row or registered test without an
+independent receipt does not establish execution reachability.
+
 ### Correlated GPU startup response
 
 The `dev.pulp.gpu/health.read@1` response is receipt-bound JSON rather than a

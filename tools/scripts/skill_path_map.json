@@ -195,7 +195,9 @@
         "tools/scripts/single_backend_guard.py",
         "tools/scripts/processing_model_terms_lint.py",
         "tools/launchd/**",
-        ".githooks/**"
+        ".githooks/**",
+        "tools/scripts/format_changed.sh",
+        "tools/scripts/test_format_changed.sh"
       ]
     },
     "clap": {
@@ -511,7 +513,11 @@
         "test/test_timeline_replay_golden.cpp",
         "test/cmake/sampler_runtime_tests.cmake",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         "tools/scripts/*web_timeline_source_closure_check.py",
+        "tools/scripts/negative_capability_check.py",
+        "tools/scripts/negative_capability_allowlist.json",
         ".agents/skills/playback/**"
       ]
     },
@@ -792,12 +798,33 @@
     },
     "timeline": {
       "paths": [
+        "core/interchange/**",
+        "core/dawproject/**",
+        "core/smf/**",
         "core/timeline/**",
+        "core/project_package/**",
+        "core/timeline_editor/**",
+        "examples/timeline-sdk-consumer/**",
         "test/test_timeline_*.cpp",
+        "test/test_sequencer_ui_host.cpp",
+        "test/test_interchange_*.cpp",
+        "test/test_dawproject_*.cpp",
+        "test/test_smf_*.cpp",
         "test/fixtures/timeline/**",
         "test/timeline_command_test_helpers.hpp",
+        "test/cmake/timeline_tests.cmake",
+        "test/cmake/test_timeline_sdk_consumer.cmake",
         "test/cmake/sampler_runtime_tests.cmake",
+        "tools/timeline/**",
+        "tools/mcp/mcp_timeline_tools.cpp",
+        "inspect/include/pulp/inspect/control_sequencer_state_executor.hpp",
+        "inspect/src/control_sequencer_state_executor.cpp",
+        "test/test_control_sequencer_state_executor.cpp",
+        "tools/scripts/sequencer_control_skill_check.py",
+        "tools/scripts/timeline_command_doc_check.py",
         "tools/scripts/timeline_engine_dependency_floor_check.py",
+        "tools/cmake/PulpLinkFloor.cmake",
+        "tools/scripts/link_floor_selftest.py",
         ".agents/skills/timeline/**"
       ]
     },
@@ -953,64 +980,6 @@
         "core/format/include/pulp/format/detail/standalone_key_sequence.hpp"
       ]
     },
-    "playback": {
-      "paths": [
-        "core/playback/**",
-        "core/format/include/pulp/format/playback_context_projection.hpp",
-        "test/test_playback_*.cpp",
-        "test/test_timeline_replay_golden.cpp",
-        "test/cmake/sampler_runtime_tests.cmake",
-        "tools/scripts/timeline_engine_dependency_floor_check.py",
-        "tools/cmake/PulpLinkFloor.cmake",
-        "tools/scripts/link_floor_selftest.py",
-        "tools/scripts/*web_timeline_source_closure_check.py",
-        "tools/scripts/negative_capability_check.py",
-        "tools/scripts/negative_capability_allowlist.json",
-        ".agents/skills/playback/**"
-      ]
-    },
-    "timebase": {
-      "paths": [
-        "core/timebase/**",
-        "core/format/src/transport_quantizer.cpp",
-        "core/format/include/pulp/format/transport_quantizer.hpp",
-        "test/test_timebase.cpp",
-        "test/test_transport_quantizer.cpp",
-        ".agents/skills/timebase/**"
-      ]
-    },
-    "timeline": {
-      "paths": [
-        "core/interchange/**",
-        "core/dawproject/**",
-        "core/smf/**",
-        "core/timeline/**",
-        "core/project_package/**",
-        "core/timeline_editor/**",
-        "examples/timeline-sdk-consumer/**",
-        "test/test_timeline_*.cpp",
-        "test/test_sequencer_ui_host.cpp",
-        "test/test_interchange_*.cpp",
-        "test/test_dawproject_*.cpp",
-        "test/test_smf_*.cpp",
-        "test/fixtures/timeline/**",
-        "test/timeline_command_test_helpers.hpp",
-        "test/cmake/timeline_tests.cmake",
-        "test/cmake/test_timeline_sdk_consumer.cmake",
-        "test/cmake/sampler_runtime_tests.cmake",
-        "tools/timeline/**",
-        "tools/mcp/mcp_timeline_tools.cpp",
-        "inspect/include/pulp/inspect/control_sequencer_state_executor.hpp",
-        "inspect/src/control_sequencer_state_executor.cpp",
-        "test/test_control_sequencer_state_executor.cpp",
-        "tools/scripts/sequencer_control_skill_check.py",
-        "tools/scripts/timeline_command_doc_check.py",
-        "tools/scripts/timeline_engine_dependency_floor_check.py",
-        "tools/cmake/PulpLinkFloor.cmake",
-        "tools/scripts/link_floor_selftest.py",
-        ".agents/skills/timeline/**"
-      ]
-    },
     "vst3": {
       "paths": [
         "core/format/src/vst3_adapter.cpp",
@@ -1060,7 +1029,7 @@
         "tools/scripts/test_gpu_dpr_web_adapter.py"
       ],
       "_doc": {
-        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list — so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer — the habit that lets a genuinely missed skill update through."
+        "scope": "Claims the web-ABI source-closure surface of the timebase/timeline/playback engines, not the engines themselves. The two Pulp*Sources.cmake files are the shared source lists both web lanes include, and PulpWam.cmake carries the literal timebase source list \u2014 so adding or splitting an engine TU still lands here. Editing an existing engine TU does not: it changes nothing this skill documents, and `web-timeline-source-closure` (a ctest) is the instrument that enforces closure. Whole-subsystem globs here previously made every timeline/playback/timebase edit demand a web-plugins SKILL.md update, which trains reflexive use of the Skill-Update: skip trailer \u2014 the habit that lets a genuinely missed skill update through."
       }
     },
     "webview-ui": {

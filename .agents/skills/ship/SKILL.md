@@ -921,6 +921,25 @@ export ANDROID_HOME=~/Library/Android/sdk  # macOS
   (not just a development cert).
 - Check the notarization log: `xcrun notarytool log <UUID>`.
 
+### `sign-and-release.yml` ships UNSIGNED unless its secrets exist — and says so
+
+The repository holds none of the signing secrets (`MACOS_CERTIFICATE`,
+`SIGNING_IDENTITY`, `APPLE_ID`, …); real Developer ID signing happens on hosts
+from `~/.config/pulp/secrets`. The workflow's `Detect signing inputs` step
+(`id: signing`) decides once and every signing step gates on
+`steps.signing.outputs.sign` / `.notarize`. Do not guard a step with
+`if: env.X != ''` where `X` comes from that step's own `env:` — a step's `env:`
+is not in scope for its own `if:`, so the guard is never true and signing is
+skipped silently (this shipped every release unsigned with no annotation).
+With no secrets the run is marked `unsigned` (warning, job summary,
+`SIGNING-STATUS.txt`, `-UNSIGNED` artifact suffix) and continues;
+`vars.PULP_RELEASE_UNSIGNED_POLICY=fail` makes that a failure. A partial secret
+set always fails. Once signing is attempted, a notarization that is not
+`status: Accepted` or a failed staple fails the job (`notarytool --wait` exits 0
+on `Invalid`, so the status line is checked). Note that the packages are built
+with plain `pkgbuild` (no `--sign`); adding the secrets will surface that
+notarization rejects an unsigned installer package.
+
 ### `check_notarization` and Gatekeeper-disabled CI environments
 
 `check_notarization(path)` runs `spctl --assess --type exec <path>`. On a stock

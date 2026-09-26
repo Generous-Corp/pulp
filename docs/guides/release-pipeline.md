@@ -130,6 +130,10 @@ PR merge to main
 │   - Holds `contents: read`. It CANNOT write to a         │
 │     release. That is the point: it may fail, hang, or be │
 │     cancelled without affecting whether the SDK ships.   │
+│   - With no signing secrets configured it reports        │
+│     `unsigned` loudly (warning, job summary, an          │
+│     `-UNSIGNED` artifact) instead of skipping silently.  │
+│     `vars.PULP_RELEASE_UNSIGNED_POLICY=fail` fails it.   │
 └─────────────────────────────────────────────────────────┘
      │
      ▼

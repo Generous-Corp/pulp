@@ -429,6 +429,15 @@ if(Python3_Interpreter_FOUND)
         ${_pulp_pch_expect})
     add_test(NAME test-pch-wiring-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pch_wiring_check.py")
+    # A .pch embeds its build tree's absolute paths, so ccache must never serve
+    # one tree's PCH to another. Builds a two-tree CMake + Ninja fixture against
+    # an isolated ccache (base_dir over both trees), deletes the first tree and
+    # builds the second; a negative control without the carrier's path-keyed
+    # launcher must fail with the stale-PCH error. Skips without ccache, Ninja
+    # or clang.
+    add_test(NAME ccache-pch-isolation COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ccache_pch_isolation.py")
+    set_tests_properties(ccache-pch-isolation PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
 
     # Test-support sources compiled once into OBJECT libraries
     # (tools/cmake/PulpTestSharedObjects.cmake) must stay compiled once.

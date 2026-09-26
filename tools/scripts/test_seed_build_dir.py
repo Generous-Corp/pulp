@@ -377,5 +377,33 @@ class SeedBuildDirTest(unittest.TestCase):
         self.assertFalse((target / "build").exists())
 
 
+class SeededPchTest(unittest.TestCase):
+    """A seeded build dir never keeps the donor's precompiled header.
+
+    Clang records the absolute paths of a PCH's inputs, so a donor .pch cloned
+    into the target would load the donor's files (or fail once the donor is
+    gone). The retarget must delete it so Ninja rebuilds it in the target,
+    where ccache keys the PCH compile on the target's own path.
+    """
+
+    def test_donor_pch_is_deleted_and_path_free_objects_survive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            donor_build = b"/w/donor/build"
+            carrier = root / "test" / "CMakeFiles" / "pulp-test-pch-cxx20.dir"
+            carrier.mkdir(parents=True)
+            pch = carrier / "cmake_pch.hxx.pch"
+            pch.write_bytes(b"CPCH\0\1" + donor_build
+                            + b"/test/CMakeFiles/pulp-test-pch-cxx20.dir/cmake_pch.hxx.cxx\0")
+            obj = root / "test" / "CMakeFiles" / "pulp-test-x.dir" / "test_x.cpp.o"
+            obj.parent.mkdir(parents=True)
+            obj.write_bytes(b"\xcf\xfa\xed\xfe\0no paths here")
+            subst, pattern = sbd.make_subst([(donor_build, b"/w/target/build")])
+            receipt = sbd.rewrite_tree(root, subst, pattern, pattern)
+            self.assertFalse(pch.exists(), receipt)
+            self.assertIn(str(pch.relative_to(root)), receipt["tainted"])
+            self.assertTrue(obj.exists(), receipt)
+
+
 if __name__ == "__main__":
     unittest.main()
