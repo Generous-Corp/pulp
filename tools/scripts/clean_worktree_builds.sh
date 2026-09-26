@@ -577,6 +577,20 @@ lineage_proves_exact_merge() {
             "${expected_tip}" 2>/dev/null; then
         return 0
     fi
+    # A squash landing leaves the head outside main's history on purpose, so the
+    # row records WHICH commit on main carries the change. That commit being an
+    # ancestor of the tip is a local, offline proof of the same fact the API call
+    # below would confirm, and the registry is trusted input here by the same rule
+    # as every other field read from it. Without this the only proof available for
+    # a squash-landed head was a rate-limited `gh api` round trip per candidate.
+    local recorded
+    recorded="$(git -C "${REPO_ROOT}" config --local --get \
+        "branch.${branch}.pulpWorktreeMergeCommit" 2>/dev/null || true)"
+    if [ -n "${recorded}" ] &&
+       git -C "${REPO_ROOT}" merge-base --is-ancestor "${recorded}" \
+            "${expected_tip}" 2>/dev/null; then
+        return 0
+    fi
     merged_pr_proves_exact_head "${pr}" "${head}" "${expected_tip}"
 }
 
@@ -678,6 +692,27 @@ DEFAULT_TIP="$(git -C "${REPO_ROOT}" rev-parse --verify --quiet \
     echo "clean_worktree_builds: origin/${DEFAULT_BRANCH} has no exact tip. Nothing removed." >&2
     exit 3
 }
+
+# ── Refresh the lineage registry before reading it ─────────────────────────
+# The merged proof below is read from the registry, and nothing writes that
+# registry on its own: closing a worktree out is a step someone has to take and
+# most sessions end without it, so this script decided from records nobody had
+# updated. Git ancestry already covers a merge-commit landing, but a SQUASH
+# landing is deliberately not an ancestor, so without a row those build dirs were
+# kept forever. `reconcile --squash-patch-id` closes exactly that case from local
+# evidence — a unique patch-id match against main plus the `(#N)` GitHub puts in a
+# squash subject — at no API cost.
+#
+# Best-effort by design: a registry that cannot be refreshed leaves every
+# candidate exactly as unproven as before, which keeps it, so a failure here can
+# only be conservative. PULP_REAP_SKIP_RECONCILE=1 opts out.
+if [ "${PULP_REAP_SKIP_RECONCILE:-0}" != "1" ] && [ -x "${SCRIPT_DIR}/worktree_lineage.sh" ]; then
+    if ( cd "${REPO_ROOT}" && "${SCRIPT_DIR}/worktree_lineage.sh" reconcile --squash-patch-id ) >/dev/null 2>&1; then
+        echo "clean_worktree_builds: lineage reconciled against origin/${DEFAULT_BRANCH}"
+    else
+        echo "clean_worktree_builds: lineage reconcile did not complete; deciding from the registry as it stands" >&2
+    fi
+fi
 
 # ── One process snapshot for the whole run ─────────────────────────────────
 # A build in flight names the directory it is building on its command line, and

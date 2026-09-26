@@ -148,6 +148,20 @@ void record_adapter_info(const GpuSurface& gpu,
     result.adapter_info_available = info.available;
     result.adapter_backend = info.backend;
     result.adapter_backend_type = info.backend_type;
+    switch (info.adapter_type) {
+    case GpuSurface::AdapterType::integrated_gpu:
+        result.adapter_type = "integrated-gpu";
+        break;
+    case GpuSurface::AdapterType::discrete_gpu:
+        result.adapter_type = "discrete-gpu";
+        break;
+    case GpuSurface::AdapterType::cpu:
+        result.adapter_type = "cpu";
+        break;
+    default:
+        result.adapter_type = "unknown";
+        break;
+    }
     result.adapter_name = info.name;
     result.adapter_vendor = info.vendor;
     result.adapter_architecture = info.architecture;

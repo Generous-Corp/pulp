@@ -155,6 +155,19 @@ bool native_recipe_test_fault(std::string_view name) {
 #endif
 }
 
+// CI's software-renderer lanes set this explicitly so a hosted runner cannot
+// accidentally select a native adapter and report hardware coverage. Dawn's
+// fallback adapter is WARP on Windows and the software Vulkan adapter (usually
+// lavapipe) on Linux. An unset variable preserves the normal high-performance
+// selection used by developers and hardware lanes.
+bool software_adapter_requested() {
+    const auto* value = std::getenv("PULP_GPU_SOFTWARE_ADAPTER");
+    if (value == nullptr)
+        return false;
+    const std::string_view text(value);
+    return text == "1" || text == "true" || text == "TRUE" || text == "on" || text == "ON";
+}
+
 std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
     std::vector<std::uint8_t> bytes;
     bytes.reserve(values.size_bytes());
@@ -344,6 +357,14 @@ AdapterClass dawn_adapter_class(wgpu::AdapterType type) {
     return AdapterClass::unknown;
 }
 
+AdapterClass dawn_adapter_class_name(std::string_view type) {
+    if (type == "discrete-gpu" || type == "integrated-gpu")
+        return AdapterClass::hardware;
+    if (type == "cpu")
+        return AdapterClass::software;
+    return AdapterClass::unknown;
+}
+
 void populate_surface_adapter_identity(ProbeResult& result, render::GpuSurface& surface) {
     auto* device = static_cast<wgpu::Device*>(surface.dawn_device_handle());
     wgpu::AdapterInfo info{};
@@ -383,6 +404,7 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     render::HardcodedCubeRenderConfig config;
     config.width = run.result.dimensions.width;
     config.height = run.result.dimensions.height;
+    config.force_fallback_adapter = software_adapter_requested();
     // The planted regression must affect bytes produced by the GPU. A 32x32
     // render still exercises submission and readback while making the recipe's
     // 1,500-pixel foreground floor impossible to satisfy.
@@ -393,11 +415,15 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     };
     const auto rendered = render::Renderer3D::render_hardcoded_textured_cube(config);
 
-    run.result.adapter.status = rendered.adapter_info_available
-        ? IdentityStatus::unverified : IdentityStatus::unavailable;
+    run.result.adapter.status =
+        rendered.adapter_info_available ? IdentityStatus::authentic : IdentityStatus::unavailable;
     run.result.adapter.classification = rendered.null_backend_requested
-        ? AdapterClass::null_adapter : AdapterClass::unknown;
-    run.result.adapter.backend = bounded(rendered.adapter_backend);
+                                            ? AdapterClass::null_adapter
+                                            : dawn_adapter_class_name(rendered.adapter_type);
+    // `adapter_backend` is the generic Dawn/WebGPU wrapper label. The typed
+    // recipe receipt needs the concrete API backend so the software lanes can
+    // distinguish Vulkan/lavapipe from D3D12/WARP.
+    run.result.adapter.backend = bounded(rendered.adapter_backend_type);
     run.result.adapter.name = bounded(rendered.adapter_name);
     run.result.adapter.vendor = bounded(rendered.adapter_vendor);
     run.result.adapter.architecture = bounded(rendered.adapter_architecture);

@@ -68,6 +68,18 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     // to whatever sibling pixel sits under the submenu.
     bool dismissed_any = false;
     bool consume_press = false;
+    // Whether the press lands outside EVERY open overlay, read before any
+    // dismissal callback can change the tree. Only then is a press on a
+    // nest one "outside the menu" rather than "on the menu under a submenu".
+    bool outside_every_overlay = true;
+    if (auto* state = root.existing_interaction()) {
+        for (View* open : state->overlay_stack)
+            if (open != nullptr && overlay_still_in_tree(open, &root) &&
+                open->overlay_contains(root_pt)) {
+                outside_every_overlay = false;
+                break;
+            }
+    }
     for (;;) {
         auto* state = root.existing_interaction();
         auto* overlay = state ? state->active_overlay : nullptr;
@@ -105,6 +117,15 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         // answers about a different tree than the one the user pressed on.
         const bool entry_consumes = overlay->overlay_consumes_outside_click() &&
                                     !press_hits_overlay_trigger(root, root_pt);
+        // A submenu nested on the overlay below it is one surface with that
+        // overlay. When the press is outside the whole nest, stopping here
+        // closed only the submenu and left the menu it belonged to open, so
+        // the walk continues to the overlay it nests on. A press that lands
+        // ON a lower overlay keeps the rule below untouched: a dialog nested
+        // on a panel still spends a press on that panel on its own close.
+        const auto& stack = state->overlay_stack;
+        const View* below = stack.size() >= 2 ? stack[stack.size() - 2] : nullptr;
+        const bool defers_to_below = outside_every_overlay && overlay->overlay_nests_on(below);
         consume_press = consume_press || entry_consumes;
         View::dismiss_active_overlay(root);
         dismissed_any = true;
@@ -112,8 +133,11 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         // An overlay that consumes its outside press spends that press on the
         // close; nothing below it — not even a parent menu — may also act on
         // it. Without this the one press would close a modal AND operate the
-        // menu behind it.
-        if (entry_consumes) break;
+        // menu behind it. The one exception is a press outside the whole nest
+        // (above): every level closes, and the consumption carried so far
+        // still holds, so nothing behind the nest receives it.
+        if (entry_consumes && !defers_to_below)
+            break;
 
         // No-progress guard: a dismissal callback may re-claim the same view,
         // and a loop that kept asking would never terminate.

@@ -77,6 +77,44 @@ if ! MAIN="$(git -C "${REPO}" rev-parse origin/main 2>/dev/null)"; then
     exit 2
 fi
 
+# ── Refresh the lineage registry before reading it ─────────────────────────
+# The merged proof below is read from the registry, and nothing writes that
+# registry on its own: closing a worktree out is a step someone has to take and
+# most sessions end without it, so this script decided from records nobody had
+# updated. Git ancestry already covers a merge-commit landing, but a SQUASH
+# landing is deliberately not an ancestor, so without a row those build dirs were
+# kept forever. `reconcile --squash-patch-id` closes exactly that case from local
+# evidence — a unique patch-id match against main plus the `(#N)` GitHub puts in a
+# squash subject — at no API cost.
+#
+# Best-effort by design: a registry that cannot be refreshed leaves every
+# candidate exactly as unproven as before, which keeps it, so a failure here can
+# only be conservative. PULP_REAP_SKIP_RECONCILE=1 opts out.
+#
+# This script removes the WORKTREE, not just its build dir, and `reconcile`
+# overwrites ANY non-merged status — `active` included. Ancestry proves a head
+# landed; it never proves the person working there stopped. So the active set is
+# snapshotted BEFORE the reconcile and re-applied after, which lets reconcile
+# close out what nobody marked without ever laundering a claim into a deletion.
+# Keys come back lowercased from --get-regexp; git treats the trailing key as
+# case-insensitive, so this matches rows written as pulpWorktreeStatus.
+PRE_ACTIVE_BRANCHES="$(git -C "${REPO}" config --get-regexp \
+    '^branch\..*\.pulpworktreestatus$' 2>/dev/null |
+    awk '$2 == "active" { k = $1; sub(/^branch\./, "", k);
+                          sub(/\.pulpworktreestatus$/, "", k); print k }' || true)"
+if [[ "${PULP_REAP_SKIP_RECONCILE:-0}" != "1" && -x "${SCRIPT_DIR}/worktree_lineage.sh" ]]; then
+    if ( cd "${REPO}" && "${SCRIPT_DIR}/worktree_lineage.sh" reconcile --squash-patch-id ) >/dev/null 2>&1; then
+        echo "clean_worktrees: lineage reconciled against origin/main"
+    else
+        echo "clean_worktrees: lineage reconcile did not complete; deciding from the registry as it stands" >&2
+    fi
+fi
+was_active_before_reconcile() {
+    local b="$1"
+    [[ -n "${b}" && "${b}" != "(detached)" && -n "${PRE_ACTIVE_BRANCHES}" ]] || return 1
+    grep -qxF -- "${b}" <<<"${PRE_ACTIVE_BRANCHES}"
+}
+
 # Liveness, on two independent instruments because either alone has a blind
 # spot: a process cwd catches a shell sitting in the tree, and a process argv
 # catches a build whose cwd is elsewhere but which names the tree on its command
@@ -151,7 +189,8 @@ while IFS=$'\t' read -r path head branch; do
         unmerged+=("${path}"); continue
     fi
     if [[ "${branch}" != "(detached)" ]] && \
-       [[ "$(git -C "${REPO}" config --get "branch.${branch}.pulpworktreeStatus" 2>/dev/null)" == "active" ]]; then
+       { [[ "$(git -C "${REPO}" config --get "branch.${branch}.pulpworktreeStatus" 2>/dev/null)" == "active" ]] ||
+         was_active_before_reconcile "${branch}"; }; then
         active+=("${path}"); continue
     fi
     if is_live "${path}"; then busy+=("${path}"); continue; fi
