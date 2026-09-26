@@ -169,6 +169,7 @@ function(pulp_wire_android_sources)
             ${CMAKE_SOURCE_DIR}/core/view/include
             ${CMAKE_SOURCE_DIR}/core/platform/include
             ${CMAKE_SOURCE_DIR}/core/signal/include
+            ${CMAKE_SOURCE_DIR}/core/simd/include
             ${CMAKE_SOURCE_DIR}/core/state/include
             ${CMAKE_SOURCE_DIR}/core/audio/include
             ${CMAKE_SOURCE_DIR}/core/events/include

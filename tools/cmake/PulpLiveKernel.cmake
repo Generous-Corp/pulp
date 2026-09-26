@@ -31,6 +31,7 @@ get_filename_component(_PULP_LK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
 set(_PULP_LK_INCLUDES
     ${_PULP_LK_ROOT}/core/signal/include
+    ${_PULP_LK_ROOT}/core/simd/include
     ${_PULP_LK_ROOT}/experimental/live_kernel)
 
 # pulp_add_live_kernel(<Name> ENTRY <entry.cpp> [SOURCES ...] [EXPORTS _sym ...])

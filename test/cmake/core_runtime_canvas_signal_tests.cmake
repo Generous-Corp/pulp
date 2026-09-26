@@ -243,6 +243,12 @@ target_compile_features(pulp-test-simd-header-fallback PRIVATE cxx_std_20)
 target_link_libraries(pulp-test-simd-header-fallback PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-simd-header-fallback)
 
+# FirFilterT on a linear history over pulp::simd::correlate/dot, against a
+# sequential reference across compactions and block sizes.
+pulp_add_test_suite(pulp-test-fir-filter
+    SOURCES test_fir_filter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio pulp::audio-analysis)
+
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd GROUP pulp-test-group-core-view
     SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp

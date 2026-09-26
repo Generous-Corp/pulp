@@ -19,6 +19,19 @@ the *same* wasm UI module mounts against both a WAM and a WebCLAP demo. Build it
 once; if it looks different across the two ABIs, that is a shared-player bug, not
 a per-demo tweak.
 
+## wasm DSP builds get `pulp::simd` as inline scalar code
+
+Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,
+and everything that includes them) include `<pulp/simd/simd.hpp>`. A build
+that lists include directories by hand must list `core/simd/include` next to
+`core/signal/include`, or it fails with a missing header. It needs no library:
+without pulp-simd's compile definitions the header supplies the scalar kernels
+inline (`pulp::simd::active_backend_name == "inline-scalar"`). `PulpWam.cmake`,
+`PulpWclap.cmake`, `PulpWebUi.cmake`, `PulpGpuWasm.cmake` and
+`PulpLiveKernel.cmake` list it. The wasm DSP is therefore scalar until the
+Highway wasm target lands with `-msimd128`; do not add `core/simd/src` sources
+to a wasm source list to "fix" speed without that plan.
+
 ## What is NOT in the browser
 
 Be precise about this; it is easy to overclaim and the claims get quoted.

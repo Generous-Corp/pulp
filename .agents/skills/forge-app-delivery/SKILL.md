@@ -44,6 +44,13 @@ pkgutil --expand "Foo.pkg" out      # --payload-files does NOT recurse into
                                     # nested component payloads
 ```
 
+## The Rack pack's inputs include `core/simd/include`
+
+`examples/forge-modular/package.sh` refuses to pack when any consumed input
+tree is dirty, and that list now includes `core/simd/include` because signal
+headers include `<pulp/simd/simd.hpp>`. A local edit under `core/simd` blocks
+a pack exactly like an edit under `core/signal`.
+
 ## The seam: the shell is built in the other repo
 
 Forge app shells live in `forge-seam/`, are copied into a **throwaway Forge

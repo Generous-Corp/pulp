@@ -40,6 +40,16 @@ The API 28 cases are positive controls for the original compiler failure.
 This is compile/link evidence; the existing aligned-buffer tests cover runtime
 alignment, initialization, and resizing.
 
+## Hand-listed signal include directories need `core/simd/include`
+
+Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,
+and everything that includes them) include `<pulp/simd/simd.hpp>`. A build
+that lists include directories by hand must list `core/simd/include` next to
+`core/signal/include`, or it fails with a missing header. It needs no library:
+without pulp-simd's compile definitions the header supplies the scalar kernels
+inline (`pulp::simd::active_backend_name == "inline-scalar"`). `PulpAndroid.cmake`'s
+hand-listed DSP include set carries it.
+
 ## Architecture Overview
 
 ```

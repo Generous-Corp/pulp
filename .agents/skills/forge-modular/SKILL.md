@@ -13,6 +13,19 @@ Read this before trusting any green result in this area. Everything below cost
 a session at least once, and most of it was a test or a tool reporting success
 for work it had not done.
 
+## The Rack build compiles signal headers by hand: keep `core/simd/include` listed
+
+Signal headers (`fir_filter.hpp`, `oversampling*.hpp`, `zero_latency_convolver.hpp`,
+and everything that includes them) include `<pulp/simd/simd.hpp>`. A build
+that lists include directories by hand must list `core/simd/include` next to
+`core/signal/include`, or it fails with a missing header. It needs no library:
+without pulp-simd's compile definitions the header supplies the scalar kernels
+inline (`pulp::simd::active_backend_name == "inline-scalar"`). Three lists carry it
+for this pack and must move together: `examples/forge-modular/CMakeLists.txt`
+(both include blocks), the consumed-input status list in `package.sh`, and
+the toolchain tree list in `tools/rack/install_toolchain.sh`. A pack that
+misses it fails at the compiler after the model has already been called.
+
 ## A run that fails still has to hand something over
 
 `generate()` returns `(patch, why, shortfall)`. `shortfall` is `None` on a pass

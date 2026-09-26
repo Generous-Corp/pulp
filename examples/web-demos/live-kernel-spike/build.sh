@@ -18,6 +18,7 @@ SPIKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SPIKE_DIR/../../.." && pwd)"
 KERNEL_DIR="$REPO_ROOT/experimental/live_kernel"
 SIGNAL_INC="$REPO_ROOT/core/signal/include"
+SIMD_INC="$REPO_ROOT/core/simd/include"
 DIST="$SPIKE_DIR/dist"
 mkdir -p "$DIST"
 
@@ -28,7 +29,7 @@ fi
 echo "emcc: $(emcc --version | head -1)"
 
 COMMON=( -std=c++20 -O3 -fno-exceptions -fno-rtti
-         -I"$SIGNAL_INC" -I"$KERNEL_DIR"
+         -I"$SIGNAL_INC" -I"$SIMD_INC" -I"$KERNEL_DIR"
          -sSTANDALONE_WASM=1 -sPURE_WASI=0
          -sINITIAL_MEMORY=67108864 -sALLOW_MEMORY_GROWTH=0
          -sTOTAL_STACK=1048576
