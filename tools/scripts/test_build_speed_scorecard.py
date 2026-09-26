@@ -280,6 +280,16 @@ class BenchSectionsTests(unittest.TestCase):
         self.assertNotIn("Reuse", regressions)
         self.assertNotIn("Fleet / hit", regressions)
 
+    def test_small_values_keep_three_significant_figures(self) -> None:
+        base = {"sections": [{"title": "Kernel", "unit": "ns/element", "lower_is_better": True,
+                              "values": {"dot": 0.61, "sum": 0.028, "fir": 16.53}}]}
+        cur = {"sections": [{"title": "Kernel", "unit": "ns/element", "lower_is_better": True,
+                             "values": {"dot": 0.052, "sum": 0.028, "fir": 1.3417}}]}
+        out = bd.render_sections(base, cur, 0.05)
+        self.assertIn("| dot | 0.61 ns/element | 0.052 ns/element | -91.5% (better) |", out)
+        self.assertIn("| sum | 0.028 ns/element | 0.028 ns/element | = |", out)
+        self.assertIn("| fir | 16.5 ns/element | 1.34 ns/element | -91.9% (better) |", out)
+
     def test_cli_dispatches_on_sections(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             b, c = Path(d, "b.json"), Path(d, "c.json")
