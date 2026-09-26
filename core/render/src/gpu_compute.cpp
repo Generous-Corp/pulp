@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -1130,6 +1131,14 @@ public:
 
         wgpu::RequestAdapterOptions opts{};
         opts.powerPreference = wgpu::PowerPreference::HighPerformance;
+        // Hosted software-GPU lanes opt into Dawn's fallback adapter so the
+        // receipt proves WARP/lavapipe execution rather than whichever adapter
+        // happens to be present on the runner. The default remains unchanged.
+        if (const auto* value = std::getenv("PULP_GPU_SOFTWARE_ADAPTER")) {
+            const std::string_view text(value);
+            opts.forceFallbackAdapter =
+                text == "1" || text == "true" || text == "TRUE" || text == "on" || text == "ON";
+        }
 
         instance_.RequestAdapter(
             &opts, wgpu::CallbackMode::AllowProcessEvents,
