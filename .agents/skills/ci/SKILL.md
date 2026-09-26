@@ -1364,6 +1364,17 @@ and hardcode a timeout, so there is no shared default to inherit and a
 codesign-heavy suite could sit at 10s while its siblings used 30-60s. When
 adding a shellout test, reuse the shared helper rather than picking a number.
 
+### A gate job that "failed" after ~2 hours hung; it did not fail
+
+A self-hosted `macos` job has no step or job `timeout-minutes` of its own for
+most steps, so a hung step runs until the host's tartci `job_timeout` (7200 s)
+tears the VM down. GitHub then records `failure`, never `timed_out`, so a query
+for timed-out jobs finds nothing. Read the job's `steps`: the last step still
+`in_progress` is the one that hung (on 2026-09-26 it was "Bootstrap repository
+dependencies", which normally takes 0.3 min). Bound a setup step that can only
+hang on the network with a step `timeout-minutes` well above its measured max,
+so the VM is freed in minutes instead of hours.
+
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
 Hard-fails a PR when Pulp's own source names another UI framework — in a
