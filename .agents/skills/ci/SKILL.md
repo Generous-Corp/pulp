@@ -452,6 +452,11 @@ current `main` tip. That full run is what issues the receipt. Three traps:
 - `download` requires the whole PR workflow run to have concluded `success`, so
   a PR run still finishing its Linux leg, or with a red advisory leg, refuses
   reuse for macOS too.
+- Never push a merge of `main` (or "update branch") to earn a receipt. A
+  BEHIND head deliberately gets the fast tier and validates in full in the
+  queue; a refresh push cancels the running gate, and a cancelled full run is
+  pure waste. Merge `main` only when the PR is DIRTY or a required check fails
+  because of a stale base.
 
 When measuring reuse from job logs, read only the emitted `##[notice]` lines.
 The `protected-receipt-reuse` log also echoes the step's whole script, so a

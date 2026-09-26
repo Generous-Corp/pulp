@@ -1905,6 +1905,12 @@ full in the merge group as before. REST `auto_merge` reads null once the queue
 holds a pull request (decisions contract row 11); that only ever yields the
 fast tier.
 
+Do not push a merge of `main` into a pull request to make it eligible. A head
+whose base has moved is still validated in full by the merge group, and a
+refresh push cancels and restarts the running `macos` gate, so it costs more
+than the receipt could save. Merge `main` only when the pull request is DIRTY
+or a required check fails because of a stale base.
+
 That full run is evidence, not the pull request's gate: the step is
 `continue-on-error` on pull requests, so a failure there leaves the `macos`
 check meaning build + fast tier, and the `Surface ctest failures` step still
