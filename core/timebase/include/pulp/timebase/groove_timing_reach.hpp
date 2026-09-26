@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/timebase/groove_kernel.hpp>
+#include <pulp/timebase/inline_groove_projector.hpp>
 
 #include <algorithm>
 #include <cstdint>

@@ -599,7 +599,7 @@ EXPORTS = [
                 target="Pulp::timebase",
                 address_expression="&pulp::timebase::groove_timing_reach<pulp::timebase::InlineGrooveProjector>",
                 header_fingerprint=(
-                    "sha256:e5e5d3998912cf419a588e6bafba0a6e4e256f93efeb3f4b28a47dd48265815c"
+                    "sha256:08cc72d0d66e1798551780cc195f3c4ebc824d7e403196b0a7e0303ba4aac72c"
                 ),
             )
         ],
