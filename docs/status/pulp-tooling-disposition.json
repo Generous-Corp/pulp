@@ -4561,6 +4561,10 @@
         "disposition": "pulp-owned"
       },
       {
+        "name": "test-audit",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "text-metrics",
         "disposition": "candidate-shared-later"
       },
