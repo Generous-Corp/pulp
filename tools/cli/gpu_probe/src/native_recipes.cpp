@@ -168,6 +168,16 @@ bool software_adapter_requested() {
     return text == "1" || text == "true" || text == "TRUE" || text == "on" || text == "ON";
 }
 
+pulp::render::Renderer3DAdapterBackendPreference software_adapter_backend() {
+#if defined(_WIN32)
+    return pulp::render::Renderer3DAdapterBackendPreference::d3d12;
+#elif defined(__linux__)
+    return pulp::render::Renderer3DAdapterBackendPreference::vulkan;
+#else
+    return pulp::render::Renderer3DAdapterBackendPreference::default_backend;
+#endif
+}
+
 std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
     std::vector<std::uint8_t> bytes;
     bytes.reserve(values.size_bytes());
@@ -396,7 +406,14 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
     render::HardcodedCubeRenderConfig config;
     config.width = run.result.dimensions.width;
     config.height = run.result.dimensions.height;
-    config.force_fallback_adapter = software_adapter_requested();
+    if (software_adapter_requested()) {
+        config.backend_preference = software_adapter_backend();
+        // Keep the historical fallback request for platforms without a
+        // hosted software backend mapping (for example macOS); Linux and
+        // Windows take the explicit lavapipe/WARP paths above.
+        config.force_fallback_adapter = config.backend_preference ==
+                                        render::Renderer3DAdapterBackendPreference::default_backend;
+    }
     // The planted regression must affect bytes produced by the GPU. A 32x32
     // render still exercises submission and readback while making the recipe's
     // 1,500-pixel foreground floor impossible to satisfy.

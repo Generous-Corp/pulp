@@ -81,6 +81,10 @@ wgpu::BackendType dawn_backend_preference(
     switch (preference) {
         case GpuSurface::AdapterBackendPreference::null_backend:
             return wgpu::BackendType::Null;
+        case GpuSurface::AdapterBackendPreference::vulkan:
+            return wgpu::BackendType::Vulkan;
+        case GpuSurface::AdapterBackendPreference::d3d12:
+            return wgpu::BackendType::D3D12;
         case GpuSurface::AdapterBackendPreference::default_backend:
             return wgpu::BackendType::Undefined;
     }
@@ -135,7 +139,11 @@ public:
             create_native_surface(config.native_surface_handle);
         }
 
-        // Request adapter (compatible with surface if we have one)
+        // Request adapter (compatible with surface if we have one). The
+        // software proof lane selects a concrete backend and enumerates CPU
+        // adapters. Dawn's forceFallbackAdapter hint asks for SwiftShader on
+        // some builds, which is not the hosted Linux/Windows software path
+        // (lavapipe/WARP) and can therefore return no adapter at all.
         wgpu::RequestAdapterOptions adapter_opts{};
         adapter_opts.powerPreference = wgpu::PowerPreference::HighPerformance;
         adapter_opts.forceFallbackAdapter = config.force_fallback_adapter;
@@ -145,15 +153,35 @@ public:
             adapter_opts.compatibleSurface = surface_;
         }
 
-        instance_.RequestAdapter(
-            &adapter_opts,
-            wgpu::CallbackMode::AllowProcessEvents,
-            [this](wgpu::RequestAdapterStatus status, wgpu::Adapter result, wgpu::StringView) {
-                if (status == wgpu::RequestAdapterStatus::Success) {
-                    adapter_ = std::move(result);
+        const bool explicit_software_backend =
+            config.backend_preference == AdapterBackendPreference::vulkan ||
+            config.backend_preference == AdapterBackendPreference::d3d12;
+        if (explicit_software_backend) {
+            // Enumerate instead of relying on RequestAdapter's power
+            // preference. The hosted proof must reject a hardware adapter if
+            // one is present and bind to the CPU adapter from the requested
+            // backend (lavapipe on Vulkan, WARP on D3D12).
+            adapter_opts.forceFallbackAdapter = false;
+            const auto candidates = native_instance_->EnumerateAdapters(&adapter_opts);
+            for (const auto& candidate : candidates) {
+                wgpu::Adapter selected(candidate.Get());
+                wgpu::AdapterInfo info{};
+                if (selected.GetInfo(&info) == wgpu::Status::Success &&
+                    info.adapterType == wgpu::AdapterType::CPU) {
+                    adapter_ = std::move(selected);
+                    break;
                 }
-            });
-        instance_.ProcessEvents();
+            }
+        } else {
+            instance_.RequestAdapter(
+                &adapter_opts, wgpu::CallbackMode::AllowProcessEvents,
+                [this](wgpu::RequestAdapterStatus status, wgpu::Adapter result, wgpu::StringView) {
+                    if (status == wgpu::RequestAdapterStatus::Success) {
+                        adapter_ = std::move(result);
+                    }
+                });
+            instance_.ProcessEvents();
+        }
 
         if (!adapter_) {
             runtime::log_error("GpuSurface: no suitable GPU adapter found");
@@ -692,10 +720,24 @@ public:
         WGPURequestAdapterOptions adapter_opts{};
         adapter_opts.powerPreference = WGPUPowerPreference_HighPerformance;
         adapter_opts.forceFallbackAdapter = config.force_fallback_adapter;
-        adapter_opts.backendType = config.backend_preference ==
-                GpuSurface::AdapterBackendPreference::null_backend
-            ? WGPUBackendType_Null
-            : WGPUBackendType_Undefined;
+        switch (config.backend_preference) {
+        case GpuSurface::AdapterBackendPreference::null_backend:
+            adapter_opts.backendType = WGPUBackendType_Null;
+            break;
+        case GpuSurface::AdapterBackendPreference::vulkan:
+            adapter_opts.backendType = WGPUBackendType_Vulkan;
+            break;
+        case GpuSurface::AdapterBackendPreference::d3d12:
+            adapter_opts.backendType = WGPUBackendType_D3D12;
+            break;
+        case GpuSurface::AdapterBackendPreference::default_backend:
+            adapter_opts.backendType = WGPUBackendType_Undefined;
+            break;
+        }
+        if (config.backend_preference == GpuSurface::AdapterBackendPreference::vulkan ||
+            config.backend_preference == GpuSurface::AdapterBackendPreference::d3d12) {
+            adapter_opts.forceFallbackAdapter = false;
+        }
 
         WGPURequestAdapterCallbackInfo adapter_cb{};
         adapter_cb.mode = WGPUCallbackMode_AllowSpontaneous;
