@@ -2077,7 +2077,7 @@ Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_label
 - `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
 - `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
-- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m1, m5, studio; its unset fallback's labels are advertised by no registration
 - `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
 - `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
 
