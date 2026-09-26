@@ -59,7 +59,11 @@ class Fixture:
     def __init__(self, tmp: pathlib.Path) -> None:
         # Match Git's physical spelling on macOS (/private/var, not /var).
         self.tmp = tmp.resolve()
-        self.origin = self.tmp / "origin.git"
+        # Spelled so the reconciler can derive OWNER/REPO from the origin URL:
+        # it matches `github.com/<owner>/<name>` at the end of the URL, so a
+        # purely local path satisfies it with no network and no production change.
+        self.origin = self.tmp / "github.com" / "acme" / "widget.git"
+        self.origin.parent.mkdir(parents=True, exist_ok=True)
         self.main = self.tmp / "main-checkout"
         self.wts = self.tmp / "wts"
         self.wts.mkdir()
@@ -86,6 +90,12 @@ class Fixture:
         scripts = self.main / "tools" / "scripts"
         scripts.mkdir(parents=True)
         (scripts / "clean_worktree_builds.sh").write_text(SCRIPT.read_text())
+        # The reaper reconciles lineage before deciding, so the fixture carries
+        # the reconciler too. Without it the reconcile step is a silent no-op and
+        # the squash assertion below would pass for the wrong reason.
+        _lin = scripts / "worktree_lineage.sh"
+        _lin.write_text((REPO_ROOT / "tools" / "scripts" / "worktree_lineage.sh").read_text())
+        _lin.chmod(0o755)
         ci = self.main / "tools" / "ci"
         ci.mkdir(parents=True)
         (ci / "build_dir_lock.py").write_text(
@@ -495,6 +505,61 @@ class GateTests(FixtureTestCase):
             "manual reconcile:\n" + r.stdout + r.stderr)
         # Only build/ goes; the checkout and its committed work stay.
         self.assertTrue((wt / "wt-unmarked.txt").is_file())
+
+    def _squash_landed(self, name: str) -> pathlib.Path:
+        """A worktree whose branch landed as a SQUASH commit on main.
+
+        A squash rewrites history, so the head is deliberately NOT an ancestor of
+        main and no merge commit names it as a second parent. Git ancestry cannot
+        prove it and neither can the merge-commit reconcile; before
+        --squash-patch-id these build dirs were kept forever.
+        """
+        wt = self.fx.add_worktree(name, build=False)
+        branch = git(wt, "branch", "--show-current").strip()
+        # Squash the branch onto main the way GitHub does: one commit carrying
+        # the branch's whole diff, subject ending in `(#N)`.
+        git(self.fx.main, "merge", "--squash", branch)
+        git(self.fx.main, "commit", "-m", f"{name}: squashed (#4242)")
+        git(self.fx.main, "push")
+        self.fx.advance_main(f"after-{name}.txt")
+        head = git(wt, "rev-parse", "HEAD").strip()
+        tip = git(self.fx.main, "rev-parse", "origin/main").strip()
+        self.assertNotEqual(head, tip)
+        # The premise: ancestry genuinely cannot prove this one.
+        anc = subprocess.run(["git", "-C", str(wt), "merge-base",
+                              "--is-ancestor", head, tip], capture_output=True)
+        self.assertNotEqual(anc.returncode, 0,
+                            "fixture must produce a head that is NOT an ancestor")
+        for field in ("Status", "DurableSha", "Pr"):
+            self.assertEqual(
+                git(self.fx.main, "config", "--local", "--default", "", "--get",
+                    f"branch.{branch}.pulpWorktree{field}").strip(), "",
+                f"fixture must leave pulpWorktree{field} unset")
+        Fixture.make_build(wt, stale=True)
+        return wt
+
+    def test_squash_landed_worktree_is_reaped_without_a_manual_reconcile(self) -> None:
+        wt = self._squash_landed("wt-squashed")
+        r = run_script(self.fx, "--verbose", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("lineage reconciled", r.stdout)
+        self.assertFalse(
+            (wt / "build").exists(),
+            "a squash-landed worktree must be reapable without anyone running "
+            "worktree_lineage.sh by hand:\n" + r.stdout + r.stderr)
+        self.assertTrue((wt / "wt-squashed.txt").is_file())
+
+    def test_without_the_reconcile_the_squash_landed_worktree_is_kept(self) -> None:
+        # The control. Same fixture, same gates, one variable. If this also
+        # reaped, the test above would prove nothing about the reconcile.
+        wt = self._squash_landed("wt-squashed")
+        r = run_script(self.fx, "--verbose", "--yes",
+                       env_extra={"PULP_REAP_SKIP_RECONCILE": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(
+            (wt / "build").is_dir(),
+            "with the reconcile skipped nothing can prove a squash landing, so "
+            "the build dir must be kept:\n" + r.stdout + r.stderr)
 
     def test_stale_lineage_head_is_reaped_on_git_ancestry(self) -> None:
         # The row records `merged` against a sha that is not this head, so the
