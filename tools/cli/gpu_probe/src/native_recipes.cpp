@@ -168,6 +168,7 @@ bool software_adapter_requested() {
     return text == "1" || text == "true" || text == "TRUE" || text == "on" || text == "ON";
 }
 
+#if defined(PULP_ENABLE_SCENE3D)
 pulp::render::Renderer3DAdapterBackendPreference software_adapter_backend() {
 #if defined(_WIN32)
     return pulp::render::Renderer3DAdapterBackendPreference::d3d12;
@@ -177,6 +178,7 @@ pulp::render::Renderer3DAdapterBackendPreference software_adapter_backend() {
     return pulp::render::Renderer3DAdapterBackendPreference::default_backend;
 #endif
 }
+#endif
 
 std::vector<std::uint8_t> floats_as_bytes(std::span<const float> values) {
     std::vector<std::uint8_t> bytes;
