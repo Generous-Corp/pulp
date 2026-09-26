@@ -217,6 +217,11 @@ retain those fields in the PR/landing evidence.
 
 ## Common traps
 
+- `release-path-pr-gate.yml`'s darwin runner resolver runs
+  `resolve_release_runners.py --apply-class-label pulp-release-pr-gate` after a
+  sparse checkout. With `PULP_RELEASE_CLASS_TOKENS` unset the selector is
+  verbatim; set, a self-hosted selector gains `pulp-release-pr-gate`, so a gate
+  run that never starts may be an unserved class, not a toolchain failure.
 - A Skia milestone name alone does not select a V8 revision. Resolve through Chromium's
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.
