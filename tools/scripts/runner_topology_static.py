@@ -52,6 +52,12 @@ from typing import Any
 
 REACHABLE = "REACHABLE"
 UNSERVED = "UNSERVED"
+# No registration mints for the job's workflow, but registrations minting for a
+# workflow the lane names in `opportunistic_service.minted_for` carry its
+# labels. GitHub hands a queued job to any idle registered runner whose labels
+# are a superset, so the job runs whenever such a runner is idle — and never
+# when that other workflow has no demand. Reported, never blocking.
+OPPORTUNISTIC = "OPPORTUNISTIC"
 # Row source for a lane's declared break-glass rollback.
 ROLLBACK_SOURCE = "break_glass_rollback"
 HOSTED = "HOSTED"
@@ -349,6 +355,7 @@ def evaluate_lane(lane: Any, contract: Any, snapshot: Snapshot,
     # "Unset the variable" is the rollback an operator reaches for first. When
     # that fallback cannot be served, a required lane must name the rollback
     # that can, or the only recovery on record queues release work forever.
+    _opportunistic(lane, rows, snapshot, repo)
     fallback_unserved = any(row.source == "unset_fallback" and row.verdict == UNSERVED
                             for row in rows)
     if lane.severity == "required" and fallback_unserved and rollback is None:
@@ -359,6 +366,32 @@ def evaluate_lane(lane: Any, contract: Any, snapshot: Snapshot,
                                "fallback, and the lane declares no "
                                "break_glass_rollback that is served"))
     return rows
+
+
+def _opportunistic(lane: Any, rows: list[Row], snapshot: Snapshot, repo: str) -> None:
+    """Downgrade a declared-opportunistic lane's UNSERVED `expect` rows.
+
+    Only the contracted value qualifies. A fallback or rollback is the route an
+    operator reaches for when normal service is gone; one that depends on
+    another workflow's idle runners is not a recovery, so it stays UNSERVED.
+    """
+    riders = set(getattr(lane, "served_opportunistically_by", None) or [])
+    if not riders:
+        return
+    for row in rows:
+        if row.source != "expect" or row.verdict != UNSERVED or not isinstance(row.labels, list):
+            continue
+        hosts = [reg for reg in label_carriers(row.labels, repo, snapshot)
+                 if riders & set(reg.workflows)]
+        if not hosts:
+            continue
+        minted = sorted(riders & {name for reg in hosts for name in reg.workflows})
+        row.verdict = OPPORTUNISTIC
+        row.served_by = sorted({reg.host_id for reg in hosts})
+        row.detail = (f"no registration mints for {row.workflow!r}; idle runners "
+                      f"minted for {minted} carry the labels "
+                      f"({', '.join(reg.handle for reg in hosts)}), so service "
+                      "depends on that workflow's demand")
 
 
 def evaluate(contract: Any, snapshot: Snapshot, workflows_dir: Path,
@@ -470,13 +503,13 @@ def render_table(rows: list[Row], snapshot: Snapshot, statuses: list[OverrideSta
         "runner-topology --mode=static: DECLARED supply "
         f"(advertised-labels snapshot @ {commit}), not live fleet state.",
         "",
-        f"{'VARIABLE':42} {'SEV':8} {'SRC':8} {'EVENT':17} {'WORKFLOW':22} VERDICT     DETAIL",
+        f"{'VARIABLE':42} {'SEV':8} {'SRC':8} {'EVENT':17} {'WORKFLOW':22} VERDICT       DETAIL",
     ]
     for row in rows:
         src = {"unset_fallback": "fallback",
                ROLLBACK_SOURCE: "rollback"}.get(row.source, "expect")
         out.append(f"{row.variable:42} {row.severity:8} {src:8} {row.event:17} "
-                   f"{(row.workflow or '-'):22} {row.verdict:11} {row.detail}")
+                   f"{(row.workflow or '-'):22} {row.verdict:13} {row.detail}")
     out.append("")
     if statuses:
         out.append("Active routing overrides:")
@@ -490,15 +523,20 @@ def render_table(rows: list[Row], snapshot: Snapshot, statuses: list[OverrideSta
         out.append(f"  ERROR [{kind}] {subject}: {detail}")
     blocking = [row for row in rows if row.blocking]
     fallback = [row for row in rows if row.verdict == UNSERVED and not row.blocking]
+    riding = [row for row in rows if row.verdict == OPPORTUNISTIC]
     out.append("")
     if blocking or override_findings:
         out.append(f"runner-topology static: FAIL — {len(blocking)} required lane "
                    f"row(s) UNSERVED, {len(override_findings)} override finding(s).")
     else:
+        notes = []
+        if riding:
+            notes.append(f"{len(riding)} row(s) OPPORTUNISTIC by contract")
+        if fallback:
+            notes.append(f"{len(fallback)} advisory/fallback row(s) UNSERVED")
         out.append("runner-topology static: OK — every required lane is REACHABLE, "
-                   "HOSTED, or a SENTINEL on declared supply"
-                   + (f" ({len(fallback)} advisory/fallback row(s) UNSERVED)."
-                      if fallback else "."))
+                   "HOSTED, a SENTINEL, or declared OPPORTUNISTIC on declared supply"
+                   + (f" ({'; '.join(notes)})." if notes else "."))
     return "\n".join(out)
 
 
