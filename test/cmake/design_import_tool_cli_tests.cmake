@@ -44,11 +44,12 @@ if(_PULP_NODE_FOR_TESTS)
     file(GLOB _PULP_MATERIALIZED_RUNTIME_NODE_TESTS CONFIGURE_DEPENDS
          ${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/*.test.mjs)
 
-    # The real-browser cases are intentionally slow and serial within their
-    # file. Keeping them in the unit aggregate made one growing integration
-    # file consume the aggregate's entire timeout before later unit files ran.
-    set(_PULP_BROWSER_CAPTURE_INTEGRATION_TEST
-        ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/capture.integration.test.mjs)
+    # The real-browser cases are slow and serial within each file. Keeping them
+    # in the unit aggregate made the integration suite consume the aggregate's
+    # entire timeout before later unit files ran, so every
+    # *.integration.test.mjs file is its own serial group, run below.
+    file(GLOB _PULP_BROWSER_CAPTURE_INTEGRATION_TEST CONFIGURE_DEPENDS
+         ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/*.integration.test.mjs)
     list(REMOVE_ITEM _PULP_BROWSER_CAPTURE_NODE_TESTS
          ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
 
@@ -91,13 +92,19 @@ if(_PULP_NODE_FOR_TESTS)
         LABELS "parser-import;browser-capture;node")
 
     add_test(NAME pulp-browser-capture-node-integration
-             COMMAND ${_PULP_NODE_FOR_TESTS} --test
+             COMMAND ${_PULP_NODE_FOR_TESTS} --test --test-concurrency=3
                      ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
     # Real Chrome capture is itself load-sensitive: in production a screenshot
     # CDP call crossed its bounded 20-second deadline while unrelated CTest work
     # shared the VM, even though the same suite normally finishes cleanly. Make
     # the isolation independent of the caller's `-j` width; retaining the 600s
     # outer timeout keeps a genuine capture hang bounded and named.
+    #
+    # Isolation from OTHER tests is the requirement; the cases themselves are
+    # mostly waiting on cold Chrome launches and bounded settles (about a third
+    # of one core per file), so the files run concurrently inside the slot.
+    # Run file by file it held the machine alone for minutes: the longest
+    # single item on the required gate's test step.
     set_tests_properties(pulp-browser-capture-node-integration PROPERTIES
         RUN_SERIAL TRUE
         TIMEOUT 600
