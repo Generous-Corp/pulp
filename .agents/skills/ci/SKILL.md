@@ -73,6 +73,17 @@ Windows remain advisory and do not produce this authority.
 
 ## A merge queue amplifies a broken base instead of catching it
 
+### Duplicate PR heads are an admission smell
+
+The Shipyard merge steward snapshots all open pull-request heads and runs
+`tools/scripts/shipyard_duplicate_pr_heads.py` before cleanup planning. A
+duplicate exact head identity means two open PRs are asking the queue to spend
+validation capacity on the same source state; consolidate them before adding
+more fixup commits. The check is read-only and diagnostic because a REST
+snapshot has a time-of-check/time-of-use gap. Shipyard's atomic exact-head
+handoff remains the merge-time authority, and malformed census data must stay
+failed closed.
+
 The merge queue's failure mode is not that it misses a break. It is that it
 inherits one and repeats it. A batch validates `main` plus its entries, so a
 break already on `main` fails every batch, ejects the innocent entries,
