@@ -107,6 +107,120 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
 
 
+def _build_steps() -> dict[str, dict[str, object]]:
+    steps = _workflow()["jobs"]["build"]["steps"]
+    return {step["name"]: step for step in steps if "name" in step}
+
+
+def _evaluate_if(expression: object, context: dict[str, object]) -> bool:
+    """Evaluate a GitHub Actions step condition over a small literal context.
+
+    Supports exactly what these step conditions use: `&&`, `||`, `!`, `==`,
+    `!=`, parentheses, single-quoted strings, dotted context names, and the
+    status functions. An unknown name is '' (GitHub reads a missing step
+    output as an empty string), so a condition that forgets a clause cannot
+    pass by raising.
+    """
+    if isinstance(expression, bool):  # YAML reads a bare `true` as a bool
+        return expression
+    expression = expression.replace("${{", "").replace("}}", "")
+    tokens = re.findall(
+        r"\s+|&&|\|\||!=|==|!|\(|\)|'[^']*'|[A-Za-z_][A-Za-z0-9_.\-]*(?:\(\))?",
+        expression)
+    assert "".join(tokens) == expression, f"unparsed condition: {expression!r}"
+    python = []
+    for token in tokens:
+        if token.isspace():
+            python.append(" ")
+        elif token in ("&&", "||", "!"):
+            python.append({"&&": " and ", "||": " or ", "!": " not "}[token])
+        elif token in ("==", "!=", "(", ")") or token.startswith("'"):
+            python.append(token)
+        elif token in ("true", "false"):
+            python.append(repr(token == "true"))
+        else:
+            python.append(repr(context.get(token, "")))
+    return bool(eval("".join(python), {"__builtins__": {}}))  # noqa: S307
+
+
+class ReadyPullRequestReceiptTest(unittest.TestCase):
+    """The receipt is issued from a ready head's full run, and from nothing else."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        steps = _build_steps()
+        cls.decide = steps["Decide pull-request test suite"]
+        cls.fast = steps["Test fast deterministic tier (pull request head)"]
+        cls.full = steps["Test (non-Windows)"]
+        cls.issue = steps["Issue exact protected-validation receipt"]
+        cls.publish = steps["Publish exact protected-validation receipt"]
+
+    def _context(self, event, suite="", ctest_outcome="", success=True, key="macos",
+                 os_name="macOS"):
+        return {
+            "runner.os": os_name, "github.event_name": event, "matrix.key": key,
+            "steps.pr_suite.outputs.suite": suite,
+            "steps.ctest.outcome": ctest_outcome,
+            "success()": success, "failure()": not success,
+        }
+
+    def test_ready_pull_request_runs_the_full_suite_as_evidence(self) -> None:
+        ready = self._context("pull_request", suite="full")
+        self.assertTrue(_evaluate_if(self.decide["if"], ready))
+        self.assertTrue(_evaluate_if(self.fast["if"], ready))
+        self.assertTrue(_evaluate_if(self.full["if"], ready))
+        self.assertEqual(
+            _evaluate_if(self.full["continue-on-error"], ready), True,
+            "a ready head's full run must not gate the pull request check")
+
+    def test_ordinary_pull_request_push_keeps_only_the_fast_tier(self) -> None:
+        for suite in ("fast", ""):
+            ordinary = self._context("pull_request", suite=suite)
+            self.assertTrue(_evaluate_if(self.fast["if"], ordinary))
+            self.assertFalse(_evaluate_if(self.full["if"], ordinary), suite)
+
+    def test_merge_group_and_push_still_run_the_full_suite_as_the_gate(self) -> None:
+        for event in ("merge_group", "push"):
+            ctx = self._context(event)
+            self.assertTrue(_evaluate_if(self.full["if"], ctx))
+            self.assertFalse(_evaluate_if(self.fast["if"], ctx))
+            self.assertFalse(_evaluate_if(self.full["continue-on-error"], ctx), event)
+
+    def test_issuer_runs_only_after_a_ready_heads_full_suite_passed(self) -> None:
+        passed = self._context("pull_request", suite="full", ctest_outcome="success")
+        self.assertTrue(_evaluate_if(self.issue["if"], passed))
+        self.assertTrue(_evaluate_if(self.issue["if"], {**passed, "matrix.key": "linux"}))
+        refused = {
+            "fast tier (Test skipped)": self._context(
+                "pull_request", suite="fast", ctest_outcome="skipped"),
+            "full suite failed (continue-on-error)": self._context(
+                "pull_request", suite="full", ctest_outcome="failure"),
+            "earlier step failed": self._context(
+                "pull_request", suite="full", ctest_outcome="success", success=False),
+            "merge group": self._context("merge_group", ctest_outcome="success"),
+            "push": self._context("push", ctest_outcome="success"),
+            "windows leg": self._context(
+                "pull_request", suite="full", ctest_outcome="success", key="windows"),
+        }
+        for label, ctx in refused.items():
+            self.assertFalse(_evaluate_if(self.issue["if"], ctx), label)
+
+    def test_published_name_is_the_one_the_merge_group_looks_up(self) -> None:
+        # The consumer's lookup is the exact-match binding: same target, the
+        # PR head the group merged, and the base it merged onto. A receipt
+        # published under any other name is simply never found.
+        published = self.publish["with"]["name"]
+        self.assertEqual(
+            published,
+            "protected-validation-${{ matrix.key }}-"
+            "${{ github.event.pull_request.head.sha }}-"
+            "${{ github.event.pull_request.base.sha }}",
+        )
+        self.assertIn(
+            'artifact_name="protected-validation-${target}-${head}-${base}"', WORKFLOW)
+        self.assertIn('read -r group base head extra <<< "$parents"', WORKFLOW)
+
+
 class LocalProofWorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = _workflow()
