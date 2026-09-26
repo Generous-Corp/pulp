@@ -1,0 +1,98 @@
+{
+  "id": "timing-invariant-capability-exposure",
+  "title": "The timing-window bound is discoverable without inventing a live control operation",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "8a3b4fb3-f8a9-4e31-bf57-8f57d2b1d8a5",
+  "owned_paths": [
+    "core/playback/src/sequence_content_lowerer.cpp",
+    "core/timebase/include/pulp/timebase/groove_timing_reach.hpp",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "docs/status/sequencer-exposure/rows/timing-invariant-capability-exposure.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/timebase/include/pulp/timebase/groove_timing_reach.hpp",
+      "needles": [
+        "std::int64_t groove_timing_reach(const Groove& groove) noexcept"
+      ]
+    },
+    {
+      "path": "docs/status/agent-capabilities.json",
+      "needles": [
+        "\"key\": \"timebase.groove-timing-reach\""
+      ]
+    },
+    {
+      "path": "test/test_timebase_groove_kernels.cpp",
+      "needles": [
+        "groove timing reach is reusable across canonical and inline grooves"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public timebase header is installed through the existing subsystem directory and remains a header-only Pulp::timebase consumer surface.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/timebase/include/pulp/timebase/groove_timing_reach.hpp",
+          "needles": [
+            "#pragma once"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The helper computes a scheduling bound for SDK consumers; it adds no timeline command, flag, or artifact writer."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added; exposing this pure helper as a remote mutation or query would create a second control surface."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This is an internal reusable calculation and not a user-facing parameter, operation, executor, or policy. Existing groove authoring controls remain the owning surface."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The generated capability contract publishes a typed timebase.groove-timing-reach binding so design-time consumers can discover the timing-window abstraction.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"timebase.groove-timing-reach\""
+          ]
+        },
+        {
+          "kind": "agent_manifest",
+          "path": "test/test_agent_capability_compile.cpp",
+          "needles": [
+            "// timebase.groove-timing-reach"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

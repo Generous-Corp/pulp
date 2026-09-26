@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 92,
+  "inventory_version": 94,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,12 +42,12 @@
     }
   ],
   "counts": {
-    "public_headers": 496,
-    "reviewed_headers": 209,
+    "public_headers": 497,
+    "reviewed_headers": 210,
     "legacy_unreviewed_headers": 287,
     "unsupported_headers": 2,
     "by_disposition": {
-      "capability_entrypoint": 117,
+      "capability_entrypoint": 118,
       "capability_support": 44,
       "infrastructure": 46,
       "legacy_unreviewed": 287,
@@ -91,8 +91,8 @@
         "unsupported_headers": 2
       },
       "timebase": {
-        "public_headers": 13,
-        "reviewed_headers": 10,
+        "public_headers": 14,
+        "reviewed_headers": 11,
         "legacy_unreviewed_headers": 3,
         "unsupported_headers": 0
       }
@@ -4854,6 +4854,17 @@
       "disposition": "capability_entrypoint",
       "capability_keys": [
         "timebase.groove-kernel"
+      ],
+      "rationale": "Public binding for a curated consumer capability."
+    },
+    {
+      "domain": "timebase",
+      "source": "core/timebase/include/pulp/timebase/groove_timing_reach.hpp",
+      "fingerprint": "sha256:08cc72d0d66e1798551780cc195f3c4ebc824d7e403196b0a7e0303ba4aac72c",
+      "include": "pulp/timebase/groove_timing_reach.hpp",
+      "disposition": "capability_entrypoint",
+      "capability_keys": [
+        "timebase.groove-timing-reach"
       ],
       "rationale": "Public binding for a curated consumer capability."
     },

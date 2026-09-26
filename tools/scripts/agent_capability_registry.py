@@ -50,6 +50,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/music/voicing.hpp": "Pulp::music",
     "pulp/playback/program.hpp": "Pulp::playback",
     "pulp/sequence/host_transport_projector.hpp": "Pulp::sequence",
+    "pulp/timebase/groove_timing_reach.hpp": "Pulp::timebase",
     "pulp/timeline/compile_context.hpp": "Pulp::timeline",
     "pulp/timeline/model.hpp": "Pulp::timeline",
     "pulp/timeline/note_modifier.hpp": "Pulp::timeline",
