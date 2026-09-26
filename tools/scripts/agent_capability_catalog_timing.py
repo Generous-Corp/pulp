@@ -597,6 +597,7 @@ EXPORTS = [
                 include="pulp/timebase/groove_timing_reach.hpp",
                 qualified_name="pulp::timebase::groove_timing_reach",
                 target="Pulp::timebase",
+                address_expression="&pulp::timebase::groove_timing_reach<pulp::timebase::InlineGrooveProjector>",
                 header_fingerprint=(
                     "sha256:e5e5d3998912cf419a588e6bafba0a6e4e256f93efeb3f4b28a47dd48265815c"
                 ),
@@ -606,7 +607,7 @@ EXPORTS = [
             "role": "timing-window-bound",
             "binding": "pulp::timebase::groove_timing_reach",
             "operation": "function_call",
-            "arguments": "pulp::timebase::groove_timing_reach(pulp::timebase::InlineGrooveProjector{})",
+            "arguments": "pulp::timebase::InlineGrooveProjector{}",
         }],
     ),
     capability(

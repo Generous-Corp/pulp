@@ -910,9 +910,9 @@ int main() {
     }
     {
         // timebase.groove-timing-reach
-        auto volatile binding_207 = &pulp::timebase::groove_timing_reach;
+        auto volatile binding_207 = &pulp::timebase::groove_timing_reach<pulp::timebase::InlineGrooveProjector>;
         (void)binding_207;
-        (void)pulp::timebase::groove_timing_reach(pulp::timebase::groove_timing_reach(pulp::timebase::InlineGrooveProjector{}));
+        (void)pulp::timebase::groove_timing_reach(pulp::timebase::InlineGrooveProjector{});
     }
     {
         // timebase.inline-groove-projector
