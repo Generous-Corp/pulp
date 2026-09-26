@@ -24,7 +24,7 @@ TEST_CASE("Renderer3D hardcoded textured cube renders offscreen", "[render][scen
     REQUIRE(result.readback_completed);
     REQUIRE(result.adapter_info_available);
     REQUIRE_FALSE(result.adapter_backend.empty());
-    REQUIRE(!result.adapter_backend_type.empty() && !result.adapter_type.empty());
+    REQUIRE((!result.adapter_backend_type.empty() && !result.adapter_type.empty()));
     REQUIRE_FALSE(result.adapter_name.empty());
     REQUIRE(result.rgba.size() == static_cast<size_t>(config.width) * config.height * 4u);
     REQUIRE(result.distinct_color_count > 1);
