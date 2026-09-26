@@ -288,9 +288,21 @@ catch_discover_tests(pulp-test-audio-doctor)
 # argv surface the Quality Lab shells out to.
 pulp_add_test_group(pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
+# The warm macOS gate can retain an archive index that does not expose the
+# bridge object even after CMake regenerates the support archive.  Keep the
+# bridge directly on the group executable too, so the Catch2 WAV tests do not
+# depend on that stale index.
+target_sources(pulp-test-group-app-audio-support PRIVATE support/wav_bridge.cpp)
 pulp_add_test_suite(pulp-test-wav-bridge GROUP pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
 add_executable(pulp-osc-render-wav osc_render_wav.cpp)
+# Keep the bridge translation unit on this executable as well as in the shared
+# harness archive.  The macOS self-hosted gate reuses build trees; an archive
+# index from a pre-bridge generation can otherwise survive a CMake reconfigure
+# and leave this small standalone tool with an unresolved write_scenario_wav
+# symbol.  The direct object makes the executable self-contained while the
+# archive remains the common dependency for the Catch2 harnesses.
+target_sources(pulp-osc-render-wav PRIVATE support/wav_bridge.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
 # CLI argv smoke for the tool above: shells out per --engine and for --seed,
 # asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.
