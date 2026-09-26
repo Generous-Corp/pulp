@@ -221,6 +221,17 @@ jobs:
             done
           } | jq -s 'unique_by(.id)' > pull-request-runs.json
 
+      - name: Detect duplicate open PR heads
+        id: duplicate_pr_heads
+        if: always() && steps.pull_request_cleanup_census.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/shipyard_duplicate_pr_heads.py \
+            --pulls pull-request-open-heads.json \
+            --output duplicate-pr-heads.json
+          jq . duplicate-pr-heads.json
+
       - name: Plan bounded superseded pull-request cleanup
         id: pull_request_cleanup_plan
         if: always() && steps.pull_request_cleanup_census.outcome == 'success'
@@ -607,6 +618,7 @@ jobs:
             pull-request-open-heads.json
             pull-request-runs.json
             pull-request-cleanup-plan.json
+            duplicate-pr-heads.json
             provenance-label-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
@@ -623,6 +635,7 @@ jobs:
           [ "${{ steps.merge_group_cleanup_plan.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_census.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_plan.outcome }}" = success ]
+          [ "${{ steps.duplicate_pr_heads.outcome }}" = success ]
           [ "${{ steps.provenance_label_plan.outcome }}" = success ]
           if [ "$STEWARD_APPLY" = true ]; then
             [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]

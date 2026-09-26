@@ -198,6 +198,16 @@ class ShipyardMergeStewardWorkflowTests(unittest.TestCase):
         self.assertIn("steps.pull_request_cleanup_apply.outcome", self.text)
         self.assertNotIn('.event == "pull_request_target"', self.text)
 
+    def test_duplicate_heads_are_checked_from_the_same_census_before_steward_health(self) -> None:
+        self.assertIn("shipyard_duplicate_pr_heads.py", self.text)
+        self.assertIn("duplicate-pr-heads.json", self.text)
+        census = self.text.index("id: pull_request_cleanup_census")
+        duplicate = self.text.index("id: duplicate_pr_heads")
+        health = self.text.index("name: Preserve unhealthy controller result")
+        self.assertLess(census, duplicate)
+        self.assertLess(duplicate, health)
+        self.assertIn("steps.duplicate_pr_heads.outcome", self.text)
+
     def test_unlabeled_prs_receive_only_a_truthful_exact_head_sentinel(self) -> None:
         self.assertIn("shipyard_provenance_label_plan.py", self.text)
         self.assertIn("provenance-label-plan.json", self.text)
