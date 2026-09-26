@@ -599,9 +599,9 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
 # validates model metadata before any provider resource or handle is created.
 pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
     SOURCES test_gpu_shared_io_wavenet_spec.cpp
-    LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 if(PULP_HAS_SKIA)
+    target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
 endif()
