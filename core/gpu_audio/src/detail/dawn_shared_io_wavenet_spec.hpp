@@ -5,6 +5,7 @@
 // validate model metadata before a provider allocates any pipeline, history,
 // or slot resources.
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -42,6 +43,8 @@ enum class DawnSharedIoWavenetSpecError : std::uint8_t {
     InvalidDilation,
     HistoryOverflow,
     WeightBlobMismatch,
+    ResourceOverflow,
+    InvalidScale,
 };
 
 struct DawnSharedIoWavenetSpecValidation {
@@ -67,7 +70,8 @@ validate_dawn_shared_io_wavenet_spec(const DawnSharedIoWavenetProgramSpec& spec)
     for (std::size_t a = 0; a < spec.arrays.size(); ++a) {
         const auto& layer = spec.arrays[a];
         if (layer.channels == 0 || layer.channels > 64 || layer.kernel == 0 ||
-            layer.head_size == 0 || layer.dilations.empty())
+            layer.head_size == 0 || layer.dilations.empty() || layer.gated > 1 ||
+            layer.head_bias > 1)
             return {DawnSharedIoWavenetSpecError::InvalidLayer};
         if (layer.condition_size != 1)
             return {DawnSharedIoWavenetSpecError::InvalidCondition};
@@ -78,23 +82,34 @@ validate_dawn_shared_io_wavenet_spec(const DawnSharedIoWavenetProgramSpec& spec)
 
         const auto z = layer.gated != 0 ? 2ull * layer.channels : layer.channels;
         required += static_cast<std::uint64_t>(layer.channels) * layer.input_size;
+        if (required > std::numeric_limits<std::uint32_t>::max())
+            return {DawnSharedIoWavenetSpecError::ResourceOverflow};
         for (const auto dilation : layer.dilations) {
             if (dilation == 0)
                 return {DawnSharedIoWavenetSpecError::InvalidDilation};
-            if (dilation > (std::numeric_limits<std::uint32_t>::max() /
-                            (layer.kernel - 1u == 0 ? 1u : layer.kernel - 1u)))
+            const auto reach = static_cast<std::uint64_t>(layer.kernel - 1u) * dilation;
+            if (reach > std::numeric_limits<std::uint32_t>::max() - spec.block_size)
                 return {DawnSharedIoWavenetSpecError::HistoryOverflow};
             required += z * layer.channels * layer.kernel + z + z * layer.condition_size +
                         static_cast<std::uint64_t>(layer.channels) * layer.channels +
                         layer.channels;
+            if (required > std::numeric_limits<std::uint32_t>::max())
+                return {DawnSharedIoWavenetSpecError::ResourceOverflow};
         }
         required += static_cast<std::uint64_t>(layer.head_size) * layer.channels;
         if (layer.head_bias != 0)
             required += layer.head_size;
+        if (required >= std::numeric_limits<std::uint32_t>::max())
+            return {DawnSharedIoWavenetSpecError::ResourceOverflow};
     }
+    if (spec.arrays.back().head_size != 1)
+        return {DawnSharedIoWavenetSpecError::InvalidChain};
     ++required; // trailing head_scale
     if (required != spec.weights.size())
         return {DawnSharedIoWavenetSpecError::WeightBlobMismatch};
+    if (!std::isfinite(spec.head_scale) || !std::isfinite(spec.weights.back()) ||
+        spec.weights.back() != spec.head_scale)
+        return {DawnSharedIoWavenetSpecError::InvalidScale};
     return {};
 }
 

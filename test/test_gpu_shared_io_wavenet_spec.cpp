@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -31,6 +32,39 @@ struct Fixture {
     };
     // rechannel 2 + 2 layers * (4*2*2 + 4 + 4 + 4 + 2) + head (2 + 1) + scale
     std::vector<float> weights = std::vector<float>(static_cast<std::size_t>(2 + 2 * 30 + 4), 0.0f);
+
+    Fixture() {
+        weights.back() = 1.0f;
+    }
+};
+
+struct TinyReference {
+    float a0_l0 = 0.0f;
+    std::array<float, 2> a0_l1{};
+    std::size_t a0_l1_head = 0;
+    float a1_l0 = 0.0f;
+
+    float process(float input) {
+        const float a0_input = input;
+        const float z0 = 0.2f * a0_l0 + 0.4f * a0_input + 0.1f + 0.05f * input;
+        a0_l0 = a0_input;
+        const float h0 = std::tanh(z0);
+        const float r0 = a0_input + 0.3f * h0 - 0.02f;
+
+        const float z1 = -0.1f * a0_l1[a0_l1_head] + 0.25f * r0 - 0.03f + 0.04f * input;
+        a0_l1[a0_l1_head] = r0;
+        a0_l1_head = (a0_l1_head + 1u) % a0_l1.size();
+        const float h1 = std::tanh(z1);
+        const float r1 = r0 + 0.2f * h1 + 0.01f;
+        const float array0_head = 0.7f * (h0 + h1);
+
+        const float a1_input = 0.8f * r1;
+        const float z2 = 0.15f * a1_l0 + 0.35f * a1_input + 0.02f - 0.05f * input;
+        a1_l0 = a1_input;
+        const float h2 = std::tanh(z2);
+        const float array1_head = 0.6f * (array0_head + h2) - 0.04f;
+        return 0.5f * array1_head;
+    }
 };
 } // namespace
 
@@ -66,6 +100,26 @@ TEST_CASE("WaveNet shared spec rejects mismatched flat weights before allocation
     };
     CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
           DawnSharedIoWavenetSpecError::WeightBlobMismatch);
+}
+
+TEST_CASE("WaveNet shared spec authenticates the serialized head scale",
+          "[gpu_audio][shared_io][wavenet]") {
+    Fixture fixture;
+    fixture.weights.back() = 0.5f;
+    DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 32,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
+          DawnSharedIoWavenetSpecError::InvalidScale);
+
+    spec.head_scale = std::numeric_limits<float>::quiet_NaN();
+    fixture.weights.back() = spec.head_scale;
+    CHECK(validate_dawn_shared_io_wavenet_spec(spec).error ==
+          DawnSharedIoWavenetSpecError::InvalidScale);
 }
 
 TEST_CASE("WaveNet shared spec rejects non-mono conditioning and broken layer chains",
@@ -121,6 +175,63 @@ TEST_CASE("WaveNet shared spec rejects zero stream instances and dilation",
     CHECK(result.error == DawnSharedIoWavenetSpecError::InvalidShape);
 }
 
+TEST_CASE("WaveNet shared spec rejects invalid flags and non-mono final heads",
+          "[gpu_audio][shared_io][wavenet]") {
+    Fixture fixture;
+    const auto validate = [&] {
+        return validate_dawn_shared_io_wavenet_spec({
+            .block_size = 32,
+            .head_scale = 1.0f,
+            .stream_instances = 1,
+            .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+            .weights = fixture.weights,
+        });
+    };
+
+    fixture.layer.gated = 2;
+    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidLayer);
+
+    fixture.layer.gated = 1;
+    fixture.layer.head_bias = 2;
+    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidLayer);
+
+    fixture.layer.head_bias = 1;
+    fixture.layer.head_size = 2;
+    CHECK(validate().error == DawnSharedIoWavenetSpecError::InvalidChain);
+}
+
+TEST_CASE("WaveNet shared spec rejects history and resource-size overflow",
+          "[gpu_audio][shared_io][wavenet]") {
+    const std::array<float, 1> weights{0.0f};
+    const std::uint32_t dilation = 2;
+    DawnSharedIoWavenetLayerSpec layer{
+        .input_size = 1,
+        .condition_size = 1,
+        .channels = 1,
+        .kernel = std::numeric_limits<std::uint32_t>::max(),
+        .head_size = 1,
+        .gated = 0,
+        .head_bias = 0,
+        .dilations = std::span<const std::uint32_t>(&dilation, 1),
+    };
+    const auto validate = [&] {
+        return validate_dawn_shared_io_wavenet_spec({
+            .block_size = 32,
+            .head_scale = 1.0f,
+            .stream_instances = 1,
+            .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&layer, 1),
+            .weights = weights,
+        });
+    };
+
+    CHECK(validate().error == DawnSharedIoWavenetSpecError::HistoryOverflow);
+
+    layer.kernel = 1;
+    layer.channels = 2;
+    layer.head_size = std::numeric_limits<std::uint32_t>::max();
+    CHECK(validate().error == DawnSharedIoWavenetSpecError::ResourceOverflow);
+}
+
 #if defined(PULP_GPU_AUDIO_WAVENET_RUNTIME)
 TEST_CASE("authenticated Dawn WaveNet preserves causal history across rotating slots",
           "[gpu_audio][shared_io][wavenet]") {
@@ -143,8 +254,8 @@ TEST_CASE("authenticated Dawn WaveNet preserves causal history across rotating s
         .weights = fixture.weights,
     };
     auto created = DawnSharedIoProvider::create({});
-    if (!created.provider)
-        SKIP("Dawn/Metal provider unavailable on this host");
+    INFO(created.reason);
+    REQUIRE(created.provider);
     auto program = created.provider->make_wavenet_program(spec);
     REQUIRE(program);
     SharedIoArena arena;
@@ -213,6 +324,224 @@ TEST_CASE("authenticated Dawn WaveNet preserves causal history across rotating s
                                         std::tanh(3.5f)};
     for (std::size_t index = 0; index < actual.size(); ++index)
         CHECK(actual[index] == Catch::Approx(expected[index]).margin(1.0e-5));
+    REQUIRE(arena.release());
+}
+
+TEST_CASE("authenticated Dawn WaveNet matches a two-array multi-dilation CPU oracle",
+          "[gpu_audio][shared_io][wavenet]") {
+    const std::array<std::uint32_t, 2> first_dilations{1, 2};
+    const std::array<std::uint32_t, 1> second_dilations{1};
+    const std::array<DawnSharedIoWavenetLayerSpec, 2> arrays{{
+        {.input_size = 1,
+         .condition_size = 1,
+         .channels = 1,
+         .kernel = 2,
+         .head_size = 1,
+         .gated = 0,
+         .head_bias = 0,
+         .dilations = first_dilations},
+        {.input_size = 1,
+         .condition_size = 1,
+         .channels = 1,
+         .kernel = 2,
+         .head_size = 1,
+         .gated = 0,
+         .head_bias = 1,
+         .dilations = second_dilations},
+    }};
+    // array 0: rechannel; two layers of conv W+bias, mixin W, residual W+bias;
+    // head W. array 1: the same with one layer and a biased head. Final scalar
+    // is the serialized head scale.
+    const std::vector<float> weights{
+        1.0f,  0.2f, 0.4f, 0.1f,  0.05f, 0.3f,  -0.02f, -0.1f, 0.25f, -0.03f, 0.04f,  0.2f,
+        0.01f, 0.7f, 0.8f, 0.15f, 0.35f, 0.02f, -0.05f, 0.1f,  0.03f, 0.6f,   -0.04f, 0.5f,
+    };
+    const DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 3,
+        .head_scale = 0.5f,
+        .stream_instances = 1,
+        .arrays = arrays,
+        .weights = weights,
+    };
+    REQUIRE(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+
+    auto created = DawnSharedIoProvider::create({});
+    INFO(created.reason);
+    REQUIRE(created.provider);
+    auto program = created.provider->make_wavenet_program(spec);
+    REQUIRE(program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*created.provider,
+                          {.slots = 2,
+                           .input_bytes_per_slot = 3 * sizeof(float),
+                           .output_bytes_per_slot = 3 * sizeof(float)},
+                          std::move(program)));
+
+    TinyReference reference;
+    const std::array<std::array<float, 3>, 3> inputs{{
+        {0.2f, -0.1f, 0.3f},
+        {0.4f, 0.05f, -0.2f},
+        {0.1f, 0.25f, -0.35f},
+    }};
+    std::array<std::array<float, 3>, 3> expected{};
+    for (std::size_t block = 0; block < inputs.size(); ++block)
+        for (std::size_t sample = 0; sample < inputs[block].size(); ++sample)
+            expected[block][sample] = reference.process(inputs[block][sample]);
+
+    const auto submit = [&](std::uint64_t sequence, const std::array<float, 3>& input) {
+        auto write = arena.grant_write(sequence);
+        REQUIRE(write);
+        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+        REQUIRE(arena.publish_written({write->token}));
+        REQUIRE(arena.submit(write->token));
+    };
+    const auto collect = [&](std::uint64_t sequence) {
+        std::optional<SharedIoArena::OutputLease> output;
+        for (int i = 0; i < 200 && !output; ++i) {
+            created.provider->poll();
+            arena.drain_completions();
+            output = arena.acquire_output(arena.preparation_epoch(), sequence);
+            if (!output)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(output);
+        const auto* values = reinterpret_cast<const float*>(output->bytes.data());
+        const std::array<float, 3> result{values[0], values[1], values[2]};
+        const auto token = output->token;
+        output.reset();
+        REQUIRE(arena.release_output({token}));
+        return result;
+    };
+
+    submit(1, inputs[0]);
+    submit(2, inputs[1]);
+    const auto first = collect(1);
+    const auto second = collect(2);
+    submit(3, inputs[2]);
+    const auto third = collect(3);
+    const std::array<std::array<float, 3>, 3> actual{first, second, third};
+    for (std::size_t block = 0; block < actual.size(); ++block)
+        for (std::size_t sample = 0; sample < actual[block].size(); ++sample)
+            CHECK(actual[block][sample] == Catch::Approx(expected[block][sample]).margin(1.0e-5));
+    REQUIRE(arena.release());
+}
+
+TEST_CASE("authenticated Dawn WaveNet executes channel matrices and cross-array head seeding",
+          "[gpu_audio][shared_io][wavenet]") {
+    const std::uint32_t dilation = 1;
+    const std::array<DawnSharedIoWavenetLayerSpec, 2> arrays{{
+        {.input_size = 1,
+         .condition_size = 1,
+         .channels = 2,
+         .kernel = 1,
+         .head_size = 2,
+         .gated = 0,
+         .head_bias = 0,
+         .dilations = std::span<const std::uint32_t>(&dilation, 1)},
+        {.input_size = 2,
+         .condition_size = 1,
+         .channels = 2,
+         .kernel = 1,
+         .head_size = 1,
+         .gated = 0,
+         .head_bias = 0,
+         .dilations = std::span<const std::uint32_t>(&dilation, 1)},
+    }};
+    const std::vector<float> weights{
+        // Array 0: 2x1 rechannel; one fixed-bias activation layer; 2x2 head.
+        1.0f,
+        2.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.1f,
+        -0.2f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        2.0f,
+        3.0f,
+        -1.0f,
+        // Array 1: non-identity 2x2 rechannel; identity convolution; scalar head.
+        0.5f,
+        -0.25f,
+        1.5f,
+        0.75f,
+        1.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.25f,
+        -0.5f,
+        2.0f,
+    };
+    const DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 3,
+        .head_scale = 2.0f,
+        .stream_instances = 1,
+        .arrays = arrays,
+        .weights = weights,
+    };
+    REQUIRE(validate_dawn_shared_io_wavenet_spec(spec).accepted());
+
+    auto created = DawnSharedIoProvider::create({});
+    INFO(created.reason);
+    REQUIRE(created.provider);
+    auto program = created.provider->make_wavenet_program(spec);
+    REQUIRE(program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*created.provider,
+                          {.slots = 1,
+                           .input_bytes_per_slot = 3 * sizeof(float),
+                           .output_bytes_per_slot = 3 * sizeof(float)},
+                          std::move(program)));
+
+    const std::array<float, 3> input{0.2f, -0.1f, 0.3f};
+    auto write = arena.grant_write(1);
+    REQUIRE(write);
+    std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+    REQUIRE(arena.publish_written({write->token}));
+    REQUIRE(arena.submit(write->token));
+
+    std::optional<SharedIoArena::OutputLease> output;
+    for (int i = 0; i < 200 && !output; ++i) {
+        created.provider->poll();
+        arena.drain_completions();
+        output = arena.acquire_output(arena.preparation_epoch(), 1);
+        if (!output)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(output);
+    const auto a0 = std::tanh(0.1f);
+    const auto a1 = std::tanh(-0.2f);
+    const auto seeded0 = a0 + 2.0f * a1;
+    const auto seeded1 = 3.0f * a0 - a1;
+    const auto* actual = reinterpret_cast<const float*>(output->bytes.data());
+    for (std::size_t frame = 0; frame < input.size(); ++frame) {
+        const auto array1_activation = std::tanh(3.0f * input[frame]);
+        const auto expected = 2.0f * (0.25f * seeded0 - 0.5f * (seeded1 + array1_activation));
+        CHECK(actual[frame] == Catch::Approx(expected).margin(1.0e-5));
+    }
+    const auto token = output->token;
+    output.reset();
+    REQUIRE(arena.release_output({token}));
     REQUIRE(arena.release());
 }
 #endif

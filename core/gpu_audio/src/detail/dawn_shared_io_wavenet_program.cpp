@@ -20,7 +20,10 @@ std::optional<std::size_t> history_size(const DawnSharedIoWavenetProgramSpec& sp
                 return std::nullopt;
             max_history = std::max(max_history, static_cast<std::uint32_t>(span));
         }
-        samples += static_cast<std::uint64_t>(max_history) * layer.channels;
+        // Every layer input carries its own causal window. There is one input
+        // activation plus one output activation per dilated layer.
+        samples += static_cast<std::uint64_t>(max_history) * layer.channels *
+                   (layer.dilations.size() + 1u);
     }
     samples *= spec.stream_instances;
     if (samples > std::numeric_limits<std::size_t>::max() / sizeof(float))
