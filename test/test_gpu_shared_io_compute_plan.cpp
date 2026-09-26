@@ -127,8 +127,7 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool retired_before_program_release = false;
     CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
-    std::shared_ptr<FakeLifecycleState> lifecycle_state =
-        std::make_shared<FakeLifecycleState>();
+    std::shared_ptr<FakeLifecycleState> lifecycle_state = std::make_shared<FakeLifecycleState>();
     std::vector<Slot*> slots_;
 };
 
