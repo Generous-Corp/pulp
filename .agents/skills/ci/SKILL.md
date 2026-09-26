@@ -254,6 +254,18 @@ summary/watch commands.
 > now an anti-pattern (cancels queued runs but registers `failure` on
 > required checks).
 
+## Performance lanes report; they never gate
+
+`dsp-throughput-bench.yml` (weekly + `workflow_dispatch`) is the model for any
+timing lane: it builds a Release `PULP_BENCHMARK` target on GitHub-hosted
+runners, asserts only that the JSON is well-formed and came from an optimized
+NDEBUG binary, uploads the artifact, and writes a `bench_diff.py` table to the
+job summary. It never compares a number to a threshold, and it must stay off
+`required_status_checks`: timing on shared hosts flakes, and decisions contract
+policy is that DSP perf is tracked, not gated. Its first dispatch after landing
+must be `ghapp workflow run dsp-throughput-bench.yml --ref main` (a new
+workflow is dispatchable only once it exists on the default branch).
+
 ## Android minimum-API allocation check
 
 The Android workflow compiles and links the public aligned DSP buffer for both
