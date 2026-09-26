@@ -221,6 +221,29 @@ jobs:
             done
           } | jq -s 'unique_by(.id)' > pull-request-runs.json
 
+      - name: Detect duplicate open PR heads
+        id: duplicate_pr_heads
+        if: always() && steps.pull_request_cleanup_census.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.shipyard-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          : > pull-request-commits.jsonl
+          while IFS= read -r number; do
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/pulls/${number}/commits?per_page=100" \
+              --jq '.[].sha' | jq -R --arg number "$number" '{number: $number, sha: .}' \
+              >> pull-request-commits.jsonl
+          done < <(jq -r '.[].number' pull-request-open-heads.json)
+          jq -s 'group_by(.number) | map({key: .[0].number, value: map(.sha)}) | from_entries' \
+            pull-request-commits.jsonl > pull-request-commits.json
+          python3 tools/scripts/shipyard_duplicate_pr_heads.py \
+            --pulls pull-request-open-heads.json \
+            --commits pull-request-commits.json \
+            --output duplicate-pr-heads.json
+          jq . duplicate-pr-heads.json
+
       - name: Plan bounded superseded pull-request cleanup
         id: pull_request_cleanup_plan
         if: always() && steps.pull_request_cleanup_census.outcome == 'success'
@@ -607,6 +630,8 @@ jobs:
             pull-request-open-heads.json
             pull-request-runs.json
             pull-request-cleanup-plan.json
+            duplicate-pr-heads.json
+            pull-request-commits.json
             provenance-label-plan.json
             .shipyard-steward/ledger.json
           retention-days: 14
@@ -623,6 +648,7 @@ jobs:
           [ "${{ steps.merge_group_cleanup_plan.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_census.outcome }}" = success ]
           [ "${{ steps.pull_request_cleanup_plan.outcome }}" = success ]
+          [ "${{ steps.duplicate_pr_heads.outcome }}" = success ]
           [ "${{ steps.provenance_label_plan.outcome }}" = success ]
           if [ "$STEWARD_APPLY" = true ]; then
             [ "${{ steps.merge_group_cleanup_apply.outcome }}" = success ]
