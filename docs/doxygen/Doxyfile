@@ -42,6 +42,7 @@ INPUT                  = ../../core/audio/include \
                          ../../core/runtime/include \
                          ../../core/sequence/include \
                          ../../core/signal/include \
+                         ../../core/simd/include \
                          ../../core/state/include \
                          ../../core/dawproject/include \
                          ../../core/dsl/include \

@@ -9,6 +9,31 @@ The `pulp::signal` namespace provides 30+ DSP processors for use inside `Process
 
 All processors live in `core/signal/include/pulp/signal/`.
 
+### Performance
+
+- **Block math goes through `pulp::simd`.** Sums, dot products, peak and
+  energy reductions, gain ramps and FIR correlation are compiled kernels
+  (Accelerate on Apple, Highway with run-time AVX2/AVX-512/NEON dispatch
+  elsewhere). A plain C++ reduction loop stays scalar under Pulp's IEEE
+  build flags, so `pulp::simd::dot` over 256 taps is roughly 20x faster than
+  the loop it replaces. Short elementwise loops (gain, mix, copy) are better
+  written inline: they auto-vectorize and skip the call. See
+  [modules: simd](../reference/modules.md#simd).
+- **Keep history linear for FIR work.** A wrapping ring buffer forces a
+  branch or mask per tap; a linear window of `taps - 1 + block` samples lets
+  one `correlate()` produce the whole block.
+- **Recursive filters vectorize across channels or voices, not time.** A
+  biquad or SVF cannot be vectorized along its own output, but N independent
+  instances stored struct-of-arrays (one array per coefficient and state
+  variable, the instance index innermost) auto-vectorize across the N lanes:
+  four such lanes measure about 5x cheaper per channel than four separate
+  `Biquad` objects.
+- **Update coefficients at control rate.** Recomputing an SVF's `tan()` every
+  sample in every voice costs more than the filter; once per block is usually
+  inaudible.
+- Measure with `pulp-dsp-throughput-benchmark`
+  ([guide](dsp-throughput-benchmark.md)) before and after, in Release.
+
 ---
 
 ## 1. Utilities

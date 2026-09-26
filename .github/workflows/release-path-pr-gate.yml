@@ -68,29 +68,43 @@ jobs:
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
     steps:
+      # Only the resolver is needed; it owns the opt-in class-label rewrite so
+      # the three release workflows share one tested implementation.
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+          sparse-checkout: tools/scripts/resolve_release_runners.py
+          sparse-checkout-cone-mode: false
       - id: resolve
         env:
           PR_GATE_JSON: ${{ vars.PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON }}
           RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
           LOCAL_JSON: ${{ vars.PULP_LOCAL_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          # Opt-in (exactly `1`/`true`): append `pulp-release-pr-gate` to a
+          # self-hosted selector. Unset = the selector below, verbatim.
+          PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
         run: |
+          set -euo pipefail
           if [ -n "${PR_GATE_JSON:-}" ]; then
-            echo "runs_on_json=${PR_GATE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${PR_GATE_JSON}"
             echo "Routing macOS release-path PR gate via PULP_RELEASE_PR_GATE_MACOS_RUNS_ON_JSON: ${PR_GATE_JSON}"
           elif [ -n "${RELEASE_JSON:-}" ]; then
-            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${RELEASE_JSON}"
             echo "Routing macOS release-path PR gate via legacy PULP_RELEASE_MACOS_RUNS_ON_JSON fallback: ${RELEASE_JSON}"
           elif [ -n "${LOCAL_JSON:-}" ]; then
-            echo "runs_on_json=${LOCAL_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${LOCAL_JSON}"
             echo "Routing macOS release-path PR gate via self-hosted PULP_LOCAL_MACOS_RUNS_ON_JSON: ${LOCAL_JSON}"
           elif [ -n "${NAMESPACE_JSON:-}" ]; then
-            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${NAMESPACE_JSON}"
             echo "Routing macOS release-path PR gate through Namespace: ${NAMESPACE_JSON}"
           else
-            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
+            selector='["macos-15"]'
             echo "Routing macOS release-path PR gate through GitHub-hosted macos-15"
           fi
+          selector="$(python3 tools/scripts/resolve_release_runners.py \
+            --apply-class-label pulp-release-pr-gate --selector "$selector")"
+          echo "runs_on_json=${selector}" >> "$GITHUB_OUTPUT"
 
   release-build:
     needs: resolve-macos-runner

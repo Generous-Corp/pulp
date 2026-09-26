@@ -357,14 +357,6 @@ AdapterClass dawn_adapter_class(wgpu::AdapterType type) {
     return AdapterClass::unknown;
 }
 
-AdapterClass dawn_adapter_class_name(std::string_view type) {
-    if (type == "discrete-gpu" || type == "integrated-gpu")
-        return AdapterClass::hardware;
-    if (type == "cpu")
-        return AdapterClass::software;
-    return AdapterClass::unknown;
-}
-
 void populate_surface_adapter_identity(ProbeResult& result, render::GpuSurface& surface) {
     auto* device = static_cast<wgpu::Device*>(surface.dawn_device_handle());
     wgpu::AdapterInfo info{};
@@ -419,7 +411,7 @@ RecipeRun run_renderer3d_recipe(const RunOptions& options) {
         rendered.adapter_info_available ? IdentityStatus::authentic : IdentityStatus::unavailable;
     run.result.adapter.classification = rendered.null_backend_requested
                                             ? AdapterClass::null_adapter
-                                            : dawn_adapter_class_name(rendered.adapter_type);
+                                            : adapter_class(rendered.adapter_type);
     // `adapter_backend` is the generic Dawn/WebGPU wrapper label. The typed
     // recipe receipt needs the concrete API backend so the software lanes can
     // distinguish Vulkan/lavapipe from D3D12/WARP.

@@ -114,6 +114,16 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: browser-capture-integration
+  path: tools/import-design/browser_capture/run_integration.mjs
+  category: design-import
+  use_when: Run the browser capture integration harness against an imported panel.
+  invocation: node tools/import-design/browser_capture/run_integration.mjs --help
+  inputs: A browser-capture integration scenario and its panel/runtime fixtures.
+  outputs: Integration capture results and diagnostics for the browser import lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: check-palette-health
   path: tools/import-validation/check_palette_health.py
   category: design-import

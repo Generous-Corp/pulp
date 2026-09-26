@@ -5308,6 +5308,20 @@ You don't need the same VM setup as the original developer. Options:
 
 Local CI config is intentionally gitignored. Keep your host topology local, and prefer the machine-global config path so every worktree uses the same host map by default.
 
+## Branch refreshes are refused unless they fix something
+
+`.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`.
+`main` lands through a merge queue that builds and validates the merge result
+itself, and `build.yml` cancels an in-flight run whenever the PR ref moves, so
+refreshing a merely `BEHIND` PR (`update-branch`, or merging `origin/main` into
+it) restarts the ~25-40 minute required `macos` gate for nothing. With this
+policy Shipyard's `ghapp` branch-refresh guard refuses an App-authenticated
+refresh when the PR is mergeable and no required check is failing; a
+conflicting PR, a red required check, or any state it cannot read is still
+refreshed. The guard only takes effect on hosts where `shipyard guards status`
+shows `branch-refresh-guard` current. A local `git merge origin/main && git
+push` bypasses it, so do not merge `main` into a PR unless it conflicts.
+
 ## Steward auto-handoff is PAUSED (2026-09-07)
 
 `.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`. Normally it
