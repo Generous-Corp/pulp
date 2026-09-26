@@ -1889,8 +1889,29 @@ above exists to tell you.
 
 ## Exact PR receipts on an unchanged merge-group candidate
 
-A successful pull-request macOS or Linux matrix child publishes a two-day
-`protected-validation-<target>-<head>-<base>` receipt. The receipt binds the
+A pull-request head normally runs only the build and the `pr-fast` tier, which
+is what its required `macos` check means, and that issues no receipt. A head
+that is **ready to land** also runs the full suite: the `Decide pull-request
+test suite` step (`tools/ci/ctest_gate_args.py --pr-suite`) reads the live pull
+request just before testing and chooses the full suite only when it is armed
+for auto-merge, is still the pull request's head, and was merged onto the
+current tip of `main`. Anything else, including an unreadable pull request,
+keeps the fast tier. Each clause drops a run whose receipt could never be
+consumed, because the receipt names the exact head and base. A push after
+arming re-decides on its own run, so a new head gets its own full run and the
+old receipt simply never matches. Arming a pull request whose checks are
+already green enqueues it immediately and starts no new run, so it validates in
+full in the merge group as before. REST `auto_merge` reads null once the queue
+holds a pull request (decisions contract row 11); that only ever yields the
+fast tier.
+
+That full run is evidence, not the pull request's gate: the step is
+`continue-on-error` on pull requests, so a failure there leaves the `macos`
+check meaning build + fast tier, and the `Surface ctest failures` step still
+reports it. When it passes, the macOS or Linux matrix child publishes a two-day
+`protected-validation-<target>-<head>-<base>` receipt. The issuer requires the
+Test step's `outcome` to be `success` (its `conclusion` is always success under
+`continue-on-error`). The receipt binds the
 exact synthetic merge tree and parents, protected workflow/policy blobs,
 observed platform/toolchain identity, and SHA-256 identities for every CTest
 executable that was actually exercised. Receipt publication is an optimization

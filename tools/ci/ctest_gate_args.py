@@ -161,6 +161,13 @@ def probe_pr_suite(
 
     Fails closed: anything unreadable or malformed means the fast tier, which
     is exactly what a pull-request head ran before receipts existed.
+
+    REST ``auto_merge`` is non-null for a pull request that is armed and still
+    waiting on its checks, and null once the merge queue holds it (decisions
+    contract row 11). A run that feeds the queue is by construction the one
+    producing those checks, so it sees the armed value; a queued pull request
+    reads as unarmed and keeps the fast tier, which is correct because its
+    merge group already exists.
     """
     try:
         pull = fetch(f"repos/{repository}/pulls/{number}")
