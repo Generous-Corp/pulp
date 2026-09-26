@@ -80,7 +80,8 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
 
         consumer = job(self.build, "build")
         self.assertIn(
-            "needs: [resolve-provider, classify, protected-receipt-reuse]", consumer
+            "needs: [resolve-provider, classify, protected-receipt-reuse, pr-gate-settle]",
+            consumer,
         )
         self.assertIn(
             "needs.protected-receipt-reuse.outputs.matrix_json || needs.resolve-provider.outputs.matrix_json",
