@@ -66,9 +66,13 @@ set(PULP_GPU_AUDIO_VELLUM_NOTICE_DIR "" CACHE INTERNAL
     "Validated Vellum attribution directory shipped by the Pulp SDK" FORCE)
 set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL
     "Whether the Vellum D15 provider has exhaustive builder provenance" FORCE)
+set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO FALSE CACHE INTERNAL
+    "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
 
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
    AND EXISTS "${DAWN_LIBRARY}")
+    set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL
+        "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
     # D15 is deliberately an opt-in installed-prefix integration.  The Vellum
     # GPU dylib owns the linked Dawn definitions and its coordinator owns the
     # one process bootstrap; this Pulp target only consumes that provider.  An
