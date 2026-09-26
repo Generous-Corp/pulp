@@ -600,7 +600,7 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
 pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
     SOURCES test_gpu_shared_io_wavenet_spec.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
-if(PULP_HAS_SKIA)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio)
     target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
         PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
