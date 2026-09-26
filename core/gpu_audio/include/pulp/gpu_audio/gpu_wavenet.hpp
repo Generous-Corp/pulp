@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
 
 namespace pulp::gpu_audio {
@@ -53,6 +55,97 @@ struct GpuWaveNetValidation {
     constexpr bool accepted() const noexcept {
         return error == GpuWaveNetError::None;
     }
+};
+
+/// Errors returned while constructing or operating a one-stream shared
+/// WaveNet session. A missing provider is a normal capability result on
+/// platforms that do not ship the authenticated Dawn backend.
+enum class GpuWaveNetSessionError : std::uint8_t {
+    None = 0,
+    InvalidDescriptor,
+    InvalidWeights,
+    ProviderUnavailable,
+    ProgramUnavailable,
+    PreparationFailed,
+    NotPrepared,
+    InvalidBlock,
+    NoSlot,
+    SubmissionRejected,
+    OutputTooSmall,
+    ReleaseFailed,
+};
+
+enum class GpuWaveNetBlockStatus : std::uint8_t {
+    GpuDelivered = 0,
+    ProviderFailed,
+};
+
+struct GpuWaveNetBlockResult {
+    std::uint64_t sequence = 0;
+    GpuWaveNetBlockStatus status = GpuWaveNetBlockStatus::ProviderFailed;
+    bool late = false;
+};
+
+/// A prepared, one-stream shared-memory WaveNet session.
+///
+/// The session owns the provider, resident model resources, causal history,
+/// and fixed shared input/output slots. Callers provide only model metadata,
+/// weights, and audio spans; Dawn, Metal, queue, and slot handles remain
+/// private. `submit_block()` and `service()` are serialized non-realtime
+/// operations in this first SDK seam. A caller that needs a realtime bridge
+/// should connect this session to its own preallocated callback/fallback
+/// machinery rather than invoking provider work from the audio callback.
+///
+/// The first public session is intentionally limited to one causal stream
+/// (`descriptor.stream_instances == 1`). Submitted sequence numbers must be
+/// contiguous because they advance the persistent WaveNet history.
+class GpuWaveNetSession {
+  public:
+    struct Config {
+        GpuWaveNetDescriptor descriptor{};
+        std::span<const float> weights{};
+        std::uint32_t slots = 2;
+    };
+
+    struct CreateResult {
+        std::unique_ptr<GpuWaveNetSession> session;
+        GpuWaveNetSessionError error = GpuWaveNetSessionError::None;
+
+        explicit operator bool() const noexcept {
+            return session != nullptr && error == GpuWaveNetSessionError::None;
+        }
+    };
+
+    static CreateResult create(const Config& config) noexcept;
+    ~GpuWaveNetSession();
+
+    GpuWaveNetSession(const GpuWaveNetSession&) = delete;
+    GpuWaveNetSession& operator=(const GpuWaveNetSession&) = delete;
+
+    bool prepared() const noexcept;
+    std::uint32_t block_size() const noexcept;
+
+    /// Copies one mono block into a persistent shared slot and submits it to
+    /// the authenticated provider. `deadline_ns == 0` disables late marking.
+    bool submit_block(std::span<const float> input, std::uint64_t sequence,
+                      std::uint64_t deadline_ns = 0) noexcept;
+
+    /// Services already-submitted provider work without waiting for a future
+    /// completion. Returns the number of newly visible terminal records.
+    std::size_t service(std::uint64_t now_ns) noexcept;
+
+    /// Copies one completed block into `output` and releases its shared slot.
+    /// A failed provider completion returns a result with no output written.
+    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept;
+
+    /// Host/quiescent-only release. A false result retains the session so the
+    /// caller can retry the provider's physical drain barrier.
+    bool release() noexcept;
+
+  private:
+    struct Impl;
+    explicit GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept;
+    std::unique_ptr<Impl> impl_;
 };
 
 // The first public adapter is deliberately narrow. Unsupported NAM models
