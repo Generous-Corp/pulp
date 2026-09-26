@@ -998,7 +998,20 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
             return
         if isinstance(old, list):
             if old != new:
-                lines.append(f"profile field changed: {path}")
+                first_difference = next(
+                    (
+                        index
+                        for index, (old_item, new_item) in enumerate(zip(old, new))
+                        if old_item != new_item
+                    ),
+                    min(len(old), len(new)),
+                )
+                old_item = old[first_difference] if first_difference < len(old) else "<missing>"
+                new_item = new[first_difference] if first_difference < len(new) else "<missing>"
+                lines.append(
+                    f"profile field changed: {path}[{first_difference}] "
+                    f"({old_item!r} -> {new_item!r}); lengths {len(old)} -> {len(new)}"
+                )
             return
         if old != new:
             lines.append(f"profile field changed: {path} ({old!r} -> {new!r})")
