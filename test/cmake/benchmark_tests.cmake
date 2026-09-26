@@ -122,3 +122,16 @@ if(PULP_BENCHMARK)
         LABELS "bench"
         TIMEOUT 120)
 endif()
+
+# ── DSP throughput benchmark ────────────────────────────────────────────────
+#
+# Advisory Release-only per-frame cost of the processors that dominate
+# realistic workloads (convolution, reverb, oversampling, FIR, delays,
+# pitch/time, voice loops) at 48 kHz x {32,128,512}, reporting mean and
+# worst-block cost, plus the scalar kernel shapes they reduce to. `--json`
+# writes a `pulp-bench-sections/1` document for tools/scripts/bench_diff.py.
+# A standalone executable, never a ctest: timing does not gate correctness CI.
+if(PULP_BENCHMARK)
+    add_executable(pulp-dsp-throughput-benchmark test_dsp_throughput_benchmark.cpp)
+    target_link_libraries(pulp-dsp-throughput-benchmark PRIVATE pulp::signal)
+endif()
