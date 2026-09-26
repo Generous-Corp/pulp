@@ -435,6 +435,24 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+### Only a ready-to-land PR head issues a receipt
+
+A pull-request head's gate is build + `pr-fast`. The full suite also runs on
+it, non-gating, only when `tools/ci/ctest_gate_args.py --pr-suite` finds the
+pull request armed for auto-merge, still at this head, and merged onto the
+current `main` tip. That full run is what issues the receipt. Three traps:
+
+- The Test step is `continue-on-error` on pull requests, so its `conclusion`
+  is always `success`. Anything that must know whether the tests passed (the
+  issuer, `Surface ctest failures`) reads `steps.ctest.outcome`.
+- REST `auto_merge` is non-null only while an armed PR waits on its checks; it
+  reads null once the queue holds the PR. Arming a PR whose checks are already
+  green enqueues it at once and starts no new run, so it gets no receipt.
+  That is expected, not a bug.
+- `download` requires the whole PR workflow run to have concluded `success`, so
+  a PR run still finishing its Linux leg, or with a red advisory leg, refuses
+  reuse for macOS too.
+
 When measuring reuse from job logs, read only the emitted `##[notice]` lines.
 The `protected-receipt-reuse` log also echoes the step's whole script, so a
 plain grep finds every refusal message in every run, including runs that made
