@@ -145,6 +145,19 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             r'(?m)^\s*(?:bash|sh|python3)\s+"?\$proposed_tree(?:/|\")',
         )
 
+    def test_pull_request_freeze_compares_from_proposed_merge_base(self) -> None:
+        value = workflow("vellum-freeze-check.yml")
+        job = value["jobs"]["freeze-check"]
+        comparison_step = step_named(job, "Resolve exact comparison")
+        comparison = comparison_step["run"]
+        self.assertIn('protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"', comparison)
+        self.assertIn('git fetch --no-tags origin refs/heads/main', comparison)
+        self.assertIn('live_base="$(git rev-parse --verify FETCH_HEAD)"', comparison)
+        self.assertIn('[[ "$protected_base" != "$live_base" ]]', comparison)
+        self.assertIn('echo "base=$protected_base"', comparison)
+        self.assertNotIn("PR_BASE", comparison_step.get("env", {}))
+        self.assertNotIn('git fetch --no-tags origin "$PR_BASE"', comparison)
+
     def test_merge_result_is_bound_to_resolved_base_and_source_head(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
         validation = step_named(
