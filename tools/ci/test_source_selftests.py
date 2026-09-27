@@ -490,6 +490,13 @@ class WorkflowEntriesTests(unittest.TestCase):
         self.assertEqual([e["name"] for e in picked],
                          ["tools/scripts/portability.py tools/ci tools/scripts"])
 
+    def test_every_local_skip_names_a_real_workflow_suite(self) -> None:
+        # A skip for a suite the workflow no longer runs would hide nothing and
+        # rot silently; a skip must name a live entry.
+        names = {e["name"] for e in lane.workflow_entries()}
+        for skipped in lane.WORKFLOW_LOCAL_SKIPS:
+            self.assertIn(skipped, names)
+
     def test_the_real_workflow_yields_its_contract_suites(self) -> None:
         # Control: the parser sees the real workflow, not an empty list.
         entries = lane.workflow_entries()

@@ -340,6 +340,14 @@ def change_tokens(path: str) -> set[str]:
 
 
 WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
+# Workflow suites that cannot run in bounded time on a developer checkout. Each
+# is reported as NOT CHECKED, never as a pass; the workflow still runs it.
+WORKFLOW_LOCAL_SKIPS = {
+    "tools/scripts/test_generated_version_bump_check.py": (
+        "replays generators that walk full git history per file: ~105 s for its "
+        "whole step on CI's shallow clone, over 600 s on a full-history checkout"
+    ),
+}
 WORKFLOW_TIMEOUT = 600.0
 _WORKFLOW_PYTHON = re.compile(r"^\s+python3\s+((?:tools|scripts|test)/[\w./-]+\.py)((?:\s+[\w./-]+)*)\s*$")
 
@@ -634,6 +642,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.workflow:
+            for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
+                entries.remove(entry)
+                if not args.changed_from or entry in select_for_changes(
+                        [entry], changed_paths(args.changed_from)):
+                    print(f"source-selftests: NOT CHECKED locally: {entry['name']} "
+                          f"({WORKFLOW_LOCAL_SKIPS[entry['name']]}); CI runs it", flush=True)
         if args.changed_from:
             total = len(entries)
             lane_files = LANE_FILES
