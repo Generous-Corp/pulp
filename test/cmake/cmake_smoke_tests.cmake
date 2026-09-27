@@ -26,6 +26,16 @@ if(APPLE AND NOT PULP_IOS)
         set_tests_properties(ios-compile-gate-legs PROPERTIES
             LABELS "cmake;ios"
             TIMEOUT 180)
+
+        # Shadow-mode identity of an iOS gate run: the digest over the gate's
+        # input set + toolchain, the artifact lookup, and the annotation that
+        # build.yml's Build step emits. No gating depends on it.
+        add_test(NAME ios-gate-digest-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/ci/test_ios_gate_digest.py")
+        set_tests_properties(ios-gate-digest-selftest PROPERTIES
+            LABELS "cmake;ios"
+            TIMEOUT 120)
     endif()
 
     add_test(NAME cmake-ios-auv3-configure

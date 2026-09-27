@@ -810,6 +810,18 @@ either side of an explicit instant instead. It reads the `metrics list` rows
 the pipeline section already fetched, because `shipyard metrics compare` splits
 only on whole days ago and cannot filter by target.
 
+The gate's Build step also runs the **iOS compile gate in shadow-identity
+mode**: `tools/ci/ios_gate_digest.py` digests every tracked file the gate's
+three iOS configures can read (product sources, examples, CMake, dependency
+pins, the gate's own scripts) plus the Apple toolchain, looks the digest up
+among passing runs (repository-wide `ios-gate-ok-<digest>` artifacts, 14-day
+retention), and annotates `pulp-ios-gate-shadow/v1` with `would_skip` or
+`run`, then `ran_ok` or `ran_failed`. The gate always runs; the annotations
+are read as two proxies — `would_skip ÷ runs` per event, and `would_skip`
+verdicts followed by `ran_failed`, which must be zero before a digest-keyed
+skip could be proposed (that switch-on is a decisions-contract amendment,
+not a workflow edit).
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate

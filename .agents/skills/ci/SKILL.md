@@ -1466,6 +1466,17 @@ the two `scene3d-native-slice-handoff` tests, only one names the plan file in
 its ctest arguments; the other reaches it through a verifier that hardcodes the
 path, so excluding the obvious one alone leaves a permanent red.
 
+## The iOS gate shadow annotation is evidence, not a skip
+
+`pulp-ios-gate-shadow/v1` notices on the `macos` job (`would_skip` / `run`,
+then `ran_ok` / `ran_failed`) come from `tools/ci/ios_gate_digest.py`, which
+digests the gate's input set + toolchain and looks it up among passing runs.
+Shadow mode changes no gating: a `would_skip` job still ran the gate. Read
+`would_skip ÷ runs` per event (merge group and PR head separately, n ≥ 20)
+and, as the safety control, `would_skip` followed by `ran_failed` (must be
+0). Do not turn the verdict into a skip in build.yml; that is a decisions-
+contract amendment with the shadow data as its Step Zero.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
