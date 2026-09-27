@@ -63,6 +63,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     ring_blocks_ = config.ring_blocks;
     miss_policy_ = desc.miss_policy;
     const auto realtime_path = detail::realtime_gpu_node_path(node);
+    if (!realtime_path.active() && detail::requires_realtime_gpu_path(node)) {
+        release();
+        return false;
+    }
     if (realtime_path.active()) {
         realtime_gpu_context_ = realtime_path.context;
         realtime_gpu_process_ = realtime_path.process;

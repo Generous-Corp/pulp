@@ -339,6 +339,8 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
     return {};
 }
 
+bool requires_realtime_gpu_path(GpuAudioNode*) noexcept { return false; }
+
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept {
     // The test hook deliberately has no authenticated provider identity.
     return GpuAudioProvider::Unknown;

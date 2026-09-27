@@ -1,0 +1,319 @@
+#include "detail/realtime_gpu_audio_path.hpp"
+#include "detail/shared_io_stamped_bridge.hpp"
+#include "detail/wavenet_realtime_channel.hpp"
+#include <algorithm>
+#include <chrono>
+#include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+
+namespace pulp::gpu_audio {
+namespace {
+using Bridge = detail::SharedIoStampedBridge;
+class SessionChannel final : public detail::WaveNetRealtimeChannel {
+  public:
+    explicit SessionChannel(std::unique_ptr<GpuWaveNetSession> session)
+        : session_(std::move(session)) {}
+    bool submit(std::span<const float> input, std::uint64_t sequence) noexcept override {
+        return session_->submit_block(input, sequence);
+    }
+    void service(std::uint64_t now) noexcept override {
+        session_->service(now);
+    }
+    std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
+        return session_->receive(output);
+    }
+    bool release() noexcept override {
+        return session_->release();
+    }
+
+  private:
+    std::unique_ptr<GpuWaveNetSession> session_;
+};
+std::uint64_t now_ns() noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+} // namespace
+
+struct GpuWaveNetRealtimeNode::Impl {
+    Config config;
+    std::vector<GpuWaveNetLayerDescriptor> layers;
+    std::vector<std::vector<std::uint32_t>> dilations;
+    std::vector<float> weights;
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
+    std::unique_ptr<Bridge> bridge;
+    std::vector<float> callback_input, callback_output, worker_output;
+    std::vector<std::uint8_t> completed;
+    Bridge::Callback callback;
+    Bridge::Stamp pending;
+    std::uint64_t next_input = 0, sequence = 0, epoch = 0;
+    bool prepared = false, inflight = false, production_provider = false, suppress_pending = false;
+
+    explicit Impl(const Config& source)
+        : config(source),
+          layers(source.session.descriptor.layers.begin(), source.session.descriptor.layers.end()),
+          weights(source.session.weights.begin(), source.session.weights.end()) {
+        dilations.reserve(layers.size());
+        for (auto& layer : layers) {
+            dilations.emplace_back(layer.dilations.begin(), layer.dilations.end());
+            layer.dilations = dilations.back();
+        }
+        config.session.descriptor.layers = layers;
+        config.session.weights = weights;
+    }
+    bool valid_config(bool include_prewarm = true) const noexcept {
+        const auto& c = config;
+        return c.channels > 0 && c.channels <= 64 && c.lead_blocks > 0 &&
+               c.capacity > c.lead_blocks && c.session.slots >= 2 &&
+               validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
+               weights.size() == c.session.descriptor.weight_count &&
+               (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
+               (c.miss_policy == MissPolicy::Silence || c.miss_policy == MissPolicy::CpuFallback) &&
+               epoch != UINT64_MAX && sequence < Bridge::kSequenceLimit &&
+               (!include_prewarm || c.prewarm_blocks < Bridge::kSequenceLimit - sequence);
+    }
+    bool initialize() {
+        const auto& c = config;
+        if (prepared || !valid_config(false) || channels.size() != c.channels)
+            return false;
+        bridge = std::make_unique<Bridge>();
+        if (!bridge->prepare({.capacity = c.capacity,
+                              .channels = c.channels,
+                              .block_size = c.session.descriptor.block_size,
+                              .lead_blocks = c.lead_blocks},
+                             ++epoch, sequence))
+            return false;
+        const auto count = bridge->samples_per_block();
+        callback_input.assign(count, 0.f);
+        callback_output.assign(count, 0.f);
+        worker_output.assign(count, 0.f);
+        completed.assign(c.channels, 0);
+        next_input = sequence;
+        inflight = false;
+        prepared = true;
+        return true;
+    }
+    void fail(detail::SharedIoRecoveryReason reason) noexcept {
+        bridge->request_recovery(reason);
+    }
+};
+
+GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode(const Config& config)
+    : impl_(std::make_unique<Impl>(config)) {}
+GpuWaveNetRealtimeNode::~GpuWaveNetRealtimeNode() {
+    (void)release();
+}
+GpuAudioNodeDescriptor GpuWaveNetRealtimeNode::descriptor() const {
+    const auto& c = impl_->config;
+    return {.name = "Stamped shared WaveNet",
+            .input_channels = c.channels,
+            .output_channels = c.channels,
+            .block_size = c.session.descriptor.block_size,
+            .sample_rate = c.session.descriptor.sample_rate,
+            .latency_blocks = c.lead_blocks,
+            .miss_policy = c.miss_policy,
+            .supports_cpu_fallback = c.supports_cpu_fallback};
+}
+bool GpuWaveNetRealtimeNode::prepare() {
+    if (!release())
+        return false;
+    auto& s = *impl_;
+    try {
+        if (!s.valid_config())
+            return false;
+        for (std::uint32_t ch = 0; ch < s.config.channels; ++ch) {
+            auto result = GpuWaveNetSession::create(s.config.session);
+            if (!result) {
+                // Retain a partially prepared session if its physical drain needs retry.
+                if (result.session)
+                    s.channels.push_back(
+                        std::make_unique<SessionChannel>(std::move(result.session)));
+                (void)release();
+                return false;
+            }
+            s.channels.push_back(std::make_unique<SessionChannel>(std::move(result.session)));
+        }
+        // Silence warmup is explicit and stopped-host-only. Never auto-reprime a
+        // failed live history with silence. All channels begin at the same block.
+        std::vector<float> zero(s.config.session.descriptor.block_size, 0.f), output(zero.size());
+        for (std::uint32_t block = 0; block < s.config.prewarm_blocks; ++block) {
+            for (auto& channel : s.channels) {
+                if (!channel->submit(zero, s.sequence + block)) {
+                    (void)release();
+                    return false;
+                }
+                const auto deadline = now_ns() + 2'000'000'000ull;
+                bool received = false;
+                while (now_ns() < deadline) {
+                    channel->service(now_ns());
+                    if (auto result = channel->receive(output)) {
+                        received = result->sequence == s.sequence + block &&
+                                   result->status == GpuWaveNetBlockStatus::GpuDelivered;
+                        break;
+                    }
+                    std::this_thread::yield();
+                }
+                if (!received) {
+                    (void)release();
+                    return false;
+                }
+            }
+        }
+        s.sequence += s.config.prewarm_blocks;
+        if (s.initialize()) {
+            s.production_provider = true;
+            return true;
+        }
+    } catch (...) {
+    }
+    (void)release();
+    return false;
+}
+bool GpuWaveNetRealtimeNode::release() noexcept {
+    auto& s = *impl_;
+    s.prepared = false;
+    s.production_provider = false;
+    if (s.bridge) {
+        s.sequence = s.bridge->next_sequence();
+        s.bridge->request_recovery(detail::SharedIoRecoveryReason::OfflineFence);
+    }
+    bool released = true;
+    for (auto& channel : s.channels)
+        if (!channel->release())
+            released = false;
+    if (!released)
+        return false;
+    s.channels.clear();
+    s.bridge.reset();
+    s.inflight = false;
+    return true;
+}
+void GpuWaveNetRealtimeNode::process_block(const audio::BufferView<const float>&,
+                                           audio::BufferView<float>&, std::uint32_t) {
+    throw std::logic_error("WaveNet realtime node requires stamped transport");
+}
+bool GpuWaveNetRealtimeNode::fenced() const noexcept {
+    return !impl_->prepared || !impl_->bridge || impl_->bridge->delivery_epoch() == 0;
+}
+bool GpuWaveNetRealtimeNode::ready() const noexcept {
+    return impl_->prepared;
+}
+bool GpuWaveNetRealtimeNode::authenticated_provider() const noexcept {
+    return impl_->prepared && impl_->production_provider;
+}
+std::uint64_t GpuWaveNetRealtimeNode::next_sequence(void* self) noexcept {
+    return static_cast<GpuWaveNetRealtimeNode*>(self)->impl_->bridge->next_sequence();
+}
+std::uint8_t GpuWaveNetRealtimeNode::process(void* self,
+                                             const audio::BufferView<const float>& input,
+                                             audio::BufferView<float>& output, std::uint32_t n,
+                                             std::uint64_t sequence, bool valid,
+                                             std::uint64_t start) noexcept {
+    auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
+    if (!s.prepared)
+        return detail::kRealtimeGpuMissed;
+    if (!valid || n != s.config.session.descriptor.block_size ||
+        input.num_channels() != s.config.channels || output.num_channels() != s.config.channels ||
+        input.num_samples() < n || output.num_samples() < n) {
+        s.fail(detail::SharedIoRecoveryReason::InvalidCallback);
+        std::fill(s.callback_input.begin(), s.callback_input.end(), 0.f);
+    } else {
+        for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
+            std::copy_n(input.channel_ptr(ch), n, s.callback_input.data() + ch * n);
+    }
+    s.callback = s.bridge->begin_callback(s.callback_input, sequence, start);
+    const auto delivery = s.bridge->consume_output(s.callback, s.callback_output, nullptr, true);
+    if (delivery == Bridge::Delivery::Ready) {
+        for (std::uint32_t ch = 0; ch < s.config.channels; ++ch)
+            std::copy_n(s.callback_output.data() + ch * n, n, output.channel_ptr(ch));
+        return detail::kRealtimeGpuReady;
+    }
+    return delivery == Bridge::Delivery::Priming ? detail::kRealtimeGpuPriming
+                                                 : detail::kRealtimeGpuMissed;
+}
+std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t now) noexcept {
+    auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
+    if (!s.prepared)
+        return 0;
+    const auto n = s.config.session.descriptor.block_size;
+    // One all-channel block in flight; each call services once, never spins.
+    for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
+        s.channels[ch]->service(now);
+        if (s.inflight && !s.completed[ch]) {
+            if (auto result = s.channels[ch]->receive({s.worker_output.data() + ch * n, n})) {
+                s.completed[ch] = 1;
+                s.suppress_pending = s.suppress_pending || result->late;
+                if (result->sequence != s.pending.sequence ||
+                    result->status != GpuWaveNetBlockStatus::GpuDelivered)
+                    s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
+            }
+        }
+    }
+    std::uint32_t produced = 0;
+    if (s.inflight &&
+        std::all_of(s.completed.begin(), s.completed.end(), [](auto v) { return v != 0; })) {
+        s.inflight = false;
+        if (!s.suppress_pending && s.bridge->delivery_epoch() == s.pending.epoch) {
+            const auto publication = s.bridge->publish_output(s.pending, s.worker_output);
+            produced = publication == Bridge::Publication::Published ? 1 : 0;
+            if (publication != Bridge::Publication::Published)
+                s.fail(detail::SharedIoRecoveryReason::InputSaturated);
+        }
+    }
+    if (s.inflight || !s.bridge->begin_worker_admission())
+        return produced;
+    auto input = s.bridge->acquire_input();
+    if (input) {
+        const auto stamp = input->stamp();
+        if (stamp.epoch != s.bridge->delivery_epoch() || stamp.sequence != s.next_input) {
+            s.fail(detail::SharedIoRecoveryReason::SequenceGap);
+        } else {
+            s.pending = stamp;
+            s.suppress_pending = false;
+            std::fill(s.completed.begin(), s.completed.end(), 0);
+            s.inflight = true;
+            for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
+                if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
+                    s.completed[ch] = 1;
+                    s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                }
+            }
+            ++s.next_input;
+        }
+        (void)s.bridge->release_input(*input);
+    }
+    s.bridge->end_worker_admission();
+    return produced;
+}
+bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
+    auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
+    if (!s.bridge)
+        return true;
+    s.fail(detail::SharedIoRecoveryReason::OfflineFence);
+    bool drained = true;
+    for (auto& channel : s.channels)
+        if (!channel->release())
+            drained = false;
+    return drained;
+}
+void GpuWaveNetRealtimeNode::delivered(void* self, std::uint64_t sequence, std::uint8_t disposition,
+                                       std::uint64_t end, std::uint64_t visible) noexcept {
+    auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
+    if (s.callback.stamp.sequence == sequence)
+        (void)s.bridge->complete_callback_delivery(
+            s.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition), end,
+            visible);
+}
+bool detail::WaveNetRealtimeTestAccess::prepare(
+    GpuWaveNetRealtimeNode& node, std::vector<std::unique_ptr<WaveNetRealtimeChannel>> channels,
+    std::uint64_t first_sequence) {
+    if (!node.release())
+        return false;
+    node.impl_->sequence = first_sequence;
+    node.impl_->channels = std::move(channels);
+    return node.impl_->valid_config() && node.impl_->initialize();
+}
+} // namespace pulp::gpu_audio

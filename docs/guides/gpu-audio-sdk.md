@@ -211,8 +211,9 @@ and whether the CPU fallback and persistent provider-owned resources were
 prepared. `validate_gpu_audio_program()` applies the same fail-closed rules to
 every provider. It is metadata and preparation validation only: it deliberately
 does not expose Dawn or Metal handles, queues, rings, or callbacks, and it does
-not by itself activate a generic shared provider. `GpuConvolver` remains the
-authenticated shared consumer until a typed execution implementation is added.
+not by itself activate a generic shared provider. Shared execution requires a
+concrete SDK-owned adapter, such as `GpuConvolver` or the experimental
+`GpuWaveNetRealtimeNode`.
 
 The installed SDK also includes `<pulp/gpu_audio/gpu_wavenet.hpp>`. Its
 `GpuWaveNetDescriptor` is the narrow, model-neutral admission boundary for a
@@ -225,6 +226,13 @@ release without exposing Dawn or Metal handles. The first session requires
 service methods are serialized non-realtime operations; it does not turn GPU
 scheduling into a hard-realtime contract. Consumers must keep a continuously
 prepared CPU fallback for unavailable, failed, or late blocks.
+
+`<pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>` adds a narrow stamped adapter
+for these sessions. Derive from `GpuWaveNetRealtimeNode` to retain a continuously
+primed, aligned CPU shadow without a second worker CPU model. Provider failures
+and missing results remain tied to their epoch/sequence; they never shift later
+samples into an earlier hole. See [the lifecycle and limitations](gpu-audio-wavenet-realtime.md).
+This is experimental correctness infrastructure, not a CPU-saving claim.
 
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
@@ -255,7 +263,8 @@ read-only and deliberately exposes no rings, queues, callback hooks, or live
 path-switching controls.
 
 At present, the authenticated shared provider has concrete `GpuConvolver` and
-one-stream `GpuWaveNetSession` integrations. A custom `GpuAudioNode` passed to
+one-stream `GpuWaveNetSession` integrations, with `GpuWaveNetRealtimeNode` providing
+a stamped transport adapter for the latter. A custom `GpuAudioNode` passed to
 `GpuAudioTransport` uses the staged path unless it is implemented by a Pulp-owned
 shared-provider adapter;
 the generic node API cannot opt into shared execution merely by reporting a
