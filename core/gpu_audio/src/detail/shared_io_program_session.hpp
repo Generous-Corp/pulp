@@ -51,6 +51,14 @@ class SharedIoProgramSession {
     bool expire_delivery(const Completion& completion) noexcept;
     bool discard_completion(const Completion& completion) noexcept;
     bool reprime_when_quiescent() noexcept;
+    // Observe final provider counters after physical retirement succeeds and
+    // before ownership is destroyed. No observer fires on a failed barrier or
+    // a repeated release after the provider has already been destroyed.
+    struct ReleaseObserver {
+        void* context = nullptr;
+        void (*observe)(void*, const SharedIoArenaProvider&) noexcept = nullptr;
+    };
+    bool release(ReleaseObserver observer) noexcept;
     bool release() noexcept;
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();

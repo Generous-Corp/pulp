@@ -104,6 +104,10 @@ int capacity_case() {
     auto r=receive(gpu,output);
     if (!r || !r->delivered || r->sequence!=3) return 25;
     if (!gpu.submit_hop(input,4) || !gpu.release()) return 26; // Drain in-flight work.
+    const auto final_report = gpu.diagnostics();
+    if (!final_report.physical_release_confirmed || final_report.retired_success != 5 ||
+        final_report.retired_failure != 0) return 28;
+    if (!gpu.release() || gpu.diagnostics().retired_success != 5) return 29;
     return 0;
 }
 

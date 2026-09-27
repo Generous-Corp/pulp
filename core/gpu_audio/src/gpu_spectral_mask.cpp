@@ -9,6 +9,7 @@
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/shared_io_program_session.hpp"
+#include "detail/shared_spectral_result.hpp"
 #endif
 namespace pulp::gpu_audio {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -133,19 +134,10 @@ std::size_t GpuSpectralMaskSession::service(std::uint64_t now) noexcept {
 }
 std::optional<GpuSpectralMaskSession::Result> GpuSpectralMaskSession::receive(std::span<float> output) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    if (!impl_ || output.size()<std::size_t(impl_->h)*impl_->channels) return std::nullopt;
-    auto completion=impl_->session.pop_completion(); if (!completion) return std::nullopt;
-    Result r{impl_->stream_epoch,completion->token.slot.stream_sequence,false,completion->late};
-    if(completion->status!=detail::SharedIoArena::CompletionStatus::RetiredSuccess){
-        impl_->failed=true; (void)impl_->session.discard_completion(*completion); return r;
-    }
-    auto lease=impl_->session.acquire_output(*completion);
-    if(!lease){impl_->failed=true;(void)impl_->session.discard_completion(*completion);return r;}
-    std::memcpy(output.data(),lease->bytes.data(),std::size_t(impl_->h)*impl_->channels*sizeof(float));
-    impl_->report.cpu_output_bytes += std::size_t(impl_->h)*impl_->channels*sizeof(float);
-    r.delivered=impl_->session.release_output({lease->token});
-    if(!r.delivered)impl_->failed=true;
-    return r;
+    if (!impl_) return std::nullopt;
+    return detail::receive_shared_spectral_result(
+        impl_->session, impl_->stream_epoch, impl_->failed, output,
+        std::size_t(impl_->h) * impl_->channels, impl_->report.cpu_output_bytes);
 #else
     (void)output;return std::nullopt;
 #endif
@@ -153,18 +145,20 @@ std::optional<GpuSpectralMaskSession::Result> GpuSpectralMaskSession::receive(st
 bool GpuSpectralMaskSession::release() noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (!impl_) return true;
-    // Snapshot while the provider is still owned; release destroys it only
-    // after the arena confirms physical retirement of every slot.
-    if (impl_->provider) {
-        const auto stats = impl_->provider->stats();
-        impl_->report.runtime_write_buffer_calls = stats.runtime_write_buffer_calls;
-        impl_->report.runtime_copy_buffer_calls = stats.runtime_copy_buffer_calls;
-        impl_->report.runtime_map_async_calls = stats.runtime_map_async_calls;
-        impl_->report.imported_allocations = stats.import_successes;
-        impl_->report.retired_success = stats.retired_success;
-        impl_->report.retired_failure = stats.retired_failure;
-    }
-    if (!impl_->session.release()) return false;
+    // The generic lifecycle invokes this only after the arena's final physical
+    // barrier and before provider destruction, including in-flight retirements.
+    const detail::SharedIoProgramSession::ReleaseObserver observer{
+        impl_.get(), [](void* context, const detail::SharedIoArenaProvider& provider) noexcept {
+            auto& report = static_cast<Impl*>(context)->report;
+            const auto stats = static_cast<const detail::DawnSharedIoProvider&>(provider).stats();
+            report.runtime_write_buffer_calls = stats.runtime_write_buffer_calls;
+            report.runtime_copy_buffer_calls = stats.runtime_copy_buffer_calls;
+            report.runtime_map_async_calls = stats.runtime_map_async_calls;
+            report.imported_allocations = stats.import_successes;
+            report.retired_success = stats.retired_success;
+            report.retired_failure = stats.retired_failure;
+        }};
+    if (!impl_->session.release(observer)) return false;
     impl_->provider = nullptr;
     impl_->report.physical_release_confirmed = true;
     return true;

@@ -1,10 +1,12 @@
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_program_session.hpp"
+#include "detail/shared_spectral_result.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <memory>
 
@@ -13,21 +15,36 @@ using namespace pulp::gpu_audio::detail;
 namespace {
 struct FakeLifecycleState {
     bool program_released = false;
+    bool provider_destroyed = false;
+    std::uint64_t retired = 0;
 };
 
 class FakeProvider final : public SharedIoArenaProvider {
     struct Slot {
         std::byte* input;
         std::byte* output;
+        std::uint32_t index = 0;
         std::uint64_t generation = 1;
         bool retired = false;
     };
 
   public:
-    bool create_slot(std::uint32_t, std::size_t in, std::size_t out,
+    ~FakeProvider() override { lifecycle_state->provider_destroyed = true; }
+    bool post_terminal(SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
+                       CompletionStatus terminal) noexcept {
+        if (defer_terminals) {
+            pending_terminals.push_back({token, std::move(inbox), terminal});
+            return true;
+        }
+        if (inbox->push(token, terminal) != SharedIoTerminalInbox::PushResult::Accepted)
+            return false;
+        ++lifecycle_state->retired;
+        return true;
+    }
+    bool create_slot(std::uint32_t index, std::size_t in, std::size_t out,
                      SlotResources& resources) noexcept override {
         auto* slot = new (std::nothrow)
-            Slot{new (std::nothrow) std::byte[in], new (std::nothrow) std::byte[out]};
+            Slot{new (std::nothrow) std::byte[in], new (std::nothrow) std::byte[out], index};
         if (!slot || !slot->input || !slot->output) {
             if (slot) {
                 delete[] slot->input;
@@ -80,7 +97,7 @@ class FakeProvider final : public SharedIoArenaProvider {
         handle.device = this;
         handle.input_buffer = slot->input;
         handle.output_buffer = slot->output;
-        handle.slot = 0;
+        handle.slot = slot->index;
         handle.generation = slot->generation;
         handle.lifetime = lifetime_;
         return true;
@@ -106,10 +123,17 @@ class FakeProvider final : public SharedIoArenaProvider {
         auto* out = reinterpret_cast<float*>(slot->output);
         for (std::size_t i = 0; i < count && i < resources.output_size / sizeof(float); ++i)
             out[i] = in[i] * 2.0f;
-        return inbox->push(token, terminal_status) == SharedIoTerminalInbox::PushResult::Accepted;
+        return post_terminal(token, std::move(inbox), terminal_status);
     }
     void poll() noexcept override {}
     bool drain() noexcept override {
+        if (!allow_drain) return false;
+        defer_terminals = false;
+        for (auto& pending : pending_terminals) {
+            if (!post_terminal(pending.token, std::move(pending.inbox), pending.status))
+                return false;
+        }
+        pending_terminals.clear();
         return true;
     }
     void cleanup_abandoned_for_test() noexcept {
@@ -120,6 +144,13 @@ class FakeProvider final : public SharedIoArenaProvider {
             destroy_slot(resources);
         }
     }
+    struct PendingTerminal {
+        SlotToken token;
+        std::shared_ptr<SharedIoTerminalInbox> inbox;
+        CompletionStatus status;
+    };
+    std::vector<PendingTerminal> pending_terminals;
+    bool defer_terminals = false, allow_drain = true;
     bool accept_submissions = true;
     bool require_program_release = false;
     bool program_released = false;
@@ -155,8 +186,7 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
         auto* output = reinterpret_cast<float*>(resources.output);
         for (std::size_t index = 0; index < values; ++index)
             output[index] = input[index] * 3.0f;
-        return inbox->push(token, SharedIoTerminalStatus::RetiredSuccess) ==
-               SharedIoTerminalInbox::PushResult::Accepted;
+        return expected_.post_terminal(token, std::move(inbox), expected_.terminal_status);
     }
 
     bool release() noexcept override {
@@ -224,6 +254,115 @@ TEST_CASE("shared IO program session owns generic provider lifecycle",
     output.reset();
     REQUIRE(session.release());
     CHECK(lifecycle_state->program_released);
+}
+
+TEST_CASE("healthy spectral result copies exact output and releases its slot",
+          "[gpu_audio][shared_io][spectral]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = session.acquire_input(8, 0);
+    REQUIRE(input);
+    const std::array<float, 4> source{1, 2, 3, 4};
+    std::memcpy(input->bytes.data(), source.data(), sizeof(source));
+    REQUIRE(session.submit({input->token, 0}));
+    REQUIRE(session.service(0) == 1);
+    bool poisoned = false;
+    std::uint64_t copied_bytes = 0;
+    std::array<float, 4> output{};
+    auto result = receive_shared_spectral_result(session, 9, poisoned, output, 4, copied_bytes);
+    REQUIRE(result);
+    CHECK(result->delivered);
+    CHECK(result->epoch == 9);
+    CHECK(result->sequence == 8);
+    CHECK_FALSE(poisoned);
+    CHECK(copied_bytes == sizeof(output));
+    CHECK(output == std::array<float, 4>{3, 6, 9, 12});
+    REQUIRE(session.release());
+}
+
+TEST_CASE("spectral failure poisons later physical successes until recreation",
+          "[gpu_audio][shared_io][spectral]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto* control = provider.get();
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    control->terminal_status = SharedIoTerminalStatus::RetiredFailed;
+    auto failed_input = session.acquire_input(40, 0);
+    REQUIRE(failed_input);
+    std::fill(failed_input->bytes.begin(), failed_input->bytes.end(), std::byte{});
+    REQUIRE(session.submit({failed_input->token, 0}));
+    control->terminal_status = SharedIoTerminalStatus::RetiredSuccess;
+    auto later_input = session.acquire_input(41, 0);
+    REQUIRE(later_input);
+    std::fill(later_input->bytes.begin(), later_input->bytes.end(), std::byte{});
+    reinterpret_cast<float*>(later_input->bytes.data())[0] = 7.0f;
+    REQUIRE(session.submit({later_input->token, 0}));
+    REQUIRE(session.service(0) == 2);
+    bool poisoned = false;
+    std::uint64_t copied_bytes = 0;
+    std::array<float, 4> output{99, 99, 99, 99};
+    auto first = receive_shared_spectral_result(session, 7, poisoned, output, 4, copied_bytes);
+    REQUIRE(first);
+    CHECK(first->sequence == 40);
+    CHECK_FALSE(first->delivered);
+    CHECK(poisoned);
+    auto second = receive_shared_spectral_result(session, 7, poisoned, output, 4, copied_bytes);
+    REQUIRE(second);
+    CHECK(second->sequence == 41);
+    CHECK(second->epoch == 7);
+    CHECK_FALSE(second->delivered);
+    CHECK(copied_bytes == 0);
+    CHECK(output == std::array<float, 4>{99, 99, 99, 99});
+    CHECK_FALSE(receive_shared_spectral_result(session, 7, poisoned, output, 4, copied_bytes));
+    // Both discarded results released their CPU claims; physical release is
+    // still possible even though this epoch can never deliver again.
+    REQUIRE(session.release());
+}
+
+TEST_CASE("program release observer sees final retirements only after physical barrier",
+          "[gpu_audio][shared_io][spectral]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto* control = provider.get();
+    const auto state = provider->lifecycle_state;
+    control->defer_terminals = true;
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = session.acquire_input(1, 0);
+    REQUIRE(input);
+    std::fill(input->bytes.begin(), input->bytes.end(), std::byte{});
+    REQUIRE(session.submit({input->token, 0}));
+    CHECK(state->retired == 0);
+    struct Observation { unsigned calls=0; std::uint64_t retired=0; bool provider_alive=false; } observed;
+    SharedIoProgramSession::ReleaseObserver observer{
+        &observed, [](void* context, const SharedIoArenaProvider& base) noexcept {
+            const auto& provider = static_cast<const FakeProvider&>(base);
+            auto& result = *static_cast<Observation*>(context);
+            ++result.calls;
+            result.retired = provider.lifecycle_state->retired;
+            result.provider_alive = !provider.lifecycle_state->provider_destroyed;
+        }};
+    control->allow_drain = false;
+    CHECK_FALSE(session.release(observer));
+    CHECK(observed.calls == 0);
+    CHECK_FALSE(state->provider_destroyed);
+    control->allow_drain = true;
+    REQUIRE(session.release(observer));
+    CHECK(observed.calls == 1);
+    CHECK(observed.retired == 1);
+    CHECK(observed.provider_alive);
+    CHECK(state->provider_destroyed);
+    REQUIRE(session.release(observer));
+    CHECK(observed.calls == 1);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",

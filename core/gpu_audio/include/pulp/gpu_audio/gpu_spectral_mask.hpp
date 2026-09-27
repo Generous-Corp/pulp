@@ -54,6 +54,10 @@ public:
     bool submit_hop(std::span<const float> planar, std::uint64_t sequence,
                     std::uint64_t deadline_ns = 0) noexcept;
     std::size_t service(std::uint64_t now_ns) noexcept;
+    // A failed result poisons this epoch: prepared() becomes false, future
+    // submissions are refused, and remaining completions are retired without
+    // delivery. Continue service/receive or release, then recreate the session
+    // with a new epoch; a physical success cannot repair missing DSP history.
     std::optional<Result> receive(std::span<float> planar) noexcept;
     // Retain the session and retry if its physical drain cannot yet finish.
     bool release() noexcept;

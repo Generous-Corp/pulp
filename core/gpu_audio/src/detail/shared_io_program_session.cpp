@@ -75,6 +75,10 @@ bool SharedIoProgramSession::reprime_when_quiescent() noexcept {
 }
 
 bool SharedIoProgramSession::release() noexcept {
+    return release({});
+}
+
+bool SharedIoProgramSession::release(ReleaseObserver observer) noexcept {
     if (!provider_ && !plan_.prepared()) {
         prepared_ = false;
         return true;
@@ -82,6 +86,8 @@ bool SharedIoProgramSession::release() noexcept {
     if (!plan_.release())
         return false;
     prepared_ = false;
+    if (provider_ && observer.observe)
+        observer.observe(observer.context, *provider_);
     provider_.reset();
     return true;
 }
