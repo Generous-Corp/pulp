@@ -65,6 +65,18 @@ def run_step(
                 "RUNNER_TEMP": tmp,
                 "GITHUB_OUTPUT": str(Path(tmp) / "github-output"),
                 "IOS_COMPILE_REQUIRED": ios_compile_required,
+                # The real GitHub step supplies these paths and identity
+                # values. Keep the shell harness faithful while pointing the
+                # digest computation at the temporary fixture so this focused
+                # test never performs a live GitHub lookup.
+                "RUNNER_TEMP": tmp,
+                "GITHUB_OUTPUT": str(Path(tmp) / "github-output"),
+                "GITHUB_WORKSPACE": tmp,
+                "GITHUB_RUN_ID": "test-run-1",
+                "GITHUB_SHA": "0" * 40,
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+                "IOS_GATE_TOKEN": "test-token",
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             },
         )
