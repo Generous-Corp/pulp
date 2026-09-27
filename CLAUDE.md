@@ -1031,7 +1031,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **build-speed** — measure build, gate and merge-queue speed
 - Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
-  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. Wall-clock waits track load; judge a change by `proxies`, where a zero control reads INSTRUMENT BLIND and a small side reads "insufficient sample". The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
 - Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before and after a build-system change. → `tools/scripts/build_time_report.py blast-radius`
   - ⚠ **Cannot see:** Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not counted) and says so. It touches each file and restores its mtime, so do not run it against a tree another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
 

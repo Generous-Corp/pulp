@@ -742,6 +742,26 @@ python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17T13:12Z 
   --no-local --no-fleet
 ```
 
+Wall-clock waits mostly track load, so they cannot say whether a change worked.
+`proxies` is the before/after verdict instead: for each mechanism a change
+targets it counts that mechanism directly from job labels and runner names,
+run cancellations and head-SHA changes, PR timelines, failed-job logs, and each
+host's tartci supervisor events (`~/.tartci/state/macos-fleet/<lane>/events.jsonl`,
+read over ssh with `ls`/`cat` only). Every row names its source and n, carries a
+control on the same instrument that must be non-zero (a zero control prints
+INSTRUMENT BLIND and exits 3), and says "insufficient sample" below 20 units a
+side instead of a percentage. Wall time is printed beside the rows as context.
+`--exclude START/END` drops an infrastructure incident from both sides; a link
+error inside it is classified `infra_host_cache`. Raw inputs are cached
+(`~/.cache/pulp/build-speed/proxies.json`), so `--no-collect` re-renders with
+other windows without another sweep.
+
+```bash
+python3 tools/scripts/build_speed_scorecard.py proxies --since 2026-09-17T13:12Z \
+  --split 2026-09-22T00:00Z --after-from 2026-09-27T12:00Z --until 2026-09-29T12:00Z \
+  --exclude 2026-09-26T08:23Z/2026-09-27T01:12Z
+```
+
 `--split` also renders a "Time to merge and gate cost" table: PR open→merged and
 first/last enqueue→merged p50/p90, merged PRs per day and hour, PRs per
 merge-queue push, gate-minutes per merged PR, cancelled gate-minutes (per day
