@@ -14,10 +14,21 @@ The lanes, and why they differ:
   the waste: every batch inherits the break, every lane pays it, and each
   re-formed batch pays it again. So the queue stops at the first failure.
 
-* ``push`` to main is the DETECTOR and the diagnostic. It is the only lane that
-  runs the whole macOS suite on a commit that is actually on main, so it must
-  report every failing test rather than the first one. Stopping early here
+* ``push`` to main is the DESIGNATED detector and diagnostic. It is the only
+  lane that would run the whole macOS suite on a commit actually on main, so it
+  must report every failing test rather than the first one. Stopping early here
   would trade the one complete signal in the system for a few minutes.
+
+  In practice it reports nothing. Every non-proof event shares the
+  ``build-<github.ref>`` concurrency group, so all pushes to main land in one
+  domain; ``cancel-in-progress`` is false there, and GitHub holds at most ONE
+  run pending per group, cancelling the previously pending one when the next
+  merge arrives. Measured over the 60 most recent pushes to main: 58 completed,
+  55 dispatched no job at all, and 0 executed the macOS suite (the same query
+  over ``merge_group`` returned 31 of 55). The label and stop-on-failure rules
+  below are still the right ones for that lane whenever it does run; they are
+  not what makes it observable. ``tools/ci/base_poison_detector.py`` derives
+  main's health from evidence that already exists instead of waiting for it.
 
 * The gate events also exclude ``source-selftest``: registrations that read
   only the checkout, which the build-free required ``Enforce version & skill

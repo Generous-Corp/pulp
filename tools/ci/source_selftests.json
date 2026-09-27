@@ -55,6 +55,13 @@
       ]
     },
     {
+      "name": "base-poison-detector-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_base_poison_detector.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "build-matrix-contract",
       "argv": [
         "{repo}/tools/ci/test_build_matrix_contract.py"

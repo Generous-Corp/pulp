@@ -664,6 +664,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
     set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
 
+    # base-poison-detector-selftest pins what may and may not be called proof
+    # that `main` itself is carrying a failure. A wrong `poisoned` pauses the
+    # whole merge queue, and the two tempting rules are both unsafe: a failure
+    # shared across batches cannot distinguish a red base from one entry that
+    # breaks every batch it joins, and a failure naming no test is as easily a
+    # link error as an infrastructure fault. It also asserts a workflow actually
+    # invokes the detector, because a correct rule nothing runs reads exactly
+    # like one that works -- which is how the designated push lane went 58 runs
+    # without producing a single observation.
+    add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
+    set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
+
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
     # lane provably CANNOT see: at -O3 each TU inlines its own copy so the A/B

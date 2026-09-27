@@ -1768,12 +1768,27 @@ same break and pays the same forty minutes.
 Running it on push moves that detection onto the merge commit that caused it,
 where attribution is free.
 
-The cost is bounded rather than unlimited. Push runs share the
-`refs/heads/main` concurrency group, so consecutive merges serialize and at
-most one push macOS leg is ever in flight: the steady-state draw on the
-self-hosted Macs is one lane. The leg also keeps its descriptive matrix name on
-push instead of claiming the required `macos` context, so it detects without
-gating. Caches are still saved only from GitHub-hosted Linux and Windows: the
+The leg keeps its descriptive matrix name on push instead of claiming the
+required `macos` context, so it detects without gating.
+
+**In practice this lane observes nothing, and the bound it was given is why.**
+Push runs share the `refs/heads/main` concurrency group with
+`cancel-in-progress` false, which was intended to serialize consecutive merges
+to at most one macOS leg in flight. GitHub holds at most **one** run pending per
+concurrency group and cancels the previously pending one when another arrives,
+so on a main that merges faster than the macOS suite takes, "serialize" becomes
+"cancel all but the one already running" — and that one's self-hosted macOS leg
+is still queued for a runner when the next merge cancels it too. Over the 60
+most recent pushes to main: 58 completed, 55 dispatched no job at all, and **0**
+executed the macOS suite. The same query over `merge_group` returned 31 of 55
+executed, so the instrument reads a real lane when there is one to read.
+
+Because a cancelled push run's observation is tied to a sha that never comes
+again, the observation is lost rather than deferred. Widening the group to
+per-sha would fix the supersession and hand the shared Studios one ~40-minute
+macOS leg per merge — on the hosts that serve the required `macos` gate. The
+base health detector below takes the other route: it derives main's health from
+evidence that already exists, and costs no gate lane. Caches are still saved only from GitHub-hosted Linux and Windows: the
 two `Save …` steps stay scoped
 `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which is
 narrower than the restore side on purpose, because the self-hosted Macs keep
@@ -1783,6 +1798,85 @@ ccache and FetchContent on local disk between jobs.
 this: it asserts over the parsed syntax tree that the macOS matrix entry is
 appended unconditionally, so re-gating it on the event name fails a test rather
 than quietly restoring the blind spot.
+
+### Base health detector (`main-health-detector.yml`)
+
+A broken `main` is amplified rather than caught by a merge queue: every batch is
+`main` plus its entries, so every batch inherits the break, fails after a full
+gate, ejects its innocent entries, re-forms, and pays again. Nothing in a
+batch's own report says the base is the cause, so each batch reads as a new
+culprit in turn.
+
+`.github/workflows/main-health-detector.yml` runs `tools/ci/base_poison_detector.py`
+on a schedule and on demand. It is read-only, runs on the preamble Linux runner,
+draws no macOS gate host, and **reports only** — pausing a re-forming batch or
+prioritising the fix is Shipyard's side and is not wired here. One detector runs
+at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
+superseded tick loses nothing, because the next one reads main's *current* head,
+which is strictly more relevant than the head the cancelled tick would have
+reported on. That is exactly the property the push lane lacks.
+
+**Where main's evidence comes from without a build.** A merge queue validates
+`main` plus its entries as one commit, and the commit that lands carries that
+commit's tree. So when main's head tree equals the head tree of a run whose
+macOS leg genuinely executed the suite, that run built and tested main's exact
+tree — the same sources, the same binaries, the same result. A failure there is
+a failure observed on main itself, for two commit reads instead of a gate lane.
+Tree identity rather than sha identity, because the queue's merge method can
+produce a landing commit whose sha differs while the tree is the same, and it is
+the tree that determines what was built. The detector prefers a genuine
+push-lane observation when one exists and falls back to tree identity, and the
+signal says which it used.
+
+Failing test names are read from the `ctest-logs-macos` **artifact**
+(`Testing/Temporary/LastTestsFailed.log`), never from a job log:
+`ghapp api .../actions/jobs/<id>/logs` refuses any response carrying terminal
+escape sequences and returns a short refusal instead, so a log scrape silently
+yields no failing tests — which reads as "the failure was not a test failure".
+
+**The signal.** A `::notice title=base-poison-signal::` annotation carrying one
+line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
+and a `base-poison-signal` artifact. Fields: `status`, `proof`,
+`safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
+`main_evidence_source`, `main_failing_tests`, `batch_streak`,
+`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`, `reason`.
+
+| `status` | Means | `safe_to_pause_queue` |
+|---|---|---|
+| `healthy` | a job that genuinely ran the suite on main's tree passed | false |
+| `unproven` | no such job exists — main's health is unmeasured | false |
+| `suspected` | a streak, or a main failure naming no test | false |
+| `poisoned` | main's own suite failed a test that a streak of consecutive executed batches also failed | **true** |
+
+`safe_to_pause_queue` is the only field a consumer should act on. It is true for
+`poisoned` and for nothing else.
+
+**Two rules it deliberately refuses**, because both are measured unsafe and both
+look convincing:
+
+1. *Cross-batch corroboration of an identical failure.* Batches with disjoint
+   single-entry memberships have failed with a byte-identical error at different
+   bases while one of those entries was genuinely broken. That rule is
+   structurally indistinguishable from the innocent case, so a streak alone is
+   `suspected` with `proof: batch-streak-only` — a prioritisation hint, never
+   proof, and it never pauses anything.
+2. *"No ctest block, therefore infrastructure."* A compile or link error
+   produces no ctest block either. A failure naming no test contributes an empty
+   set and so cannot carry any verdict that names one.
+
+It fails closed in every direction. A receipt-reuse green (three steps, no
+build, no test) is not evidence and reads as `unproven` rather than `healthy`; a
+cancelled run is not evidence, so cancelling doomed batches cannot turn a red
+base green; and absence of evidence is never health. A fix PR is named only on
+the attributor's decisive weight — an exact test-name to file-stem match with a
+single contender — because prioritising the wrong branch is worse than
+prioritising none.
+
+`tools/ci/test_base_poison_detector.py` (ctest `base-poison-detector-selftest`)
+pins each of those refusals, and also asserts that a workflow actually invokes
+the detector: a correct rule nothing runs reads exactly like one that works,
+which is how the designated push lane went 58 runs without producing a single
+observation.
 
 Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill

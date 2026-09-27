@@ -88,13 +88,24 @@ diagnose a stalled queue:
 in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
 the PR head. So "the PR was green" never meant its tests passed.
 
-**`main`'s macOS health is measured only on push.** The macOS matrix leg now
-runs on `push: main` for exactly this reason: a merge group validates a
-synthetic merge commit, so without the push leg nothing ever runs the full
-macOS suite against a commit that is actually on `main`. If you are asking
-"is main broken?", look at the push run for the merge commit, not at a batch.
-The leg keeps its descriptive matrix name on push rather than claiming the
-required `macos` context, so it detects without gating.
+**`main`'s macOS health is nominally measured on push, and in practice is not.**
+The macOS matrix leg runs on `push: main` for exactly this reason: a merge group
+validates a synthetic merge commit, so without the push leg nothing ever runs
+the full macOS suite against a commit that is actually on `main`. The leg keeps
+its descriptive matrix name on push rather than claiming the required `macos`
+context, so it detects without gating.
+
+That lane reports nothing. Every non-proof event shares the
+`build-<github.ref>` concurrency group, and push sets `cancel-in-progress`
+false there; GitHub holds at most **one** run pending per group and cancels the
+previously pending one when the next merge arrives. On a main that merges faster
+than the suite takes, the intended "serialize to one leg at a time" becomes
+"cancel all but the one already running", and that one's self-hosted macOS leg is
+still queued for a runner when the next merge cancels it too. Over the 60 most
+recent pushes to main: 58 completed, 55 dispatched **no job at all**, and **0**
+executed the macOS suite (the same query over `merge_group` returned 31 of 55).
+So "look at the push run for the merge commit" will almost always hand you a
+cancelled run with zero jobs. Use the base health detector below instead.
 
 **A batch stops at its first failing test.** `merge_group` runs ctest with
 `--stop-on-failure`; no other lane does. It composes with `--repeat
@@ -143,14 +154,25 @@ python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
 
 It maps each failing ctest to the pull request whose files own it. Below its
 confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
-read that as "go look at main's own push run", never as "no culprit exists".
-Because it reads the run's job logs, a batch whose macos gate never ran the
-suite yields nothing, which is the previous section's problem wearing a
-different hat. Read them from the RUN-level endpoint
-(`actions/runs/<id>/logs`, a zip) and never the per-job one: `ghapp` withholds
-any response carrying terminal escape sequences, so `actions/jobs/<id>/logs`
-returns zero bytes and every reader built on it sees an empty log rather than an
-error.
+read that as "go ask the base health detector", never as "no culprit exists". A
+batch whose macos gate never ran the suite yields nothing, which is the previous
+section's problem wearing a different hat.
+
+**Read logs from the RUN, never the job.** `ghapp api
+repos/<o>/<r>/actions/jobs/<id>/logs` withholds any response carrying terminal
+escape sequences and returns a short refusal instead of the log, so a reader
+built on it sees an EMPTY failing-test list and reports "no ctest failure block"
+on a run that failed four tests. The attributor reads the run-level zip
+(`actions/runs/<id>/logs`), which is binary and passes through. The
+machine-readable per-test record is the run's `ctest-logs-macos` artifact,
+uploaded with `if: always()`, which is what the base health detector reads:
+
+```bash
+ghapp api repos/Generous-Corp/pulp/actions/runs/<run-id>/artifacts \
+  --jq '.artifacts[]|select(.name=="ctest-logs-macos")|.id'
+ghapp api repos/Generous-Corp/pulp/actions/artifacts/<id>/zip > /tmp/ctest.zip
+unzip -p /tmp/ctest.zip Testing/Temporary/LastTestsFailed.log
+```
 
 The same module answers a second, narrower question for Shipyard. When
 `queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
@@ -169,6 +191,48 @@ as a bug in the attributor; read it as "nothing here rules this head out". The
 full rule, and the two candidate signals rejected for certifying a guilty head,
 are in [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) under
 "Letting an un-implicated head back into the queue".
+
+## Is `main` itself broken? Ask the base health detector
+
+```bash
+python3 tools/ci/base_poison_detector.py --name-fix-pr
+```
+
+Read-only. It answers "is the base carrying the failure these batches keep
+dying on?" and prints a one-line `base-poison-signal/v1` JSON annotation plus a
+table. `.github/workflows/main-health-detector.yml` runs it on a schedule and on
+demand; it draws no macOS gate host and **reports only** — pausing a re-forming
+batch is Shipyard's side.
+
+**Where main's evidence comes from without a build.** A merge queue validates
+`main` plus its entries as one commit, and the commit that lands carries that
+commit's tree. So when main's head tree equals the head tree of a run whose
+macOS leg genuinely executed the suite, that run built and tested main's exact
+tree, and a failure there is a failure observed on main itself — for two commit
+reads rather than a gate lane.
+
+| `status` | Means | Act on it? |
+|---|---|---|
+| `healthy` | a job that genuinely ran the suite on main's tree passed | no |
+| `unproven` | no such job exists; main's health is unmeasured | no |
+| `suspected` | a streak of batches share a failure, or main failed naming no test | **hint only** |
+| `poisoned` | main's own suite failed a test a streak of executed batches also failed | **yes** |
+
+`safe_to_pause_queue` is true for `poisoned` and nothing else. It is the only
+field to act on.
+
+**Do not "improve" it with either of these two rules.** Both are measured
+unsafe. (1) *Cross-batch corroboration*: batches with disjoint single-entry
+memberships have failed with a byte-identical error at different bases while one
+of those entries was genuinely broken, so a shared failure cannot distinguish a
+red base from one entry breaking every batch it joins — that is why a streak
+alone is only `suspected`. (2) *"No ctest block therefore infrastructure"*: a
+compile or link error produces no ctest block either.
+
+A `suspected` verdict with a named test is still the best starting point in a
+cascade: attribute it with `queue_batch_attribute.py`, and check whether the
+landing batch that produced main's current tree reused a receipt (three steps,
+green, ran nothing) — if it did, main's tree has never been tested.
 
 ## Current required-macOS truth (read before older incident notes)
 

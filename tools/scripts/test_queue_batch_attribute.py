@@ -1031,5 +1031,36 @@ class DeclarationTests(unittest.TestCase):
         self.assertIs(payload["implicates_head"], False)
 
 
+class GhCliOverrideTests(unittest.TestCase):
+    """Both API readers honour PULP_GH_CLI, so a GitHub runner can use `gh`."""
+
+    def _argv(self, call, env: dict[str, str]) -> list[str]:
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"x", stderr=b"")
+
+        with mock.patch.dict("os.environ", env, clear=False), mock.patch.object(
+            qba.subprocess, "run", side_effect=fake_run
+        ):
+            call()
+        self.assertTrue(seen, "the reader never shelled out")
+        return seen[0]
+
+    def test_run_log_zip_uses_the_override(self) -> None:
+        argv = self._argv(
+            lambda: qba.run_log_zip("o/r", "1"), {"PULP_GH_CLI": "gh"}
+        )
+        self.assertEqual(argv[:2], ["gh", "api"])
+        self.assertEqual(argv[2], "repos/o/r/actions/runs/1/logs")
+
+    def test_run_log_zip_defaults_to_ghapp(self) -> None:
+        argv = self._argv(
+            lambda: qba.run_log_zip("o/r", "1"), {"PULP_GH_CLI": "  "}
+        )
+        self.assertEqual(argv[0], "ghapp")
+
+
 if __name__ == "__main__":
     unittest.main()
