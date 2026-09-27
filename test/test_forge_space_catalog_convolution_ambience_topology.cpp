@@ -33,6 +33,57 @@ TEST_CASE("Forge space convolution: the node bakes and runs true stereo",
     REQUIRE(std::isfinite(out[1][0]));
 }
 
+#if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+
+TEST_CASE("Forge space GPU convolution: the route is disabled by default",
+          "[host][gpu][forge][forge-space][convolution]") {
+    pulp::gpu_audio::GpuConvolutionReverbConfig config;
+    config.block_size = kFrames;
+    config.sample_rate = static_cast<std::uint32_t>(kSr);
+    config.impulse_response = {{1.0f}};
+
+    pulp::gpu_audio::GpuConvolutionReverb route(config);
+    REQUIRE_FALSE(route.gpu_enabled());
+    REQUIRE_FALSE(route.prepare());
+    REQUIRE_FALSE(route.prepared());
+    const auto report = route.report();
+    REQUIRE_FALSE(report.prepared);
+    REQUIRE_FALSE(report.gpu_enabled);
+    REQUIRE(report.latency_samples == 0);
+}
+
+TEST_CASE("Forge space GPU convolution: catalog metadata preserves controls and block PDC",
+          "[host][gpu][forge][forge-space][convolution][latency]") {
+    const auto type = conv::make_gpu_convolution_reverb_node(delta_ir());
+    REQUIRE(std::string(type.type_id) == conv::kGpuTypeId);
+    REQUIRE_FALSE(type.lowerable);
+    REQUIRE(type.num_input_ports == 2);
+    REQUIRE(type.num_output_ports == 2);
+    REQUIRE(type.baked_params.size() == 7);
+    REQUIRE(type.latency_samples_for_block);
+    REQUIRE(type.latency_samples_for_block(kSr, kFrames) == 2 * kFrames);
+    REQUIRE(type.latency_samples_for_block(kSr, 0) == 0);
+    REQUIRE(type.latency_samples_for_block(kSr,
+                                           CustomNodeType::kMaxLatencySamples / 2 + 1) ==
+            0);
+
+    const auto has = [&](pulp::state::ParamID id) {
+        return std::find_if(type.baked_params.begin(), type.baked_params.end(),
+                            [=](const auto& p) { return p.id == id; }) !=
+               type.baked_params.end();
+    };
+    REQUIRE(has(conv::kIrGainDb));
+    REQUIRE(has(conv::kPredelayMs));
+    REQUIRE(has(conv::kWetPercent));
+    REQUIRE(has(conv::kDryPercent));
+    REQUIRE(has(conv::kWidthPercent));
+    REQUIRE(has(conv::kLowcutHz));
+    REQUIRE(has(conv::kHighcutHz));
+    REQUIRE(type.is_valid_registration());
+}
+
+#endif
+
 TEST_CASE("Forge space convolution: zero latency survives the graph",
           "[host][baked][param-injection][forge][forge-space][convolution][latency]") {
     // The DSP promises a literal constant 0. A node wrapper that buffered one
