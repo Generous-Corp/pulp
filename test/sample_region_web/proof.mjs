@@ -86,6 +86,8 @@ async function renderWam(kind, restored = null) {
   const preroll = 512, block = 512, stages = kind === 'region' && !restored ? 4 : 1;
   const context = new OfflineAudioContext(2, preroll + stages * block, RATE);
   const wam = await PulpWAM.createInstance(context, null, { processor: `/${kind}/wam-processor.js` });
+  let processorError = false;
+  wam.audioNode.addEventListener('processorerror', () => { processorError = true; });
   const source = context.createBufferSource();
   const input = signal(block);
   source.buffer = context.createBuffer(1, context.length, RATE);
@@ -96,6 +98,7 @@ async function renderWam(kind, restored = null) {
   let saved, params;
   for (let stage = 0; stage < stages; stage++) {
     await timeout(stops[stage], 'offline suspension');
+    check(!processorError, `WAM ${kind} stage ${stage} processor remained live`);
     if (wam._lastError) throw new Error(wam._lastError);
     params = await wam.getParameterInfo();
     if (kind === 'region') {
@@ -125,6 +128,8 @@ async function renderWam(kind, restored = null) {
     await context.resume();
   }
   const audio = await timeout(rendering, 'offline rendering');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  check(!processorError, `WAM ${kind} processor remained live through rendering`);
   const output = audio.getChannelData(0), history = { x: 0, y: 0 };
   for (let stage = 0; stage < stages; stage++) {
     const segment = output.subarray(preroll + stage * block, preroll + (stage + 1) * block);

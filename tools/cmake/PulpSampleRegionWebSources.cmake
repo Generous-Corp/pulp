@@ -50,3 +50,11 @@ function(pulp_sample_region_web_profile TARGET)
         target_link_libraries(${TARGET} PRIVATE unwind)
     endif()
 endfunction()
+
+# The isolated WAM profile runs in AudioWorkletGlobalScope, where Emscripten's
+# steady_clock import terminates. Keep load snapshots at their documented zero,
+# unavailable state instead of fabricating timing samples.
+function(pulp_sample_region_audio_worklet_profile TARGET)
+    target_compile_definitions(${TARGET} PRIVATE
+        PULP_AUDIOWORKLET_DISABLE_LOAD_TIMING=1)
+endfunction()
