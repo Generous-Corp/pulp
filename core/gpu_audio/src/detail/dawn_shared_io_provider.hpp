@@ -148,6 +148,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     std::uint64_t proc_table_install_count() const noexcept;
     Stats stats() const noexcept;
     CompletionPolicy completion_policy() const noexcept;
+    void service_until(std::uint64_t deadline_ns) noexcept override;
     AdapterIdentity adapter_identity() const;
     std::string dawn_revision() const;
 
