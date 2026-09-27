@@ -59,10 +59,12 @@ class GpuAudioTransport {
         // keeps effective latency pinned at latency_blocks instead of creeping one
         // block per miss (which would comb-filter dry against wet).
         std::uint64_t resynced_blocks = 0;
-        // Wall-clock cost of the node's work per block, measured on the worker
-        // thread (includes the GPU submit + the blocking readback — the honest
-        // real cost of the GPU path). last = most recent block; avg = an EWMA.
-        // Zero until the first block is produced.
+        // Worker-observed wall time. The staged path measures one process_block
+        // call, including any blocking readback. The shared path measures one
+        // service call that reports progress; it may cover several completions.
+        // Neither interval is GPU execution time, CPU consumption, or an audio
+        // deadline measurement. last is the latest recorded interval; avg is an
+        // EWMA. Both remain zero until the worker first reports progress.
         double last_block_us = 0.0;
         double avg_block_us = 0.0;
     };

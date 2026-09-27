@@ -535,3 +535,18 @@ instants while processing continues. Stop the callback before checking exact
 aggregate totals. Do not race preparation or destruction with snapshot readers.
 These aggregate counters complement the per-block tracing identities; they do
 not replace terminal-disposition or deadline analysis.
+
+### Interpret worker timing separately
+
+`Stats::last_block_us` and `avg_block_us` retain their existing names, but their
+measurement scope depends on the path. Staged processing times one worker-side
+`process_block()` call, including any blocking readback. Shared processing times
+a service call that reports progress, which can cover multiple completions.
+The average is an exponentially weighted average of those recorded intervals.
+
+These values do not measure GPU execution time, process CPU consumption, or the
+callback's deadline margin. Do not turn them into a realtime percentage or
+compare them across paths as equivalent per-block costs. Use callback timing,
+process CPU measurements, and scope-matched GPU timestamps for those questions.
+Likewise, `produced_blocks` records worker progress, not selected GPU output;
+use `delivery_snapshot()` for output selection.
