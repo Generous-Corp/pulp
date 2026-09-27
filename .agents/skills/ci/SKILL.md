@@ -913,6 +913,17 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   force allocation of the native job that owns the proof. Do not remove
   that explicit affected step when maintaining the broad `slow` exclusion,
   and do not run it again on unfiltered main/nightly corpora that already own it.
+- **Wide non-native (`PULP_CLASSIFY_WIDE_NON_NATIVE=1`, default off)** lets a
+  `tools/scripts` / `tools/testing` / `tools/import-validation` change skip the
+  native matrix only when a reference search proves no gate-side test names it
+  (`tools/scripts/wide_non_native.py`). Gotchas: a data file that lists paths
+  (e.g. `skill_path_map.json`) is itself a referrer, so a script it names stays
+  native until that file's readers are proven gate-silent; the gate's tree
+  scanners run from `tools/ci/wide_non_native_checks.json` on `Enforce version &
+  skill sync`, and a new tools-walking gate scanner must be added there or to
+  `REVIEWED_SCANNERS` in `test_wide_non_native.py`. The big remaining lever is
+  moving gate-side Python ctests (runner-topology, trace-span lint) into the
+  source-selftest lane, which then makes their scripts admissible here too.
 - **`validation` is example-only** — the `pluginval-*` / `auval-*` /
   `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
   run on the **`example-validation`** lane

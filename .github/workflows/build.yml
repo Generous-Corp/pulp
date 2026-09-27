@@ -891,6 +891,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
+          # Default OFF. When `1`, tooling files that no test left on this gate
+          # can observe skip the native matrix; the required `Enforce version &
+          # skill sync` context runs the checks that do observe them. See
+          # tools/scripts/wide_non_native.py.
+          WIDE_NON_NATIVE: ${{ vars.PULP_CLASSIFY_WIDE_NON_NATIVE }}
         run: |
           set -euo pipefail
           # LaunchAgents inherit macOS's stripped /usr/bin-only PATH. That made
@@ -918,9 +923,14 @@ jobs:
               # cannot resolve the tree and safely requests the native build.
               git fetch --no-tags --depth=1 origin "$base" || true
             fi
+            wide_args=()
+            if [ "${WIDE_NON_NATIVE:-}" = 1 ]; then
+              wide_args=(--wide-non-native)
+            fi
             classification=$(
               env GITHUB_OUTPUT='' "$ci_python" tools/scripts/classify_changes.py \
-                --mode=diff --comparison=trees --base "$base" --json
+                --mode=diff --comparison=trees --base "$base" --json \
+                ${wide_args[@]+"${wide_args[@]}"}
             )
             native_build_required=$(
               "$ci_python" -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
