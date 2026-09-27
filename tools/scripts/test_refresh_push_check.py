@@ -202,17 +202,22 @@ def case_pure_refresh_logged_and_warned(fx: Fixture) -> None:
 
 def case_conflict_resolution_logged_not_warned(fx: Fixture) -> None:
     feat = fx.setup(conflict=True)
+    # Capture the exact main parent before the conflicted merge. Some hosted
+    # Git versions do not retain origin/main after the merge is resolved, and
+    # reading HEAD^2 after commit then misclassifies a valid fixture.
+    main_parent = fx.git("rev-parse", "origin/main")
     r = subprocess.run(["git", "merge", "--no-edit", "origin/main"], cwd=fx.repo, capture_output=True, text=True)
     assert r.returncode != 0, "fixture must conflict"
     fx.write("shared.txt", "resolved\n")
     fx.git("add", "shared.txt")
+    # A hosted Git build may clear MERGE_HEAD after a conflicted merge.
+    # Restore it before committing so this fixture always creates the intended
+    # two-parent conflict-resolution commit on every platform.
+    (fx.repo / ".git" / "MERGE_HEAD").write_text(main_parent + "\n")
     fx.git("commit", "-q", "-m", "resolve conflict fixture")
-    # Some hosted Git versions do not retain the remote-tracking ref after a
-    # conflicted merge. The classifier needs that ref to recognize the merge
-    # as a main refresh, so restore the exact main parent explicitly.
-    main_parent = fx.git("rev-parse", "HEAD^2")
-    assert len(fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
     fx.git("update-ref", "refs/remotes/origin/main", main_parent)
+    parents = fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()
+    assert len(parents) == 3 and parents[2] == main_parent
     fx.set_pr(pr_fixture(head=feat))
     res = fx.run(feat)
     assert res.returncode == 0, res.stderr
