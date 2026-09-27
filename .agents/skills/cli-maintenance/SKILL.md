@@ -827,6 +827,30 @@ must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
   `pulp dev --design` do. Forgetting it reads as "unknown target", not as a
   configure problem.
 
+### The shared WebGPU runtime is CLI payload, not only broker payload
+
+`pulp-cpp`, `pulp-mcp` and `pulp-import-design` link
+`@rpath/libwgpu_native.dylib` with `LC_RPATH @loader_path` (Linux: `$ORIGIN`,
+`libwgpu_native.so`), so the runtime must sit in the install directory beside
+them. The release archive ships it flat there, and a flat unpack always
+works, which is why the release smoke never saw the break. `install.sh` used to
+exclude it from the ordinary extraction and hand it only to the control-broker
+transaction, which copies it after activation succeeds and rolls it back when
+activation fails or is refused. Any broker failure (a stale LaunchAgent plist,
+a custom root) left v0.876.1's `pulp-cpp` dying in dyld, and every command that
+delegates to it (`pulp doctor`, `pulp loop`, `build --watch/--validate`) died
+with it. `pulp upgrade` never installed the runtime at all.
+
+Now both paths install it as ordinary payload first (`install.sh`'s tar
+extraction; `install_extracted()` via `shared_runtime_basename()`), and the
+broker transaction backs up and restores that copy. Guard:
+`tools/scripts/check_installed_rpaths.py <install-dir>` resolves every Mach-O
+dependency against the INSTALLED tree; the `install-rpath-closure` ctest runs
+`install.sh` on real compiled fixtures with a failing broker and requires a
+clean result. Never "fix" a missing runtime with a symlink to `~/.pulp/lib`:
+that directory is an old SDK install prefix holding an unrelated wgpu build,
+and the broker transaction refuses a symlink at the runtime path.
+
 ### `pulp status` — build-governance tier line
 
 `pulp status` reports the active host-resource governance tier via a

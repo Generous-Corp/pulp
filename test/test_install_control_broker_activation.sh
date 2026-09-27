@@ -165,8 +165,8 @@ assert_common_contract() {
         "$install_dir/pulp-control-standalone-host"
     assert_absent "$label keeps the manifest out of the install root before reconciliation" \
         "$install_dir/pulp-control-standalone-host.inspector-capabilities.json"
-    assert_absent "$label keeps the runtime out of the install root before reconciliation" \
-        "$install_dir/libwgpu_native.dylib"
+    assert_file_contains "$label installs the shared runtime beside the CLI binaries" \
+        "$install_dir/libwgpu_native.dylib" 'runtime-fixture'
     assert_file_contains "$label reconciles the extracted broker bytes" \
         "$log" 'contents=broker-fixture'
     assert_file_contains "$label passes the hidden broker option" \
@@ -247,6 +247,8 @@ assert_file_contains "unaccepted custom install does not invent the opt-in" \
     "$unaccepted_root/pulp.log" '|arg10=|'
 assert_file_contains "unaccepted custom install reports activation failure" \
     "$unaccepted_root/output.log" 'control broker activation failed'
+assert_file_contains "refused activation still leaves the CLI its shared runtime" \
+    "$unaccepted_install/libwgpu_native.dylib" 'runtime-fixture'
 
 echo "Scenario: explicit custom-root opt-in"
 custom_root="$TEST_ROOT/custom"
