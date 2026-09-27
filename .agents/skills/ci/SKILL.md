@@ -562,6 +562,9 @@ current `main` tip. That full run is what issues the receipt. Three traps:
 - The Test step is `continue-on-error` on pull requests, so its `conclusion`
   is always `success`. Anything that must know whether the tests passed (the
   issuer, `Surface ctest failures`) reads `steps.ctest.outcome`.
+  Because of that, `Surface ctest failures` must always exit 0: it runs on
+  a non-gating PR-head failure, and under `bash -e -o pipefail` a grep that
+  matched no Catch2 assertion once made the reporter the job's only red step.
 - REST `auto_merge` is non-null only while an armed PR waits on its checks; it
   reads null once the queue holds the PR. Arming a PR whose checks are already
   green enqueues it at once and starts no new run, so it gets no receipt.

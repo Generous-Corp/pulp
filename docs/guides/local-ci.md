@@ -2227,7 +2227,11 @@ or a required check fails because of a stale base.
 That full run is evidence, not the pull request's gate: the step is
 `continue-on-error` on pull requests, so a failure there leaves the `macos`
 check meaning build + fast tier, and the `Surface ctest failures` step still
-reports it. When it passes, the macOS or Linux matrix child publishes a two-day
+reports it. That reporter always exits 0 (errexit off, every possibly-empty
+grep guarded): it runs whenever the Test step's outcome is failure, so a
+non-zero exit from it alone would turn the required check red for a failure
+the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`
+executes the step's script under GitHub's `bash -e -o pipefail`. When it passes, the macOS or Linux matrix child publishes a two-day
 `protected-validation-<target>-<head>-<base>` receipt. The issuer requires the
 Test step's `outcome` to be `success` (its `conclusion` is always success under
 `continue-on-error`). The receipt binds the
