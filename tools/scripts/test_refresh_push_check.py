@@ -211,6 +211,7 @@ def case_conflict_resolution_logged_not_warned(fx: Fixture) -> None:
     # conflicted merge. The classifier needs that ref to recognize the merge
     # as a main refresh, so restore the exact main parent explicitly.
     main_parent = fx.git("rev-parse", "HEAD^2")
+    assert len(fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
     fx.git("update-ref", "refs/remotes/origin/main", main_parent)
     fx.set_pr(pr_fixture(head=feat))
     res = fx.run(feat)
