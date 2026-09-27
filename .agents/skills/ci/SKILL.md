@@ -1522,6 +1522,17 @@ and, as the safety control, `would_skip` followed by `ran_failed` (must be
 0). Do not turn the verdict into a skip in build.yml; that is a decisions-
 contract amendment with the shadow data as its Step Zero.
 
+## Script tests declare inputs in `test/ctest_script_inputs.json`
+
+The build graph cannot see what a Python, Node or shell ctest reads, so the
+affected-test shadow used to count all ~400 of them affected on any script
+change (44% of gate test-seconds). `tools/scripts/script_test_inputs.py`
+generates their inputs (Chromium's `.pydeps` pattern) and the pr-fast
+`script-test-inputs-drift` check fails a PR head whose list is stale:
+regenerate with `--write` against a configured build dir and commit the file.
+A test the generator cannot bound (cmake-driven, no command) has no entry
+and stays fail-closed; do not hand-edit entries to make a test look narrower.
+
 ## The affected-tests shadow annotation selects nothing
 
 Merge-group `macos` jobs carry a `pulp-affected-tests-shadow/v1` notice

@@ -84,11 +84,15 @@ class Fixture:
             {"name": "B: one", "command": [f"{b}/test/pulp-test-b", "B: one"], "properties": []},
             {"name": "check-script", "command": ["/usr/bin/python3", f"{s}/tools/scripts/check.py"],
              "properties": [{"name": "WORKING_DIRECTORY", "value": s}]},
+            {"name": "declared-script", "command": ["/usr/bin/python3", f"{s}/tools/scripts/declared.py"],
+             "properties": []},
         ]}
+        self.script_inputs = {"declared-script": ["tools/scripts/declared.py", "tools/scripts/lib/"]}
 
-    def compute(self, changed: list[str], failed: list[str] = ()) -> dict:
+    def compute(self, changed: list[str], failed: list[str] = (), script_inputs=None) -> dict:
         return ats.compute(self.build, self.src, ats.parse_build_ninja(self.ninja),
-                           ats.parse_ninja_deps(self.deps), self.inventory, changed, list(failed))
+                           ats.parse_ninja_deps(self.deps), self.inventory, changed, list(failed),
+                           self.script_inputs if script_inputs is None else script_inputs)
 
 
 class AffectedSetTests(unittest.TestCase):
@@ -120,25 +124,47 @@ class AffectedSetTests(unittest.TestCase):
 
     def test_cmake_change_selects_everything(self) -> None:
         r, n = self.selected(["CMakeLists.txt"])
-        self.assertEqual((n, r["select_all"], r["reason"]), (4, True, "cmake changed"))
+        self.assertEqual((n, r["select_all"], r["reason"]), (5, True, "cmake changed"))
 
     def test_empty_diff_selects_everything(self) -> None:
         r, n = self.selected([])
-        self.assertEqual((n, r["reason"]), (4, "empty diff"))
+        self.assertEqual((n, r["reason"]), (5, "empty diff"))
 
     def test_unread_changed_file_fails_closed(self) -> None:
         r, n = self.selected(["misc/data.bin"])
-        self.assertEqual(n, 4, r)
+        self.assertEqual(n, 5, r)
         self.assertEqual(r["unread_changed"], ["misc/data.bin"])
 
     def test_known_non_inputs_select_nothing(self) -> None:
         r, n = self.selected(["docs/x.md"])
         self.assertEqual(n, 0, r)
 
-    def test_script_surface_selects_script_tests_only(self) -> None:
+    def test_script_surface_selects_only_undeclared_script_tests(self) -> None:
+        # check-script has no declared inputs: any script-surface change selects it.
+        # declared-script lists its inputs: an unrelated tools/ change leaves it out.
         r, n = self.selected(["tools/scripts/other.py"])
         self.assertEqual(n, 1, r)
         self.assertEqual(r["scripts_changed"], True)
+        self.assertEqual((r["script_declared"], r["script_undeclared"]), (1, 1))
+        self.assertEqual((r["script_selected_declared"], r["script_selected_undeclared"]), (0, 1))
+
+    def test_declared_script_test_is_selected_by_its_inputs(self) -> None:
+        # The entry script is on the command line, so the graph hop already
+        # selects it; the declared list is what reaches the inputs behind it.
+        # (the undeclared check-script is selected too: any script-surface
+        # change is a fail-closed hit for a test without a list.)
+        r, n = self.selected(["tools/scripts/declared.py"])
+        self.assertEqual(n, 2, r)
+        self.assertEqual(r["script_selected_undeclared"], 1, r)
+        r, n = self.selected(["tools/scripts/lib/util.py"])   # directory input
+        self.assertEqual(r["script_selected_declared"], 1, r)
+        r, n = self.selected([ats.SCRIPT_INPUTS_LIST])        # the list itself moved
+        self.assertEqual(r["script_selected_declared"], 1, r)
+
+    def test_without_a_list_every_script_test_keeps_the_fail_closed_rule(self) -> None:
+        r = self.fx.compute(["tools/scripts/other.py"], script_inputs={})
+        self.assertEqual(r["selected"], 2, r)
+        self.assertEqual(r["script_undeclared"], 2)
 
     def test_failures_outside_the_selection_are_counted_by_name(self) -> None:
         r, _ = self.selected(["core/a.cpp"], failed=["A: one", "B: one", "check-script"])
@@ -196,7 +222,7 @@ class ParsersAndCliTests(unittest.TestCase):
         line = [ln for ln in proc.stdout.splitlines() if ln.startswith("::notice title=affected-tests-shadow::")]
         self.assertEqual(len(line), 1, proc.stdout)
         rec = json.loads(line[0].split("::", 2)[2])
-        self.assertEqual((rec["schema"], rec["selected"], rec["total"]), (ats.SCHEMA, 2, 4))
+        self.assertEqual((rec["schema"], rec["selected"], rec["total"]), (ats.SCHEMA, 2, 5))
         self.assertEqual(rec["failed_outside_selection"], 1)
         self.assertEqual(rec["event"], "merge_group")
 

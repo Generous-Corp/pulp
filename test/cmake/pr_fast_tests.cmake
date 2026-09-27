@@ -32,6 +32,19 @@ add_test(NAME pr-fast-tier-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_fast_tier_check.py")
 
+# Declared inputs of script-driven ctests (test/ctest_script_inputs.json) must
+# match what the scripts import and name today, or the affected-test shadow
+# would trust a stale list. Regenerate with
+#   python3 tools/scripts/script_test_inputs.py --build-dir <dir> --write
+add_test(NAME script-test-inputs-drift
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/script_test_inputs.py"
+        --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120)
+add_test(NAME script-test-inputs-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")
+
 # The native-build and iOS-compile skip classifier, including the check that
 # every test/ or docs/ path non-test CMake names stays denied from the iOS skip
 # allowlist. Needs tomllib.
@@ -50,6 +63,8 @@ endif()
 set(PULP_PR_FAST_TESTS
     pr-fast-tier-contract
     pr-fast-tier-selftest
+    script-test-inputs-drift
+    script-test-inputs-selftest
     advisory-macos-runner-policy
     agent-capability-manifest-check
     agent-hook-paths
