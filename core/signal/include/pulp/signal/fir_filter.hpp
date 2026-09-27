@@ -3,15 +3,28 @@
 /// @file fir_filter.hpp
 /// Finite Impulse Response filter with configurable order and coefficients.
 
-#include <vector>
-#include <cstring>
-#include <cmath>
+#include <pulp/simd/simd.hpp>
+
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <numeric>
+#include <vector>
 
 namespace pulp::signal {
 
-/// FIR filter with arbitrary coefficients and efficient circular buffer.
+/// FIR filter with arbitrary coefficients.
+///
+/// History is kept linear (oldest to newest, contiguous) rather than in a
+/// wrapping ring, so every output is one contiguous dot product and a block of
+/// outputs is one pulp::simd::correlate() call, which the SIMD backends
+/// vectorize across outputs. Appending past the end of the history buffer
+/// moves the last `taps - 1` samples back to the front, once per
+/// kBlockCapacity samples.
+///
+/// Numerics: taps accumulate oldest-first in the backend's order, so output
+/// matches a textbook sequential sum to rounding, not to the bit.
 ///
 /// RT contract: `set_coefficients()` allocates and must run off the audio
 /// thread. `process()` and `reset()` allocate no memory after coefficients are
@@ -25,48 +38,75 @@ namespace pulp::signal {
 template <typename SampleType = float>
 class FirFilterT {
 public:
-    FirFilterT() = default;
+  /// Samples appended between history compactions. A block longer than this
+  /// is processed in slices of at most this many outputs.
+  static constexpr std::size_t kBlockCapacity = 512;
 
-    /// Set filter coefficients. The number of taps equals coefficients.size().
-    void set_coefficients(std::vector<SampleType> coeffs) {
-        coefficients_ = std::move(coeffs);
-        buffer_.resize(coefficients_.size(), SampleType{0.0f});
-        write_pos_ = 0;
-    }
+  /// Per-sample calls with at most this many taps sum inline instead of
+  /// calling the dot kernel, whose call overhead would dominate.
+  static constexpr std::size_t kInlineTaps = 8;
+
+  FirFilterT() = default;
+
+  /// Set filter coefficients. The number of taps equals coefficients.size().
+  void set_coefficients(std::vector<SampleType> coeffs) {
+      coefficients_ = std::move(coeffs);
+      reversed_.assign(coefficients_.rbegin(), coefficients_.rend());
+      const std::size_t taps = coefficients_.size();
+      history_.assign(taps == 0 ? 0 : (taps - 1) + kBlockCapacity, SampleType{0});
+      head_ = taps == 0 ? 0 : taps - 1;
+  }
 
     /// Get current coefficient count (filter order + 1).
     int order() const { return static_cast<int>(coefficients_.size()); }
 
+    /// The taps in time order (h[0] multiplies the newest input).
+    const std::vector<SampleType>& coefficients() const noexcept {
+        return coefficients_;
+    }
+
     /// Process a single sample.
     SampleType process(SampleType input) {
-        if (coefficients_.empty()) return input;
-
-        buffer_[write_pos_] = input;
-
-        SampleType output = SampleType{0.0f};
-        int n = static_cast<int>(coefficients_.size());
-        int pos = write_pos_;
-
-        for (int i = 0; i < n; ++i) {
-            output += coefficients_[static_cast<size_t>(i)] * buffer_[static_cast<size_t>(pos)];
-            if (--pos < 0) pos = n - 1;
+        const std::size_t taps = coefficients_.size();
+        if (taps == 0)
+            return input;
+        if (head_ == history_.size())
+            compact();
+        history_[head_] = input;
+        const SampleType* window = history_.data() + head_ + 1 - taps;
+        ++head_;
+        if (taps <= kInlineTaps) {
+            SampleType output = SampleType{0};
+            for (std::size_t k = 0; k < taps; ++k)
+                output += window[k] * reversed_[k];
+            return output;
         }
-
-        write_pos_ = (write_pos_ + 1) % n;
-        return output;
+        return pulp::simd::dot(window, reversed_.data(), taps);
     }
 
     /// Process a buffer of samples in-place.
     void process(SampleType* data, int num_samples) {
-        for (int i = 0; i < num_samples; ++i) {
-            data[i] = process(data[i]);
+        const std::size_t taps = coefficients_.size();
+        if (taps == 0 || num_samples <= 0)
+            return;
+        const auto total = static_cast<std::size_t>(num_samples);
+        std::size_t done = 0;
+        while (done < total) {
+            if (head_ == history_.size())
+                compact();
+            const std::size_t count = std::min(history_.size() - head_, total - done);
+            std::copy_n(data + done, count, history_.data() + head_);
+            pulp::simd::correlate(history_.data() + head_ + 1 - taps, reversed_.data(), data + done,
+                                  count, taps);
+            head_ += count;
+            done += count;
         }
     }
 
     /// Reset the internal delay buffer to zero.
     void reset() {
-        std::fill(buffer_.begin(), buffer_.end(), SampleType{0.0f});
-        write_pos_ = 0;
+        std::fill(history_.begin(), history_.end(), SampleType{0.0f});
+        head_ = coefficients_.empty() ? 0 : coefficients_.size() - 1;
     }
 
     // ── Coefficient generators ──────────────────────────────────────────
@@ -117,9 +157,19 @@ public:
     }
 
 private:
+  // Keeps the newest taps - 1 inputs and makes room at the end.
+  void compact() noexcept {
+      const std::size_t keep = coefficients_.size() - 1;
+      std::copy(history_.begin() + static_cast<std::ptrdiff_t>(head_ - keep),
+                history_.begin() + static_cast<std::ptrdiff_t>(head_), history_.begin());
+      head_ = keep;
+  }
+
     std::vector<SampleType> coefficients_;
-    std::vector<SampleType> buffer_;
-    int write_pos_ = 0;
+    std::vector<SampleType> reversed_;
+    // [0, head_) holds past input, oldest first; head_ >= taps - 1 always.
+    std::vector<SampleType> history_;
+    std::size_t head_ = 0;
 };
 
 using FirFilter = FirFilterT<float>;

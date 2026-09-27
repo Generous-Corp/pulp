@@ -5,6 +5,7 @@
 
 #include <pulp/signal/fir_filter.hpp>
 #include <pulp/signal/windowed_sinc_design.hpp>
+#include <pulp/simd/simd.hpp>
 
 #include <algorithm>
 #include <array>
@@ -29,36 +30,59 @@ namespace detail {
 // general LinearPhaseOversamplingStage2x below supports selectable quality and
 // tap counts; this stage deliberately fixes the 65-tap prototype so its state
 // can live entirely inline.
+//
+// Half-band structure: apart from the centre, only odd-offset taps are
+// non-zero, and an odd offset always reaches a sample of the opposite time
+// parity. The stage therefore keeps one linear history per parity; each
+// output is the centre tap on its own-parity history plus one contiguous
+// 32-tap pulp::simd::dot over the other parity's history. Histories move
+// their newest samples back to the front once every kCapacity writes.
 class FixedHalfBandFir65 {
   public:
     FixedHalfBandFir65() noexcept {
-        // Force the shared coefficient table to initialize off the audio path.
+        // Force the shared coefficient tables to initialize off the audio path.
         static_cast<void>(coefficients());
+        static_cast<void>(odd_taps_oldest_first());
     }
 
     double process(double input) noexcept {
-        history_[write_] = input;
-        const auto& taps = coefficients();
-
-        // A 65-tap half-band prototype has only the centre and odd-indexed
-        // coefficients non-zero (the centre index is 32).
-        double output = taps[kCentre] * history_at(kCentre);
-        for (std::size_t tap = 1; tap < kTaps; tap += 2)
-            output += taps[tap] * history_at(tap);
-
-        if (++write_ == kTaps)
-            write_ = 0;
-        return output;
+        auto& own = parity_[phase_];
+        auto& other = parity_[phase_ ^ 1u];
+        if (own.head == kHistory)
+            own.compact();
+        own.samples[own.head++] = input;
+        // x[n - 32] is 16 own-parity samples back; x[n - 1 - 2j] for
+        // j = 0..31 are the other parity's newest 32, oldest first.
+        const double centre = coefficients()[kCentre] * own.samples[own.head - 1 - kCentre / 2];
+        const double odd = pulp::simd::dot(other.samples.data() + other.head - kOddTaps,
+                                           odd_taps_oldest_first().data(), kOddTaps);
+        phase_ ^= 1u;
+        return centre + odd;
     }
 
     void reset() noexcept {
-        history_.fill(0.0);
-        write_ = 0;
+        for (auto& p : parity_) {
+            p.samples.fill(0.0);
+            p.head = kKeep;
+        }
+        phase_ = 0;
+    }
+
+    /// The 65 prototype taps (symmetric; centre index 32; even offsets zero).
+    static const std::array<double, 65>& coefficients() noexcept {
+        static const std::array<double, kTaps> result = design();
+        return result;
     }
 
   private:
     static constexpr std::size_t kTaps = 65;
     static constexpr std::size_t kCentre = (kTaps - 1) / 2;
+    static constexpr std::size_t kOddTaps = (kTaps - 1) / 2;
+    // Each parity history must reach back kOddTaps samples (the dot) and
+    // kCentre / 2 + 1 samples (the centre tap).
+    static constexpr std::size_t kKeep = kOddTaps;
+    static constexpr std::size_t kCapacity = 64;
+    static constexpr std::size_t kHistory = kKeep + kCapacity;
     static constexpr double kBeta = 8.0;
 
     static double sinc(double x) noexcept {
@@ -95,19 +119,31 @@ class FixedHalfBandFir65 {
         return result;
     }
 
-    static const std::array<double, kTaps>& coefficients() noexcept {
-        static const std::array<double, kTaps> result = design();
+    // Odd-offset taps t = 63, 61, ..., 1 (oldest sample first).
+    static const std::array<double, kOddTaps>& odd_taps_oldest_first() noexcept {
+        static const std::array<double, kOddTaps> result = [] {
+            std::array<double, kOddTaps> taps{};
+            for (std::size_t j = 0; j < kOddTaps; ++j)
+                taps[j] = coefficients()[kTaps - 2 - 2 * j];
+            return taps;
+        }();
         return result;
     }
 
-    double history_at(std::size_t delay) const noexcept {
-        const std::size_t index =
-            write_ >= delay ? write_ - delay : write_ + kTaps - delay;
-        return history_[index];
-    }
+    struct ParityHistory {
+        // [0, head) holds past same-parity input, oldest first; head >= kKeep.
+        std::array<double, kHistory> samples{};
+        std::size_t head = kKeep;
 
-    std::array<double, kTaps> history_{};
-    std::size_t write_ = 0;
+        void compact() noexcept {
+            std::copy(samples.begin() + static_cast<std::ptrdiff_t>(head - kKeep),
+                      samples.begin() + static_cast<std::ptrdiff_t>(head), samples.begin());
+            head = kKeep;
+        }
+    };
+
+    std::array<ParityHistory, 2> parity_{};
+    unsigned phase_ = 0;
 };
 
 template <typename SampleType> class LinearPhaseOversamplingStage2x {

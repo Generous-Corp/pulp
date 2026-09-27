@@ -1,0 +1,2321 @@
+{
+ "_comment": "Changed-file lists of the 177 pull requests merged to main between 2026-09-21T14:00Z and 2026-09-27T02:00Z, from the GitHub pull-request files API. test_wide_non_native.py replays the classifier over them.",
+ "prs": [
+  {
+   "number": 8540,
+   "branch": "fix/codecov-complete-reporting",
+   "files": [
+    ".github/actions/upload-codecov-report/action.yml",
+    ".github/workflows/coverage.yml",
+    "ci/coverage-surfaces.yaml",
+    "codecov.yml",
+    "scripts/run_coverage.sh",
+    "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/test_codecov_config.py",
+    "tools/scripts/test_codecov_upload_contract.py",
+    "tools/scripts/test_coverage_surface_contract.py",
+    "tools/scripts/test_ios_gate_skip_contract.py",
+    "tools/scripts/test_resolve_linux_route.py",
+    "tools/scripts/test_run_coverage.py"
+   ]
+  },
+  {
+   "number": 8591,
+   "branch": "feat/au-midi2-and-mpe",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/auv2/SKILL.md",
+    ".agents/skills/auv3/SKILL.md",
+    ".agents/skills/mpe/SKILL.md",
+    "core/format/include/pulp/format/au_v2_common.hpp",
+    "core/format/src/au_adapter.mm",
+    "core/format/src/au_v2_adapter.cpp",
+    "core/format/src/au_v2_common.cpp",
+    "core/format/src/au_v2_instrument.cpp",
+    "core/format/src/au_v2_midi_processor.cpp",
+    "core/midi/include/pulp/midi/ump_conversion.hpp",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json",
+    "test/test_au_plugin_state.mm",
+    "test/test_midi.cpp",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_registry.py"
+   ]
+  },
+  {
+   "number": 8602,
+   "branch": "feature/overflow-scroll-container",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260920-pr8602-overflow-scroll-container.json",
+    "core/view/include/pulp/view/ui_components.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/ui_components.cpp",
+    "core/view/src/view.cpp",
+    "core/view/src/view_paint.cpp",
+    "core/view/src/widget_bridge/style_visual_api.cpp",
+    "test/cmake/script_canvas_render_tests.cmake",
+    "test/test_overflow_scroll.cpp",
+    "test/test_widget_bridge_css_per_edge.cpp"
+   ]
+  },
+  {
+   "number": 8603,
+   "branch": "fix/8387-probe-names-its-reason",
+   "files": [
+    ".agents/skills/trace-analysis/SKILL.md",
+    ".agents/skills/trace-sql/SKILL.md",
+    ".agents/skills/trace-sql/pulp_gpu_health_transitions.sql",
+    ".agents/skills/trace-sql/pulp_gpu_probe_correlation.sql",
+    "docs/guides/tracing.md",
+    "docs/reference/cli.md",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis_tests.rs",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs"
+   ]
+  },
+  {
+   "number": 8623,
+   "branch": "feat/developer-efficiency-next",
+   "files": [
+    "docs/guides/agent-efficiency-audits.md",
+    "experimental/pulp-rs/Cargo.lock",
+    "experimental/pulp-rs/Cargo.toml",
+    "experimental/pulp-rs/src/build_context.rs",
+    "experimental/pulp-rs/src/build_governor.rs",
+    "experimental/pulp-rs/src/cmd/orchestrate.rs",
+    "experimental/pulp-rs/src/lib.rs",
+    "planning",
+    "tools/ci/governed-build.sh",
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/release-cli-local.sh",
+    "tools/scripts/shell_portability_check.py",
+    "tools/scripts/shell_portability_rules.json",
+    "tools/scripts/test_shell_portability_check.py"
+   ]
+  },
+  {
+   "number": 8628,
+   "branch": "feature/8458-observability-20260920",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260920-pr8458-timing-interaction-gates.json",
+    "docs/tools/importer-differential-lab.md",
+    "test/test_importer_differential_lab.py",
+    "tools/import-design/browser_capture/README.md",
+    "tools/import-design/browser_capture/interaction_executor.mjs",
+    "tools/import-design/browser_capture/interaction_plan.mjs",
+    "tools/import-design/browser_capture/interaction_plan_protocol.json",
+    "tools/import-design/browser_capture/interactions.test.mjs",
+    "tools/import-validation/importer_differential/cli.py",
+    "tools/import-validation/importer_differential/core.py",
+    "tools/import-validation/importer_differential/reports.py"
+   ]
+  },
+  {
+   "number": 8630,
+   "branch": "fix/gpu-ledger-identity-churn-guard",
+   "files": [
+    ".gitattributes",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/sequencer_exposure_check.py"
+   ]
+  },
+  {
+   "number": 8633,
+   "branch": "feat/param-visibility-attributes-20260920",
+   "files": [
+    ".agents/skills/auv2/SKILL.md",
+    ".agents/skills/auv3/SKILL.md",
+    ".agents/skills/clap/SKILL.md",
+    ".agents/skills/vst3/SKILL.md",
+    "core/format/include/pulp/format/clap_entry.hpp",
+    "core/format/src/au_adapter.mm",
+    "core/format/src/au_v2_common.cpp",
+    "core/format/src/vst3_adapter.cpp",
+    "core/state/include/pulp/state/parameter.hpp",
+    "test/cmake/core_audio_platform_format_tests.cmake",
+    "test/test_au_param_visibility.mm",
+    "test/test_clap_param_flags.cpp",
+    "test/test_vst3_param_display.cpp"
+   ]
+  },
+  {
+   "number": 8634,
+   "branch": "fix/skill-path-map-coverage",
+   "files": [
+    "tools/scripts/skill_path_map.json"
+   ]
+  },
+  {
+   "number": 8636,
+   "branch": "perf/materialized-reapply-scope-20260920",
+   "files": [
+    ".agents/skills/import-design/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260920-pr8636-materialized-reapply-scope.json",
+    "packages/pulp-react/src/host-config.ts",
+    "packages/pulp-react/src/prop-applier.ts",
+    "packages/pulp-react/test/host-config-materialized-metadata.test.ts",
+    "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_entry.mjs"
+   ]
+  },
+  {
+   "number": 8638,
+   "branch": "feature/press-reach-instrument-v2",
+   "files": [
+    ".agents/skills/web-plugins/SKILL.md",
+    ".github/vellum-change-events/20260920-press-reach-instrument.json",
+    ".github/vellum-expansion-watch-events/20260920-press-reach-instrument-watch.json",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/pointer_dispatch.hpp",
+    "core/view/include/pulp/view/press_reach.hpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/src/press_reach.cpp",
+    "docs/status/consumption-profiles.json",
+    "test/cmake/design_import_view_widget_tests.cmake",
+    "test/test_press_reach.cpp",
+    "tools/cmake/PulpWebUi.cmake"
+   ]
+  },
+  {
+   "number": 8639,
+   "branch": "feature/plugin-host-pointer-coalescing",
+   "files": [
+    ".agents/skills/view-bridge/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260920-pr8639-plugin-host-drag-coalescing.json",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/host_drag_coalescer.hpp",
+    "core/view/platform/mac/plugin_view_host_mac.mm",
+    "core/view/src/host_drag_coalescer.cpp",
+    "docs/status/consumption-profiles.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/test_host_drag_coalescer.cpp"
+   ]
+  },
+  {
+   "number": 8644,
+   "branch": "fix/build-cancel-in-progress-inputs-context",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/test_build_workflow.py"
+   ]
+  },
+  {
+   "number": 8648,
+   "branch": "feature/plugin-key-routing-20260920",
+   "files": [
+    ".agents/skills/daw-smoke/SKILL.md",
+    ".agents/skills/view-bridge/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260920-pr8648-plugin-key-routing-watch.json",
+    "core/format/src/vst3_plug_view.cpp",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/plugin_key_routing.hpp",
+    "core/view/platform/mac/plugin_view_host_mac.mm",
+    "core/view/src/plugin_key_routing.cpp",
+    "docs/status/consumption-profiles.json",
+    "test/cmake/view_host_tests.cmake",
+    "test/test_plugin_key_routing.cpp",
+    "test/test_plugin_view_host_key_focus.mm",
+    "tools/testing/daw-smoke/keyboard_routing.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py",
+    "tools/testing/daw-smoke/test_reaper_smoke.py"
+   ]
+  },
+  {
+   "number": 8656,
+   "branch": "fix/ci-wedge-triage-and-guards",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
+    ".github/workflows/examples-validation.yml",
+    "CLAUDE.md",
+    "docs/guides/local-ci.md"
+   ]
+  },
+  {
+   "number": 8657,
+   "branch": "feat/gpu-submission-evidence-20260920",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/skia-gpu-build/SKILL.md",
+    ".agents/skills/view-bridge/SKILL.md",
+    ".github/vellum-change-events/20260920-gpu-submission-evidence.json",
+    ".github/vellum-expansion-watch-events/20260920-gpu-submission-evidence-watch.json",
+    "core/render/src/skia_surface.cpp",
+    "core/view/include/pulp/view/window_host.hpp",
+    "core/view/platform/mac/window_host_mac.mm",
+    "docs/status/sequencer-exposure/rows/window-host-gpu-submission-evidence.json",
+    "docs/validation/gpu-first-visible-a3-acceptance.md",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mac_platform_harness.cpp",
+    "test/test_skia_frame_outcome_gpu.cpp"
+   ]
+  },
+  {
+   "number": 8658,
+   "branch": "fix/apply-friction-liveness-and-vellum-preflight",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/forge-app-delivery/SKILL.md",
+    ".agents/skills/pulp-vellum-change-routing/SKILL.md",
+    ".agents/skills/ship/SKILL.md",
+    ".githooks/pre-push",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/build_combined_installer.sh",
+    "tools/scripts/gates.sh",
+    "tools/scripts/lib/heartbeat_wait.sh",
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/test_build_combined_installer.py",
+    "tools/scripts/test_vellum_watch_preflight.py",
+    "tools/scripts/vellum_watch_preflight.py"
+   ]
+  },
+  {
+   "number": 8662,
+   "branch": "fix/widen-thread-assert-guard-20260920",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    "docs/status/sequencer-exposure/rows/timeline-transaction-test-thread-safety.json",
+    "test/cmake/quality_tests.cmake",
+    "test/test_timeline_transactions.cpp",
+    "tools/scripts/test_thread_assert_check.py",
+    "tools/scripts/thread_assert_check.py"
+   ]
+  },
+  {
+   "number": 8663,
+   "branch": "fix/gpu-check-names-dirty-pinned-paths",
+   "files": [
+    ".agents/skills/pulp-vellum-change-routing/SKILL.md",
+    "tools/scripts/gpu_handoff_provenance.py",
+    "tools/scripts/test_gpu_handoff_provenance.py"
+   ]
+  },
+  {
+   "number": 8666,
+   "branch": "fix/name-the-working-remedy-20260920",
+   "files": [
+    "tools/scripts/connected_git_history.py"
+   ]
+  },
+  {
+   "number": 8668,
+   "branch": "fix/workflow-lint-ios-gate-127-20260920",
+   "files": [
+    "tools/scripts/test_ios_gate_skip_contract.py"
+   ]
+  },
+  {
+   "number": 8669,
+   "branch": "fix/workflow-lint-parallelism-guarded-20260920",
+   "files": [
+    "tools/scripts/test_resolve_linux_route.py"
+   ]
+  },
+  {
+   "number": 8670,
+   "branch": "fix/workflow-lint-contracts-20260920",
+   "files": [
+    "tools/scripts/test_ios_gate_skip_contract.py",
+    "tools/scripts/test_resolve_linux_route.py"
+   ]
+  },
+  {
+   "number": 8671,
+   "branch": "batch/midi-message-coverage-20260920",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/mpe/SKILL.md",
+    ".agents/skills/view-bridge/SKILL.md",
+    ".agents/skills/vst3/SKILL.md",
+    "core/format/include/pulp/format/processor.hpp",
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/src/vst3_adapter.cpp",
+    "core/midi/include/pulp/midi/message.hpp",
+    "core/midi/include/pulp/midi/ump_conversion.hpp",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json",
+    "test/test_midi.cpp",
+    "test/test_vst3_plugin_state.cpp",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_registry.py"
+   ]
+  },
+  {
+   "number": 8672,
+   "branch": "fix/gpu-audio-sdk-lifecycle-followup-20260920",
+   "files": [
+    "test/cmake/test_gpu_audio_sdk_consumer.cmake"
+   ]
+  },
+  {
+   "number": 8675,
+   "branch": "fix/ios-gate-contract-harness",
+   "files": [
+    "tools/scripts/test_ios_gate_skip_contract.py",
+    "tools/scripts/test_resolve_linux_route.py"
+   ]
+  },
+  {
+   "number": 8678,
+   "branch": "fix/gate-fail-closed-20260920",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".githooks/lib/gate-output.sh",
+    ".githooks/pre-push",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "tools/scripts/build_parallelism_guard.py",
+    "tools/scripts/skill_sync_check.py",
+    "tools/scripts/test_build_parallelism_guard.py",
+    "tools/scripts/test_prepush_cannot_measure.py",
+    "tools/scripts/version_bump_check.py"
+   ]
+  },
+  {
+   "number": 8679,
+   "branch": "repair/s4-reentry-20260921",
+   "files": [
+    "core/format/include/pulp/format/graph_runtime_executor.hpp",
+    "core/format/src/graph_runtime_executor.cpp",
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "core/host/src/signal_graph.cpp",
+    "core/host/src/signal_graph_prepared_topology_edit.cpp",
+    "core/host/src/timeline_automation_delivery.cpp",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json",
+    "test/CMakeLists.txt",
+    "test/cmake/sample_region_sequencer_tests.cmake",
+    "test/test_sample_region_sequencer.cpp",
+    "tools/scripts/agent_capability_catalog_signal.py",
+    "tools/scripts/agent_capability_manifest.py"
+   ]
+  },
+  {
+   "number": 8680,
+   "branch": "fix/merge-queue-deadlock-guard",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/merge-stall-check.yml",
+    ".github/workflows/workflow-lint.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/merge_stall_watchdog.py",
+    "tools/scripts/test_merge_stall_watchdog.py"
+   ]
+  },
+  {
+   "number": 8681,
+   "branch": "fix/queued-job-label-reconciliation",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/runner-health-check.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/queue_age_watchdog.py",
+    "tools/scripts/test_queue_age_watchdog.py"
+   ]
+  },
+  {
+   "number": 8682,
+   "branch": "fix/ios-gate-contract-20260921",
+   "files": [
+    "tools/scripts/test_ios_gate_skip_contract.py"
+   ]
+  },
+  {
+   "number": 8684,
+   "branch": "fix/generated-version-regenerator-pin-20260921",
+   "files": [
+    "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ]
+  },
+  {
+   "number": 8686,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8688,
+   "branch": "feature/sample-region-f4-20260919-dsp2",
+   "files": [
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/src/au_adapter.mm",
+    "core/format/src/au_v2_adapter.cpp",
+    "core/format/src/vst3_adapter.cpp",
+    "examples/sample-region-allpass/allpass_processor.cpp",
+    "examples/sample-region-allpass/allpass_processor.hpp",
+    "examples/sample-region-allpass/au_v2_entry.cpp",
+    "examples/sample-region-allpass/clap_entry.cpp",
+    "examples/sample-region-allpass/vst3_entry.cpp",
+    "test/fixtures/sample-region/native-host-contract.json",
+    "test/test_au_plugin_state.mm",
+    "test/test_vst3_plugin_state.cpp",
+    "tools/scripts/sample_region_native_package_smoke.py",
+    "tools/testing/daw-smoke/sample_region_native_audio_oracle.py",
+    "tools/testing/daw-smoke/sample_region_native_reaper.lua",
+    "tools/testing/daw-smoke/sample_region_native_reaper.py",
+    "tools/testing/daw-smoke/sample_region_native_smoke.py",
+    "tools/testing/daw-smoke/test_sample_region_native_reaper.py",
+    "tools/testing/daw-smoke/test_sample_region_native_smoke.py"
+   ]
+  },
+  {
+   "number": 8691,
+   "branch": "fix/dawn-timestamp-quantization-20260921",
+   "files": [
+    ".github/vellum-change-events/20260921-dawn-timestamp-quantization.json",
+    ".github/vellum-expansion-watch-events/20260921-pr8691-dawn-timestamp-quantization-watch.json",
+    "core/render/include/pulp/render/gpu_render_time.hpp",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "test/test_gpu_render_time.cpp"
+   ]
+  },
+  {
+   "number": 8693,
+   "branch": "docs/redraw-inspiration-20260921",
+   "files": [
+    "docs/reference/licensing.md"
+   ]
+  },
+  {
+   "number": 8694,
+   "branch": "integration/import-graphite-p1-land-20260921",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260918-text-diagnostics-watch.json",
+    ".github/vellum-expansion-watch-events/20260919-p1a-vite-import-stager-watch.json",
+    "CLAUDE.md",
+    "core/view/src/design_import.cpp",
+    "docs/status/tools.yaml",
+    "test/fixtures/import-differential/13-canvas-primitives.html",
+    "test/fixtures/import-differential/14-canvas-state.html",
+    "test/fixtures/import-differential/15-svg-shapes.html",
+    "test/fixtures/import-differential/16-svg-invalid.html",
+    "test/fixtures/import-differential/canvas-svg-manifest.json",
+    "test/fixtures/imports/claude/vite-assets-hero.png",
+    "test/fixtures/imports/claude/vite-assets.html",
+    "test/test_design_import_ir.cpp",
+    "test/test_html_project_stager.cpp",
+    "tools/harness/README.md",
+    "tools/harness/differential/__init__.py",
+    "tools/harness/differential/__main__.py",
+    "tools/harness/differential/contract.py",
+    "tools/harness/tests/test_differential_contract.py",
+    "tools/import-design/browser_capture/README.md",
+    "tools/import-design/browser_capture/native_text_diagnostics.mjs",
+    "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/text_diagnostics.mjs",
+    "tools/import-design/browser_capture/text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/text_diagnostics_native_proof.mjs",
+    "tools/import-design/design_ir_observe.cpp",
+    "tools/import-design/html_project_stager.cpp",
+    "tools/import-design/text_diagnostic_observer.hpp",
+    "tools/import-validation/importer_differential/cli.py"
+   ]
+  },
+  {
+   "number": 8695,
+   "branch": "test/calibration-diagnostics-coverage-20260921",
+   "files": [
+    "tools/scripts/test_gpu_dpr_v2_evidence.py"
+   ]
+  },
+  {
+   "number": 8696,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt"
+   ]
+  },
+  {
+   "number": 8698,
+   "branch": "fix/visual-python-deps",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260922-pr8698-visual-python-deps-watch.json",
+    ".github/workflows/build.yml",
+    ".github/workflows/workflow-lint.yml",
+    "docs/guides/local-ci.md",
+    "test/cmake/motion_tests.cmake",
+    "test/test_importer_differential_lab.py",
+    "tools/scripts/check_visual_python_deps.py",
+    "tools/scripts/test_check_visual_python_deps.py",
+    "tools/scripts/test_visual_python_deps_step.py",
+    "tools/scripts/test_workflow_lint.py"
+   ]
+  },
+  {
+   "number": 8699,
+   "branch": "fix/win-frame-timer-access",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260921-pr8699-win-frame-timer-access.json",
+    "core/view/platform/win/plugin_view_host_win.cpp"
+   ]
+  },
+  {
+   "number": 8702,
+   "branch": "fix/overlay-declared-parent",
+   "files": [
+    ".agents/skills/engine/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260921-overlay-declared-parent-lifted-submenu.json",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/js/web-compat-element.js",
+    "core/view/js/web-compat-style-decl.js",
+    "core/view/js/web-compat-style-dedup-table.js",
+    "core/view/src/view.cpp",
+    "core/view/src/widget_bridge/event_api.cpp",
+    "docs/reference/compat/css.md",
+    "docs/reference/compat/html.md",
+    "docs/reference/js-bridge.md",
+    "packages/pulp-react/src/bridge-globals.generated.d.ts",
+    "packages/pulp-react/src/bridge-mock-functions.generated.ts",
+    "packages/pulp-react/src/bridge-mock-safe-functions.generated.ts",
+    "packages/pulp-react/src/prop-applier-events.ts",
+    "packages/pulp-react/src/prop-applier.ts",
+    "packages/pulp-react/src/types.ts",
+    "packages/pulp-react/test/prop-applier-overlay.test.ts",
+    "test/test_overlay_routing.cpp",
+    "test/test_web_compat_overlay.cpp",
+    "tools/scripts/generate_widget_bridge_api.py"
+   ]
+  },
+  {
+   "number": 8704,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8707,
+   "branch": "fix/capability-contract-prepush-gate",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/ci/SKILL.md",
+    ".githooks/pre-push",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/gates.sh",
+    "tools/scripts/test_capability_contract_gate.py",
+    "tools/scripts/test_required_macos_alias.py"
+   ]
+  },
+  {
+   "number": 8709,
+   "branch": "fix/workerpool-first-batch-timeout-20260922",
+   "files": [
+    "test/test_graph_runtime_worker_pool.cpp"
+   ]
+  },
+  {
+   "number": 8711,
+   "branch": "perf/pr-gate-build-only-20260922",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md"
+   ]
+  },
+  {
+   "number": 8713,
+   "branch": "feature/sdf-shading-substrate",
+   "files": [
+    ".github/vellum-change-events/20260921-sdf-shading-substrate.json",
+    ".github/vellum-expansion-watch-events/20260921-sdf-shading-substrate-watch.json",
+    "core/canvas/include/pulp/canvas/canvas.hpp",
+    "core/canvas/include/pulp/canvas/skia_canvas.hpp",
+    "core/canvas/src/recording_canvas.cpp",
+    "core/canvas/src/skia_canvas_shaders.cpp",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/binding_diagnostics.hpp",
+    "core/view/include/pulp/view/canvas_widget.hpp",
+    "core/view/include/pulp/view/custom_shader_host.hpp",
+    "core/view/include/pulp/view/widget_bridge.hpp",
+    "core/view/src/canvas_widget.cpp",
+    "core/view/src/widget_bridge/canvas2d_api.cpp",
+    "core/view/src/widget_bridge/retained_shader_geometry.cpp",
+    "core/view/src/widget_bridge/retained_shader_geometry.hpp",
+    "core/view/src/widget_bridge/shader_api.cpp",
+    "core/view/src/widget_bridge/state_binding_api.cpp",
+    "core/view/src/widget_bridge/value_channel_binding_service.cpp",
+    "core/view/src/widget_bridge_api_manifest.tsv",
+    "core/view/src/widgets.cpp",
+    "docs/reference/compat/canvas2d.md",
+    "docs/reference/js-bridge.md",
+    "packages/pulp-react/src/bridge-globals.generated.d.ts",
+    "packages/pulp-react/src/bridge-mock-functions.generated.ts",
+    "packages/pulp-react/src/bridge-mock-safe-functions.generated.ts",
+    "packages/pulp-react/src/intrinsics.ts",
+    "packages/pulp-react/src/prop-applier.ts",
+    "packages/pulp-react/src/types.ts",
+    "packages/pulp-react/test/canvas-intrinsic.test.ts",
+    "packages/pulp-react/test/prop-applier-shader.test.ts",
+    "packages/pulp-react/test/widget-bridge-jsx-contract.test.ts",
+    "test/test_canvas.cpp",
+    "test/test_widget_bridge.cpp",
+    "tools/scripts/generate_widget_bridge_api.py"
+   ]
+  },
+  {
+   "number": 8716,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8720,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8721,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt"
+   ]
+  },
+  {
+   "number": 8722,
+   "branch": "feat/pr-flow-audit-20260922",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260922-pr-flow-audit-watch.json",
+    "CLAUDE.md",
+    "docs/status/tools.yaml",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/pr_flow_audit.py",
+    "tools/scripts/test_pr_flow_audit.py"
+   ]
+  },
+  {
+   "number": 8723,
+   "branch": "fix/sdf-geom-gradient-nan",
+   "files": [
+    ".github/vellum-change-events/20260922-sdf-geometry-gradient-nan.json",
+    ".github/vellum-expansion-watch-events/20260922-sdf-geometry-gradient-nan-watch.json",
+    "core/canvas/src/skia_canvas_shaders.cpp",
+    "test/test_canvas.cpp"
+   ]
+  },
+  {
+   "number": 8724,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8725,
+   "branch": "feat/self-describing-ci-20260922",
+   "files": [
+    ".agents/contract.toml",
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/runner-topology-check.yml",
+    "CLAUDE.md",
+    "docs/guides/local-ci.md",
+    "hooks/hooks.json",
+    "hooks/scripts/decisions-contract-pointer.sh",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/ci_routing_digest.py",
+    "tools/scripts/decisions_contract.py",
+    "tools/scripts/fixtures/observed_supply_jobs.json",
+    "tools/scripts/fixtures/shipyard_landing_merge_queue_live.json",
+    "tools/scripts/fleet_advertised_labels.json",
+    "tools/scripts/fleet_snapshot.py",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/test_ci_routing_digest.py",
+    "tools/scripts/test_decisions_contract.py",
+    "tools/scripts/test_fleet_snapshot.py",
+    "tools/scripts/test_runner_topology_static.py",
+    "tools/scripts/tools_registry_check.py"
+   ]
+  },
+  {
+   "number": 8726,
+   "branch": "feature/path-arc-length-measure",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260922-path-arc-length-measure-watch.json",
+    "core/canvas/CMakeLists.txt",
+    "core/canvas/include/pulp/canvas/path_measure.hpp",
+    "core/canvas/src/path_measure.cpp",
+    "docs/status/consumption-profiles.json",
+    "test/cmake/canvas_text_tests.cmake",
+    "test/test_canvas_path_measure.cpp"
+   ]
+  },
+  {
+   "number": 8728,
+   "branch": "feature/gpu-audio-p4-raw-writer-20260922",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260922-pr8728-gpu-audio-raw-writer-watch.json",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_transport.hpp",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_convolver.hpp",
+    "core/gpu_audio/src/detail/gpu_convolver_raw_trace_jsonl.hpp",
+    "core/gpu_audio/src/detail/gpu_convolver_trial_config.hpp",
+    "core/gpu_audio/src/detail/realtime_gpu_audio_path.hpp",
+    "core/gpu_audio/src/detail/shared_io_convolution_pipeline.cpp",
+    "core/gpu_audio/src/detail/shared_io_convolution_pipeline.hpp",
+    "core/gpu_audio/src/detail/shared_io_convolution_session.cpp",
+    "core/gpu_audio/src/detail/shared_io_convolution_session.hpp",
+    "core/gpu_audio/src/detail/shared_io_stamped_bridge.cpp",
+    "core/gpu_audio/src/detail/shared_io_stamped_bridge.hpp",
+    "core/gpu_audio/src/detail/shared_io_trace.hpp",
+    "core/gpu_audio/src/detail/staged_async_trace_ledger.hpp",
+    "core/gpu_audio/src/gpu_audio_transport.cpp",
+    "core/gpu_audio/src/gpu_convolver.cpp",
+    "core/render/include/pulp/render/gpu_compute.hpp",
+    "core/render/src/gpu_compute.cpp",
+    "test/test_gpu_audio_trace.cpp",
+    "test/test_gpu_audio_transport.cpp"
+   ]
+  },
+  {
+   "number": 8729,
+   "branch": "feature/p6-host-package-audit-20260923",
+   "files": [
+    "docs/validation/gpu-audio-p6-host-package-20260923/README.md",
+    "docs/validation/gpu-audio-p6-host-package-20260923/receipt.json"
+   ]
+  },
+  {
+   "number": 8731,
+   "branch": "feature/sample-region-s4-lifecycle-20260922",
+   "files": [
+    "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json",
+    "test/cmake/sample_region_sequencer_tests.cmake",
+    "test/test_sample_region_sequencer.cpp"
+   ]
+  },
+  {
+   "number": 8732,
+   "branch": "fix/visual-deps-no-network-when-satisfied",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-pr8732-visual-deps-offline-watch.json",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/test_visual_python_deps_step.py"
+   ]
+  },
+  {
+   "number": 8734,
+   "branch": "feature/palette-cvd-check",
+   "files": [
+    ".agents/skills/import-design/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-pr8734-palette-cvd-check-watch.json",
+    "docs/reference/licensing.md",
+    "tools/import-validation/check_palette_health.py",
+    "tools/import-validation/test_check_palette_health.py"
+   ]
+  },
+  {
+   "number": 8736,
+   "branch": "docs/trace-canvas-gap",
+   "files": [
+    ".agents/skills/trace-analysis/SKILL.md",
+    ".agents/skills/trace-sql/SKILL.md"
+   ]
+  },
+  {
+   "number": 8738,
+   "branch": "feature/sample-region-c4-dispatch-20260922",
+   "files": [
+    "docs/reference/development-inspector-capabilities.md",
+    "docs/status/sequencer-exposure.json",
+    "docs/status/sequencer-exposure/rows/sample-region-control-operations.json",
+    "examples/capability-control/control-examples.json",
+    "examples/capability-control/generated/cli-walkthrough.sh",
+    "examples/capability-control/generated/mcp-tools.jsonl",
+    "examples/sample-region-allpass/control_editable_standalone.cpp",
+    "examples/sample-region-allpass/control_frozen_standalone.cpp",
+    "examples/sample-region-allpass/control_sample_region_allpass.hpp",
+    "examples/sample-region-allpass/control_targets.cmake",
+    "inspect/CMakeLists.txt",
+    "inspect/include/pulp/inspect/capability_definitions.inc",
+    "inspect/include/pulp/inspect/control_registry_digest.inc",
+    "inspect/include/pulp/inspect/control_sample_region_edit_executor.hpp",
+    "inspect/include/pulp/inspect/control_sample_region_read_executor.hpp",
+    "inspect/include/pulp/inspect/control_sample_region_target.hpp",
+    "inspect/include/pulp/inspect/control_standalone_host.hpp",
+    "inspect/src/control_manifest.cpp",
+    "inspect/src/control_sample_region_edit_executor.cpp",
+    "inspect/src/control_sample_region_read_executor.cpp",
+    "inspect/src/control_sample_region_schemas.hpp",
+    "inspect/src/control_sample_region_target.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "inspect/src/control_standalone_host_minimal.cpp",
+    "test/cmake/sample_region_control_tests.cmake",
+    "test/cmake/sample_region_delivery_tests.cmake",
+    "test/test_control_manifest.cpp",
+    "test/test_control_sample_region.cpp",
+    "test/test_control_sample_region_e2e.cpp",
+    "test/test_mcp_control_adapter.cpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/check_control_shipping_artifact.cmake"
+   ]
+  },
+  {
+   "number": 8739,
+   "branch": "fix/ink-signal-success-cvd",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260923-pr8739-ink-signal-success-cvd-watch.json",
+    "assets/design-system/ink-signal/tokens/css/colors.css",
+    "assets/design-system/ink-signal/tokens/css/semantic.css",
+    "assets/design-system/ink-signal/tokens/pulp.tokens.json",
+    "core/view/src/theme_presets.cpp",
+    "test/test_theme_presets.cpp"
+   ]
+  },
+  {
+   "number": 8741,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8742,
+   "branch": "fix/grid-projection-floor-epsilon",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/timebase/SKILL.md",
+    "core/timebase/include/pulp/timebase/grid_projection.hpp",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json",
+    "test/test_timebase_groove_kernels.cpp",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_manifest.py"
+   ]
+  },
+  {
+   "number": 8743,
+   "branch": "docs/codecov-operating-contract",
+   "files": [
+    "docs/guides/coverage.md"
+   ]
+  },
+  {
+   "number": 8744,
+   "branch": "feature/8448-linux-scheduling-20260923",
+   "files": [
+    "docs/status/gpu-8448-linux-scheduling-boundary.md"
+   ]
+  },
+  {
+   "number": 8749,
+   "branch": "feat/menu-keyboard-navigation",
+   "files": [
+    ".agents/skills/engine/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-menu-keyboard-navigation.json",
+    "core/view/js/web-compat-document.js",
+    "test/cmake/design_import_runtime_bridge_tests.cmake",
+    "test/test_web_compat_menu_keynav.cpp"
+   ]
+  },
+  {
+   "number": 8750,
+   "branch": "fix/sdf-chart-px-and-valid",
+   "files": [
+    ".github/vellum-change-events/20260923-sdf-chart-px-and-shape-set.json",
+    ".github/vellum-expansion-watch-events/20260923-sdf-chart-px-and-shape-set-watch.json",
+    "core/canvas/include/pulp/canvas/canvas.hpp",
+    "core/canvas/src/skia_canvas_shaders.cpp",
+    "test/test_canvas.cpp"
+   ]
+  },
+  {
+   "number": 8751,
+   "branch": "feat/lv2-ttl-emission-and-port-bounds",
+   "files": [
+    ".agents/skills/lv2/SKILL.md",
+    "CLAUDE.md",
+    "CMakeLists.txt",
+    "core/format/include/pulp/format/lv2_entry.hpp",
+    "docs/reference/skills.md",
+    "docs/status/sequencer-exposure/rows/lv2-bundle-manifest-emission.json",
+    "test/cmake/core_audio_platform_format_tests.cmake",
+    "test/native_components/lv2_ttl_fixture_plugin.cpp",
+    "test/test_lv2_bundle_discovery_e2e.cpp",
+    "tools/cmake/PulpPluginFormats.cmake",
+    "tools/lv2-ttlgen/CMakeLists.txt",
+    "tools/lv2-ttlgen/main.cpp"
+   ]
+  },
+  {
+   "number": 8752,
+   "branch": "fix/clapslot-modulatable-expectation",
+   "files": [
+    "test/test_host.cpp"
+   ]
+  },
+  {
+   "number": 8754,
+   "branch": "test/sdf-emitter-differential",
+   "files": [
+    "test/test_widget_bridge.cpp"
+   ]
+  },
+  {
+   "number": 8756,
+   "branch": "fix/queue-cascade-guards",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-queue-cascade-guards-watch.json",
+    ".github/workflows/build.yml",
+    "CLAUDE.md",
+    "docs/guides/local-ci.md",
+    "docs/status/tools.yaml",
+    "test/cmake/quality_tests.cmake",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/test_build_matrix_contract.py",
+    "tools/ci/test_ctest_gate_args.py",
+    "tools/scripts/gate_suite_executed.py",
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/test_gate_suite_executed.py",
+    "tools/scripts/test_queue_batch_attribute.py",
+    "tools/scripts/test_resolve_classify_base.py",
+    "tools/scripts/test_workflow_build_dirs.py"
+   ]
+  },
+  {
+   "number": 8757,
+   "branch": "feature/gpu-audio-p4-staged-observer-20260923-aa423ba",
+   "files": [
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_transport.hpp",
+    "core/gpu_audio/src/detail/gpu_audio_transport_trial_observer.hpp",
+    "core/gpu_audio/src/gpu_audio_transport.cpp",
+    "test/test_gpu_audio_p4_matched_convolution_benchmark.cpp",
+    "test/test_gpu_audio_transport.cpp"
+   ]
+  },
+  {
+   "number": 8758,
+   "branch": "fix/control-enrollment-identity",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260923-pr8758-control-enrollment-identity-watch.json",
+    "examples/sample-region-allpass/control_targets.cmake",
+    "test/cmake/sample_region_control_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake"
+   ]
+  },
+  {
+   "number": 8759,
+   "branch": "ci/queue-admission-guard",
+   "files": [
+    "tools/scripts/queue_admission_guard.py",
+    "tools/scripts/test_queue_admission_guard.py"
+   ]
+  },
+  {
+   "number": 8760,
+   "branch": "fix/quarantine-sample-region-e2e",
+   "files": [
+    "test/cmake/sample_region_control_tests.cmake",
+    "tools/scripts/ctest_label_exclusion_guard.json"
+   ]
+  },
+  {
+   "number": 8761,
+   "branch": "feature/canvas-drawlist-format",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-canvas-drawlist-and-layer-trace-watch.json",
+    ".github/workflows/tracing-build.yml",
+    "core/canvas/CMakeLists.txt",
+    "core/canvas/include/pulp/canvas/drawlist_format.hpp",
+    "core/canvas/src/drawlist_format.cpp",
+    "core/view/src/view_paint.cpp",
+    "docs/status/consumption-profiles.json",
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/core_runtime_canvas_signal_tests.cmake",
+    "test/test_canvas_drawlist_format.cpp",
+    "test/test_trace_frame_pipeline.cpp",
+    "test/test_tracing_canvas_layers.cpp"
+   ]
+  },
+  {
+   "number": 8762,
+   "branch": "fix/gpu-provenance-merge-group-hydration",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/hydrate_gpu_provenance_commits.py",
+    "tools/scripts/test_hydrate_real_git.py"
+   ]
+  },
+  {
+   "number": 8763,
+   "branch": "fix/sample-region-e2e-quarantine-guards",
+   "files": [
+    "docs/status/consumption-profiles.json",
+    "inspect/CMakeLists.txt",
+    "test/cmake/sample_region_control_tests.cmake",
+    "test/test_control_sample_region_e2e.cpp",
+    "test/test_inspector_domain_helpers.cpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/release_product_matrix.json"
+   ]
+  },
+  {
+   "number": 8765,
+   "branch": "fix/prequeue-static-guards",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    "tools/scripts/gates.sh"
+   ]
+  },
+  {
+   "number": 8766,
+   "branch": "fix/honest-protected-receipts",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    ".github/workflows/workflow-lint.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_build_workflow.py",
+    "tools/scripts/test_protected_merge_receipt.py"
+   ]
+  },
+  {
+   "number": 8767,
+   "branch": "feature/shipyard-local-lane-o0",
+   "files": [
+    ".agents/contract.toml",
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/debug-o0.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/test_odr_macro_gated_headers.py"
+   ]
+  },
+  {
+   "number": 8769,
+   "branch": "fix/vst3-host-param-write-visible-to-getstate",
+   "files": [
+    "core/format/include/pulp/format/vst3_adapter.hpp",
+    "core/format/src/vst3_adapter.cpp",
+    "test/test_vst3_plugin_state.cpp"
+   ]
+  },
+  {
+   "number": 8770,
+   "branch": "fix/census-drift-20260923",
+   "files": [
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/test_queue_batch_attribute.py"
+   ]
+  },
+  {
+   "number": 8771,
+   "branch": "docs/sample-region-doc4-20260924",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".agents/skills/audio-harness/SKILL.md",
+    ".agents/skills/hosting/SKILL.md",
+    "docs/guides/sample-granular-graphs.md",
+    "docs/reference/capability-control.md",
+    "docs/reference/cli.md",
+    "docs/reference/modules.md",
+    "docs/reference/signal-graph.md",
+    "docs/status/docs-index.yaml",
+    "docs/status/modules.yaml"
+   ]
+  },
+  {
+   "number": 8773,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8774,
+   "branch": "fix/sample-region-reaper-driver-hardening-20260924",
+   "files": [
+    "tools/testing/daw-smoke/sample_region_native_reaper.lua",
+    "tools/testing/daw-smoke/sample_region_native_reaper.py"
+   ]
+  },
+  {
+   "number": 8780,
+   "branch": "feature/test-pch-ccache",
+   "files": [
+    ".agents/skills/render-toolchain-update/SKILL.md",
+    "docs/guides/build.md",
+    "docs/guides/test-lanes.md",
+    "test/cmake/quality_tests.cmake",
+    "tools/cmake/Ccache.cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/pch_wiring_check.py",
+    "tools/scripts/test_pch_wiring_check.py"
+   ]
+  },
+  {
+   "number": 8781,
+   "branch": "feature/targeted-prepush-diffcover",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".githooks/pre-push",
+    "CLAUDE.md",
+    "docs/guides/coverage.md",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/diff_cover_targets.py",
+    "tools/scripts/local_diff_cover.sh",
+    "tools/scripts/test_diff_cover_targets.py",
+    "tools/scripts/test_local_diff_cover.py"
+   ]
+  },
+  {
+   "number": 8782,
+   "branch": "feature/gate-vm-sizing",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/motion/SKILL.md",
+    ".agents/skills/tart-ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-visual-deps-lock-watch.json",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "tools/ci/governed-build.sh",
+    "tools/ci/test_governed_build.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/test_build_workflow.py",
+    "tools/scripts/test_visual_python_deps_step.py"
+   ]
+  },
+  {
+   "number": 8784,
+   "branch": "feature/build-speed-scorecard",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/tart-ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260923-build-speed-scorecard-watch.json",
+    "CLAUDE.md",
+    "docs/guides/local-ci.md",
+    "docs/status/tools.yaml",
+    "test/cmake/quality_tests.cmake",
+    "test/test_governed_build.sh",
+    "tools/ci/governed-build.sh",
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/bench_diff.py",
+    "tools/scripts/build_speed_scorecard.py",
+    "tools/scripts/build_time_report.py",
+    "tools/scripts/fixtures/build_speed/merge_group_gate_run.json",
+    "tools/scripts/fixtures/build_speed/merge_group_receipt_reuse_run.json",
+    "tools/scripts/fixtures/build_speed/merged_prs_graphql.json",
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/host_vitals_sensor.sh",
+    "tools/scripts/test_build_speed_scorecard.py",
+    "tools/scripts/test_build_time_report.py",
+    "tools/scripts/test_host_vitals.sh",
+    "tools/scripts/tools_registry_check.py"
+   ]
+  },
+  {
+   "number": 8785,
+   "branch": "feature/gate-pr-fast-tests-ios",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/ios/SKILL.md",
+    ".github/workflows/build.yml",
+    ".shipyard/config.toml",
+    "core/midi/CMakeLists.txt",
+    "docs/guides/local-ci.md",
+    "docs/guides/test-lanes.md",
+    "test/CMakeLists.txt",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "test/cmake/pr_fast_tests.cmake",
+    "test/cmake/test_ios_compile_gate.sh",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/pr_fast_tier_check.py",
+    "tools/scripts/test_changed_surface_policy.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    "tools/scripts/test_pr_fast_tier_check.py"
+   ]
+  },
+  {
+   "number": 8786,
+   "branch": "feature/focused-affected-builds",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/cli-maintenance/SKILL.md",
+    ".agents/skills/prototype-loop/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260924-focused-builds-cli-watch.json",
+    "CLAUDE.md",
+    "CMakeLists.txt",
+    "docs/guides/local-ci.md",
+    "docs/reference/cli.md",
+    "docs/status/cli-commands.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs/src/cmd/affected.rs",
+    "experimental/pulp-rs/src/cmd/dev.rs",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/orchestrate.rs",
+    "experimental/pulp-rs/src/help.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests/fixtures/help/expected_cpp.txt",
+    "experimental/pulp-rs/tests/orchestrate_parity_test.rs",
+    "test/cmake/cli_import_tool_tests.cmake",
+    "test/cmake/cli_tests.cmake",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/test_build_defaults.cmake",
+    "test/cmake/test_control_shipping_fresh_stamp.cmake",
+    "test/test_cli_configure_defaults.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_common.hpp",
+    "tools/cli/cli_watch.hpp",
+    "tools/cli/cmd_build.cpp",
+    "tools/cli/cmd_design.cpp",
+    "tools/cli/cmd_dev.cpp",
+    "tools/cli/cmd_loop.cpp",
+    "tools/cli/configure_defaults.hpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/focused_build.hpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/PulpDefaultBuildType.cmake",
+    "tools/cmake/PulpLinkPool.cmake",
+    "tools/cmake/check_control_shipping_artifact.cmake",
+    "tools/scripts/affected_targets.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/test_affected_targets.py",
+    "tools/scripts/tools_registry_check.py"
+   ]
+  },
+  {
+   "number": 8789,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8790,
+   "branch": "feature/test-consolidation-pilot",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260924-widget-bridge-test-grouping-watch.json",
+    "docs/guides/test-lanes.md",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/test_inspector_domains.cpp",
+    "tools/cmake/PulpCatch.cmake",
+    "tools/cmake/PulpCatchAddTests.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/ctest_inventory_parity.py",
+    "tools/scripts/test_pulp_test_group.py"
+   ]
+  },
+  {
+   "number": 8791,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8793,
+   "branch": "fix/rack-module-index-atomic",
+   "files": [
+    ".agents/skills/forge-modular/SKILL.md",
+    "test/cmake/rack_contract_tests.cmake",
+    "tools/rack/patch.py",
+    "tools/rack/test_module_index_atomic.py"
+   ]
+  },
+  {
+   "number": 8794,
+   "branch": "feature/test-grouping-design",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260924-design-import-test-grouping-watch.json",
+    "docs/guides/test-lanes.md",
+    "test/cmake/design_import_view_widget_tests.cmake",
+    "test/cmake/design_system_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/test_web_compat_overlay.cpp",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/test_pulp_test_group.py"
+   ]
+  },
+  {
+   "number": 8795,
+   "branch": "fix/signal-graph-debug-mutation-lock",
+   "files": [
+    ".agents/skills/hosting/SKILL.md",
+    "core/host/src/signal_graph.cpp",
+    "test/test_signal_graph_prepared_swap.cpp"
+   ]
+  },
+  {
+   "number": 8796,
+   "branch": "feature/test-grouping-canvas",
+   "files": [
+    "test/cmake/canvas_text_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/script_canvas_render_tests.cmake"
+   ]
+  },
+  {
+   "number": 8797,
+   "branch": "feature/test-grouping-core",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260924-design-import-test-grouping-watch.json",
+    "docs/guides/test-lanes.md",
+    "test/cmake/design_import_view_widget_tests.cmake",
+    "test/cmake/design_system_tests.cmake",
+    "test/cmake/late_core_tests.cmake",
+    "test/cmake/motion_tests.cmake",
+    "test/cmake/native_component_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/test_web_compat_overlay.cpp",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/test_pulp_test_group.py"
+   ]
+  },
+  {
+   "number": 8798,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8800,
+   "branch": "feature/p8-gpu-convolver-provider-policy-20260923",
+   "files": [
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_convolver.hpp",
+    "core/gpu_audio/src/gpu_convolver.cpp",
+    "core/gpu_audio/src/gpu_convolver_no_render.cpp",
+    "docs/guides/gpu-audio-sdk.md",
+    "test/test_gpu_convolver.cpp"
+   ]
+  },
+  {
+   "number": 8801,
+   "branch": "fix/shader-tests-honest-without-skia",
+   "files": [
+    "test/test_canvas.cpp"
+   ]
+  },
+  {
+   "number": 8802,
+   "branch": "fix/trace-category-counts",
+   "files": [
+    ".agents/skills/trace-analysis/SKILL.md",
+    ".agents/skills/trace-sql/SKILL.md",
+    "tools/scripts/test_trace_span_category_lint.py",
+    "tools/scripts/trace_span_category_lint.py"
+   ]
+  },
+  {
+   "number": 8803,
+   "branch": "feature/gate-python-selftests-lane-20260924",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/version-skill-check.yml",
+    "docs/guides/test-lanes.md",
+    "docs/guides/versioning.md",
+    "docs/status/sequencer-exposure/rows/source-selftest-lane.json",
+    "test/CMakeLists.txt",
+    "test/cmake/source_selftest_lane_tests.cmake",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/ci/test_ctest_gate_args.py",
+    "tools/ci/test_source_selftests.py",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_workflow_build_dirs.py"
+   ]
+  },
+  {
+   "number": 8805,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8806,
+   "branch": "fix/control-profile-downgrade-announced",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/scripts/test_control_profile_downgrade_is_announced.py"
+   ]
+  },
+  {
+   "number": 8807,
+   "branch": "fix/sdf-chart-contract-backend-independent",
+   "files": [
+    ".github/vellum-change-events/20260924-sdf-chart-contract-backend-independent.json",
+    ".github/vellum-expansion-watch-events/20260924-sdf-chart-contract-backend-independent-watch.json",
+    "core/canvas/src/recording_canvas.cpp",
+    "core/canvas/src/sdf_chart_contract.hpp",
+    "core/canvas/src/skia_canvas_shaders.cpp",
+    "test/test_canvas.cpp"
+   ]
+  },
+  {
+   "number": 8809,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8810,
+   "branch": "p4-raw-honest-20260924",
+   "files": [
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_convolver.hpp",
+    "core/gpu_audio/src/detail/gpu_convolver_raw_trace_jsonl.hpp",
+    "core/gpu_audio/src/detail/gpu_convolver_trace_jsonl.hpp",
+    "core/gpu_audio/src/detail/gpu_convolver_trial_config.hpp",
+    "core/gpu_audio/src/gpu_convolver.cpp",
+    "test/cmake/render_gpu_surface_tests.cmake",
+    "test/test_gpu_audio_p4_matched_convolution_benchmark.cpp",
+    "test/test_gpu_audio_trace.cpp"
+   ]
+  },
+  {
+   "number": 8811,
+   "branch": "feature/test-grouping-view-host",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_host_tests.cmake",
+    "test/test_resizable_shell.cpp",
+    "test/test_transport_hook.cpp"
+   ]
+  },
+  {
+   "number": 8812,
+   "branch": "fix/canvas-cg-suites-apple-only",
+   "files": [
+    "test/cmake/script_canvas_render_tests.cmake"
+   ]
+  },
+  {
+   "number": 8814,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt"
+   ]
+  },
+  {
+   "number": 8815,
+   "branch": "fix/release-runner-rollback-truth-20260924",
+   "files": [
+    "docs/guides/local-ci.md",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/test_runner_topology_static.py"
+   ]
+  },
+  {
+   "number": 8816,
+   "branch": "feature/b6-cargo-off-all",
+   "files": [
+    "experimental/pulp-rs/CMakeLists.txt",
+    "tools/scripts/rust_cli_build_edge_check.py",
+    "tools/scripts/test_rust_cli_build_edge_check.py"
+   ]
+  },
+  {
+   "number": 8817,
+   "branch": "feature/relay-contract-guard-20260924",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/runner-topology-check.yml",
+    "docs/guides/local-ci.md",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/relay_contract_check.py",
+    "tools/scripts/relay_contract_hosts.toml",
+    "tools/scripts/test_relay_contract_check.py"
+   ]
+  },
+  {
+   "number": 8818,
+   "branch": "feature/test-grouping-core-runtime",
+   "files": [
+    "docs/guides/test-lanes.md",
+    "test/cmake/core_runtime_canvas_signal_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/test_animator_set.cpp",
+    "test/test_osc_sync.cpp",
+    "tools/scripts/test_ci_throughput_workflows.py"
+   ]
+  },
+  {
+   "number": 8819,
+   "branch": "feature/build-metrics-awareness",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/tart-ci/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260925-build-metrics-scorecard-split-watch.json",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "docs/reference/cli.md",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs/src/build_metrics.rs",
+    "experimental/pulp-rs/src/build_parallelism.rs",
+    "experimental/pulp-rs/src/cmd/orchestrate.rs",
+    "experimental/pulp-rs/src/lib.rs",
+    "tools/ci/governed-build.sh",
+    "tools/ci/record_build_metric.sh",
+    "tools/ci/test_governed_build.py",
+    "tools/scripts/build_speed_scorecard.py",
+    "tools/scripts/host_vitals.sh",
+    "tools/scripts/host_vitals_sensor.sh",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_build_speed_scorecard.py",
+    "tools/scripts/test_build_workflow.py",
+    "tools/scripts/test_host_vitals.sh",
+    "tools/scripts/test_protected_merge_receipt.py"
+   ]
+  },
+  {
+   "number": 8820,
+   "branch": "feature/build-speed-b8-backend-tus",
+   "files": [
+    ".agents/skills/hosting/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260925-design-import-codegen-test-split-watch.json",
+    "core/host/CMakeLists.txt",
+    "core/host/src/forge_catalog_export.cpp",
+    "core/host/src/forge_catalog_export_detail.hpp",
+    "core/host/src/forge_catalog_export_dynamics.cpp",
+    "core/host/src/forge_catalog_export_effects.cpp",
+    "core/host/src/forge_catalog_export_eurorack_drums.cpp",
+    "core/host/src/forge_catalog_export_lofi.cpp",
+    "core/host/src/forge_catalog_export_modulation.cpp",
+    "core/host/src/forge_catalog_export_pitch_sequencing.cpp",
+    "core/host/src/forge_catalog_export_space_synthesis.cpp",
+    "test/cmake/design_import_native_codegen_tests.cmake",
+    "test/test_design_import_codegen.cpp",
+    "test/test_design_import_codegen_layout_text.cpp",
+    "test/test_design_import_codegen_paint.cpp",
+    "test/test_design_import_codegen_web_controls.cpp",
+    "test/test_forge_descriptor_audit.cpp",
+    "tools/scripts/forge_descriptor_coverage.py",
+    "tools/scripts/hotspot_size_guard.json"
+   ]
+  },
+  {
+   "number": 8821,
+   "branch": "feature/build-speed-b3-objc-unity",
+   "files": [
+    ".agents/skills/agent-capabilities/SKILL.md",
+    ".github/vellum-change-events/20260925-metal-surface-view-distinct-objc-name.json",
+    ".github/vellum-expansion-watch-events/20260925-mac-objc-cluster-unity-watch.json",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/pulp_render_objc_names.h",
+    "core/view/platform/mac/drag_drop_mac.mm",
+    "core/view/platform/mac/mac_text_input_ranges.h",
+    "core/view/platform/mac/plugin_view_host_mac.mm",
+    "core/view/platform/mac/plugin_view_host_mac_text_input.mm",
+    "core/view/platform/mac/plugin_view_host_mac_view.h",
+    "core/view/platform/mac/window_host_mac_text_input.mm",
+    "examples/CMakeLists.txt",
+    "test/mac_objc_coload_probe.cpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/scripts/classify_changes.py"
+   ]
+  },
+  {
+   "number": 8822,
+   "branch": "fix/status-tone-noncolour-signal",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260924-status-tone-noncolour-signal-watch.json",
+    "core/view/src/gap_widgets.cpp",
+    "test/test_gap_widgets.cpp"
+   ]
+  },
+  {
+   "number": 8823,
+   "branch": "feature/test-grouping-sampler-runtime",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/sampler_runtime_tests.cmake"
+   ]
+  },
+  {
+   "number": 8824,
+   "branch": "feature/test-grouping-timeline",
+   "files": [
+    ".agents/skills/ableton-link/SKILL.md",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/timeline-test-executable-grouping.json",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/timeline_tests.cmake"
+   ]
+  },
+  {
+   "number": 8825,
+   "branch": "gpu-8808-test-contract",
+   "files": [
+    "test/test_widget_bridge.cpp"
+   ]
+  },
+  {
+   "number": 8826,
+   "branch": "feature/b5-sdl3-configure-speed",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "tools/cmake/PulpConfigureCheckCache.cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/scripts/test_configure_check_cache.py"
+   ]
+  },
+  {
+   "number": 8827,
+   "branch": "feature/test-grouping-app-audio-host",
+   "files": [
+    "test/cmake/app_audio_host_tests.cmake",
+    "test/cmake/core_audio_platform_format_tests.cmake",
+    "test/cmake/quality_tests.cmake"
+   ]
+  },
+  {
+   "number": 8828,
+   "branch": "feature/b4-fold-duplicate-sources",
+   "files": [
+    "test/cmake/cli_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "tools/cmake/PulpTestSharedObjects.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/shared_test_objects_check.py",
+    "tools/scripts/test_affected_targets.py",
+    "tools/scripts/test_shared_test_objects_check.py"
+   ]
+  },
+  {
+   "number": 8829,
+   "branch": "feature/test-grouping-dsp-rt-contract",
+   "files": [
+    "docs/guides/test-lanes.md",
+    "test/cmake/dsp_rt_contract_tests.cmake",
+    "test/cmake/mac_platform_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/test_signal_feedforward_compressor.cpp",
+    "test/test_signal_fuzz_pair.cpp",
+    "tools/cmake/PulpTestSuite.cmake"
+   ]
+  },
+  {
+   "number": 8830,
+   "branch": "feature/test-grouping-design-import",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260925-design-import-test-grouping-watch.json",
+    "test/cmake/design_import_runtime_bridge_tests.cmake",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "test/cmake/quality_tests.cmake"
+   ]
+  },
+  {
+   "number": 8831,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt"
+   ]
+  },
+  {
+   "number": 8832,
+   "branch": "fix-box-shadow-group-tag",
+   "files": [
+    "test/test_box_shadow_cache.cpp"
+   ]
+  },
+  {
+   "number": 8833,
+   "branch": "feature/warm-seed-build-dir",
+   "files": [
+    ".agents/skills/cli-maintenance/SKILL.md",
+    ".agents/skills/prototype-loop/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260925-seed-build-dir-cli-watch.json",
+    "CLAUDE.md",
+    "docs/reference/cli.md",
+    "docs/status/cli-commands.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs/src/cmd/orchestrate.rs",
+    "test/cmake/quality_tests.cmake",
+    "tools/scripts/seed_build_dir.py",
+    "tools/scripts/test_seed_build_dir.py"
+   ]
+  },
+  {
+   "number": 8834,
+   "branch": "feature/test-grouping-format-reload",
+   "files": [
+    "test/cmake/format_reload_tests.cmake",
+    "test/cmake/quality_tests.cmake"
+   ]
+  },
+  {
+   "number": 8835,
+   "branch": "feat/grid-placement-policy",
+   "files": [
+    ".agents/skills/timebase/SKILL.md",
+    "core/timebase/include/pulp/timebase/grid_projection.hpp",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/sequencer-exposure/rows/agent-capability-surface-midi-output-reconciliation.json",
+    "test/test_timebase_groove_kernels.cpp",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_manifest.py"
+   ]
+  },
+  {
+   "number": 8838,
+   "branch": "chore/refresh-consumption-census",
+   "files": [
+    "docs/status/consumption-profiles.json"
+   ]
+  },
+  {
+   "number": 8839,
+   "branch": "feature/gpu-audio-public-provider-20260925",
+   "files": [
+    "docs/guides/gpu-audio-sdk.md"
+   ]
+  },
+  {
+   "number": 8841,
+   "branch": "fix/8836-scoped-empty-suite",
+   "files": [
+    "test/cmake/script_canvas_render_tests.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/test_pulp_test_group.py"
+   ]
+  },
+  {
+   "number": 8843,
+   "branch": "feat/gpu-audio-prepared-program-current-20260925",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "core/gpu_audio/CMakeLists.txt",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_capability.hpp",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_audio_program.hpp",
+    "docs/guides/gpu-audio-sdk.md",
+    "docs/guides/local-ci.md",
+    "docs/status/consumption-profiles.json",
+    "test/test_gpu_audio_transport.cpp"
+   ]
+  },
+  {
+   "number": 8845,
+   "branch": "fix/host-vitals-carry-build",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    "tools/scripts/host_vitals_sensor.sh",
+    "tools/scripts/test_host_vitals.sh"
+   ]
+  },
+  {
+   "number": 8847,
+   "branch": "fix/gpu-missing-categories-20260925",
+   "files": [
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/test_control_gpu_health_provider.cpp"
+   ]
+  },
+  {
+   "number": 8850,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8852,
+   "branch": "audit/metal4-comparator-20260925",
+   "files": [
+    "docs/status/native-metal-comparator-boundary-20260925.md"
+   ]
+  },
+  {
+   "number": 8854,
+   "branch": "feat/gpu-audio-sdk-artifact-20260925",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "docs/guides/gpu-audio-sdk.md",
+    "docs/guides/local-ci.md"
+   ]
+  },
+  {
+   "number": 8855,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8857,
+   "branch": "docs/doc4-narrative-c9cc-20260925",
+   "files": [
+    "CLAUDE.md",
+    "docs/reference/control-evidence-and-telemetry.md",
+    "docs/reference/processing-models.md"
+   ]
+  },
+  {
+   "number": 8859,
+   "branch": "fix/f4-exact-identity-c9a4-20260925",
+   "files": [
+    "tools/testing/daw-smoke/sample_region_native_reaper.lua",
+    "tools/testing/daw-smoke/sample_region_native_reaper.py",
+    "tools/testing/daw-smoke/test_sample_region_native_reaper.py"
+   ]
+  },
+  {
+   "number": 8860,
+   "branch": "fix/sanitizer-lanes-skip-timing-labels",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/sanitizers.yml"
+   ]
+  },
+  {
+   "number": 8861,
+   "branch": "feature/test-audit-skill",
+   "files": [
+    ".agents/skills/test-audit/SKILL.md",
+    "CLAUDE.md",
+    "docs/reference/skills.md",
+    "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/skill_path_map.json"
+   ]
+  },
+  {
+   "number": 8862,
+   "branch": "fix/ccache-pch-cross-worktree",
+   "files": [
+    "test/cmake/quality_tests.cmake",
+    "tools/cmake/Ccache.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/pch_wiring_check.py",
+    "tools/scripts/test_ccache_pch_isolation.py",
+    "tools/scripts/test_pch_wiring_check.py",
+    "tools/scripts/test_seed_build_dir.py"
+   ]
+  },
+  {
+   "number": 8863,
+   "branch": "feature/browser-capture-parallel-shards",
+   "files": [
+    ".agents/skills/import-design/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260925-browser-capture-concurrent-integration-files.json",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "tools/import-design/browser_capture/capture.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_integration_support.mjs",
+    "tools/import-design/browser_capture/capture_interactions.integration.test.mjs"
+   ]
+  },
+  {
+   "number": 8864,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8865,
+   "branch": "chore/format-changed-gotcha-and-path-map",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    "tools/scripts/skill_path_map.json"
+   ]
+  },
+  {
+   "number": 8866,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8867,
+   "branch": "fix/release-signing-honest",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/ship/SKILL.md",
+    ".github/workflows/sign-and-release.yml",
+    "docs/guides/release-pipeline.md",
+    "tools/scripts/test_release_workflow_test_step.py"
+   ]
+  },
+  {
+   "number": 8868,
+   "branch": "fix/receipt-reuse-decision-notes",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_protected_merge_receipt.py"
+   ]
+  },
+  {
+   "number": 8869,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "docs/status/pulp-tooling-disposition.json"
+   ]
+  },
+  {
+   "number": 8870,
+   "branch": "feature/gpu-software-advisory-20260925",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260926-pr8870-advisory-software-gpu.json",
+    ".github/workflows/cross-platform-check.yml",
+    "core/render/include/pulp/render/renderer3d.hpp",
+    "core/render/src/gpu_compute.cpp",
+    "core/render/src/renderer3d.cpp",
+    "docs/reports/software-gpu-advisory-plan-2026-09-25.md",
+    "test/test_renderer3d_loading.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp",
+    "tools/scripts/run_software_gpu_break_confirm.py",
+    "tools/scripts/test_run_software_gpu_break_confirm.py"
+   ]
+  },
+  {
+   "number": 8872,
+   "branch": "feature/a6-governed-build-floor",
+   "files": [
+    ".agents/skills/tart-ci/SKILL.md",
+    "tools/ci/governed-build.sh",
+    "tools/ci/record_build_metric.sh",
+    "tools/ci/test_governed_build.py"
+   ]
+  },
+  {
+   "number": 8873,
+   "branch": "feature/dsp-throughput-benchmark",
+   "files": [
+    ".agents/skills/audio-harness/SKILL.md",
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/dsp-throughput-bench.yml",
+    "test/cmake/benchmark_tests.cmake",
+    "test/test_dsp_throughput_benchmark.cpp",
+    "tools/scripts/bench_diff.py",
+    "tools/scripts/test_build_speed_scorecard.py"
+   ]
+  },
+  {
+   "number": 8875,
+   "branch": "feat/reaper-reconciles-lineage",
+   "files": [
+    "tools/scripts/clean_worktree_builds.sh",
+    "tools/scripts/clean_worktrees.sh",
+    "tools/scripts/test_clean_worktree_builds.py",
+    "tools/scripts/worktree_lineage.sh"
+   ]
+  },
+  {
+   "number": 8876,
+   "branch": "feature/pulp-simd-library",
+   "files": [
+    ".agents/skills/audio-harness/SKILL.md",
+    "CMakeLists.txt",
+    "ci/coverage-surfaces.yaml",
+    "codecov.yml",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/simd.hpp",
+    "core/signal/CMakeLists.txt",
+    "core/simd/CMakeLists.txt",
+    "core/simd/include/pulp/simd/simd.hpp",
+    "core/simd/src/highway.cpp",
+    "docs/doxygen/Doxyfile",
+    "docs/reference/modules.md",
+    "docs/status/consumption-profiles.json",
+    "docs/status/modules.yaml",
+    "docs/status/sequencer-exposure/rows/simd-kernel-library-floor-admission.json",
+    "test/cmake/core_runtime_canvas_signal_tests.cmake",
+    "test/test_simd_signal_link.cpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpLinkFloor.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/release_product_matrix.json",
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/timeline_engine_dependency_floor_check.py"
+   ]
+  },
+  {
+   "number": 8877,
+   "branch": "fix/stacked-submenu-outside-press",
+   "files": [
+    ".agents/skills/engine/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260926-overlay-nest-outside-press-and-window-size-watch.json",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/js/web-compat-document.js",
+    "core/view/src/overlay_dismissal.cpp",
+    "core/view/src/view.cpp",
+    "test/test_overlay_routing.cpp",
+    "test/test_web_compat_overlay.cpp"
+   ]
+  },
+  {
+   "number": 8878,
+   "branch": "fix/gpu-probe-adapter-classification-20260926",
+   "files": [
+    "tools/cli/gpu_probe/src/native_recipes.cpp"
+   ]
+  },
+  {
+   "number": 8879,
+   "branch": "ci/release-topology-matches-live",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/tart-ci/SKILL.md",
+    "CLAUDE.md",
+    "docs/guides/local-ci.md",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/test_runner_topology_static.py"
+   ]
+  },
+  {
+   "number": 8881,
+   "branch": "ci/release-class-label-optin",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".agents/skills/render-toolchain-update/SKILL.md",
+    ".agents/skills/ship/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260926-release-class-label-optin-watch.json",
+    ".github/workflows/release-cli.yml",
+    ".github/workflows/release-path-pr-gate.yml",
+    ".github/workflows/sign-and-release.yml",
+    "docs/guides/release-pipeline.md",
+    "tools/scripts/resolve_release_runners.py",
+    "tools/scripts/test_release_workflow_test_step.py",
+    "tools/scripts/test_resolve_release_runners.py"
+   ]
+  },
+  {
+   "number": 8882,
+   "branch": "feature/simd-backends-kernels-final",
+   "files": [
+    ".agents/skills/audio-harness/SKILL.md",
+    "CMakeLists.txt",
+    "ci/coverage-surfaces.yaml",
+    "codecov.yml",
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/simd.hpp",
+    "core/runtime/src/simd.cpp",
+    "core/signal/CMakeLists.txt",
+    "core/simd/CMakeLists.txt",
+    "core/simd/include/pulp/simd/scalar_kernels.hpp",
+    "core/simd/include/pulp/simd/simd.hpp",
+    "core/simd/src/accelerate.cpp",
+    "core/simd/src/highway.cpp",
+    "core/simd/src/scalar.cpp",
+    "docs/doxygen/Doxyfile",
+    "docs/guides/dsp-throughput-benchmark.md",
+    "docs/guides/signal-processing.md",
+    "docs/reference/modules.md",
+    "docs/reference/opinionated-defaults.md",
+    "docs/status/consumption-profiles.json",
+    "docs/status/docs-index.yaml",
+    "docs/status/modules.yaml",
+    "docs/status/sequencer-exposure/rows/simd-kernel-library-floor-admission.json",
+    "mkdocs.yml",
+    "test/cmake/core_runtime_canvas_signal_tests.cmake",
+    "test/test_dsp_throughput_benchmark.cpp",
+    "test/test_simd_header_fallback.cpp",
+    "test/test_simd_parity.cpp",
+    "test/test_simd_signal_link.cpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpLinkFloor.cmake",
+    "tools/deps/manifest.json",
+    "tools/scripts/release_product_matrix.json",
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/timeline_engine_dependency_floor_check.py"
+   ]
+  },
+  {
+   "number": 8885,
+   "branch": "fix/gpu-wavenet-no-dawn-sanitizer-20260925",
+   "files": [
+    "core/gpu_audio/CMakeLists.txt",
+    "core/gpu_audio/include/pulp/gpu_audio/gpu_wavenet.hpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.cpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_provider.hpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_wavenet_program.cpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_wavenet_program.hpp",
+    "core/gpu_audio/src/detail/dawn_shared_io_wavenet_spec.hpp",
+    "core/gpu_audio/src/detail/shared_io_program_session.cpp",
+    "core/gpu_audio/src/detail/shared_io_program_session.hpp",
+    "core/gpu_audio/src/gpu_wavenet.cpp",
+    "docs/guides/gpu-audio-sdk.md",
+    "docs/reference/capabilities.md",
+    "docs/reference/modules.md",
+    "docs/status/consumption-profiles.json",
+    "docs/status/gpu-wavenet-provider-plan-20260925.md",
+    "docs/status/gpu-wavenet-shared-provider-boundary-20260925.md",
+    "test/cmake/core_runtime_canvas_signal_tests.cmake",
+    "test/test_gpu_shared_io_compute_plan.cpp",
+    "test/test_gpu_shared_io_wavenet_spec.cpp",
+    "test/test_gpu_wavenet_descriptor.cpp",
+    "test/test_gpu_wavenet_session.cpp",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/test_consumption_census.py"
+   ]
+  },
+  {
+   "number": 8887,
+   "branch": "ci/pr-gate-settle-window",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".github/workflows/build.yml",
+    "docs/guides/local-ci.md",
+    "tools/scripts/test_build_workflow.py",
+    "tools/scripts/test_windows_runner_policy.py"
+   ]
+  },
+  {
+   "number": 8889,
+   "branch": "chore/enable-refresh-branch-policy",
+   "files": [
+    ".agents/skills/ci/SKILL.md",
+    ".shipyard/config.toml",
+    "docs/guides/local-ci.md"
+   ]
+  },
+  {
+   "number": 8890,
+   "branch": "fix/gate-reliability-small-vm",
+   "files": [
+    ".agents/skills/import-design/SKILL.md",
+    ".github/vellum-expansion-watch-events/20260926-browser-capture-concurrency-sized-to-vm.json",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "tools/import-design/browser_capture/run_integration.mjs",
+    "tools/import-design/browser_capture/run_integration.test.mjs"
+   ]
+  },
+  {
+   "number": 8896,
+   "branch": "chore/software-gpu-proof-lane-20260926",
+   "files": [
+    ".github/vellum-expansion-watch-events/20260926-browser-capture-tool-registry-watch.json",
+    ".github/workflows/software-gpu-proof.yml",
+    "CLAUDE.md",
+    "docs/status/tools.yaml",
+    "test/cmake/app_audio_host_tests.cmake"
+   ]
+  },
+  {
+   "number": 8899,
+   "branch": "fix/software-adapter-hosted",
+   "files": [
+    ".github/vellum-change-events/20260926-hosted-software-adapter-selection.json",
+    ".github/vellum-expansion-watch-events/20260926-hosted-software-adapter-selection-watch.json",
+    "core/render/include/pulp/render/gpu_surface.hpp",
+    "core/render/include/pulp/render/renderer3d.hpp",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/renderer3d.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp"
+   ]
+  },
+  {
+   "number": 8902,
+   "branch": "release/version-bump",
+   "files": [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+    "CMakeLists.txt",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "docs/validation/gpu-handoff-provenance/receipt.json"
+   ]
+  },
+  {
+   "number": 8903,
+   "branch": "fix/windows-arm64-highway-dispatch-20260926",
+   "files": [
+    "core/simd/src/highway.cpp"
+   ]
+  },
+  {
+   "number": 8904,
+   "branch": "release/version-bump",
+   "files": [
+    "CMakeLists.txt"
+   ]
+  }
+ ]
+}
