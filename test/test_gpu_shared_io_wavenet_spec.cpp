@@ -544,4 +544,108 @@ TEST_CASE("authenticated Dawn WaveNet executes channel matrices and cross-array 
     REQUIRE(arena.release_output({token}));
     REQUIRE(arena.release());
 }
+
+TEST_CASE("authenticated Dawn WaveNet resets history at a new preparation epoch",
+          "[gpu_audio][shared_io][wavenet]") {
+    Fixture fixture;
+    fixture.dilations = {1, 1};
+    fixture.layer.channels = 1;
+    fixture.layer.kernel = 2;
+    fixture.layer.head_size = 1;
+    fixture.layer.gated = 0;
+    fixture.layer.head_bias = 0;
+    fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
+    fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
+    const DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 2,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    auto created = DawnSharedIoProvider::create({});
+    INFO(created.reason);
+    REQUIRE(created.provider);
+
+    const auto run_epoch = [&](auto program) {
+        SharedIoArena arena;
+        REQUIRE(arena.prepare(*created.provider,
+                              {.slots = 1,
+                               .input_bytes_per_slot = 2 * sizeof(float),
+                               .output_bytes_per_slot = 2 * sizeof(float)},
+                              std::move(program)));
+        auto write = arena.grant_write(1);
+        REQUIRE(write);
+        const std::array<float, 2> input{1.0f, 2.0f};
+        std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+        REQUIRE(arena.publish_written({write->token}));
+        REQUIRE(arena.submit(write->token));
+        std::optional<SharedIoArena::OutputLease> output;
+        for (int i = 0; i < 200 && !output; ++i) {
+            created.provider->poll();
+            arena.drain_completions();
+            output = arena.acquire_output(arena.preparation_epoch(), 1);
+            if (!output)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(output);
+        const auto* values = reinterpret_cast<const float*>(output->bytes.data());
+        const std::array<float, 2> result{values[0], values[1]};
+        const auto token = output->token;
+        output.reset();
+        REQUIRE(arena.release_output({token}));
+        REQUIRE(arena.release());
+        return result;
+    };
+
+    const auto first = run_epoch(created.provider->make_wavenet_program(spec));
+    const auto second = run_epoch(created.provider->make_wavenet_program(spec));
+    CHECK(first[0] == Catch::Approx(0.0f).margin(1.0e-5));
+    CHECK(second[0] == Catch::Approx(0.0f).margin(1.0e-5));
+}
+
+TEST_CASE("authenticated Dawn WaveNet rejects sequence overflow after UINT64_MAX",
+          "[gpu_audio][shared_io][wavenet]") {
+    Fixture fixture;
+    fixture.dilations = {1, 1};
+    fixture.layer.channels = 1;
+    fixture.layer.kernel = 2;
+    fixture.layer.head_size = 1;
+    fixture.layer.gated = 0;
+    fixture.layer.head_bias = 0;
+    fixture.layer.dilations = std::span<const std::uint32_t>(fixture.dilations.data(), 1);
+    fixture.weights = {1.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f};
+    const DawnSharedIoWavenetProgramSpec spec{
+        .block_size = 2,
+        .head_scale = 1.0f,
+        .stream_instances = 1,
+        .arrays = std::span<const DawnSharedIoWavenetLayerSpec>(&fixture.layer, 1),
+        .weights = fixture.weights,
+    };
+    auto created = DawnSharedIoProvider::create({});
+    INFO(created.reason);
+    REQUIRE(created.provider);
+    auto program = created.provider->make_wavenet_program(spec);
+    REQUIRE(program);
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(*created.provider,
+                          {.slots = 2,
+                           .input_bytes_per_slot = 2 * sizeof(float),
+                           .output_bytes_per_slot = 2 * sizeof(float)},
+                          std::move(program)));
+
+    const std::array<float, 2> input{1.0f, 2.0f};
+    auto write = arena.grant_write(std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(write);
+    std::copy(input.begin(), input.end(), reinterpret_cast<float*>(write->bytes.data()));
+    REQUIRE(arena.publish_written({write->token}));
+    REQUIRE(arena.submit(write->token));
+
+    auto overflow = arena.grant_write(0);
+    REQUIRE(overflow);
+    std::copy(input.begin(), input.end(), reinterpret_cast<float*>(overflow->bytes.data()));
+    REQUIRE(arena.publish_written({overflow->token}));
+    CHECK_FALSE(arena.submit(overflow->token));
+    REQUIRE(arena.release());
+}
 #endif
