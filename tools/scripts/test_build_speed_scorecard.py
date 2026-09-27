@@ -238,7 +238,7 @@ class MergeLatencyAndCostTests(unittest.TestCase):
 
     def test_release_jobs_on_gate_runners_are_recorded_with_their_queue(self) -> None:
         run = {"id": 5, "name": "Release CLI", "head_branch": "main", "head_sha": "abc"}
-        jobs = [{"id": 1, "name": "CLI darwin-arm64", "status": "completed", "conclusion": "success",
+        jobs = [{"id": 1, "name": "CLI macos-arm64", "status": "completed", "conclusion": "success",
                  "runner_name": "m5-pulp-gate-slot2-02-34267-1", "created_at": "2026-09-25T12:00:00Z",
                  "started_at": "2026-09-25T12:30:00Z", "completed_at": "2026-09-25T12:40:00Z"},
                 {"id": 2, "name": "CLI linux-x64", "status": "completed", "conclusion": "success",
