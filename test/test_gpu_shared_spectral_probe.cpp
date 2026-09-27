@@ -67,6 +67,10 @@ int run_case(unsigned n, unsigned h, unsigned c, bool impulse) {
     }
     if (impulse && (peak_index!=2*n+h || peak<0.99f)) return 9;
     const auto report=gpu.diagnostics();
+#if defined(PULP_SPECTRAL_REQUIRE_CONFIGURED_PROVIDER)
+    // A successful physical dispatch cannot substitute for the SDK's pin proof.
+    if (!report.configured_revision_verified) return 13;
+#endif
     if (!report.authenticated_shared_metal || report.dawn_revision.empty() || report.adapter_name.empty() ||
         report.runtime_write_buffer_calls || report.runtime_copy_buffer_calls || report.runtime_map_async_calls ||
         report.imported_allocations!=6 || report.retired_success!=48 || report.retired_failure ||

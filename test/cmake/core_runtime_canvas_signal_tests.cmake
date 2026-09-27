@@ -948,6 +948,11 @@ pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
 if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
     add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
     target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
+    target_compile_definitions(pulp-gpu-shared-spectral-probe PRIVATE
+        PULP_SPECTRAL_REQUIRE_CONFIGURED_PROVIDER=1)
     add_test(NAME pulp-gpu-shared-spectral-probe COMMAND pulp-gpu-shared-spectral-probe)
-    set_tests_properties(pulp-gpu-shared-spectral-probe PROPERTIES TIMEOUT 60)
+    set_tests_properties(pulp-gpu-shared-spectral-probe PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+        RESOURCE_LOCK pulp_gpu
+        TIMEOUT 60)
 endif()
