@@ -79,6 +79,14 @@ its last frame reached an output is runtime control plumbing, not a
 generator-facing design capability, and a plausible `WindowHost::` prefix is not
 evidence otherwise.
 
+A stopped-install runtime observer can change a reviewed header without adding
+an advertised design capability. Refresh the affected fingerprints and inspect
+the generated manifest diff: its legacy method projection can change even when
+all curated capability contracts stay identical. Bind related pending exposure
+evidence to the specific API or header fingerprint, not a literal global
+`SURFACE_INVENTORY_VERSION`; an unrelated inventory update must not invalidate
+that evidence. None of these source checks establishes installed execution.
+
 ## Classify the change
 
 For a new public header or symbol:
