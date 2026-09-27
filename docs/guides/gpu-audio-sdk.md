@@ -536,6 +536,23 @@ aggregate totals. Do not race preparation or destruction with snapshot readers.
 These aggregate counters complement the per-block tracing identities; they do
 not replace terminal-disposition or deadline analysis.
 
+### Keep host controls separate from callback execution
+
+Musical parameters retain the plugin's existing parameter IDs and automation
+path. Change backend policy, pipeline lead and fallback configuration while
+processing is stopped, then prepare again and publish the resulting host latency.
+Do not route per-block submission or completion servicing through the control
+broker, CLI or MCP.
+
+The existing `dev.pulp.gpu/health.read@1` control describes rendering health;
+it does not report GPU-audio delivery. Use the audio capability report,
+delivery counters and per-block traces for audio diagnostics. A remote audio
+report would need its own registered operation and a non-realtime publisher
+with a stable producer lifetime. No such broker operation is supplied by these
+C++ reports. Include the counter's unit when presenting product-specific
+diagnostics: host callbacks and internal processing quantums are not
+interchangeable.
+
 ### Interpret worker timing separately
 
 `Stats::last_block_us` and `avg_block_us` retain their existing names, but their
