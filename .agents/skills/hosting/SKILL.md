@@ -2442,3 +2442,25 @@ publish only after the region proof accepts. The callback uses prepared storage;
 live edits adopt immutable snapshots and fail-fast admission prevents retained
 state from executing under two bindings. Signed baked artifacts are re-parsed,
 reconstructed, and re-proved before use.
+
+## An AU negotiates its channel width at initialize time — and a mismatch is SILENT
+
+`PluginSlot` for AU fixes the stream format when the unit is initialized and cannot adapt to a
+differently shaped buffer afterwards. If the width the host will actually render is not supplied
+*before* `prepare()`, the unit initializes at the descriptor's width (falling back to 2) and every
+render at any other width is rejected by `AUEffectBase` as a malformed shape: it zeroes the output,
+sets `kAudioUnitRenderAction_OutputIsSilence`, and returns `noErr`.
+
+**That failure is silent in both senses — no error status, no audio.** A mono render of a
+stereo-negotiated AU produces a valid-looking WAV full of zeros and a success code. Nothing in the
+logs says the audio was discarded.
+
+So when hosting an AU at a width that is not the descriptor default, call
+`slot->set_preferred_channel_layout(inputs, outputs)` before `prepare()`. It is a default no-op on
+`PluginSlot`, overridden only by the AU slot; VST3, CLAP and LV2 take their width from the
+per-block buffers and need nothing. The AU slot sets the input and output scopes independently, so
+an asymmetric unit negotiates correctly too.
+
+Diagnostic: the AU slot logs `AU v2: initialized with N channels`. If that N disagrees with the
+width you are rendering, the render is silence regardless of what the status says — check it before
+trusting any AU measurement.

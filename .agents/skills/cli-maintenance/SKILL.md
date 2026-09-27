@@ -3464,3 +3464,15 @@ assert the **absence** in the narrowed response as its control, not only the
 presence in the broad one. A presence-only test passes identically whether the
 field is conditional or unconditionally appended everywhere, so it cannot tell
 you which one you shipped.
+
+## `pulp audio render --in-channels/--out-channels` must reach the slot before prepare()
+
+These flags are not just buffer sizing. An AU negotiates its stream format when it is initialized,
+so the requested widths have to be handed to the slot via
+`set_preferred_channel_layout(inputs, outputs)` *before* `slot->prepare(...)`. Without that the AU
+initializes at its descriptor width and any render at a different width comes back as silence with
+a success status — a valid-looking WAV of zeros, no error.
+
+If you add a command that hosts a plugin at a caller-chosen width, plumb the widths through the
+same way `cmd_audio_render.cpp` does, and sanity-check the AU slot's
+`initialized with N channels` log against the width you asked for.
