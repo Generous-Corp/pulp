@@ -90,7 +90,10 @@ What to know before trusting it:
 shared ccache and starts every build cold; create it under
 `$PULP_WORKTREES_ROOT` or beside the primary checkout. A second `pulp build`
 into a tree that is still building exits 75 and names the running build:
-attach to that one instead of relaunching.
+attach to that one instead of relaunching. `pulp loop` takes the same lock for
+each rebuild, so a loop and a manual `pulp build` in one tree cannot race; a
+rebuild that finds another build holding the tree reports 75 and the loop keeps
+watching.
 
 ## Step 1 — AOT analyze the consumer's bundle
 
