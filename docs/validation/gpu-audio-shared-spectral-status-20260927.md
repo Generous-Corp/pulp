@@ -1,6 +1,9 @@
-# Shared spectral SDK implementation status
+# Shared spectral SDK investigation record
 
-Owner: sdk_buildtree_probe. Pulp branch feat/shared-spectral-sdk-20260927 at
+Historical entries below retain their original source/build context. They are
+not current installed-SDK acceptance claims.
+
+Owner at initial implementation: sdk_buildtree_probe. Pulp branch feat/shared-spectral-sdk-20260927 at
 /tmp/pulp-shared-spectral-sdk-20260927, based on c17fc3c. Spectr branch
 /tmp/spectr-gpu-audio-validation-20260927, hardening commit be8fad6.
 
@@ -66,3 +69,27 @@ session epochs and release with in-flight work. Runtime WebGPU calls all zero.
 Configured revision verified remains false in the provisional build, explicitly
 pending the production testsOFF exact-provider fix owned by planning_audit.
 GPU-off source compilation with -Wall -Wextra -Werror also passes.
+
+## Lifecycle review and publication preparation
+
+Review found two wrapper issues: a failed epoch could expose a later physical
+success, and the pre-release diagnostics snapshot omitted retirements completed
+during release. Commit b8d7ffd516 fixes both. A private result consumer now
+discards later results from poisoned history. A generic release observer takes
+final counters only after the arena physical barrier succeeds and before the
+provider is destroyed; the existing release symbol remains available.
+
+Focused deterministic validation passed 190 assertions in 15 cases. An isolated
+copy with only the poisoned-state guard removed failed the three expected
+assertions: later delivery, copied byte count, and overwritten output. The
+Dawn-enabled wrapper also compiled. Receipt:
+`/tmp/pulp-spectral-lifecycle-probe/receipt.json`. The hardware probe now checks
+all five final retirements after releasing one hop in flight; that strengthened
+hardware assertion remains pending on the authenticated combined SDK.
+
+Publication uses a fresh main-based branch, with source commits 8fc7c916c8,
+1ad61b59b0, 0e4b0b9f17, and b8d7ffd516 applied without the unrelated capability
+PR ancestry. SDK-only configured-provider authentication requires the separate
+production-identity change f9ccca1b11. Capability export and downstream SDK
+pinning are separate integration changes. No realtime or performance verdict
+is assigned by these correctness tests.
