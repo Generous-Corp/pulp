@@ -472,7 +472,7 @@ NATIVE_SOURCE = re.compile(
     r"tools/(ci|cli|cmake|audio|agent-capabilities)|\.github/(workflows|actions))/"
     r"|(^|/)CMakeLists\.txt$|\.(c|cc|cpp|h|hpp|m|mm|swift|cmake)$"
 )
-# Recorded 2026-09-26 against the tree this change landed on.
+# Recorded 2026-09-26 against the tree this change landed on; an upper bound.
 BASELINE_SKIP_NATIVE = {8693, 8729, 8736, 8743, 8744, 8838, 8839, 8852, 8857, 8889}
 # The pull requests the widening admitted when this was recorded. References
 # added later can only shrink the set, never grow it, so the replay asserts a
@@ -504,9 +504,12 @@ class ReplayTests(unittest.TestCase):
     def test_fixture_is_the_recorded_window(self) -> None:
         self.assertEqual(len(self.prs), 177)
 
-    def test_baseline_skip_native_set_is_unchanged(self) -> None:
+    def test_baseline_skip_native_set_never_grows(self) -> None:
+        # The base classifier may later force more builds (shrinking this set);
+        # it must never skip a PR it did not skip when this was recorded.
         baseline = {n for n, (base, _) in self.verdicts.items() if not base}
-        self.assertEqual(baseline, BASELINE_SKIP_NATIVE)
+        self.assertLessEqual(baseline, BASELINE_SKIP_NATIVE, sorted(baseline - BASELINE_SKIP_NATIVE))
+        self.assertTrue(baseline, "control: the replay still sees skip-native PRs")
 
     def test_no_pull_request_with_native_sources_flips(self) -> None:
         flipped = [
