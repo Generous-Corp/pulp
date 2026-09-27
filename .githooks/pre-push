@@ -790,9 +790,8 @@ elif [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
             # SKIP_WHEN_STARVED: exit 4 means the governor would pin this build
             # at its -j2 floor, so the script built nothing and said so. That
             # is a loud skip, never a pass.
-            run_gate_captured env PULP_DIFF_COVER_COMPARE_BRANCH="$BASE" \
-                PULP_DIFF_COVER_SKIP_WHEN_STARVED=1 bash "$DIFF_COVER_SH"
-            _diff_cover_rc=$?
+            _diff_cover_rc=0
+            run_gate_captured env PULP_DIFF_COVER_COMPARE_BRANCH="$BASE" PULP_DIFF_COVER_SKIP_WHEN_STARVED=1 bash "$DIFF_COVER_SH" || _diff_cover_rc=$?
             kill "$_hb_pid" 2>/dev/null || true
             wait "$_hb_pid" 2>/dev/null || true
             if [ "$_diff_cover_rc" -eq 4 ]; then
