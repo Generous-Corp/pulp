@@ -110,7 +110,8 @@
         "test/support/audio_doctor.*",
         "test/support/README.md",
         "tools/audio/analysis/**",
-        "tools/audio/quality-lab/**"
+        "tools/audio/quality-lab/**",
+        "core/simd/**"
       ]
     },
     "audio-headless-debug": {

@@ -107,6 +107,123 @@ class ProtectedReceiptWorkflowTest(unittest.TestCase):
         self.assertIn('--base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA"', issuer)
 
 
+class PrGateSettleWorkflowTest(unittest.TestCase):
+    """The default-off settle window may delay only PR native builds, never gate them."""
+
+    EVENTS = ("pull_request", "merge_group", "push", "workflow_dispatch")
+
+    def setUp(self) -> None:
+        self.jobs = _workflow()["jobs"]
+        self.settle = self.jobs["pr-gate-settle"]
+
+    def _settle_runs(self, event: str, var: str, local_proof: bool = False) -> bool:
+        """Evaluate the settle job's `if` exactly as written, for one event."""
+        expr = " ".join(self.settle["if"].split())
+        python = (
+            expr.replace("!inputs.local_proof", "(not local_proof)")
+            .replace("&&", " and ")
+            .replace("github.event_name", "event")
+            .replace("vars.PULP_PR_GATE_SETTLE_SECONDS", "var")
+        )
+        self.assertNotRegex(python, r"\|\||!(?!=)|\$\{\{")
+        return bool(eval(python, {}, {"event": event, "var": var, "local_proof": local_proof}))
+
+    def test_unset_or_zero_skips_the_settle_job_for_every_event(self) -> None:
+        # GitHub renders an unset repo variable as ''.
+        for event in self.EVENTS:
+            for var in ("", "0"):
+                with self.subTest(event=event, var=var):
+                    self.assertFalse(self._settle_runs(event, var))
+
+    def test_only_pull_request_ever_waits(self) -> None:
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                self.assertEqual(self._settle_runs(event, "180"), event == "pull_request")
+        self.assertFalse(self._settle_runs("pull_request", "180", local_proof=True))
+
+    def test_settle_runs_on_the_hosted_preamble_lane_in_parallel(self) -> None:
+        self.assertEqual(
+            self.settle["runs-on"],
+            "${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '\"ubuntu-latest\"') }}",
+        )
+        # No `needs`: the wait overlaps resolve-provider/classify rather than
+        # stacking after them.
+        self.assertNotIn("needs", self.settle)
+        self.assertIs(self.settle["continue-on-error"], True)
+        self.assertEqual(self.settle["permissions"], {})
+
+    def test_build_waits_on_settle_but_never_reads_its_result(self) -> None:
+        build = self.jobs["build"]
+        self.assertEqual(
+            build["needs"],
+            ["resolve-provider", "classify", "protected-receipt-reuse", "pr-gate-settle"],
+        )
+        condition = " ".join(build["if"].split())
+        # A status function is what stops a skipped `needs` entry from
+        # skipping the dependent job; without it an unset variable would skip
+        # the whole native matrix, including the required macos leg.
+        self.assertIn("!cancelled()", condition)
+        self.assertNotIn("pr-gate-settle", condition)
+        for field in ("name", "runs-on", "strategy"):
+            self.assertNotIn("pr-gate-settle", json.dumps(build.get(field)))
+
+    def test_required_macos_bootstraps_do_not_wait(self) -> None:
+        for name, job in self.jobs.items():
+            if name == "build":
+                continue
+            with self.subTest(job=name):
+                self.assertNotIn("pr-gate-settle", job.get("needs", []) or [])
+                self.assertNotIn("pr-gate-settle", json.dumps(job.get("if", "")))
+        self.assertEqual(self.jobs["macos"]["needs"], ["resolve-provider", "classify"])
+        self.assertEqual(
+            self.jobs["macos-merge-group"]["needs"],
+            ["resolve-provider", "classify", "protected-receipt-reuse"],
+        )
+
+    def _run_step(self, value: str) -> tuple[int, str, list[str]]:
+        import os
+        import subprocess
+        import tempfile
+
+        step = self.settle["steps"][0]
+        with tempfile.TemporaryDirectory() as tmp:
+            record = Path(tmp) / "sleeps"
+            fake = Path(tmp) / "sleep"
+            fake.write_text(f'#!/bin/sh\necho "$1" >> "{record}"\n', encoding="utf-8")
+            fake.chmod(0o755)
+            env = dict(os.environ, **step["env"])
+            env["SETTLE_SECONDS"] = value
+            env["PATH"] = f"{tmp}:{env['PATH']}"
+            proc = subprocess.run(
+                ["bash", "-c", step["run"]],
+                env=env, text=True, capture_output=True, timeout=30,
+            )
+            sleeps = record.read_text(encoding="utf-8").split() if record.exists() else []
+        return proc.returncode, proc.stdout, sleeps
+
+    def test_valid_values_sleep_that_long(self) -> None:
+        for value, expected in (("1", "1"), ("180", "180"), ("0900", "900")):
+            with self.subTest(value=value):
+                code, _, sleeps = self._run_step(value)
+                self.assertEqual(code, 0)
+                self.assertEqual(sleeps, [expected])
+
+    def test_invalid_values_are_ignored_with_a_notice(self) -> None:
+        for value in ("abc", "-5", "1.5", "60s", " 60", "901", "999999"):
+            with self.subTest(value=value):
+                code, out, sleeps = self._run_step(value)
+                self.assertEqual(code, 0)
+                self.assertEqual(sleeps, [])
+                self.assertIn("::notice title=PR gate settle ignored::", out)
+        code, out, sleeps = self._run_step("00")
+        self.assertEqual((code, sleeps), (0, []))
+        self.assertNotIn("::notice", out)
+
+    def test_timeout_exceeds_the_cap(self) -> None:
+        cap = int(self.settle["steps"][0]["env"]["SETTLE_MAX_SECONDS"])
+        self.assertGreater(int(self.settle["timeout-minutes"]) * 60, cap)
+
+
 class LocalProofWorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.workflow = _workflow()
