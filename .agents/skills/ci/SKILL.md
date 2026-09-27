@@ -623,6 +623,16 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- `gates.sh` now runs this lane scoped to your diff
+  (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
+  script changed or its source names a changed file (full path, a distinctive
+  basename, or a changed module's stem); a change to the lane itself runs all of
+  them. Before that, a `.githooks/pre-push` edit passed `gates.sh` and still
+  failed `prepush-gate-output` on the required context. Measured 2026-09-27 on m3:
+  a hook + `governed-build.sh` diff selects 9 of 140 entries (57 s); a wider
+  tools/** diff 27 (138 s); the whole lane is ~190 s. The selection is a textual
+  heuristic that over-selects rather than under-selects, and the required lane
+  still runs everything. `PULP_SKIP_SOURCE_SELFTESTS=1` skips it.
 
 ### A green ctest job proves nothing about a label its event excludes
 

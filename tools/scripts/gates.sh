@@ -470,6 +470,28 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     fi
 fi
 
+# ── 7a-src. source-only selftests the diff can reach ───────────────────────
+# The required `Enforce version & skill sync` context runs every entry of
+# tools/ci/source_selftests.json, and none of the gates above did, so a change
+# under tools/** could pass this script and still red that required check (a
+# pre-push hook edit broke prepush-gate-output that way). Run the entries the
+# diff can plausibly reach, selected by source_selftests.py itself; a change to
+# the lane runs all of them. PULP_SKIP_SOURCE_SELFTESTS=1 skips it.
+if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
+    echo "" >&2
+    echo "▸ source-only selftests (diff-scoped; required on Enforce version & skill sync)" >&2
+    src_selftest_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-source-selftests.XXXXXX")"
+    if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run --changed-from "$BASE" \
+            >"$src_selftest_log" 2>&1; then
+        sed -n 's/^source-selftests: /  source-selftests: /p' "$src_selftest_log" >&2
+    else
+        tail -n 40 "$src_selftest_log" >&2
+        echo "  source-selftests: failing — the required lane runs these; fix before pushing." >&2
+        fail=1
+    fi
+    rm -f "$src_selftest_log"
+fi
+
 # ── 7a-bis. setup.sh shared-source-cache tests ─────────────────────────────
 # Guards the cross-version cache seeding path, which only misbehaves when a
 # dependency is re-pinned on a machine that already cached the old version —

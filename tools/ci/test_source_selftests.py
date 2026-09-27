@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -343,6 +345,93 @@ class RepositoryTests(unittest.TestCase):
         text = lane.LANE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("\n  merge_group:", text)
         self.assertIn("name: Enforce version & skill sync", text)
+
+
+class DiffSelectionTests(unittest.TestCase):
+    """--changed-from runs what a diff can reach, and all of it for a lane change."""
+
+    def _tree(self, root: pathlib.Path) -> list[dict]:
+        (root / "tools").mkdir()
+        (root / "tools" / "test_hook.py").write_text(
+            'HOOK = ROOT / ".githooks/pre-push"\n', encoding="utf-8")
+        (root / "tools" / "test_helper_user.py").write_text(
+            "import widget_math\n", encoding="utf-8")
+        (root / "tools" / "test_unrelated.py").write_text(
+            "print('nothing here')\n", encoding="utf-8")
+        (root / "tools" / "test_self.py").write_text("pass\n", encoding="utf-8")
+        return [
+            entry("hook", ["{repo}/tools/test_hook.py"]),
+            entry("helper", ["{repo}/tools/test_helper_user.py"]),
+            entry("unrelated", ["{repo}/tools/test_unrelated.py"]),
+            entry("self", ["{repo}/tools/test_self.py"]),
+        ]
+
+    def _names(self, changed: list[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            entries = self._tree(root)
+            return sorted(e["name"] for e in lane.select_for_changes(entries, changed, root))
+
+    def test_a_referenced_file_selects_its_reader(self) -> None:
+        self.assertEqual(self._names([".githooks/pre-push"]), ["hook"])
+
+    def test_a_changed_module_selects_its_importer(self) -> None:
+        self.assertEqual(self._names(["tools/scripts/widget_math.py"]), ["helper"])
+
+    def test_a_changed_test_selects_itself(self) -> None:
+        self.assertEqual(self._names(["tools/test_self.py"]), ["self"])
+
+    def test_a_lane_change_selects_everything(self) -> None:
+        self.assertEqual(len(self._names(["tools/ci/source_selftests.json"])), 4)
+
+    def test_generic_basenames_do_not_select(self) -> None:
+        self.assertEqual(self._names(["docs/unrelated/SKILL.md"]), [])
+
+    def test_an_unrelated_change_selects_nothing(self) -> None:
+        self.assertEqual(self._names(["core/audio/src/buffer.cpp"]), [])
+
+
+class GatesWiringTests(unittest.TestCase):
+    """gates.sh runs the diff-scoped lane and fails when it fails."""
+
+    GATES = HERE.parent / "scripts" / "gates.sh"
+
+    def _block(self) -> str:
+        text = self.GATES.read_text(encoding="utf-8")
+        start = text.index("# ── 7a-src.")
+        end = text.index("# ── 7a-bis.", start)
+        return text[start:end]
+
+    def _run_block(self, stub_exit: int) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "tools" / "ci").mkdir(parents=True)
+            calls = root / "calls"
+            (root / "tools" / "ci" / "source_selftests.py").write_text(
+                "import sys, pathlib\n"
+                f"pathlib.Path({str(calls)!r}).write_text(' '.join(sys.argv[1:]))\n"
+                "print('source-selftests: stub')\n"
+                f"raise SystemExit({stub_exit})\n",
+                encoding="utf-8",
+            )
+            script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\n'
+                      + self._block() + '\necho "fail=$fail"\n')
+            env = {k: v for k, v in os.environ.items()
+                   if k != "PULP_SKIP_SOURCE_SELFTESTS"}
+            result = subprocess.run(
+                ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
+            argv = calls.read_text() if calls.exists() else ""
+        return result.stdout.strip() + "|" + argv
+
+    def test_a_failing_lane_fails_gates(self) -> None:
+        out, argv = self._run_block(1).split("|", 1)
+        self.assertEqual(out, "fail=1")
+        self.assertEqual(argv, "run --changed-from origin/main")
+
+    def test_a_passing_lane_leaves_gates_green(self) -> None:
+        out, argv = self._run_block(0).split("|", 1)
+        self.assertEqual(out, "fail=0")
+        self.assertIn("--changed-from", argv)
 
 
 if __name__ == "__main__":
