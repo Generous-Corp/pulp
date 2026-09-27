@@ -744,6 +744,12 @@ class CertifyTests(unittest.TestCase):
             8773, [{"name": "macos", "conclusion": "failure", "steps": []}]
         )
         self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        # The refusal must name the job that failed. Dropping a stepless failure
+        # would also refuse -- via the "no failing job was read" path -- so the
+        # verdict alone cannot tell the two apart, and the one that silently
+        # discards a real failing job is the dangerous one.
+        self.assertIn("macos", verdict.evidence)
+        self.assertNotIn("no failing job was read", verdict.evidence)
 
 
 TEST_JOBS = [
@@ -777,6 +783,12 @@ class CertifyAgainstTestOwnershipTests(unittest.TestCase):
         self.assertEqual(verdict.verdict, qba.VERDICT_OTHER_PR)
         self.assertIs(verdict.implicates_head, False)
         self.assertEqual(verdict.implicated_pr, 8001)
+        # The guard rejects an `other_pull_request` verdict that names this same
+        # pull request, so an unattributed one certifies nothing.
+        payload = verdict.as_json()
+        self.assertIsInstance(payload["implicated_pr"], int)
+        self.assertNotEqual(payload["implicated_pr"], payload["pr"])
+        self.assertIn("prepush-cannot-measure", verdict.evidence)
 
     def test_the_head_owning_a_failing_test_is_positively_implicated(self) -> None:
         ctest = qba.attribute(
