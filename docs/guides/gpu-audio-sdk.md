@@ -509,3 +509,29 @@ For the experimental shared-memory route, the [paced convolution
 probe](gpu-audio-paced-probe.md) records callback timing, missed deliveries,
 and numerical correctness through the public transport and its own worker.
 Use the [tracing guide](gpu-audio-tracing.md) for per-block lifecycle analysis.
+
+### Verify the output selected by the audio callback
+
+`GpuAudioTransport::delivery_snapshot()` reports cumulative, allocation-free
+counters for prepared `process()` calls. Each call increments exactly one field:
+`gpu_blocks`, `worker_output_blocks`, `cpu_fallback_blocks`, `silence_blocks`,
+`passthrough_blocks`, `priming_blocks`, or `invalid_blocks`.
+
+Use these counters when testing an installed plugin. A successful submission or
+worker completion does not prove the callback used that result. `gpu_blocks`
+counts ready output selected through the callback-side GPU path. Generic worker
+ring output is counted separately as `worker_output_blocks`: a generic node can
+perform CPU work or internal fallback, so a ring delivery cannot establish GPU
+execution. Pair the counters with the capability report and an audio reference
+comparison; counters alone establish neither numerical correctness nor a speedup.
+
+Offline and unprepared calls are excluded. Invalid prepared calls count once,
+even when the transport sanitizes their views. Successful preparation resets the
+counters; release and preparation returning false preserve them. A failed
+preparation leaves the transport unprepared.
+
+Snapshots use independent atomic loads and may combine different callback
+instants while processing continues. Stop the callback before checking exact
+aggregate totals. Do not race preparation or destruction with snapshot readers.
+These aggregate counters complement the per-block tracing identities; they do
+not replace terminal-disposition or deadline analysis.
