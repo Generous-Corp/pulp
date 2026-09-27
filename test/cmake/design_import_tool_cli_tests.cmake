@@ -86,8 +86,12 @@ if(_PULP_NODE_FOR_TESTS)
     add_test(NAME pulp-browser-capture-process-lifecycle
              COMMAND ${_PULP_NODE_FOR_TESTS} --test
                      ${_PULP_BROWSER_CAPTURE_PROCESS_LIFECYCLE_TEST})
+    # The collision that mattered was with the real-browser suite, so the two
+    # share the `browser` lock rather than holding the whole machine: the
+    # helpers are short-lived and signal-driven, and two slots cover them.
     set_tests_properties(pulp-browser-capture-process-lifecycle PROPERTIES
-        RUN_SERIAL TRUE
+        RESOURCE_LOCK browser
+        PROCESSORS 2
         TIMEOUT 60
         LABELS "parser-import;browser-capture;node")
 
@@ -100,21 +104,26 @@ if(_PULP_NODE_FOR_TESTS)
              COMMAND ${_PULP_NODE_FOR_TESTS}
                      ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/run_integration.mjs
                      ${_PULP_BROWSER_CAPTURE_INTEGRATION_TEST})
-    # Real Chrome capture is itself load-sensitive: in production a screenshot
-    # CDP call crossed its bounded 20-second deadline while unrelated CTest work
-    # shared the VM, even though the same suite normally finishes cleanly. Make
-    # the isolation independent of the caller's `-j` width; retaining the 600s
-    # outer timeout keeps a genuine capture hang bounded and named.
-    #
-    # Isolation from OTHER tests is the requirement; the cases themselves are
-    # mostly waiting on cold Chrome launches and bounded settles (about a third
-    # of one core per file), so the files run concurrently inside the slot.
-    # Run file by file it held the machine alone for minutes: the longest
-    # single item on the required gate's test step.
+    # Real Chrome capture is load-sensitive: in production a screenshot CDP
+    # call crossed its bounded 20-second deadline while unrelated CTest work
+    # shared the VM. The suite therefore reserves the cores its browsers use
+    # rather than holding the whole machine: PROCESSORS takes that many of
+    # ctest's `-j` slots, and the launcher sizes its file concurrency to the
+    # same reservation (PULP_BROWSER_CAPTURE_RESERVED_CORES), so two slots per
+    # Chrome are genuinely free. ctest clamps a reservation larger than `-j` to
+    # all of it, so a 3-vCPU gate VM still runs the suite alone and one file at
+    # a time. The `browser` lock keeps every other Chrome-launching test out of
+    # the window, and COST starts it first so it overlaps the parallel phase
+    # instead of trailing it. The 600s timeout keeps a capture hang bounded.
+    set(_PULP_BROWSER_CAPTURE_RESERVED_CORES 4)
     set_tests_properties(pulp-browser-capture-node-integration PROPERTIES
-        RUN_SERIAL TRUE
+        RESOURCE_LOCK browser
+        PROCESSORS ${_PULP_BROWSER_CAPTURE_RESERVED_CORES}
+        ENVIRONMENT "PULP_BROWSER_CAPTURE_RESERVED_CORES=${_PULP_BROWSER_CAPTURE_RESERVED_CORES}"
+        COST 120
         TIMEOUT 600
         LABELS "parser-import;browser-capture;node")
+    unset(_PULP_BROWSER_CAPTURE_RESERVED_CORES)
 
     if(EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/esbuild/package.json"
        AND EXISTS "${CMAKE_SOURCE_DIR}/tools/import-design/jsx-runtime/node_modules/@babel/parser/package.json")
@@ -289,21 +298,33 @@ endif()
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "~[network]"
+        TEST_SPEC "~[network]~[browser]"
         PROPERTIES LABELS "parser-import;windows-pr-quarantine")
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "[network]"
         PROPERTIES
             RESOURCE_LOCK "design-import-network"
         LABELS "parser-import;windows-pr-quarantine")
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "[browser]~[network]"
+        PROPERTIES
+            RESOURCE_LOCK browser
+        LABELS "parser-import;windows-pr-quarantine")
 else()
     catch_discover_tests(pulp-test-import-design-tool
-        TEST_SPEC "~[network]"
+        TEST_SPEC "~[network]~[browser]"
         PROPERTIES LABELS "parser-import")
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "[network]"
         PROPERTIES
             RESOURCE_LOCK "design-import-network"
+        LABELS "parser-import")
+    # Cases that launch a real Chrome share the lock the browser-capture
+    # suites hold, so two captures never contend for one VM's cores.
+    catch_discover_tests(pulp-test-import-design-tool
+        TEST_SPEC "[browser]~[network]"
+        PROPERTIES
+            RESOURCE_LOCK browser
         LABELS "parser-import")
 endif()
 
