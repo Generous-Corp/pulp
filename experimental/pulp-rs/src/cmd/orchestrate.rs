@@ -170,6 +170,9 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             "--examples" => out.examples = true,
+            // Consumed by the stale-CLI and SDK-compatibility guards before
+            // dispatch; it must not reach `cmake --build`.
+            "--allow-unsupported-sdk" => {}
             "--seed-build" => out.seed_build = Some(SEED_AUTO.to_owned()),
             _ if a.starts_with("--seed-build=") => {
                 out.seed_build = Some(seed_build_value(a.trim_start_matches("--seed-build=")));

@@ -827,6 +827,48 @@ must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
   `pulp dev --design` do. Forgetting it reads as "unknown target", not as a
   configure problem.
 
+### A stale installed CLI applies ITS defaults — the stale-CLI guard
+
+Because the configure defaults above live in the binary, a `pulp` on PATH that
+is hundreds of releases behind the checkout silently configures it the way its
+own release did: Makefiles, no build type, examples ON, and a `cmake --build`
+with no `-j` (serial under Makefiles). It prints no error. Measured on m3
+(2026-09-27): installed `~/.pulp/bin/pulp` v0.305.0 against a v0.876.1 checkout,
+40 of 46 agent-worktree caches were `Unix Makefiles`, and about 70% of the
+agent `pulp build`-family launches that week resolved to the installed binary
+rather than `./build/pulp`.
+
+Two layers, because the fix inside the CLI only reaches hosts after they update:
+
+- **In the Rust CLI** (`experimental/pulp-rs/src/stale_cli.rs`, called first in
+  `main()`, before the `PULP_USE_CPP` rollback lever): for `build`, `dev`,
+  `loop`, `run`, `test`, when the project is more than 50 releases ahead
+  (`PULP_STALE_CLI_LIMIT`; a newer major always counts), a Pulp checkout with a
+  built `build/pulp` gets the command re-run through it
+  (`PULP_STALE_CLI_REDIRECTED=1` stops a second hop); otherwise it exits 1 with
+  both versions, the installer command, and a governed bootstrap. Bypass:
+  `--allow-unsupported-sdk` (the Rust build parser swallows it so it never
+  reaches `cmake --build`) or `PULP_ALLOW_STALE_CLI=1`.
+- **In the repo** (`hooks/scripts/check-pulp-cli.sh --session-start`, wired as
+  a SessionStart hook in `.claude/settings.json` and `.codex/hooks.json`): the
+  same comparison from the checkout side, printed as agent context. This is
+  the one that helps a host whose CLI predates the guard.
+
+Traps:
+
+- **Pulp's project name is `Pulp`, capitalised.** Both layers match
+  `project(Pulp …)` case-insensitively and require it; a tree that merely has
+  `core/` and a `CMakeLists.txt` (the shell-out fixtures use
+  `project(VersionFixture VERSION 1.0.0)`) is not a Pulp checkout and must not
+  be gated by its unrelated version.
+- **Only a release identity gates.** The CLI version counts only when CMake
+  baked `PULP_RS_BUILD_VERSION` (or a test sets `PULP_RS_CLI_VERSION`). A plain
+  `cargo build` reports the crate's `0.0.1`, which would refuse every build in
+  the checkout.
+- **Covered by** `pulp-rust-stale-cli-guard` (cargo `stale_cli` filter: unit
+  cases plus `tests/stale_cli_test.rs` driving the real binary with a `cmake`
+  stub that must stay unused on refusal) and `check-pulp-cli-hook`.
+
 ### `pulp status` — build-governance tier line
 
 `pulp status` reports the active host-resource governance tier via a
