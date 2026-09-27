@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Build-speed scorecard: local build cost, PR pipeline timing, fleet state.
 
-Two subcommands:
+Three subcommands:
 
   ingest   Backfill the required `macos` gate's job and step timings, merge-queue
            latency and merge_group outcomes from the GitHub API into Shipyard's
            metrics store (`shipyard metrics record`). Idempotent: rows already in
            the store (by external id) are skipped. Run it before `report`, or on a
            schedule, so `shipyard metrics watch` has history to judge drift.
+  proxies  The before/after VERDICT: load-independent counts and ratios, one per
+           mechanism a change targets (build_speed_proxies.py), each with a
+           control that must be non-zero. Reads GitHub and each host's tartci
+           supervisor events directly (cached), not the Shipyard store. Wall
+           time is printed beside them as context only.
   report   Render the scorecard. Pipeline numbers are READ FROM SHIPYARD, not
            recomputed from GitHub; fleet state is read from each host's published
            host_vitals.json; the local section uses build_time_report.py.
@@ -218,7 +223,8 @@ def gate_job_records(run: dict, jobs: list[dict]) -> list[dict]:
                                 "platform": "macos", "backend": "vm", "provider": "tart-macos",
                                 "host": "none", "duration_ms": round(waited * 60000),
                                 "status": "cancelled", "started_at": job.get("created_at"),
-                                "completed_at": end, "external_id": base_id})
+                                "completed_at": end, "external_id": base_id,
+                                "queued_at": job.get("created_at"), "runner_assigned": False})
                 continue
             # A hosted placeholder: in a merge group it stands in for a reused
             # PR receipt or a skip-safe group; on a PR it means no native build
@@ -231,7 +237,8 @@ def gate_job_records(run: dict, jobs: list[dict]) -> list[dict]:
                             "provider": "github-hosted", "host": "github",
                             "runner": job.get("runner_name"), "duration_ms": round(dur * 60000),
                             "status": conclusion, "started_at": start, "completed_at": end,
-                            "external_id": base_id})
+                            "external_id": base_id, "queued_at": job.get("created_at"),
+                            "runner_assigned": True})
             continue
         if dur is None:
             continue
@@ -239,7 +246,8 @@ def gate_job_records(run: dict, jobs: list[dict]) -> list[dict]:
                 "host": host, "runner": job.get("runner_name"), "job": GATE_JOB}
         out.append({**gate, "project": PROJECT_JOBS, "target": f"macos-gate/{event}",
                     "duration_ms": round(dur * 60000), "status": conclusion,
-                    "started_at": start, "completed_at": end, "external_id": base_id})
+                    "started_at": start, "completed_at": end, "external_id": base_id,
+                    "queued_at": job.get("created_at"), "runner_assigned": True})
         queue = minutes(job.get("created_at"), start)
         if queue is not None and queue >= 0:
             out.append({**gate, "project": PROJECT_STEPS, "target": f"macos-gate/{event}/queue",
@@ -439,18 +447,38 @@ def pr_gate_minutes_records(prs: list[dict], pr_of_run: dict[str, int],
     return out
 
 
-def record_argv(rec: dict, shipyard: str = "shipyard") -> list[str]:
+# `metrics record --queued-at/--runner-assigned` (Shipyard's load-independent
+# proxies: wait per job ahead, starvation) exist from this version on. Older
+# Shipyards reject unknown flags, so they are passed only when supported.
+PROXY_FIELDS_MIN = (0, 216, 0)
+
+
+def shipyard_version(binary: str | None) -> tuple[int, ...] | None:
+    if not binary:
+        return None
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                             timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def record_argv(rec: dict, shipyard: str = "shipyard", proxy_fields: bool = False) -> list[str]:
     argv = [shipyard, "metrics", "record", "--project", rec["project"], "--job", rec["job"]]
     flags = {"repo": "--repo", "workflow": "--workflow", "branch": "--branch", "sha": "--sha",
              "pr": "--pr", "target": "--target", "platform": "--platform", "backend": "--backend",
              "provider": "--provider", "runner": "--runner", "host": "--host",
              "duration_ms": "--duration-ms", "status": "--status", "started_at": "--started-at",
              "completed_at": "--completed-at", "external_id": "--external-id"}
+    if proxy_fields:
+        flags.update({"queued_at": "--queued-at", "runner_assigned": "--runner-assigned"})
     for key, flag in flags.items():
         v = rec.get(key)
         if v is None or v == "":
             continue
-        argv += [flag, str(v)]
+        argv += [flag, str(v).lower() if isinstance(v, bool) else str(v)]
     return argv
 
 
@@ -515,6 +543,14 @@ class Shipyard:
     def __init__(self, binary: str | None = None, mode: str | None = None):
         self.bin = binary or shutil.which("shipyard")
         self.mode = mode
+        self._proxy_fields: bool | None = None
+
+    @property
+    def proxy_fields(self) -> bool:
+        if self._proxy_fields is None:
+            v = shipyard_version(self.bin)
+            self._proxy_fields = bool(v and v >= PROXY_FIELDS_MIN)
+        return self._proxy_fields
 
     @property
     def available(self) -> bool:
@@ -541,7 +577,7 @@ class Shipyard:
         return json.loads(proc.stdout).get("findings", [])
 
     def record(self, rec: dict) -> bool:
-        argv = record_argv(rec, self.bin)
+        argv = record_argv(rec, self.bin, self.proxy_fields)
         if self.mode:
             argv += ["--mode", self.mode]
         return subprocess.run(argv, capture_output=True, text=True).returncode == 0
@@ -1440,6 +1476,52 @@ def cmd_report(args) -> int:
     return rc
 
 
+PROXY_CACHE = Path.home() / ".cache" / "pulp" / "build-speed" / "proxies.json"
+
+
+def _parse_window(text: str) -> tuple[dt.datetime, dt.datetime]:
+    lo, sep, hi = text.partition("/")
+    if not sep:
+        raise argparse.ArgumentTypeError(f"expected START/END: {text!r}")
+    a, b = _parse_split(lo), _parse_split(hi)
+    if b <= a:
+        raise argparse.ArgumentTypeError(f"END must follow START: {text!r}")
+    return a, b
+
+
+def cmd_proxies(args) -> int:
+    px = _load_sibling("build_speed_proxies")
+    since = parse_since(args.since)
+    cache = None
+    if args.cache.exists():
+        try:
+            cache = json.loads(args.cache.read_text())
+        except ValueError:
+            cache = None
+    if args.no_collect:
+        if cache is None:
+            print(f"proxies: --no-collect but no cache at {args.cache}", file=sys.stderr)
+            return 2
+        data = cache
+    else:
+        gh = GitHub(args.repo, args.gh)
+        try:
+            data = px.collect(gh, since, args.hosts or DEFAULT_HOSTS, _ssh, cache=cache,
+                              workers=args.workers, log=lambda m: print(m, file=sys.stderr))
+        except RuntimeError as exc:
+            print(f"proxies: collect failed: {exc}", file=sys.stderr)
+            return 2
+        args.cache.parent.mkdir(parents=True, exist_ok=True)
+        args.cache.write_text(json.dumps(data))
+    win = px.Windows(since, args.split, args.after_from, args.until, args.exclude or ())
+    rep = px.compute(data, win)
+    print(json.dumps(rep, indent=2, default=str) if args.json else px.render_markdown(rep))
+    blind = [r["key"] for r in rep["rows"] if r["verdict"].startswith("INSTRUMENT BLIND")]
+    if blind:
+        print(f"proxies: instrument blind (control zero): {', '.join(blind)}", file=sys.stderr)
+    return 3 if blind else 0
+
+
 def _parse_split(text: str) -> dt.datetime:
     t = parse_ts(text)
     if t is None:
@@ -1470,6 +1552,26 @@ def main(argv: list[str] | None = None) -> int:
     p_in.add_argument("--workers", type=int, default=8)
     p_in.add_argument("--dry-run", action="store_true")
     p_in.set_defaults(func=cmd_ingest)
+
+    p_px = sub.add_parser("proxies", help="load-independent before/after proxies (the verdict)")
+    p_px.add_argument("--since", required=True, help="start of the before side (ISO or 7d)")
+    p_px.add_argument("--split", type=_parse_split, required=True, metavar="ISO-TIME")
+    p_px.add_argument("--after-from", type=_parse_split, metavar="ISO-TIME",
+                      help="start the after side here (after the last rollout)")
+    p_px.add_argument("--until", type=_parse_split, metavar="ISO-TIME")
+    p_px.add_argument("--exclude", type=_parse_window, action="append", metavar="START/END",
+                      help="drop this window from both sides (an infra incident); "
+                           "a link error inside it counts as infra_host_cache. Repeatable")
+    p_px.add_argument("--hosts", nargs="*", help="alias[=ssh-target|local] (default: m3=local m5 m1)")
+    p_px.add_argument("--repo", default=DEFAULT_REPO)
+    p_px.add_argument("--gh", default=os.environ.get("PULP_GH_BIN", "ghapp"))
+    p_px.add_argument("--workers", type=int, default=8)
+    p_px.add_argument("--cache", type=Path, default=PROXY_CACHE,
+                      help="raw collected inputs; completed runs, commits and logs are reused")
+    p_px.add_argument("--no-collect", action="store_true",
+                      help="re-render from --cache without touching GitHub or the hosts")
+    p_px.add_argument("--json", action="store_true")
+    p_px.set_defaults(func=cmd_proxies)
 
     p_rep = sub.add_parser("report", help="render the scorecard")
     p_rep.add_argument("--since", default="7d")

@@ -73,6 +73,9 @@ class RecordMappingTests(unittest.TestCase):
         self.assertEqual(job["duration_ms"], (65 * 60 + 33) * 1000)
         gate_id = next(j["id"] for j in f["jobs"] if j["name"] == "macos")
         self.assertEqual(job["external_id"], f"github:{f['run']['id']}/{gate_id}/1")
+        gate_job = next(j for j in f["jobs"] if j["name"] == "macos")
+        self.assertIs(job["runner_assigned"], True)
+        self.assertEqual(job["queued_at"], gate_job["created_at"])
         build = by_target["macos-gate/merge_group/Build"]
         self.assertEqual(build["project"], "pulp-gate-steps")
         self.assertEqual(build["duration_ms"], (32 * 60 + 40) * 1000)  # 00:19:34 → 00:52:14
@@ -112,6 +115,24 @@ class RecordMappingTests(unittest.TestCase):
         self.assertEqual(argv[:3], ["shipyard", "metrics", "record"])
         self.assertIn("--external-id", argv)
         self.assertNotIn("--pr", argv)  # unknown is omitted, not sent as 0
+
+    def test_proxy_fields_are_sent_only_to_a_shipyard_that_accepts_them(self) -> None:
+        rec = {"project": "pulp", "job": "macos", "target": "macos-gate/merge_group/no-runner-cancel",
+               "duration_ms": 1000, "external_id": "github:1/2/1",
+               "queued_at": "2026-09-23T10:13:09Z", "runner_assigned": False}
+        old = sc.record_argv(rec, "shipyard")
+        self.assertNotIn("--queued-at", old)
+        self.assertNotIn("--runner-assigned", old)
+        new = sc.record_argv(rec, "shipyard", proxy_fields=True)
+        self.assertEqual(new[new.index("--runner-assigned") + 1], "false")
+        self.assertEqual(new[new.index("--queued-at") + 1], "2026-09-23T10:13:09Z")
+        with tempfile.TemporaryDirectory() as tmp:
+            for version, expected in (("shipyard 0.215.0", False), ("shipyard 0.216.0", True),
+                                      ("shipyard 1.0.0", True), ("garbage", False)):
+                fake = Path(tmp) / "shipyard"
+                fake.write_text(f"#!/bin/sh\necho '{version}'\n")
+                fake.chmod(0o755)
+                self.assertEqual(sc.Shipyard(str(fake)).proxy_fields, expected, version)
 
 
 def _row(target: str, minutes: float, status: str, when: str, host: str = "m3") -> dict:
@@ -211,6 +232,9 @@ class MergeLatencyAndCostTests(unittest.TestCase):
         self.assertEqual([(r["target"], r["duration_ms"], r["host"]) for r in recs],
                          [("macos-gate/merge_group/no-runner-cancel", 20 * 60000, "none")])
         self.assertEqual(sc.gate_ms_by_run(recs), {})
+        # Shipyard's starvation proxy: never assigned, queued when GitHub created it.
+        self.assertIs(recs[0]["runner_assigned"], False)
+        self.assertEqual(recs[0]["queued_at"], "2026-09-23T10:13:09Z")
 
     def test_release_jobs_on_gate_runners_are_recorded_with_their_queue(self) -> None:
         run = {"id": 5, "name": "Release CLI", "head_branch": "main", "head_sha": "abc"}

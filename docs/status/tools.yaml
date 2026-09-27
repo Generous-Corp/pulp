@@ -505,7 +505,13 @@ tools:
     delta through bench_diff.py; `--split` adds gate job and step p50/p90 either side of one instant,
     and time to merge (open→merged, enqueue→merged), gate-minutes per merged PR, cancelled gate-minutes,
     receipt reuse, merge_group failure and ejection rates, gate starvation and release-lane competition.
-  caveat: Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own
+    `proxies --since … --split …` is the before/after VERDICT, one load-independent count or ratio per
+    mechanism (release placement, unserved label sets, idle-with-demand per host from tartci events,
+    VM discard and unminted boots, PR-head no-runner cancels, wait per job ahead, refresh cancels per
+    merged PR, merge-queue attempts and ejection causes, gate runs per merged PR), each with a control
+    that must be non-zero, and wall time beside them as context only.
+  caveat: Pipeline numbers are only as fresh as the last `ingest`. Wall-clock waits track load; judge a change
+    by `proxies`, where a zero control reads INSTRUMENT BLIND and a small side reads "insufficient sample". The iOS compile gate has no step of its own
     (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build
     snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
   availability: always

@@ -1192,6 +1192,10 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_scorecard
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(build-speed-scorecard-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME build-speed-proxies-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_proxies
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-speed-proxies-selftest PROPERTIES TIMEOUT 120)
         if(APPLE)
             # host_vitals.sh reads macOS sysctls and BSD stat/date.
             add_test(NAME host-vitals-selftest
