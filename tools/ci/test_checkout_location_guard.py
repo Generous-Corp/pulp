@@ -98,6 +98,37 @@ class CcacheBaseDirTests(unittest.TestCase):
         base = str(REPO_ROOT.parent)
         self.assertEqual(guard.evaluate(REPO_ROOT, {}, "ctx", lambda _argv: base), (0, []))
 
+    def test_tool_owned_checkouts_do_not_warn(self) -> None:
+        with tempfile.TemporaryDirectory() as raw, tempfile.TemporaryDirectory() as base:
+            home = Path(raw)
+            env = {"HOME": str(home), guard.ALLOW_ENV: "1"}
+            owned = [
+                home / ".pulp" / "sdk-source-dev" / "forge-dev" / "abc" / ".snapshot-1",
+                home / "Library" / "Application Support" / "shipyard" / "results" / "x",
+                home / ".local" / "state" / "shipyard-dev" / "integration-checkouts" / "s",
+            ]
+            control = home / "Code" / "stray-worktree"
+            for path in (*owned, control):
+                path.mkdir(parents=True)
+            for path in owned:
+                with self.subTest(path=str(path)):
+                    _, messages = guard.evaluate(path, env, "ctx", lambda _argv: base)
+                    self.assertFalse(
+                        [m for m in messages if "base_dir" in m], messages)
+            # Control: an ordinary checkout beside them still warns, so the
+            # silence above is the exemption and not a blind instrument.
+            _, messages = guard.evaluate(control, env, "ctx", lambda _argv: base)
+            self.assertTrue([m for m in messages if "outside ccache base_dir" in m], messages)
+
+    def test_pulp_home_override_moves_the_snapshot_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw, tempfile.TemporaryDirectory() as base:
+            custom = Path(raw) / "custom-pulp-home"
+            snapshot = custom / "sdk-source-dev" / "p"
+            snapshot.mkdir(parents=True)
+            env = {"HOME": raw, "PULP_HOME": str(custom), guard.ALLOW_ENV: "1"}
+            _, messages = guard.evaluate(snapshot, env, "ctx", lambda _argv: base)
+            self.assertFalse([m for m in messages if "base_dir" in m], messages)
+
     def test_unset_base_dir_is_silent(self) -> None:
         self.assertEqual(guard.evaluate(REPO_ROOT, {}, "ctx", lambda _argv: ""), (0, []))
 
