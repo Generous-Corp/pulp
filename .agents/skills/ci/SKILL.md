@@ -144,9 +144,31 @@ python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
 It maps each failing ctest to the pull request whose files own it. Below its
 confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
 read that as "go look at main's own push run", never as "no culprit exists".
-Because it reads the macos job's log, a batch whose macos gate never ran the
+Because it reads the run's job logs, a batch whose macos gate never ran the
 suite yields nothing, which is the previous section's problem wearing a
-different hat.
+different hat. Read them from the RUN-level endpoint
+(`actions/runs/<id>/logs`, a zip) and never the per-job one: `ghapp` withholds
+any response carrying terminal escape sequences, so `actions/jobs/<id>/logs`
+returns zero bytes and every reader built on it sees an empty log rather than an
+error.
+
+The same module answers a second, narrower question for Shipyard. When
+`queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
+ejection, it asks Pulp's declared attributor whether the ejecting batch
+implicated the head at all:
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --certify \
+  --repo Generous-Corp/pulp --pr <n> --run-id <ejecting-run-id>
+```
+
+It certifies only on positive evidence, per failing step and exhaustively, so
+most batches refuse — including every batch that failed with no ctest block,
+because a link error is how a head most often breaks one. Do not read a refusal
+as a bug in the attributor; read it as "nothing here rules this head out". The
+full rule, and the two candidate signals rejected for certifying a guilty head,
+are in [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) under
+"Letting an un-implicated head back into the queue".
 
 ## Current required-macOS truth (read before older incident notes)
 

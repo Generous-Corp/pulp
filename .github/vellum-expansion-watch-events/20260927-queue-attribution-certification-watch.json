@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260927-queue-attribution-certification-watch",
+  "created_at": "2026-09-27T02:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record the tools registry invocation line for the merge-queue batch attributor's new --certify mode, which answers Shipyard's queue-arm-guard about whether an ejecting batch implicated a head. The registry edit is documentation of an existing CI tool's invocation; it touches no design import, capture, rendering, packaging, or Vellum authority behavior.",
+  "tests": [
+    "python3 -m unittest discover -s tools/scripts -p test_queue_batch_attribute.py -t tools/scripts (86 tests)",
+    "python3 tools/scripts/tools_registry_check.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <base-sha> --head <head-sha>",
+    "tools/scripts/gates.sh origin/main (all gates pass)"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
