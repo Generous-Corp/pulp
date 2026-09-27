@@ -3,9 +3,14 @@ name: Post-tag docs sync
 # Installed by `shipyard release-bot hook install`. Shipyard-owned file:
 # re-running the install command overwrites this file in place.
 
+# Tag trigger withdrawn: the job's `pulp-queue-authority-studio` runner is no
+# longer registered, so every tag queued a run that sat for ~5.5 hours and was
+# cancelled without doing anything. Dispatch it against a tag ref
+# (`--ref vX.Y.Z`) once a runner serves that label again, and restore the
+# `push: tags` trigger then. Re-running `shipyard release-bot hook install`
+# rewrites this file and brings the trigger back.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 concurrency:
   group: shipyard-post-tag-sync
