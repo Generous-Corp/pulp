@@ -220,6 +220,10 @@ connection: it does not create the runtime directory, remove a stale endpoint,
 start a daemon, open a session, consume admission, register a client, or grant a
 capability. With no trusted peer expectation, an accepting socket is reported
 as `reachable-unverified`; it is never described as healthy or verified.
+`pulp status --broker-only` prints only that line and exits 0, and needs no
+project; it is the check the installer and `pulp upgrade` run after starting the
+broker, so a `curl | sh` from any directory can pass it. A broker that does not
+become reachable in time is a warning in both: the CLI is already installed.
 On macOS and Windows it also reports whether an optional AAX SDK is detected. On
 Linux and Ubuntu it reports AAX as unsupported.
 

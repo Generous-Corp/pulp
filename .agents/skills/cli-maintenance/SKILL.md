@@ -61,6 +61,21 @@ the Rust crate would ship a check nobody reaches. Verify the split rather than
 assuming it: run the built `./build/pulp doctor` and confirm the C++ check names
 appear in its output.
 
+### `--only` must filter BEFORE the work, not after
+
+`run_doctor_checks(root, standalone, only)` is also how `pulp status` gets its
+`Control broker:` line, and the installer's broker health probe runs that
+line. The `RELEASE_BOT_TOKEN secret` row used to make two `gh` network calls
+before looking at the filter, so every `--only` caller paid about 3.7 s for a
+row it discarded, longer than the installer's 3 s health deadline, and the
+broker was never installed anywhere. The probe also ran plain `pulp-cpp status`,
+which refuses outside a Pulp project, so a `curl | sh` from `~` could not pass
+it either. Now the `gh` block sits inside its filter check, the probe runs
+`pulp-cpp status --broker-only` (no project needed), and its deadline (5 s) is
+set from measured startup times, not a guess. A new doctor row with a
+subprocess or network call goes INSIDE its `doctor_check_matches_only_filter`
+block.
+
 ### A doctor check that cannot be wrong is worse than no check
 
 `pulp doctor`'s value rests on people believing a failing row. A check that

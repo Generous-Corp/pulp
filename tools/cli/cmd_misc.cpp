@@ -237,6 +237,12 @@ int cmd_test(const std::vector<std::string>& args) {
 // ── cmd_status ──────────────────────────────────────────────────────────────
 
 int cmd_status(const std::vector<std::string>& args) {
+    // The broker observation needs no project: the installer's health probe
+    // runs from wherever `curl | sh` was started, usually outside one.
+    if (args.size() == 1 && args[0] == "--broker-only") {
+        print_control_broker_status({}, false);
+        return 0;
+    }
     if (!args.empty()) {
         std::cerr << "Unexpected status argument: " << args[0] << "\n";
         return 2;
