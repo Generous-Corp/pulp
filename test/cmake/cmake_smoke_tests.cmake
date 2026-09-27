@@ -690,6 +690,14 @@ if(UNIX)
         set_tests_properties(install-rpath-closure PROPERTIES
             LABELS "tooling;installer"
             TIMEOUT 120)
+        # The README's verify-before-install recipe checks the website's
+        # installer against tools/install/SHA256SUMS.
+        add_test(NAME install-sha256sums-current
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_install_sha256sums.py)
+        set_tests_properties(install-sha256sums-current PROPERTIES
+            LABELS "tooling;installer"
+            TIMEOUT 30)
     endif()
 endif()
 if(Python3_Interpreter_FOUND)

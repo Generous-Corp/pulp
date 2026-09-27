@@ -847,7 +847,14 @@ broker transaction backs up and restores that copy. Guard:
 `tools/scripts/check_installed_rpaths.py <install-dir>` resolves every Mach-O
 dependency against the INSTALLED tree; the `install-rpath-closure` ctest runs
 `install.sh` on real compiled fixtures with a failing broker and requires a
-clean result, and it also checks that a stale runtime already in the install
+clean result. The release smoke (`release-cli.yml`, Unix legs) installs the
+artifact it is about to publish through the default branch's `install.sh`
+(`PULP_INSTALL_ARCHIVE`, no download) and runs the checker on the installed
+tree, since the flat unpack it did before could not see this class. Any edit
+to `tools/install/install.sh` or `install.ps1` must regenerate
+`tools/install/SHA256SUMS` (`install-sha256sums-current` ctest): the README's
+verify-before-install recipe checks the website copy, which is main's, against
+it, and a stale entry fails that recipe for every user, and it also checks that a stale runtime already in the install
 directory is replaced. The broker is optional, so `install.sh` reports a
 failed activation as a warning and exits 0. Never "fix" a missing runtime
 with a symlink to `~/.pulp/lib`: that directory is an old SDK install prefix holding an unrelated wgpu build,

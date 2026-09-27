@@ -1037,6 +1037,17 @@ artifact on a *clean* runner that did not build it, catching the bug
 class before tagging. If you change rpath logic, run the smoke job
 locally first or it will fail in CI for everyone else.
 
+A flat unpack is not the installed layout. v0.876.1's archive was correct
+and passed the flat smoke, yet `install.sh` left `libwgpu_native.dylib` out
+of `~/.pulp/bin` whenever the optional broker failed, and `pulp-cpp` died in
+dyld on every host. The Unix smoke legs therefore also install the artifact
+through the default branch's `install.sh` (`PULP_INSTALL_ARCHIVE`, no
+download, a scratch `HOME` and install root where the broker is refused) and
+run `tools/scripts/check_installed_rpaths.py` on the installed tree. To
+reproduce locally: `PULP_INSTALL_ARCHIVE=pulp-darwin-arm64.tar.gz
+PULP_INSTALL_DIR=/tmp/i/bin PULP_NO_MODIFY_PATH=1 PULP_SKIP_SDK_INSTALL=1
+bash tools/install/install.sh && python3 tools/scripts/check_installed_rpaths.py /tmp/i/bin`.
+
 ### Phase 8 CLI release artifacts are dual-binary
 
 After the Rust CLI flip, release artifacts must contain both `pulp`

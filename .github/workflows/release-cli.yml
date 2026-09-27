@@ -1525,6 +1525,46 @@ jobs:
           Expand-Archive -Force -Path artifact-in\pulp-${{ matrix.platform }}.zip -DestinationPath $env:TEMP\pulp-smoke
           Get-ChildItem $env:TEMP\pulp-smoke
 
+      # The flat unpack above cannot see an installer that leaves a member out
+      # or puts it where the binaries do not look (v0.876.1 shipped a correct
+      # archive whose install stranded pulp-cpp without libwgpu_native). So
+      # also install the artifact through the real install.sh, the way users
+      # do, and check the INSTALLED tree. The installer comes from the default
+      # branch, which is the copy users download. The broker is refused here
+      # (custom root, no opt-in); that must be a warning, not a failed install.
+      - name: Check out the installer and install-layout checker
+        if: runner.os != 'Windows'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: installer-src
+          lfs: false
+          sparse-checkout: |
+            tools/install/install.sh
+            tools/scripts/check_installed_rpaths.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install through install.sh and check the installed layout (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$RUNNER_TEMP/pulp-installed"
+          mkdir -p "$INSTALL_ROOT/home"
+          HOME="$INSTALL_ROOT/home" \
+          PULP_INSTALL_ARCHIVE="$PWD/artifact-in/pulp-${{ matrix.platform }}.tar.gz" \
+          PULP_INSTALL_DIR="$INSTALL_ROOT/bin" \
+          PULP_NO_MODIFY_PATH=1 \
+          PULP_SKIP_SDK_INSTALL=1 \
+            bash installer-src/tools/install/install.sh
+          ls -la "$INSTALL_ROOT/bin"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            python3 installer-src/tools/scripts/check_installed_rpaths.py "$INSTALL_ROOT/bin"
+          fi
+          # Loading proves the shared runtime resolved (dyld / ld.so fail first).
+          "$INSTALL_ROOT/bin/pulp-cpp" version
+          "$INSTALL_ROOT/bin/pulp-mcp" --version
+
       # Smoke test — the binary must run portably.
       #
       # If `pulp help` exits non-zero or produces dyld/ld.so/DLL
