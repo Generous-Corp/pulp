@@ -285,16 +285,16 @@ struct SharedIoTraceDrainObserver {
 
 // Final failed-release disclosure. No per-sequence terminal or retirement is
 // implied. Call after quiescent draining, before destroying the recorder.
-void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership&,
-    const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
+void emit_shared_io_unresolved_ownership(
+    const SharedIoTraceOwnership&, const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
 
 // Non-RT diagnostic thread ONLY, including when the producer becomes a future
 // realtime auxiliary worker. This is the sole Perfetto edge for these records.
 // Counters are approximate cumulative snapshots; no per-block timing is
 // inferred from the independent "latest sample" atomics.
-SharedIoTraceDrainResult drain_shared_io_trace(SharedIoTraceRecorder& recorder,
-                                               const SharedIoTelemetrySnapshot& telemetry,
-                                               std::uint32_t budget = 256,
-                                               const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
+SharedIoTraceDrainResult
+drain_shared_io_trace(SharedIoTraceRecorder& recorder, const SharedIoTelemetrySnapshot& telemetry,
+                      std::uint32_t budget = 256,
+                      const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
 
 } // namespace pulp::gpu_audio::detail

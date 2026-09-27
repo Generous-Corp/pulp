@@ -286,11 +286,14 @@ void emit_record([[maybe_unused]] const SharedIoTraceConfig& config,
         shared_io_fallback_reason_name(r.gpu_reason), "delivery_reason",
         shared_io_fallback_reason_name(r.delivery_reason), "valid_stages", r.valid_stages,
         "gpu_work_admitted", r.gpu_work_admitted, "output_eligible", r.output_eligible,
-        "callback_ingress_ns", r.callback_ingress_ns ? static_cast<std::int64_t>(r.callback_ingress_ns) : -1,
-        "ingress_to_worker_ns", r.callback_ingress_ns && r.has(S::WorkerEntry) && r.cpu_ns[1] >= r.callback_ingress_ns
-            ? static_cast<std::int64_t>(r.cpu_ns[1] - r.callback_ingress_ns) : -1,
-        "worker_to_observed_ns", elapsed(r, S::WorkerEntry, S::CompletionObserved),
-        "gpu_terminal", shared_io_gpu_terminal_name(r.gpu_terminal), "delivery",
+        "callback_ingress_ns",
+        r.callback_ingress_ns ? static_cast<std::int64_t>(r.callback_ingress_ns) : -1,
+        "ingress_to_worker_ns",
+        r.callback_ingress_ns && r.has(S::WorkerEntry) && r.cpu_ns[1] >= r.callback_ingress_ns
+            ? static_cast<std::int64_t>(r.cpu_ns[1] - r.callback_ingress_ns)
+            : -1,
+        "worker_to_observed_ns", elapsed(r, S::WorkerEntry, S::CompletionObserved), "gpu_terminal",
+        shared_io_gpu_terminal_name(r.gpu_terminal), "delivery",
         shared_io_delivery_name(r.delivery), "scheduled_ns",
         r.has(S::Scheduled) ? static_cast<std::int64_t>(r.cpu_ns[0]) : -1, "worker_entry_ns",
         r.has(S::WorkerEntry) ? static_cast<std::int64_t>(r.cpu_ns[1]) : -1,
@@ -315,12 +318,13 @@ void emit_admission([[maybe_unused]] const SharedIoTraceConfig& config,
 } // namespace
 
 void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership,
-                                        const SharedIoTraceDrainObserver* observer) noexcept {
-    PULP_TRACE_INSTANT_ARGS("gpu", "gpu.audio.ownership", "schema", 2,
-        "engine_id", ownership.engine_id, "generation", ownership.generation,
-        "physical_release_complete", ownership.physical_release_complete,
-        "unresolved_channel_count", ownership.unresolved_channel_count);
-    if (observer && observer->ownership) observer->ownership(observer->context, ownership);
+                                         const SharedIoTraceDrainObserver* observer) noexcept {
+    PULP_TRACE_INSTANT_ARGS("gpu", "gpu.audio.ownership", "schema", 2, "engine_id",
+                            ownership.engine_id, "generation", ownership.generation,
+                            "physical_release_complete", ownership.physical_release_complete,
+                            "unresolved_channel_count", ownership.unresolved_channel_count);
+    if (observer && observer->ownership)
+        observer->ownership(observer->context, ownership);
 }
 
 SharedIoTraceDrainResult
@@ -346,11 +350,13 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
         "event_time", "drain", "gpu_clock_mapped", false);
     const auto emit_terminal = [&](const SharedIoTraceRecord& record) {
         emit_record(config, record);
-        if (observer && observer->record) observer->record(observer->context, config.engine_id, record);
+        if (observer && observer->record)
+            observer->record(observer->context, config.engine_id, record);
     };
     const auto emit_admitted = [&](const SharedIoTraceAdmission& admission) {
         emit_admission(config, admission);
-        if (observer && observer->admission) observer->admission(observer->context, config.engine_id, admission);
+        if (observer && observer->admission)
+            observer->admission(observer->context, config.engine_id, admission);
     };
     std::uint32_t admissions_drained = 0;
     const bool terminals_first = recorder.terminals_first_for_next_drain();

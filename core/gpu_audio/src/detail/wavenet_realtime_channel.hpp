@@ -1,8 +1,8 @@
 #pragma once
+#include "shared_io_stamped_bridge.hpp"
+#include "shared_io_trace.hpp"
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
 #include <vector>
-#include "shared_io_trace.hpp"
-#include "shared_io_stamped_bridge.hpp"
 
 namespace pulp::gpu_audio::detail {
 // Private deterministic provider seam. No plugin-facing queue/provider hooks.

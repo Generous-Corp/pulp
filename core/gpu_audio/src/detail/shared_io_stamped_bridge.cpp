@@ -35,7 +35,8 @@ bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
 }
 
 SharedIoStampedBridge::Publication
-SharedIoStampedBridge::publish(Queue& queue, Stamp stamp, std::span<const float> samples, std::uint64_t ingress_ns) noexcept {
+SharedIoStampedBridge::publish(Queue& queue, Stamp stamp, std::span<const float> samples,
+                               std::uint64_t ingress_ns) noexcept {
     const auto write = queue.write.load(std::memory_order_relaxed);
     if (write == kNoLease)
         return Publication::CounterExhausted;
