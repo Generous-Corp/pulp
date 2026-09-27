@@ -442,16 +442,27 @@ PULP_SIMD_HWY_DEFINE(F64, double)
 
 #undef PULP_SIMD_HWY_DEFINE
 
+// HWY_DYNAMIC_DISPATCH expands its argument relative to the generated target
+// namespace. Keep these calls inside the backend namespace so the single-target
+// Highway configuration used by Windows ARM64 resolves the target correctly.
+std::size_t dispatch_float_lanes() noexcept {
+    return HWY_DYNAMIC_DISPATCH(FloatLanes)();
+}
+
+std::size_t dispatch_double_lanes() noexcept {
+    return HWY_DYNAMIC_DISPATCH(DoubleLanes)();
+}
+
 } // namespace pulp::simd::backend::highway
 
 namespace pulp::simd {
 
 std::size_t float_lanes() noexcept {
-    return HWY_DYNAMIC_DISPATCH(backend::highway::FloatLanes)();
+    return backend::highway::dispatch_float_lanes();
 }
 
 std::size_t double_lanes() noexcept {
-    return HWY_DYNAMIC_DISPATCH(backend::highway::DoubleLanes)();
+    return backend::highway::dispatch_double_lanes();
 }
 
 } // namespace pulp::simd

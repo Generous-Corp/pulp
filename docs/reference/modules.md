@@ -2804,6 +2804,7 @@ policy** falls back to CPU or silence rather than glitching.
 | `GpuMultiConvolver` | Batched multi-IR / multi-room convolution — one GPU submit per block across N IRs |
 | `GpuStft` | GPU STFT / ISTFT primitive — the spectral toolkit's analysis/synthesis stage |
 | `GpuSpectralFreeze` / `GpuSpectralMorph` / `GpuSpectralStack` | Capture-and-render spectral engines (single freeze, A/B morph, N-layer stack/cloud) |
+| `GpuWaveNetSession` | One-stream shared-memory WaveNet model/session lifecycle with opaque provider resources |
 
 The node boundary is **not** real-time-safe at the device level by design — the
 GPU round-trip is amortized across a block of fixed latency, not paid per sample.
@@ -2811,6 +2812,14 @@ Only the GPU node *implementations* are gated on `pulp::render`; the
 `GpuAudioTransport` bridge and the public node classes still compile and link in
 a build without the GPU stack, report `gpu_available() == false`, and route the
 `signal::*` CPU fallback.
+
+`GpuWaveNetSession` is an opt-in SDK seam for validating a single causal stream
+through the authenticated shared Dawn provider. It accepts a
+`GpuWaveNetDescriptor` and flat weights, keeps model resources and history
+resident, and exposes only block submission, non-blocking service, completion,
+and quiescent release. It does not expose Dawn or Metal handles and does not
+claim realtime scheduling. Consumers should retain a continuously prepared CPU
+fallback until deadline and contention evidence supports a realtime policy.
 
 **Example plugins built on it** (in-tree, `examples/`):
 
