@@ -164,7 +164,9 @@ class PipelineStatsTests(unittest.TestCase):
         self.assertEqual(set(s["gate_by_host"]), {"m1", "m3"})
         self.assertEqual(s["receipt_reused"], 1)
         mg = s["merge_group_failure"]
-        self.assertEqual(mg["per_day"]["2026-09-22"], {"failed": 1, "runs": 2, "rate": 0.5})
+        self.assertEqual(mg["per_day"]["2026-09-22"],
+                         {"failed": 1, "runs": 2, "rate": 0.5, "macos": 0, "other_only": 0,
+                          "macos_unrecorded": 1})
         self.assertAlmostEqual(mg["window_rate"], 1 / 3)
         self.assertEqual(s["latency"]["pr/open-to-merged"]["p50"], 2.0)
         self.assertEqual(s["steps"]["macos-gate/pull_request/Build"]["p50"], 20.0)
@@ -174,6 +176,85 @@ class PipelineStatsTests(unittest.TestCase):
         secs = {x["title"]: x for x in sc.to_sections(s, None, None)}
         self.assertIsNone(secs["Required macos gate job (min)"]["values"]["pull_request p50"])
         self.assertIsNone(secs["merge_group failure rate (%)"]["values"]["window"])
+
+
+class RequiredMacosRateTests(unittest.TestCase):
+    """The required `macos` check is headlined; the run-level rate is split by failing job."""
+
+    SINCE = dt.datetime(2026, 9, 20, tzinfo=UTC)
+    SPLIT = dt.datetime(2026, 9, 22, 12, tzinfo=UTC)
+    NOW = dt.datetime(2026, 9, 24, tzinfo=UTC)
+
+    def _fixture(self):
+        d1, d2 = "2026-09-22T01:00:00+00:00", "2026-09-23T01:00:00+00:00"
+        jobs = [
+            # run 1: macos failed -> the required check failed the run
+            _q("macos-gate/merge_group", 30, d1, "failure", "m3", "github:1/11/1"),
+            # run 2: macos green, the run failed anyway (hosted Linux leg)
+            _q("macos-gate/merge_group", 30, d1, "success", "m5", "github:2/21/1"),
+            # run 3: a hosted placeholder is the required check too
+            _q("macos-gate/merge_group/receipt-reused", 1, d1, "success", "github",
+               "github:3/31/1"),
+            # run 5 attempt 1 green, attempt 2 timed out: attempts are matched
+            _q("macos-gate/merge_group", 30, d2, "success", "m1", "github:5/51/1"),
+            _q("macos-gate/merge_group", 90, d2, "timed_out", "m1", "github:5/52/2"),
+            _q("macos-gate/merge_group", 30, d2, "success", "m3", "github:6/61/1"),
+        ]
+        queue = [
+            _q("merge-group-run", 40, d1, "failure", ext="github-run:1/1"),
+            _q("merge-group-run", 40, d1, "failure", ext="github-run:2/1"),
+            _q("merge-group-run", 40, d1, "failure", ext="github-run:3/1"),
+            # run 4: no `macos` row recorded at all
+            _q("merge-group-run", 40, d1, "failure", ext="github-run:4/1"),
+            _q("merge-group-run", 40, d2, "failure", ext="github-run:5/2"),
+            _q("merge-group-run", 40, d2, "success", ext="github-run:6/1"),
+        ]
+        return jobs, queue
+
+    def test_failed_runs_are_split_by_the_job_that_failed_them(self) -> None:
+        jobs, queue = self._fixture()
+        s = sc.pipeline_stats(jobs, [], queue, self.SINCE)
+        mg = s["merge_group_failure"]
+        self.assertEqual(mg["by_failing_job"], {"macos": 2, "other_only": 2,
+                                                "macos_unrecorded": 1})
+        self.assertEqual({k: mg["per_day"]["2026-09-22"][k] for k in
+                          ("failed", "macos", "other_only", "macos_unrecorded")},
+                         {"failed": 4, "macos": 1, "other_only": 2, "macos_unrecorded": 1})
+        # the required check: native jobs only, a timeout is a failure
+        req = s["merge_group_macos_failure"]
+        self.assertEqual(req["jobs"], 5)
+        self.assertAlmostEqual(req["window_rate"], 2 / 5)
+        self.assertEqual(req["per_day"]["2026-09-23"], {"failed": 1, "jobs": 3, "rate": 1 / 3})
+        self.assertAlmostEqual(mg["window_rate"], 5 / 6)  # the run-level number mixes both
+        secs = {x["title"]: x for x in sc.to_sections(s, None, None)}
+        self.assertEqual(secs["merge_group required macos failure rate (%)"]["values"]["window"],
+                         40.0)
+
+    def test_report_prints_the_required_rate_before_the_split_run_rate(self) -> None:
+        jobs, queue = self._fixture()
+        md = sc.render_markdown({"generated_at": "t", "local": {"status": "NOT MEASURED"},
+                                 "pipeline": sc.pipeline_stats(jobs, [], queue, self.SINCE),
+                                 "fleet": None})
+        self.assertIn("| Required `macos` check, merge_group (by day) | failed / completed | "
+                      "rate |", md)
+        self.assertIn("| 2026-09-22 | 1 / 2 | 50% |", md)
+        self.assertIn("| 2026-09-22 | 4 / 4 | 1 | 2 | 1 | 100% |", md)
+        self.assertIn("| window | | 2 | 2 | 1 | 83% |", md)
+        self.assertLess(md.index("Required `macos` check"), md.index("merge_group runs, any job"))
+
+    def test_split_rows_carry_both_rates(self) -> None:
+        jobs, queue = self._fixture()
+        ms = sc.merge_split_stats(jobs, [], queue, self.SINCE, self.SPLIT, now=self.NOW)
+        b, a = ms["sides"]["before"]["merge_group_runs"], ms["sides"]["after"]["merge_group_runs"]
+        self.assertEqual(b["by_failing_job"], {"macos": 1, "other_only": 2, "macos_unrecorded": 1})
+        self.assertEqual((b["macos_failed_rate"], b["other_only_rate"]), (0.25, 0.5))
+        self.assertEqual((a["macos_failed_rate"], a["other_only_rate"]), (0.5, 0.0))
+        md = "\n".join(sc.render_merge_split_markdown(ms))
+        self.assertIn("| merge_group `macos` gate failure rate (the required check) |", md)
+        self.assertIn("| merge_group run failure rate (any job) | 4 | 100.0 % |", md)
+        self.assertIn("|   of which `macos` failed | 4 | 25.0 % | 2 | 50.0 % | +25 pp |", md)
+        self.assertIn("|   of which only other jobs failed (`macos` green) | 4 | 50.0 % | 2 | "
+                      "0.0 % | -50 pp |", md)
 
 
 class SplitTests(unittest.TestCase):
@@ -386,8 +467,9 @@ class MergeLatencyAndCostTests(unittest.TestCase):
         self.assertEqual((ub["rate"], ub["unknown"]), (0.0, 1))
         self.assertAlmostEqual(ub["rate_upper"], 1 / 3)
         self.assertEqual(a["receipt_reuse"]["rate"], 0.5)
-        self.assertEqual(b["merge_group_runs"], {"completed": 3, "failed": 1, "cancelled": 1,
-                                                 "failure_rate": 0.5})
+        self.assertEqual({k: b["merge_group_runs"][k] for k in
+                          ("completed", "failed", "cancelled", "failure_rate")},
+                         {"completed": 3, "failed": 1, "cancelled": 1, "failure_rate": 0.5})
         # the required gate failed 1 of its 2 self-hosted runs before, 0 of 1 after
         self.assertEqual(b["merge_group_gate"], {"completed": 2, "failed": 1, "failure_rate": 0.5})
         self.assertEqual(a["merge_group_gate"]["failure_rate"], 0.0)
