@@ -151,6 +151,10 @@ int cmd_dev(const std::vector<std::string>& args) {
     ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
     auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
 
+    // A build dir an older CLI configured (Makefiles, Debug, examples ON)
+    // moves aside here so the bootstrap below reconfigures it.
+    migrate_slow_build_dir(build_dir, !standalone_mode, examples);
+
     // Ensure configured
     if (!fs::exists(build_dir / "CMakeCache.txt")
         || (!standalone_mode

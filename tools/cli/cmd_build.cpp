@@ -207,8 +207,10 @@ int cmd_build(const std::vector<std::string>& args) {
                        && focused_build_applicable(project_root, standalone_mode,
                                                    passthrough_args, build_all);
     if (focus) ensure_codemodel_query(build_dir);
-    bool needs_configure = force_configure || !fs::exists(build_dir / "CMakeCache.txt")
-        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir));
+    const bool migrated = migrate_slow_build_dir(build_dir, !standalone_mode, examples);
+    bool needs_configure = force_configure || migrated ||
+                           !fs::exists(build_dir / "CMakeCache.txt") ||
+                           (examples && !standalone_mode && build_dir_has_examples_off(build_dir));
     bool needs_dependency_bootstrap = !standalone_mode && needs_configure;
 
     // Heal source trees configured before dependency provisioning was

@@ -821,6 +821,20 @@ must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
   change. The functions only emit `-G` when there is no `CMakeCache.txt`, and
   only fill an *empty* cached build type — an explicit `PULP_BUILD_TYPE` is the
   one way to change a non-empty one.
+- **A slow existing dir is migrated, not kept.** Build dirs an older CLI
+  created stay Makefiles + Debug + examples ON forever otherwise (on m3,
+  2026-09-27: 33 of 43 agent `build/` dirs). `stale_build_config_reasons` /
+  `migrate_stale_build_dir` (both languages, same rules) move `CMakeCache.txt`
+  and `CMakeFiles` into `build/.pulp-pre-migration/` and print one
+  `Reconfiguring … (was: Unix Makefiles, Debug, examples ON)` line when the
+  cache has a Makefiles generator and ninja is available, an empty or `Debug`
+  build type `PULP_BUILD_TYPE` did not ask for, or examples ON without
+  `--examples`. Xcode / Visual Studio caches are left alone. Rust calls it in
+  `build_with_dependency_policy`; C++ in `cmd_build`, and dev/loop call it
+  before their "is it configured?" check so their `cmd_build` bootstrap runs.
+  `PULP_KEEP_BUILD_CONFIG=1` is the opt-out. A cache without
+  `CMAKE_GENERATOR` is a test fixture, not a real configure, and never
+  migrates — keep fixtures that way unless the test is about migration.
 - **A command that needs an example target must ask for it.** Examples are off
   in a fresh dev tree, so anything that builds `pulp-design-tool` (or another
   `examples/` target) passes `examples=true` / `--examples`; `pulp design` and
