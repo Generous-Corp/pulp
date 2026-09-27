@@ -226,10 +226,13 @@ if [ -n "$CONTROL_BROKER_STAGE" ]; then
             --standalone-runtime "$CONTROL_STANDALONE_RUNTIME_STAGE" || \
             CONTROL_BROKER_RECONCILE_FAILED=1
     fi
+    # The broker is optional: the CLI, its sibling binaries and their shared
+    # runtime are already installed, so a broker that cannot activate is a
+    # warning, never a failed install.
     if [ "$CONTROL_BROKER_RECONCILE_FAILED" = "1" ]; then
-        echo "Error: Pulp CLI installed, but control broker activation failed."
+        echo "Warning: Pulp CLI installed, but control broker activation failed."
+        echo "The optional health-only broker is not running; the CLI works without it."
         echo "Run 'pulp doctor --only Control broker' after correcting the reported error."
-        exit 1
     fi
 fi
 

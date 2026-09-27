@@ -847,7 +847,9 @@ broker transaction backs up and restores that copy. Guard:
 `tools/scripts/check_installed_rpaths.py <install-dir>` resolves every Mach-O
 dependency against the INSTALLED tree; the `install-rpath-closure` ctest runs
 `install.sh` on real compiled fixtures with a failing broker and requires a
-clean result. Never "fix" a missing runtime with a symlink to `~/.pulp/lib`:
+clean result, and it also checks that a stale runtime already in the install
+directory is replaced. The broker is optional, so `install.sh` reports a
+failed activation as a warning and exits 0. Never "fix" a missing runtime with a symlink to `~/.pulp/lib`:
 that directory is an old SDK install prefix holding an unrelated wgpu build,
 and the broker transaction refuses a symlink at the runtime path.
 

@@ -239,10 +239,15 @@ unaccepted_root="$TEST_ROOT/unaccepted-custom"
 unaccepted_install="$unaccepted_root/opt/pulp/bin"
 if run_installer "$unaccepted_root" "$unaccepted_install" \
         MOCK_REJECT_UNACCEPTED_CUSTOM=1; then
-    fail "custom install without opt-in must surface reconciliation refusal"
+    pass "a refused optional broker does not fail the CLI install"
 else
-    pass "custom install without opt-in surfaces reconciliation refusal"
+    fail "a refused optional broker must not fail the CLI install"
 fi
+assert_file_contains "refused activation is reported as a warning" \
+    "$unaccepted_root/output.log" 'Warning: Pulp CLI installed, but control broker activation failed'
+assert_file_contains "refused activation still verifies the installed CLI" \
+    "$unaccepted_root/pulp.log" 'version|'
+
 assert_file_contains "unaccepted custom install does not invent the opt-in" \
     "$unaccepted_root/pulp.log" '|arg10=|'
 assert_file_contains "unaccepted custom install reports activation failure" \

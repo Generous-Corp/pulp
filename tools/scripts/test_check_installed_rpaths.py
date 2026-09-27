@@ -29,9 +29,13 @@ import check_installed_rpaths as checker  # noqa: E402
 
 ON_MACOS = platform.system() == "Darwin" and shutil.which("clang") and shutil.which("otool")
 
+# The broker reconcile fails the way m3's did: the service never reports
+# healthy before the deadline.
 MOCK_PULP = """#!/bin/sh
 case "${1:-}" in
-    __control-broker-reconcile) exit 66 ;;
+    __control-broker-reconcile)
+        echo "pulp-rs: control broker did not become reachable-unverified before the health deadline" >&2
+        exit 1 ;;
     --version) echo 0.0.0-test ;;
 esac
 """
@@ -58,6 +62,21 @@ cp "$MOCK_ARCHIVE" "$output"
 def _write_exec(path: Path, body: str) -> None:
     path.write_text(body)
     path.chmod(0o755)
+
+
+def build_stale_runtime(out: Path) -> None:
+    """An older runtime at the same install name, without today's symbol."""
+    src = out / "stale.c"
+    src.write_text("int wgpu_fixture_previous(void) { return 1; }\n")
+    subprocess.run(
+        [
+            "clang", "-dynamiclib", str(src),
+            "-install_name", "@rpath/libwgpu_native.dylib",
+            "-o", str(out / "libwgpu_native.dylib"),
+        ],
+        check=True,
+    )
+    src.unlink()
 
 
 def build_fixtures(out: Path) -> None:
@@ -170,15 +189,30 @@ class InstallerLayoutTest(unittest.TestCase):
             env=env, capture_output=True, text=True, timeout=120,
         )
 
-    def test_failed_broker_activation_still_leaves_every_binary_loadable(self) -> None:
-        install_dir = self.tmp / "opt" / "pulp" / "bin"
-        result = self.run_installer(install_dir)
-        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("control broker activation failed", result.stdout)
+    def assert_loadable(self, install_dir: Path) -> None:
         checked, unresolved = checker.check_tree(install_dir)
         self.assertGreaterEqual(checked, 2, "the installed fixtures were not found")
         self.assertEqual(unresolved, [], [u.__dict__ for u in unresolved])
+        # Running it proves the runtime is this release's: the stale one lacks
+        # the symbol pulp-cpp binds, so dyld would refuse to launch it.
         subprocess.run([str(install_dir / "pulp-cpp")], check=True)
+
+    def test_failed_broker_health_still_leaves_every_binary_loadable(self) -> None:
+        install_dir = self.tmp / "home" / ".pulp" / "bin"
+        result = self.run_installer(install_dir)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Warning: Pulp CLI installed, but control broker activation failed", result.stdout)
+        self.assert_loadable(install_dir)
+
+    def test_a_stale_runtime_is_replaced_even_when_the_broker_fails(self) -> None:
+        install_dir = self.tmp / "home" / ".pulp" / "bin"
+        install_dir.mkdir(parents=True)
+        build_stale_runtime(install_dir)
+        stale = (install_dir / "libwgpu_native.dylib").read_bytes()
+        result = self.run_installer(install_dir)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotEqual((install_dir / "libwgpu_native.dylib").read_bytes(), stale)
+        self.assert_loadable(install_dir)
 
 
 if __name__ == "__main__":
