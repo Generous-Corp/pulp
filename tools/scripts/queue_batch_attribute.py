@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import posixpath
 import re
 import subprocess
@@ -106,7 +107,9 @@ def gh(
     repo_cwd: str | None = None,
     paginate: bool = False,
 ) -> str | None:
-    cmd = ["ghapp", "api", path]
+    # `ghapp` locally; `gh` on a GitHub runner, where no App wrapper exists.
+    # PULP_GH_CLI is the single override every CI helper reads.
+    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", path]
     if paginate:
         cmd.append("--paginate")
     cmd += ["--jq", jq] if jq else []

@@ -1,0 +1,102 @@
+name: Base health detector
+
+# WHY THIS IS NOT PART OF `Build and Test`. The push-to-main lane in build.yml
+# was designated the detector for a broken base, and it produces no observation.
+# Every non-proof event shares the `build-<github.ref>` concurrency group, so
+# every push to main lands in one domain; `cancel-in-progress` is false there,
+# which means GitHub holds at most ONE run pending and cancels the previously
+# pending one when the next merge arrives. On a main that merges faster than the
+# macOS suite takes, the intended "serialize to one leg at a time" degrades into
+# "cancel all but the one already running", and that one's self-hosted macOS leg
+# is still queued for a runner when the next merge cancels it too.
+#
+# Measured over the 60 most recent pushes to main: 58 completed, 55 dispatched
+# no job at all, and 0 executed the macOS suite. The same query over merge_group
+# returned 31 of 55 executed, so the instrument reads a real lane when there is
+# one to read.
+#
+# Widening build.yml's push concurrency would fix the supersession and hand the
+# shared Mac Studios one ~40-minute macOS leg per merge - the hosts that serve
+# the required `macos` gate. This workflow instead derives main's health from
+# evidence that already exists (see tools/ci/base_poison_detector.py:
+# tree identity), so the detector costs a few API reads and no gate lane.
+#
+# It REPORTS ONLY. Acting on the signal - pausing re-forming batches,
+# prioritising the fix - is Shipyard's side and is not wired here.
+
+on:
+  schedule:
+    # Often enough to catch a poisoned base within one batch's lifetime,
+    # rarely enough that the read volume is negligible.
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      min_streak:
+        description: "Consecutive executed batch failures that make a streak (>= 2)"
+        required: false
+        default: "2"
+        type: string
+      name_fix_pr:
+        description: "Also look for the open pull request that decisively owns the test"
+        required: false
+        default: true
+        type: boolean
+
+# One detector at a time, and never per-sha. A superseded tick loses nothing:
+# the next one reads main's CURRENT head, which is strictly more relevant than
+# the head the cancelled tick would have reported on. That is the property the
+# push lane lacks - it pins its own sha, so a cancelled run's observation is
+# gone for good.
+concurrency:
+  group: main-health-detector
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  triage:
+    name: Base health
+    # A fork's copy of this workflow would probe THIS repository's runs and mail
+    # its owner every failure, so a scheduled run no-ops off the primary repo.
+    # `workflow_dispatch` is untouched, so a fork owner can still run it by hand.
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Classify the base
+        id: classify
+        env:
+          # No `ghapp` App wrapper on a GitHub runner; the detector reads this
+          # override so both halves resolve the same client.
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+          MIN_STREAK: ${{ inputs.min_streak || '2' }}
+          NAME_FIX_PR: ${{ (github.event_name != 'workflow_dispatch' || inputs.name_fix_pr) && 'true' || 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--repo "$GITHUB_REPOSITORY" --min-streak "$MIN_STREAK"
+                --output "$RUNNER_TEMP/base-poison-signal.json")
+          [ "$NAME_FIX_PR" != true ] || args+=(--name-fix-pr)
+          # Report only: the exit status must not depend on the verdict, or a
+          # poisoned base would read as a broken detector.
+          python3 tools/ci/base_poison_detector.py "${args[@]}"
+
+      - name: Upload the signal
+        # `always()` because the signal is most needed on the runs a
+        # failure-only upload would discard.
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: base-poison-signal
+          path: ${{ runner.temp }}/base-poison-signal.json
+          if-no-files-found: warn
+          retention-days: 30
