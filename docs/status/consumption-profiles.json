@@ -333,7 +333,7 @@
           {
             "exported_as": "Pulp::timebase",
             "closure_node_count": 2,
-            "public_header_count": 14
+            "public_header_count": 13
           },
           {
             "exported_as": "Pulp::bundled-fonts",
@@ -5020,7 +5020,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 14,
+            "count": 13,
             "roots": [
               "core/timebase/include"
             ],
@@ -6687,7 +6687,7 @@
           {
             "exported_as": "Pulp::timebase",
             "closure_node_count": 2,
-            "public_header_count": 14
+            "public_header_count": 13
           },
           {
             "exported_as": "Pulp::clap",
@@ -16201,7 +16201,7 @@
             "system_libraries": []
           },
           "public_headers": {
-            "count": 14,
+            "count": 13,
             "roots": [
               "core/timebase/include"
             ],
