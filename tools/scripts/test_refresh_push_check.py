@@ -94,12 +94,15 @@ class Fixture:
         self.fixture_file = tmp / "gh-fixture.json"
         self.set_pr(pr_fixture())
 
-    def git(self, *args: str, cwd: Path | None = None, check: bool = True) -> str:
+    def git_env(self) -> dict[str, str]:
         env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
                    GIT_COMMITTER_EMAIL="t@t", GIT_CONFIG_NOSYSTEM="1", HOME=str(self.tmp))
         for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
             env.pop(k, None)
-        res = subprocess.run(["git", *args], cwd=cwd or self.repo, capture_output=True, text=True, env=env)
+        return env
+
+    def git(self, *args: str, cwd: Path | None = None, check: bool = True) -> str:
+        res = subprocess.run(["git", *args], cwd=cwd or self.repo, capture_output=True, text=True, env=self.git_env())
         if check and res.returncode != 0:
             raise AssertionError(f"git {' '.join(args)} failed: {res.stderr}")
         return res.stdout.strip()
@@ -202,22 +205,28 @@ def case_pure_refresh_logged_and_warned(fx: Fixture) -> None:
 
 def case_conflict_resolution_logged_not_warned(fx: Fixture) -> None:
     feat = fx.setup(conflict=True)
-    # Capture the exact main parent before the conflicted merge. Some hosted
-    # Git versions do not retain origin/main after the merge is resolved, and
-    # reading HEAD^2 after commit then misclassifies a valid fixture.
-    main_parent = fx.git("rev-parse", "origin/main")
     r = subprocess.run(["git", "merge", "--no-edit", "origin/main"], cwd=fx.repo, capture_output=True, text=True)
     assert r.returncode != 0, "fixture must conflict"
     fx.write("shared.txt", "resolved\n")
     fx.git("add", "shared.txt")
-    # A hosted Git build may clear MERGE_HEAD after a conflicted merge.
-    # Restore it before committing so this fixture always creates the intended
-    # two-parent conflict-resolution commit on every platform.
-    (fx.repo / ".git" / "MERGE_HEAD").write_text(main_parent + "\n")
-    fx.git("commit", "-q", "-m", "resolve conflict fixture")
+    # Build the resolved merge explicitly. Git versions differ in whether a
+    # plain commit after a conflicted merge consumes MERGE_HEAD, but the
+    # classifier must always receive a real two-parent merge commit.
+    feature_parent = fx.git("rev-parse", "HEAD")
+    main_parent = fx.git("rev-parse", "origin/main")
+    tree = fx.git("write-tree")
+    merge = subprocess.run(
+        ["git", "commit-tree", tree, "-p", feature_parent, "-p", main_parent],
+        cwd=fx.repo,
+        input="resolve conflict\n",
+        capture_output=True,
+        text=True,
+        check=True,
+        env=fx.git_env(),
+    ).stdout.strip()
+    fx.git("reset", "-q", merge)
+    assert len(fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
     fx.git("update-ref", "refs/remotes/origin/main", main_parent)
-    parents = fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()
-    assert len(parents) == 3 and parents[2] == main_parent
     fx.set_pr(pr_fixture(head=feat))
     res = fx.run(feat)
     assert res.returncode == 0, res.stderr
