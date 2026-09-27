@@ -68,3 +68,13 @@ reliability. An authenticated installed SDK build, actual GPU delivery controls,
 matched DSP output, CPU cost and graphics/load contention remain separate gates.
 The worker scheduling/completion policy still affects latency. There is no
 hard-realtime GPU scheduling guarantee and no NAM speedup claim.
+
+### Optional bounded completion servicing
+
+`completion_service_wait_ns` is a non-realtime worker budget, capped at 1 ms,
+and defaults to zero. Each worker pump computes one fresh monotonic deadline
+and shares it across all channels. The audio callback never uses this budget.
+The session must also select a supported `TimedWaitAny` completion policy;
+`ProcessEvents` remains nonblocking. The budget may reduce completion polling
+delay, but it is not an audio deadline and provides no hard GPU scheduling
+guarantee.
