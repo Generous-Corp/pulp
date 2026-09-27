@@ -638,6 +638,13 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_affected_tests_shadow.py")
     set_tests_properties(affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
 
+    # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
+    # cumulative `ccache --show-stats` counters belong to the host-shared cache
+    # directory, so only the before/after difference describes one job.
+    add_test(NAME ccache-job-delta-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_job_delta.py")
+    set_tests_properties(ccache-job-delta-selftest PROPERTIES TIMEOUT 60)
+
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and
     # the next batch pays again. These four cover the rules that stop that.
