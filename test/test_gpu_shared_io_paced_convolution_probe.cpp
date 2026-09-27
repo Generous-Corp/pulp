@@ -38,7 +38,7 @@ constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
 // smallest supported block size. The probe retains input, output, and per-block
 // records in memory, so this is deliberately below the point where a routine
 // campaign becomes a multi-hundred-megabyte allocation.
-constexpr std::uint32_t kMaximumMeasuredBlocks = 250'000;
+constexpr std::uint32_t kMaximumMeasuredBlocks = 100'000;
 
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
