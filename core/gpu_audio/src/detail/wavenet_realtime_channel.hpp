@@ -9,6 +9,7 @@ class WaveNetRealtimeChannel {
     virtual ~WaveNetRealtimeChannel() = default;
     virtual bool submit(std::span<const float>, std::uint64_t) noexcept = 0;
     virtual void service(std::uint64_t) noexcept = 0;
+    virtual void service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept = 0;
     virtual std::optional<GpuWaveNetBlockResult> receive(std::span<float>) noexcept = 0;
     virtual bool release() noexcept = 0;
 };

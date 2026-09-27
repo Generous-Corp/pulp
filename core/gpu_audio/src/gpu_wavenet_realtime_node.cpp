@@ -21,6 +21,9 @@ class SessionChannel final : public detail::WaveNetRealtimeChannel {
     void service(std::uint64_t now) noexcept override {
         session_->service(now);
     }
+    void service_until(std::uint64_t now, std::uint64_t deadline) noexcept override {
+        session_->service_until(deadline);
+    }
     std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
         return session_->receive(output);
     }
@@ -68,6 +71,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         const auto& c = config;
         return c.channels > 0 && c.channels <= 64 && c.lead_blocks > 0 &&
                c.capacity > c.lead_blocks && c.session.slots >= 2 &&
+               c.completion_service_wait_ns <= 1'000'000 &&
                validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
                weights.size() == c.session.descriptor.weight_count &&
                (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
@@ -239,9 +243,14 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t now) noe
     if (!s.prepared)
         return 0;
     const auto n = s.config.session.descriptor.block_size;
+    const auto wait_ns = s.config.completion_service_wait_ns;
+    const auto deadline = wait_ns != 0 && now <= UINT64_MAX - wait_ns ? now + wait_ns : 0;
     // One all-channel block in flight; each call services once, never spins.
     for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
-        s.channels[ch]->service(now);
+        if (deadline != 0)
+            s.channels[ch]->service_until(now, deadline);
+        else
+            s.channels[ch]->service(now);
         if (s.inflight && !s.completed[ch]) {
             if (auto result = s.channels[ch]->receive({s.worker_output.data() + ch * n, n})) {
                 s.completed[ch] = 1;

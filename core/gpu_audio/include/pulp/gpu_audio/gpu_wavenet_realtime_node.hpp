@@ -26,6 +26,10 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
         std::uint32_t lead_blocks = 2;
         std::uint32_t capacity = 8;
         std::uint32_t prewarm_blocks = 0;
+        /// Optional bounded completion-service budget for each non-RT worker
+        /// pump. Zero preserves nonblocking service. This is not an audio
+        /// deadline and is recomputed for every pump.
+        std::uint64_t completion_service_wait_ns = 0;
         MissPolicy miss_policy = MissPolicy::Silence;
         bool supports_cpu_fallback = false;
     };
