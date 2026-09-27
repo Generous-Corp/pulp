@@ -207,6 +207,17 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(pulp-rust-gpu-trace-analysis-ctest-selftest
         PROPERTIES LABELS "trace;gpu;rust")
 
+    # The stale-CLI guard: unit cases plus the real binary refusing, or
+    # re-running through a checkout's own CLI, before any configure.
+    add_test(NAME pulp-rust-stale-cli-guard
+        COMMAND ${CMAKE_COMMAND} -E env
+            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            ${CARGO_EXECUTABLE} test
+            --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+            stale_cli)
+    set_tests_properties(pulp-rust-stale-cli-guard
+        PROPERTIES LABELS "cli;rust")
+
     # A no-op build must not spawn cargo: the cargo step has to stay an edge
     # with real outputs, Cargo's dep-info as its depfile, and the manifests as
     # inputs. Skips (77) on non-Ninja generators.
