@@ -60,7 +60,9 @@ test("the launcher passes the derived width to node --test and its exit status b
       'test("no", () => { throw new Error("deliberate"); });\n');
     // NODE_TEST_CONTEXT would make the nested `node --test` report to this
     // runner instead of exiting with its own status, as it does under ctest.
-    const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
+    // The launcher reads the gate VM's sizing from the environment; strip it so
+    // this test controls every input it asserts on.
+    const { NODE_TEST_CONTEXT: _nested, TARTCI_GUEST_MEM_MB: _mem, ...env } = process.env;
     const run = (files, cores) => spawnSync(process.execPath, [launcher, ...files], {
       encoding: "utf8", env: { ...env, TARTCI_GUEST_CORES: cores },
     });
