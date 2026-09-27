@@ -1925,6 +1925,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
 | `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
+| `proxy-first-eval` | Judge whether a change made things better with demonstrable proxy measures tied to the mechanism it targets, not wall-clock time. |
 | `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
@@ -1951,7 +1952,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 68 skills is GENERATED from each
+This table of 69 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->

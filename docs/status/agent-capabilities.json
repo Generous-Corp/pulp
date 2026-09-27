@@ -11469,6 +11469,7 @@
               "reset()",
               "set_coefficients(std::vector<SampleType> coeffs)",
               "order()",
+              "coefficients()",
               "lowpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)",
               "highpass(int num_taps, SampleType cutoff_hz, SampleType sample_rate)"
             ],
@@ -13308,7 +13309,17 @@
             "template": null,
             "methods": [
               "process(double input)",
-              "reset()"
+              "reset()",
+              "coefficients()"
+            ],
+            "enums": []
+          },
+          {
+            "class": "ParityHistory",
+            "qualified_name": "pulp::signal::detail::ParityHistory",
+            "template": null,
+            "methods": [
+              "compact()"
             ],
             "enums": []
           },

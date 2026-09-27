@@ -568,6 +568,12 @@
         ".agents/skills/pulp-web-demo/**"
       ]
     },
+    "proxy-first-eval": {
+      "_doc": {
+        "empty-ok": "proxy-first-eval is evaluation guidance for any before/after claim (CI, fleet, build, DSP, render). It owns no source path, so no code change can make it stale."
+      },
+      "paths": []
+    },
     "pulp-vellum-change-routing": {
       "paths": [
         ".agents/skills/pulp-vellum-change-routing/**",

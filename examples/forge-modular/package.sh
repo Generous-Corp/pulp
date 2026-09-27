@@ -131,7 +131,7 @@ print(manifest["slug"], manifest["version"], len(manifest["modules"]))
         examples/forge-modular/design examples/forge-modular/src tools/rack \
         tools/dsp_vocabulary.py docs/status/agent-capabilities.json \
         external/fonts/Inter-Regular.ttf \
-        core/signal/include core/format/include core/audio/include \
+        core/signal/include core/simd/include core/format/include core/audio/include \
         core/state/include core/platform/include core/runtime/include \
         core/timebase/include | \
         grep -Ev '^(!!|\?\?) .*/(\.corpus|\.sweeps|__pycache__|\.pytest_cache)(/|$)' || true)"

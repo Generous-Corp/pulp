@@ -41,6 +41,7 @@ set(_PULP_GPU_DSP_INCLUDES
     ${_PULP_GPU_DSP_ROOT}/core/runtime/include
     ${_PULP_GPU_DSP_ROOT}/core/audio/include
     ${_PULP_GPU_DSP_ROOT}/core/signal/include
+    ${_PULP_GPU_DSP_ROOT}/core/simd/include
     ${_PULP_GPU_DSP_ROOT}/core/render/include
     ${_PULP_GPU_DSP_ROOT}/core/gpu_audio/include
 )
