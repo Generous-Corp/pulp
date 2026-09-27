@@ -27,6 +27,7 @@ from resolve_release_runners import (  # noqa: E402
     SOURCES,
     apply_class_label_raw,
     resolve,
+    resolve_smoke,
 )
 
 LEGS = (
@@ -168,6 +169,48 @@ class ReleaseClassLabelOptIn(unittest.TestCase):
                                   {"PULP_RELEASE_CLASS_TOKENS": "1"}),
             '["self-hosted","pulp-release-pr-gate"]',
         )
+
+
+class DarwinSmokeLeavesTheBuildPool(unittest.TestCase):
+    """Smoke needs a machine other than the builder, not a gate slot."""
+
+    def smoke(self, env: dict[str, str]) -> dict[str, object]:
+        return resolve_smoke(env, resolve(env))
+
+    def test_darwin_smoke_defaults_to_hosted_when_builds_are_self_hosted(self) -> None:
+        env = {"DARWIN_ARM64": GATE, "DARWIN_X64": GATE}
+        build = resolve(env)
+        self.assertEqual(build["darwin-arm64"], json.loads(GATE))
+        out = self.smoke(env)
+        self.assertEqual(out["darwin-arm64"], ["macos-15"])
+        self.assertEqual(out["darwin-x64"], ["macos-15"])
+
+    def test_class_tokens_do_not_pull_hosted_smoke_onto_the_pool(self) -> None:
+        env = {"DARWIN_ARM64": GATE, "PULP_RELEASE_CLASS_TOKENS": "1"}
+        self.assertIn("pulp-release-tagged", resolve(env)["darwin-arm64"])
+        self.assertEqual(self.smoke(env)["darwin-arm64"], ["macos-15"])
+
+    def test_non_darwin_smoke_follows_its_build_leg(self) -> None:
+        env = {"LINUX_ARM64": LOCAL_LINUX, "DARWIN_ARM64": GATE}
+        out = self.smoke(env)
+        self.assertEqual(out["linux-arm64"], json.loads(LOCAL_LINUX))
+        for leg in ("linux-x64", "windows-x64", "windows-arm64"):
+            self.assertEqual(out[leg], HOSTED[leg])
+
+    def test_override_routes_both_darwin_smoke_legs(self) -> None:
+        env = {"SMOKE_DARWIN": GATE, "PULP_RELEASE_CLASS_TOKENS": "1"}
+        out = self.smoke(env)
+        for leg in ("darwin-arm64", "darwin-x64"):
+            self.assertEqual(
+                out[leg],
+                ["self-hosted", "macOS", "ARM64", "pulp-build-vm", "pulp-release-tagged"],
+            )
+
+    def test_malformed_override_aborts(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.smoke({"SMOKE_DARWIN": "[self-hosted"})
+        with self.assertRaises(SystemExit):
+            self.smoke({"SMOKE_DARWIN": "[]"})
 
 
 if __name__ == "__main__":

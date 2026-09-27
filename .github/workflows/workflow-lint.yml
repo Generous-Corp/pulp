@@ -24,6 +24,7 @@ on:
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
       - 'tools/scripts/resolve_release_runners.py'
+      - 'tools/scripts/test_resolve_release_runners.py'
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
@@ -141,6 +142,7 @@ on:
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
       - 'tools/scripts/resolve_release_runners.py'
+      - 'tools/scripts/test_resolve_release_runners.py'
       - 'tools/scripts/resolve_advisory_macos_runner.py'
       - 'tools/scripts/test_advisory_macos_runner_policy.py'
       - 'tools/scripts/resolve_linux_route.py'
@@ -403,6 +405,8 @@ jobs:
           # The active_platforms shipping knob: matrix-leg derivation and the
           # subset-staleness allowance that keeps a platform pause temporary.
           python3 tools/scripts/test_release_build_matrix.py
+          # Release runner routing: the build map and the smoke map.
+          python3 tools/scripts/test_resolve_release_runners.py
           python3 tools/scripts/test_release_platform_subset_check.py
           python3 tools/scripts/test_sdk_provenance.py
           python3 tools/scripts/test_required_gate_liveness.py

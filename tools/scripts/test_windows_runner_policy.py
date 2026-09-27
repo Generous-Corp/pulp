@@ -177,12 +177,20 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
                     r"include:\s*\$\{\{\s*fromJSON\(needs\.resolve-macos-runner"
                     r"\.outputs\.(build|smoke)_include\)\s*\}\}",
                 )
+                output = "map" if name == "build-cli" else "smoke_map"
                 self.assertIn(
-                    "runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)"
+                    f"runs-on: ${{{{ fromJSON(needs.resolve-macos-runner.outputs.{output})"
                     "[matrix.platform] }}",
                     section,
                 )
                 self.assertNotIn("windows-2022", section)
+        smoke_line = next(
+            line for line in emitted.stdout.splitlines() if line.startswith("smoke_map=")
+        )
+        self.assertEqual(
+            json.loads(smoke_line.removeprefix("smoke_map="))["windows-x64"],
+            "windows-latest",
+        )
 
     def test_coverage_stays_on_latest(self) -> None:
         resolver = job(self.coverage, "resolve-runners")

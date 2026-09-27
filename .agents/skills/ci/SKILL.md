@@ -3623,6 +3623,23 @@ bisectable.
   Widening a poll timeout was the old mitigation and it is exactly backwards — a
   longer wait squats the scarce VM for longer. If you find yourself raising a
   timeout on the release VM, stop: move the wait off the VM instead.
+- **Release smoke legs run on GitHub-hosted macOS, not the gate pool.**
+  `resolve_release_runners.py` emits a separate `smoke_map`; its darwin rows
+  default to `macos-15` whatever the build legs use
+  (`PULP_RELEASE_SMOKE_DARWIN_RUNS_ON_JSON` overrides both). The smoke only
+  needs a machine other than the builder; on the gate VMs it waited 16 / 29 min
+  p50 (max 115) for 0.4-1.5 min of work. Do not index `smoke-cli`'s `runs-on`
+  back into `map`.
+- **Release ccache is asserted, not assumed.** `build-cli` carries the gate's
+  `CCACHE_*` correctness env and an always-run `Ccache stats` step reading a
+  per-job `CCACHE_STATSLOG`. The darwin VMs share the host cache with the gate,
+  so `ccache --show-stats` there is the host's lifetime total and says nothing
+  about one release; read `--show-log-stats` instead. Never `ccache -z` on a
+  shared host cache: it resets the counters of every concurrent gate job.
+- **`post-tag-sync.yml` is dispatch-only** while no runner registers
+  `pulp-queue-authority-studio`; its tag trigger only parked a run per tag for
+  ~5.5 h. `shipyard release-bot hook install` rewrites the file and restores the
+  trigger, so re-remove it (or serve the label) after any reinstall.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
