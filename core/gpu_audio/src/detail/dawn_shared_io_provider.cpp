@@ -325,6 +325,7 @@ struct DawnSharedIoProvider::Impl {
         std::atomic<int> scope{0};
         std::atomic<unsigned> scopes_pending{0};
         std::atomic<bool> scope_error{false};
+        std::atomic<int> readback{0};
         std::array<std::atomic<bool>, 3> scope_completed{};
         DawnSubmissionTracker tracker;
         SlotToken token;
@@ -334,12 +335,15 @@ struct DawnSharedIoProvider::Impl {
         // stack-local Future would otherwise leave the dispatcher with no
         // safe way to wait for the exact submission it owns.
         wgpu::Future queue_future{};
+        // ProcessEvents-owned; never mix mapping futures into queue timed waits.
+        wgpu::Future readback_future{};
         std::array<wgpu::Future, 3> scope_futures{};
         std::array<ScopeCallback, 3> scope_callbacks{};
         std::optional<SharedIoTerminalStatus> pending_terminal;
         std::uint64_t generation = 0;
         bool queue_consumed = false;
         bool scope_consumed = false;
+        bool readback_consumed = false;
         bool accepted = false;
         int forced_queue_result = 0;
         std::optional<SharedIoTerminalInbox::CompletionClaim> held_busy_claim;
@@ -357,6 +361,7 @@ struct DawnSharedIoProvider::Impl {
         Disposal output_disposal;
         wgpu::Buffer input_buffer;
         wgpu::Buffer output_buffer;
+        wgpu::Buffer readback_buffer;
         bool input_disposal_expected = false;
         bool output_disposal_expected = false;
         std::uint64_t handle_generation = 1;
@@ -422,6 +427,8 @@ struct DawnSharedIoProvider::Impl {
     std::size_t wait_any_batch_cursor = 0;
     bool wait_any_disabled = false;
     bool wait_any_fault_consumed = false;
+    bool drain_fault_consumed = false;
+    std::uint64_t device_owner_generation = 0;
 
     explicit Impl(Options value) : options(std::move(value)) {
         completion_policy = options.completion_policy;
@@ -763,6 +770,28 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             for (auto& future : submission.scope_futures)
                 future = {};
         }
+        if (options.storage_kind == StorageKind::Staged && !submission.readback_consumed) {
+            const auto readback = submission.readback.load(std::memory_order_acquire);
+            if (readback == 0 || queue_value == 0 || scope_value == 0)
+                return;
+            auto result = readback == 2 || slot.retired ? DawnSubmissionTracker::ReadbackResult::Cancelled
+                                       : DawnSubmissionTracker::ReadbackResult::Error;
+            // Map success can precede owner consumption. Retirement invalidates
+            // the mapped handle even when the retained callback says success.
+            if (readback == 1 && !slot.retired && slot.readback_buffer) {
+                const auto* mapped = slot.readback_buffer.GetConstMappedRange(0, slot.output_logical_bytes);
+                if (mapped && queue_value == 1 && scope_value == 1 &&
+                    !device_lost.load(std::memory_order_acquire) &&
+                    !dawn::native::IsDeviceLost(device.Get())) {
+                    std::memcpy(slot.output, mapped, slot.output_logical_bytes);
+                    result = DawnSubmissionTracker::ReadbackResult::Success;
+                }
+                slot.readback_buffer.Unmap();
+            }
+            submission.tracker.record_readback(submission.generation, result);
+            submission.readback_consumed = true;
+            submission.readback_future = {};
+        }
         if (!submission.pending_terminal) {
             // Every provider operation is enclosed by validation, OOM, and
             // internal error scopes. A clean set of PopErrorScope callbacks
@@ -808,8 +837,10 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             if (result == SharedIoTerminalInbox::PushResult::Accepted) {
                 if (*submission.pending_terminal == SharedIoTerminalStatus::RetiredSuccess)
                     ++stats.retired_success;
-                else
+                else {
                     ++stats.retired_failure;
+                    reusable = false;
+                }
                 submission.accepted = false;
                 submission.pending_terminal.reset();
                 submission.inbox.reset();
@@ -952,6 +983,11 @@ DawnSharedIoProvider::~DawnSharedIoProvider() {
 
 DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& options) noexcept {
     CreateResult result;
+    if (options.storage_kind != StorageKind::ImportedHostPointer &&
+        options.storage_kind != StorageKind::Staged) {
+        result.reason = "invalid_storage_kind";
+        return result;
+    }
     if (options.completion_wait_ns > kMaxCompletionWaitNs) {
         result.availability = Availability::Failed;
         result.reason = "completion_wait_ns_out_of_range";
@@ -961,6 +997,17 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))
             return result;
+        static std::atomic<std::uint64_t> next_device_owner{1};
+        auto generation = next_device_owner.load(std::memory_order_relaxed);
+        while (generation != std::numeric_limits<std::uint64_t>::max() &&
+               !next_device_owner.compare_exchange_weak(generation, generation + 1,
+                                                        std::memory_order_relaxed)) {}
+        if (generation == std::numeric_limits<std::uint64_t>::max()) {
+            result.availability = Availability::Failed;
+            result.reason = "device_owner_generation_exhausted";
+            return result;
+        }
+        impl->device_owner_generation = generation;
         result.provider =
             std::unique_ptr<DawnSharedIoProvider>(new DawnSharedIoProvider(std::move(impl)));
     } catch (...) {
@@ -1056,6 +1103,8 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
     };
     if (consume_refusal(Fault::RefuseAllocation))
         return false;
+    const bool imported = impl_->options.storage_kind == StorageKind::ImportedHostPointer;
+    resources.storage_kind = impl_->options.storage_kind;
     auto slot = std::unique_ptr<Impl::Slot>(new (std::nothrow) Impl::Slot);
     if (!slot)
         return false;
@@ -1101,21 +1150,22 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
     wgpu::DawnFakeBufferOOMForTesting input_oom{};
     input_oom.fakeOOMAtDevice = true;
     input_host.nextInChain = native_input_oom ? &input_oom : nullptr;
-    input_descriptor.nextInChain = &input_host;
+    input_descriptor.nextInChain = imported ? static_cast<const wgpu::ChainedStruct*>(&input_host)
+                                           : native_input_oom ? &input_oom : nullptr;
     input_descriptor.size = slot->input_bytes;
     input_descriptor.usage =
         wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
     if (!consume_refusal(Fault::RefuseInputImport)) {
-        resources.input_lifecycle.import_attempted = true;
-        ++impl_->stats.import_attempts;
-        slot->input_disposal_expected = !native_input_oom;
+        resources.input_lifecycle.import_attempted = imported;
+        impl_->stats.import_attempts += static_cast<std::uint64_t>(imported);
+        slot->input_disposal_expected = imported && !native_input_oom;
         impl_->push_error_scopes();
         slot->input_buffer = impl_->device.CreateBuffer(&input_descriptor);
         if (!impl_->pop_error_scopes())
             slot->input_buffer = nullptr;
     }
-    resources.input_lifecycle.import_succeeded = bool(slot->input_buffer);
-    if (slot->input_buffer)
+    resources.input_lifecycle.import_succeeded = imported && bool(slot->input_buffer);
+    if (resources.input_lifecycle.import_succeeded)
         ++impl_->stats.import_successes;
     if (!slot->input_buffer) {
         resources.opaque = slot.release();
@@ -1134,21 +1184,22 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
     wgpu::DawnFakeBufferOOMForTesting output_oom{};
     output_oom.fakeOOMAtDevice = true;
     output_host.nextInChain = native_output_oom ? &output_oom : nullptr;
-    output_descriptor.nextInChain = &output_host;
+    output_descriptor.nextInChain = imported ? static_cast<const wgpu::ChainedStruct*>(&output_host)
+                                            : native_output_oom ? &output_oom : nullptr;
     output_descriptor.size = slot->output_bytes;
     output_descriptor.usage =
         wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
     if (!consume_refusal(Fault::RefuseOutputImport)) {
-        resources.output_lifecycle.import_attempted = true;
-        ++impl_->stats.import_attempts;
-        slot->output_disposal_expected = !native_output_oom;
+        resources.output_lifecycle.import_attempted = imported;
+        impl_->stats.import_attempts += static_cast<std::uint64_t>(imported);
+        slot->output_disposal_expected = imported && !native_output_oom;
         impl_->push_error_scopes();
         slot->output_buffer = impl_->device.CreateBuffer(&output_descriptor);
         if (!impl_->pop_error_scopes())
             slot->output_buffer = nullptr;
     }
-    resources.output_lifecycle.import_succeeded = bool(slot->output_buffer);
-    if (slot->output_buffer)
+    resources.output_lifecycle.import_succeeded = imported && bool(slot->output_buffer);
+    if (resources.output_lifecycle.import_succeeded)
         ++impl_->stats.import_successes;
     if (!slot->output_buffer) {
         resources.opaque = slot.release();
@@ -1156,6 +1207,19 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
         return false;
     }
 
+    if (!imported) {
+        wgpu::BufferDescriptor descriptor{};
+        descriptor.label = "Pulp matched staged readback";
+        descriptor.size = slot->output_bytes;
+        descriptor.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
+        impl_->push_error_scopes();
+        slot->readback_buffer = impl_->device.CreateBuffer(&descriptor);
+        if (!impl_->pop_error_scopes() || !slot->readback_buffer) {
+            resources.opaque = slot.release();
+            ++impl_->stats.slots_created;
+            return false;
+        }
+    }
     wgpu::BindGroupEntry entries[2]{};
     entries[0].binding = 0;
     entries[0].buffer = slot->input_buffer;
@@ -1200,6 +1264,10 @@ void DawnSharedIoProvider::retire_slot(SlotResources& resources) noexcept {
         slot->output_buffer.Destroy();
         slot->output_buffer = nullptr;
     }
+    if (slot->readback_buffer) {
+        slot->readback_buffer.Destroy();
+        slot->readback_buffer = nullptr;
+    }
 }
 
 void DawnSharedIoProvider::destroy_slot(SlotResources& resources) noexcept {
@@ -1214,7 +1282,7 @@ void DawnSharedIoProvider::destroy_slot(SlotResources& resources) noexcept {
         !slot->input_disposal_expected || resources.input_lifecycle.dispose_observed;
     const bool output_safe =
         !slot->output_disposal_expected || resources.output_lifecycle.dispose_observed;
-    if (!slot->retired || !input_safe || !output_safe)
+    if (!slot->retired || slot->submission.accepted || !input_safe || !output_safe)
         return;
     impl_->stats.disposals_observed +=
         static_cast<std::uint64_t>(resources.input_lifecycle.dispose_observed) +
@@ -1972,6 +2040,12 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             pass.DispatchWorkgroups(std::numeric_limits<std::uint32_t>::max());
         pass.End();
     }
+    const bool staged = impl_->options.storage_kind == StorageKind::Staged;
+    if (staged) {
+        ++impl_->stats.runtime_copy_buffer_calls;
+        encoder.CopyBufferToBuffer(slot->output_buffer, 0, slot->readback_buffer, 0,
+                                   slot->output_logical_bytes);
+    }
     auto commands = encoder.Finish();
     if (!commands) {
         (void)impl_->pop_error_scopes();
@@ -1981,7 +2055,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     auto& submission = slot->submission;
     ++submission.generation;
     if (!submission.tracker.begin(submission.generation, impl_->uncaptured_error_generation.load(
-                                                             std::memory_order_acquire))) {
+                                                             std::memory_order_acquire), staged)) {
         (void)impl_->pop_error_scopes();
         return false;
     }
@@ -1991,6 +2065,9 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     submission.scope_error.store(false, std::memory_order_release);
     submission.queue_consumed = false;
     submission.scope_consumed = false;
+    submission.readback.store(0, std::memory_order_release);
+    submission.readback_future = {};
+    submission.readback_consumed = false;
     for (auto& completed : submission.scope_completed)
         completed.store(false, std::memory_order_release);
     for (auto& future : submission.scope_futures)
@@ -2006,8 +2083,27 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     submission.held_busy_claim.reset();
     submission.held_busy_released = false;
 
+    if (staged) {
+        ++impl_->stats.runtime_write_buffer_calls;
+        impl_->queue.WriteBuffer(slot->input_buffer, 0, slot->input, slot->input_logical_bytes);
+    }
     impl_->queue.Submit(1, &commands);
     submission.accepted = true;
+    if (staged) {
+        ++impl_->stats.runtime_map_async_calls;
+        submission.readback_future = slot->readback_buffer.MapAsync(
+            wgpu::MapMode::Read, 0, slot->output_logical_bytes, Impl::callback_mode(),
+            [](wgpu::MapAsyncStatus status, wgpu::StringView, Impl::Submission* state) {
+                const int value = status == wgpu::MapAsyncStatus::Success ? 1
+                    : status == wgpu::MapAsyncStatus::CallbackCancelled ? 2 : 3;
+                state->readback.store(value, std::memory_order_release);
+            }, &submission);
+        if (impl_->options.fault == Fault::CancelReadbackMapping &&
+            impl_->options.fault_slot == slot->index) {
+            ++impl_->stats.fault_injections;
+            slot->readback_buffer.Unmap();
+        }
+    }
     if (impl_->options.fault == Fault::ForceLossBetweenSubmitAndCompletionRegistration)
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown,
                                 "P1 loss before completion registration");
@@ -2068,11 +2164,30 @@ void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
             impl_->options.fault_slot == slot->index) {
             continue;
         }
+        if (impl_->options.fault == Fault::RetireAfterReadbackSuccess &&
+            impl_->options.fault_slot == slot->index && slot->submission.accepted &&
+            !slot->retired) {
+            // Hold all owner consumption until the real map-success callback;
+            // retire the handle before refresh can consume any callback evidence.
+            if (slot->submission.readback.load(std::memory_order_acquire) != 1)
+                continue;
+            SlotResources resources{};
+            resources.opaque = slot;
+            retire_slot(resources);
+            ++impl_->stats.fault_injections;
+        }
         impl_->refresh(*slot, false);
     }
 }
 
 bool DawnSharedIoProvider::drain() noexcept {
+    if (impl_ && impl_->options.fault == Fault::FirstDrainFailure && !impl_->drain_fault_consumed) {
+        impl_->drain_fault_consumed = true;
+        impl_->reusable = false;
+        ++impl_->stats.failed_drains;
+        ++impl_->stats.fault_injections;
+        return false;
+    }
     if (!impl_)
         return true;
     impl_->accepting = false;
@@ -2083,7 +2198,9 @@ bool DawnSharedIoProvider::drain() noexcept {
             for (const auto* slot : impl_->slots) {
                 if (slot->submission.accepted &&
                     (slot->submission.queue.load(std::memory_order_acquire) == 0 ||
-                     slot->submission.scope.load(std::memory_order_acquire) == 0)) {
+                     slot->submission.scope.load(std::memory_order_acquire) == 0 ||
+                     (impl_->options.storage_kind == StorageKind::Staged &&
+                      slot->submission.readback.load(std::memory_order_acquire) == 0))) {
                     return false;
                 }
                 if (slot->retired &&
@@ -2181,6 +2298,24 @@ DawnSharedIoProvider::CompletionPolicy DawnSharedIoProvider::completion_policy()
 
 DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() const {
     return impl_ ? impl_->adapter_identity : AdapterIdentity{};
+}
+
+bool DawnSharedIoProvider::reconfigure_storage_kind(StorageKind kind) noexcept {
+    if (!impl_ || !impl_->accepting || !impl_->reusable || !impl_->slots.empty() ||
+        impl_->convolution || impl_->wavenet || device_lost() ||
+        impl_->uncaptured_error_generation.load(std::memory_order_acquire) != 0 ||
+        (kind != StorageKind::ImportedHostPointer && kind != StorageKind::Staged))
+        return false;
+    impl_->options.storage_kind = kind;
+    return true;
+}
+
+DawnSharedIoProvider::StorageKind DawnSharedIoProvider::storage_kind() const noexcept {
+    return impl_ ? impl_->options.storage_kind : StorageKind::ImportedHostPointer;
+}
+
+std::uint64_t DawnSharedIoProvider::device_owner_generation() const noexcept {
+    return impl_ ? impl_->device_owner_generation : 0;
 }
 
 } // namespace pulp::gpu_audio::detail

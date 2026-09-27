@@ -82,6 +82,13 @@ bool SharedIoProgramSession::reprime_when_quiescent() noexcept {
     return plan_.reprime_when_quiescent();
 }
 
+std::unique_ptr<SharedIoArenaProvider> SharedIoProgramSession::release_to_owner() noexcept {
+    if (!plan_.release())
+        return {};
+    prepared_ = false;
+    return std::move(provider_);
+}
+
 bool SharedIoProgramSession::release() noexcept {
     return release({});
 }

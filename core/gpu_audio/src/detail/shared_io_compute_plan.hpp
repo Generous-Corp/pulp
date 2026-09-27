@@ -15,6 +15,8 @@ class SharedIoComputePlan {
         std::uint32_t slots = 0;
         std::size_t input_bytes_per_slot = 0;
         std::size_t output_bytes_per_slot = 0;
+        SharedIoArenaProvider::StorageKind storage_kind =
+            SharedIoArenaProvider::StorageKind::ImportedHostPointer;
     };
     struct SubmitToken {
         SharedIoSlotLedger::SlotToken slot;

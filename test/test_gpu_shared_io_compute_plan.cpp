@@ -661,3 +661,28 @@ TEST_CASE("shared IO compute plan bounds saturation and retires refused or faile
     REQUIRE(plan.cancel({after_failure->token, 0}));
     REQUIRE(plan.release());
 }
+
+TEST_CASE("program session returns the same owner only after physical release",
+          "[gpu_audio][shared_io][same_device]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto* identity = provider.get();
+    auto state = provider->lifecycle_state;
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 2, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    identity->allow_drain = false;
+    CHECK_FALSE(session.release_to_owner());
+    CHECK(session.owned_provider() == identity);
+    CHECK_FALSE(state->provider_destroyed);
+    identity->allow_drain = true;
+    auto returned = session.release_to_owner();
+    REQUIRE(returned.get() == identity);
+    CHECK_FALSE(session.prepared());
+    CHECK(session.owned_provider() == nullptr);
+    CHECK_FALSE(state->provider_destroyed);
+    CHECK_FALSE(session.release_to_owner());
+    returned.reset();
+    CHECK(state->provider_destroyed);
+}

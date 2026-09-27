@@ -104,12 +104,15 @@ class SharedIoTerminalInbox {
     std::atomic<std::uint64_t> rejected_callbacks_{0};
 };
 
-// Private provider boundary for the actual host allocations and wrapped GPU
-// buffers. A Dawn implementation owns both allocations behind `opaque`; tests
-// use the same transaction boundary with deterministic fake resources.
+// Private provider boundary for host allocations and GPU buffers. Imported
+// backing and the staged control share terminal ownership, but report distinct
+// storage kinds and allocation facts. The arena checks the requested kind.
+// A Dawn implementation owns allocations behind `opaque`; tests use the same
+// transaction boundary with deterministic fake resources.
 class SharedIoArenaProvider {
   public:
     using SlotToken = SharedIoSlotLedger::SlotToken;
+    enum class StorageKind : std::uint8_t { ImportedHostPointer, Staged };
 
     struct AllocationLifecycle {
         bool allocated = false;
@@ -144,6 +147,7 @@ class SharedIoArenaProvider {
         void* opaque = nullptr;
         AllocationLifecycle input_lifecycle;
         AllocationLifecycle output_lifecycle;
+        StorageKind storage_kind = StorageKind::ImportedHostPointer;
     };
 
     using CompletionStatus = SharedIoTerminalStatus;
@@ -279,6 +283,8 @@ class SharedIoArena {
         std::size_t output_bytes_per_slot = 0;
         // Deterministic private fault injection for the bool transaction.
         PrepareFault prepare_fault = PrepareFault::None;
+        SharedIoArenaProvider::StorageKind storage_kind =
+            SharedIoArenaProvider::StorageKind::ImportedHostPointer;
     };
 
     struct WriteLease {

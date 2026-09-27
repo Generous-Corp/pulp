@@ -61,6 +61,10 @@ class SharedIoProgramSession {
     };
     bool release(ReleaseObserver observer) noexcept;
     bool release() noexcept;
+    // Test/dispatcher owner only, after callback and service have stopped.
+    // Null retains a failed physical barrier for retry. Returning the owner
+    // proves resource drain, not that its device remains reusable.
+    std::unique_ptr<SharedIoArenaProvider> release_to_owner() noexcept;
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();
     }

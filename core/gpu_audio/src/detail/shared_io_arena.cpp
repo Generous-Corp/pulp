@@ -14,9 +14,19 @@ bool owns_host_allocation(const SharedIoArenaProvider::SlotResources& resources)
            (resources.output_lifecycle.allocated && !resources.output_lifecycle.host_freed);
 }
 
-bool valid_import(const SharedIoArenaProvider::AllocationLifecycle& lifecycle) noexcept {
-    return lifecycle.allocated && lifecycle.import_attempted && lifecycle.import_succeeded &&
-           !lifecycle.dispose_observed && !lifecycle.host_freed;
+bool valid_backing(const SharedIoArenaProvider::AllocationLifecycle& lifecycle,
+                   SharedIoArenaProvider::StorageKind kind) noexcept {
+    if (!lifecycle.allocated || lifecycle.dispose_observed || lifecycle.host_freed)
+        return false;
+    switch (kind) {
+    case SharedIoArenaProvider::StorageKind::ImportedHostPointer:
+        return lifecycle.import_attempted && lifecycle.import_succeeded;
+    case SharedIoArenaProvider::StorageKind::Staged:
+        // Staged CPU storage is never imported. Keep its lifecycle facts
+        // distinct so a copied path cannot satisfy a shared-memory request.
+        return !lifecycle.import_attempted && !lifecycle.import_succeeded;
+    }
+    return false;
 }
 
 bool retire_drain_destroy(SharedIoArenaProvider& provider,
@@ -240,8 +250,9 @@ bool SharedIoArena::prepare(SharedIoArenaProvider& provider, const Config& confi
             if (created && resource.input != nullptr && resource.output != nullptr &&
                 resource.input_size == config.input_bytes_per_slot &&
                 resource.output_size == config.output_bytes_per_slot &&
-                resource.opaque != nullptr && valid_import(resource.input_lifecycle) &&
-                valid_import(resource.output_lifecycle)) {
+                resource.opaque != nullptr && resource.storage_kind == config.storage_kind &&
+                valid_backing(resource.input_lifecycle, config.storage_kind) &&
+                valid_backing(resource.output_lifecycle, config.storage_kind)) {
                 continue;
             }
             throw std::bad_alloc{};

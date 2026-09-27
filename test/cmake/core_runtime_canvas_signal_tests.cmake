@@ -961,3 +961,34 @@ if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         RESOURCE_LOCK pulp_gpu
         TIMEOUT 60)
 endif()
+
+# Opt-in same-device storage experiment. It is never an ordinary GPU-off pass.
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    add_executable(pulp-gpu-same-device-storage-probe test_gpu_same_device_storage_probe.cpp)
+    target_include_directories(pulp-gpu-same-device-storage-probe PRIVATE
+        ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+    target_link_libraries(pulp-gpu-same-device-storage-probe PRIVATE pulp::gpu-audio)
+    get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
+    target_compile_definitions(pulp-gpu-same-device-storage-probe PRIVATE
+        PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+    add_test(NAME pulp-gpu-same-device-storage-probe COMMAND pulp-gpu-same-device-storage-probe)
+    set_tests_properties(pulp-gpu-same-device-storage-probe PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity RESOURCE_LOCK pulp_gpu TIMEOUT 60)
+endif()
+
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    # Manual paired campaign: requires a fresh output directory and a reserved GPU.
+    add_executable(pulp-gpu-same-device-paired-probe test_gpu_same_device_paired_probe.cpp)
+    target_include_directories(pulp-gpu-same-device-paired-probe PRIVATE
+        ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+    target_link_libraries(pulp-gpu-same-device-paired-probe PRIVATE pulp::gpu-audio)
+    get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
+    target_compile_definitions(pulp-gpu-same-device-paired-probe PRIVATE
+        PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+endif()
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-same-device-storage-receipt-controls
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+            -s ${PROJECT_SOURCE_DIR}/test -p test_verify_gpu_same_device_storage.py)
+endif()

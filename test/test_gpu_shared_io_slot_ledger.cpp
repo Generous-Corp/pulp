@@ -403,6 +403,15 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
                     .import_succeeded = true,
                 },
         };
+        resources.storage_kind = storage_kind;
+        if (storage_kind == StorageKind::Staged) {
+            resources.input_lifecycle.import_attempted = false;
+            resources.input_lifecycle.import_succeeded = false;
+            resources.output_lifecycle.import_attempted = false;
+            resources.output_lifecycle.import_succeeded = false;
+        }
+        if (false_import_claim)
+            resources.output_lifecycle.import_attempted = true;
         ++live_allocations;
         if (slot == malformed_success_at)
             resources.output = nullptr;
@@ -587,6 +596,8 @@ class FakeSharedIoProvider final : public SharedIoArenaProvider {
     std::uint32_t fail_output_import_at = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t malformed_success_at = std::numeric_limits<std::uint32_t>::max();
     bool reject_submissions = false;
+    StorageKind storage_kind = StorageKind::ImportedHostPointer;
+    bool false_import_claim = false;
     bool hold_stale_claim_on_reject = false;
     bool held_claim_failed = false;
     bool complete_on_poll = false;
@@ -644,6 +655,58 @@ TEST_CASE("shared IO arena creation refusal rolls back exact resource ownership"
     CHECK(provider.host_frees == 2);
     CHECK_FALSE(provider.destroy_before_dispose);
     CHECK(provider.live_allocations == 0);
+}
+
+TEST_CASE("staged arena backing uses the same terminal ownership without claiming imports",
+          "[gpu_audio][shared_io][arena][staged]") {
+    FakeSharedIoProvider provider;
+    provider.storage_kind = SharedIoArenaProvider::StorageKind::Staged;
+    auto config = arena_config(1);
+    config.storage_kind = provider.storage_kind;
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, config));
+    const auto token = publish_and_submit(arena, 10);
+    CHECK_FALSE(arena.acquire_output(token.preparation_epoch, token.stream_sequence));
+    CHECK_FALSE(arena.grant_write(11));
+    REQUIRE(provider.complete(0, SharedIoTerminalStatus::RetiredSuccess) ==
+            SharedIoTerminalInbox::PushResult::Accepted);
+    REQUIRE(arena.drain_completions().accepted == 1);
+    const auto output = arena.acquire_output(token.preparation_epoch, token.stream_sequence);
+    REQUIRE(output);
+    CHECK(output->bytes.front() == std::byte{0x6b});
+    REQUIRE(arena.release_output({output->token}));
+    REQUIRE(arena.release());
+    CHECK(provider.disposals_observed == 0);
+    CHECK(provider.host_frees == 2);
+    CHECK(provider.live_allocations == 0);
+    CHECK_FALSE(provider.destroy_before_dispose);
+}
+
+TEST_CASE("arena storage selection rejects mismatched backing and false import claims",
+          "[gpu_audio][shared_io][arena][staged]") {
+    using Storage = SharedIoArenaProvider::StorageKind;
+    for (const auto expected : {Storage::ImportedHostPointer, Storage::Staged}) {
+        FakeSharedIoProvider provider;
+        provider.storage_kind = expected == Storage::Staged ? Storage::ImportedHostPointer
+                                                           : Storage::Staged;
+        auto config = arena_config(1);
+        config.storage_kind = expected;
+        SharedIoArena arena;
+        CHECK_FALSE(arena.prepare(provider, config));
+        CHECK(provider.live_allocations == 0);
+        CHECK(provider.host_frees == 2);
+        CHECK_FALSE(provider.destroy_before_dispose);
+    }
+    FakeSharedIoProvider provider;
+    provider.storage_kind = Storage::Staged;
+    provider.false_import_claim = true;
+    auto config = arena_config(1);
+    config.storage_kind = Storage::Staged;
+    SharedIoArena arena;
+    CHECK_FALSE(arena.prepare(provider, config));
+    CHECK(provider.live_allocations == 0);
+    CHECK(provider.host_frees == 2);
+    CHECK_FALSE(provider.destroy_before_dispose);
 }
 
 TEST_CASE("shared IO arena pre-import refusal needs no disposal callback",

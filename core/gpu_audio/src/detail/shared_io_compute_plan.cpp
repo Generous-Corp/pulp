@@ -17,7 +17,8 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
         !arena_.prepare(provider,
                         {.slots = config.slots,
                          .input_bytes_per_slot = config.input_bytes_per_slot,
-                         .output_bytes_per_slot = config.output_bytes_per_slot},
+                         .output_bytes_per_slot = config.output_bytes_per_slot,
+                         .storage_kind = config.storage_kind},
                         std::move(program)))
         return false;
     pending_.assign(config.slots, {});
