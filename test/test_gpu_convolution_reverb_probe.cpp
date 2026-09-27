@@ -284,6 +284,17 @@ int main() {
         require(type.is_valid_registration(), "GPU Forge registration invalid");
         require(type.latency_samples_for_block(kSr, kQ) == 3 * kQ, "full-quantum PDC mismatch");
         require(type.latency_samples_for_block(kSr, 192) == 3 * 256, "non-power-of-two capacity mismatch");
+        // Exercise the non-power-of-two host capacity through the real factory,
+        // not only its metadata callback. The engine rounds 192 up to a 256
+        // sample internal quantum while preserving arbitrary host partitions.
+        ParamTimeline nonpower{{3.0f, 0.0f, 70.0f, 30.0f, 160.0f, 20.0f, 12000.0f}, {}};
+        constexpr int nonpower_total = 6 * 192;
+        const auto nonpower_route =
+            run(type, {191, 1, 64, 192, 17, 83}, nonpower, 192, nonpower_total);
+        compare_aligned(nonpower_route,
+                        cpu_oracle({191, 1, 64, 192, 17, 83}, nonpower, 192,
+                                   nonpower_total),
+                        3 * 256, "non-power-of-two capacity CPU oracle");
         ParamTimeline dry{{}, {}};
         dry.initial.wet = 0.0f;
         dry.initial.dry = 100.0f;
