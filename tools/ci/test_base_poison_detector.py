@@ -342,21 +342,37 @@ DETECTOR_WORKFLOW = REPO_ROOT / ".github/workflows/main-health-detector.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github/workflows/build.yml"
 
 
+def strip_comments(text: str) -> str:
+    """Drop `#` comment text.
+
+    Every one of these files has to EXPLAIN the thing it wires, so a raw
+    substring scan finds the explanation and reads as wiring. Replacing the real
+    invocation with an `echo` left an assertion on the bare path green, because
+    the rationale comment names the same path.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
 class WorkflowWiringTests(unittest.TestCase):
     """A decision module that is correct but unreferenced reads like one that works."""
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.detector = DETECTOR_WORKFLOW.read_text(encoding="utf-8")
+        cls.detector_code = strip_comments(cls.detector)
         cls.build = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
     def test_a_workflow_actually_invokes_the_detector(self) -> None:
         self.assertTrue(DETECTOR_WORKFLOW.is_file(), DETECTOR_WORKFLOW)
-        self.assertIn("tools/ci/base_poison_detector.py", self.detector)
+        self.assertIn(
+            "python3 tools/ci/base_poison_detector.py",
+            self.detector_code,
+            "the detector path appears only in prose; nothing runs it",
+        )
 
     def test_the_detector_lane_is_scheduled_so_it_runs_unprompted(self) -> None:
-        self.assertIn("schedule:", self.detector)
-        self.assertIn("cron:", self.detector)
+        self.assertIn("schedule:", self.detector_code)
+        self.assertIn("cron:", self.detector_code)
 
     def test_the_detector_group_is_shared_and_never_cancels_in_progress(self) -> None:
         """One at a time, and a superseded tick must lose nothing.
@@ -365,13 +381,13 @@ class WorkflowWiringTests(unittest.TestCase):
         the sha is exactly what makes build.yml's push lane lose an observation
         when it is superseded, because the sha it pinned never comes again.
         """
-        self.assertIn("group: main-health-detector", self.detector)
-        self.assertIn("cancel-in-progress: false", self.detector)
-        self.assertNotIn("main-health-detector-${{", self.detector)
+        self.assertIn("group: main-health-detector", self.detector_code)
+        self.assertIn("cancel-in-progress: false", self.detector_code)
+        self.assertNotIn("main-health-detector-${{", self.detector_code)
 
     def test_the_detector_reports_only(self) -> None:
         """Acting on the signal is Shipyard's side; this lane must not gate."""
-        self.assertNotIn("--fail-on-poisoned", self.detector)
+        self.assertNotIn("--fail-on-poisoned", self.detector_code)
 
     def test_the_detector_does_not_draw_a_macos_gate_host(self) -> None:
         """The whole point of tree identity is costing no gate lane.
@@ -380,7 +396,7 @@ class WorkflowWiringTests(unittest.TestCase):
         comment names the self-hosted Studios it declines to draw, and a
         whole-file scan would fail on the explanation of its own restraint.
         """
-        selectors = re.findall(r"^\s*runs-on:.*$", self.detector, re.MULTILINE)
+        selectors = re.findall(r"^\s*runs-on:.*$", self.detector_code, re.MULTILINE)
         self.assertTrue(selectors, "the detector declares no runs-on at all")
         joined = " ".join(selectors)
         for token in ("pulp-build-vm", "macos-15", "macos-26", "self-hosted", "macOS"):
@@ -390,13 +406,24 @@ class WorkflowWiringTests(unittest.TestCase):
     def test_build_yml_push_still_shares_one_concurrency_domain(self) -> None:
         """Pins the fact the detector's design is a response to.
 
+        Scoped to the top-level `concurrency:` block, not the file: the tokens
+        it checks appear six other times in build.yml, so a whole-file scan
+        stayed green when the block's own push exemption was deleted.
+
         If this stops holding, re-measure whether the push lane now carries an
         observation and update the detector's docstring: the tree-identity route
         would become a fallback rather than the primary source.
         """
-        self.assertIn("group: build-${{", self.build)
-        self.assertIn("github.ref", self.build)
-        self.assertIn("github.event_name != 'push'", self.build)
+        match = re.search(
+            r"^concurrency:\n((?:[ \t]+\S.*\n|[ \t]*\n)+)",
+            self.build,
+            re.MULTILINE,
+        )
+        self.assertIsNotNone(match, "build.yml declares no top-level concurrency")
+        block = strip_comments(match.group(1))
+        self.assertIn("group: build-${{", block, block)
+        self.assertIn("github.ref", block, block)
+        self.assertIn("github.event_name != 'push'", block, block)
 
     def test_observe_main_falls_back_past_the_push_lane(self) -> None:
         """The detector must not depend on the lane measured to report nothing."""
