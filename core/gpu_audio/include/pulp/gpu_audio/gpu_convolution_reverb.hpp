@@ -115,7 +115,8 @@ class GpuConvolutionReverb final {
     void process_quantum() noexcept;
 
     GpuConvolutionReverbConfig config_;
-    std::array<std::unique_ptr<Lane>, 2> lanes_{};
+    // Initialize after Lane is complete, in the out-of-line constructor.
+    std::array<std::unique_ptr<Lane>, 2> lanes_;
     // The transports are fixed-quantum APIs.  `block_size` is the host's
     // prepared capacity, not a promise that every callback has that size;
     // lane input buffers accumulate short callbacks into one full quantum.

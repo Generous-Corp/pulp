@@ -27,7 +27,7 @@ struct GpuConvolutionReverb::Lane {
 };
 
 GpuConvolutionReverb::GpuConvolutionReverb(GpuConvolutionReverbConfig config)
-    : config_(std::move(config)) {
+    : config_(std::move(config)), lanes_{} {
     // The Dawn/FFT transport requires a radix-2 quantum, while a host's
     // prepared max block is only a capacity and is often not a power of two
     // (for example 192).  Round up once, off the audio thread; callbacks up to

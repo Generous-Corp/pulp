@@ -371,6 +371,9 @@
             if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
                 add_executable(pulp-gpu-convolution-reverb-probe
                     test_gpu_convolution_reverb_probe.cpp)
+                # Match the catalog exporter's C++23 consumer: inline array
+                # initialization must not require the private Lane definition.
+                target_compile_features(pulp-gpu-convolution-reverb-probe PRIVATE cxx_std_23)
                 target_link_libraries(pulp-gpu-convolution-reverb-probe PRIVATE
                     pulp::host pulp::gpu-audio)
                 target_include_directories(pulp-gpu-convolution-reverb-probe PRIVATE
