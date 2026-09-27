@@ -1276,19 +1276,24 @@ TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic re
     auto out = output.view();
     std::atomic<bool> done{false};
     std::atomic<bool> monotonic{true};
+    std::atomic<bool> timed_out{false};
     std::thread reader([&] {
         std::uint64_t previous = 0;
-        while (!done.load(std::memory_order_acquire)) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
             const auto current = t.delivery_snapshot().gpu_blocks;
             if (current < previous)
                 monotonic.store(false, std::memory_order_relaxed);
             previous = current;
         }
+        timed_out.store(!done.load(std::memory_order_acquire));
     });
     for (int i = 0; i < 10000; ++i)
         t.process(in, out, 32);
     done.store(true, std::memory_order_release);
     reader.join();
+    CHECK_FALSE(timed_out.load());
     CHECK(monotonic.load());
     CHECK(t.delivery_snapshot().gpu_blocks == 10000);
     CHECK(delivery_total(t.delivery_snapshot()) == 10000);

@@ -3,6 +3,10 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <source_location>
 #include <memory>
 #include <thread>
 #include <sys/wait.h>
@@ -45,8 +49,20 @@ OSStatus render(const AURenderCallbackStruct& cb, float* value) {
     output.mBuffers[0]={1,sizeof(float),value};
     return cb.inputProc(cb.inputProcRefCon,&flags,&timestamp,0,1,value?&output:nullptr);
 }
-void await(const std::atomic<bool>& flag) {
-    while (!flag.load(std::memory_order_acquire)) std::this_thread::yield();
+void await(const std::atomic<bool>& flag,
+           std::source_location caller = std::source_location::current()) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!flag.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    if (!flag.load(std::memory_order_acquire)) {
+        std::fprintf(stderr, "CoreAudio test progress timed out at %s:%u\n",
+                     caller.file_name(), caller.line());
+        // A distinct exit code cannot satisfy the child tests expecting termination code 77.
+        // Avoid unwinding through live callbacks or invoking Catch on a worker.
+        std::_Exit(124);
+    }
 }
 }
 
