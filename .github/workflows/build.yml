@@ -891,6 +891,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_HEAD_SHA: ${{ github.sha }}
           EVENT_PATH: ${{ github.event_path }}
+          # Default OFF. `1` lets the protected-base bump verifier accept the
+          # synthesized refs/pull/N/merge checkout once it proves the merge's
+          # parents are exactly [base.sha, head.sha] and its tree is the head's.
+          BUMP_FASTPATH_PR_MERGE_REF: ${{ vars.PULP_BUMP_FASTPATH_PR_MERGE_REF }}
         run: |
           set -euo pipefail
           # LaunchAgents inherit macOS's stripped /usr/bin-only PATH. That made
@@ -1025,6 +1029,14 @@ jobs:
                   fi
                 fi
               fi
+              # The repository variable, never PR content, decides whether the
+              # merge-ref proof is offered. A base verifier that predates the
+              # flag rejects it and the run keeps the full path.
+              accept_pr_merge_ref=
+              if [ "$EVENT_NAME" = pull_request ] \
+                  && [ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]; then
+                accept_pr_merge_ref=--accept-pr-merge-ref
+              fi
               if [[ "$trusted_verifier_base" =~ ^[0-9a-f]{40}$ ]] \
                   && git show "$trusted_verifier_base:tools/scripts/generated_version_bump_check.py" \
                   >"$trusted_bump_check" 2>/dev/null \
@@ -1033,7 +1045,8 @@ jobs:
                     --event-name "$EVENT_NAME" \
                     --event-path "$EVENT_PATH" \
                     --base "$base" \
-                    --head "$EVENT_HEAD_SHA"; then
+                    --head "$EVENT_HEAD_SHA" \
+                    ${accept_pr_merge_ref:+"$accept_pr_merge_ref"}; then
                 native_build_required=false
                 echo "Exact generated version bump: native build matrix skipped."
               fi

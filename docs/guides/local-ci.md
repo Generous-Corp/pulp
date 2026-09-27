@@ -1777,6 +1777,21 @@ validation. Version/skill enforcement and both Vellum gates still run, and
 pushes to main, releases, scheduled work, and manual dispatches retain their
 normal validation.
 
+On a `pull_request` event the run checks out GitHub's synthesized
+`refs/pull/N/merge` commit, and a freshly opened bump PR's payload usually has
+a null or stale `merge_commit_sha` and no `after`, so by default the verifier
+cannot bind `GITHUB_SHA` to the event and every PR-event bump run takes the full
+native path (only merge groups are fast-pathed). Setting the repository variable
+`PULP_BUMP_FASTPATH_PR_MERGE_REF=1` (unset by default) makes `build.yml` pass
+`--accept-pr-merge-ref` to the protected-base verifier, which then accepts that
+checkout only when it is the working HEAD, its parents are exactly
+`[pull_request.base.sha, pull_request.head.sha]` in that order, and its tree is
+byte-identical to the head's tree. Every other check above still applies, so
+fork PRs, non-bump branches, stale bases, force-push races, and merge commits
+with extra content all keep the full path. The variable is read by the
+workflow, never by PR content; a base verifier that predates the flag rejects
+it and the run keeps the full path.
+
 The current provenance boundary is GitHub's valid SSH-signature record plus the
 `danielraffel` signer/account and exact release-bot author/committer identity.
 The repository does not yet contain an authoritative public key or fingerprint

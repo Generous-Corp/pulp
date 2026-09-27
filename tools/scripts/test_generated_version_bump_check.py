@@ -485,5 +485,213 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
             CHECK.verify(inputs)
 
 
+    # -- pull_request merge-ref proof (PULP_BUMP_FASTPATH_PR_MERGE_REF) -------
+
+    def _commit_tree(self, tree: str, *parents: str, message: str = "fixture\n") -> str:
+        args = ["git", "commit-tree", tree]
+        for parent in parents:
+            args.extend(["-p", parent])
+        return subprocess.run(
+            args, cwd=self.repo, check=True, text=True, input=message,
+            capture_output=True,
+        ).stdout.strip()
+
+    def _merge_ref(self, candidate: str, *, base: str | None = None) -> str:
+        """Build GitHub's refs/pull/N/merge shape and check it out, as CI does."""
+        run(self.repo, "checkout", "--quiet", "--detach", base or self.base)
+        subprocess.run(
+            ["git", "merge", "--quiet", "--no-ff", "--no-edit", candidate],
+            cwd=self.repo, check=True, capture_output=True,
+        )
+        return run(self.repo, "rev-parse", "HEAD")
+
+    def _fresh_pr_inputs(self, candidate: str, merge: str, *,
+                         accept: bool = True, **kwargs: object) -> types.SimpleNamespace:
+        """A freshly opened bump PR: null merge_commit_sha, no `after`."""
+        inputs = self._inputs(candidate, **kwargs)  # type: ignore[arg-type]
+        event = json.loads(inputs.event_path.read_text(encoding="utf-8"))
+        event["pull_request"]["merge_commit_sha"] = None
+        event.pop("after", None)
+        inputs.event_path.write_text(json.dumps(event), encoding="utf-8")
+        inputs.head = merge
+        inputs.accept_pr_merge_ref = accept
+        return inputs
+
+    def _checkout(self, commit: str) -> None:
+        run(self.repo, "checkout", "--quiet", "--detach", commit)
+
+    def test_fresh_pr_merge_ref_is_accepted_only_when_opted_in(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        self.assertEqual(
+            run(self.repo, "rev-parse", f"{merge}^{{tree}}"),
+            run(self.repo, "rev-parse", f"{candidate}^{{tree}}"),
+        )
+        result = CHECK.verify(self._fresh_pr_inputs(candidate, merge))
+        self.assertTrue(result["generated_version_bump"])
+        self.assertEqual(result["candidate"], candidate)
+
+    def test_fresh_pr_merge_ref_keeps_refusal_when_variable_unset(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "unrelated to the pull request"):
+            CHECK.verify(self._fresh_pr_inputs(candidate, merge, accept=False))
+        # A namespace without the attribute (the pre-flag call shape) also refuses.
+        inputs = self._fresh_pr_inputs(candidate, merge)
+        del inputs.accept_pr_merge_ref
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "unrelated to the pull request"):
+            CHECK.verify(inputs)
+
+    def test_cli_flag_is_opt_in_and_wired(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        inputs = self._fresh_pr_inputs(candidate, merge)
+        argv = [
+            "--repo", str(self.repo), "--event-name", "pull_request",
+            "--event-path", str(inputs.event_path), "--base", self.base,
+            "--head", merge, "--commit-json", str(inputs.commit_json), "--json",
+        ]
+        self.assertEqual(CHECK.main(argv), 1)
+        self.assertEqual(CHECK.main([*argv, "--accept-pr-merge-ref"]), 0)
+
+    def test_merge_ref_with_wrong_parents_is_refused(self) -> None:
+        candidate = self._generated_commit()
+        tree = run(self.repo, "rev-parse", f"{candidate}^{{tree}}")
+        other = self._commit_tree(tree, self.base, message="attacker side\n")
+        cases = {
+            "swapped": (candidate, self.base),
+            "foreign head": (self.base, other),
+            "foreign base": (other, candidate),
+            "single parent": (self.base,),
+            "octopus": (self.base, candidate, other),
+        }
+        for label, parents in cases.items():
+            with self.subTest(label):
+                forged = self._commit_tree(tree, *parents, message=f"{label}\n")
+                self._checkout(forged)
+                with self.assertRaisesRegex(
+                    CHECK.NotGeneratedBump, r"parents are not exactly \[base.sha, head.sha\]"
+                ):
+                    CHECK.verify(self._fresh_pr_inputs(candidate, forged))
+
+    def test_merge_ref_carrying_extra_content_is_refused(self) -> None:
+        candidate = self._generated_commit()
+        self._merge_ref(candidate)
+        hostile = self.repo / "core" / "hostile-merge.cpp"
+        hostile.write_text("hostile merge byte\n", encoding="utf-8")
+        subprocess.run(["git", "add", "--", "core/hostile-merge.cpp"], cwd=self.repo, check=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "--amend", "--no-edit", "--no-verify"],
+            cwd=self.repo, check=True,
+        )
+        tampered = run(self.repo, "rev-parse", "HEAD")
+        self.assertEqual(CHECK._parents(self.repo, tampered), [self.base, candidate])
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "tree differs from the head tree"):
+            CHECK.verify(self._fresh_pr_inputs(candidate, tampered))
+
+    def test_merge_ref_must_be_the_checked_out_commit(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        self._checkout(self.base)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "not the checked-out"):
+            CHECK.verify(self._fresh_pr_inputs(candidate, merge))
+
+    def test_merge_ref_non_bot_bump_is_refused(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "release-bot account"):
+            CHECK.verify(self._fresh_pr_inputs(candidate, merge, bot_login="mallory"))
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "signature"):
+            CHECK.verify(self._fresh_pr_inputs(candidate, merge, verified=False))
+
+    def test_merge_ref_fork_pr_is_refused(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        inputs = self._fresh_pr_inputs(candidate, merge)
+        event = json.loads(inputs.event_path.read_text(encoding="utf-8"))
+        event["pull_request"]["head"]["repo"] = {"full_name": "mallory/pulp"}
+        inputs.event_path.write_text(json.dumps(event), encoding="utf-8")
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "protected repository"):
+            CHECK.verify(inputs)
+
+    def test_merge_ref_non_bump_pr_is_refused(self) -> None:
+        # Negative control: an ordinary PR checked out the same way never
+        # rides the new path, even with a valid [base, head] merge ref.
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "head ref/SHA"):
+            CHECK.verify(
+                self._fresh_pr_inputs(candidate, merge, branch="feature/not-a-bump")
+            )
+
+    def test_merge_ref_on_stale_base_is_refused(self) -> None:
+        # The bump was generated on an older main; main then moved.
+        candidate = self._generated_commit()
+        self._checkout(self.base)
+        (self.repo / "docs" / "main-moved.md").write_text("moved\n", encoding="utf-8")
+        subprocess.run(["git", "add", "docs/main-moved.md"], cwd=self.repo, check=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "--no-verify", "-m", "main moved"],
+            cwd=self.repo, check=True,
+        )
+        moved = run(self.repo, "rev-parse", "HEAD")
+        merge = self._merge_ref(candidate, base=moved)
+        inputs = self._fresh_pr_inputs(candidate, merge)
+        event = json.loads(inputs.event_path.read_text(encoding="utf-8"))
+        event["pull_request"]["base"]["sha"] = moved
+        inputs.event_path.write_text(json.dumps(event), encoding="utf-8")
+        inputs.base = moved
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "tree differs from the head tree"):
+            CHECK.verify(inputs)
+        # A merge ref built on the moved main but an event still naming the
+        # old base (a stale payload) fails the parent binding instead.
+        inputs = self._fresh_pr_inputs(candidate, merge)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "parents are not exactly"):
+            CHECK.verify(inputs)
+
+    def test_merge_ref_force_push_race_is_refused(self) -> None:
+        # The payload names head H1 while the merge ref was rebuilt on H2.
+        first = self._generated_commit()
+        tree = run(self.repo, "rev-parse", f"{first}^{{tree}}")
+        second = self._commit_tree(tree, self.base, message="force-pushed head\n")
+        self.assertNotEqual(first, second)
+        merge = self._merge_ref(second)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "parents are not exactly"):
+            CHECK.verify(self._fresh_pr_inputs(first, merge))
+
+    def test_merge_ref_flag_does_not_widen_other_events(self) -> None:
+        candidate = self._generated_commit()
+        merge = self._merge_ref(candidate)
+        for event_name in ("pull_request_target", "workflow_dispatch", "push"):
+            with self.subTest(event_name):
+                inputs = self._fresh_pr_inputs(candidate, merge)
+                inputs.event_name = event_name
+                with self.assertRaisesRegex(CHECK.NotGeneratedBump, "unsupported event"):
+                    CHECK.verify(inputs)
+
+    def test_merge_group_is_unchanged_by_the_flag(self) -> None:
+        candidate = self._generated_commit()
+        for accept in (False, True):
+            with self.subTest(accept=accept):
+                self._checkout(self.base)
+                # verify() rebinds the imported writer's regenerators in place;
+                # a second in-process call needs a fresh import, as CI's
+                # one-process-per-run invocation always has.
+                for name in ("version_at_land", "version_bump_surfaces"):
+                    sys.modules.pop(name, None)
+                inputs = self._cumulative_inputs(candidate)
+                inputs.accept_pr_merge_ref = accept
+                self.assertTrue(CHECK.verify(inputs)["generated_version_bump"])
+
+    def test_workflow_offers_flag_only_from_the_repository_variable(self) -> None:
+        text = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "BUMP_FASTPATH_PR_MERGE_REF: ${{ vars.PULP_BUMP_FASTPATH_PR_MERGE_REF }}", text
+        )
+        self.assertEqual(text.count("--accept-pr-merge-ref"), 1)
+        self.assertIn('[ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]', text)
+        self.assertIn('${accept_pr_merge_ref:+"$accept_pr_merge_ref"}', text)
+
+
 if __name__ == "__main__":
     unittest.main()
