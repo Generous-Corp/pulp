@@ -61,7 +61,11 @@ TEST_CASE("Forge space GPU convolution: catalog metadata preserves controls and 
     REQUIRE(type.num_output_ports == 2);
     REQUIRE(type.baked_params.size() == 7);
     REQUIRE(type.latency_samples_for_block);
-    REQUIRE(type.latency_samples_for_block(kSr, kFrames) == 2 * kFrames);
+    REQUIRE(type.latency_samples_for_block(kSr, kFrames) == 3 * kFrames);
+    // The host max block is a capacity and need not be radix-2.  The GPU
+    // route rounds 192 up to its fixed 256-sample transport quantum and
+    // reports the corresponding three-quantum staged latency.
+    REQUIRE(type.latency_samples_for_block(kSr, 192) == 3 * 256);
     REQUIRE(type.latency_samples_for_block(kSr, 0) == 0);
     REQUIRE(type.latency_samples_for_block(kSr,
                                            CustomNodeType::kMaxLatencySamples / 2 + 1) ==

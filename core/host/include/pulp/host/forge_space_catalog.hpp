@@ -333,6 +333,14 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
 
 inline constexpr const char* kGpuTypeId = "space.convolution_reverb_gpu";
 
+inline int gpu_internal_block_size(int max_block) noexcept {
+    if (max_block <= 0) return 0;
+    std::uint64_t quantum = 1u;
+    while (quantum < static_cast<std::uint64_t>(max_block)) quantum <<= 1u;
+    if (quantum > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return 0;
+    return static_cast<int>(quantum);
+}
+
 struct GpuInstance {
     std::unique_ptr<gpu_audio::GpuConvolutionReverb> engine;
 };
@@ -362,13 +370,15 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
     t.destroy = [](void* p) { delete static_cast<GpuInstance*>(p); };
     t.prepare = [shared, policy](void* p, double sr, int max_block) {
         auto* instance = static_cast<GpuInstance*>(p);
+        const int internal_block = gpu_internal_block_size(max_block);
         if (!std::isfinite(sr) || sr <= 0.0 || max_block <= 0 ||
             sr > static_cast<double>(std::numeric_limits<std::uint32_t>::max()) ||
-            max_block > static_cast<int>(std::numeric_limits<std::uint32_t>::max()))
+            internal_block <= 0)
             throw std::runtime_error("invalid GPU convolution prepare geometry");
         gpu_audio::GpuConvolutionReverbConfig config;
-        config.block_size = static_cast<std::uint32_t>(max_block);
+        config.block_size = static_cast<std::uint32_t>(internal_block);
         config.sample_rate = static_cast<std::uint32_t>(std::lround(sr));
+        config.impulse_response_sample_rate = shared->sample_rate;
         config.impulse_response = shared->channels;
         config.normalize = policy.normalize;
         config.tail_trim_db = policy.tail_trim_db;
@@ -426,9 +436,11 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
         instance->engine->process(in, out, static_cast<std::uint32_t>(std::max(0, n)));
     };
     t.latency_samples_for_block = [](double, int max_block) {
-        if (max_block <= 0 || max_block > CustomNodeType::kMaxLatencySamples / 2)
+        const int internal_block = gpu_internal_block_size(max_block);
+        if (internal_block <= 0 ||
+            internal_block > CustomNodeType::kMaxLatencySamples / 3)
             return 0;
-        return 2 * max_block;
+        return 3 * internal_block;
     };
     return t;
 }

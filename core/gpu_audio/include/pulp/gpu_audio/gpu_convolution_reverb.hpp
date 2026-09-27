@@ -19,6 +19,10 @@ namespace pulp::gpu_audio {
 struct GpuConvolutionReverbConfig {
     std::uint32_t block_size = 0;
     std::uint32_t sample_rate = 0;
+    // The asset's native rate.  This is intentionally distinct from the
+    // session rate above: Forge may prepare one immutable IR at several host
+    // rates, and ZeroLatencyConvolver owns the canonical resampling policy.
+    double impulse_response_sample_rate = 0.0;
     std::vector<std::vector<float>> impulse_response;
     signal::IrNormalizeMode normalize = signal::IrNormalizeMode::energy;
     double tail_trim_db = signal::ZeroLatencyConvolver::kTailTrimDbDefault;
@@ -54,7 +58,9 @@ struct GpuConvolutionReverbReport {
 /// The wrapper owns only host-side control, filtering, predelay, dry alignment,
 /// and lane composition.  GPU work and the continuously primed CPU fallbacks
 /// remain inside the existing GpuAudioTransport instances.  Its fixed latency
-/// is exactly two host blocks and is reported through latency_samples().
+/// is exactly three internal host quanta: two transport lead quanta plus one
+/// staging quantum that makes the result independent of callback partitioning.
+/// It is reported through latency_samples().
 class GpuConvolutionReverb final {
   public:
     explicit GpuConvolutionReverb(GpuConvolutionReverbConfig config);
@@ -72,7 +78,7 @@ class GpuConvolutionReverb final {
     bool gpu_enabled() const noexcept { return config_.gpu_enabled; }
     std::uint32_t block_size() const noexcept { return config_.block_size; }
     std::uint32_t latency_samples() const noexcept {
-        return prepared_ ? 2u * config_.block_size : 0u;
+        return prepared_ ? 3u * config_.block_size : 0u;
     }
 
     // These setters are RT-safe and allocation-free.  As with the CPU
@@ -94,22 +100,40 @@ class GpuConvolutionReverb final {
 
   private:
     struct Lane;
+    struct ControlSample {
+        double wet = 0.0;
+        double dry = 0.0;
+        double width = 1.0;
+        double ir_gain = 1.0;
+        std::uint32_t predelay = 0;
+    };
 
     bool valid_config() const noexcept;
     bool prepare_lanes() noexcept;
     void update_filter_coefficients() noexcept;
     void clear_runtime_buffers() noexcept;
+    void process_quantum() noexcept;
 
     GpuConvolutionReverbConfig config_;
     std::array<std::unique_ptr<Lane>, 2> lanes_{};
+    // The transports are fixed-quantum APIs.  `block_size` is the host's
+    // prepared capacity, not a promise that every callback has that size;
+    // lane input buffers accumulate short callbacks into one full quantum.
     std::vector<float> dry_delay_;
-    std::vector<float> filtered_input_[2];
+    std::vector<ControlSample> control_delay_;
     std::vector<float> predelay_ring_[2];
     std::vector<float> dry_due_[2];
+    std::vector<ControlSample> control_due_;
+    std::vector<float> output_fifo_[2];
     std::uint32_t predelay_capacity_ = 0;
     std::uint32_t predelay_samples_ = 0;
     std::uint32_t predelay_write_ = 0;
     std::uint32_t dry_write_ = 0;
+    std::uint32_t quantum_fill_ = 0;
+    std::uint32_t output_fifo_capacity_ = 0;
+    std::uint32_t output_fifo_read_ = 0;
+    std::uint32_t output_fifo_write_ = 0;
+    std::uint32_t output_fifo_available_ = 0;
     double ir_gain_db_ = signal::ZeroLatencyConvolver::kIrGainDbDefault;
     double ir_gain_linear_ = 1.0;
     double predelay_ms_ = signal::ZeroLatencyConvolver::kPredelayMsDefault;

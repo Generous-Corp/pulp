@@ -7,6 +7,17 @@
 
 namespace pulp::gpu_audio {
 
+namespace {
+std::uint32_t next_power_of_two(std::uint32_t value) noexcept {
+    if (value <= 1u)
+        return value;
+    std::uint32_t result = 1u;
+    while (result < value && result <= (std::numeric_limits<std::uint32_t>::max() >> 1u))
+        result <<= 1u;
+    return result < value ? 0u : result;
+}
+} // namespace
+
 struct GpuConvolutionReverb::Lane {
     std::vector<float> ir;
     std::vector<float> input;
@@ -16,12 +27,27 @@ struct GpuConvolutionReverb::Lane {
 };
 
 GpuConvolutionReverb::GpuConvolutionReverb(GpuConvolutionReverbConfig config)
-    : config_(std::move(config)) {}
+    : config_(std::move(config)) {
+    // The Dawn/FFT transport requires a radix-2 quantum, while a host's
+    // prepared max block is only a capacity and is often not a power of two
+    // (for example 192).  Round up once, off the audio thread; callbacks up to
+    // the original capacity are accumulated into this internal quantum.
+    if (config_.block_size != 0u &&
+        (config_.block_size & (config_.block_size - 1u)) != 0u) {
+        const auto rounded = next_power_of_two(config_.block_size);
+        if (rounded != 0u)
+            config_.block_size = rounded;
+    }
+}
 
 GpuConvolutionReverb::~GpuConvolutionReverb() { release(); }
 
 bool GpuConvolutionReverb::valid_config() const noexcept {
     if (!config_.gpu_enabled || config_.block_size == 0 || config_.sample_rate == 0 ||
+        !std::isfinite(config_.impulse_response_sample_rate) ||
+        config_.impulse_response_sample_rate <= 0.0 ||
+        config_.block_size > static_cast<std::uint32_t>(std::numeric_limits<int>::max()) ||
+        config_.block_size > std::numeric_limits<std::uint32_t>::max() / 3u ||
         (config_.block_size & (config_.block_size - 1u)) != 0u || config_.ring_blocks < 4u)
         return false;
     if (config_.impulse_response.size() != 1u && config_.impulse_response.size() != 2u)
@@ -55,7 +81,7 @@ bool GpuConvolutionReverb::prepare_lanes() noexcept {
         if (!prepared.load_impulse_response(
                 source_ptrs.data(), static_cast<int>(source_ptrs.size()),
                 static_cast<int>(config_.impulse_response.front().size()),
-                static_cast<double>(config_.sample_rate)))
+                config_.impulse_response_sample_rate))
             return false;
 
         const auto prepared_length = prepared.prepared_ir_length();
@@ -112,18 +138,27 @@ void GpuConvolutionReverb::update_filter_coefficients() noexcept {
 }
 
 void GpuConvolutionReverb::clear_runtime_buffers() noexcept {
-    for (auto& buffer : filtered_input_)
-        std::fill(buffer.begin(), buffer.end(), 0.0f);
     for (auto& buffer : predelay_ring_)
         std::fill(buffer.begin(), buffer.end(), 0.0f);
+    for (auto& buffer : output_fifo_)
+        std::fill(buffer.begin(), buffer.end(), 0.0f);
     std::fill(dry_delay_.begin(), dry_delay_.end(), 0.0f);
+    std::fill(control_delay_.begin(), control_delay_.end(), ControlSample{});
     for (auto& buffer : dry_due_)
         std::fill(buffer.begin(), buffer.end(), 0.0f);
+    std::fill(control_due_.begin(), control_due_.end(), ControlSample{});
+    for (auto& lane : lanes_) {
+        if (!lane) continue;
+        std::fill(lane->input.begin(), lane->input.end(), 0.0f);
+        std::fill(lane->output.begin(), lane->output.end(), 0.0f);
+    }
     hp_prev_x_ = {};
     hp_z_ = {};
     lp_z_ = {};
     predelay_write_ = 0;
     dry_write_ = 0;
+    quantum_fill_ = 0;
+    output_fifo_read_ = output_fifo_write_ = output_fifo_available_ = 0;
 }
 
 bool GpuConvolutionReverb::prepare() noexcept {
@@ -148,11 +183,20 @@ bool GpuConvolutionReverb::prepare() noexcept {
                              config_.block_size + 1u;
         predelay_ring_[0].assign(predelay_capacity_, 0.0f);
         predelay_ring_[1].assign(predelay_capacity_, 0.0f);
-        filtered_input_[0].assign(config_.block_size, 0.0f);
-        filtered_input_[1].assign(config_.block_size, 0.0f);
         dry_due_[0].assign(config_.block_size, 0.0f);
         dry_due_[1].assign(config_.block_size, 0.0f);
-        dry_delay_.assign(static_cast<std::size_t>(2u * config_.block_size * 2u), 0.0f);
+        dry_delay_.assign(static_cast<std::size_t>(config_.block_size) * 4u, 0.0f);
+        control_delay_.assign(static_cast<std::size_t>(2u * config_.block_size),
+                              ControlSample{});
+        control_due_.assign(config_.block_size, ControlSample{});
+        // At most one full quantum is produced per host callback (callbacks
+        // are bounded by the prepared max block).  Two quanta leave room for
+        // the newly completed quantum while the current callback drains its
+        // due samples, including a short callback that crosses a quantum
+        // boundary.
+        output_fifo_capacity_ = 2u * config_.block_size;
+        output_fifo_[0].assign(output_fifo_capacity_, 0.0f);
+        output_fifo_[1].assign(output_fifo_capacity_, 0.0f);
         prepared_ = true;
         update_filter_coefficients();
         set_predelay_ms(predelay_ms_);
@@ -172,13 +216,17 @@ void GpuConvolutionReverb::release() noexcept {
         lane.reset();
     }
     dry_delay_.clear();
-    for (auto& buffer : filtered_input_)
-        buffer.clear();
+    control_delay_.clear();
     for (auto& buffer : predelay_ring_)
         buffer.clear();
     for (auto& buffer : dry_due_)
         buffer.clear();
+    control_due_.clear();
+    for (auto& buffer : output_fifo_)
+        buffer.clear();
     predelay_capacity_ = predelay_samples_ = predelay_write_ = dry_write_ = 0;
+    quantum_fill_ = 0;
+    output_fifo_capacity_ = output_fifo_read_ = output_fifo_write_ = output_fifo_available_ = 0;
     hp_prev_x_ = {};
     hp_z_ = {};
     lp_z_ = {};
@@ -240,23 +288,101 @@ void GpuConvolutionReverb::set_highcut_hz(double hz) noexcept {
         update_filter_coefficients();
 }
 
+void GpuConvolutionReverb::process_quantum() noexcept {
+    if (quantum_fill_ != config_.block_size || output_fifo_capacity_ < config_.block_size)
+        return;
+
+    // The authenticated transports are deliberately called only with their
+    // configured full quantum.  Their fixed two-block lead is then represented
+    // by the output samples they return, while the host-facing FIFO below
+    // preserves that timeline across arbitrary callback boundaries.
+    for (auto& lane : lanes_) {
+        std::array<const float*, 1> input_ptrs{lane->input.data()};
+        std::array<float*, 1> output_ptrs{lane->output.data()};
+        const audio::BufferView<const float> lane_input(input_ptrs.data(), 1u,
+                                                         config_.block_size);
+        audio::BufferView<float> lane_output(output_ptrs.data(), 1u, config_.block_size);
+        lane->transport->process(lane_input, lane_output, config_.block_size);
+    }
+
+    for (std::uint32_t i = 0; i < config_.block_size; ++i) {
+        const auto controls = control_due_[i];
+        double wet_l = 0.0;
+        double wet_r = 0.0;
+        const std::uint32_t write = predelay_write_;
+        const std::uint32_t read =
+            (write + predelay_capacity_ - controls.predelay) % predelay_capacity_;
+        for (std::size_t lane = 0; lane < 2u; ++lane) {
+            auto& ring = predelay_ring_[lane];
+            ring[write] = lanes_[lane]->output[i];
+            const double delayed = ring[read];
+            if (lane == 0u)
+                wet_l = delayed;
+            else
+                wet_r = delayed;
+        }
+        predelay_write_ = (predelay_write_ + 1u) % predelay_capacity_;
+
+        // Match ZeroLatencyConvolver::mix_chunk(): pre-delay and width are
+        // both applied to the wet return, after convolution.  Applying the
+        // delay to the send changes automated predelay behavior at partition
+        // boundaries even though the two paths are LTI in the static case.
+        const double mid = (wet_l + wet_r) * 0.5;
+        const double side = (wet_l - wet_r) * 0.5 * controls.width;
+        wet_l = mid + side;
+        wet_r = mid - side;
+
+        const std::uint32_t fifo_index =
+            (output_fifo_write_ + i) % output_fifo_capacity_;
+        output_fifo_[0][fifo_index] =
+            static_cast<float>(dry_due_[0][i] * controls.dry +
+                               wet_l * controls.wet * controls.ir_gain);
+        output_fifo_[1][fifo_index] =
+            static_cast<float>(dry_due_[1][i] * controls.dry +
+                               wet_r * controls.wet * controls.ir_gain);
+    }
+    output_fifo_write_ = (output_fifo_write_ + config_.block_size) % output_fifo_capacity_;
+    output_fifo_available_ += config_.block_size;
+    quantum_fill_ = 0;
+}
+
 void GpuConvolutionReverb::process(const audio::BufferView<const float>& input,
                                    audio::BufferView<float>& output, std::uint32_t n) noexcept {
-    if (!prepared_ || n != config_.block_size || input.num_channels() < 2u ||
+    if (!prepared_ || n == 0u || n > config_.block_size || input.num_channels() < 2u ||
         output.num_channels() < 2u || input.num_samples() < n || output.num_samples() < n) {
         output.clear();
         return;
     }
 
-    const std::uint32_t dry_capacity = 2u * config_.block_size;
+    // Drain and ingest in sample order.  Cache each input sample before
+    // writing the output so an in-place host callback remains valid.  A newly
+    // completed internal quantum is readable on the next sample, which keeps
+    // the externally reported latency fixed across callback boundaries,
+    // including a callback that crosses a quantum boundary.
     for (std::uint32_t i = 0; i < n; ++i) {
-        const std::uint32_t dry_index = dry_write_;
         const float left = std::isfinite(input.channel_ptr(0)[i]) ? input.channel_ptr(0)[i] : 0.0f;
         const float right = std::isfinite(input.channel_ptr(1)[i]) ? input.channel_ptr(1)[i] : 0.0f;
-        dry_due_[0][i] = dry_delay_[dry_index];
-        dry_due_[1][i] = dry_delay_[dry_capacity + dry_index];
+
+        if (output_fifo_available_ == 0u) {
+            output.channel_ptr(0)[i] = 0.0f;
+            output.channel_ptr(1)[i] = 0.0f;
+        } else {
+            output.channel_ptr(0)[i] = output_fifo_[0][output_fifo_read_];
+            output.channel_ptr(1)[i] = output_fifo_[1][output_fifo_read_];
+            output_fifo_read_ = (output_fifo_read_ + 1u) % output_fifo_capacity_;
+            --output_fifo_available_;
+        }
+
+        const std::uint32_t fill = quantum_fill_;
+        const std::uint32_t dry_capacity = 2u * config_.block_size;
+        const std::uint32_t dry_index = dry_write_;
+        dry_due_[0][fill] = dry_delay_[dry_index];
+        dry_due_[1][fill] = dry_delay_[dry_capacity + dry_index];
+        control_due_[fill] = control_delay_[dry_index];
         dry_delay_[dry_index] = left;
         dry_delay_[dry_capacity + dry_index] = right;
+        control_delay_[dry_index] = ControlSample{
+            wet_gain_, dry_gain_, width_, ir_gain_linear_, predelay_samples_};
         dry_write_ = (dry_write_ + 1u) % dry_capacity;
 
         const float source[2] = {left, right};
@@ -270,37 +396,13 @@ void GpuConvolutionReverb::process(const audio::BufferView<const float>& input,
             if (lp_active_)
                 lp_z_[lane] += lp_coef_ * (x - lp_z_[lane]);
             const float filtered = static_cast<float>(lp_active_ ? lp_z_[lane] : x);
-            filtered_input_[lane][i] = filtered;
-            predelay_ring_[lane][predelay_write_] = filtered;
-            const std::uint32_t read =
-                (predelay_write_ + predelay_capacity_ - predelay_samples_) % predelay_capacity_;
-            lanes_[lane]->input[i] = predelay_ring_[lane][read];
-            if (lane == 1u)
-                predelay_write_ = (predelay_write_ + 1u) % predelay_capacity_;
+            lanes_[lane]->input[fill] = filtered;
         }
+        quantum_fill_ = fill + 1u;
+        if (quantum_fill_ == config_.block_size)
+            process_quantum();
     }
 
-    for (auto& lane : lanes_) {
-        std::array<const float*, 1> input_ptrs{lane->input.data()};
-        std::array<float*, 1> output_ptrs{lane->output.data()};
-        const audio::BufferView<const float> lane_input(input_ptrs.data(), 1u, n);
-        audio::BufferView<float> lane_output(output_ptrs.data(), 1u, n);
-        lane->transport->process(lane_input, lane_output, n);
-    }
-
-    const double wet = wet_gain_ * ir_gain_linear_;
-    const double dry = dry_gain_;
-    const double width = width_;
-    for (std::uint32_t i = 0; i < n; ++i) {
-        const double l = lanes_[0]->output[i];
-        const double r = lanes_[1]->output[i];
-        const double mid = (l + r) * 0.5;
-        const double side = (l - r) * 0.5;
-        output.channel_ptr(0)[i] = static_cast<float>(dry_due_[0][i] * dry +
-                                                       (mid + side * width) * wet);
-        output.channel_ptr(1)[i] = static_cast<float>(dry_due_[1][i] * dry +
-                                                       (mid - side * width) * wet);
-    }
     for (std::size_t channel = 2; channel < output.num_channels(); ++channel)
         std::fill_n(output.channel_ptr(channel), n, 0.0f);
 }
