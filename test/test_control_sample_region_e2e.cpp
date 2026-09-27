@@ -698,7 +698,8 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
     const std::string host_start(binding["producer"]["process_start_id"].getString());
     const auto observed_process_start = [host_pid]() -> std::optional<std::string> {
         proc_bsdinfo process{};
-        if (proc_pidinfo(host_pid, PROC_PIDTBSDINFO, 0, &process, sizeof(process)) != sizeof(process))
+        if (proc_pidinfo(host_pid, PROC_PIDTBSDINFO, 0, &process, sizeof(process)) !=
+            sizeof(process))
             return std::nullopt;
         return std::to_string(process.pbi_start_tvsec) + ":" +
                std::to_string(process.pbi_start_tvusec);
@@ -722,11 +723,10 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
     CHECK(binding["producer"]["plugin_id"].getString() == "dev.pulp.sample-region-allpass.proof");
     ControlClient editor(primary), controller(authority), gesturer(parameter);
     for (auto* client : {&editor, &controller, &gesturer})
-        REQUIRE(
-            client
-                ->negotiate({.mandatory_features = {"receipts", "cancellation"},
-                             .optional_features = {"progress"}})
-                .succeeded());
+        REQUIRE(client
+                    ->negotiate({.mandatory_features = {"receipts", "cancellation"},
+                                 .optional_features = {"progress"}})
+                    .succeeded());
     const auto grant = [&] {
         auto params = choc::value::createObject("");
         params.setMember("instance_id", identity["instance_id"]);
@@ -775,8 +775,8 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
         const bool separate_edit_grant = edit_grant != persistent_grant;
         REQUIRE(separate_edit_grant);
         const double local_normalized = kind == "cancel" ? 0.40 : kind == "revoke" ? 0.45 : 0.50;
-        std::ofstream(barriers / "arm") << kind << (kind == "allow" ? " allow " : " stop ")
-                                        << local_normalized << '\n';
+        std::ofstream(barriers / "arm")
+            << kind << (kind == "allow" ? " allow " : " stop ") << local_normalized << '\n';
         const auto edit_request =
             wire_request(client_id, identity, edit_grant, "dev.pulp.graph/sample-region.edit@1",
                          delay_edit(before_graph), "prepared-" + kind);
@@ -827,11 +827,13 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
             interrupted_edit = pending_edit.get();
             REQUIRE(interrupted_edit->response);
             CHECK(interrupted_edit->response->state == ControlReceiptState::UnknownNeedsRefresh);
-            CHECK(interrupted_edit->response->result_code == ControlResultCode::UnknownNeedsRefresh);
+            CHECK(interrupted_edit->response->result_code ==
+                  ControlResultCode::UnknownNeedsRefresh);
             CHECK(interrupted_edit->response->retry == ControlRetryClassification::AfterRefresh);
         }
         std::ofstream(barriers / (kind + ".resume")) << "resume\n";
-        const auto edit_result = interrupted_edit ? std::move(*interrupted_edit) : pending_edit.get();
+        const auto edit_result =
+            interrupted_edit ? std::move(*interrupted_edit) : pending_edit.get();
         const auto gesture_result = pending_gesture.get();
         INFO(edit_result.explanation);
         REQUIRE(edit_result.response);
@@ -840,7 +842,7 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
         REQUIRE(gesture_result.response->state == ControlReceiptState::Completed);
         const auto finished = wait_json(barriers / (kind + ".finished.json"));
         const auto settled = wait_terminal_receipt(daemon.state_directory() / "operations",
-                                                  edit_result.response->receipt_id);
+                                                   edit_result.response->receipt_id);
         require_instance_binding(settled, binding);
         const bool authority_bound =
             settled["request_id"].getString() == edit_request.request_id &&
@@ -848,8 +850,8 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
             settled["grant_id"].getString() == edit_grant &&
             settled["canonical_request_hash"].getString() == edit_request.request_hash;
         REQUIRE(authority_bound);
-        for (const auto* field : {"broker_id", "session_id", "instance_generation", "manifest_digest",
-                                 "producer_artifact_digest"})
+        for (const auto* field : {"broker_id", "session_id", "instance_generation",
+                                  "manifest_digest", "producer_artifact_digest"})
             REQUIRE(settled[field].getString() == binding[field].getString());
         CHECK(settled["operation_id"].getString() == edit_request.operation_id);
         CHECK(settled["operation_version"].getInt64() == edit_request.operation_version);
@@ -938,7 +940,8 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
     do {
         siginfo_t child_exit{};
         if (::waitid(P_PID, static_cast<id_t>(host_pid), &child_exit,
-                     WEXITED | WNOHANG | WNOWAIT) == 0 && child_exit.si_pid == host_pid) {
+                     WEXITED | WNOHANG | WNOWAIT) == 0 &&
+            child_exit.si_pid == host_pid) {
             REQUIRE(child_exit.si_code == CLD_EXITED);
             REQUIRE(child_exit.si_status == 0);
             original_process_exited = true;
@@ -946,7 +949,8 @@ TEST_CASE("broker cancellation and revocation fence prepared topology with live 
             break;
         }
         proc_bsdinfo process{};
-        if (proc_pidinfo(host_pid, PROC_PIDTBSDINFO, 0, &process, sizeof(process)) == sizeof(process)) {
+        if (proc_pidinfo(host_pid, PROC_PIDTBSDINFO, 0, &process, sizeof(process)) ==
+            sizeof(process)) {
             const auto current_start = std::to_string(process.pbi_start_tvsec) + ":" +
                                        std::to_string(process.pbi_start_tvusec);
             if (current_start != host_start || process.pbi_status == SZOMB) {

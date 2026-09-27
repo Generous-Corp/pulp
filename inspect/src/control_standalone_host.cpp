@@ -370,16 +370,16 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             });
         auto sample_region_read =
             make_control_sample_region_read_executor([this](const ControlAdmissionPlan& plan) {
-                if (std::this_thread::get_id() != main_thread_ || !store_ || !sample_region_target_ ||
-                    !sample_region_target_->uses_state_store(*store_))
+                if (std::this_thread::get_id() != main_thread_ || !store_ ||
+                    !sample_region_target_ || !sample_region_target_->uses_state_store(*store_))
                     return std::shared_ptr<ControlSampleRegionTarget>{};
                 sample_region_target_->set_preparation_context(sample_rate_, 0);
                 return sample_region_target_;
             });
         auto sample_region_edit =
             make_control_sample_region_edit_executor([this](const ControlAdmissionPlan& plan) {
-                if (std::this_thread::get_id() != main_thread_ || !store_ || !sample_region_target_ ||
-                    !sample_region_target_->uses_state_store(*store_))
+                if (std::this_thread::get_id() != main_thread_ || !store_ ||
+                    !sample_region_target_ || !sample_region_target_->uses_state_store(*store_))
                     return std::shared_ptr<ControlSampleRegionTarget>{};
                 sample_region_target_->set_preparation_context(sample_rate_, 0);
                 return sample_region_target_;

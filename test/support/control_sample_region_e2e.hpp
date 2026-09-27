@@ -129,9 +129,8 @@ inline choc::value::Value snapshot(const ControlAdmissionPlan& plan,
 
 inline ControlExecutionOutcome
 guarded_edit(const std::filesystem::path& directory, const std::filesystem::path& evidence,
-             const ControlOperationExecutor& edit,
-             const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
-             const ControlExecutionContext& context,
+             const ControlOperationExecutor& edit, const ControlAdmissionPlan& plan,
+             const ControlRequestEnvelope& request, const ControlExecutionContext& context,
              examples::SampleRegionAllpassProcessor& processor, state::StateStore& store,
              ControlSampleRegionGeneration& generation, product::RenderWorker& renderer,
              format::HeadlessHost& app, std::thread::id main_thread) {
@@ -161,7 +160,8 @@ guarded_edit(const std::filesystem::path& directory, const std::filesystem::path
         if (context.report_progress)
             (void)context.report_progress(1, 2, R"({"phase":"prepared_before_commit"})");
         const auto progress_deadline = std::chrono::steady_clock::now() + 2s;
-        const auto prepared_blocks = static_cast<std::uint64_t>(ready["continuous_blocks"].getInt64());
+        const auto prepared_blocks =
+            static_cast<std::uint64_t>(ready["continuous_blocks"].getInt64());
         while (renderer.blocks() == prepared_blocks && !renderer.failed() &&
                std::chrono::steady_clock::now() < progress_deadline)
             std::this_thread::sleep_for(1ms);
@@ -307,8 +307,8 @@ inline int host_main(int argc, char** argv) {
                                             const ControlRequestEnvelope& request,
                                             const ControlExecutionContext& context) {
         if (request.operation_id == "dev.pulp.graph/sample-region.edit@1")
-            return guarded_edit(barriers, evidence, region_edit, plan, request, context,
-                                *processor, app.state(), generation, renderer, app, thread);
+            return guarded_edit(barriers, evidence, region_edit, plan, request, context, *processor,
+                                app.state(), generation, renderer, app, thread);
         if (request.operation_id == "dev.pulp.graph/sample-region.read@1")
             return region_read(plan, request, context);
         if (request.operation_id == "dev.pulp.state/read@1")
@@ -863,12 +863,13 @@ void require_cli_refusal(const pulp::platform::ProcessResult& result,
 }
 
 choc::value::Value wait_terminal_receipt(const std::filesystem::path& directory,
-                                        const std::string& receipt_id) {
+                                         const std::string& receipt_id) {
     REQUIRE_FALSE(receipt_id.empty());
     REQUIRE(receipt_id.size() <= 256);
-    const bool bounded_id = receipt_id.find_first_not_of(
-                                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") ==
-                            std::string::npos;
+    const bool bounded_id =
+        receipt_id.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") ==
+        std::string::npos;
     REQUIRE(bounded_id);
     const auto deadline = std::chrono::steady_clock::now() + 5s;
     do {
