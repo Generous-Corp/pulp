@@ -60,9 +60,21 @@ test("the launcher passes the derived width to node --test and its exit status b
       'test("no", () => { throw new Error("deliberate"); });\n');
     // NODE_TEST_CONTEXT would make the nested `node --test` report to this
     // runner instead of exiting with its own status, as it does under ctest.
-    const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
-    const run = (files, cores) => spawnSync(process.execPath, [launcher, ...files], {
-      encoding: "utf8", env: { ...env, TARTCI_GUEST_CORES: cores },
+    // The gate VM's own lease must not leak in either: each run below declares
+    // exactly the cores and memory it is asserting about.
+    const {
+      NODE_TEST_CONTEXT: _nested,
+      TARTCI_GUEST_CORES: _cores,
+      TARTCI_GUEST_MEM_MB: _memory,
+      ...env
+    } = process.env;
+    const run = (files, cores, memoryMb) => spawnSync(process.execPath, [launcher, ...files], {
+      encoding: "utf8",
+      env: {
+        ...env,
+        TARTCI_GUEST_CORES: cores,
+        ...(memoryMb === undefined ? {} : { TARTCI_GUEST_MEM_MB: memoryMb }),
+      },
     });
     // Two files that each log start, wait, then log end: one at a time the
     // log interleaves s,e,s,e; in flight together it reads s,s,e,e. This
@@ -86,6 +98,12 @@ test("the launcher passes the derived width to node --test and its exit status b
     assert.match(wide.stdout, /--test-concurrency=4 \(cores=12\)/);
     assert.notEqual(wide.status, 0);
     assert.equal(readFileSync(log, "utf8"), "ssee");
+    rmSync(log);
+    // A declared memory lease narrows the width and is named in the banner.
+    const leased = run(slow, "12", "2048");
+    assert.match(leased.stdout, /--test-concurrency=1 \(cores=12, mem_mb=2048\)/);
+    assert.equal(leased.status, 0);
+    assert.equal(readFileSync(log, "utf8"), "sese");
     assert.equal(spawnSync(process.execPath, [launcher], { env }).status, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
