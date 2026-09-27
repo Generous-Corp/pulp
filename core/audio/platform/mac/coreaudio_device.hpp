@@ -1,6 +1,7 @@
 #pragma once
 
 #include "coreaudio_io_timing.hpp"
+#include "coreaudio_lifetime.hpp"
 #include <pulp/audio/device.hpp>
 #include <pulp/audio/workgroup.hpp>
 #include <AudioToolbox/AudioToolbox.h>
@@ -108,6 +109,8 @@ public:
     void close() override;
     bool start(AudioCallback callback) override;
     void stop() override;
+    CoreAudioTeardownResult close_checked();
+    CoreAudioTeardownResult stop_checked();
 
     bool is_open() const override { return is_open_; }
     bool is_running() const override { return is_running_; }
@@ -124,6 +127,7 @@ public:
         std::uint64_t route_instance_token,
         std::uint64_t calibration_generation);
 
+    /// Control-thread query; it acquires switch_mutex_. Never call from render.
     /// Returns the device's I/O thread workgroup (`os_workgroup_t`)
     /// queried via `kAudioDevicePropertyIOThreadOSWorkgroup` on
     /// macOS 13+, or `nullptr` on older targets / when the device
@@ -144,6 +148,16 @@ public:
     void quiesce_workgroup_changes() override;
 
 private:
+    friend struct CoreAudioLifecycleTestAccess;
+    void require_control_thread() const noexcept;
+    void publish_workgroup_change_locked(void* workgroup);
+    bool open_locked(const DeviceConfig& config);
+    CoreAudioTeardownResult close_locked();
+    void quiesce_workgroup_changes_locked();
+    CoreAudioTeardownResult stop_locked();
+    bool install_render_context_locked();
+    void retire_render_context_locked();
+    void quarantine_native_ownership() noexcept;
     static OSStatus render_callback(
         void* inRefCon,
         AudioUnitRenderActionFlags* ioActionFlags,
@@ -185,6 +199,15 @@ private:
         const AudioObjectPropertyAddress* inAddresses,
         void* inClientData);
 
+    CoreAudioNativeOperations native_ops_;
+    std::unique_ptr<CoreAudioNativeRetirement> retirement_;
+    std::unique_ptr<CoreAudioCallbackContext> render_context_;
+    std::unique_ptr<CoreAudioCallbackContext> listener_context_;
+    // Serializes external lifecycle calls; native default-change callbacks use
+    // only switch_mutex_, so close can drain their admission outside that lock.
+    std::mutex lifecycle_mutex_;
+    bool unit_initialized_ = false;
+    AudioDeviceID overload_listener_device_id_ = kAudioObjectUnknown;
     AudioDeviceID device_id_;
     AudioComponentInstance audio_unit_ = nullptr;
     DeviceConfig config_;
@@ -272,14 +295,31 @@ public:
     static AudioDeviceID get_default_device(bool input);
 
 private:
+    friend struct CoreAudioLifecycleTestAccess;
+    CoreAudioNativeOperations native_ops_;
+    std::unique_ptr<CoreAudioNativeRetirement> retirement_;
+    std::unique_ptr<CoreAudioCallbackContext> listener_context_;
+    void ensure_listener_registration(std::size_t index, AudioObjectPropertySelector selector,
+                                      AudioObjectPropertyListenerProc callback);
     static OSStatus device_list_changed(AudioObjectID, UInt32,
                                         const AudioObjectPropertyAddress*, void*);
     static OSStatus default_device_changed(AudioObjectID, UInt32,
                                            const AudioObjectPropertyAddress*, void*);
-    DeviceChangeCallback device_change_cb_;
-    DefaultDeviceChangeCallback default_device_change_cb_;
+    // System property notifications are non-RT. Keep owner and registration
+    // admission through invocation, retaining the callable across replacement.
+    void (*notification_snapshot_hook_)(void*) = nullptr;
+    void* notification_snapshot_hook_context_ = nullptr;
+    void (*notification_drain_hook_)(void*) = nullptr;
+    void* notification_drain_hook_context_ = nullptr;
+    std::mutex callback_mutex_;
+    std::shared_ptr<CoreAudioNotificationSlot<DeviceChangeCallback>> device_change_cb_;
+    std::shared_ptr<CoreAudioNotificationSlot<DefaultDeviceChangeCallback>> default_device_change_cb_;
+    std::vector<std::shared_ptr<CoreAudioNotificationSlot<DeviceChangeCallback>>> retired_device_callbacks_;
+    std::vector<std::shared_ptr<CoreAudioNotificationSlot<DefaultDeviceChangeCallback>>> retired_default_callbacks_;
+    std::array<bool, 3> listener_registration_pending_{};
     bool listener_installed_ = false;
-    bool default_listener_installed_ = false;
+    bool default_output_listener_installed_ = false;
+    bool default_input_listener_installed_ = false;
 };
 
 } // namespace pulp::audio::mac

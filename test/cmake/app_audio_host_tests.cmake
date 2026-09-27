@@ -200,6 +200,11 @@ pulp_add_test_suite(pulp-test-audio-workgroup-wiring
 # whole registered suites isolated so an opt-in run cannot overlap any other
 # CTest work, regardless of the dynamically granted width.
 if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-coreaudio-native-lifetime
+        SOURCES test_coreaudio_native_lifetime.mm harness/rt_allocation_probe.cpp
+        LIBRARIES pulp::audio
+        PROPERTIES TIMEOUT 30)
+    target_link_libraries(pulp-test-coreaudio-native-lifetime PRIVATE "-framework CoreAudio")
     pulp_add_test_suite(pulp-test-coreaudio-default-follow
         SOURCES test_coreaudio_default_follow.mm
         LIBRARIES pulp::audio
