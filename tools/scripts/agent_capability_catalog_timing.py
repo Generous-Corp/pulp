@@ -562,6 +562,55 @@ EXPORTS = [
         }],
     ),
     capability(
+        key="timebase.groove-timing-reach",
+        domain="timebase",
+        summary=(
+            "Allocation-free supremum bound for widening an authored groove "
+            "selection window without missing displaced events."
+        ),
+        rt_class="any",
+        lifecycle={
+            "construction": "none",
+            "prepare": "none",
+            "process": "control-or-audio",
+            "reset": "none",
+            "release": "none",
+        },
+        state_model="Pure header-only calculation over an immutable groove value.",
+        seed_model="none",
+        determinism={
+            "repeatability": "bit_exact",
+            "block_partition": "invariant",
+            "platform_scope": "cross_platform",
+            "transport_history": "irrelevant",
+        },
+        input_domain="immutable groove timing steps and swing parameters",
+        output_domain="non-negative supremum displacement in authored ticks",
+        units=["ticks"],
+        latency="zero",
+        tail="none",
+        scheduling="event-synchronous",
+        bindings=[
+            binding(
+                role="timing-window-bound",
+                kind="cpp_function",
+                include="pulp/timebase/groove_timing_reach.hpp",
+                qualified_name="pulp::timebase::groove_timing_reach",
+                target="Pulp::timebase",
+                address_expression="&pulp::timebase::groove_timing_reach<pulp::timebase::InlineGrooveProjector>",
+                header_fingerprint=(
+                    "sha256:08cc72d0d66e1798551780cc195f3c4ebc824d7e403196b0a7e0303ba4aac72c"
+                ),
+            )
+        ],
+        _link_probes=[{
+            "role": "timing-window-bound",
+            "binding": "pulp::timebase::groove_timing_reach",
+            "operation": "function_call",
+            "arguments": "pulp::timebase::InlineGrooveProjector{}",
+        }],
+    ),
+    capability(
         key="timebase.trigger-grid",
         domain="timebase",
         summary="Fixed-capacity authored trigger grid with block-invariant window projection.",

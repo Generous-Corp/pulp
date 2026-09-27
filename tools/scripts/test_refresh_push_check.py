@@ -206,7 +206,13 @@ def case_conflict_resolution_logged_not_warned(fx: Fixture) -> None:
     assert r.returncode != 0, "fixture must conflict"
     fx.write("shared.txt", "resolved\n")
     fx.git("add", "shared.txt")
-    fx.git("commit", "-q", "--no-edit")
+    fx.git("commit", "-q", "-m", "resolve conflict")
+    # Some hosted Git versions do not retain the remote-tracking ref after a
+    # conflicted merge. The classifier needs that ref to recognize the merge
+    # as a main refresh, so restore the exact main parent explicitly.
+    main_parent = fx.git("rev-parse", "HEAD^2")
+    assert len(fx.git("rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
+    fx.git("update-ref", "refs/remotes/origin/main", main_parent)
     fx.set_pr(pr_fixture(head=feat))
     res = fx.run(feat)
     assert res.returncode == 0, res.stderr
