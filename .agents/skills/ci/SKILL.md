@@ -234,6 +234,37 @@ cascade: attribute it with `queue_batch_attribute.py`, and check whether the
 landing batch that produced main's current tree reused a receipt (three steps,
 green, ran nothing) — if it did, main's tree has never been tested.
 
+### Main is red: land the fix first by jumping it to the head of the queue
+
+When `base_poison_detector.py` says `poisoned`, or the same failing test name
+appears in two or more consecutive merge-group `macos` jobs on different hosts,
+every batch that forms behind the break will fail after a full gate and eject
+innocent entries. Fixing the ejected PRs is wasted work. Land the fix instead,
+ahead of everything else:
+
+```bash
+id=$(ghapp api repos/Generous-Corp/pulp/pulls/<fix-pr> --jq .node_id)
+GHAPP_ALLOW_QUEUE_REMOVAL=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+  dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}'
+GHAPP_ALLOW_REARM=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+  enqueuePullRequest(input:{pullRequestId:$id,jump:true}){mergeQueueEntry{position}}}'
+```
+
+The dequeue is only needed when the fix PR already sits in the queue; a PR not
+yet queued goes straight to the enqueue. The jump is pre-approved for a PR whose
+title or body names the failing test or the change being reverted. If no fix PR
+exists, open the revert or the one-line fix and jump that. Record the PR, the
+failing test, and how long main was red. Jumping anything else, or switching on
+an automatic jump, is a maintainer decision.
+
+## Wait on a blocking waiter, not a poll loop
+
+A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
+`shipyard ship --pr <n>` (merges on green), or a background command that exits
+when the condition holds. A loop that reads the same state every few seconds
+costs an agent turn per read and changes nothing: in one week of agent sessions
+on one host, poll turns were a fifth of all tool calls.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart

@@ -23,11 +23,20 @@ DESIGN NOTE — this must stay CHEAP and QUIET. A working checkout here can carr
   * only then do the (more expensive) relatedness tests, on a handful;
   * report at most MAX_REPORT, and say little.
 A noisy advisor is worse than none: it trains everyone to ignore it.
+
+Every time it DOES fire, it appends one JSON line to
+``${XDG_STATE_HOME:-~/.local/state}/pulp/pr-batch-advice.jsonl``
+(override: ``PULP_PR_BATCH_ADVICE_LOG``). The log is what lets anyone measure
+whether the advice is followed (fires vs. branches that later landed in one PR)
+instead of guessing. Writing it never blocks or fails a push.
 """
 
 from __future__ import annotations
 
+import datetime
+import json
 import os
+import socket
 import subprocess
 import sys
 
@@ -120,6 +129,55 @@ def shares_unmerged_work(a: str, b: str) -> bool:
     return n.isdigit() and int(n) > 0
 
 
+def advice_log_path() -> str:
+    override = os.environ.get("PULP_PR_BATCH_ADVICE_LOG")
+    if override:
+        return override
+    state = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "state"
+    )
+    return os.path.join(state, "pulp", "pr-batch-advice.jsonl")
+
+
+def reason(contained: bool, sibling: bool, overlap: list[str]) -> str:
+    if contained:
+        return "contained"
+    if sibling:
+        return "sibling"
+    return "subsystem"
+
+
+def record_advice(current: str, related: list) -> None:
+    """Append one line per firing. Best effort: a log failure is swallowed."""
+    entry = {
+        "schema": "pulp-pr-batch-advice/v1",
+        "ts": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "host": socket.gethostname().split(".")[0],
+        "repo": git("rev-parse", "--show-toplevel"),
+        "branch": current,
+        "head": git("rev-parse", "HEAD"),
+        "related": [
+            {
+                "branch": b,
+                "head": git("rev-parse", b),
+                "commits": n,
+                "reason": reason(contained, sibling, overlap),
+                "subsystems": overlap,
+            }
+            for b, n, contained, sibling, overlap in related
+        ],
+    }
+    path = advice_log_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
     if os.environ.get("PULP_SKIP_PR_BATCH_ADVICE") == "1":
         return 0
@@ -160,6 +218,7 @@ def main() -> int:
     # always worth batching; a bare subsystem overlap is a much weaker hint, and
     # burying the real candidates under weak ones is how an advisor gets ignored.
     related.sort(key=lambda r: (not (r[2] or r[3]), -r[1]))
+    record_advice(current, related)
 
     e = sys.stderr
     print("", file=e)
