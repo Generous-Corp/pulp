@@ -25,7 +25,14 @@ recorder. A known submission or completion failure remains the terminal reason
 if teardown drains it before the next service pass; teardown does not replace
 that cause with cancellation. A stale result retains the bridge recovery cause
 (input saturation, provider loss, or another explicit recovery request). Failed
-physical release retains the recorder for retry. Never drain
+physical release retains the recorder for retry. If destruction follows another
+failed physical release, the node drains real queued records and emits
+`gpu.audio.ownership` with `physical_release_complete=false` and the number of
+channels whose release returned false (`unresolved_channel_count`). This event
+has no block sequence and does not claim retirement. Existing lower-level GPU
+quarantine behavior is unchanged. SQL reports `unresolved_physical_ownership`
+and rejects complete-lifecycle acceptance, even when all per-block rows look
+complete. Never drain
 from a second consumer or call Perfetto in the audio callback.
 
 Correlate `(upid, engine_id, generation, sequence)`. Engine IDs share an allocator

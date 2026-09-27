@@ -49,6 +49,7 @@ struct GpuWaveNetRealtimeNode::Impl {
     detail::SharedIoTelemetry telemetry;
     detail::SharedIoTraceStats closed_trace_stats;
     detail::SharedIoTraceDrainObserver trace_observer;
+    std::uint32_t unresolved_channel_count = 0;
     detail::SharedIoTraceRecord trace_record;
     bool trace_pending = false;
     detail::SharedIoTraceOutcome pending_outcome = detail::SharedIoTraceOutcome::Success;
@@ -89,7 +90,7 @@ struct GpuWaveNetRealtimeNode::Impl {
         case Recovery::ProviderLost: return Reason::DeviceLost;
         case Recovery::OfflineFence: return Reason::Teardown;
         case Recovery::None: return Reason::None;
-        case Recovery::InvalidCallback:
+        case Recovery::InvalidCallback: return Reason::InvalidCallback;
         case Recovery::SequenceGap: return Reason::SequenceGap;
         }
         return Reason::None;
@@ -260,7 +261,14 @@ struct GpuWaveNetRealtimeNode::Impl {
 GpuWaveNetRealtimeNode::GpuWaveNetRealtimeNode(const Config& config)
     : impl_(std::make_unique<Impl>(config)) {}
 GpuWaveNetRealtimeNode::~GpuWaveNetRealtimeNode() {
-    (void)release();
+    if (!release() && impl_->trace) {
+        // Callers are quiescent. Preserve real records, but do not manufacture
+        // retirement for channels whose physical release was not established.
+        for (int i = 0; i < 4; ++i) impl_->drain_trace();
+        detail::emit_shared_io_unresolved_ownership(
+            {impl_->trace_engine, impl_->epoch, false, impl_->unresolved_channel_count},
+            &impl_->trace_observer);
+    }
 }
 GpuAudioNodeDescriptor GpuWaveNetRealtimeNode::descriptor() const {
     const auto& c = impl_->config;
@@ -342,11 +350,11 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
         s.sequence = s.bridge->next_sequence();
         s.bridge->request_recovery(detail::SharedIoRecoveryReason::OfflineFence);
     }
-    bool released = true;
+    s.unresolved_channel_count = 0;
     for (auto& channel : s.channels)
         if (!channel->release())
-            released = false;
-    if (!released)
+            ++s.unresolved_channel_count;
+    if (s.unresolved_channel_count != 0)
         return false;
     s.close_trace();
     s.channels.clear();

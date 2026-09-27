@@ -5,6 +5,7 @@
 #include "harness/rt_allocation_probe.hpp"
 #include <algorithm>
 #include <array>
+#include <string_view>
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>
@@ -74,6 +75,8 @@ struct TraceCapture {
     std::array<Record, 128> records{};
     std::size_t admission_count = 0, record_count = 0;
     bool overflow = false;
+    std::size_t ownership_count = 0;
+    detail::SharedIoTraceOwnership ownership;
     void attach(GpuWaveNetRealtimeNode& node) {
         detail::WaveNetRealtimeTestAccess::observe_trace(node, {this,
             [](void* context, std::uint64_t engine, const detail::SharedIoTraceRecord& record) noexcept {
@@ -85,6 +88,11 @@ struct TraceCapture {
                 auto& self = *static_cast<TraceCapture*>(context);
                 if (self.admission_count == self.admissions.size()) { self.overflow = true; return; }
                 self.admissions[self.admission_count++] = {engine, admission};
+            },
+            [](void* context, const detail::SharedIoTraceOwnership& ownership) noexcept {
+                auto& self = *static_cast<TraceCapture*>(context);
+                ++self.ownership_count;
+                self.ownership = ownership;
             }});
     }
     std::size_t terminal_count() const {
@@ -94,6 +102,7 @@ struct TraceCapture {
     }
     void require_closed() const {
         REQUIRE_FALSE(overflow);
+        CHECK(ownership_count == 0);
         REQUIRE(admission_count > 0);
         CHECK(terminal_count() == admission_count);
         for (std::size_t i = 0; i < admission_count; ++i) {
@@ -693,7 +702,8 @@ TEST_CASE("WaveNet stale terminal preserves the bridge recovery cause", "[gpu_au
         std::pair{Recovery::ProviderFailure, Reason::CompletionFailed},
         std::pair{Recovery::ProviderLost, Reason::DeviceLost},
         std::pair{Recovery::OfflineFence, Reason::Teardown},
-        std::pair{Recovery::SequenceGap, Reason::SequenceGap}};
+        std::pair{Recovery::SequenceGap, Reason::SequenceGap},
+        std::pair{Recovery::InvalidCallback, Reason::InvalidCallback}};
     for (const auto& [recovery, reason] : cases) {
         TraceCapture capture;
         Harness h(1, 1, 0, true);
@@ -702,11 +712,44 @@ TEST_CASE("WaveNet stale terminal preserves the bridge recovery cause", "[gpu_au
         h.callback(1); h.service();
         // This tests the node's device-loss/recovery seam, not a real lost GPU.
         detail::WaveNetRealtimeTestAccess::request_recovery(h.node, recovery);
+        h.callback(2);
         h.controls[0].complete = true;
         h.service();
         REQUIRE(h.node.release());
         capture.require_closed();
         CHECK(capture.only_terminal().gpu_terminal == detail::SharedIoGpuTerminalDisposition::StaleRejected);
         CHECK(capture.only_terminal().gpu_reason == reason);
+        const auto delivery = std::find_if(capture.records.begin(), capture.records.begin() + capture.record_count,
+            [](const auto& record) { return record.value.output_eligible; });
+        REQUIRE(delivery != capture.records.begin() + capture.record_count);
+        CHECK(delivery->value.delivery_reason == reason);
+        if (recovery == Recovery::InvalidCallback)
+            CHECK(std::string_view(detail::shared_io_fallback_reason_name(reason)) == "invalid_callback");
+    }
+}
+
+TEST_CASE("WaveNet failed destructor release discloses unresolved physical ownership", "[gpu_audio][wavenet][trace]") {
+    for (bool fail_release : {false, true}) {
+        TraceCapture capture;
+        {
+            Harness h(1, 2, 0, true);
+            capture.attach(h.node);
+            h.controls[0].complete = false;
+            h.controls[1].complete = false;
+            h.callback(1); h.service();
+            REQUIRE(capture.admission_count == 1);
+            h.controls[1].release = !fail_release;
+            // Two pending outputs, but only one unresolved physical release.
+        }
+        if (fail_release) {
+            CHECK(capture.ownership_count == 1);
+            CHECK_FALSE(capture.ownership.physical_release_complete);
+            CHECK(capture.ownership.unresolved_channel_count == 1);
+            CHECK(capture.ownership.engine_id == capture.admissions[0].engine);
+            CHECK(capture.ownership.generation == capture.admissions[0].value.generation);
+            CHECK(capture.terminal_count() == 0);
+        } else {
+            capture.require_closed();
+        }
     }
 }

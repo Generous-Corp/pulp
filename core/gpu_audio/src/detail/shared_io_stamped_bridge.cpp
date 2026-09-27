@@ -316,7 +316,7 @@ bool SharedIoStampedBridge::complete_callback_delivery(const Callback& callback,
             record.delivery_reason = SharedIoFallbackReason::CompletionFailed;
             break;
         case SharedIoRecoveryReason::InvalidCallback:
-            record.delivery_reason = SharedIoFallbackReason::SequenceGap;
+            record.delivery_reason = SharedIoFallbackReason::InvalidCallback;
             break;
         case SharedIoRecoveryReason::OfflineFence:
             record.delivery_reason = SharedIoFallbackReason::Teardown;

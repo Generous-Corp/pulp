@@ -270,11 +270,23 @@ struct SharedIoTraceDrainResult {
 
 // Private diagnostic observer. Called only by the sole drain consumer, never
 // by callback producers. Its lifetime must cover every drain, including release.
+struct SharedIoTraceOwnership {
+    std::uint64_t engine_id = 0;
+    std::uint64_t generation = 0;
+    bool physical_release_complete = false;
+    std::uint32_t unresolved_channel_count = 0;
+};
 struct SharedIoTraceDrainObserver {
     void* context = nullptr;
     void (*record)(void*, std::uint64_t, const SharedIoTraceRecord&) noexcept = nullptr;
     void (*admission)(void*, std::uint64_t, const SharedIoTraceAdmission&) noexcept = nullptr;
+    void (*ownership)(void*, const SharedIoTraceOwnership&) noexcept = nullptr;
 };
+
+// Final failed-release disclosure. No per-sequence terminal or retirement is
+// implied. Call after quiescent draining, before destroying the recorder.
+void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership&,
+    const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
 
 // Non-RT diagnostic thread ONLY, including when the producer becomes a future
 // realtime auxiliary worker. This is the sole Perfetto edge for these records.

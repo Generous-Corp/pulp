@@ -16,11 +16,11 @@ bool SharedIoTraceRecord::valid() const noexcept {
         generation == 0 || valid_stages >> kSharedIoTraceStageCount != 0 ||
         static_cast<unsigned>(outcome) > static_cast<unsigned>(SharedIoTraceOutcome::Cancelled) ||
         static_cast<unsigned>(reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
+            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
         static_cast<unsigned>(gpu_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
+            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
         static_cast<unsigned>(delivery_reason) >
-            static_cast<unsigned>(SharedIoFallbackReason::CompletionFailed) ||
+            static_cast<unsigned>(SharedIoFallbackReason::InvalidCallback) ||
         static_cast<unsigned>(gpu_terminal) >
             static_cast<unsigned>(SharedIoGpuTerminalDisposition::CancelledTeardown) ||
         static_cast<unsigned>(delivery) >
@@ -165,6 +165,8 @@ const char* shared_io_fallback_reason_name(SharedIoFallbackReason value) noexcep
         return "sequence_gap";
     case SharedIoFallbackReason::CompletionFailed:
         return "completion_failed";
+    case SharedIoFallbackReason::InvalidCallback:
+        return "invalid_callback";
     case SharedIoFallbackReason::Teardown:
         return "teardown";
     }
@@ -311,6 +313,15 @@ void emit_admission([[maybe_unused]] const SharedIoTraceConfig& config,
                             admission.sequence);
 }
 } // namespace
+
+void emit_shared_io_unresolved_ownership(const SharedIoTraceOwnership& ownership,
+                                        const SharedIoTraceDrainObserver* observer) noexcept {
+    PULP_TRACE_INSTANT_ARGS("gpu", "gpu.audio.ownership", "schema", 2,
+        "engine_id", ownership.engine_id, "generation", ownership.generation,
+        "physical_release_complete", ownership.physical_release_complete,
+        "unresolved_channel_count", ownership.unresolved_channel_count);
+    if (observer && observer->ownership) observer->ownership(observer->context, ownership);
+}
 
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,

@@ -36,6 +36,7 @@ enum class SharedIoFallbackReason : std::uint8_t {
     SequenceGap,
     Teardown,
     CompletionFailed,
+    InvalidCallback,
 };
 
 enum class SharedIoContractError : std::uint8_t {
