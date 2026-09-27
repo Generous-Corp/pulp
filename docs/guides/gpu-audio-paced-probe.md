@@ -44,10 +44,11 @@ published. These policies keep Dawn calls off the audio callback and do not
 promise hard realtime behavior or GPU scheduling priority.
 The maximum is 100,000 measured blocks per invocation. The probe keeps the
 stereo input, output, and per-callback records in memory so that it can emit a
-complete CSV; the bound supports an approximately 11-minute run at 48 kHz and
+complete CSV; the bound supports an approximately 67-second run at 48 kHz and
 32 frames without turning the diagnostic into a multi-hundred-megabyte or
-unbounded allocation. Longer campaigns should use a streaming harness rather
-than increasing this in-memory limit.
+unbounded allocation. A million blocks would be about 11 minutes at that
+period, but longer campaigns should use a streaming harness rather than
+increasing this in-memory limit.
 
 `receipt.json` contains configuration, numerical failures, callback overruns,
 late callback starts, and the transport's miss-counter delta. `blocks.csv`
