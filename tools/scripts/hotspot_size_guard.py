@@ -228,8 +228,11 @@ def config_at_ref(ref: str, rel_path: str) -> Config | None:
 
 
 def added_files(base: str, head: str) -> list[str]:
+    # Three-dot: files this branch added since the merge-base. A two-dot tree
+    # diff against a base tip that moved on would report every file main
+    # deleted after the branch point as "added" here.
     result = subprocess.run(
-        ["git", "diff", "--name-status", "--diff-filter=A", f"{base}..{head}"],
+        ["git", "diff", "--name-status", "--diff-filter=A", f"{base}...{head}"],
         capture_output=True,
         text=True,
     )

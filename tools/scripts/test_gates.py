@@ -74,6 +74,7 @@ from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
 from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 from test_skill_path_map import NoSilentEmptyPatterns  # noqa: E402,F401
 from test_skill_path_map_lint import (  # noqa: E402,F401
+    CoClaimBaseResolutionTests,
     CoClaimRuleTests,
     EmptyRuleTests,
     JsonSchemaLiteTests,

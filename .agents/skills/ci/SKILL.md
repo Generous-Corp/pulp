@@ -554,6 +554,21 @@ near-instant bootstrap. The job writes decision notes for `macos` and `linux`
 in file-name order, so the log prints `linux` first; `shipyard landing` shows
 both.
 
+### `Enforce version & skill sync` compares against the merge-base
+
+The workflow's "Resolve diff base" step hands every gate `git merge-base
+origin/<base> HEAD`, not `origin/<base>`. The checked-out PR merge ref can lag
+the live base by hours, so any gate that reads a file at the base tip blames
+the PR for what `main` changed since: a PR that never touched
+`plugin_slot.hpp` failed the Node ABI check because `main` had appended a
+virtual after its merge ref was built. `node_abi_gate.py` and
+`skill_path_map_lint.py` also resolve the merge-base themselves (via
+`gate_common.resolve_git_comparison`), so the pre-push hook agrees. A new gate
+that reads `git show <base>:<path>` must do the same, and its fixture test needs
+a "branch behind main" case. If such a gate still names a file the PR's diff
+does not contain, check the step's `diff base:` log line before merging `main`
+in.
+
 ### `source-selftest` tests gate on `Enforce version & skill sync`, not on `macos`
 
 The gate events also exclude `source-selftest`: ~140 Python registrations that

@@ -173,6 +173,17 @@ repository-scoped `PULP_LOCAL_LINUX_RUNS_ON_JSON` lane. Keeping those selectors
 distinct prevents automatic branch content from matching the less-isolated
 repository runner through GitHub's subset-based label selection.
 
+Every gate in this workflow compares HEAD against the **merge-base** of the
+base branch and HEAD, which the "Resolve diff base" step computes once. The
+base tip is the wrong anchor for any gate that reads a file *at* the base
+(`node_abi_gate.py`'s virtual order, `skill_path_map_lint.py`'s co-claim map,
+`hotspot_size_guard.py`'s new-file list): a PR merely behind `main` would be
+blamed for whatever `main` changed after it branched, such as a virtual
+appended to a header the PR never touched. Those three scripts also resolve
+the merge-base themselves, so the pre-push hook and `gates.sh`, which pass
+`origin/main`, behave the same way. Three-dot diffs and `base..HEAD` commit
+ranges give identical results under either anchor.
+
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
 
