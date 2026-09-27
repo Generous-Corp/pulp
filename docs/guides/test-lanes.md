@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below); an unchanged exact PR merge tree may reuse its artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
 | **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
@@ -88,7 +88,11 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   assert no wall-clock or load-dependent bound: a forgotten regeneration then
   fails on the PR that caused it rather than ejecting a merge-queue batch, and
   the timing flakes that moved the full suite off the PR head stay off it.
-  Tests carrying `pr-fast` still run in the full suite everywhere else.
+  Tests carrying `pr-fast` still run in the full suite everywhere else. The
+  one exception is a head that is ready to land (armed for auto-merge on the
+  current `main`): it also runs the full suite, non-gating, to issue the
+  receipt a merge group of that one pull request can reuse (see the local CI
+  guide, "Exact PR receipts on an unchanged merge-group candidate").
 - **`source-selftest`** — applied from `tools/ci/source_selftests.json`, never by
   hand: a Python registration that reads only the checkout. **Excluded from the
   required `macos` gate on gate events** and run instead by the build-free
