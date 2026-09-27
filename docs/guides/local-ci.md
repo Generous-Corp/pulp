@@ -709,9 +709,9 @@ projects so they never inflate `pulp`'s worker-minute totals:
 
 | Project | Targets |
 |---|---|
-| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` |
-| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,Fast tier,SDK contract}` |
-| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `merge-group-run` |
+| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` (hosted placeholder), `macos-gate/merge_group/placeholder/{receipt-reused,skip-safe,unknown}` (what the placeholder's annotation says it stood for), `macos-gate/<event>/no-runner-cancel` (cancelled before any runner took it; duration = the wait), `release/<workflow>` (release-lane jobs that ran on a gate runner) |
+| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,Fast tier,SDK contract}`, `release/<workflow>/queue` |
+| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `pr/gate-minutes` (self-hosted gate minutes one merged PR cost, PR heads + merge groups, every conclusion), `pr/ejected/<reason>` (one removal from the queue before merging; duration = queue time it threw away), `merge-group-run` |
 
 Ingest is idempotent (rows already in the store are skipped by external id),
 so it can run on a schedule. "Is this build slower than usual on this host?"
@@ -732,10 +732,28 @@ python3 tools/scripts/build_speed_scorecard.py report --since 7d \
 python3 tools/scripts/build_speed_scorecard.py report --build-dir build --runs last
 
 # Gate job and step p50/p90 either side of one instant (a merge, an incident's
-# end), within the --since window.
+# end), within the --since window, plus time to merge and gate cost.
 python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17 \
   --split 2026-09-24T13:12Z --no-local --no-fleet
+
+# A clean after-window that skips a rollout and stops at a fixed end.
+python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17T13:12Z \
+  --split 2026-09-24T13:12Z --after-from 2026-09-27T12:00Z --until 2026-09-29T12:00Z \
+  --no-local --no-fleet
 ```
+
+`--split` also renders a "Time to merge and gate cost" table: PR open→merged and
+first/last enqueue→merged p50/p90, merged PRs per day and hour, PRs per
+merge-queue push, gate-minutes per merged PR, cancelled gate-minutes (per day
+and per merged PR), receipt reuse rate, merge_group run failure rate,
+ejections per 100 merged PRs (with reasons), gate jobs cancelled before any
+runner took them, release-lane queue and gate-runner minutes, and gate queue
+p50 per host. Everything is normalised per day or per merged PR so windows of
+different length compare. Receipt reuse counts only placeholders whose
+annotation says a receipt was reused: a skip-safe merge group never needed the
+native gate and is reported separately. `shipyard metrics compare` is not a
+substitute here: it ignores `--before` and compares against all history before
+the split (Shipyard#618).
 
 The drift section comes from `shipyard metrics watch`, which halves a fixed
 window, so a window that spans a change mixes both regimes. `--split` compares
