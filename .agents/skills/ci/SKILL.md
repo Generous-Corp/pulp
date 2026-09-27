@@ -4758,7 +4758,28 @@ clear a failing required check; otherwise enqueue it as it is.
 `.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`,
 so Shipyard's `ghapp` branch-refresh guard refuses a pointless App-authenticated
 refresh. A local `git merge origin/main && git push` bypasses that guard, so the
-rule is yours to keep there.
+pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`):
+
+- Every push whose own new commits include a merge with a parent on
+  `origin/main` is logged to `~/.local/state/pulp/refresh-pushes.jsonl` (override
+  `PULP_REFRESH_PUSH_LOG`), with the PR, `pure_refresh`, `gate_in_flight` (a
+  running `macos` check in `Build and Test` on the pre-push head), the repo
+  policy, and the decision. Pushes with no such merge skip the check entirely.
+- A push is a **pure refresh** only when every own commit is such a merge and
+  each merge tree equals `git merge-tree --write-tree` of its parents. A merge
+  that resolved a conflict, carried an extra edit, or rode along with ordinary
+  commits is not pure and is never warned about.
+- `PULP_REFRESH_PUSH_POLICY=warn` (default) prints a warning for a pure refresh
+  of an open PR that is not CONFLICTING, has no failing required check, and was
+  not ejected from the queue at its head. `refuse` makes that a pre-push failure
+  (override once with `PULP_ALLOW_REFRESH_PUSH=1`; `PULP_SKIP_PREPUSH=1` and
+  `PULP_DISABLE_PREPUSH_GATES=1` demote it); `off` logs only.
+- The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
+  the log, never a blocked push. A failing check that could not be confirmed as
+  non-required counts as justification, so the check errs toward silence.
+
+Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
+are the avoidable cancellations; all lines are the control population.
 
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 

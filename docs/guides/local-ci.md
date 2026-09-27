@@ -646,6 +646,35 @@ shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
 
+### A local main-refresh push honours `refresh_branch`
+
+`[merge] refresh_branch = "only-if-conflicting"` in `.shipyard/config.toml`
+governs Shipyard's own `ghapp` update-branch calls. A local
+`git merge origin/main && git push` moves the PR head the same way, cancelling
+the in-flight required `macos` run (`build.yml` cancels superseded PR runs),
+while the merge queue re-tests the merge result anyway. The pre-push hook runs
+`tools/scripts/refresh_push_check.py` before every other gate, including under
+`PULP_SKIP_PREPUSH=1`, so those pushes are visible:
+
+| Setting | Effect |
+|---------|--------|
+| `PULP_REFRESH_PUSH_POLICY=warn` (default) | warn on a pure refresh of an open PR with no reason to refresh |
+| `PULP_REFRESH_PUSH_POLICY=refuse` | fail the push instead; `PULP_ALLOW_REFRESH_PUSH=1` allows one |
+| `PULP_REFRESH_PUSH_POLICY=off` | log only |
+| `PULP_REFRESH_PUSH_LOG` | log path (default `~/.local/state/pulp/refresh-pushes.jsonl`) |
+
+A refresh is justified, and never warned about, when the PR is `CONFLICTING`, a
+required check on its head is failing, or the queue removed it at its current
+head. A push counts as a pure refresh only when every new branch commit is a
+merge with a parent on `origin/main` whose tree equals Git's clean automatic
+merge; a conflict-resolution merge is logged but never warned about. Pushes
+with no merge from main cost two `git rev-list` calls and write nothing. The
+GitHub lookup (one query, plus a required-ness query only when a check has
+failed) shares a 5 s budget and fails open. Each log line is one JSON object:
+`ts, repo, branch, pr, head_before, head_after, main_merges, other_commits,
+pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
+lookup, policy, mode, decision, via`.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
