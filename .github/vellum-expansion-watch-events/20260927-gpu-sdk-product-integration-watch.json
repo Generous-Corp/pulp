@@ -6,7 +6,8 @@
   "acceptance_id": "full-design-import-render-v1-pulp-watch",
   "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
   "capability_families": [
-    "design-output-and-packaging"
+    "design-output-and-packaging",
+    "design-source-ingest"
   ],
   "rationale": "The GPU SDK product-integration change crosses the design-output-and-packaging selector through generated capability and SDK catalog metadata. It adds no importer, DesignIR schema, generated design output, renderer, package authority, release workflow, Vellum artifact, or ownership transition. The remaining paths are shared-memory GPU-audio transport, lifecycle, tracing, provider identity, downstream consumer tests, and documentation. This is registered as watch-only so selector coverage remains explicit while authority stays unchanged.",
   "tests": [
