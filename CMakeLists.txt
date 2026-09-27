@@ -902,6 +902,11 @@ endif()
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
 
+# Build-specific Forge metadata is separate from the statically audited public
+# header install surface. The catalog module installs only share/pulp JSON.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake)
+pulp_install_forge_catalog()
+
 # ── Linux fontconfig post-pass ──────────────────────────────────────────
 # GNU ld processes static archives left-to-right and won't re-scan.
 # `libskia.a(SkFontMgr_fontconfig.o)` references Fc* symbols and

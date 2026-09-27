@@ -627,10 +627,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json")
             DESTINATION "share/pulp")
 endif()
 
-# Select the catalog belonging to this build, including opt-in realizations.
-include("${CMAKE_CURRENT_LIST_DIR}/PulpForgeCatalogInstall.cmake")
-pulp_install_forge_catalog()
-
 # Public multi-domain capabilities for agents and downstream generators. This
 # is intentionally separate from forge-catalog.json: it owns public symbols,
 # lifecycle, and RT facts while the Forge catalog remains the numeric node

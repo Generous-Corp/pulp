@@ -89,9 +89,14 @@ endif()
 
     def test_install_rules_delegate_catalog_selection(self):
         rules = (SOURCE / 'tools/cmake/PulpInstallRules.cmake').read_text()
-        self.assertIn('include("${CMAKE_CURRENT_LIST_DIR}/PulpForgeCatalogInstall.cmake")', rules)
-        self.assertIn('pulp_install_forge_catalog()', rules)
+        root = (SOURCE / 'CMakeLists.txt').read_text()
+        self.assertIn('include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake)', root)
+        self.assertIn('pulp_install_forge_catalog()', root)
+        self.assertNotIn('PulpForgeCatalogInstall.cmake', rules)
         self.assertNotIn('install(FILES "${_pulp_forge_catalog_snapshot}"', rules)
+        module = (SOURCE / 'tools/cmake/PulpForgeCatalogInstall.cmake').read_text()
+        installs = [line.strip() for line in module.splitlines() if line.strip().startswith('install(')]
+        self.assertEqual(installs, ['install(FILES "${_catalog}" DESTINATION "share/pulp")'])
 
     def test_default_installs_committed_snapshot_without_exporter(self):
         self.configure(enabled=False, omit=True)
