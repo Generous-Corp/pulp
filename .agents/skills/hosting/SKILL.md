@@ -1204,6 +1204,22 @@ registry header. Use the family header that owns the DSP you are exposing:
   `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
   `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
 
+The space catalog's GPU convolution route is an opt-in host realization, not a
+replacement for the CPU node.  Enable it with
+`PULP_HOST_ENABLE_GPU_CONVOLUTION=ON` only in a GPU/provider-configured SDK
+build; the exported family keeps `space.convolution_reverb` as the default and
+adds the `gpu` realization with type ID `space.convolution_reverb_gpu`.
+Consumers must preserve the seven convolution controls (IR gain, pre-delay,
+wet/dry, width, low/high cut) and the route's fixed three-quantum PDC: a host
+capacity is rounded up to the next power-of-two transport quantum (for example,
+192 becomes 256) before reporting `3 * quantum` latency.  The GPU node is
+intentionally non-lowerable and accepts
+only one- or two-channel dual-mono IRs; four-channel true-stereo assets remain
+on the CPU realization until a channel-matrix GPU route exists.  The exact
+provider probe is `pulp-gpu-convolution-reverb-probe`, and a Forge consumer
+acceptance must use an installed SDK whose catalog export contains both
+realizations and whose source/build provenance is bound to the same Pulp SHA.
+
 The sidechain HPF setter resets its biquad when the cutoff changes. Cache the
 last applied cutoff in any baked adapter and call the setter only on an actual
 change; calling it unconditionally per block manufactures a fresh detector
