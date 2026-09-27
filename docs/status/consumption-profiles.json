@@ -216,6 +216,11 @@
             "public_header_count": 1
           },
           {
+            "exported_as": "Pulp::inspect-protocol",
+            "closure_node_count": 23,
+            "public_header_count": 78
+          },
+          {
             "exported_as": "Pulp::midi",
             "closure_node_count": 23,
             "public_header_count": 50
@@ -257,11 +262,6 @@
           },
           {
             "exported_as": "Pulp::inspect-authoring",
-            "closure_node_count": 19,
-            "public_header_count": 78
-          },
-          {
-            "exported_as": "Pulp::inspect-protocol",
             "closure_node_count": 19,
             "public_header_count": 78
           },
@@ -2439,8 +2439,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 19,
+            "node_count": 23,
             "pulp_targets": [
+              "pulp-events",
               "pulp-foundation",
               "pulp-platform",
               "pulp-runtime",
@@ -2459,7 +2460,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 18,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -2477,8 +2478,11 @@
               "Accelerate",
               "Cocoa",
               "CoreFoundation",
+              "CoreServices",
+              "Foundation",
               "Security",
-              "UniformTypeIdentifiers"
+              "UniformTypeIdentifiers",
+              "UserNotifications"
             ],
             "system_libraries": [
               "bsm"
@@ -2492,6 +2496,7 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "pulp-events",
             "pulp-runtime"
           ]
         },
