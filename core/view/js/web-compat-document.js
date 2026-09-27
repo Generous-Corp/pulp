@@ -515,11 +515,24 @@ var document = {
 // window object (minimal shim)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// The root view's live size. A script that positions a popover against
+// `window.innerWidth/innerHeight` is asking how big its surface is; a constant
+// 800x600 answered for a screen that does not exist, so a menu in a larger
+// editor believed it had no room on the right and was clamped upward. Kept in
+// lockstep with the legacy web-compat.js bundle, whose getters read the same.
+function __pulpWindowRootDims__() {
+    if (typeof getRootSize === "function") {
+        var s = getRootSize();
+        return { w: (s && s.width) || 800, h: (s && s.height) || 600 };
+    }
+    return { w: 800, h: 600 };
+}
+
 var window = {
     document: document,
     getComputedStyle: getComputedStyle,
-    innerWidth: 800,
-    innerHeight: 600,
+    get innerWidth() { return __pulpWindowRootDims__().w; },
+    get innerHeight() { return __pulpWindowRootDims__().h; },
     devicePixelRatio: 2,
     requestAnimationFrame: function(fn) {
         // Map to Pulp's frame clock

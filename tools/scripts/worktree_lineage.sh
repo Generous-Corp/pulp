@@ -69,6 +69,7 @@ archive=""
 note=""
 repo_slug=""
 dry_run=0
+squash_patch_id=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -82,6 +83,7 @@ while [[ $# -gt 0 ]]; do
         --note) [[ $# -ge 2 ]] || die "--note requires a value"; note="$2"; shift 2 ;;
         --repo) [[ $# -ge 2 ]] || die "--repo requires a value"; repo_slug="$2"; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
+        --squash-patch-id) squash_patch_id=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument '$1'" ;;
     esac
@@ -155,6 +157,38 @@ github_slug_from_origin() {
     printf '%s/%s\n' "${owner}" "${name}"
 }
 
+# Resolve a SQUASH-landed head from local evidence alone.
+#
+# A squash merge rewrites history, so the source head is deliberately not an
+# ancestor of main and no merge commit names it as a second parent — the two
+# things `reconcile` otherwise relies on. What does survive is the CHANGE: the
+# squash commit on main applies the same diff the branch applied over its
+# merge-base, so their patch-ids match. GitHub also titles a squash commit
+# `subject (#N)`, which supplies the PR number without an API call.
+#
+# Both conditions are required, and the patch-id match must be UNIQUE in the
+# range. A patch-id is content, not identity: two branches that made the same
+# edit share one, so an ambiguous match proves nothing about which landed and is
+# refused rather than guessed.
+squash_commit_for_head() {
+    local head="$1" base head_pid rows match count
+    base="$(git merge-base "${head}" refs/remotes/origin/main 2>/dev/null)" || return 1
+    [[ -n "${base}" && "${base}" != "${head}" ]] || return 1
+    head_pid="$(git diff "${base}" "${head}" 2>/dev/null | git patch-id --stable 2>/dev/null | awk '{print $1}')"
+    [[ -n "${head_pid}" ]] || return 1
+    # Bounded: a branch far behind main would otherwise diff every commit since
+    # its base. The cap keeps a reconcile pass predictable rather than unbounded.
+    rows="$(git log --first-parent --no-merges -p --format='commit %H' \
+        --max-count="${PULP_LINEAGE_SQUASH_SCAN_MAX:-2000}" \
+        "${base}..refs/remotes/origin/main" 2>/dev/null |
+        git patch-id --stable 2>/dev/null || true)"
+    [[ -n "${rows}" ]] || return 1
+    match="$(awk -v pid="${head_pid}" '$1 == pid { print $2 }' <<<"${rows}")"
+    count="$(grep -c . <<<"${match}" || true)"
+    [[ "${count}" == "1" ]] || return 1
+    printf '%s\n' "${match}"
+}
+
 # One row per registered worktree: path, head, branch (empty when detached).
 registered_worktrees() {
     git worktree list --porcelain | awk '
@@ -197,7 +231,39 @@ case "${command_name}" in
                 continue
             fi
             if ! git merge-base --is-ancestor "${wt_head}" refs/remotes/origin/main 2>/dev/null; then
-                printf 'unresolved\t%s\t%s\tnot in origin/main\n' "${wt_branch}" "${wt_head:0:12}"
+                # Not an ancestor: either it never landed, or it landed squashed.
+                # Only --squash-patch-id may distinguish those, and only from a
+                # unique patch-id match plus a PR number in the squash subject.
+                squash_sha=""
+                if [[ "${squash_patch_id}" -eq 1 ]]; then
+                    squash_sha="$(squash_commit_for_head "${wt_head}" || true)"
+                fi
+                if [[ -z "${squash_sha}" ]]; then
+                    printf 'unresolved\t%s\t%s\tnot in origin/main\n' "${wt_branch}" "${wt_head:0:12}"
+                    continue
+                fi
+                squash_subject="$(git log -1 --format='%s' "${squash_sha}")"
+                if [[ ! "${squash_subject}" =~ \(#([0-9]+)\)[[:space:]]*$ ]]; then
+                    printf 'unresolved\t%s\t%s\tsquash candidate %s names no pull request: %s\n' \
+                        "${wt_branch}" "${wt_head:0:12}" "${squash_sha:0:12}" "${squash_subject}"
+                    continue
+                fi
+                url="https://github.com/${repo_slug}/pull/${BASH_REMATCH[1]}"
+                if [[ "${dry_run}" -eq 1 ]]; then
+                    printf 'would-mark\t%s\t%s\t%s (squash)\n' "${wt_branch}" "${wt_head:0:12}" "${url}"
+                    continue
+                fi
+                branch="${wt_branch}"
+                unset_field Archive; unset_field ArchiveSha256
+                git config --local "$(key Status)" merged
+                git config --local "$(key DurableSha)" "${wt_head}"
+                git config --local "$(key UpdatedAt)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+                git config --local "$(key LastPath)" "${wt_path}"
+                git config --local "$(key Pr)" "${url}"
+                git config --local "$(key MergeCommit)" "${squash_sha}"
+                git config --local "$(key Note)" "reconciled from squash commit ${squash_sha:0:12} (patch-id match)"
+                branch=""
+                printf 'merged\t%s\t%s\t%s (squash)\n' "${wt_branch}" "${wt_head:0:12}" "${url}"
                 continue
             fi
             merge_line="$(awk -F'\t' -v h="${wt_head}" '{ split($1, p, " "); if (p[3] == h) { print; exit } }' <<<"${merge_table}")"
@@ -225,6 +291,7 @@ case "${command_name}" in
             git config --local "$(key UpdatedAt)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             git config --local "$(key LastPath)" "${wt_path}"
             git config --local "$(key Pr)" "${url}"
+            git config --local "$(key MergeCommit)" "${merge_sha}"
             git config --local "$(key Note)" "reconciled from origin/main merge commit ${merge_sha:0:12}"
             branch=""
             printf 'merged\t%s\t%s\t%s\n' "${wt_branch}" "${wt_head:0:12}" "${url}"

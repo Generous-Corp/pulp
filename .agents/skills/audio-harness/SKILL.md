@@ -331,6 +331,52 @@ usually means the processor emitted (almost) nothing, which is the finding.
   All three executions reproduced identical per-domain checksums for each lane.
   These numbers document this host/compiler decision; rerun before drawing a
   conclusion on another architecture or toolchain.
+- **Vectorized kernels live in `pulp::simd`, and `pulp::signal` can call
+  them.** `<pulp/simd/simd.hpp>` (target `pulp-simd`) is linked INTERFACE by
+  `pulp::signal`; its link items are Highway and, on Apple, Accelerate, so a
+  DSP header may call it without dragging in `pulp::runtime` and its TLS
+  stack (configure fails if that ever changes). `<pulp/runtime/simd.hpp>`'s
+  `simd_*` names are inline wrappers kept for existing callers. Gotchas:
+  - The unqualified names are a compile-time alias of one backend
+    (`PULP_SIMD_BACKEND`: `auto` = Accelerate on Apple, Highway elsewhere).
+    All compiled backends stay callable as `pulp::simd::backend::{scalar,
+    highway, accelerate}`; `pulp-test-simd-parity` runs every kernel on each
+    against `scalar`. A new kernel lands in all three backends and in that
+    suite in the same change, then gets a row in the throughput benchmark.
+  - Tolerance classes (the parity suite states the derivations): one-rounding
+    elementwise ops and max/min are bit-exact; multiply-adds get one extra
+    rounding; reductions and FIR correlation get `2 * n * eps * sum|terms|`
+    because each backend sums in its own order. Accelerate advances
+    `vDSP_vrampmul`'s gain by repeated addition, so `ramp_mul` error grows
+    with the index. The measured float FIR null is -115.6 dBFS worst
+    (Accelerate, 256 taps), floored at -105 dBFS.
+  - Under flush-to-zero, a scalar `std::clamp` copies a subnormal through
+    unchanged while a vector min/max returns zero; parity with subnormal
+    input needs a `numeric_limits::min()`-scale slack, not bit equality.
+  - A break-confirm that injects an allocation must let the pointer escape
+    (store it in a volatile global): clang elides a paired `new`/`delete`,
+    so the probe sees nothing and the control is void.
+- **Processor-wide throughput lives in one benchmark; extend it, do not
+  fork it.** `pulp-dsp-throughput-benchmark` (`PULP_BENCHMARK=ON`, Release)
+  times the heavy processors at 48 kHz x {32,128,512} plus the scalar kernel
+  shapes they reduce to, and `--json PATH` writes `pulp-bench-sections/1` for
+  `tools/scripts/bench_diff.py baseline.json current.json`. Add a row there
+  when a DSP change needs a before/after number. Read it correctly:
+  - *Mean* is the median over repetitions of whole-run time; *worst-block* p99
+    and max time each block alone, so they carry one timer read per block and
+    the clock's tick (Apple silicon: ~41.7 ns, i.e. ~1.3 ns/frame at B=32).
+    Judge sub-ns rows by the mean, and judge realtime headroom by p99, not
+    mean: a partitioned convolver's mean hides FFT blocks many times its
+    average.
+  - Every case feeds a rolling noise window and publishes output through an
+    asm memory clobber. A row that reads near zero was hoisted, not fast; the
+    JSON notes flag kernel rows under 0.005 ns/element as suspect.
+  - `--smoke` exercises every case in about a second; its numbers mean
+    nothing. `--filter SUBSTR` runs a subset. The JSON records `optimized`
+    and `ndebug`; a baseline without both true is not comparable.
+  - The `dsp-throughput-bench.yml` workflow (weekly + dispatch) uploads the
+    arm64 macOS and x86-64 Linux JSON as artifacts. It is advisory and must
+    never gain a threshold.
 - **Fast trigonometry is accepted per consumer, not per primitive.** Read
   `docs/validation/fast-trigonometry.md` before changing a realtime sine/cosine
   path. It records the shipped profiles, licensing pin, Release methodology,

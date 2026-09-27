@@ -973,6 +973,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 
 **design-import** — get a design into Pulp
+- Run the browser capture integration harness against an imported panel. → `tools/import-design/browser_capture/run_integration.mjs`
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
   - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
 - A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate. → `tools/import-validation/check_palette_health.py (--tokens`
@@ -1935,6 +1936,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `streams` | Pick the right Pulp Stream for a given I/O task, wire async callbacks correctly without deadlocking the worker, and avoid the backpressure / cancellation footguns in `pulp::runtime::AsyncStream`. |
 | `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
+| `test-audit` | Decide whether a Pulp test earns its place — before writing it, when reviewing one, or when sweeping a subsystem for low-value, duplicated, or mis-routed tests. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
 | `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
@@ -1949,7 +1951,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 67 skills is GENERATED from each
+This table of 68 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->
@@ -2076,7 +2078,7 @@ Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_label
 - `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
 - `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
-- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m1, m5, studio; its unset fallback's labels are advertised by no registration
 - `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
 - `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
 

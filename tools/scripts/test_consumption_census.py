@@ -157,5 +157,29 @@ class AbsentTargets(unittest.TestCase):
         self.assertIn(f"exported target gone: Pulp::{name}", body)
 
 
+class SummaryConsistency(unittest.TestCase):
+    """The derived ranked summary must agree with every recorded target row."""
+
+    def test_every_profile_summary_matches_target_rows(self) -> None:
+        document = json.loads(CENSUS.read_text())
+        for key, profile in document["profiles"].items():
+            expected = [
+                {
+                    "exported_as": row["exported_as"],
+                    "closure_node_count": row["closure"]["node_count"],
+                    "public_header_count": row["public_headers"]["count"],
+                }
+                for _, row in sorted(
+                    profile["targets"].items(),
+                    key=lambda item: (-item[1]["closure"]["node_count"], item[0]),
+                )
+            ]
+            self.assertEqual(
+                profile["summary"]["ranked_by_closure"],
+                expected,
+                f"{key}: ranked summary is stale relative to its target rows",
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -26,10 +26,12 @@ file(GLOB _pulp_gpu_audio_public_headers CONFIGURE_DEPENDS
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/gpu_wavenet.cpp
         src/detail/realtime_gpu_audio_path.cpp
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp
         src/detail/shared_io_compute_plan.cpp
+        src/detail/shared_io_program_session.cpp
         src/detail/shared_io_convolution_executor.cpp
         src/detail/shared_io_transport_bridge.cpp
         src/detail/shared_io_stamped_bridge.cpp
@@ -65,9 +67,13 @@ set(PULP_GPU_AUDIO_VELLUM_NOTICE_DIR "" CACHE INTERNAL
     "Validated Vellum attribution directory shipped by the Pulp SDK" FORCE)
 set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE FALSE CACHE INTERNAL
     "Whether the Vellum D15 provider has exhaustive builder provenance" FORCE)
+set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO FALSE CACHE INTERNAL
+    "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
 
 if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
    AND EXISTS "${DAWN_LIBRARY}")
+    set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO TRUE CACHE INTERNAL
+        "Pulp GPU-audio includes the Dawn shared-I/O provider" FORCE)
     # D15 is deliberately an opt-in installed-prefix integration.  The Vellum
     # GPU dylib owns the linked Dawn definitions and its coordinator owns the
     # one process bootstrap; this Pulp target only consumes that provider.  An
@@ -161,7 +167,8 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA
     endif()
 
     target_sources(pulp-gpu-audio PRIVATE
-        src/detail/dawn_shared_io_provider.cpp)
+        src/detail/dawn_shared_io_provider.cpp
+        src/detail/dawn_shared_io_wavenet_program.cpp)
     target_compile_definitions(pulp-gpu-audio PRIVATE PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO=1)
     if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
         # Do not link Pulp's static Dawn archive on this edge.  The executable

@@ -405,6 +405,24 @@ block and renders `--demo cube --capture` to a non-empty PNG.
 
 ## Gotchas
 
+### The split preludes and the legacy `web-compat.js` must agree on `window`
+
+The runtime embeds the SPLIT preludes (`web-compat-document.js` and friends,
+listed in `core/view/cmake/PulpViewJsPreludes.cmake`), not the monolithic
+`web-compat.js`. When the two define the same global differently, only the
+split one is live. `window.innerWidth/innerHeight` were once the constants
+800/600 in the split module while the legacy bundle read the root size, so a
+popover positioned against the window believed the surface was 800x600: a menu
+in a 1320x860 editor flipped its submenu left and clamped itself upward. Both
+now read `getRootSize()`. When changing a `window`/`document` member, change it
+in the split module and keep the legacy bundle in step; a test through a real
+`WidgetBridge` (see `test_web_compat_overlay.cpp`) is what exercises the live
+one.
+
+To confirm-failure a prelude edit, name the generated unit:
+`--object web_compat_preludes_gen.cpp` -- the `.js` file has no object of its
+own, so without it `confirm_failure.sh` reports INCONCLUSIVE by construction.
+
 ### Three.js V8 builds use the pinned sealed libv8 (no Homebrew node)
 
 The native Three.js bridge needs V8. Use the pinned sealed `libv8` — fetch

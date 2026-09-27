@@ -26,7 +26,7 @@ include(GNUInstallDirs)
 # `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
 # that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
-    pulp-platform pulp-foundation pulp-runtime pulp-music pulp-timebase
+    pulp-platform pulp-simd pulp-foundation pulp-runtime pulp-music pulp-timebase
     pulp-timeline
 )
 if(TARGET pulp-project-package)
@@ -320,7 +320,7 @@ if(TARGET pulp-authoring-capsule)
     list(APPEND _pulp_sdk_header_subsystems authoring_capsule)
 endif()
 list(APPEND _pulp_sdk_header_subsystems
-    timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
+    simd timeline_agent_view timeline_editor playback interchange dawproject smf events state audio midi signal graph format sequence osc canvas
     render view gpu_audio native-components dsl
 )
 if(TARGET pulp-host)

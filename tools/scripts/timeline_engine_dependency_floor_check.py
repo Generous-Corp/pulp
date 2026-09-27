@@ -15,6 +15,8 @@ from pathlib import Path
 
 
 MODULE_FLOORS = {
+    # Every row that admits `runtime` also admits `simd`: pulp-runtime links the
+    # pulp-simd kernel library PUBLIC, so no closure through runtime avoids it.
     # `platform` is gone because the closure no longer reaches it: timebase links
     # pulp::foundation, which carries the header-only Result/queue primitives and
     # nothing else. `runtime` stays only so the sources may keep including
@@ -29,7 +31,7 @@ MODULE_FLOORS = {
     # commands — with no gate able to object. `music` is a lower, header-only
     # value vocabulary: admitting it lets the document model share checked
     # pitch/chord/scale identities without acquiring MIDI, signal, or playback.
-    "timeline": {"timeline", "music", "timebase", "platform", "runtime"},
+    "timeline": {"timeline", "music", "timebase", "platform", "runtime", "simd"},
     # Durable project-package publication sits above the document model. It may
     # validate package-relative Timeline paths and use runtime/platform durability
     # primitives, but ZIP formats, interchange adapters, playback, and UI remain
@@ -43,6 +45,7 @@ MODULE_FLOORS = {
         "timebase",
         "platform",
         "runtime",
+        "simd",
     },
     # Agent-facing read projections sit directly above the immutable document.
     # They may hash and summarize timeline values but must not acquire editor,
@@ -55,6 +58,7 @@ MODULE_FLOORS = {
         "timebase",
         "platform",
         "runtime",
+        "simd",
     },
     # Interchange sits above the document model, not inside it: it may read a
     # document and consult what formats declare, but a format adapter, a plugin
@@ -66,6 +70,7 @@ MODULE_FLOORS = {
         "timebase",
         "platform",
         "runtime",
+        "simd",
     },
     "playback": {
         "playback",
@@ -76,6 +81,7 @@ MODULE_FLOORS = {
         "midi",
         "platform",
         "runtime",
+        "simd",
     },
     # The editor rung reaches the document model and the timebase and stops
     # there. Playback is absent on purpose: an editor view learns where the
@@ -101,6 +107,7 @@ MODULE_FLOORS = {
         "timebase",
         "platform",
         "runtime",
+        "simd",
     },
     # The arranger rung, above the editor kernel. It is the first thing that
     # consumes the kernel rather than declaring it, and it is where the view
@@ -125,6 +132,7 @@ MODULE_FLOORS = {
         "canvas",
         "platform",
         "runtime",
+        "simd",
     },
 }
 
