@@ -1081,3 +1081,16 @@ set_tests_properties(cmake-test-manifest-parse-selftest PROPERTIES
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
+
+# pulp-build-info.json / runtime-pins.json machinery that needs no built
+# bundle: build-time commit resolution, overrides, embedding, refusal of
+# malformed input, and the Skia/Dawn/min-OS pin parsers against independent
+# records. The per-bundle proof lives with the PulpGain example.
+add_test(NAME cmake-bundle-build-info-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/bundle-build-info-contract
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_bundle_build_info_contract.cmake)
+set_tests_properties(cmake-bundle-build-info-contract PROPERTIES
+    LABELS "cmake;ship"
+    TIMEOUT 60)

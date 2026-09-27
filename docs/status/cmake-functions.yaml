@@ -28,6 +28,8 @@ functions:
       - CONTENT_KINDS
       - CONTENT_HOT_RELOAD_KINDS
       - CONTENT_MANUAL_RESCAN_KINDS
+      - SOURCE_GIT_SHA
+      - SOURCE_GIT_DIRTY
     creates:
       - ${target}_Core
       - ${target}_VST3

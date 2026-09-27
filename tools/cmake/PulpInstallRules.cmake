@@ -739,6 +739,10 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginMetadata.cmake"
+    # PulpUtils.cmake includes PulpBuildInfo.cmake, which resolves the
+    # build-time finalize script relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBuildInfo.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFinalizeBuildInfo.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginFormats.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPortable.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake"

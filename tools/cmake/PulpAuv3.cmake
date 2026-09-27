@@ -631,6 +631,11 @@ function(pulp_add_ios_auv3)
     if(TARGET ${target}_AUv3)
         target_link_libraries(${target}_AUv3 PRIVATE ${target}_Core)
     endif()
+    set(PULP_${target}_SOURCE_GIT_SHA "" CACHE INTERNAL "")
+    set(PULP_${target}_SOURCE_GIT_DIRTY "" CACHE INTERNAL "")
+    _pulp_attach_build_info(${target} ${target}_AUv3 AUv3
+        "${AUV3_NAME}" "${AUV3_BUNDLE_ID}" "${AUV3_VERSION}"
+        "${AUV3_MANUFACTURER}")
 
     message(STATUS "Pulp iOS AUv3: ${target} (type: ${AUV3_AU_TYPE}, subtype: ${AUV3_SUBTYPE_CODE})")
 endfunction()
