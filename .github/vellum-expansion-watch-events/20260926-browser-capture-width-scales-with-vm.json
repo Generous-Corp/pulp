@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260926-browser-capture-width-scales-with-vm",
+  "created_at": "2026-09-27T02:07:12Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record test-only scheduling for Pulp's real-browser capture validation. The 27 existing integration cases move unchanged from three into six themed *.integration.test.mjs files, and run_integration.mjs sizes file concurrency at one Chrome per two cores and per 2 GiB of a declared memory lease, capped by the file count, instead of a fixed width of three above six cores. A 3-vCPU VM still runs one file at a time and a 6-vCPU VM still runs three; a 12-vCPU VM now runs six. RUN_SERIAL, every per-case and outer timeout, production browser capture, design ingest, captured output, rendering, packaging, the accepted expansion boundary, and Vellum source authority are unchanged.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/run_integration.test.mjs (6 cases)",
+    "TARTCI_GUEST_CORES=12 node tools/import-design/browser_capture/run_integration.mjs tools/import-design/browser_capture/*.integration.test.mjs (27 cases, width 6)",
+    "TARTCI_GUEST_CORES=6 node tools/import-design/browser_capture/run_integration.mjs tools/import-design/browser_capture/*.integration.test.mjs (27 cases, width 3)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "python3 tools/scripts/test_ci_throughput_workflows.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
