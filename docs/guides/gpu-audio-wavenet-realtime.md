@@ -28,10 +28,15 @@ CPU-offload savings.
    allocation, lock, encoding or completion wait. Normal fixed buffer copies
    remain at this callback bridge; shared provider memory does not mean every
    CPU-side copy is absent.
-4. The serialized non-RT worker calls each provider service once per pump. It
-   does not busy-wait. This first version permits one all-channel block in
-   flight; only successful output from every channel publishes the original
-   stamp. It is a bounded correctness architecture, not a throughput claim.
+4. The serialized non-RT worker services existing completions before admitting
+   one new all-channel block. With `completion_service_wait_ns > 0`, successful
+   submission on every channel permits one additional completion pass in the
+   same pump. There are at most two service passes per channel, sharing the
+   original unchanged deadline; the second pass adds no wait budget and admits
+   no further work. The default zero budget retains one service pass per pump.
+   The worker does not busy-wait and permits one all-channel block in flight;
+   only successful output from every channel publishes the original stamp.
+   This is a bounded correctness architecture, not a throughput claim.
 5. Stop and join both callers before `release()` or reprepare. A failed physical
    drain returns false and retains owners for retry. Destruction follows the
    existing session quarantine rules; retain the node when explicit retry is
@@ -73,7 +78,9 @@ hard-realtime GPU scheduling guarantee and no NAM speedup claim.
 
 `completion_service_wait_ns` is a non-realtime worker budget, capped at 1 ms,
 and defaults to zero. Each worker pump computes one fresh monotonic deadline
-and shares it across all channels. The audio callback never uses this budget.
+and shares it across all channels and both completion passes, when the second
+pass is enabled. Submission time consumes that same budget: the deadline is
+never extended after submission. The audio callback never uses this budget.
 The session must also select a supported `TimedWaitAny` completion policy;
 `ProcessEvents` remains nonblocking. The budget may reduce completion polling
 delay, but it is not an audio deadline and provides no hard GPU scheduling
