@@ -216,7 +216,8 @@ bool GpuConvolver::prepare() {
     if (!trial_configured_) {
         switch (provider_policy_) {
         case ProviderPolicy::Auto:
-            requested_path = detail::SharedIoRequest::Auto;
+            // Compiling shared support must not change existing SDK callers.
+            requested_path = detail::SharedIoRequest::RequireStaged;
             break;
         case ProviderPolicy::StagedOnly:
             requested_path = detail::SharedIoRequest::RequireStaged;

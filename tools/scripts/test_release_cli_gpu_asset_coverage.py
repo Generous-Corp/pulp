@@ -41,6 +41,9 @@ import importlib.util
 import json
 import pathlib
 import re
+import os
+import subprocess
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -127,6 +130,39 @@ class GpuOnRequiresAsset(unittest.TestCase):
             "the REQUIRE_GPU=ON case block. Offenders (platform -> manifest "
             f"key): {missing}",
         )
+
+
+class SharedAudioSdkRecipe(unittest.TestCase):
+    def test_mac_sdk_arguments_enable_only_arm64_explicit_capability(self):
+        workflow = RELEASE_CLI.read_text()
+        block = workflow.split("- name: Prepare SDK build dir (macOS)", 1)[1].split(
+            "- name: Build SDK tarball (Unix)", 1)[0]
+        script = block.split("run: |\n", 1)[1].split("        shell: bash", 1)[0]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        # Execute the actual recipe with command stubs: no build or configure.
+        # This tests argument expansion/platform branching, not string presence.
+        for platform in ("darwin-arm64", "darwin-x64"):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temp:
+                capture = pathlib.Path(temp) / "configure.args"
+                prelude = r'''
+cmake() { if [ "$1" = "-S" ]; then printf '%s\n' "$@" > "$CAPTURE"; fi; }
+python3() { return 0; }
+sysctl() { echo 2; }
+'''
+                env = dict(os.environ, RELEASE_TAG="v9.8.7", CAPTURE=str(capture),
+                           NUMBER_OF_PROCESSORS="2")
+                result = subprocess.run(["bash", "-c", prelude + script.replace(
+                    "${{ matrix.platform }}", platform)], env=env,
+                    text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = capture.read_text().splitlines()
+                state = "ON" if platform == "darwin-arm64" else "OFF"
+                for name in ("EXACT_PROVIDER_PROOF", "ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER"):
+                    self.assertIn(f"-DPULP_GPU_AUDIO_{name}={state}", args)
+                    self.assertEqual(sum(arg.startswith(f"-DPULP_GPU_AUDIO_{name}=") for arg in args), 1)
+                self.assertIn("-DPULP_ENABLE_AUDIO_PROBES=OFF", args)
+                self.assertIn("-DPULP_BUILD_TESTS=OFF", args)
+                self.assertIn("-DPULP_REQUIRE_GPU_FOR_SDK=ON", args)
 
 
 if __name__ == "__main__":

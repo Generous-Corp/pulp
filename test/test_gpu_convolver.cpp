@@ -190,6 +190,15 @@ TEST_CASE("GpuConvolver provider policy is immutable and fail-closed",
     constexpr uint32_t BS = 32;
     const std::vector<float> ir{1.0f};
 
+    // The installed arm64 SDK may contain shared support without changing
+    // existing callers. This also runs in exact-provider capability-ON builds.
+    GpuConvolver automatic(1, BS, 48000, ir);
+    REQUIRE(automatic.provider_policy() == GpuConvolver::ProviderPolicy::Auto);
+    REQUIRE(automatic.prepare());
+    GpuAudioTransport automatic_transport;
+    REQUIRE(automatic_transport.prepare(&automatic, {.ring_blocks = 8}));
+    REQUIRE(automatic_transport.capability_report().path == GpuAudioExecutionPath::Staged);
+
     GpuConvolver staged(1, BS, 48000, ir);
     REQUIRE(staged.set_provider_policy(GpuConvolver::ProviderPolicy::StagedOnly));
     REQUIRE(staged.provider_policy() == GpuConvolver::ProviderPolicy::StagedOnly);
@@ -236,11 +245,12 @@ TEST_CASE("GpuConvolver public trace configuration is opt-in and prepare-bound",
     CHECK_FALSE(node.configure_trace({.enabled = true}));
 }
 
-TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
+TEST_CASE("GpuConvolver shared realtime path requires explicit provider selection",
           "[gpu_audio][convolver][realtime-path]") {
 #if PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER
     constexpr uint32_t BS = 32;
     GpuConvolver node(1, BS, 48000, {1.0f});
+    REQUIRE(node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired));
     REQUIRE(node.prepare());
     REQUIRE(detail::realtime_gpu_node_path(&node).active());
 

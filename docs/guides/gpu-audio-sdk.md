@@ -186,12 +186,30 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 shifted late against every other track in the session.
 
 `GpuConvolver` exposes a host-thread-only provider policy for experiments that
-need an explicit selection: `Auto` keeps the normal shared-then-staged
-behavior, `StagedOnly` forces the legacy staged provider, and `SharedRequired`
+need an explicit selection: `Auto` preserves staged execution, `StagedOnly`
+forces the staged provider, and `SharedRequired`
 fails `prepare()` unless the exact authenticated shared Dawn provider is ready.
 Set the policy before `prepare()`; changing it while prepared is rejected. This
 is a preparation capability contract, not a realtime scheduling guarantee, and
 it exposes no Dawn handles, queues, rings, or callback controls.
+
+The Darwin arm64 SDK produced by `release-cli.yml` compiles the shared convolver
+and validates its pinned Dawn provider at configure and before library builds. Installed CMake
+exports `PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO`,
+`PULP_GPU_AUDIO_SHARED_CONVOLVER_ENABLED` and
+`PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF_ENABLED` as producer capability facts.
+They do not establish runtime availability or change a plugin's default engine.
+The release provenance binds these facts to the installed config and GPU-audio
+archive; older SDKs may not contain these facts. Traced/probe builds and the
+Vellum D15 experiment remain outside the official release contract. The legacy
+`release-cli-local.sh` helper does not produce this qualified capability receipt;
+its archive is not a substitute for the official release artifact.
+
+Earlier experimental builds let `Auto` try shared execution when the convolver
+compile flag was enabled. Experiments relying on that behavior must now request
+`SharedRequired` before preparation. Private diagnostic trial overrides retain
+their explicit selection. WaveNet and spectral sessions do not depend on the
+convolver flag; they still require a supported shared provider.
 
 The ordinary staged transport copies between its CPU rings and the provider.
 The experimental shared path instead keeps provider-owned slots persistently

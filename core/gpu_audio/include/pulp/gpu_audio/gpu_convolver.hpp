@@ -68,8 +68,8 @@ bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceR
 class GpuConvolver : public GpuAudioNode {
   public:
     /// Host-thread selection for the provider used during the next prepare().
-    /// The default preserves the existing behavior: use the authenticated
-    /// shared Dawn path when enabled and fall back to staged/CPU execution.
+    /// Auto preserves staged/CPU execution even when shared support is compiled.
+    /// SharedRequired explicitly opts into the authenticated shared Dawn path.
     /// Selection is immutable while prepared and never changes from the audio
     /// callback.
     enum class ProviderPolicy : std::uint8_t {

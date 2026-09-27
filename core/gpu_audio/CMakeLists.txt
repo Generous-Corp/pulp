@@ -45,6 +45,10 @@ target_sources(pulp-gpu-audio
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
 
+# Marks the producer capability tuple understood by official SDK provenance.
+set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA 1 CACHE INTERNAL
+    "GPU-audio installed capability metadata schema" FORCE)
+
 set(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER OFF CACHE BOOL
     "Enable the experimental shared-I/O realtime path inside GpuConvolver")
 if(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER)
