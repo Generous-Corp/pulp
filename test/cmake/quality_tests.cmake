@@ -536,6 +536,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/trace_span_category_lint.py")
     add_test(NAME trace-span-category-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_span_category_lint.py")
+    # Status tone must not rest on hue. success and danger carry OPPOSITE
+    # meanings and are indistinguishable under protanopia in the light theme,
+    # where no token value fixes it -- the shipped pair retains ~8.3 dE00 and
+    # darkening success is worse, because protanopia darkens red until a dark
+    # green lands on top of it. Contrast checking cannot see any of this: it
+    # measures luminance, so both tones clear their bar against the surface and
+    # still read as one colour. check_palette_health judges token VALUES and
+    # never sees a widget, so without this nothing catches the next component
+    # that differentiates by hue alone.
+    add_test(NAME status-tone-signal-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/status_tone_signal_lint.py")
+    add_test(NAME status-tone-signal-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_status_tone_signal_lint.py")
     # macOS ObjC source lists: three hand-maintained lists (the in-tree target,
     # what the SDK installs, what a consumer recompiles per binary) must name the
     # same translation units, or the per-binary ObjC class suffix is dropped and

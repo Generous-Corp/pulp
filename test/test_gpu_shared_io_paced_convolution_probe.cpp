@@ -34,6 +34,11 @@ struct Config {
 };
 
 constexpr auto kPostCallbackDrainTimeout = std::chrono::seconds{2};
+// Keep long-tail campaigns bounded while allowing a 100,000-block run at the
+// smallest supported block size. The probe retains input, output, and per-block
+// records in memory, so this is deliberately below the point where a routine
+// campaign becomes a multi-hundred-megabyte allocation.
+constexpr std::uint32_t kMaximumMeasuredBlocks = 100'000;
 
 bool parse(int argc, char** argv, Config& config) {
     for (int i = 1; i < argc; ++i) {
@@ -59,7 +64,7 @@ bool parse(int argc, char** argv, Config& config) {
     }
     return (config.frames == 32 || config.frames == 64 || config.frames == 128) &&
            (config.lead == 1 || config.lead == 2 || config.lead == 4 || config.lead == 8) &&
-           config.blocks > 0 && config.blocks <= 20000 && config.warmup <= 4096;
+           config.blocks > 0 && config.blocks <= kMaximumMeasuredBlocks && config.warmup <= 4096;
 }
 
 std::uint64_t nanoseconds(Clock::duration value) {

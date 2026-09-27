@@ -1935,11 +1935,121 @@ while the real break stays on main, failing every batch that forms. When it
 reports that, check main's own health first, which is what the push macOS leg
 above exists to tell you.
 
+### Letting an un-implicated head back into the queue
+
+`queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
+ejection, and `branch-refresh-guard` refuses the `update-branch` that would
+otherwise dodge it. Both are right on their own: re-queueing a head that broke a
+batch ejects its innocent batch-mates all over again, and a refresh buys nothing
+while cancelling and restarting a 40-minute required gate. Together they trap a
+pull request ejected by a defect that was never its own.
+
+`.shipyard/config.toml` declares the way out:
+
+```toml
+[queue.attribution]
+command = ["python3", "tools/scripts/queue_batch_attribute.py", "--certify"]
+```
+
+The guard runs that argv with `--repo <owner/name> --pr <n> --run-id <ejecting
+run>` appended, from the repository root, and allows the re-enqueue only when it
+exits 0 and prints a JSON object whose `implicates_head` is exactly `false`
+beside a verdict that positively names why — `infrastructure` or
+`other_pull_request`. A verdict recording what was *not* found certifies
+nothing, and neither does a missing or null `implicates_head`.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --certify \
+  --repo Generous-Corp/pulp --pr 8773 --run-id 35973715485
+```
+
+Certification is per failing step and exhaustive: every failing step of every
+failing job must be positively accounted for, and one unaccounted step refuses
+the whole verdict. Two accounts qualify.
+
+- **The step is a package-manager fetch, an artifact move, a cache warm, or
+  runner-generated** — and the head changes nothing that step reads. Both halves
+  are required. A step name alone proves nothing, because a workflow step *is*
+  repository content and a head can rewrite the step that failed; and the
+  surface is scoped per step class, because a blanket one including
+  `CMakeLists.txt` would refuse every version bump while a `curl` of a pinned
+  wasi-sdk release plainly cannot fail because a version string moved.
+- **The failing step ran the suite and the ctest failures are owned by a
+  different batch member** — the attribution above, at its confidence threshold,
+  naming exactly one culprit that is not this head.
+
+Everything else refuses, including the case that looks most like a free pass: a
+batch that failed with **no ctest block at all**. "No test failure, therefore
+infrastructure" is the tempting rule and the wrong one — a compile or link error
+is the most common way a head breaks a batch and it produces no ctest block.
+pulp#8811 was ejected exactly that way, with its own required checks green, and
+its own later commit admits the head was broken.
+
+Two candidate signals were evaluated against live runs and are deliberately
+**not** implemented, because each one certified a head that was at fault:
+
+- *The identical failure reproduces in a batch that does not contain this head.*
+  Disproven. Three batches with disjoint single-entry memberships (#8803, #8807,
+  #8811) failed with a byte-identical CMake test-discovery error, which would
+  have certified #8811 — the head that was broken. The structure is
+  indistinguishable from the genuinely-innocent case, where four batches
+  (#8891, #8892, #8896, and #8888's) shared one `write_scenario_wav` link error.
+- *The failure is present on main at the batch's base.* Sound in principle — a
+  `main`-branch run at the base contains no queue entry, so anything it fails is
+  the base's — but **not observable here**, which is the more useful finding.
+  `build.yml`'s own push run at a queue base is cancelled by its concurrency
+  group with **zero jobs**, so the one lane whose configuration matches the
+  batch never reports on the base. The main-branch runs that do carry jobs at
+  that sha are other workflows with other build configurations, and a failure
+  matched across configurations does not transfer.
+
+  Measured on the case that motivated this: four batches with disjoint
+  single-entry memberships, on two different bases and two different gate hosts,
+  all failed to link `pulp::test::audio::write_scenario_wav`. The bases did not
+  contain `f4ee4ac3cc` ("keep grouped wav bridge link self-contained"), a
+  four-line `test/cmake/app_audio_host_tests.cmake` fix — so the base really was
+  red, and none of the four heads was at fault. Main's Debug and sanitizer runs
+  at that base linked both affected targets cleanly (585 and 1758 link lines, so
+  the reading is not blindness), because they do not group that target the way
+  the gate does.
+
+  So the obstacle to certifying this whole class is a CI-topology fact, not a
+  missing rule: nothing publishes a same-configuration verdict on a queue base.
+  Give `build.yml`'s main push lane a run that survives to dispatch jobs at each
+  base and the rule becomes checkable and would have cleared all four.
+
 
 ## Exact PR receipts on an unchanged merge-group candidate
 
-A successful pull-request macOS or Linux matrix child publishes a two-day
-`protected-validation-<target>-<head>-<base>` receipt. The receipt binds the
+A pull-request head normally runs only the build and the `pr-fast` tier, which
+is what its required `macos` check means, and that issues no receipt. A head
+that is **ready to land** also runs the full suite: the `Decide pull-request
+test suite` step (`tools/ci/ctest_gate_args.py --pr-suite`) reads the live pull
+request just before testing and chooses the full suite only when it is armed
+for auto-merge, is still the pull request's head, and was merged onto the
+current tip of `main`. Anything else, including an unreadable pull request,
+keeps the fast tier. Each clause drops a run whose receipt could never be
+consumed, because the receipt names the exact head and base. A push after
+arming re-decides on its own run, so a new head gets its own full run and the
+old receipt simply never matches. Arming a pull request whose checks are
+already green enqueues it immediately and starts no new run, so it validates in
+full in the merge group as before. REST `auto_merge` reads null once the queue
+holds a pull request (decisions contract row 11); that only ever yields the
+fast tier.
+
+Do not push a merge of `main` into a pull request to make it eligible. A head
+whose base has moved is still validated in full by the merge group, and a
+refresh push cancels and restarts the running `macos` gate, so it costs more
+than the receipt could save. Merge `main` only when the pull request is DIRTY
+or a required check fails because of a stale base.
+
+That full run is evidence, not the pull request's gate: the step is
+`continue-on-error` on pull requests, so a failure there leaves the `macos`
+check meaning build + fast tier, and the `Surface ctest failures` step still
+reports it. When it passes, the macOS or Linux matrix child publishes a two-day
+`protected-validation-<target>-<head>-<base>` receipt. The issuer requires the
+Test step's `outcome` to be `success` (its `conclusion` is always success under
+`continue-on-error`). The receipt binds the
 exact synthetic merge tree and parents, protected workflow/policy blobs,
 observed platform/toolchain identity, and SHA-256 identities for every CTest
 executable that was actually exercised. Receipt publication is an optimization

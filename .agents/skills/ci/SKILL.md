@@ -144,9 +144,31 @@ python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>]
 It maps each failing ctest to the pull request whose files own it. Below its
 confidence threshold it prints `LIKELY PRE-EXISTING ON MAIN` and names nobody —
 read that as "go look at main's own push run", never as "no culprit exists".
-Because it reads the macos job's log, a batch whose macos gate never ran the
+Because it reads the run's job logs, a batch whose macos gate never ran the
 suite yields nothing, which is the previous section's problem wearing a
-different hat.
+different hat. Read them from the RUN-level endpoint
+(`actions/runs/<id>/logs`, a zip) and never the per-job one: `ghapp` withholds
+any response carrying terminal escape sequences, so `actions/jobs/<id>/logs`
+returns zero bytes and every reader built on it sees an empty log rather than an
+error.
+
+The same module answers a second, narrower question for Shipyard. When
+`queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
+ejection, it asks Pulp's declared attributor whether the ejecting batch
+implicated the head at all:
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --certify \
+  --repo Generous-Corp/pulp --pr <n> --run-id <ejecting-run-id>
+```
+
+It certifies only on positive evidence, per failing step and exhaustively, so
+most batches refuse — including every batch that failed with no ctest block,
+because a link error is how a head most often breaks one. Do not read a refusal
+as a bug in the attributor; read it as "nothing here rules this head out". The
+full rule, and the two candidate signals rejected for certifying a guilty head,
+are in [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) under
+"Letting an un-implicated head back into the queue".
 
 ## Current required-macOS truth (read before older incident notes)
 
@@ -434,6 +456,29 @@ include label or regex) can never be reused. When changing which tests a
 pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
+
+### Only a ready-to-land PR head issues a receipt
+
+A pull-request head's gate is build + `pr-fast`. The full suite also runs on
+it, non-gating, only when `tools/ci/ctest_gate_args.py --pr-suite` finds the
+pull request armed for auto-merge, still at this head, and merged onto the
+current `main` tip. That full run is what issues the receipt. Three traps:
+
+- The Test step is `continue-on-error` on pull requests, so its `conclusion`
+  is always `success`. Anything that must know whether the tests passed (the
+  issuer, `Surface ctest failures`) reads `steps.ctest.outcome`.
+- REST `auto_merge` is non-null only while an armed PR waits on its checks; it
+  reads null once the queue holds the PR. Arming a PR whose checks are already
+  green enqueues it at once and starts no new run, so it gets no receipt.
+  That is expected, not a bug.
+- `download` requires the whole PR workflow run to have concluded `success`, so
+  a PR run still finishing its Linux leg, or with a red advisory leg, refuses
+  reuse for macOS too.
+- Never push a merge of `main` (or "update branch") to earn a receipt. A
+  BEHIND head deliberately gets the fast tier and validates in full in the
+  queue; a refresh push cancels the running gate, and a cancelled full run is
+  pure waste. Merge `main` only when the PR is DIRTY or a required check fails
+  because of a stale base.
 
 When measuring reuse from job logs, read only the emitted `##[notice]` lines.
 The `protected-receipt-reuse` log also echoes the step's whole script, so a
