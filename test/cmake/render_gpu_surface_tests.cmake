@@ -360,6 +360,31 @@
             set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
                 TIMEOUT 20)
 
+            # Exact-provider Forge convolution route probe. This target is
+            # deliberately opt-in: it links the host catalog only when the
+            # GPU Forge realization is enabled, and it is admitted behind the
+            # authenticated provider fixture above. The probe drives paced
+            # callbacks through the concrete catalog factory, verifies
+            # sample-rate conversion, arbitrary callback partitions, in-place
+            # aliasing, PDC, block-boundary automation, finite output, and
+            # callback-selected GPU delivery on both lanes.
+            if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+                add_executable(pulp-gpu-convolution-reverb-probe
+                    test_gpu_convolution_reverb_probe.cpp)
+                target_link_libraries(pulp-gpu-convolution-reverb-probe PRIVATE
+                    pulp::host pulp::gpu-audio)
+                target_include_directories(pulp-gpu-convolution-reverb-probe PRIVATE
+                    "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+                add_dependencies(pulp-gpu-convolution-reverb-probe
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-convolution-reverb-probe
+                    COMMAND pulp-gpu-convolution-reverb-probe)
+                set_tests_properties(pulp-gpu-convolution-reverb-probe PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 120)
+            endif()
+
             add_executable(pulp-gpu-shared-io-private-convolution-probe
                 test_gpu_shared_io_private_convolution_probe.cpp)
             target_link_libraries(pulp-gpu-shared-io-private-convolution-probe PRIVATE
