@@ -40,11 +40,6 @@ cd "$ROOT" || exit 0
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
       GIT_COMMON_DIR GIT_PREFIX GIT_NAMESPACE GIT_QUARANTINE_PATH
 
-if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
-    echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
-    exit 0
-fi
-
 # Git supplies one source/destination record per pushed ref on stdin. Capture
 # those records before any gate subprocess can consume them: every source gate
 # below validates the checked-out HEAD, so a branch update that names another
@@ -52,6 +47,39 @@ fi
 if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     echo "✗ pre-push: failed to capture Git's pushed-ref records; refusing to validate an unknown source tree." >&2
     exit 1
+fi
+
+# ── Main-refresh push telemetry + policy ───────────────────────────────────
+# A local `git merge origin/main && git push` moves the PR head, which cancels
+# the in-flight required `macos` gate, and it never reaches Shipyard's
+# branch-refresh guard (`[merge] refresh_branch` in .shipyard/config.toml).
+# This logs every push carrying a merge from origin/main to
+# ~/.local/state/pulp/refresh-pushes.jsonl and applies
+# PULP_REFRESH_PUSH_POLICY=warn|refuse|off (default warn) to a PURE refresh of
+# a PR with no reason to refresh. It runs before PULP_SKIP_PREPUSH so the
+# telemetry is always on; only exit 1 (refuse mode) blocks, and the skip and
+# demote knobs turn that back into advice. A push without a merge from main
+# costs two `git rev-list` calls; network lookups are bounded to 5s, fail open.
+REFRESH_PUSH_CHECK="$ROOT/tools/scripts/refresh_push_check.py"
+if [ -f "$REFRESH_PUSH_CHECK" ]; then
+    printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
+        "${PYTHON:-python3}" "$REFRESH_PUSH_CHECK" --root "$ROOT" --remote-url "${2:-}"
+    _refresh_rc=$?
+    if [ "$_refresh_rc" = "1" ]; then
+        if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
+            echo "[pre-push] refresh-push: refusal demoted to advisory by PULP_SKIP_PREPUSH/PULP_DISABLE_PREPUSH_GATES." >&2
+        else
+            exit 1
+        fi
+    elif [ "$_refresh_rc" != "0" ]; then
+        echo "[pre-push] refresh-push: check could not run (exit $_refresh_rc); advisory, continuing." >&2
+    fi
+    unset _refresh_rc
+fi
+
+if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
+    exit 0
 fi
 
 # Agent/tool subprocesses can inherit nonblocking stdout/stderr pipes. Python's

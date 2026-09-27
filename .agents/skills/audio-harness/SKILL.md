@@ -356,6 +356,20 @@ usually means the processor emitted (almost) nothing, which is the finding.
   - A break-confirm that injects an allocation must let the pointer escape
     (store it in a volatile global): clang elides a paired `new`/`delete`,
     so the probe sees nothing and the control is void.
+  - Inside `namespace pulp`, an unqualified `simd::` now names Pulp's
+    kernel namespace, not Apple's `<simd/simd.h>` vector library. Spell
+    Apple's as `::simd::` (see `fast_math.hpp`); the collision only shows up
+    in a translation unit that also includes a header reaching
+    `<pulp/simd/simd.hpp>`, so it can hide until an unrelated include lands.
+  - Signal headers that call `pulp::simd` are also compiled by hand-listed
+    builds (WAM/WebCLAP, VCV Rack via forge-modular, Android, live kernels).
+    Those add `core/simd/include` to their include list and get the header's
+    inline scalar fallback (`active_backend_name == "inline-scalar"`), with
+    no library to link.
+  - Accelerate's `vDSP_conv`/`vDSP_desamp` are not partition-invariant: the
+    same output can round differently depending on where it falls in the
+    call. Highway and scalar `correlate` are (fixed per-output order), so a
+    block-invariance test is bit-exact there and bounded on Accelerate.
 - **Processor-wide throughput lives in one benchmark; extend it, do not
   fork it.** `pulp-dsp-throughput-benchmark` (`PULP_BENCHMARK=ON`, Release)
   times the heavy processors at 48 kHz x {32,128,512} plus the scalar kernel

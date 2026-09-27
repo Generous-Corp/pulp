@@ -129,6 +129,7 @@ set(_PULP_WEBUI_INCLUDES
     ${_PULP_WEBUI_ROOT}/core/runtime/include
     ${_PULP_WEBUI_ROOT}/core/events/include
     ${_PULP_WEBUI_ROOT}/core/signal/include
+    ${_PULP_WEBUI_ROOT}/core/simd/include
     ${_PULP_WEBUI_ROOT}/core/audio/include
     ${_PULP_WEBUI_ROOT}/core/state/include
     ${_PULP_WEBUI_ROOT}/core/midi/include

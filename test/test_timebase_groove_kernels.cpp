@@ -3,6 +3,7 @@
 #include <pulp/timebase/coordinate_random.hpp>
 #include <pulp/timebase/grid_projection.hpp>
 #include <pulp/timebase/groove_kernel.hpp>
+#include <pulp/timebase/groove_timing_reach.hpp>
 #include <pulp/timebase/inline_groove_projector.hpp>
 #include <pulp/timeline/model.hpp>
 
@@ -1091,6 +1092,29 @@ TEST_CASE("inline groove projection admits the authored table the strict kernel 
     REQUIRE(projector.velocity_scale_at({entry}) == 820);
     REQUIRE_FALSE(projector.states_no_feel());
     REQUIRE(InlineGrooveProjector{}.states_no_feel());
+}
+
+TEST_CASE("groove timing reach is reusable across canonical and inline grooves",
+          "[timebase][groove]") {
+    constexpr std::int64_t entry = kTicksPerQuarter / 4;
+    const auto steps = authored_sixteenth_groove(entry);
+    const std::span<const GrooveKernelStep> table{steps};
+    const auto canonical =
+        canonical_groove(entry, table, {entry * 2}, kTripletSwing, kGrooveKernelUnitScale);
+    const auto inline_result = InlineGrooveProjector::create({{entry * 2},
+                                                              kTripletSwing,
+                                                              {entry},
+                                                              table,
+                                                              kGrooveKernelUnitScale,
+                                                              kGrooveKernelUnitScale});
+    REQUIRE(inline_result);
+
+    // The public helper is the same bound used by playback's selection-window
+    // widening, regardless of whether the source is the canonical model or a
+    // realtime inline projection.
+    REQUIRE(groove_timing_reach(canonical) == groove_timing_reach(inline_result.value()));
+    REQUIRE(groove_timing_reach(inline_result.value()) > 0);
+    REQUIRE(groove_timing_reach(InlineGrooveProjector{}) == 0);
 }
 
 TEST_CASE("zero inline groove strength is exact identity including swing", "[timebase][groove]") {
