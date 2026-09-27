@@ -39,6 +39,12 @@ if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
     add_test(NAME classify-changes-selftest
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_classify_changes.py")
+    # The opt-in wide non-native classification: fail-closed reference-graph
+    # cases, the tier/scanner contract, and a replay over recorded merged PRs.
+    add_test(NAME wide-non-native-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_wide_non_native.py")
+    set_tests_properties(wide-non-native-selftest PROPERTIES TIMEOUT 300)
 endif()
 
 set(PULP_PR_FAST_TESTS

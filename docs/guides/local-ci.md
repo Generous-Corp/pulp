@@ -1762,6 +1762,25 @@ diff is always empty — so a docs-only merge is otherwise indistinguishable fro
 a core merge, and the run never skips. A docs-only merge to main now correctly
 skips the whole matrix.
 
+**Wide non-native classification (opt-in, default off).** With the repository
+variable `PULP_CLASSIFY_WIDE_NON_NATIVE` unset, `classify` behaves exactly as
+above. Set to `1`, it passes `--wide-non-native` to `classify_changes.py`, which
+consults `tools/scripts/wide_non_native.py` for the files the base allowlist
+kept native. A file under `tools/scripts/`, `tools/testing/` or
+`tools/import-validation/` is admitted only when every tracked file naming its
+stem is inert (Markdown, `docs/`, `planning/`, `.agents/`, a workflow other than
+`build.yml` / `build-macos.yml` / `.github/actions/**`), a script run by
+`tools/ci/source_selftests.json` or `tools/ci/wide_non_native_checks.json`, the
+CMake registration of one of those tests, or another admitted file. Anything
+else keeps the native build: a gate-side ctest registration, `tools/ci/**`,
+`tools/cmake/**`, C++ or test sources, the classifier's own files, a failed or
+over-budget reference search. The gate's repository scanners that walk `tools/`
+without naming files run from `tools/ci/wide_non_native_checks.json` on the
+required `Enforce version & skill sync` context whenever the variable is `1`.
+`.github/workflows/**` and `tools/ci/**` are never widened. Over the 177 PRs
+merged 2026-09-21..27 the widening admits 9 more (19 skip-native instead of
+10); `tools/scripts/test_wide_non_native.py` replays that window.
+
 The classifier also establishes its interpreter explicitly. A macOS
 LaunchAgent normally sees only `/usr/bin:/bin:/usr/sbin:/sbin`; on M5 that made
 the preamble use Apple's Python 3.9 and fail importing `tomllib`, while the same
