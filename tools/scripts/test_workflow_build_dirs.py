@@ -361,6 +361,29 @@ class WorkflowBuildDirTests(unittest.TestCase):
         # The failure path still ends the step non-success so Publish is skipped.
         self.assertIn("exit 1", run.split("::warning title=protected receipt NOT issued", 1)[1])
 
+    def test_ios_gate_digest_shadow_annotates_and_records_without_skipping(self) -> None:
+        """The Build step computes the iOS gate input digest, looks it up, and
+        annotates would_skip / run / ran_ok / ran_failed, then STILL runs the
+        gate; a passing run is recorded under its digest. Shadow mode must not
+        acquire a skip: the gate invocation stays unconditional inside the
+        IOS_COMPILE_REQUIRED branch."""
+        build = workflow_named_step(BUILD_WORKFLOW, "build", "Build")
+        run = str(build["run"])
+        for needle in ("ios_gate_digest.py compute", "ios_gate_digest.py lookup",
+                       "note --verdict would_skip", "note --verdict run",
+                       "--verdict ran_ok", "--verdict ran_failed",
+                       'echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"'):
+            self.assertIn(needle, run, needle)
+        # The gate call must not be guarded by the shadow verdict.
+        gate_call = run.index("bash test/cmake/test_ios_compile_gate.sh")
+        would_skip = run.index("note --verdict would_skip")
+        between = run[would_skip:gate_call]
+        self.assertNotRegex(between, r"\bexit\b|continue", "shadow verdict must not skip the gate")
+        self.assertIn("set +e", between)
+        record = workflow_named_step(BUILD_WORKFLOW, "build", "Record iOS gate digest (shadow)")
+        self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
+        self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

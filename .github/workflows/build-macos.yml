@@ -500,12 +500,16 @@ jobs:
           # PR code runs as another uid with an empty, explicit environment, so
           # it cannot read the runner process environment or receive any
           # ACTIONS_*, GITHUB_*, token, credential, or command-file variable.
+          # Dropping GITHUB_ACTIONS also drops the configure-time exemption for
+          # temporary checkouts, and this source deliberately lives under
+          # /private/tmp, so the exemption is passed explicitly.
           cd "$PULP_UNTRUSTED_HOME"
           exec sudo -u nobody /usr/bin/env -i \
             HOME="$PULP_UNTRUSTED_HOME" \
             TMPDIR="$PULP_UNTRUSTED_TMPDIR" \
             PATH="$PULP_TRUSTED_PATH" \
             CI=1 \
+            PULP_ALLOW_TMP_CHECKOUT=1 \
             PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE" \
             PULP_BUILD_DIR="$PULP_BUILD_DIR" \
             PULP_TRUSTED_CHECKOUT="$PULP_TRUSTED_CHECKOUT" \

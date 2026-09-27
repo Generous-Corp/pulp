@@ -13,6 +13,7 @@ project(Pulp
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
 )
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCheckoutLocation.cmake)  # refuse /tmp checkouts before any build work
 
 # Pulp's own source-tree root. Use this — NOT CMAKE_SOURCE_DIR — when referencing
 # Pulp's own files (tools/cmake helpers, external SDKs, bundled fonts, git dir).
