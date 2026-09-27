@@ -17,6 +17,8 @@ struct GpuWaveNetSession::Impl {
     std::unique_ptr<detail::SharedIoProgramSession> session;
 #endif
     std::uint32_t block_size = 0;
+    GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
+    bool completion_policy_supported = true;
 };
 
 GpuWaveNetSession::GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept
@@ -99,6 +101,11 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
 
         auto impl = std::make_unique<Impl>();
         impl->block_size = config.descriptor.block_size;
+        // Preserve both sides of the capability contract: callers can inspect
+        // what they requested, while support reports the provider's actual
+        // policy after any backend fallback.
+        impl->completion_policy = config.completion_policy;
+        impl->completion_policy_supported = created.provider->completion_policy() == policy;
         impl->session = std::make_unique<detail::SharedIoProgramSession>();
         const auto bytes = static_cast<std::size_t>(config.descriptor.block_size) * sizeof(float);
         if (!impl->session->prepare({std::move(created.provider), std::move(program)},
@@ -132,6 +139,14 @@ bool GpuWaveNetSession::prepared() const noexcept {
 
 std::uint32_t GpuWaveNetSession::block_size() const noexcept {
     return impl_ ? impl_->block_size : 0;
+}
+
+GpuWaveNetCompletionPolicy GpuWaveNetSession::completion_policy() const noexcept {
+    return impl_ ? impl_->completion_policy : GpuWaveNetCompletionPolicy::ProcessEvents;
+}
+
+bool GpuWaveNetSession::completion_policy_supported() const noexcept {
+    return impl_ && impl_->completion_policy_supported;
 }
 
 bool GpuWaveNetSession::submit_block(std::span<const float> input, std::uint64_t sequence,

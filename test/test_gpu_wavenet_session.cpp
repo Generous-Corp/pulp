@@ -65,6 +65,8 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
     auto& session = *result.session;
     CHECK(session.prepared());
     CHECK(session.block_size() == fixture.descriptor().block_size);
+    CHECK(session.completion_policy() == GpuWaveNetCompletionPolicy::ProcessEvents);
+    CHECK(session.completion_policy_supported());
 
     const std::array<float, 2> input{1.0f, 2.0f};
     std::array<float, 2> output{0.0f, 0.0f};
@@ -100,5 +102,7 @@ TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
         return;
     }
     CHECK(result.session->prepared());
+    CHECK(result.session->completion_policy() == GpuWaveNetCompletionPolicy::TimedWaitAny);
+    CHECK(result.session->completion_policy_supported());
     CHECK(result.session->release());
 }
