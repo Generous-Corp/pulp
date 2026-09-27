@@ -87,3 +87,18 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
     CHECK(output[1] == Catch::Approx(std::tanh(0.5f)).margin(1.0e-5));
     REQUIRE(session.release());
 }
+
+TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
+          "[gpu_audio][wavenet][completion]") {
+    Fixture fixture;
+    const auto result = GpuWaveNetSession::create(
+        {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = 2,
+         .completion_policy = GpuWaveNetCompletionPolicy::TimedWaitAny,
+         .completion_wait_ns = 500'000});
+    if (!result.session) {
+        CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
+        return;
+    }
+    CHECK(result.session->prepared());
+    CHECK(result.session->release());
+}
