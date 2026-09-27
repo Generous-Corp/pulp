@@ -577,12 +577,30 @@ def observe_batches(repo: str, limit: int = 12) -> list[SuiteObservation]:
     return [observe(repo, run, "batch") for run in _runs(repo, "merge_group", limit)]
 
 
+def decisive_fix_pr(attribution) -> int | None:
+    """The one pull request an attribution DECISIVELY names, or nothing.
+
+    Two refusals, both deliberate. Below the decisive weight (an exact
+    test-name to file-stem match) the attributor's own comment calls a finding
+    a false accusation, and this consumer is stricter still than its ordinary
+    confidence threshold: a named fix tells a queue which branch to prioritise,
+    and prioritising an innocent one leaves the real break in place while
+    looking like progress. More than one contender at the top strength is a
+    coin toss, so it names nobody rather than picking the lowest number.
+    """
+    if attribution is None:
+        return None
+    if attribution.best_strength < _FIX_PR_MIN_STRENGTH:
+        return None
+    if len(attribution.contenders) != 1:
+        return None
+    return attribution.culprit
+
+
 def candidate_fix_pr(repo: str, tests: tuple[str, ...]) -> int | None:
     """An OPEN pull request whose diff decisively owns one of these tests.
 
-    Uses the queue attributor's own scoring rather than a second copy of it, at
-    a stricter bar: only a decisive match may name a fix, because prioritising
-    the wrong branch is worse than prioritising none.
+    Uses the queue attributor's own scoring rather than a second copy of it.
     """
     if not tests:
         return None
@@ -595,12 +613,9 @@ def candidate_fix_pr(repo: str, tests: tuple[str, ...]) -> int | None:
         return None
     files = {n: attributor.pr_files(repo, n) for n in numbers}
     roots = attributor.census_include_roots(REPO_ROOT)
-    result = attributor.attribute(list(tests), files, census_roots=roots)
-    if result.best_strength < _FIX_PR_MIN_STRENGTH:
-        return None
-    if len(result.contenders) != 1:
-        return None
-    return result.culprit
+    return decisive_fix_pr(
+        attributor.attribute(list(tests), files, census_roots=roots)
+    )
 
 
 def _emit(payload: dict, output: str | None) -> None:

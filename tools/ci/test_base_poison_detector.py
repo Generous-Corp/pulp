@@ -285,6 +285,58 @@ class BatchBaseShaTests(unittest.TestCase):
         self.assertEqual(bp._base_sha(run), "abc")
 
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
+
+import queue_batch_attribute as attributor  # noqa: E402
+
+
+class DecisiveFixPrTests(unittest.TestCase):
+    """Naming a fix tells a queue which branch to prioritise, so the bar is high.
+
+    The fixtures run the real attributor rather than hand-built scores, so the
+    weights cannot drift from the ones it actually produces.
+    """
+
+    def test_an_exact_test_name_to_file_stem_match_names_the_pull_request(self) -> None:
+        result = attributor.attribute(
+            ["rack-generator-safety"],
+            {8913: ["test/test_rack_generator_safety.py"]},
+        )
+        self.assertEqual(result.best_strength, attributor.WEIGHT_EXACT_STEM)
+        self.assertEqual(bp.decisive_fix_pr(result), 8913)
+
+    def test_an_incidental_token_overlap_names_nobody(self) -> None:
+        """The attributor's own confidence threshold is lower than this one."""
+        result = attributor.attribute(
+            ["cmake-control-sdk-consumer"],
+            {8913: ["test/cmake/test_gpu_audio_sdk_consumer.cmake"]},
+        )
+        self.assertLess(result.best_strength, bp._FIX_PR_MIN_STRENGTH)
+        self.assertIsNone(bp.decisive_fix_pr(result))
+
+    def test_a_tie_at_the_top_strength_names_nobody(self) -> None:
+        """Two branches owning the same test is a coin toss, not a finding."""
+        result = attributor.attribute(
+            ["rack-generator-safety"],
+            {
+                8913: ["test/test_rack_generator_safety.py"],
+                8914: ["tools/test_rack_generator_safety.py"],
+            },
+        )
+        self.assertEqual(sorted(result.contenders), [8913, 8914])
+        self.assertIsNone(bp.decisive_fix_pr(result))
+
+    def test_no_attribution_names_nobody(self) -> None:
+        self.assertIsNone(bp.decisive_fix_pr(None))
+        self.assertIsNone(bp.decisive_fix_pr(attributor.attribute([], {})))
+
+    def test_the_bar_is_the_attributors_decisive_weight(self) -> None:
+        """Pinned to the attributor's constant so a re-weighting cannot silently
+        lower this consumer's bar to ordinary confidence."""
+        self.assertEqual(bp._FIX_PR_MIN_STRENGTH, attributor.WEIGHT_EXACT_STEM)
+        self.assertGreater(bp._FIX_PR_MIN_STRENGTH, attributor.CONFIDENT)
+
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DETECTOR_WORKFLOW = REPO_ROOT / ".github/workflows/main-health-detector.yml"
 BUILD_WORKFLOW = REPO_ROOT / ".github/workflows/build.yml"
