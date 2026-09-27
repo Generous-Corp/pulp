@@ -3464,3 +3464,45 @@ assert the **absence** in the narrowed response as its control, not only the
 presence in the broad one. A presence-only test passes identically whether the
 field is conditional or unconditionally appended everywhere, so it cannot tell
 you which one you shipped.
+
+## A caller and its definition must share an archive, or Apple `ld` drops it
+
+Apple's linker scans a static archive **once**. A member that becomes newly
+needed *after* the scan has passed it is not revisited, so the CLI can fail with
+an undefined symbol even though every object that defines it was built. The CLI
+therefore force-loads its own implementation archives on Apple —
+`pulp-view-core`, `pulp-view-script`, `pulp-canvas`, `pulp-runtime`,
+`pulp-inspect-protocol` — in `tools/cli/CMakeLists.txt`, guarded by `if(APPLE)`
+and `if(TARGET ...)` so plugin consumers are unaffected.
+
+Force-loading only helps if the definition is actually *in* the archive being
+force-loaded. The sharper rule is about placement: **when a TU compiled into
+archive A calls a symbol, the definition belongs in A**, not in a sibling target
+the CLI does not link. `session.cpp` is compiled into `pulp-inspect-protocol`
+and calls `InspectorMainThreadRpc::call` in every configuration, while
+`main_thread_rpc.cpp` sat in `pulp-inspect-runtime`; with the inspector enabled
+— the default — the CLI linked the protocol archive, never the runtime one, and
+the symbol had no definition to find. Adding the TU to the protocol archive only
+under `if(NOT PULP_ENABLE_INSPECTOR)` fixes the stripped build and leaves the
+default one broken. Put it in unconditionally and remove it from the other
+target, so the symbol is defined exactly once rather than duplicated across two
+archives that link together.
+
+Two traps when verifying a link repair:
+
+- **Read the build's own status, not a wrapper's.** A backgrounded
+  `governed-build.sh … > log` reports the *wrapper's* exit; the build's result is
+  whatever you echoed into the log. `BUILD_RC=2` with a trailing
+  `[exited with code 0]` is a failed build, and `ls` on the expected binary is
+  the independent check.
+- **`governed-build.sh` blames host contention generically.** Its verdict
+  ("pinned at the parallelism floor … this signature has passed on re-run with no
+  code change") is about flaky *timing*. An undefined symbol is deterministic:
+  re-running on a quiet host reproduces it exactly, so do not spend another full
+  build on that advice.
+
+Prove the repair with `nm -C` rather than a successful exit: the symbol should
+appear as `T` (defined) with **zero** `U` entries, and the binary should run —
+`pulp-cpp version` and `pulp-cpp sdk` are the cheapest live checks. Note the
+argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
+`pulp-cpp sdk` rather than `sdk --help`.
