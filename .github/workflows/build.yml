@@ -2217,6 +2217,28 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
+      # SHADOW MODE (tools/ci/flake_exoneration_shadow.py): when the merge
+      # group's ctest FAILED, ask whether each failing test would have been
+      # exonerated as a known flake (OCCURS_ON_OTHER_CLS: failed on >= 2 other
+      # heads in the last 24 h AND passes on main's latest validated tree) and
+      # annotate the answer. It changes no outcome; the job still fails. The
+      # annotations are the evidence a future exoneration decision would stand
+      # on: exonerated-only failures ÷ merge-group failures, with unique-cause
+      # failures > 0 and the base-red streak count unchanged as controls.
+      - name: Flake exoneration (shadow, merge group)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.ctest.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci/flake_exoneration_shadow.py \
+            --repo "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" --hours 24 \
+            --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || true
+
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true

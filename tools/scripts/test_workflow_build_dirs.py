@@ -367,6 +367,24 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
         self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
 
+    def test_flake_exoneration_shadow_runs_only_on_failed_merge_group_ctest(self) -> None:
+        """The exoneration shadow reads the failed run's JUnit and other runs'
+        artifacts, annotates, and changes nothing: it is continue-on-error,
+        gated on a failed ctest outcome in a merge group, and the ctest step
+        takes no input from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Flake exoneration (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.ctest.outcome == 'failure'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(step["env"]["PULP_GH_CLI"], "gh")
+        run = str(step["run"])
+        self.assertIn("flake_exoneration_shadow.py", run)
+        self.assertIn("--hours 24", run)
+        ctest = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
+        self.assertNotIn("flake_exoneration", str(ctest["run"]))
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

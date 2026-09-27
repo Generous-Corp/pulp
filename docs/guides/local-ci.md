@@ -822,6 +822,15 @@ verdicts followed by `ran_failed`, which must be zero before a digest-keyed
 skip could be proposed (that switch-on is a decisions-contract amendment,
 not a workflow edit).
 
+When a merge-group `macos` ctest fails, the job also annotates a **flake
+exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
+from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
+it failed on at least two other heads in the last 24 hours (other runs'
+`ctest-logs-macos` artifacts) and passes on main's latest merge-group run,
+Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing; the job still fails.
+Read `exonerated_only` failures ÷ merge-group failures, with `unique_cause`
+> 0 and the base-red streak count unchanged as controls.
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate

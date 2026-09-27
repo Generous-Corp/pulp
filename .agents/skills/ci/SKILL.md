@@ -1535,6 +1535,17 @@ and after the Build step. No per-job line means the instrument failed (exit
 2), never that the cache hit; the cumulative line stays for continuity.
 Typical healthy job: misses 13–315 of ~10k calls.
 
+## The flake-exoneration shadow annotation exonerates nothing
+
+A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+when it failed on >= 2 other heads in 24 h AND passes on main's latest
+merge-group run. It is evidence, not a verdict: `base_poison_detector.py`
+records why cross-batch corroboration alone was measured unsafe, and this
+shadow inherits that by requiring the main pass and acting on nothing. Read
+exonerated-only failures ÷ failures; do not wire it into the job outcome
+without a contract decision and the shadow data as Step Zero.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
