@@ -822,6 +822,15 @@ verdicts followed by `ran_failed`, which must be zero before a digest-keyed
 skip could be proposed (that switch-on is a decisions-contract amendment,
 not a workflow edit).
 
+After the full ctest run, a merge-group `macos` job also annotates the
+**affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
+`tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and
+recorded header dependencies say the group's change could reach, with
+script-driven tests counted as affected whenever any script surface changed
+and every test selected when a CMake file changed. It selects nothing; the
+number to watch is `failed_outside_selection`, which must stay at zero over a
+long window before selection could gate anything.
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate

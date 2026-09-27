@@ -641,6 +641,12 @@ if(Python3_Interpreter_FOUND)
             PROPERTIES TIMEOUT 120)
     endif()
 
+    # Shadow-mode affected-test set the merge-group macos job annotates after
+    # its full ctest run (build graph + recorded header deps + ctest inventory).
+    add_test(NAME affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_affected_tests_shadow.py")
+    set_tests_properties(affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
+
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache
     # directory, so only the before/after difference describes one job.

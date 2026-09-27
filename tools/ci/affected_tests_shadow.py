@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Which ctest entries did this change affect? Shadow mode: report, never select.
+
+Every merge group runs all ~21,800 tests whatever changed. A replay of 200
+merged PRs through the real Ninja graph showed the median PR changes no
+object, no link and 2% of ctest entries, while the 402 script-driven tests,
+whose inputs are not declared anywhere the graph can see, hold 44% of the
+gate's test-seconds. Before any selection could ever gate, one number has to
+be zero over a long window: tests that FAILED in the full run but were NOT in
+the affected set. This tool computes that number per job and annotates it.
+
+Inputs (all already present in the gate job after ctest):
+- the Ninja build directory: `build.ninja` (edge inputs/outputs) and
+  `ninja -t deps` (header dependencies recorded by the compiler);
+- `ctest --show-only=json-v1` for the tests the job selected;
+- the job's `ctest.junit.xml` for what actually failed;
+- the changed files: `git diff --name-only <base> <head>`.
+
+Affected set. A test is affected when its executable (or any file its command
+line names) is a build output whose transitive explicit/implicit inputs
+include a changed file (headers via the recorded deps; order-only `||`
+inputs never propagate content). Fail-closed rules, each one a class of
+input the graph cannot see:
+- a change to any CMake file re-selects EVERY test (the inventory itself
+  may have changed);
+- a script-driven test (its command is not a binary under the build dir) is
+  affected whenever any changed file lies outside the compiled tree
+  (`tools/`, `test/` non-C++, `hooks/`, `.github/`, `docs/status/`, `ship/`,
+  ...), because its inputs are undeclared;
+- a changed file that no edge reads and that is not under a known non-input
+  prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test.
+
+Output: one `::notice title=affected-tests-shadow::` JSON line
+(`pulp-affected-tests-shadow/v1`) with selected/total counts, the
+failed-outside-selection count and names, and the reason class, plus a
+human line. Exit 0 on a computed verdict; exit 2 when an input is missing or
+unreadable (no verdict, so an absent annotation is never read as "zero").
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import os
+import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+SCHEMA = "pulp-affected-tests-shadow/v1"
+
+# Changed paths that no build edge reads and that cannot influence a test.
+KNOWN_NON_INPUT_PREFIXES = ("docs/", ".agents/", ".claude", ".codex", "planning",
+                            "CHANGELOG.md", "README.md", "VISION.md", "LICENSE.md")
+# Changed paths outside the compiled tree that a script-driven test may read.
+SCRIPT_SURFACE_PREFIXES = ("tools/", "hooks/", ".githooks/", ".github/", "docs/status/",
+                           "ship/", "inspect/", "experimental/", "templates/")
+COMPILED_SUFFIXES = (".cpp", ".cc", ".mm", ".m", ".c", ".hpp", ".h", ".hh", ".inl", ".swift",
+                     ".rs", ".metal", ".js", ".mjs", ".ts", ".tsx", ".json", ".yaml", ".yml",
+                     ".txt", ".toml", ".sh", ".py")
+
+
+def _unesc(s: str) -> str:
+    return s.replace("$ ", " ").replace("$:", ":").replace("$$", "$")
+
+
+def parse_build_ninja(text: str) -> list[tuple[list[str], list[str], str]]:
+    """(outputs, content-propagating inputs, rule) per build statement.
+    CMake writes one statement per line; `||` order-only inputs are dropped."""
+    edges = []
+    text = text.replace("$\n", "")
+    for line in text.splitlines():
+        if not line.startswith("build "):
+            continue
+        head, _, rest = line[6:].partition(": ")
+        outs = [_unesc(x) for x in re.split(r"(?<!\$) ", head.split(" | ")[0].strip()) if x]
+        rule, _, rest = rest.partition(" ")
+        rest = rest.split(" || ")[0]
+        ins = []
+        for part in rest.split(" | "):
+            ins += [_unesc(x) for x in re.split(r"(?<!\$) ", part.strip()) if x]
+        edges.append((outs, ins, rule))
+    return edges
+
+
+def parse_ninja_deps(text: str) -> dict[str, list[str]]:
+    """`ninja -t deps` output → {object: [dependency paths]}."""
+    deps: dict[str, list[str]] = {}
+    cur = None
+    for line in text.splitlines():
+        if line.startswith("    ") and cur is not None:
+            deps[cur].append(line.strip())
+        elif line.strip() and not line.startswith(" "):
+            cur = line.split(":")[0]
+            deps[cur] = []
+    return deps
+
+
+class Graph:
+    def __init__(self, build_dir: Path, edges, deps: dict[str, list[str]]) -> None:
+        self.build_dir = build_dir
+        self.fwd: dict[str, set[str]] = collections.defaultdict(set)
+        self.src_to_out: dict[str, set[str]] = collections.defaultdict(set)
+        self.read_paths: set[str] = set()
+        for outs, ins, _rule in edges:
+            for i in ins:
+                n = self.norm(i)
+                self.read_paths.add(n)
+                for o in outs:
+                    self.fwd[i].add(o)
+                    self.src_to_out[n].add(o)
+        for obj, hs in deps.items():
+            for h in hs:
+                n = self.norm(h)
+                self.read_paths.add(n)
+                self.src_to_out[n].add(obj)
+
+    def norm(self, p: str) -> str:
+        # realpath, not normpath: the build dir and the checkout may be reached
+        # through a symlink (macOS /var → /private/var), and ninja records
+        # whichever spelling the compiler saw.
+        return os.path.realpath(p if os.path.isabs(p) else os.path.join(self.build_dir, p))
+
+    def affected_outputs(self, changed_abs: list[str]) -> set[str]:
+        seeds: set[str] = set()
+        for f in changed_abs:
+            seeds |= self.src_to_out.get(f, set())
+        seen, stack = set(seeds), list(seeds)
+        while stack:
+            x = stack.pop()
+            for y in self.fwd.get(x, ()):
+                if y not in seen:
+                    seen.add(y)
+                    stack.append(y)
+        return {self.norm(o) for o in seen}
+
+
+def test_inputs(test: dict, build_dir: Path, source_root: Path) -> set[str]:
+    """Files a test's command line names that exist under the build or source tree."""
+    props = {p["name"]: p["value"] for p in test.get("properties", [])}
+    wd = props.get("WORKING_DIRECTORY") or str(build_dir)
+    out: set[str] = set()
+    roots = (os.path.realpath(build_dir), os.path.realpath(source_root))
+    for arg in test.get("command") or []:
+        for cand in (arg, os.path.join(wd, arg)):
+            if not os.path.isabs(cand):
+                continue
+            real = os.path.realpath(cand)
+            if real.startswith(roots):
+                out.add(real)
+    return out
+
+
+def is_binary_test(test: dict, build_dir: Path) -> bool:
+    cmd = test.get("command") or []
+    if not cmd:
+        return False
+    exe = os.path.realpath(cmd[0])
+    base = os.path.basename(exe)
+    return (exe.startswith(os.path.realpath(build_dir) + os.sep) and not exe.endswith((".py", ".sh", ".mjs", ".js"))
+            and "python" not in base and base not in ("node", "bash", "sh", "zsh"))
+
+
+def junit_failures(path: Path) -> list[str]:
+    root = ET.parse(path).getroot()
+    failed = []
+    for case in root.iter("testcase"):
+        if any(child.tag in ("failure", "error") for child in case):
+            failed.append(case.get("name") or "")
+    return failed
+
+
+def classify_changes(files: list[str]) -> dict:
+    cmake = any(f.endswith(("CMakeLists.txt", ".cmake")) or f.startswith(("cmake/", "tools/cmake/"))
+                for f in files)
+    scripts = any(f.startswith(SCRIPT_SURFACE_PREFIXES)
+                  or (f.startswith("test/") and not f.endswith((".cpp", ".cc", ".mm", ".hpp", ".h")))
+                  for f in files)
+    return {"cmake_changed": cmake, "scripts_changed": scripts}
+
+
+def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, changed: list[str],
+            failed: list[str]) -> dict:
+    g = Graph(build_dir, edges, deps)
+    tests = inventory.get("tests", [])
+    changed_abs = [os.path.realpath(os.path.join(source_root, f)) for f in changed]
+    aff = g.affected_outputs(changed_abs) | set(changed_abs)
+    flags = classify_changes(changed)
+    # A changed file the graph never read and that is not a known non-input:
+    # something reads it that we cannot see, so fail closed.
+    unread = [f for f, a in zip(changed, changed_abs)
+              if a not in g.read_paths and not f.startswith(KNOWN_NON_INPUT_PREFIXES)
+              and not f.endswith(".md") and not f.startswith(SCRIPT_SURFACE_PREFIXES)
+              and not (f.startswith("test/") and not f.endswith((".cpp", ".cc", ".mm", ".hpp", ".h")))
+              and not (f.endswith(("CMakeLists.txt", ".cmake")))]
+    select_all = flags["cmake_changed"] or bool(unread) or not changed
+    reason = ("cmake changed" if flags["cmake_changed"] else
+              f"{len(unread)} changed file(s) no edge reads" if unread else
+              "empty diff" if not changed else "graph")
+    selected = []
+    for t in tests:
+        name = t.get("name", "")
+        if select_all:
+            selected.append(name)
+            continue
+        ins = test_inputs(t, build_dir, source_root)
+        if ins & aff:
+            selected.append(name)
+        elif not is_binary_test(t, build_dir) and flags["scripts_changed"]:
+            selected.append(name)
+    sel = set(selected)
+    outside = sorted(f for f in failed if f and f not in sel)
+    return {"schema": SCHEMA, "mode": "shadow", "selected": len(sel), "total": len(tests),
+            "binary_tests": sum(1 for t in tests if is_binary_test(t, build_dir)),
+            "changed_files": len(changed), "reason": reason, "select_all": select_all,
+            "unread_changed": unread[:20], "failed": len(failed),
+            "failed_outside_selection": len(outside), "failed_outside_names": outside[:50],
+            **flags}
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--build-dir", required=True)
+    ap.add_argument("--source-root", required=True)
+    ap.add_argument("--base", required=True, help="git rev the change is measured from")
+    ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--selected-json", required=True, help="ctest --show-only=json-v1 of the run")
+    ap.add_argument("--junit", required=True)
+    ap.add_argument("--deps-file", default=None, help="captured `ninja -t deps` output (tests)")
+    ap.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME"))
+    a = ap.parse_args(argv[1:])
+    build_dir = Path(a.build_dir).resolve()
+    source_root = Path(a.source_root).resolve()
+    try:
+        edges = parse_build_ninja((build_dir / "build.ninja").read_text(encoding="utf-8"))
+        deps_text = (Path(a.deps_file).read_text(encoding="utf-8") if a.deps_file else
+                     subprocess.run(["ninja", "-C", str(build_dir), "-t", "deps"], capture_output=True,
+                                    text=True, check=True).stdout)
+        inventory = json.loads(Path(a.selected_json).read_text(encoding="utf-8"))
+        failed = junit_failures(Path(a.junit))
+        changed = subprocess.run(["git", "-C", str(source_root), "diff", "--name-only", a.base, a.head],
+                                 capture_output=True, text=True, check=True).stdout.split()
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, ET.ParseError) as exc:
+        print(f"affected-tests shadow: no verdict, input unreadable: {exc}", file=sys.stderr)
+        return 2
+    result = compute(build_dir, source_root, edges, parse_ninja_deps(deps_text), inventory, changed, failed)
+    result["event"] = a.event
+    print(f"affected-tests shadow: would select {result['selected']} of {result['total']} tests "
+          f"({result['reason']}); failed outside selection: {result['failed_outside_selection']}")
+    print(f"::notice title=affected-tests-shadow::{json.dumps(result, sort_keys=True)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

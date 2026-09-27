@@ -1522,6 +1522,17 @@ and, as the safety control, `would_skip` followed by `ran_failed` (must be
 0). Do not turn the verdict into a skip in build.yml; that is a decisions-
 contract amendment with the shadow data as its Step Zero.
 
+## The affected-tests shadow annotation selects nothing
+
+Merge-group `macos` jobs carry a `pulp-affected-tests-shadow/v1` notice
+(`tools/ci/affected_tests_shadow.py`): the ctest entries the Ninja graph says
+the change reached, plus `failed_outside_selection`. It is evidence for a
+future selector, read as a count that must be zero over a long window, and
+its fail-closed rules (CMake change selects all; script-driven tests are
+affected whenever a script surface changed; a changed file no edge reads
+selects all) are the contract any real selector inherits. The ctest step takes
+no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 
 `ccache --show-stats` counts for the life of the cache directory, and the
