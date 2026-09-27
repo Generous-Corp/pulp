@@ -1823,6 +1823,11 @@ jobs:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
           IOS_GATE_TOKEN: ${{ github.token }}
         run: |
+          # Snapshot the cumulative ccache counters so the "Ccache stats" step
+          # can print this job's own calls (see tools/ci/ccache_job_delta.py).
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-before.txt" || true
+          fi
           if [ "${RUNNER_OS}" = "macOS" ]; then
             # The gate reports "not applicable here" with exit 77, the autotools
             # skip convention. 77 is still nonzero and this step runs under
@@ -1942,6 +1947,17 @@ jobs:
         run: |
           if command -v ccache >/dev/null 2>&1; then
             ccache --show-stats
+            # The cumulative counters above belong to the cache directory,
+            # which on a self-hosted gate VM is a host mount shared by every
+            # VM that host boots; their denominator is the host's history, so
+            # they cannot show a cold or poisoned cache on THIS job. The
+            # per-job line is the difference against the snapshot taken just
+            # before the Build step. No snapshot (an earlier step failed) or a
+            # counter-less snapshot exits 2 and prints no per-job line, so an
+            # absent line is never read as a hit.
+            ccache --print-stats > "$RUNNER_TEMP/ccache-after.txt" || true
+            python3 tools/ci/ccache_job_delta.py \
+              "$RUNNER_TEMP/ccache-before.txt" "$RUNNER_TEMP/ccache-after.txt" || true
           else
             echo "ccache not available; skipping stats"
           fi
