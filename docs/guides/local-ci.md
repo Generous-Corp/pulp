@@ -1956,14 +1956,29 @@ Two candidate signals were evaluated against live runs and are deliberately
   have certified #8811 — the head that was broken. The structure is
   indistinguishable from the genuinely-innocent case, where four batches
   (#8891, #8892, #8896, and #8888's) shared one `write_scenario_wav` link error.
-- *The failure is present on main at the batch's base.* Not soundly checkable
-  here. `build.yml`'s own push run at a queue base is cancelled by its
-  concurrency group with **zero jobs**, and the main-branch runs that do carry
-  jobs at that sha are different workflows with different build configurations,
-  so a failure matched there does not transfer. Measured directly: at base
-  `8cc8794`, the Debug and sanitizer runs linked both affected targets cleanly
-  while three batches on that base failed to link them — a warm build directory
-  on the self-hosted runner, invisible to any main run.
+- *The failure is present on main at the batch's base.* Sound in principle — a
+  `main`-branch run at the base contains no queue entry, so anything it fails is
+  the base's — but **not observable here**, which is the more useful finding.
+  `build.yml`'s own push run at a queue base is cancelled by its concurrency
+  group with **zero jobs**, so the one lane whose configuration matches the
+  batch never reports on the base. The main-branch runs that do carry jobs at
+  that sha are other workflows with other build configurations, and a failure
+  matched across configurations does not transfer.
+
+  Measured on the case that motivated this: four batches with disjoint
+  single-entry memberships, on two different bases and two different gate hosts,
+  all failed to link `pulp::test::audio::write_scenario_wav`. The bases did not
+  contain `f4ee4ac3cc` ("keep grouped wav bridge link self-contained"), a
+  four-line `test/cmake/app_audio_host_tests.cmake` fix — so the base really was
+  red, and none of the four heads was at fault. Main's Debug and sanitizer runs
+  at that base linked both affected targets cleanly (585 and 1758 link lines, so
+  the reading is not blindness), because they do not group that target the way
+  the gate does.
+
+  So the obstacle to certifying this whole class is a CI-topology fact, not a
+  missing rule: nothing publishes a same-configuration verdict on a queue base.
+  Give `build.yml`'s main push lane a run that survives to dispatch jobs at each
+  base and the rule becomes checkable and would have cleared all four.
 
 
 ## Exact PR receipts on an unchanged merge-group candidate
