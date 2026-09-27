@@ -646,6 +646,35 @@ shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
 
+### A local main-refresh push honours `refresh_branch`
+
+`[merge] refresh_branch = "only-if-conflicting"` in `.shipyard/config.toml`
+governs Shipyard's own `ghapp` update-branch calls. A local
+`git merge origin/main && git push` moves the PR head the same way, cancelling
+the in-flight required `macos` run (`build.yml` cancels superseded PR runs),
+while the merge queue re-tests the merge result anyway. The pre-push hook runs
+`tools/scripts/refresh_push_check.py` before every other gate, including under
+`PULP_SKIP_PREPUSH=1`, so those pushes are visible:
+
+| Setting | Effect |
+|---------|--------|
+| `PULP_REFRESH_PUSH_POLICY=warn` (default) | warn on a pure refresh of an open PR with no reason to refresh |
+| `PULP_REFRESH_PUSH_POLICY=refuse` | fail the push instead; `PULP_ALLOW_REFRESH_PUSH=1` allows one |
+| `PULP_REFRESH_PUSH_POLICY=off` | log only |
+| `PULP_REFRESH_PUSH_LOG` | log path (default `~/.local/state/pulp/refresh-pushes.jsonl`) |
+
+A refresh is justified, and never warned about, when the PR is `CONFLICTING`, a
+required check on its head is failing, or the queue removed it at its current
+head. A push counts as a pure refresh only when every new branch commit is a
+merge with a parent on `origin/main` whose tree equals Git's clean automatic
+merge; a conflict-resolution merge is logged but never warned about. Pushes
+with no merge from main cost two `git rev-list` calls and write nothing. The
+GitHub lookup (one query, plus a required-ness query only when a check has
+failed) shares a 5 s budget and fails open. Each log line is one JSON object:
+`ts, repo, branch, pr, head_before, head_after, main_merges, other_commits,
+pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
+lookup, policy, mode, decision, via`.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
@@ -1432,6 +1461,16 @@ optional and is not part of the checked set.
 
 ## Lane timeouts — and why a timeout looks like a broken PR
 
+**Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
+the host's tartci `job_timeout` (2 h) is what finally ends a hung job, and it
+ends as `failure`, not `timed_out`, because the VM is torn down under the
+runner. A hung step therefore holds a gate VM for two hours unless the step
+carries its own bound. `build.yml` bounds "Bootstrap repository dependencies"
+at 15 minutes (it takes 0.3 min p50 and at most ~1 min on gate VMs): one such
+hang on 2026-09-26 held an m3 gate slot for 2 h 11 min. When a gate job ends in
+`failure` near the 2-hour mark, read its steps list: the last `in_progress`
+step is the one that hung.
+
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
 validation lane may run. The mac lane is **14400s (4h)** as of 2026-08-20,
 raised from 7200s after the earlier 3600s ceiling also proved too short.
@@ -1781,6 +1820,25 @@ preamble indefinitely. On a push, `origin/main` resolves to HEAD itself and the
 diff is always empty — so a docs-only merge is otherwise indistinguishable from
 a core merge, and the run never skips. A docs-only merge to main now correctly
 skips the whole matrix.
+
+**Wide non-native classification (opt-in, default off).** With the repository
+variable `PULP_CLASSIFY_WIDE_NON_NATIVE` unset, `classify` behaves exactly as
+above. Set to `1`, it passes `--wide-non-native` to `classify_changes.py`, which
+consults `tools/scripts/wide_non_native.py` for the files the base allowlist
+kept native. A file under `tools/scripts/`, `tools/testing/` or
+`tools/import-validation/` is admitted only when every tracked file naming its
+stem is inert (Markdown, `docs/`, `planning/`, `.agents/`, a workflow other than
+`build.yml` / `build-macos.yml` / `.github/actions/**`), a script run by
+`tools/ci/source_selftests.json` or `tools/ci/wide_non_native_checks.json`, the
+CMake registration of one of those tests, or another admitted file. Anything
+else keeps the native build: a gate-side ctest registration, `tools/ci/**`,
+`tools/cmake/**`, C++ or test sources, the classifier's own files, a failed or
+over-budget reference search. The gate's repository scanners that walk `tools/`
+without naming files run from `tools/ci/wide_non_native_checks.json` on the
+required `Enforce version & skill sync` context whenever the variable is `1`.
+`.github/workflows/**` and `tools/ci/**` are never widened. Over the 177 PRs
+merged 2026-09-21..27 the widening admits 9 more (19 skip-native instead of
+10); `tools/scripts/test_wide_non_native.py` replays that window.
 
 The classifier also establishes its interpreter explicitly. A macOS
 LaunchAgent normally sees only `/usr/bin:/bin:/usr/sbin:/sbin`; on M5 that made

@@ -958,6 +958,17 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   force allocation of the native job that owns the proof. Do not remove
   that explicit affected step when maintaining the broad `slow` exclusion,
   and do not run it again on unfiltered main/nightly corpora that already own it.
+- **Wide non-native (`PULP_CLASSIFY_WIDE_NON_NATIVE=1`, default off)** lets a
+  `tools/scripts` / `tools/testing` / `tools/import-validation` change skip the
+  native matrix only when a reference search proves no gate-side test names it
+  (`tools/scripts/wide_non_native.py`). Gotchas: a data file that lists paths
+  (e.g. `skill_path_map.json`) is itself a referrer, so a script it names stays
+  native until that file's readers are proven gate-silent; the gate's tree
+  scanners run from `tools/ci/wide_non_native_checks.json` on `Enforce version &
+  skill sync`, and a new tools-walking gate scanner must be added there or to
+  `REVIEWED_SCANNERS` in `test_wide_non_native.py`. The big remaining lever is
+  moving gate-side Python ctests (runner-topology, trace-span lint) into the
+  source-selftest lane, which then makes their scripts admissible here too.
 - **`validation` is example-only** — the `pluginval-*` / `auval-*` /
   `clap-dlopen-*` validators under `examples/`. They do NOT gate core PRs; they
   run on the **`example-validation`** lane
@@ -1408,6 +1419,17 @@ Root cause of the drift: the CLI shellout suites each hand-roll their own helper
 and hardcode a timeout, so there is no shared default to inherit and a
 codesign-heavy suite could sit at 10s while its siblings used 30-60s. When
 adding a shellout test, reuse the shared helper rather than picking a number.
+
+### A gate job that "failed" after ~2 hours hung; it did not fail
+
+A self-hosted `macos` job has no step or job `timeout-minutes` of its own for
+most steps, so a hung step runs until the host's tartci `job_timeout` (7200 s)
+tears the VM down. GitHub then records `failure`, never `timed_out`, so a query
+for timed-out jobs finds nothing. Read the job's `steps`: the last step still
+`in_progress` is the one that hung (on 2026-09-26 it was "Bootstrap repository
+dependencies", which normally takes 0.3 min). Bound a setup step that can only
+hang on the network with a step `timeout-minutes` well above its measured max,
+so the VM is freed in minutes instead of hours.
 
 ## Gate: framework-neutrality (`tools/scripts/framework_neutrality_check.py`)
 
@@ -4747,7 +4769,28 @@ clear a failing required check; otherwise enqueue it as it is.
 `.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`,
 so Shipyard's `ghapp` branch-refresh guard refuses a pointless App-authenticated
 refresh. A local `git merge origin/main && git push` bypasses that guard, so the
-rule is yours to keep there.
+pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`):
+
+- Every push whose own new commits include a merge with a parent on
+  `origin/main` is logged to `~/.local/state/pulp/refresh-pushes.jsonl` (override
+  `PULP_REFRESH_PUSH_LOG`), with the PR, `pure_refresh`, `gate_in_flight` (a
+  running `macos` check in `Build and Test` on the pre-push head), the repo
+  policy, and the decision. Pushes with no such merge skip the check entirely.
+- A push is a **pure refresh** only when every own commit is such a merge and
+  each merge tree equals `git merge-tree --write-tree` of its parents. A merge
+  that resolved a conflict, carried an extra edit, or rode along with ordinary
+  commits is not pure and is never warned about.
+- `PULP_REFRESH_PUSH_POLICY=warn` (default) prints a warning for a pure refresh
+  of an open PR that is not CONFLICTING, has no failing required check, and was
+  not ejected from the queue at its head. `refuse` makes that a pre-push failure
+  (override once with `PULP_ALLOW_REFRESH_PUSH=1`; `PULP_SKIP_PREPUSH=1` and
+  `PULP_DISABLE_PREPUSH_GATES=1` demote it); `off` logs only.
+- The GitHub lookup shares one 5 s budget and fails open: `lookup: failed:*` in
+  the log, never a blocked push. A failing check that could not be confirmed as
+  non-required counts as justification, so the check errs toward silence.
+
+Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
+are the avoidable cancellations; all lines are the control population.
 
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 

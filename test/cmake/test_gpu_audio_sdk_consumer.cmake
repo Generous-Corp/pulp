@@ -156,6 +156,10 @@ find_package(Pulp CONFIG REQUIRED)
 if(NOT TARGET Pulp::gpu-audio)
   message(FATAL_ERROR "installed SDK does not export Pulp::gpu-audio")
 endif()
+if(NOT DEFINED PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+  message(FATAL_ERROR
+    "installed SDK does not export PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO")
+endif()
 pulp_add_plugin(GpuAudioSdkConsumer FORMATS CLAP SOURCES src/consumer.cpp
   PROCESSOR_FACTORY create_consumer PLUGIN_NAME "GpuAudioSdkConsumer"
   MANUFACTURER "PulpSmoke" BUNDLE_ID "com.pulp.gpu-audio-sdk-consumer"

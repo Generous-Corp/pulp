@@ -347,3 +347,16 @@ jobs:
         timeout-minutes: 45
         run: |
           python3 tools/ci/source_selftests.py run --min-count 130
+
+      - name: Wide non-native tier (tooling checks for a skipped macOS gate)
+        # With PULP_CLASSIFY_WIDE_NON_NATIVE=1, build.yml's classify job lets a
+        # tooling-only change skip the native matrix when no test left on the
+        # macOS gate can observe it (tools/scripts/wide_non_native.py). The
+        # gate's repository scanners read tools/** without naming the files,
+        # so this required context runs them here instead. Unset: skipped.
+        if: vars.PULP_CLASSIFY_WIDE_NON_NATIVE == '1'
+        timeout-minutes: 15
+        run: |
+          python3 -m pip install --quiet 'PyYAML==6.0.2'
+          python3 tools/ci/source_selftests.py run \
+            --manifest tools/ci/wide_non_native_checks.json --min-count 7

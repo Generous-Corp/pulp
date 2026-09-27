@@ -9,18 +9,37 @@ import test from "node:test";
 
 import {
   availableCores,
+  CORES_PER_BROWSER,
+  declaredMemoryMb,
   integrationConcurrency,
-  SMALL_MACHINE_CORES,
+  MEMORY_MB_PER_BROWSER,
 } from "./run_integration.mjs";
 
 test("a 3-vCPU gate VM runs the browser files one at a time", () => {
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "3" }, 28)), 1);
-  assert.equal(integrationConcurrency(SMALL_MACHINE_CORES - 1), 1);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "3" }, 28), 6), 1);
+  assert.equal(integrationConcurrency(1, 6), 1);
 });
 
-test("a 6-core or wider machine keeps three files in flight", () => {
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "6" }, 2)), 3);
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "12" }, 2)), 3);
+test("each concurrent browser file gets two cores", () => {
+  assert.equal(CORES_PER_BROWSER, 2);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "6" }, 2), 6), 3);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "12" }, 2), 6), 6);
+});
+
+test("a declared memory lease can only narrow the width", () => {
+  assert.equal(MEMORY_MB_PER_BROWSER, 2048);
+  assert.equal(integrationConcurrency(12, 6, 16384), 6);
+  assert.equal(integrationConcurrency(12, 6, 8192), 4);
+  assert.equal(integrationConcurrency(12, 6, 1024), 1);
+  assert.equal(integrationConcurrency(3, 6, 65536), 1);
+  assert.equal(declaredMemoryMb({ TARTCI_GUEST_MEM_MB: "10240" }), 10240);
+  assert.equal(declaredMemoryMb({ TARTCI_GUEST_MEM_MB: "" }), undefined);
+  assert.equal(declaredMemoryMb({}), undefined);
+});
+
+test("the width never exceeds the number of files", () => {
+  assert.equal(integrationConcurrency(28, 6), 6);
+  assert.equal(integrationConcurrency(12, 2), 2);
 });
 
 test("without a guest lease the process's own parallelism decides", () => {
@@ -41,9 +60,21 @@ test("the launcher passes the derived width to node --test and its exit status b
       'test("no", () => { throw new Error("deliberate"); });\n');
     // NODE_TEST_CONTEXT would make the nested `node --test` report to this
     // runner instead of exiting with its own status, as it does under ctest.
-    const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
-    const run = (files, cores) => spawnSync(process.execPath, [launcher, ...files], {
-      encoding: "utf8", env: { ...env, TARTCI_GUEST_CORES: cores },
+    // The gate VM's own lease must not leak in either: each run below declares
+    // exactly the cores and memory it is asserting about.
+    const {
+      NODE_TEST_CONTEXT: _nested,
+      TARTCI_GUEST_CORES: _cores,
+      TARTCI_GUEST_MEM_MB: _memory,
+      ...env
+    } = process.env;
+    const run = (files, cores, memoryMb) => spawnSync(process.execPath, [launcher, ...files], {
+      encoding: "utf8",
+      env: {
+        ...env,
+        TARTCI_GUEST_CORES: cores,
+        ...(memoryMb === undefined ? {} : { TARTCI_GUEST_MEM_MB: memoryMb }),
+      },
     });
     // Two files that each log start, wait, then log end: one at a time the
     // log interleaves s,e,s,e; in flight together it reads s,s,e,e. This
@@ -64,9 +95,15 @@ test("the launcher passes the derived width to node --test and its exit status b
     assert.equal(readFileSync(log, "utf8"), "sese");
     rmSync(log);
     const wide = run([...slow, passing, failing], "12");
-    assert.match(wide.stdout, /--test-concurrency=3 \(cores=12\)/);
+    assert.match(wide.stdout, /--test-concurrency=4 \(cores=12\)/);
     assert.notEqual(wide.status, 0);
     assert.equal(readFileSync(log, "utf8"), "ssee");
+    rmSync(log);
+    // A declared memory lease narrows the width and is named in the banner.
+    const leased = run(slow, "12", "2048");
+    assert.match(leased.stdout, /--test-concurrency=1 \(cores=12, mem_mb=2048\)/);
+    assert.equal(leased.status, 0);
+    assert.equal(readFileSync(log, "utf8"), "sese");
     assert.equal(spawnSync(process.execPath, [launcher], { env }).status, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });

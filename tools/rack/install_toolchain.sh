@@ -55,6 +55,7 @@ PARTS=(
   # been called. Kept to the trees the pack's CMakeLists names, not the
   # whole repo.
   "core/signal/include"
+  "core/simd/include"
   "core/format/include"
   "core/audio/include"
   "core/state/include"
