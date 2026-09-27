@@ -680,6 +680,17 @@ if(UNIX)
     set_tests_properties(install-control-broker-activation PROPERTIES
         LABELS "tooling;installer"
         TIMEOUT 30)
+    # The installed layout, not the archive: after install.sh (including a
+    # failed broker activation) every Mach-O binary's @rpath dependencies must
+    # resolve. Compiles its own tiny dylib + binary; skips off macOS.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME install-rpath-closure
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_check_installed_rpaths.py)
+        set_tests_properties(install-rpath-closure PROPERTIES
+            LABELS "tooling;installer"
+            TIMEOUT 120)
+    endif()
 endif()
 if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
