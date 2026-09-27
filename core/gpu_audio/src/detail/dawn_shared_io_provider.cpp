@@ -774,12 +774,14 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             const auto readback = submission.readback.load(std::memory_order_acquire);
             if (readback == 0 || queue_value == 0 || scope_value == 0)
                 return;
-            auto result = readback == 2 || slot.retired ? DawnSubmissionTracker::ReadbackResult::Cancelled
-                                       : DawnSubmissionTracker::ReadbackResult::Error;
+            auto result = readback == 2 || slot.retired
+                              ? DawnSubmissionTracker::ReadbackResult::Cancelled
+                              : DawnSubmissionTracker::ReadbackResult::Error;
             // Map success can precede owner consumption. Retirement invalidates
             // the mapped handle even when the retained callback says success.
             if (readback == 1 && !slot.retired && slot.readback_buffer) {
-                const auto* mapped = slot.readback_buffer.GetConstMappedRange(0, slot.output_logical_bytes);
+                const auto* mapped =
+                    slot.readback_buffer.GetConstMappedRange(0, slot.output_logical_bytes);
                 if (mapped && queue_value == 1 && scope_value == 1 &&
                     !device_lost.load(std::memory_order_acquire) &&
                     !dawn::native::IsDeviceLost(device.Get())) {
@@ -884,8 +886,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
                                    const SharedIoConvolutionProgramSpec& spec)
         : provider_(&provider), fft_size_(spec.fft_size), channels_(spec.channels),
           logical_frames_(spec.logical_frames), ir_length_(spec.ir_length),
-          spectral_hop_(spec.spectral_hop),
-          spectral_per_hop_gains_(spec.spectral_per_hop_gains),
+          spectral_hop_(spec.spectral_hop), spectral_per_hop_gains_(spec.spectral_per_hop_gains),
           normalized_ir_spectrum_(spec.normalized_ir_spectrum.begin(),
                                   spec.normalized_ir_spectrum.end()) {}
 
@@ -1001,7 +1002,8 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
         auto generation = next_device_owner.load(std::memory_order_relaxed);
         while (generation != std::numeric_limits<std::uint64_t>::max() &&
                !next_device_owner.compare_exchange_weak(generation, generation + 1,
-                                                        std::memory_order_relaxed)) {}
+                                                        std::memory_order_relaxed)) {
+        }
         if (generation == std::numeric_limits<std::uint64_t>::max()) {
             result.availability = Availability::Failed;
             result.reason = "device_owner_generation_exhausted";
@@ -1151,7 +1153,8 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
     input_oom.fakeOOMAtDevice = true;
     input_host.nextInChain = native_input_oom ? &input_oom : nullptr;
     input_descriptor.nextInChain = imported ? static_cast<const wgpu::ChainedStruct*>(&input_host)
-                                           : native_input_oom ? &input_oom : nullptr;
+                                   : native_input_oom ? &input_oom
+                                                      : nullptr;
     input_descriptor.size = slot->input_bytes;
     input_descriptor.usage =
         wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
@@ -1185,7 +1188,8 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
     output_oom.fakeOOMAtDevice = true;
     output_host.nextInChain = native_output_oom ? &output_oom : nullptr;
     output_descriptor.nextInChain = imported ? static_cast<const wgpu::ChainedStruct*>(&output_host)
-                                            : native_output_oom ? &output_oom : nullptr;
+                                    : native_output_oom ? &output_oom
+                                                        : nullptr;
     output_descriptor.size = slot->output_bytes;
     output_descriptor.usage =
         wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst;
@@ -1341,16 +1345,21 @@ bool DawnSharedIoProvider::prepare_convolution_program(
         spec.normalized_ir_spectrum.size() != spec.fft_size * 2u) {
         return false;
     }
-    if (spec.spectral_per_hop_gains && !spec.spectral_hop) return false;
-    if (spec.spectral_hop && (spec.spectral_hop > spec.fft_size / 2 ||
-        spec.fft_size % spec.spectral_hop != 0)) return false;
+    if (spec.spectral_per_hop_gains && !spec.spectral_hop)
+        return false;
+    if (spec.spectral_hop &&
+        (spec.spectral_hop > spec.fft_size / 2 || spec.fft_size % spec.spectral_hop != 0))
+        return false;
     const auto bytes64 = std::uint64_t(spec.fft_size) * spec.channels * 2u * sizeof(float);
     if (bytes64 > std::numeric_limits<std::uint32_t>::max())
         return false;
     for (const auto* slot : impl_->slots) {
         if (slot == nullptr || slot->retired || slot->index >= impl_->slots.size() ||
             slot->input_logical_bytes < bytes64 + (spec.spectral_hop ? 24u : 0u) +
-                (spec.spectral_per_hop_gains ? (spec.fft_size/2u+1u)*sizeof(float) : 0u) || slot->output_logical_bytes < bytes64) {
+                                            (spec.spectral_per_hop_gains
+                                                 ? (spec.fft_size / 2u + 1u) * sizeof(float)
+                                                 : 0u) ||
+            slot->output_logical_bytes < bytes64) {
             return false;
         }
     }
@@ -1417,9 +1426,11 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             return fail_preparation();
         }
         plan->fft = pipeline(kSharedIoFftWgsl);
-        const auto spectral_gain_source = spec.spectral_per_hop_gains
-            ? shared_spectral_gain_kernel(spec.fft_size, spec.channels) : std::string{};
-        plan->multiply = pipeline(spec.spectral_per_hop_gains ? spectral_gain_source.c_str() : kSharedIoMulWgsl);
+        const auto spectral_gain_source =
+            spec.spectral_per_hop_gains ? shared_spectral_gain_kernel(spec.fft_size, spec.channels)
+                                        : std::string{};
+        plan->multiply =
+            pipeline(spec.spectral_per_hop_gains ? spectral_gain_source.c_str() : kSharedIoMulWgsl);
         const auto storage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
         plan->ir =
             make_buffer(static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float), storage);
@@ -1513,8 +1524,9 @@ bool DawnSharedIoProvider::prepare_convolution_program(
                 source = destination;
                 destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
             }
-            groups.multiply = bind_three(plan->multiply, source,
-                spec.spectral_per_hop_gains ? slot->input_buffer : plan->ir, groups.product);
+            groups.multiply = bind_three(
+                plan->multiply, source, spec.spectral_per_hop_gains ? slot->input_buffer : plan->ir,
+                groups.product);
             if (!groups.multiply)
                 return fail_preparation();
 
@@ -2054,8 +2066,9 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
 
     auto& submission = slot->submission;
     ++submission.generation;
-    if (!submission.tracker.begin(submission.generation, impl_->uncaptured_error_generation.load(
-                                                             std::memory_order_acquire), staged)) {
+    if (!submission.tracker.begin(
+            submission.generation,
+            impl_->uncaptured_error_generation.load(std::memory_order_acquire), staged)) {
         (void)impl_->pop_error_scopes();
         return false;
     }
@@ -2094,10 +2107,12 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         submission.readback_future = slot->readback_buffer.MapAsync(
             wgpu::MapMode::Read, 0, slot->output_logical_bytes, Impl::callback_mode(),
             [](wgpu::MapAsyncStatus status, wgpu::StringView, Impl::Submission* state) {
-                const int value = status == wgpu::MapAsyncStatus::Success ? 1
-                    : status == wgpu::MapAsyncStatus::CallbackCancelled ? 2 : 3;
+                const int value = status == wgpu::MapAsyncStatus::Success             ? 1
+                                  : status == wgpu::MapAsyncStatus::CallbackCancelled ? 2
+                                                                                      : 3;
                 state->readback.store(value, std::memory_order_release);
-            }, &submission);
+            },
+            &submission);
         if (impl_->options.fault == Fault::CancelReadbackMapping &&
             impl_->options.fault_slot == slot->index) {
             ++impl_->stats.fault_injections;
@@ -2154,10 +2169,10 @@ void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
         return;
     const auto now = std::chrono::steady_clock::now();
     const auto max_ns = static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
-    const auto deadline = deadline_ns == 0 || deadline_ns > max_ns
-                              ? now
-                              : std::chrono::steady_clock::time_point(
-                                    std::chrono::nanoseconds(deadline_ns));
+    const auto deadline =
+        deadline_ns == 0 || deadline_ns > max_ns
+            ? now
+            : std::chrono::steady_clock::time_point(std::chrono::nanoseconds(deadline_ns));
     (void)impl_->wait_for_queue_callbacks(deadline);
     for (auto* slot : impl_->slots) {
         if (impl_->options.fault == Fault::DelayCompletion &&

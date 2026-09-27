@@ -12,7 +12,7 @@ namespace pulp::gpu_audio {
 // continuously advanced CPU fallback. The session performs ordinary CPU copies
 // into/out of shared slots, but no WebGPU payload upload/readback copy.
 class GpuSpectralMaskSession {
-public:
+  public:
     struct Config {
         std::uint32_t fft_size = 0, hop = 0, channels = 0, sample_rate = 0;
         std::uint32_t slots = 3;
@@ -22,7 +22,9 @@ public:
     struct CreateResult {
         std::unique_ptr<GpuSpectralMaskSession> session;
         Error error = Error::None;
-        explicit operator bool() const noexcept { return session && error == Error::None; }
+        explicit operator bool() const noexcept {
+            return session && error == Error::None;
+        }
     };
     struct Result {
         std::uint64_t epoch = 0, sequence = 0;
@@ -38,8 +40,8 @@ public:
         bool physical_release_confirmed = false;
         std::uint64_t cpu_input_bytes = 0, cpu_output_bytes = 0;
         std::uint64_t runtime_write_buffer_calls = 0, runtime_copy_buffer_calls = 0,
-                      runtime_map_async_calls = 0, imported_allocations = 0,
-                      retired_success = 0, retired_failure = 0;
+                      runtime_map_async_calls = 0, imported_allocations = 0, retired_success = 0,
+                      retired_failure = 0;
     };
     // Non-RT snapshot. Transfer counters exclude resource initialization.
     Diagnostics diagnostics() const;
@@ -71,7 +73,8 @@ public:
     std::optional<Result> receive(std::span<float> planar) noexcept;
     // Retain the session and retry if its physical drain cannot yet finish.
     bool release() noexcept;
-private:
+
+  private:
     static CreateResult create_impl(const Config&, bool per_hop_gains) noexcept;
     bool submit_impl(std::span<const float>, std::uint64_t, std::span<const float>,
                      std::uint64_t) noexcept;
@@ -79,4 +82,4 @@ private:
     explicit GpuSpectralMaskSession(std::unique_ptr<Impl>) noexcept;
     std::unique_ptr<Impl> impl_;
 };
-}
+} // namespace pulp::gpu_audio

@@ -334,10 +334,13 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
 inline constexpr const char* kGpuTypeId = "space.convolution_reverb_gpu";
 
 inline int gpu_internal_block_size(int max_block) noexcept {
-    if (max_block <= 0) return 0;
+    if (max_block <= 0)
+        return 0;
     std::uint64_t quantum = 1u;
-    while (quantum < static_cast<std::uint64_t>(max_block)) quantum <<= 1u;
-    if (quantum > static_cast<std::uint64_t>(std::numeric_limits<int>::max())) return 0;
+    while (quantum < static_cast<std::uint64_t>(max_block))
+        quantum <<= 1u;
+    if (quantum > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        return 0;
     return static_cast<int>(quantum);
 }
 
@@ -349,11 +352,9 @@ struct GpuInstance {
 /// one/two-channel asset shapes admitted by Forge: two concrete authenticated
 /// mono lanes preserve dual-mono identity, while a four-cell true-stereo IR
 /// remains on the CPU realization until a channel-matrix GPU node exists.
-inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
-                                                       IrPolicy policy = {}) {
+inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {}) {
     if (!valid_impulse_response(ir) || ir.channels.size() > 2u || policy.true_stereo)
-        throw std::invalid_argument(
-            "GPU convolution requires a one- or two-channel dual-mono IR");
+        throw std::invalid_argument("GPU convolution requires a one- or two-channel dual-mono IR");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
 
     CustomNodeType t;
@@ -385,8 +386,7 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
         config.tail_fade_ms = policy.tail_fade_ms;
         config.resample_taps_per_phase = policy.resample_taps_per_phase;
         config.gpu_enabled = true;
-        instance->engine = std::make_unique<gpu_audio::GpuConvolutionReverb>(
-            std::move(config));
+        instance->engine = std::make_unique<gpu_audio::GpuConvolutionReverb>(std::move(config));
         if (!instance->engine->prepare())
             throw std::runtime_error("authenticated GPU convolution provider unavailable");
     };
@@ -405,10 +405,10 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
     t.baked_params.push_back({kPredelayMs, static_cast<float>(Engine::kPredelayMsMin),
                               static_cast<float>(Engine::kPredelayMsMax),
                               static_cast<float>(Engine::kPredelayMsDefault)});
-    t.baked_params.push_back({kWetPercent, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kWetPercentDefault)});
-    t.baked_params.push_back({kDryPercent, 0.0f, 100.0f,
-                              static_cast<float>(Engine::kDryPercentDefault)});
+    t.baked_params.push_back(
+        {kWetPercent, 0.0f, 100.0f, static_cast<float>(Engine::kWetPercentDefault)});
+    t.baked_params.push_back(
+        {kDryPercent, 0.0f, 100.0f, static_cast<float>(Engine::kDryPercentDefault)});
     t.baked_params.push_back({kWidthPercent, static_cast<float>(Engine::kWidthPercentMin),
                               static_cast<float>(Engine::kWidthPercentMax),
                               static_cast<float>(Engine::kWidthPercentDefault)});
@@ -437,8 +437,7 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
     };
     t.latency_samples_for_block = [](double, int max_block) {
         const int internal_block = gpu_internal_block_size(max_block);
-        if (internal_block <= 0 ||
-            internal_block > CustomNodeType::kMaxLatencySamples / 3)
+        if (internal_block <= 0 || internal_block > CustomNodeType::kMaxLatencySamples / 3)
             return 0;
         return 3 * internal_block;
     };

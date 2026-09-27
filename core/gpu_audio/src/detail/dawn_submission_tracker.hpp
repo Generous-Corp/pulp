@@ -23,8 +23,7 @@ class DawnSubmissionTracker {
         bool physically_drained = false;
     };
 
-    bool begin(Generation generation,
-               std::uint64_t uncaptured_error_generation,
+    bool begin(Generation generation, std::uint64_t uncaptured_error_generation,
                bool requires_readback = false) noexcept;
     bool record_queue(Generation generation, QueueResult result) noexcept;
     bool record_scope(Generation generation, ScopeResult result) noexcept;

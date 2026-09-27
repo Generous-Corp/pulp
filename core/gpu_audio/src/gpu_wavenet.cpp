@@ -6,8 +6,8 @@
 #include "detail/shared_io_program_session.hpp"
 #endif
 
-#include <cstring>
 #include <chrono>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -188,10 +188,10 @@ std::size_t GpuWaveNetSession::service(std::uint64_t now_ns) noexcept {
 std::size_t GpuWaveNetSession::service_until(std::uint64_t deadline_ns) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (prepared()) {
-        const auto now = static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count());
+        const auto now =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count());
         return impl_->session->service_until(now, deadline_ns);
     }
 #else

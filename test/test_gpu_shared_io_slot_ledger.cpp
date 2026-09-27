@@ -687,8 +687,8 @@ TEST_CASE("arena storage selection rejects mismatched backing and false import c
     using Storage = SharedIoArenaProvider::StorageKind;
     for (const auto expected : {Storage::ImportedHostPointer, Storage::Staged}) {
         FakeSharedIoProvider provider;
-        provider.storage_kind = expected == Storage::Staged ? Storage::ImportedHostPointer
-                                                           : Storage::Staged;
+        provider.storage_kind =
+            expected == Storage::Staged ? Storage::ImportedHostPointer : Storage::Staged;
         auto config = arena_config(1);
         config.storage_kind = expected;
         SharedIoArena arena;

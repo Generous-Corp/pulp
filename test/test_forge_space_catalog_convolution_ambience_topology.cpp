@@ -67,14 +67,11 @@ TEST_CASE("Forge space GPU convolution: catalog metadata preserves controls and 
     // reports the corresponding three-quantum staged latency.
     REQUIRE(type.latency_samples_for_block(kSr, 192) == 3 * 256);
     REQUIRE(type.latency_samples_for_block(kSr, 0) == 0);
-    REQUIRE(type.latency_samples_for_block(kSr,
-                                           CustomNodeType::kMaxLatencySamples / 2 + 1) ==
-            0);
+    REQUIRE(type.latency_samples_for_block(kSr, CustomNodeType::kMaxLatencySamples / 2 + 1) == 0);
 
     const auto has = [&](pulp::state::ParamID id) {
         return std::find_if(type.baked_params.begin(), type.baked_params.end(),
-                            [=](const auto& p) { return p.id == id; }) !=
-               type.baked_params.end();
+                            [=](const auto& p) { return p.id == id; }) != type.baked_params.end();
     };
     REQUIRE(has(conv::kIrGainDb));
     REQUIRE(has(conv::kPredelayMs));

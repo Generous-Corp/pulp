@@ -1,6 +1,5 @@
 #include "shared_io_program_session.hpp"
 
-
 namespace pulp::gpu_audio::detail {
 
 SharedIoProgramSession::~SharedIoProgramSession() {

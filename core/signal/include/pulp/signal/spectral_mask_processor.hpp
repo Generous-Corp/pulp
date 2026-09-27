@@ -34,8 +34,8 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <type_traits>
 #include <vector>
@@ -105,9 +105,10 @@ public:
     /// host callbacks. The caller supplies stream identity and sample chronology.
     /// Successful prepare removes the observer; reset preserves it and restarts
     /// the ordinal. Failed prepare preserves the entire previous prepared state.
-    [[nodiscard]] bool set_effective_frame_observer(
-        void* context, EffectiveFrameObserver observer) noexcept {
-        if (!state_) return false;
+    [[nodiscard]] bool set_effective_frame_observer(void* context,
+                                                    EffectiveFrameObserver observer) noexcept {
+        if (!state_)
+            return false;
         state_->observer_context = context;
         state_->observer = observer;
         return true;
@@ -254,8 +255,8 @@ public:
     /// called by exactly one audio-side consumer in chronological frame order.
     [[nodiscard]] bool process_frame(std::complex<SampleType>* const* frames,
                                      int num_bins) noexcept {
-        if (!state_ || num_bins != state_->frame_table.num_bins
-            || state_->next_frame_ordinal == std::numeric_limits<std::uint64_t>::max()) {
+        if (!state_ || num_bins != state_->frame_table.num_bins ||
+            state_->next_frame_ordinal == std::numeric_limits<std::uint64_t>::max()) {
             zero_frames_(frames, num_bins);
             return false;
         }

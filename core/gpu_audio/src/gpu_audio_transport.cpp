@@ -241,8 +241,10 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     }
 
     const auto publish_delivery = [&](std::uint8_t disposition) noexcept {
-        record_delivery(input_valid ? disposition : static_cast<std::uint8_t>(
-                            detail::SharedIoDeliveryDisposition::InvalidRejected), true);
+        record_delivery(input_valid ? disposition
+                                    : static_cast<std::uint8_t>(
+                                          detail::SharedIoDeliveryDisposition::InvalidRejected),
+                        true);
         if (input_valid && trial_observer_ != nullptr) {
             const auto callback_end_ns = monotonic_now_ns();
             publish_trial_delivery(sequence, disposition, callback_start_ns, callback_end_ns,
@@ -344,7 +346,8 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
 void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
                                        audio::BufferView<float>& output, std::uint32_t n,
                                        std::uint64_t sequence, bool input_valid,
-                                       std::uint64_t callback_start_ns, bool count_delivery) noexcept {
+                                       std::uint64_t callback_start_ns,
+                                       bool count_delivery) noexcept {
     using detail::SharedIoDeliveryDisposition;
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);

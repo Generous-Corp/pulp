@@ -2702,10 +2702,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 // knowable at registration, so this is where it gets checked.
                 if (cg->custom_processors.contains(n.id) &&
                     (type->latency_samples_for_block || type->latency_samples)) {
-                    const int latency = type->latency_samples_for_block
-                                            ? type->latency_samples_for_block(sample_rate,
-                                                                              max_block_size)
-                                            : type->latency_samples(sample_rate);
+                    const int latency =
+                        type->latency_samples_for_block
+                            ? type->latency_samples_for_block(sample_rate, max_block_size)
+                            : type->latency_samples(sample_rate);
                     cg->custom_latency_samples[n.id] =
                         std::clamp(latency, 0, CustomNodeType::kMaxLatencySamples);
                 }

@@ -32,7 +32,9 @@ class SharedIoProgramSession {
 
     bool prepare(ProviderPair pair, Config config);
     // Non-owning observation only; invalidated after successful release.
-    SharedIoArenaProvider* owned_provider() const noexcept { return provider_.get(); }
+    SharedIoArenaProvider* owned_provider() const noexcept {
+        return provider_.get();
+    }
     bool prepared() const noexcept {
         return prepared_;
     }

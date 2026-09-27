@@ -1,15 +1,15 @@
 #include "detail/shared_io_compute_plan.hpp"
 #include "detail/shared_io_program_session.hpp"
-#include "detail/shared_spectral_result.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
+#include "detail/shared_spectral_result.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <memory>
-#include <chrono>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -30,7 +30,9 @@ class FakeProvider final : public SharedIoArenaProvider {
     };
 
   public:
-    ~FakeProvider() override { lifecycle_state->provider_destroyed = true; }
+    ~FakeProvider() override {
+        lifecycle_state->provider_destroyed = true;
+    }
     bool post_terminal(SlotToken token, std::shared_ptr<SharedIoTerminalInbox> inbox,
                        CompletionStatus terminal) noexcept {
         if (defer_terminals) {
@@ -128,7 +130,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     }
     void poll() noexcept override {}
     bool drain() noexcept override {
-        if (!allow_drain) return false;
+        if (!allow_drain)
+            return false;
         defer_terminals = false;
         for (auto& pending : pending_terminals) {
             if (!post_terminal(pending.token, std::move(pending.inbox), pending.status))
@@ -233,10 +236,10 @@ TEST_CASE("shared IO compute plan classifies completion after bounded wake",
     SharedIoComputePlan plan;
     REQUIRE(plan.prepare(provider,
                          {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
-    const auto now = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count());
+    const auto now =
+        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count());
     auto input = plan.acquire_input(9, now + 1);
     REQUIRE(input);
     REQUIRE(plan.submit({input->token, now + 1}));
@@ -363,7 +366,11 @@ TEST_CASE("program release observer sees final retirements only after physical b
     std::fill(input->bytes.begin(), input->bytes.end(), std::byte{});
     REQUIRE(session.submit({input->token, 0}));
     CHECK(state->retired == 0);
-    struct Observation { unsigned calls=0; std::uint64_t retired=0; bool provider_alive=false; } observed;
+    struct Observation {
+        unsigned calls = 0;
+        std::uint64_t retired = 0;
+        bool provider_alive = false;
+    } observed;
     SharedIoProgramSession::ReleaseObserver observer{
         &observed, [](void* context, const SharedIoArenaProvider& base) noexcept {
             const auto& provider = static_cast<const FakeProvider&>(base);

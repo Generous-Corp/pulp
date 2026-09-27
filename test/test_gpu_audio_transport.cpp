@@ -339,7 +339,9 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
     return {};
 }
 
-bool requires_realtime_gpu_path(GpuAudioNode*) noexcept { return false; }
+bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
+    return false;
+}
 
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept {
     // The test hook deliberately has no authenticated provider identity.
@@ -1181,7 +1183,7 @@ std::uint64_t delivery_total(const GpuAudioTransport::DeliverySnapshot& s) {
     return s.gpu_blocks + s.worker_output_blocks + s.cpu_fallback_blocks + s.silence_blocks +
            s.passthrough_blocks + s.priming_blocks + s.invalid_blocks;
 }
-}
+} // namespace
 
 TEST_CASE("GpuAudioTransport public delivery snapshot counts selected callback output",
           "[gpu_audio][transport][delivery-snapshot]") {
@@ -1213,8 +1215,9 @@ TEST_CASE("GpuAudioTransport public delivery snapshot counts selected callback o
         CHECK(selected.cpu_fallback_blocks == (policy == MissPolicy::CpuFallback ? 1u : 0u));
         CHECK(selected.silence_blocks == (policy == MissPolicy::Silence ? 1u : 0u));
         CHECK(selected.passthrough_blocks == (policy == MissPolicy::PassthroughDry ? 1u : 0u));
-        CHECK(output.storage[0][0] == (policy == MissPolicy::CpuFallback ? -3.0f :
-                                     policy == MissPolicy::Silence ? 0.0f : 3.0f));
+        CHECK(output.storage[0][0] == (policy == MissPolicy::CpuFallback ? -3.0f
+                                       : policy == MissPolicy::Silence   ? 0.0f
+                                                                         : 3.0f));
         node.realtime_status = detail::kRealtimeGpuReady;
         t.process(in, out, 16);
         CHECK(output.storage[0][0] == 0.0f);

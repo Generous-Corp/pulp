@@ -1,10 +1,10 @@
-#include <pulp/audio/buffer.hpp>
-#include <pulp/host/forge_space_catalog.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <pulp/audio/buffer.hpp>
+#include <pulp/host/forge_space_catalog.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -20,20 +20,30 @@ struct Params final : BakedParamView {
     Params() = default;
     Params(float gain, float delay, float wet_percent, float dry_percent, float width_percent,
            float lowcut_hz, float highcut_hz)
-        : ir_gain(gain), predelay(delay), wet(wet_percent), dry(dry_percent),
-          width(width_percent), lowcut(lowcut_hz), highcut(highcut_hz) {}
-    float value_at(ParamID id, int32_t) const override { return value(id); }
+        : ir_gain(gain), predelay(delay), wet(wet_percent), dry(dry_percent), width(width_percent),
+          lowcut(lowcut_hz), highcut(highcut_hz) {}
+    float value_at(ParamID id, int32_t) const override {
+        return value(id);
+    }
     float value(ParamID id) const override {
         namespace C = pulp::host::space::convolution;
         switch (id) {
-        case C::kIrGainDb: return ir_gain;
-        case C::kPredelayMs: return predelay;
-        case C::kWetPercent: return wet;
-        case C::kDryPercent: return dry;
-        case C::kWidthPercent: return width;
-        case C::kLowcutHz: return lowcut;
-        case C::kHighcutHz: return highcut;
-        default: return 0.0f;
+        case C::kIrGainDb:
+            return ir_gain;
+        case C::kPredelayMs:
+            return predelay;
+        case C::kWetPercent:
+            return wet;
+        case C::kDryPercent:
+            return dry;
+        case C::kWidthPercent:
+            return width;
+        case C::kLowcutHz:
+            return lowcut;
+        case C::kHighcutHz:
+            return highcut;
+        default:
+            return 0.0f;
         }
     }
 };
@@ -82,7 +92,8 @@ float stimulus_sample(int sample, int channel) {
 Stereo run(NodeType& type, const std::vector<int>& pattern, const ParamTimeline& timeline,
            int max_block, int total, bool inplace = false) {
     void* instance = type.create();
-    if (!instance) throw std::runtime_error("GPU factory returned null instance");
+    if (!instance)
+        throw std::runtime_error("GPU factory returned null instance");
     bool prepared = false;
     try {
         type.prepare(instance, kSr, max_block);
@@ -104,12 +115,13 @@ Stereo run(NodeType& type, const std::vector<int>& pattern, const ParamTimeline&
                 left[0] += 1.0f;
                 right[0] += 0.3f;
             }
-            std::vector<float> out_l = inplace ? left : std::vector<float>(static_cast<std::size_t>(n), 0.0f);
-            std::vector<float> out_r = inplace ? right : std::vector<float>(static_cast<std::size_t>(n), 0.0f);
+            std::vector<float> out_l =
+                inplace ? left : std::vector<float>(static_cast<std::size_t>(n), 0.0f);
+            std::vector<float> out_r =
+                inplace ? right : std::vector<float>(static_cast<std::size_t>(n), 0.0f);
             float* outputs[2] = {out_l.data(), out_r.data()};
-            const float* inputs[2] = {
-                inplace ? out_l.data() : left.data(),
-                inplace ? out_r.data() : right.data()};
+            const float* inputs[2] = {inplace ? out_l.data() : left.data(),
+                                      inplace ? out_r.data() : right.data()};
             pulp::audio::BufferView<const float> input(inputs, 2, n);
             pulp::audio::BufferView<float> output(outputs, 2, n);
             const auto params = timeline.at(offset);
@@ -118,11 +130,13 @@ Stereo run(NodeType& type, const std::vector<int>& pattern, const ParamTimeline&
             result.right.insert(result.right.end(), out_r.begin(), out_r.end());
             offset += n;
         }
-        if (type.release) type.release(instance);
+        if (type.release)
+            type.release(instance);
         type.destroy(instance);
         return result;
     } catch (...) {
-        if (prepared && type.release) type.release(instance);
+        if (prepared && type.release)
+            type.release(instance);
         type.destroy(instance);
         throw;
     }
@@ -138,7 +152,8 @@ Stereo cpu_oracle(const std::vector<int>& pattern, const ParamTimeline& timeline
     cpu.set_tail_fade_ms(pulp::signal::ZeroLatencyConvolver::kTailFadeMsDefault);
     cpu.set_resample_taps_per_phase(pulp::signal::ZeroLatencyConvolver::kResampTapsPerPhaseDefault);
     const float* taps[2] = {ir.channels[0].data(), ir.channels[1].data()};
-    if (!cpu.load_impulse_response(taps, 2, static_cast<int>(ir.channels[0].size()), ir.sample_rate))
+    if (!cpu.load_impulse_response(taps, 2, static_cast<int>(ir.channels[0].size()),
+                                   ir.sample_rate))
         throw std::runtime_error("CPU oracle IR load failed");
     Stereo result;
     result.left.reserve(static_cast<std::size_t>(total));
@@ -198,7 +213,8 @@ void compare_aligned(const Stereo& route, const Stereo& cpu, int latency,
 }
 int first_nonzero(const std::vector<float>& x) {
     for (std::size_t i = 0; i < x.size(); ++i)
-        if (std::fabs(x[i]) > 1.0e-5f) return static_cast<int>(i);
+        if (std::fabs(x[i]) > 1.0e-5f)
+            return static_cast<int>(i);
     return -1;
 }
 float max_abs_difference(const Stereo& lhs, const Stereo& rhs) {
@@ -212,7 +228,8 @@ float max_abs_difference(const Stereo& lhs, const Stereo& rhs) {
     return result;
 }
 void require(bool ok, const std::string& message) {
-    if (!ok) throw std::runtime_error(message);
+    if (!ok)
+        throw std::runtime_error(message);
 }
 } // namespace
 int main() {
@@ -243,12 +260,11 @@ int main() {
         paced_result.right.reserve(static_cast<std::size_t>(paced_total));
         std::vector<float> paced_in_l(kQ, 0.0f), paced_in_r(kQ, 0.0f);
         std::vector<float> paced_out_l(kQ, 0.0f), paced_out_r(kQ, 0.0f);
-        const auto paced_start = std::chrono::steady_clock::now() +
-                                  std::chrono::milliseconds(10);
+        const auto paced_start = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
         for (int block = 0; block < paced_blocks; ++block) {
             const auto due = paced_start + std::chrono::nanoseconds(
-                                             static_cast<std::int64_t>(block) * kQ *
-                                             1'000'000'000ll / static_cast<std::int64_t>(kSr));
+                                               static_cast<std::int64_t>(block) * kQ *
+                                               1'000'000'000ll / static_cast<std::int64_t>(kSr));
             std::this_thread::sleep_until(due);
             const int offset = block * kQ;
             for (int i = 0; i < kQ; ++i) {
@@ -266,16 +282,17 @@ int main() {
             const pulp::audio::BufferView<const float> paced_input(paced_inputs, 2, kQ);
             pulp::audio::BufferView<float> paced_output(paced_outputs, 2, kQ);
             direct.process(paced_input, paced_output, kQ);
-            paced_result.left.insert(paced_result.left.end(), paced_out_l.begin(), paced_out_l.end());
-            paced_result.right.insert(paced_result.right.end(), paced_out_r.begin(), paced_out_r.end());
+            paced_result.left.insert(paced_result.left.end(), paced_out_l.begin(),
+                                     paced_out_l.end());
+            paced_result.right.insert(paced_result.right.end(), paced_out_r.begin(),
+                                      paced_out_r.end());
         }
         const auto paced_report = direct.report();
         for (const auto& lane : paced_report.lanes)
             require(lane.delivery.gpu_blocks > 0,
                     "paced direct GPU route selected no completed GPU delivery");
         ParamTimeline direct_defaults{{}, {}};
-        compare_aligned(paced_result,
-                        cpu_oracle({kQ}, direct_defaults, kQ, paced_total), 3 * kQ,
+        compare_aligned(paced_result, cpu_oracle({kQ}, direct_defaults, kQ, paced_total), 3 * kQ,
                         "paced direct GPU CPU oracle");
         const auto direct_gpu_left = paced_report.lanes[0].delivery.gpu_blocks;
         const auto direct_gpu_right = paced_report.lanes[1].delivery.gpu_blocks;
@@ -283,7 +300,8 @@ int main() {
         auto type = pulp::host::space::convolution::make_gpu_convolution_reverb_node(probe_ir);
         require(type.is_valid_registration(), "GPU Forge registration invalid");
         require(type.latency_samples_for_block(kSr, kQ) == 3 * kQ, "full-quantum PDC mismatch");
-        require(type.latency_samples_for_block(kSr, 192) == 3 * 256, "non-power-of-two capacity mismatch");
+        require(type.latency_samples_for_block(kSr, 192) == 3 * 256,
+                "non-power-of-two capacity mismatch");
         // Exercise the non-power-of-two host capacity through the real factory,
         // not only its metadata callback. The engine rounds 192 up to a 256
         // sample internal quantum while preserving arbitrary host partitions.
@@ -292,8 +310,7 @@ int main() {
         const auto nonpower_route =
             run(type, {191, 1, 64, 192, 17, 83}, nonpower, 192, nonpower_total);
         compare_aligned(nonpower_route,
-                        cpu_oracle({191, 1, 64, 192, 17, 83}, nonpower, 192,
-                                   nonpower_total),
+                        cpu_oracle({191, 1, 64, 192, 17, 83}, nonpower, 192, nonpower_total),
                         3 * 256, "non-power-of-two capacity CPU oracle");
         ParamTimeline dry{{}, {}};
         dry.initial.wet = 0.0f;
@@ -308,44 +325,44 @@ int main() {
         require(first_nonzero(irregular.left) == 3 * kQ, "irregular dry impulse PDC mismatch");
         require(first_nonzero(inplace.left) == 3 * kQ, "in-place dry impulse PDC mismatch");
         for (int i = 0; i < total; ++i) {
-            require(std::fabs(full.left[static_cast<std::size_t>(i)] - single.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
+            require(std::fabs(full.left[static_cast<std::size_t>(i)] -
+                              single.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
                     "single-sample partition changed dry output");
-            require(std::fabs(full.left[static_cast<std::size_t>(i)] - irregular.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
+            require(std::fabs(full.left[static_cast<std::size_t>(i)] -
+                              irregular.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
                     "irregular partition changed dry output");
-            require(std::fabs(irregular.left[static_cast<std::size_t>(i)] - inplace.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
+            require(std::fabs(irregular.left[static_cast<std::size_t>(i)] -
+                              inplace.left[static_cast<std::size_t>(i)]) < 1.0e-5f,
                     "in-place processing changed output");
         }
-        compare_aligned(irregular, cpu_oracle({kQ - 1, 2, 17, 31, 7, 53}, dry, kQ, total),
-                        3 * kQ, "dry CPU oracle");
+        compare_aligned(irregular, cpu_oracle({kQ - 1, 2, 17, 31, 7, 53}, dry, kQ, total), 3 * kQ,
+                        "dry CPU oracle");
         ParamTimeline wet{{}, {}};
         wet.initial.wet = 100.0f;
         wet.initial.dry = 0.0f;
         const auto wet_full = run(type, {kQ}, wet, kQ, total);
         require(first_nonzero(wet_full.left) == 3 * kQ, "native-rate wet impulse PDC mismatch");
-        compare_aligned(wet_full, cpu_oracle({kQ}, wet, kQ, total), 3 * kQ,
-                        "wet CPU oracle");
+        compare_aligned(wet_full, cpu_oracle({kQ}, wet, kQ, total), 3 * kQ, "wet CPU oracle");
         // Exercise block-boundary automation at known absolute sample
         // offsets.  These offsets are callback boundaries in the irregular
         // partition below, so the Forge block-rate baked-param contract is
         // tested without pretending that the catalog applies mid-callback
         // events.  In particular the predelay changes after prior wet history
         // exists, which catches history being applied on the convolution send.
-        ParamTimeline automated{
-            Params{0.0f, 0.0f, 75.0f, 25.0f, 100.0f, 20.0f, 20000.0f},
-            {{127, Params{6.0f, 0.0f, 75.0f, 25.0f, 100.0f, 20.0f, 20000.0f}},
-             {237, Params{0.0f, 1.0f, 100.0f, 0.0f, 0.0f, 1000.0f, 20000.0f}},
-             {364, Params{0.0f, 5.0f, 100.0f, 0.0f, 200.0f, 20.0f, 5000.0f}}}};
+        ParamTimeline automated{Params{0.0f, 0.0f, 75.0f, 25.0f, 100.0f, 20.0f, 20000.0f},
+                                {{127, Params{6.0f, 0.0f, 75.0f, 25.0f, 100.0f, 20.0f, 20000.0f}},
+                                 {237, Params{0.0f, 1.0f, 100.0f, 0.0f, 0.0f, 1000.0f, 20000.0f}},
+                                 {364, Params{0.0f, 5.0f, 100.0f, 0.0f, 200.0f, 20.0f, 5000.0f}}}};
         const auto route = run(type, {kQ - 1, 2, 17, 31, 7, 53}, automated, kQ, total);
-        const auto automated_oracle =
-            cpu_oracle({kQ - 1, 2, 17, 31, 7, 53}, automated, kQ, total);
+        const auto automated_oracle = cpu_oracle({kQ - 1, 2, 17, 31, 7, 53}, automated, kQ, total);
         const ParamTimeline static_controls{automated.initial, {}};
         const auto static_oracle =
             cpu_oracle({kQ - 1, 2, 17, 31, 7, 53}, static_controls, kQ, total);
         require(max_abs_difference(automated_oracle, static_oracle) > 1.0e-3f,
                 "automation schedule did not change the CPU oracle");
-        compare_aligned(route,
-                        automated_oracle, 3 * kQ, "automated control CPU oracle");
-        std::cout << "gpu_convolution_focused PASS factory/native-rate/partition/PDC/in-place/automation/direct-gpu-delivery "
+        compare_aligned(route, automated_oracle, 3 * kQ, "automated control CPU oracle");
+        std::cout << "gpu_convolution_focused PASS "
+                     "factory/native-rate/partition/PDC/in-place/automation/direct-gpu-delivery "
                      "left_gpu_blocks="
                   << direct_gpu_left << " right_gpu_blocks=" << direct_gpu_right << "\n";
         return 0;

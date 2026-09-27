@@ -74,9 +74,15 @@ class GpuConvolutionReverb final {
     bool prepare() noexcept;
     void release() noexcept;
 
-    bool prepared() const noexcept { return prepared_; }
-    bool gpu_enabled() const noexcept { return config_.gpu_enabled; }
-    std::uint32_t block_size() const noexcept { return config_.block_size; }
+    bool prepared() const noexcept {
+        return prepared_;
+    }
+    bool gpu_enabled() const noexcept {
+        return config_.gpu_enabled;
+    }
+    std::uint32_t block_size() const noexcept {
+        return config_.block_size;
+    }
     std::uint32_t latency_samples() const noexcept {
         return prepared_ ? 3u * config_.block_size : 0u;
     }
@@ -93,8 +99,8 @@ class GpuConvolutionReverb final {
 
     /// Audio-thread entry point.  It never allocates, locks, or calls a GPU
     /// API.  Each lane transport receives the same quantum and sequence shape.
-    void process(const audio::BufferView<const float>& input,
-                 audio::BufferView<float>& output, std::uint32_t n) noexcept;
+    void process(const audio::BufferView<const float>& input, audio::BufferView<float>& output,
+                 std::uint32_t n) noexcept;
 
     GpuConvolutionReverbReport report() const noexcept;
 

@@ -22,8 +22,8 @@ TEST_CASE("cold shared convolution delivers zero-history FIR output from sequenc
           "[gpu_audio][shared_io][executor]") {
     E executor;
     constexpr std::array<float, 5> ir{0.75f, -0.125f, 0.f, 0.f, 0.25f};
-    constexpr std::array<float, 12> input{1.f, 2.f, 4.f, 3.f, -1.f, 0.5f,
-                                         0.25f, -2.f, 8.f, 1.f, 3.f, -4.f};
+    constexpr std::array<float, 12> input{1.f,   2.f,  4.f, 3.f, -1.f, 0.5f,
+                                          0.25f, -2.f, 8.f, 1.f, 3.f,  -4.f};
     REQUIRE(executor.prepare(
         {.capacity = 3, .channels = 1, .block = 2, .fft_size = 8, .ir_length = 5}, 7, 0));
     CHECK(executor.valid_from_sequence() == 0);

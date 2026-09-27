@@ -223,8 +223,7 @@ struct CustomNodeType {
         // or loses a transport context. Declaring ANY latency callback is the
         // registration-time stand-in for a non-zero fixed latency, since the
         // value itself is not resolvable this early.
-        if (type_id.empty() || version <= 0 || num_input_ports < 0 ||
-            num_output_ports < 0 ||
+        if (type_id.empty() || version <= 0 || num_input_ports < 0 || num_output_ports < 0 ||
             ((latency_samples || latency_samples_for_block) && has_transport_callback &&
              !has_plain_callback)) {
             return false;

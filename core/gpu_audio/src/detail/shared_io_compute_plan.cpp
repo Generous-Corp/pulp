@@ -119,18 +119,18 @@ std::size_t SharedIoComputePlan::drain_until(std::uint64_t now_ns,
     const auto started = std::chrono::steady_clock::now();
     const auto before = completion_write_;
     arena_.drain_completions({this, &SharedIoComputePlan::on_terminal}, service_deadline_ns);
-    const auto observed_now_ns = service_deadline_ns == 0
-                                     ? now_ns
-                                     : static_cast<std::uint64_t>(
-                                           std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                               std::chrono::steady_clock::now().time_since_epoch())
-                                               .count());
+    const auto observed_now_ns =
+        service_deadline_ns == 0
+            ? now_ns
+            : static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                             std::chrono::steady_clock::now().time_since_epoch())
+                                             .count());
     std::size_t count = 0;
     auto cursor = before;
     while (cursor != completion_write_) {
         auto& completion = completions_[cursor];
-        completion.late = completion.token.deadline_ns != 0 &&
-                          observed_now_ns > completion.token.deadline_ns;
+        completion.late =
+            completion.token.deadline_ns != 0 && observed_now_ns > completion.token.deadline_ns;
         if (completion.late)
             ++telemetry_.late_completions;
         ++count;

@@ -10,7 +10,6 @@
 
 namespace pulp::audio::mac {
 
-
 struct CoreAudioNativeRetirement {
     struct Listener {
         bool installed = false;
@@ -37,11 +36,13 @@ CoreAudioNativeOperations native_operations() {
         [](void*, AudioUnit unit) { return AudioUnitUninitialize(unit); },
         [](void*, AudioUnit unit) { return AudioComponentInstanceDispose(unit); },
         [](void*, AudioUnit unit, bool input_only, const AURenderCallbackStruct& callback) {
-            return AudioUnitSetProperty(unit,
-                input_only ? static_cast<AudioUnitPropertyID>(kAudioOutputUnitProperty_SetInputCallback)
-                           : static_cast<AudioUnitPropertyID>(kAudioUnitProperty_SetRenderCallback),
-                input_only ? kAudioUnitScope_Global : kAudioUnitScope_Input,
-                0, &callback, sizeof(callback));
+            return AudioUnitSetProperty(
+                unit,
+                input_only
+                    ? static_cast<AudioUnitPropertyID>(kAudioOutputUnitProperty_SetInputCallback)
+                    : static_cast<AudioUnitPropertyID>(kAudioUnitProperty_SetRenderCallback),
+                input_only ? kAudioUnitScope_Global : kAudioUnitScope_Input, 0, &callback,
+                sizeof(callback));
         },
         [](void*, AudioObjectID object, const AudioObjectPropertyAddress& address,
            AudioObjectPropertyListenerProc callback, void* context) {
@@ -55,19 +56,24 @@ CoreAudioNativeOperations native_operations() {
 }
 
 void retain_closed_context(std::unique_ptr<CoreAudioCallbackContext> context) noexcept {
-    if (!context) return;
+    if (!context)
+        return;
     context->close_and_wait();
     // A queued OS listener may enter after unregister. Preserve its small,
     // permanently closed refcon; it can no longer dereference the owner.
     static std::atomic<CoreAudioCallbackContext*> retired{nullptr};
     auto* node = context.release();
     auto* head = retired.load(std::memory_order_relaxed);
-    do { node->retired_next = head; }
-    while (!retired.compare_exchange_weak(head, node,
-        std::memory_order_release, std::memory_order_relaxed));
+    do {
+        node->retired_next = head;
+    } while (!retired.compare_exchange_weak(head, node, std::memory_order_release,
+                                            std::memory_order_relaxed));
 }
 
-std::mutex& retirement_mutex() { static auto* mutex = new std::mutex; return *mutex; }
+std::mutex& retirement_mutex() {
+    static auto* mutex = new std::mutex;
+    return *mutex;
+}
 CoreAudioNativeRetirement*& retired_native_head() {
     static CoreAudioNativeRetirement* head = nullptr;
     return head;
@@ -77,28 +83,36 @@ CoreAudioTeardownResult retire_native(CoreAudioNativeRetirement& state) {
     using Stage = CoreAudioTeardownResult::Stage;
     OSStatus listener_error = noErr;
     for (auto& listener : state.listeners) {
-        if (!listener.installed) continue;
-        const auto status = state.ops.remove_listener(state.ops.context, listener.object,
-            listener.address, listener.callback, listener.context);
-        if (status == noErr) listener.installed = false;
-        else listener_error = status;
+        if (!listener.installed)
+            continue;
+        const auto status =
+            state.ops.remove_listener(state.ops.context, listener.object, listener.address,
+                                      listener.callback, listener.context);
+        if (status == noErr)
+            listener.installed = false;
+        else
+            listener_error = status;
     }
     if (state.unit && state.running) {
         const auto status = state.ops.stop(state.ops.context, state.unit);
-        if (status != noErr) return {Stage::Stop, status};
+        if (status != noErr)
+            return {Stage::Stop, status};
         state.running = false;
     }
     if (state.unit && state.initialized) {
         const auto status = state.ops.uninitialize(state.ops.context, state.unit);
-        if (status != noErr) return {Stage::Uninitialize, status};
+        if (status != noErr)
+            return {Stage::Uninitialize, status};
         state.initialized = false;
     }
     if (state.unit) {
         const auto status = state.ops.dispose(state.ops.context, state.unit);
-        if (status != noErr) return {Stage::Dispose, status};
+        if (status != noErr)
+            return {Stage::Dispose, status};
         state.unit = nullptr;
     }
-    if (listener_error != noErr) return {Stage::Listener, listener_error};
+    if (listener_error != noErr)
+        return {Stage::Listener, listener_error};
     return {};
 }
 
@@ -174,12 +188,8 @@ void CoreAudioWorkgroupReference::release_os_workgroup(
 #endif
 
 CoreAudioDevice::CoreAudioDevice(AudioDeviceID device_id)
-    : native_ops_(native_operations()),
-      retirement_(std::make_unique<CoreAudioNativeRetirement>()),
-      device_id_(device_id),
-      route_instance_token_(mint_route_instance_token())
-{
-}
+    : native_ops_(native_operations()), retirement_(std::make_unique<CoreAudioNativeRetirement>()),
+      device_id_(device_id), route_instance_token_(mint_route_instance_token()) {}
 
 CoreAudioDevice::~CoreAudioDevice() {
     (void)close_checked();
@@ -233,7 +243,8 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
 bool CoreAudioDevice::open_locked(const DeviceConfig& config) {
     // Never overwrite uncertain ownership from a previous failed close.
     if (audio_unit_ || is_open_ || default_output_listener_installed_ ||
-        overload_listener_installed_) return false;
+        overload_listener_installed_)
+        return false;
     retain_closed_context(std::move(listener_context_));
     listener_context_ = std::make_unique<CoreAudioCallbackContext>(this);
     workgroup_changes_quiesced_ = false;
@@ -582,8 +593,9 @@ bool CoreAudioDevice::open_locked(const DeviceConfig& config) {
         def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
         def_prop.mScope    = kAudioObjectPropertyScopeGlobal;
         def_prop.mElement  = kAudioObjectPropertyElementMain;
-        OSStatus def_status = AudioObjectAddPropertyListener(
-            kAudioObjectSystemObject, &def_prop, default_output_changed_listener, listener_context_.get());
+        OSStatus def_status = AudioObjectAddPropertyListener(kAudioObjectSystemObject, &def_prop,
+                                                             default_output_changed_listener,
+                                                             listener_context_.get());
         default_output_listener_installed_ = (def_status == noErr);
         if (!default_output_listener_installed_)
             runtime::log_warn("CoreAudio: default-output-device listener not installed ({})",
@@ -607,7 +619,8 @@ void CoreAudioDevice::switch_to_default_output() {
     if (!is_open_ || !audio_unit_ || !follow_default_) return;
     // A failed explicit stop closed user admission but left native running
     // uncertain. Do not restart it behind the caller's stop request.
-    if (is_running_ && !render_context_) return;
+    if (is_running_ && !render_context_)
+        return;
     const AudioDeviceID new_default = CoreAudioSystem::get_default_device(false);
     if (new_default == kAudioObjectUnknown || new_default == device_id_) return;
 
@@ -656,8 +669,8 @@ void CoreAudioDevice::switch_to_default_output() {
     if (was_running) {
         const bool registered = install_render_context_locked();
         is_running_ = registered; // Start failure leaves native activity uncertain.
-        const OSStatus start_status = registered
-            ? native_ops_.start(native_ops_.context, audio_unit_) : kAudio_ParamError;
+        const OSStatus start_status =
+            registered ? native_ops_.start(native_ops_.context, audio_unit_) : kAudio_ParamError;
         if (start_status != noErr) {
             retire_render_context_locked();
             // The replacement unit never entered its callback lifetime. Drain
@@ -676,11 +689,13 @@ void CoreAudioDevice::switch_to_default_output() {
 void CoreAudioDevice::require_control_thread() const noexcept {
     // Check before acquiring lifecycle/switch locks: another control thread may
     // already own them while waiting for this very callback to leave.
-    if (CoreAudioCallbackEntry::owns_on_current_thread(this)) std::terminate();
+    if (CoreAudioCallbackEntry::owns_on_current_thread(this))
+        std::terminate();
 }
 
 void CoreAudioDevice::publish_workgroup_change_locked(void* workgroup) {
-    if (!workgroup_change_callback_) return;
+    if (!workgroup_change_callback_)
+        return;
     CoreAudioCallbackContext context(this);
     CoreAudioCallbackEntry entry(&context);
     workgroup_change_callback_(workgroup);
@@ -727,7 +742,8 @@ void CoreAudioDevice::quiesce_workgroup_changes_locked() {
     // This must run outside switch_mutex_: an admitted default-change callback
     // may need that mutex before it can leave. This path is never called from
     // the default-change callback itself.
-    if (listener_context_) listener_context_->close_and_wait();
+    if (listener_context_)
+        listener_context_->close_and_wait();
     // Stop new default-change callbacks from firing, then take switch_mutex_ so any
     // in-flight switch_to_default_output() finishes. That switch may have rebound
     // a replacement workgroup after an earlier external drain, so publish null
@@ -737,11 +753,13 @@ void CoreAudioDevice::quiesce_workgroup_changes_locked() {
         def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
         def_prop.mScope    = kAudioObjectPropertyScopeGlobal;
         def_prop.mElement  = kAudioObjectPropertyElementMain;
-        const auto status = native_ops_.remove_listener(native_ops_.context,
-            kAudioObjectSystemObject, def_prop, default_output_changed_listener,
-            listener_context_.get());
-        if (status == noErr) default_output_listener_installed_ = false;
-        else runtime::log_warn("CoreAudio: default listener removal failed ({})", status);
+        const auto status =
+            native_ops_.remove_listener(native_ops_.context, kAudioObjectSystemObject, def_prop,
+                                        default_output_changed_listener, listener_context_.get());
+        if (status == noErr)
+            default_output_listener_installed_ = false;
+        else
+            runtime::log_warn("CoreAudio: default listener removal failed ({})", status);
     }
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
     workgroup_changes_quiesced_ = true;
@@ -753,7 +771,7 @@ void CoreAudioDevice::close() {
     const auto result = close_checked();
     if (!result.complete())
         runtime::log_error("CoreAudio: close retained native ownership (stage {}, status {})",
-            static_cast<int>(result.stage), result.status);
+                           static_cast<int>(result.stage), result.status);
 }
 
 CoreAudioTeardownResult CoreAudioDevice::close_checked() {
@@ -767,7 +785,8 @@ CoreAudioTeardownResult CoreAudioDevice::close_locked() {
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
     retire_render_context_locked();
     callback_ = nullptr;
-    if (timing_listener_context_) timing_listener_context_->detach_and_wait();
+    if (timing_listener_context_)
+        timing_listener_context_->detach_and_wait();
 
     auto& pending = *retirement_;
     pending.ops = native_ops_;
@@ -775,18 +794,23 @@ CoreAudioTeardownResult CoreAudioDevice::close_locked() {
     pending.running = is_running_;
     pending.initialized = unit_initialized_;
     pending.listeners = {{
-        {default_output_listener_installed_, kAudioObjectSystemObject,
+        {default_output_listener_installed_,
+         kAudioObjectSystemObject,
          {kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal,
-          kAudioObjectPropertyElementMain}, default_output_changed_listener,
+          kAudioObjectPropertyElementMain},
+         default_output_changed_listener,
          listener_context_.get()},
-        {overload_listener_installed_, overload_listener_device_id_,
+        {overload_listener_installed_,
+         overload_listener_device_id_,
          {kAudioDeviceProcessorOverload, kAudioObjectPropertyScopeGlobal,
-          kAudioObjectPropertyElementMain}, overload_listener, listener_context_.get()},
+          kAudioObjectPropertyElementMain},
+         overload_listener,
+         listener_context_.get()},
     }};
     for (std::size_t i = 0; i < kTimingPropertyCount; ++i) {
         pending.listeners[i + 2] = {timing_listener_installed_[i], device_id_,
-            timing_property_addresses_[i], audio_io_timing_changed_listener,
-            timing_listener_context_.get()};
+                                    timing_property_addresses_[i], audio_io_timing_changed_listener,
+                                    timing_listener_context_.get()};
     }
     const auto result = retire_native(pending);
     for (std::size_t i = 0; i < kTimingPropertyCount; ++i)
@@ -796,7 +820,8 @@ CoreAudioTeardownResult CoreAudioDevice::close_locked() {
     unit_initialized_ = pending.initialized;
     default_output_listener_installed_ = pending.listeners[0].installed;
     overload_listener_installed_ = pending.listeners[1].installed;
-    if (!result.complete()) return result;
+    if (!result.complete())
+        return result;
 
     workgroup_reference_.reset();
     fallback_priority_configured_.store(false, std::memory_order_relaxed);
@@ -823,7 +848,7 @@ bool CoreAudioDevice::install_render_context_locked() {
     auto context = std::make_unique<CoreAudioCallbackContext>(this);
     const AURenderCallbackStruct callback{render_callback, context.get()};
     const auto status = native_ops_.set_callback(native_ops_.context, audio_unit_,
-        input_enabled_ && !output_enabled_, callback);
+                                                 input_enabled_ && !output_enabled_, callback);
     if (status != noErr) {
         // Native rejection need not prove the callback was never observed.
         retain_closed_context(std::move(context));
@@ -839,7 +864,8 @@ bool CoreAudioDevice::start(AudioCallback callback) {
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
     if (!is_open_ || is_running_ || !unit_initialized_ || workgroup_changes_quiesced_)
         return false;
-    if (!install_render_context_locked()) return false;
+    if (!install_render_context_locked())
+        return false;
     callback_ = std::move(callback);
     sample_position_ = 0;
     fallback_priority_configured_.store(false, std::memory_order_release);
@@ -884,8 +910,9 @@ void CoreAudioDevice::stop() {
 
 void CoreAudioDevice::quarantine_native_ownership() noexcept {
     if (!retirement_ || (!retirement_->unit &&
-        std::none_of(retirement_->listeners.begin(), retirement_->listeners.end(),
-                     [](const auto& listener) { return listener.installed; }))) return;
+                         std::none_of(retirement_->listeners.begin(), retirement_->listeners.end(),
+                                      [](const auto& listener) { return listener.installed; })))
+        return;
     std::lock_guard<std::mutex> lock(retirement_mutex());
     retirement_->next = retired_native_head();
     retired_native_head() = retirement_.release();
@@ -1066,8 +1093,7 @@ OSStatus CoreAudioDevice::overload_listener(
 // ── CoreAudioSystem ────────────────────────────────────────────────────────
 
 CoreAudioSystem::CoreAudioSystem()
-    : native_ops_(native_operations()),
-      retirement_(std::make_unique<CoreAudioNativeRetirement>()),
+    : native_ops_(native_operations()), retirement_(std::make_unique<CoreAudioNativeRetirement>()),
       listener_context_(std::make_unique<CoreAudioCallbackContext>(this)) {}
 
 CoreAudioSystem::~CoreAudioSystem() {
@@ -1075,15 +1101,24 @@ CoreAudioSystem::~CoreAudioSystem() {
     auto& pending = *retirement_;
     pending.ops = native_ops_;
     pending.listeners = {{
-        {listener_installed_, kAudioObjectSystemObject,
+        {listener_installed_,
+         kAudioObjectSystemObject,
          {kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal,
-          kAudioObjectPropertyElementMain}, device_list_changed, listener_context_.get()},
-        {default_output_listener_installed_, kAudioObjectSystemObject,
+          kAudioObjectPropertyElementMain},
+         device_list_changed,
+         listener_context_.get()},
+        {default_output_listener_installed_,
+         kAudioObjectSystemObject,
          {kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal,
-          kAudioObjectPropertyElementMain}, default_device_changed, listener_context_.get()},
-        {default_input_listener_installed_, kAudioObjectSystemObject,
+          kAudioObjectPropertyElementMain},
+         default_device_changed,
+         listener_context_.get()},
+        {default_input_listener_installed_,
+         kAudioObjectSystemObject,
          {kAudioHardwarePropertyDefaultInputDevice, kAudioObjectPropertyScopeGlobal,
-          kAudioObjectPropertyElementMain}, default_device_changed, listener_context_.get()},
+          kAudioObjectPropertyElementMain},
+         default_device_changed,
+         listener_context_.get()},
     }};
     const auto result = retire_native(pending);
     if (!result.complete()) {
@@ -1096,23 +1131,25 @@ CoreAudioSystem::~CoreAudioSystem() {
 }
 
 namespace {
-template<class Function, class Publish>
-void replace_notification(std::mutex& mutex,
-    std::shared_ptr<CoreAudioNotificationSlot<Function>>& current,
-    std::vector<std::shared_ptr<CoreAudioNotificationSlot<Function>>>& retired,
-    Function callback, bool reentrant, void (*drain_hook)(void*), void* hook_context,
-    Publish publish_base) {
-    auto replacement = callback
-        ? std::make_shared<CoreAudioNotificationSlot<Function>>(std::move(callback)) : nullptr;
+template <class Function, class Publish>
+void replace_notification(
+    std::mutex& mutex, std::shared_ptr<CoreAudioNotificationSlot<Function>>& current,
+    std::vector<std::shared_ptr<CoreAudioNotificationSlot<Function>>>& retired, Function callback,
+    bool reentrant, void (*drain_hook)(void*), void* hook_context, Publish publish_base) {
+    auto replacement =
+        callback ? std::make_shared<CoreAudioNotificationSlot<Function>>(std::move(callback))
+                 : nullptr;
     std::vector<std::shared_ptr<CoreAudioNotificationSlot<Function>>> draining;
     {
         std::lock_guard<std::mutex> lock(mutex);
         publish_base();
-        if (current) retired.push_back(std::move(current));
+        if (current)
+            retired.push_back(std::move(current));
         current = std::move(replacement);
         // Include previously retired generations: a prior self-clear cannot
         // hide an active delivery from a later external unregister barrier.
-        for (auto& slot : retired) slot->admission.close();
+        for (auto& slot : retired)
+            slot->admission.close();
         draining = retired;
         std::erase_if(retired, [](const auto& slot) { return slot->admission.admitted() == 0; });
     }
@@ -1120,65 +1157,74 @@ void replace_notification(std::mutex& mutex,
     // itself; that supported path closes admission but cannot wait for itself
     // or another concurrently self-clearing notification.
     if (!reentrant) {
-        if (drain_hook) drain_hook(hook_context);
-        for (auto& slot : draining) slot->admission.close_and_wait();
+        if (drain_hook)
+            drain_hook(hook_context);
+        for (auto& slot : draining)
+            slot->admission.close_and_wait();
         std::lock_guard<std::mutex> lock(mutex);
         std::erase_if(retired, [](const auto& slot) { return slot->admission.admitted() == 0; });
     }
 }
 } // namespace
 
-void CoreAudioSystem::ensure_listener_registration(
-    std::size_t index, AudioObjectPropertySelector selector,
-    AudioObjectPropertyListenerProc callback) {
-    bool* installed = index == 0 ? &listener_installed_
-                    : index == 1 ? &default_output_listener_installed_
-                                 : &default_input_listener_installed_;
+void CoreAudioSystem::ensure_listener_registration(std::size_t index,
+                                                   AudioObjectPropertySelector selector,
+                                                   AudioObjectPropertyListenerProc callback) {
+    bool* installed = index == 0   ? &listener_installed_
+                      : index == 1 ? &default_output_listener_installed_
+                                   : &default_input_listener_installed_;
     {
         std::lock_guard<std::mutex> lock(callback_mutex_);
-        if (*installed || listener_registration_pending_[index]) return;
+        if (*installed || listener_registration_pending_[index])
+            return;
         listener_registration_pending_[index] = true;
     }
     const AudioObjectPropertyAddress property{selector, kAudioObjectPropertyScopeGlobal,
-                                             kAudioObjectPropertyElementMain};
+                                              kAudioObjectPropertyElementMain};
     const auto status = native_ops_.add_listener(native_ops_.context, kAudioObjectSystemObject,
-        property, callback, listener_context_.get());
+                                                 property, callback, listener_context_.get());
     {
         std::lock_guard<std::mutex> lock(callback_mutex_);
         *installed = status == noErr;
         listener_registration_pending_[index] = false;
     }
-    if (status != noErr) runtime::log_warn("CoreAudio: system listener registration failed ({})", status);
+    if (status != noErr)
+        runtime::log_warn("CoreAudio: system listener registration failed ({})", status);
 }
 
 void CoreAudioSystem::set_device_change_callback(DeviceChangeCallback cb) {
     const bool enabled = static_cast<bool>(cb);
     auto base_callback = cb;
     replace_notification(callback_mutex_, device_change_cb_, retired_device_callbacks_,
-        std::move(cb), listener_context_->entered_on_current_thread(),
-        notification_drain_hook_, notification_drain_hook_context_,
-        [this, callback = std::move(base_callback)]() mutable {
-            AudioSystem::set_device_change_callback(std::move(callback));
-        });
-    if (enabled) ensure_listener_registration(0, kAudioHardwarePropertyDevices, device_list_changed);
+                         std::move(cb), listener_context_->entered_on_current_thread(),
+                         notification_drain_hook_, notification_drain_hook_context_,
+                         [this, callback = std::move(base_callback)]() mutable {
+                             AudioSystem::set_device_change_callback(std::move(callback));
+                         });
+    if (enabled)
+        ensure_listener_registration(0, kAudioHardwarePropertyDevices, device_list_changed);
 }
 
 void CoreAudioSystem::set_default_device_change_callback(DefaultDeviceChangeCallback cb) {
     const bool enabled = static_cast<bool>(cb);
     replace_notification(callback_mutex_, default_device_change_cb_, retired_default_callbacks_,
-        std::move(cb), listener_context_->entered_on_current_thread(),
-        notification_drain_hook_, notification_drain_hook_context_, [] {});
+                         std::move(cb), listener_context_->entered_on_current_thread(),
+                         notification_drain_hook_, notification_drain_hook_context_, [] {});
     if (enabled) {
-        ensure_listener_registration(1, kAudioHardwarePropertyDefaultOutputDevice, default_device_changed);
-        ensure_listener_registration(2, kAudioHardwarePropertyDefaultInputDevice, default_device_changed);
+        ensure_listener_registration(1, kAudioHardwarePropertyDefaultOutputDevice,
+                                     default_device_changed);
+        ensure_listener_registration(2, kAudioHardwarePropertyDefaultInputDevice,
+                                     default_device_changed);
     }
 }
 
-OSStatus CoreAudioSystem::device_list_changed(
-    AudioObjectID, UInt32, const AudioObjectPropertyAddress*, void* inClientData) {
+OSStatus CoreAudioSystem::device_list_changed(AudioObjectID, UInt32,
+                                              const AudioObjectPropertyAddress*,
+                                              void* inClientData) {
     CoreAudioCallbackEntry owner_entry(static_cast<CoreAudioCallbackContext*>(inClientData));
     auto* self = static_cast<CoreAudioSystem*>(owner_entry.owner());
-    if (!self) return noErr;
+    if (!self)
+        return noErr;
     std::shared_ptr<CoreAudioNotificationSlot<DeviceChangeCallback>> slot;
     {
         std::lock_guard<std::mutex> lock(self->callback_mutex_);
@@ -1188,16 +1234,19 @@ OSStatus CoreAudioSystem::device_list_changed(
         self->notification_snapshot_hook_(self->notification_snapshot_hook_context_);
     if (slot) {
         CoreAudioCallbackEntry delivery(&slot->admission);
-        if (delivery.owner()) slot->callback();
+        if (delivery.owner())
+            slot->callback();
     }
     return noErr;
 }
 
-OSStatus CoreAudioSystem::default_device_changed(
-    AudioObjectID, UInt32 count, const AudioObjectPropertyAddress* addresses, void* inClientData) {
+OSStatus CoreAudioSystem::default_device_changed(AudioObjectID, UInt32 count,
+                                                 const AudioObjectPropertyAddress* addresses,
+                                                 void* inClientData) {
     CoreAudioCallbackEntry owner_entry(static_cast<CoreAudioCallbackContext*>(inClientData));
     auto* self = static_cast<CoreAudioSystem*>(owner_entry.owner());
-    if (!self) return noErr;
+    if (!self)
+        return noErr;
     std::shared_ptr<CoreAudioNotificationSlot<DefaultDeviceChangeCallback>> slot;
     {
         std::lock_guard<std::mutex> lock(self->callback_mutex_);
