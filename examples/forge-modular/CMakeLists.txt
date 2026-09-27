@@ -86,6 +86,7 @@ if(PULP_BUILD_TESTS)
         "${PULP_RACK_SDK_DIR_REAL}/dep/include"
         "${_fm_dir}/src"
         "${CMAKE_SOURCE_DIR}/core/signal/include"
+        "${CMAKE_SOURCE_DIR}/core/simd/include"
         "${CMAKE_SOURCE_DIR}/core/format/include"
         "${CMAKE_SOURCE_DIR}/core/audio/include"
         "${CMAKE_SOURCE_DIR}/core/state/include"
@@ -137,6 +138,7 @@ endif()
 # generators (OscillatorT::next(), AdsrT::next()) directly, so nothing links.
 target_include_directories(forge-modular PRIVATE
     "${CMAKE_SOURCE_DIR}/core/signal/include"
+    "${CMAKE_SOURCE_DIR}/core/simd/include"
     "${CMAKE_SOURCE_DIR}/core/format/include"
     "${CMAKE_SOURCE_DIR}/core/audio/include"
     "${CMAKE_SOURCE_DIR}/core/state/include"

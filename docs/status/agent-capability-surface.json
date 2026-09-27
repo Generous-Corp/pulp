@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 92,
+  "inventory_version": 93,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 496,
-    "reviewed_headers": 209,
-    "legacy_unreviewed_headers": 287,
+    "reviewed_headers": 213,
+    "legacy_unreviewed_headers": 283,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 117,
       "capability_support": 44,
-      "infrastructure": 46,
-      "legacy_unreviewed": 287,
+      "infrastructure": 50,
+      "legacy_unreviewed": 283,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 121,
-        "legacy_unreviewed_headers": 152,
+        "reviewed_headers": 125,
+        "legacy_unreviewed_headers": 148,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -2977,7 +2977,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fast_math.hpp",
-      "fingerprint": "sha256:6fb9907ba6984a2b76af66bd3a8f9a4e3008f4f0f29526beb6fbed64cafa6400",
+      "fingerprint": "sha256:0819835609a2b5287293638d869edac03e2e9d916d90ca98bb77e5b94289e9be",
       "include": "pulp/signal/fast_math.hpp",
       "disposition": "infrastructure",
       "capability_keys": [],
@@ -3188,11 +3188,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fir_filter.hpp",
-      "fingerprint": "sha256:0b5b3413b8a1e91a3b0adc26f1bc1fb153e24416b622e9e5e003ef8cc9989188",
+      "fingerprint": "sha256:1f3e4bda478177961e284380af65de670de421902e114be6ef55820dead438b7",
       "include": "pulp/signal/fir_filter.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "General FIR filter over a linear sample history whose outputs are pulp::simd dot and correlate calls. A bounded DSP primitive a processor drives from its own process(); its coefficient generators and taps are documented in the signal guide, and it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
@@ -3844,11 +3844,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/oversampling_fir.hpp",
-      "fingerprint": "sha256:fb645178bec9b3c7a66101d289471d3b723f073e9bbf1adb05035d00e65c1af8",
+      "fingerprint": "sha256:b9834233787912af899e21571b08517b4c60135e4a61f5be6e04391ac2e4831a",
       "include": "pulp/signal/oversampling_fir.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Linear-phase half-band and 2x FIR stages behind the Oversampler linear-phase lane, the drum output stage, character-delay hysteresis and the OTA cascade filter. Implementation infrastructure for those consumers rather than an advertised generator surface."
     },
     {
       "domain": "signal",
@@ -4778,20 +4778,20 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver.hpp",
-      "fingerprint": "sha256:4dae2e21eeac15b2ebfa53d2d8395c1644bb42e007105a40c2408af09bdddeb9",
+      "fingerprint": "sha256:b83e4d485420696d9598771185be0856b0fb377dd106c5d6ea76a7b5ef9e124e",
       "include": "pulp/signal/zero_latency_convolver.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Zero-latency multilevel convolution engine (direct-form head on pulp::simd correlate plus FFT partitions). Like the uniform PartitionedConvolver it is a bounded DSP primitive a plugin drives from its own process(), documented in the space-convolution guide; it makes no installed agent capability claim of its own."
     },
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/zero_latency_convolver_support.hpp",
-      "fingerprint": "sha256:e8185c57af35bcdb34ea1d5a7fc2d51336f8ccc69c46a753c2ae342dd7c4ee6e",
+      "fingerprint": "sha256:2617e8cdff61bb3899d2c2b4529339116634d86c0ec7d7f3492ae929a02cadfb",
       "include": "pulp/signal/zero_latency_convolver_support.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Design constants, schedule groups and per-cell state behind ZeroLatencyConvolverT. Support infrastructure for that engine rather than an advertised generator surface; it carries no capability claim of its own."
     },
     {
       "domain": "timebase",
