@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: custom-node-diagnostics
+    path: guides/custom-node-diagnostics.md
+    kind: guide
+    summary: Inspect actual graph-owned instances with bounded reports and lifecycle-safe generation handles
+
   - slug: getting-started
     path: guides/getting-started.md
     kind: guide

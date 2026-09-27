@@ -2490,3 +2490,25 @@ an asymmetric unit negotiates correctly too.
 Diagnostic: the AU slot logs `AU v2: initialized with N channels`. If that N disagrees with the
 width you are rendering, the render is silence regardless of what the status says — check it before
 trusting any AU measurement.
+
+## Querying the instance that actually runs
+
+Do not use `nodes()` and an opaque pointer as a live diagnostics shortcut. A
+shared owner keeps an object alive but cannot stop prepare/release from replacing
+its engine. Use the graph-owned custom-node diagnostic query: it tries the same
+mutation lock as lifecycle operations and retains the control-thread `Slot::live()`
+owner. Never take an RCU reader pin under that mutation lock; release may wait for
+those pins. The query is non-RT and its type-key lookup may allocate.
+
+Keep the diagnostic descriptor separate from the positional `CustomNodeType`
+aggregate. A live parameter wrapper receives its own opaque wrapper instance,
+not the original GPU instance: its inspector must unwrap the private inner
+pointer before calling the original inspector. Register against the exact alias
+and preserve the original producer identity separately. Otherwise plausible
+metadata can describe a different instance than the one producing audio.
+
+A live counter snapshot is approximate. `AudioCallerStopped` is an explicit
+caller promise, not a request to stop processing or a proof of worker drain.
+Read selected-delivery totals after joining the sole process caller and before
+release resets them; keep worker output distinct from authenticated GPU-selected
+output. See [the query contract](../../../docs/guides/custom-node-diagnostics.md).

@@ -578,50 +578,32 @@ sequence rather than one checklist. Make all four edits before running it:
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
 
-### `rederive.py` alone leaves `contract-history.json` at the protected base
+### History stores prior snapshots; the current artifacts store the new contract
 
-`agent_capability_rederive.py` prints `wrote ... contract-history.json` and then
-`reset N generated artifact(s) to the protected base`. The reset wins: the
-history file ends up matching the base, carrying **none** of the new keys, while
-the manifest and surface files do carry them.
+`agent_capability_rederive.py` first restores the generated manifest, surface and
+history from the protected base, then calls `--write`. Its output can print the
+write before the reset message because the subprocess output is flushed first;
+that display order does not mean the reset happened last.
 
-Nothing catches this. `--check` reports `fresh`, `test_agent_capability_manifest.py`
-passes all its checks, and `gates.sh` is green — the history is append-only
-evidence, not a validated input, so no gate reads it. The transaction only looks
-complete.
+`updated_history_entries()` in `agent_capability_history.py` appends the
+**previous** manifest/surface snapshot unless it is already the last entry. It
+stores the current snapshot directly only for an empty/bootstrap history. The
+new contract and header fingerprints belong in the current generated manifest
+and surface; their absence from the last history entry is not a failed write.
 
-Run `agent_capability_manifest.py --write` **after** `rederive.py`, then prove
-the history actually moved before believing the transaction is done:
+After rederive, verify the protected history is an unchanged prefix, inspect
+which prior snapshot was appended, and run `agent_capability_manifest.py --check`.
+Do not blindly call `--write` again to put the current fingerprint in history:
+that second call treats the just-generated artifacts as previous material and
+adds an unnecessary current snapshot. A one-entry delta is expected when the
+protected base's own snapshot was not already recorded, but check the material
+rather than prescribing a count independently of the starting history.
 
-```sh
-git diff --stat HEAD -- tools/agent-capabilities/contract-history.json   # must be non-empty
-grep -c "<your.new-key>" tools/agent-capabilities/contract-history.json  # must be >= 1
-```
-
-Use an already-published key as the control for that grep — a brand-new key from
-the previous transaction returns 1, so a 0 on yours is a real absence rather
-than a broken pattern.
-
-Whether `rederive.py` appends depends on the state it starts from, so **measure
-the append rather than following either rule blindly**. Starting from a tree
-whose four generated artifacts already sit at the protected base — which is
-where the reset-and-regenerate-once recovery leaves you — `rederive.py` alone
-bumps `SURFACE_INVENTORY_VERSION`, appends exactly one entry, and `--check`
-reports `fresh`; adding `--write` after it appends a *second* entry for one
-logical change and the append-only check rejects it. Starting from a tree that
-already carries a `--write` from earlier in the branch, the reset described
-above wins and the trailing `--write` is what moves the history.
-
-So the invariant to hold is the count, not the command sequence: after
-regenerating, compare entry counts against the protected base and require a
-delta of exactly 1, then stop. Run `--write` only if that delta is 0.
-
-`rederive.py` also refuses outright while a merge is in progress when the
-incoming commit is not the protected base, because the base resolver would step
-back to the merge base and derive a stale counter. That is why the conflict
-sequence commits the merge before re-deriving — a version bump staged into the
-merge commit itself is rejected as `inventory_version changed without a surface
-change`, since the surface document has not been regenerated yet.
+`rederive.py` refuses while a merge is in progress when the incoming commit is
+not the protected base. Commit the merge before deriving counters so the base
+resolver cannot silently compare against an older merge base. The checker's
+protected-base prefix and evolution rules remain authoritative; never repair
+history by rewriting or deleting protected entries.
 
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 
@@ -1493,3 +1475,14 @@ proof and runtime admission are the authority; capability rows and inspector
 examples are projections. Keep unsupported latency, state-size, history, and
 format projections explicit until their contracts and independent proofs exist.
 Do not use vestigial flags or create a second DSP registry.
+
+## Graph diagnostics are runtime inspection
+
+A graph-owned custom-node diagnostics query can change a catalog-bound
+`signal_graph_runtime.hpp` fingerprint without changing sample-region authoring
+semantics. Refresh every existing binding to that header, but do not advertise
+instance counters, availability, generation handles or provider reports as new
+design-time capabilities. The sibling diagnostics descriptor is a runtime
+inspection contract. Its new header follows the host directory install/Doxygen
+parity rules; do not expand the deliberately closed sample-region header list
+merely to force runtime diagnostics into the design-time catalog.
