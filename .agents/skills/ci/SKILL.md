@@ -1969,6 +1969,23 @@ perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
 dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
 label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
 
+## PR gate settle window (`PULP_PR_GATE_SETTLE_SECONDS`, default off)
+
+A `pr-gate-settle` job in build.yml can hold the PR native matrix behind a
+hosted sleep so a rapid follow-up push cancels the run before a gate VM is
+claimed. Watch out for:
+
+- **A `needs` entry you never read must be paired with a status function.**
+  `build` needs `pr-gate-settle` but gates on `!cancelled()` and never reads
+  its result; without the status function a skipped settle (the default)
+  would skip the whole native matrix, including the required `macos` leg.
+- **pull_request only.** Shipyard validates PRs through `workflow_dispatch`,
+  which never waits; neither `macos` bootstrap depends on the job either.
+- **A new required-gate latency, not a free win.** Every native PR run pays
+  the value minus ~30 s of preamble. Pick it from the measured gap between
+  consecutive pushes that cancelled a claimed VM, not from intuition. Details:
+  `docs/guides/local-ci.md`, "The PR gate settle window is default off".
+
 ## A dead lane is only visible as queue age — never as a missing runner
 
 `.github/workflows/runner-health-check.yml` sweeps every 30 min from
@@ -2127,6 +2144,18 @@ array containing bracket characters is conclusive:
 ```bash
 ghapp api repos/Generous-Corp/pulp/actions/runs/<RUN>/jobs --jq '.jobs[]|{name,status,labels}'
 ```
+
+### Gotcha: release class labels are opt-in, and enabling them early strands releases
+
+`PULP_RELEASE_CLASS_TOKENS` (exactly `1`/`true`) makes release-cli's darwin legs
+and `sign-and-release.yml` append `pulp-release-tagged`, and
+`release-path-pr-gate.yml` append `pulp-release-pr-gate`, to a self-hosted
+selector (dropping `pulp-gate-fast`, as `build.yml` does for its event classes).
+Unset is byte-identical routing; any other value is ignored with a `::notice::`.
+Enable it only once tartci's hosts register those classes: a class-labelled job
+with no serving registration queues forever (see the next gotcha). Unsetting it
+is the rollback. The single implementation is
+`resolve_release_runners.py --apply-class-label`.
 
 ### Gotcha: a lane pointed at a label NO runner carries is silent — and looks exactly like saturation
 
@@ -4156,8 +4185,8 @@ belt for any un-baked runner.
 `release-cli.yml`'s macOS matrix ships TWO slices: `darwin-arm64` (routed through
 `resolve-macos-runner`) and `darwin-x64`, which **cross-compiles on an
 Apple-Silicon runner** via the `macos-15-xcompile` sentinel. Its selector
-priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (the
-dedicated `pulp-build-vm-release` Tart pool), the legacy
+priority is the per-leg override, `PULP_RELEASE_MACOS_RUNS_ON_JSON` (currently
+the base gate labels, ridden opportunistically by idle gate runners), the legacy
 `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`, then hosted `macos-15`. It builds with
 `-DCMAKE_OSX_ARCHITECTURES=x86_64` plus
 `-DPULP_RUST_CLI_TARGET=x86_64-apple-darwin`, and smoke-tests the thin binary
@@ -4183,7 +4212,10 @@ down this list before touching build code:
    host budget fits exactly one, so `release-cli`'s `darwin-arm64` leg cannot run
    alongside anything else that wants that VM. Anything that *waits* on another
    workflow while holding it deadlocks the release outright.
-2. **Tagged releases and the release-path PR gate need distinct runner classes.**
+2. **Tagged releases and the release-path PR gate need distinct runner classes**
+   (design intent; today `PULP_RELEASE_MACOS_RUNS_ON_JSON` holds the base gate
+   labels, so both ride idle gate runners and the static audit reports them
+   `OPPORTUNISTIC` via the lane's `opportunistic_service` declaration).
    `release-cli.yml` and `sign-and-release.yml` use
    `PULP_RELEASE_MACOS_RUNS_ON_JSON` and the exclusive
    `pulp-release-tagged` label. `release-path-pr-gate.yml` prefers
@@ -4681,6 +4713,20 @@ session. Reap a stale local pile by hand with `shipyard ship-state list` →
 OPEN one). Full design: pulp
 `planning/2026-06-30-ship-queue-resilience-design.md`.
 
+### Do not refresh a `BEHIND` PR — the merge queue validates the merge itself
+
+`main` lands through the merge queue, which builds and validates each merge
+result, and `build.yml` cancels a PR's in-flight run whenever its ref moves. So
+`update-branch`, or merging `origin/main` into a PR, only restarts the ~25-40
+minute required `macos` gate: 663 of 1175 cancelled gate-minutes in one 48h
+window were runs cancelled by exactly that. `BEHIND` is not a blocker here.
+Refresh a PR only to resolve a real conflict (`mergeable: CONFLICTING`) or to
+clear a failing required check; otherwise enqueue it as it is.
+`.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`,
+so Shipyard's `ghapp` branch-refresh guard refuses a pointless App-authenticated
+refresh. A local `git merge origin/main && git push` bypasses that guard, so the
+rule is yours to keep there.
+
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
 An armed auto-merge is a backstop only if it is still armed. Two silent failures
@@ -4690,8 +4736,8 @@ on 2026-08-16 across two independent sessions:
 1. **Clearing `BEHIND` disarms auto-merge.** `gh pr update-branch` on a PR with
    auto-merge armed leaves it `UNARMED` — observed on #7565, #7573, #7556, and
    again on #7572, #7569, #7557. The treadmill this repo already has (strict
-   up-to-date protection, main advancing faster than the ~30-min gate) makes
-   `update-branch` routine, so this fires often. It turns a delay into a trap: an
+   up-to-date protection, main advancing faster than the ~30-min gate) used to
+   make `update-branch` routine, so this fired often. It turns a delay into a trap: an
    agent walks away believing the PR lands on green, and it never does — sitting
    green and unmerged with no failing signal to attract attention.
 2. **The obvious remedy also fails silently.** `update-branch` leaves the PR at

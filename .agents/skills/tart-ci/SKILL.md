@@ -74,8 +74,9 @@ Fields: `base`, `disk_gb`, `auto_login`, `[toolchain].xcode` (omit → no Xcode 
 
 ## Intel (x86_64) cross-build lane — no native Intel hardware needed
 Pulp's required `darwin-x64` release leg **cross-compiles on Apple Silicon and
-runs under Rosetta 2**. It prefers the dedicated `pulp-build-vm-release` Tart
-pool through `PULP_RELEASE_MACOS_RUNS_ON_JSON`; the native Intel Mac Mini stays
+runs under Rosetta 2**. It routes through `PULP_RELEASE_MACOS_RUNS_ON_JSON`,
+currently the base gate labels (served opportunistically by idle gate runners;
+the dedicated `pulp-build-vm-release` pool is unused); the native Intel Mac Mini stays
 in the separate advisory/nightly portability lane. The same cross-build recipe
 is available interactively when you need an exact local proof.
 

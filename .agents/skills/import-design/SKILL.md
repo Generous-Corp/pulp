@@ -3916,10 +3916,16 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
 - **Real-browser cases live in `*.integration.test.mjs` files, and they run
   concurrently.** The ctest `pulp-browser-capture-node-integration` is
   `RUN_SERIAL` (a CDP screenshot once crossed its 20 s deadline while unrelated
-  ctest work shared the VM) and runs every `*.integration.test.mjs` file under
-  `node --test --test-concurrency=3`. Node runs the cases *within* one file in
-  sequence, so the files are the unit of parallelism: each case mostly waits on
-  a cold Chrome launch, so three files overlap well inside the serial slot. Add
+  ctest work shared the VM) and runs every `*.integration.test.mjs` file through
+  `browser_capture/run_integration.mjs`, which calls `node --test` with a file
+  concurrency of 3 on a machine with 6 or more cores and 1 below that. Node runs
+  the cases *within* one file in sequence, so the files are the unit of
+  parallelism: each case mostly waits on a cold Chrome launch, so three files
+  overlap well inside the serial slot on a large VM. On m1's 3-vCPU gate VM a
+  fixed width of 3 made every capture time out (`stalled=Page.captureScreenshot`)
+  and failed every merge group that landed there, while m3 and m5 passed. The
+  width is read when the suite runs (`TARTCI_GUEST_CORES`, else
+  `os.availableParallelism()`), never at configure time. Add
   a new real-browser case to the file whose theme it shares (capture,
   interactions, frame fitting) and keep the three roughly balanced by runtime;
   a new integration file is picked up by the glob and excluded from the unit
