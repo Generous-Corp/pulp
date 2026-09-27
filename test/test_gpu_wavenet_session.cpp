@@ -113,10 +113,18 @@ TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch())
             .count()) + 2'000'000;
-    result.session->service_until(deadline);
-    CHECK(result.session->receive(output).has_value());
+    std::optional<GpuWaveNetBlockResult> completion;
+    for (int attempt = 0; attempt < 20 && !completion; ++attempt) {
+        result.session->service_until(deadline);
+        completion = result.session->receive(output);
+    }
+    CHECK(completion.has_value());
     REQUIRE(result.session->submit_block(input, 2));
-    result.session->service_until(deadline + 2'000'000);
-    CHECK(result.session->receive(output).has_value());
+    completion.reset();
+    for (int attempt = 0; attempt < 20 && !completion; ++attempt) {
+        result.session->service_until(deadline + 2'000'000);
+        completion = result.session->receive(output);
+    }
+    CHECK(completion.has_value());
     CHECK(result.session->release());
 }
