@@ -43,9 +43,17 @@ GOVERNED_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # The build-dir lock re-executes this script as the child of the lock holder;
 # that child is marked with a private variable (unset at once, so it never leaks
 # to a nested build) and skips straight to lease admission.
+#
+# Both are POSIX-only, like the CMake-side check. Under Git Bash on Windows a
+# native python3 cannot re-execute this script: its `bash` can resolve to WSL,
+# and the POSIX paths this script sees mean nothing to it.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) GOVERNED_POSIX_HOST=0 ;;
+  *) GOVERNED_POSIX_HOST=1 ;;
+esac
 if [ "${_PULP_GOVERNED_BUILD_LOCKED:-}" = "1" ]; then
   unset _PULP_GOVERNED_BUILD_LOCKED
-elif [ "${1:-}" != "--probe-jobs" ]; then
+elif [ "${1:-}" != "--probe-jobs" ] && [ "$GOVERNED_POSIX_HOST" = "1" ]; then
   guard_py="$GOVERNED_REPO_ROOT/tools/ci/checkout_location_guard.py"
   lock_py="$GOVERNED_REPO_ROOT/tools/ci/build_dir_lock.py"
   if ! command -v python3 >/dev/null 2>&1; then

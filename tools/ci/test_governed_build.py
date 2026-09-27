@@ -762,6 +762,25 @@ class BuildDirLockTests(unittest.TestCase):
         r = self._build()
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_windows_bash_skips_the_lock(self) -> None:
+        # Git Bash cannot hand the build to a native python3 re-exec, so the
+        # lock is POSIX-only there, as it is in the C++ CLI.
+        winbin = self.tmp / "winbin"
+        winbin.mkdir()
+        uname = winbin / "uname"
+        uname.write_text("#!/usr/bin/env bash\necho MINGW64_NT-10.0-20348\n")
+        uname.chmod(0o755)
+        holder = self._hold()
+        try:
+            r = subprocess.run(
+                ["bash", str(SCRIPT), "cmake", "--build", str(self.build)],
+                capture_output=True, text=True, check=False, timeout=60,
+                env=self._env(PATH=f"{winbin}{os.pathsep}{self.bindir}{os.pathsep}{os.environ['PATH']}"))
+        finally:
+            self._stop(holder)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("BUILT --build", r.stdout)
+
     def test_a_locked_parent_stage_may_build_its_own_tree(self) -> None:
         r = subprocess.run(
             [sys.executable, str(SCRIPT.with_name("build_dir_lock.py")),
