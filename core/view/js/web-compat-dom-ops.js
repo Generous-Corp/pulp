@@ -218,6 +218,10 @@ if (!Element.prototype.appendChild ||
             this._textContent = aggregated;
             _processStyleElement(this);
         }
+        // `autofocus` and the dialog first-field default, once the subtree
+        // is connected and every native widget in it exists.
+        if (typeof __pulpApplyMountFocus__ === "function")
+            __pulpApplyMountFocus__(child);
         return child;
     };
     Element.prototype.appendChild.__pulp_dom_ops__ = true;
@@ -331,6 +335,9 @@ if (!Element.prototype.appendChild ||
         newChild._reapplyStylesheets();
         __pulpRegisterAutoDomEvents__(newChild);
         __pulpReplayNativeEventListeners__(newChild);
+        // Same mount-time focus pass as appendChild.
+        if (typeof __pulpApplyMountFocus__ === "function")
+            __pulpApplyMountFocus__(newChild);
         return newChild;
     };
     Element.prototype.insertBefore.__pulp_dom_ops__ = true;

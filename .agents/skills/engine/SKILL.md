@@ -508,6 +508,31 @@ cost two presses in an app whose markup already said everything the policy
 needed. When adding a hint, check whether ARIA (or another web standard)
 already expresses it.
 
+### Script focus has a native half, and mount-time behaviour has two entry points
+
+`Element.prototype.focus()` / `blur()` (`web-compat-element-events.js`) call the
+bridge's `setFocus(id)` / `clearFocus(id)`, which run `transfer_input_focus()` -
+the same blur/gain/publish protocol a pointer press uses. Updating only
+`document.activeElement` and firing a synthetic `focus` event looks right to
+script and to every JS-side test, while the `TextEditor` never gets a caret and
+the host keeps delivering keys elsewhere: the window hosts read the root's
+native focus slot, not the DOM. A focus test must therefore assert
+`TextEditor::has_focus()` / `focused_input_under_root()` and deliver text to
+whatever that slot names, never to a widget the test picked
+(`test/web-compat/test_events_focus.cpp`).
+
+Anything that must happen "when an element mounts" has TWO entry points, and a
+change to one silently misses the other. Plain DOM script mounts through
+`Element.appendChild` / `insertBefore` in `web-compat-dom-ops.js`; `@pulp/react`
+never calls those - its host config materializes widgets through the bridge
+directly and only mirrors the DOM shim's parent links. `autofocus` and the
+dialog first-field default are therefore implemented in both places:
+`__pulpApplyMountFocus__` on the DOM path, and `finalizeInitialChildren` /
+`commitMount` in `packages/pulp-react/src/host-config.ts` on the React path
+(which is also the only path that sees React's `autoFocus` prop; it is not a
+DOM attribute). React's shim `Element` does not carry `type`, so React decides
+"text field" from instance props, not from the shim.
+
 ### Web-API global registration is hybrid native+JS by design
 
 CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).

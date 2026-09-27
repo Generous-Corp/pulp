@@ -156,6 +156,103 @@ function markMaterializedTreeDirty(scopeId?: string | null): void {
         .__pulpMaterializedTreeEpoch__ = materializedTreeEpoch;
 }
 
+// ── Mount-time focus: `autoFocus` and the dialog default ─────────
+//
+// ReactDOM honours `autoFocus` by returning true from finalizeInitialChildren
+// and focusing in commitMount, which React calls once per host instance on its
+// initial mount and never on a re-render. Pulp does the same, and adds a
+// default: a mounting dialog (role="dialog" / "alertdialog", or aria-modal)
+// that contains no autoFocus element focuses its first text field. Opt out with
+// `data-pulp-autofocus="off"` on the dialog, on any DOM ancestor, or on
+// document.body for the whole app.
+//
+// Within one commit the first explicit autoFocus wins and later ones are
+// ignored. The dialog default only fills an empty slot, and an explicit
+// autoFocus mounted later in the same commit still takes precedence over it.
+type MountFocusClaim = 'none' | 'dialog' | 'autofocus';
+let mountFocusClaim: MountFocusClaim = 'none';
+
+const TEXT_FIELD_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password']);
+
+function isTruthyFlag(value: unknown): boolean {
+    return value === true || value === '' || value === 'true'
+        || value === 'autofocus';
+}
+
+function wantsAutoFocus(props: Record<string, unknown> | null | undefined): boolean {
+    if (!props) return false;
+    return isTruthyFlag(props.autoFocus) || isTruthyFlag(props.autofocus);
+}
+
+function isDialogProps(props: Record<string, unknown> | null | undefined): boolean {
+    if (!props) return false;
+    const role = props.role;
+    const modal = props['aria-modal'] ?? props.ariaModal;
+    return role === 'dialog' || role === 'alertdialog'
+        || modal === true || modal === 'true';
+}
+
+function isTextFieldInstance(instance: Instance): boolean {
+    const type = String(instance.type);
+    if (instance.props.disabled === true) return false;
+    if (type === 'TextEditor' || type === 'textarea') return true;
+    if (type !== 'input') return false;
+    return TEXT_FIELD_INPUT_TYPES.has(String(instance.props.type ?? '').toLowerCase());
+}
+
+/// Fold a completed child subtree's focus summary into its new parent.
+function noteMountFocusChild(parent: Instance, child: Instance): void {
+    if (child.autoFocusRequested || child.hasAutoFocusDescendant) {
+        parent.hasAutoFocusDescendant = true;
+    }
+    if (!parent.firstTextField) {
+        parent.firstTextField = isTextFieldInstance(child) ? child : child.firstTextField;
+    }
+}
+
+function autofocusOptedOut(instance: Instance, props: Record<string, unknown>): boolean {
+    if (props['data-pulp-autofocus'] === 'off') return true;
+    const optedOut = (node: unknown): boolean => {
+        const el = node as { getAttribute?: (name: string) => unknown } | null | undefined;
+        return !!el && typeof el.getAttribute === 'function'
+            && el.getAttribute('data-pulp-autofocus') === 'off';
+    };
+    let dom = instance._dom as Record<string, unknown> | null | undefined;
+    for (let depth = 0; dom && depth < 4096; ++depth) {
+        if (optedOut(dom)) return true;
+        dom = dom._parentElement as Record<string, unknown> | null | undefined;
+    }
+    const doc = (globalThis as Record<string, unknown>).document as
+        | { body?: unknown; documentElement?: unknown } | undefined;
+    return optedOut(doc?.body) || optedOut(doc?.documentElement);
+}
+
+function focusInstance(instance: Instance): void {
+    const dom = instance._dom as { focus?: () => void } | null | undefined;
+    if (dom && typeof dom.focus === 'function') {
+        // The web-compat Element moves native focus (setFocus) and keeps
+        // document.activeElement and the focus event in step.
+        dom.focus();
+        return;
+    }
+    call('setFocus', instance.id);
+}
+
+function commitMountFocus(instance: Instance, props: Record<string, unknown>): void {
+    if (wantsAutoFocus(props)) {
+        if (mountFocusClaim === 'autofocus') return;
+        mountFocusClaim = 'autofocus';
+        focusInstance(instance);
+        return;
+    }
+    if (!isDialogProps(props) || mountFocusClaim !== 'none') return;
+    if (instance.hasAutoFocusDescendant || autofocusOptedOut(instance, props)) return;
+    const field = instance.firstTextField;
+    if (!field) return;
+    mountFocusClaim = 'dialog';
+    focusInstance(field);
+}
+
 let _hc_count = 0;
 function call(name: string, ...args: unknown[]): unknown {
     // A materialized browser document may legitimately define globals such as
@@ -793,6 +890,7 @@ export const PulpHostConfig: HostConfig<
             _dom: domShim,
             textTargetId: String(type) === 'button'
                 ? id + '__text' : undefined,
+            autoFocusRequested: wantsAutoFocus(props as Record<string, unknown>),
         };
     },
 
@@ -842,13 +940,19 @@ export const PulpHostConfig: HostConfig<
     appendInitialChild(parentInstance, child) {
         markMaterializedTreeDirty(parentInstance.id);
         markMaterializedTreeDirty(child.id);
+        noteMountFocusChild(parentInstance, child);
         attach(parentInstance, child);
     },
 
-    finalizeInitialChildren(_instance, _type, _props, _rootContainer, _hostContext): boolean {
-        // Return false — we don't need a commitMount callback. All prop
-        // application happens in attach() during the append.
-        return false;
+    finalizeInitialChildren(_instance, _type, props, _rootContainer, _hostContext): boolean {
+        // All prop application happens in attach() during the append. A
+        // commitMount callback is requested only for mount-time focus.
+        const p = props as Record<string, unknown>;
+        return wantsAutoFocus(p) || isDialogProps(p);
+    },
+
+    commitMount(instance, _type, newProps, _internalHandle) {
+        commitMountFocus(instance, newProps as Record<string, unknown>);
     },
 
     // ── Mutation: append / insert / remove ──────────────────────────
@@ -994,7 +1098,10 @@ export const PulpHostConfig: HostConfig<
     },
 
     // ── Per-commit flush ───────────────────────────────────────────
-    prepareForCommit(_container) { return null; },
+    prepareForCommit(_container) {
+        mountFocusClaim = 'none';
+        return null;
+    },
     resetAfterCommit(_container) {
         // Materialized imports may install renderer-neutral Chromium evidence
         // (captured text line boxes today, with room for other stable metadata

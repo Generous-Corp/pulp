@@ -117,10 +117,14 @@ These entries are implemented by the current DOM-lite runtime:
 - **`html/dialog`** — `el.show()` / `el.showModal()` / `el.close(rv)`
   methods + `el.returnValue` / `el.open` getters + 'close' event.
   `showModal()` degrades to `show()` (no modal-trap yet); ::backdrop
-  remains paint-side roadmap.
+  remains paint-side roadmap. Opening a connected dialog focuses its first
+  `autofocus` descendant, else its first text field
+  (`data-pulp-autofocus="off"` opts out).
 - **`html/details`** — `el.open` setter toggles the attribute,
   re-applies stylesheets, dispatches a `toggle` event.
-- **`html/label`** — `<label for="x">` click routing toggles
+- **`html/label`** — `<label for="x">` click routing focuses the labeled
+  element through `Element.focus()` (native keyboard focus via the
+  `setFocus` bridge function), toggles
   checkbox/radio inputs and dispatches `input`. Installed in both
   `_ensureNative` and `setAttribute('for', ...)` to cover the
   React-style commit path that bypasses JS via `__domAppend`.
