@@ -986,19 +986,49 @@ class DeclarationTests(unittest.TestCase):
         self.assertIn("tools/scripts/queue_batch_attribute.py", command)
         self.assertIn("--certify", command)
 
-    def test_the_declared_command_exists_and_runs(self) -> None:
+    def test_the_declared_script_exists(self) -> None:
         root = pathlib.Path(__file__).resolve().parents[2]
-        command = self.config()["queue"]["attribution"]["command"]
-        script = next(part for part in command if part.endswith(".py"))
-        self.assertTrue((root / script).is_file(), f"{script} is declared but missing")
-        # The guard appends --repo/--pr/--run-id to this argv, so the script must
-        # accept all three alongside whatever the declaration already carries.
-        completed = subprocess.run(
-            [*command, "--help"], cwd=root, capture_output=True, text=True
+        script = next(
+            part for part in self.config()["queue"]["attribution"]["command"]
+            if part.endswith(".py")
         )
-        self.assertEqual(completed.returncode, 0)
-        for flag in ("--repo", "--pr", "--run-id", "--certify"):
-            self.assertIn(flag, completed.stdout)
+        self.assertTrue((root / script).is_file(), f"{script} is declared but missing")
+
+    def test_the_declared_argv_plus_the_guard_s_own_yields_a_verdict(self) -> None:
+        """The exact argv the guard builds must parse and produce a verdict.
+
+        Asserted by running it, not by looking for the flags in `--help`: the
+        module docstring names them too, so a help-text search passes even after
+        an option is deleted. This drops the interpreter and script path and
+        replays the rest of the declaration in process, so it exercises the whole
+        argv the guard assembles without a network call.
+        """
+        declared = self.config()["queue"]["attribution"]["command"]
+        extra = [
+            part
+            for part in declared[1:]
+            if not part.endswith(".py") and not part.endswith("python3")
+        ]
+        argv = [
+            *extra,
+            "--repo",
+            "Generous-Corp/pulp",
+            "--pr",
+            "8773",
+            "--run-id",
+            "35973715485",
+        ]
+        with mock.patch.object(qba, "failing_jobs", return_value=JOBS_WASI_SDK), (
+            mock.patch.object(
+                qba, "pr_files", return_value=[qba.ChangedFile(path="core/x.cpp")]
+            )
+        ), contextlib.redirect_stdout(io.StringIO()) as out:
+            code = qba.main(argv)
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["run_id"], 35973715485)
+        self.assertEqual(payload["pr"], 8773)
+        self.assertIs(payload["implicates_head"], False)
 
 
 if __name__ == "__main__":
