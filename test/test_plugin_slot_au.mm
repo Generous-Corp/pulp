@@ -490,8 +490,7 @@ TEST_CASE("AU host slot bypass passes input through unchanged",
 TEST_CASE("AU host negotiates the caller's requested channel width", "[host][au][channels]") {
     const auto uid = apple_nband_eq_unique_id();
     if (uid.empty()) {
-        SUCCEED("Apple AUNBandEQ not present; nothing to negotiate against");
-        return;
+        SKIP("Apple AUNBandEQ is not registered in this environment");
     }
 
     host::PluginInfo info;
