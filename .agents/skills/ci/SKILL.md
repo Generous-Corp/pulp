@@ -1535,6 +1535,15 @@ and after the Build step. No per-job line means the instrument failed (exit
 2), never that the cache hit; the cumulative line stays for continuity.
 Typical healthy job: misses 13–315 of ~10k calls.
 
+## Binary identity across VMs is measured, not assumed
+
+`pulp-binary-identity-shadow/v1` on merge-group `macos` jobs compares the
+group's own test-binary sha256 list with the PR head's receipt. Until
+`tools/ci/binary_identity_shadow.py report` shows n >= 20 tree-identical
+groups at ~100% identical, no design may assume two VMs link the same bytes;
+a differing path names the linker input to normalise (embedded path, UUID,
+timestamp) before any per-binary reuse is proposed.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`

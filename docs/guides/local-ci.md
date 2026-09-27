@@ -822,6 +822,16 @@ verdicts followed by `ran_failed`, which must be zero before a digest-keyed
 skip could be proposed (that switch-on is a decisions-contract amendment,
 not a workflow edit).
 
+After a successful merge-group build, the `macos` job also measures
+**cross-VM test-binary identity** (`pulp-binary-identity-shadow/v1`, from
+`tools/ci/binary_identity_shadow.py measure`): it hashes this build's test
+executables the way a receipt does and compares them path by path with the
+PR head's receipt when one exists, annotating identical/differing counts and
+whether the group's tree equals the head's. Per-binary receipt reuse is only
+possible if identical approaches 100% on tree-identical groups; read the
+aggregate with `binary_identity_shadow.py report --repository <o/r>`, which
+says "waiting on receipts" until 20 such groups have been compared.
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether

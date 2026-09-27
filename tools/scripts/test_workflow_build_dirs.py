@@ -385,6 +385,22 @@ class WorkflowBuildDirTests(unittest.TestCase):
         ctest = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
         self.assertNotIn("flake_exoneration", str(ctest["run"]))
 
+    def test_binary_identity_shadow_measures_after_a_successful_merge_group_build(self) -> None:
+        """The identity measurement hashes the merge group's own build and
+        compares it with the PR head's receipt; it is advisory and neither the
+        build nor the test step reads anything from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Binary identity vs PR-head receipt (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.build.outcome == 'success'"):
+            self.assertIn(needle, cond)
+        run = str(step["run"])
+        self.assertIn("binary_identity_shadow.py measure", run)
+        self.assertIn('--merge-sha "$GITHUB_SHA"', run)
+        for name in ("Build", "Test (non-Windows)"):
+            self.assertNotIn("binary_identity", str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"]))
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 
