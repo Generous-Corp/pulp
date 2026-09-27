@@ -73,6 +73,16 @@ bool GpuConvolver::set_provider_policy(ProviderPolicy policy) noexcept {
     return true;
 }
 
+bool GpuConvolver::configure_trace(const GpuConvolverTraceConfig& config) noexcept {
+    if (prepared_ || config.success_stride == 0)
+        return false;
+    trial_enable_trace_ = config.enabled;
+    trial_capture_admissions_ = config.capture_admissions;
+    trial_capture_callback_timing_ = config.capture_callback_timing;
+    trial_success_stride_ = config.success_stride;
+    return true;
+}
+
 namespace detail {
 bool configure_gpu_convolver_trial(GpuConvolver& convolver,
                                    const GpuConvolverTrialConfig& config) noexcept {
@@ -396,9 +406,8 @@ std::uint32_t GpuConvolver::service_realtime_shared_io(void* self, std::uint64_t
         return detail::kRealtimeGpuServiceInactive;
     const auto result = convolver->shared_io_->session->service(now_ns);
     // A configured private trial owns the authenticated trace queue until its
-    // quiescent accessor drains it. The normal runtime path may continue to
-    // mirror records into Perfetto here, but consuming trial records would
-    // make the matched benchmark observe an empty shared path.
+    // quiescent accessor drains it. The ordinary runtime path drains here;
+    // never race a second diagnostic consumer against this SPSC queue.
     if (!convolver->trial_configured_)
         (void)convolver->shared_io_->session->drain_trace();
     return static_cast<std::uint32_t>(

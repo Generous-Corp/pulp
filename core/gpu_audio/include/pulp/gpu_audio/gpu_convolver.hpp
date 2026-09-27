@@ -13,6 +13,18 @@
 
 namespace pulp::gpu_audio {
 
+/// Opt-in diagnostics for the shared-I/O path.  The producer side records
+/// fixed-size identities and terminal dispositions into bounded SPSC queues;
+/// it never calls Perfetto, allocates, locks, or waits.  Configure this before
+/// prepare(). The transport worker owns the queue drain and the final close
+/// drains any records that remain.
+struct GpuConvolverTraceConfig {
+    bool enabled = false;
+    bool capture_admissions = false;
+    bool capture_callback_timing = false;
+    std::uint32_t success_stride = 1;
+};
+
 class GpuConvolver;
 
 namespace detail {
@@ -86,6 +98,11 @@ class GpuConvolver : public GpuAudioNode {
     ProviderPolicy provider_policy() const noexcept {
         return provider_policy_;
     }
+
+    /// Enable bounded shared-I/O tracing for the next prepare().  This is a
+    /// host-thread operation and fails after preparation. The transport worker
+    /// remains the sole live queue consumer; final close drains any remainder.
+    bool configure_trace(const GpuConvolverTraceConfig& config) noexcept;
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;

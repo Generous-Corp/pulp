@@ -30,6 +30,10 @@ struct GpuConvolutionReverbConfig {
     int resample_taps_per_phase = signal::ZeroLatencyConvolver::kResampTapsPerPhaseDefault;
     std::uint32_t ring_blocks = 8;
     bool gpu_enabled = false;
+    // Optional shared-I/O diagnostics.  Tracing remains off for a normal
+    // Forge node until this is enabled or the host has an active runtime
+    // tracing session.  The callback path only publishes fixed-size records.
+    GpuConvolverTraceConfig trace{};
 };
 
 /// Per-lane evidence.  A dual-mono IR is represented by two concrete

@@ -223,6 +223,19 @@ TEST_CASE("GpuConvolver provider policy is immutable and fail-closed",
     }
 }
 
+TEST_CASE("GpuConvolver public trace configuration is opt-in and prepare-bound",
+          "[gpu_audio][convolver][trace]") {
+    GpuConvolver node(1, 32, 48000, {1.0f});
+    REQUIRE(node.set_provider_policy(GpuConvolver::ProviderPolicy::StagedOnly));
+    CHECK_FALSE(node.configure_trace({.enabled = true, .success_stride = 0}));
+    REQUIRE(node.configure_trace({.enabled = true,
+                                  .capture_admissions = true,
+                                  .capture_callback_timing = true,
+                                  .success_stride = 2}));
+    REQUIRE(node.prepare());
+    CHECK_FALSE(node.configure_trace({.enabled = true}));
+}
+
 TEST_CASE("GpuConvolver shared realtime path follows the private opt-in",
           "[gpu_audio][convolver][realtime-path]") {
 #if PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER

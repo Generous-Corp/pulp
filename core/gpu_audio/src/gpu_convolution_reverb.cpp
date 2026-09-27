@@ -101,6 +101,8 @@ bool GpuConvolutionReverb::prepare_lanes() noexcept {
 
             lane->node = std::make_unique<GpuConvolver>(1u, config_.block_size, config_.sample_rate,
                                                         lane->ir, GpuConvolver::kLatencyBlocks);
+            if (!lane->node->configure_trace(config_.trace))
+                return false;
             if (!lane->node->set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
                 !lane->node->prepare())
                 return false;
