@@ -632,6 +632,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
     endif()
 
+    # Shadow-mode affected-test set the merge-group macos job annotates after
+    # its full ctest run (build graph + recorded header deps + ctest inventory).
+    add_test(NAME affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_affected_tests_shadow.py")
+    set_tests_properties(affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
+
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and
     # the next batch pays again. These four cover the rules that stop that.

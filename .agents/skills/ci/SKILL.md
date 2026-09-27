@@ -1466,6 +1466,17 @@ the two `scene3d-native-slice-handoff` tests, only one names the plan file in
 its ctest arguments; the other reaches it through a verifier that hardcodes the
 path, so excluding the obvious one alone leaves a permanent red.
 
+## The affected-tests shadow annotation selects nothing
+
+Merge-group `macos` jobs carry a `pulp-affected-tests-shadow/v1` notice
+(`tools/ci/affected_tests_shadow.py`): the ctest entries the Ninja graph says
+the change reached, plus `failed_outside_selection`. It is evidence for a
+future selector, read as a count that must be zero over a long window, and
+its fail-closed rules (CMake change selects all; script-driven tests are
+affected whenever a script surface changed; a changed file no edge reads
+selects all) are the contract any real selector inherits. The ctest step takes
+no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on

@@ -344,6 +344,23 @@ class WorkflowBuildDirTests(unittest.TestCase):
                 ).stdout.strip()
                 self.assertEqual(resolved, base_sha)
 
+    def test_affected_tests_shadow_runs_after_ctest_and_never_selects(self) -> None:
+        """The merge-group macOS job annotates the graph's affected-test set
+        after the full ctest run; it is advisory (continue-on-error, `|| true`)
+        and the ctest step itself takes no input from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Affected tests (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.ctest.outcome != 'skipped'"):
+            self.assertIn(needle, cond)
+        run = str(step["run"])
+        self.assertIn("affected_tests_shadow.py", run)
+        self.assertIn("--base \"$base\"", run)
+        self.assertIn("ctest-evidence/selected.json", run)
+        ctest = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
+        self.assertNotIn("affected_tests_shadow", str(ctest["run"]))
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

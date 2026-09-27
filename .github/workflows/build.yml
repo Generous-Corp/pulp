@@ -2146,6 +2146,31 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
+      # SHADOW MODE (tools/ci/affected_tests_shadow.py): after the full run,
+      # compute the tests the build graph says this merge group's change could
+      # affect and annotate two counts: how many it would have selected, and
+      # how many tests FAILED outside that set. The second must read zero over
+      # a long window before selection could ever gate anything; script-driven
+      # tests (undeclared inputs) count as affected whenever any script surface
+      # changed, and a CMake change selects everything. Nothing is skipped.
+      - name: Affected tests (shadow, merge group)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        run: |
+          base="$(git rev-parse --verify 'HEAD^1' 2>/dev/null)" || base=""
+          if [ -z "$base" ]; then
+            echo "affected-tests shadow: no verdict, merge commit has no first parent"
+            exit 0
+          fi
+          python3 tools/ci/affected_tests_shadow.py \
+            --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+            --base "$base" --head HEAD \
+            --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || true
+
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true
