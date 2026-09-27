@@ -33,16 +33,19 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
+import io
 import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from typing import Any
+from typing import Any, Iterator
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST = REPO_ROOT / "tools" / "ci" / "source_selftests.json"
@@ -422,6 +425,92 @@ def select_for_changes(
 
 
 # --------------------------------------------------------------------------
+# failures that are already on the base (local only)
+
+_FAILING_TEST = re.compile(
+    r"^(?:FAIL|ERROR): (\S+) \(([^)]+)\)\s*$"      # unittest
+    r"|^FAILED (\S+)"                               # pytest -q summary
+    r"|^FAIL: (.+)$",                               # plain FAIL: <what>
+    re.MULTILINE,
+)
+
+
+def failing_test_names(output: str) -> set[str]:
+    """Names of the individual failing tests a suite's output reports."""
+    names = set()
+    for match in _FAILING_TEST.finditer(output or ""):
+        name = match.group(2) or match.group(1) or match.group(3) or match.group(4)
+        if name:
+            names.add(name.strip())
+    return names
+
+
+def base_verdict(branch: dict[str, Any], base: dict[str, Any] | None) -> tuple[bool, str]:
+    """Whether a branch failure is fully explained by the base failing too.
+
+    Pre-existing only when the base run also failed and every failing test the
+    branch reports also fails on the base. A suite whose failures cannot be
+    named, a timeout, or a suite the base cannot run is not provably
+    pre-existing, so it keeps failing.
+    """
+    if base is None:
+        return False, "the suite does not exist on the base"
+    if base["returncode"] == 0:
+        return False, "passes on the base"
+    if branch["returncode"] is None or base["returncode"] is None:
+        return False, "timed out, so its failures cannot be compared"
+    branch_names = failing_test_names(branch.get("output", ""))
+    base_names = failing_test_names(base.get("output", ""))
+    if not branch_names:
+        return False, "its failing tests could not be named, so they cannot be compared"
+    new = sorted(branch_names - base_names)
+    if new:
+        return False, "new failures on this branch: " + ", ".join(new)
+    return True, f"{len(branch_names)} failing test(s), all failing on the base too"
+
+
+@contextlib.contextmanager
+def base_checkout(ref: str, repo: pathlib.Path = REPO_ROOT) -> Iterator[pathlib.Path]:
+    """A throwaway detached checkout of the merge-base with ``ref``."""
+    merge_base = subprocess.run(
+        ["git", "merge-base", ref, "HEAD"], cwd=repo,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    # Beside the checkout, not in a temp directory: suites that drive
+    # governed-build.sh or the root configure refuse a temporary checkout, and
+    # would then fail on the base for a reason the branch does not share.
+    holder = pathlib.Path(tempfile.mkdtemp(prefix=".source-selftests-base-", dir=repo.parent))
+    checkout = holder / "base"
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "--detach", str(checkout), merge_base],
+        cwd=repo, capture_output=True, text=True, check=True,
+    )
+    try:
+        yield checkout
+    finally:
+        subprocess.run(["git", "worktree", "remove", "--force", str(checkout)],
+                       cwd=repo, capture_output=True, text=True, check=False)
+        shutil.rmtree(holder, ignore_errors=True)
+
+
+def rerun_on_base(
+    failed: list[dict[str, Any]], entries: list[dict[str, Any]], ref: str,
+    *, jobs: int = 0, repo: pathlib.Path = REPO_ROOT,
+) -> dict[str, tuple[bool, str]]:
+    """Re-run each failed entry against the merge-base and judge it."""
+    by_name = {e["name"]: e for e in entries}
+    verdicts: dict[str, tuple[bool, str]] = {}
+    with base_checkout(ref, repo) as base:
+        runnable = [by_name[r["name"]] for r in failed
+                    if all(src.is_file() for src in entry_sources(by_name[r["name"]], base))]
+        base_results = {r["name"]: r for r in
+                        run(runnable, repo=base, jobs=jobs, stream=io.StringIO())}
+    for res in failed:
+        verdicts[res["name"]] = base_verdict(res, base_results.get(res["name"]))
+    return verdicts
+
+
+# --------------------------------------------------------------------------
 # check
 
 
@@ -613,6 +702,13 @@ def main(argv: list[str] | None = None) -> int:
         "manifest (e.g. .github/workflows/workflow-lint.yml)",
     )
     p_run.add_argument(
+        "--label-base-failures",
+        action="store_true",
+        help="re-run failed entries on the merge-base with --changed-from; a "
+        "failure whose failing tests all fail there too is reported as "
+        "pre-existing and does not fail the run",
+    )
+    p_run.add_argument(
         "--changed-from",
         metavar="BASE",
         help="run only entries a diff against BASE can plausibly break (local "
@@ -666,15 +762,31 @@ def main(argv: list[str] | None = None) -> int:
         start = time.monotonic()
         results = run(entries, jobs=args.jobs)
         failed = [r for r in results if r["returncode"] != 0]
-        for res in failed:
+        preexisting: list[str] = []
+        if failed and args.label_base_failures:
+            if not args.changed_from:
+                parser.error("--label-base-failures needs --changed-from BASE")
+            verdicts = rerun_on_base(failed, entries, args.changed_from, jobs=args.jobs)
+            for res in failed:
+                on_base, why = verdicts[res["name"]]
+                if on_base:
+                    preexisting.append(res["name"])
+                    print(f"source-selftests: PRE-EXISTING ON BASE: {res['name']} fails on "
+                          f"{args.changed_from} too — not caused by this branch ({why})",
+                          flush=True)
+                else:
+                    print(f"source-selftests: CAUSED BY THIS BRANCH: {res['name']} ({why})",
+                          flush=True)
+        caused = [r for r in failed if r["name"] not in preexisting]
+        for res in caused:
             print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
             print(res.get("output", "")[-6000:])
         print(
             f"\nsource-selftests: {len(results) - len(failed)} passed, "
-            f"{len(failed)} failed out of {len(results)} "
-            f"in {time.monotonic() - start:.1f}s"
+            f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
+            f"out of {len(results)} in {time.monotonic() - start:.1f}s"
         )
-        return 1 if failed or len(results) != len(entries) else 0
+        return 1 if caused or len(results) != len(entries) else 0
 
     repo = REPO_ROOT
     build_dir = args.build_dir.resolve()

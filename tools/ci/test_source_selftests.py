@@ -429,16 +429,16 @@ class GatesWiringTests(unittest.TestCase):
         out, argv = self._run_block(1).split("|", 1)
         self.assertEqual(out, "fail=1")
         calls = argv.splitlines()
-        self.assertEqual(calls[0], "run --changed-from origin/main")
+        self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
 
     def test_both_lanes_run_and_a_passing_pair_stays_green(self) -> None:
         out, argv = self._run_block(0).split("|", 1)
         self.assertEqual(out, "fail=0")
         calls = argv.splitlines()
         self.assertEqual(len(calls), 2, calls)
-        self.assertEqual(calls[0], "run --changed-from origin/main")
+        self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
         self.assertRegex(calls[1], r"^run --workflow \S+/\.github/workflows/workflow-lint\.yml "
-                                   r"--changed-from origin/main$")
+                                   r"--changed-from origin/main --label-base-failures$")
 
 
 class WorkflowEntriesTests(unittest.TestCase):
@@ -503,6 +503,87 @@ class WorkflowEntriesTests(unittest.TestCase):
         self.assertGreaterEqual(len(entries), 40)
         self.assertIn("tools/scripts/test_ci_throughput_workflows.py",
                       [e["name"] for e in entries])
+
+
+class BaseFailureTests(unittest.TestCase):
+    """A red main is labelled pre-existing; a branch's own new failure still fails."""
+
+    UNITTEST_A = "FAIL: test_a (suite.T.test_a)\n"
+    UNITTEST_AB = "FAIL: test_a (suite.T.test_a)\nERROR: test_b (suite.T.test_b)\n"
+
+    def test_failing_test_names_reads_unittest_pytest_and_plain_output(self) -> None:
+        self.assertEqual(lane.failing_test_names(self.UNITTEST_AB),
+                         {"suite.T.test_a", "suite.T.test_b"})
+        self.assertEqual(lane.failing_test_names("FAILED tests/x.py::test_y - boom\n"),
+                         {"tests/x.py::test_y"})
+        self.assertEqual(lane.failing_test_names("FAIL: slow output bypasses capture\n"),
+                         {"slow output bypasses capture"})
+
+    def _r(self, rc, out):
+        return {"name": "s", "returncode": rc, "output": out}
+
+    def test_same_failures_on_base_are_pre_existing(self) -> None:
+        on_base, _ = lane.base_verdict(self._r(1, self.UNITTEST_A), self._r(1, self.UNITTEST_AB))
+        self.assertTrue(on_base)
+
+    def test_a_new_failing_test_is_the_branch(self) -> None:
+        on_base, why = lane.base_verdict(self._r(1, self.UNITTEST_AB), self._r(1, self.UNITTEST_A))
+        self.assertFalse(on_base)
+        self.assertIn("suite.T.test_b", why)
+
+    def test_unprovable_cases_stay_failures(self) -> None:
+        for branch, base in (
+            (self._r(1, self.UNITTEST_A), self._r(0, "")),          # passes on base
+            (self._r(1, self.UNITTEST_A), None),                    # absent on base
+            (self._r(1, "Traceback, no names"), self._r(1, "x")),   # unnamed
+            (self._r(None, self.UNITTEST_A), self._r(1, self.UNITTEST_A)),  # timeout
+        ):
+            with self.subTest(branch=branch, base=base):
+                self.assertFalse(lane.base_verdict(branch, base)[0])
+
+    def _git(self, repo: pathlib.Path, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def _suite(self, failing: list[str]) -> str:
+        body = "import unittest\nclass T(unittest.TestCase):\n"
+        for name in ("a", "b"):
+            body += f"    def test_{name}(self):\n        self.assertTrue({name not in failing})\n"
+        return body + "unittest.main()\n"
+
+    def _repo(self, root: pathlib.Path, base_failing: list[str], head_failing: list[str]):
+        repo = root / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q", "-b", "main")
+        self._git(repo, "config", "user.email", "t@example.com")
+        self._git(repo, "config", "user.name", "t")
+        self._git(repo, "config", "commit.gpgsign", "false")
+        (repo / "suite.py").write_text(self._suite(base_failing), encoding="utf-8")
+        self._git(repo, "add", "suite.py")
+        self._git(repo, "commit", "-q", "-m", "base")
+        base = self._git(repo, "rev-parse", "HEAD")
+        (repo / "suite.py").write_text(self._suite(head_failing), encoding="utf-8")
+        (repo / "other.txt").write_text("x", encoding="utf-8")
+        self._git(repo, "add", "suite.py", "other.txt")
+        self._git(repo, "commit", "-q", "-m", "head")
+        entries = [entry("suite", ["{repo}/suite.py"])]
+        failed = [r for r in lane.run(entries, repo=repo, stream=io.StringIO())
+                  if r["returncode"] != 0]
+        self.assertEqual(len(failed), 1)
+        return lane.rerun_on_base(failed, entries, base, repo=repo)["suite"], repo
+
+    def test_a_red_base_is_labelled_and_leaves_no_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (on_base, why), repo = self._repo(pathlib.Path(tmp), ["a"], ["a"])
+            worktrees = self._git(repo, "worktree", "list")
+        self.assertTrue(on_base, why)
+        self.assertEqual(len(worktrees.splitlines()), 1, worktrees)
+
+    def test_control_a_failure_the_branch_added_still_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (on_base, why), _ = self._repo(pathlib.Path(tmp), ["a"], ["a", "b"])
+        self.assertFalse(on_base)
+        self.assertIn("test_b", why)
 
 
 if __name__ == "__main__":
