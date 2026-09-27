@@ -164,17 +164,20 @@ TEST_CASE("WaveNet worker completion budget is shared and recomputed per pump",
     pulp::audio::BufferView<float> out(outputs.data(), 2, 2);
     path.process(path.context, in, out, 2, 0, true, 0);
     path.service(path.context, 0);
-    path.service(path.context, 0);
     CHECK(first.wait_services == 1);
     CHECK(second.wait_services == 1);
     CHECK(first.last_wait_deadline != 0);
     CHECK(first.last_wait_deadline == second.last_wait_deadline);
     const auto first_deadline = first.last_wait_deadline;
+    path.service(path.context, 0);
+    CHECK(first.wait_services == 2);
+    CHECK(second.wait_services == 2);
+    CHECK(first.last_wait_deadline == second.last_wait_deadline);
+    CHECK(first.last_wait_deadline >= first_deadline);
     path.process(path.context, in, out, 2, 1, true, 0);
     path.service(path.context, 0);
     path.service(path.context, 0);
-    CHECK(first.wait_services == 2);
-    CHECK(first.last_wait_deadline >= first_deadline);
+    CHECK(first.wait_services == 4);
 }
 TEST_CASE("WaveNet delayed completion cannot fill a later block with stale audio",
           "[gpu_audio][wavenet][realtime]") {
