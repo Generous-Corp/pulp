@@ -1,5 +1,6 @@
 #include "detail/realtime_gpu_audio_path.hpp"
 #include "detail/shared_io_trace.hpp"
+#include "detail/shared_io_stamped_bridge.hpp"
 #include "detail/wavenet_realtime_channel.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include <algorithm>
@@ -97,8 +98,9 @@ struct Harness {
     std::array<float, 2> a{}, b{}, outa{}, outb{};
     std::array<const float*, 2> inputs{a.data(), b.data()};
     std::array<float*, 2> outputs{outa.data(), outb.data()};
-    explicit Harness(std::uint32_t lead = 1, std::uint32_t count = 1, std::uint64_t wait_ns = 0)
+    explicit Harness(std::uint32_t lead = 1, std::uint32_t count = 1, std::uint64_t wait_ns = 0, bool trace = false)
         : node(shape.config(lead, count, wait_ns)), channels(count) {
+        if (trace) REQUIRE(node.configure_trace({.enabled = true, .capture_admissions = true, .capture_callback_timing = true}));
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         for (std::uint32_t ch = 0; ch < count; ++ch)
             providers.push_back(std::make_unique<Channel>(controls[ch]));
@@ -446,4 +448,122 @@ TEST_CASE("WaveNet late retirement leaves a sequence hole without resetting vali
         REQUIRE(h.callback(3) == detail::kRealtimeGpuReady);
         CHECK(h.outa[0] == 2);
     }
+}
+
+
+TEST_CASE("WaveNet owned trace closes each worker admission without inventing GPU timing", "[gpu_audio][wavenet][trace]") {
+    Harness h(1, 2, 0, true);
+    REQUIRE_FALSE(h.node.configure_trace({.enabled = false}));
+    h.callback(1); h.service(); h.service();
+    auto first = detail::WaveNetRealtimeTestAccess::last_terminal(h.node);
+    REQUIRE(first.valid());
+    CHECK(first.gpu_terminal == detail::SharedIoGpuTerminalDisposition::CompletedAccepted);
+    CHECK(first.sequence == 0);
+    CHECK_FALSE(first.has(detail::SharedIoTraceStage::Scheduled));
+    CHECK_FALSE(first.has(detail::SharedIoTraceStage::SubmitBegin));
+    CHECK_FALSE(first.gpu_elapsed_available);
+    CHECK(first.has(detail::SharedIoTraceStage::WorkerEntry));
+    CHECK(first.has(detail::SharedIoTraceStage::CompletionObserved));
+    h.callback(2); h.service();
+    REQUIRE(h.node.release());
+    auto terminal = detail::WaveNetRealtimeTestAccess::last_terminal(h.node);
+    CHECK(terminal.gpu_terminal == detail::SharedIoGpuTerminalDisposition::CancelledTeardown);
+    CHECK(terminal.sequence == 1);
+    auto stats = detail::WaveNetRealtimeTestAccess::trace_stats(h.node);
+    CHECK(stats.admissions_enqueued == 2);
+    CHECK(stats.admissions_drained == 2);
+    CHECK(stats.invalid == 0);
+    CHECK(stats.enqueued == stats.drained);
+    CHECK(stats.dropped == 0);
+    REQUIRE(h.node.release());
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).attempted == stats.attempted);
+}
+
+TEST_CASE("WaveNet partial channel rejection produces one failed terminal after retirement", "[gpu_audio][wavenet][trace]") {
+    Harness h(1, 2, 0, true);
+    h.controls[1].reject = true;
+    h.callback(1); h.service(); h.service();
+    const auto terminal = detail::WaveNetRealtimeTestAccess::last_terminal(h.node);
+    CHECK(terminal.valid());
+    CHECK(terminal.outcome == detail::SharedIoTraceOutcome::SubmissionRejected);
+    CHECK(terminal.gpu_reason == detail::SharedIoFallbackReason::SubmissionRejected);
+    auto stats = detail::WaveNetRealtimeTestAccess::trace_stats(h.node);
+    CHECK(stats.admissions_attempted == 1);
+    CHECK(stats.attempted == 1);
+    h.callback(2); h.service();
+    REQUIRE(h.node.release());
+    stats = detail::WaveNetRealtimeTestAccess::trace_stats(h.node);
+    CHECK(stats.admissions_attempted == 1);
+    CHECK(stats.invalid == 0);
+    CHECK(stats.enqueued == stats.drained);
+}
+
+TEST_CASE("WaveNet owned trace discloses callback queue loss and preserves failed release", "[gpu_audio][wavenet][trace]") {
+    Harness h(1, 1, 0, true);
+    h.controls[0].complete = false;
+    h.callback(1); h.service();
+    for (unsigned i = 0; i < detail::SharedIoTraceRecorder::capacity + 20; ++i) h.callback(2);
+    h.controls[0].release = false;
+    CHECK_FALSE(h.node.release());
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(h.node).dropped > 0);
+    h.controls[0].release = true;
+    REQUIRE(h.node.release());
+    const auto stats = detail::WaveNetRealtimeTestAccess::trace_stats(h.node);
+    CHECK(stats.dropped > 0);
+    CHECK(stats.enqueued == stats.drained);
+    CHECK(stats.admissions_enqueued == stats.admissions_drained);
+    CHECK(detail::WaveNetRealtimeTestAccess::last_terminal(h.node).gpu_terminal ==
+          detail::SharedIoGpuTerminalDisposition::CancelledTeardown);
+}
+
+
+TEST_CASE("Stamped ingress timestamps survive reuse without changing stream identity", "[gpu_audio][wavenet][trace]") {
+    using Bridge = detail::SharedIoStampedBridge;
+    Bridge bridge;
+    REQUIRE(bridge.prepare({.capacity = 3, .channels = 1, .block_size = 2,
+                           .lead_blocks = 1, .capture_callback_timing = true}, 1));
+    std::array<float, 2> input{}, output{};
+    for (std::uint64_t sequence = 0; sequence < 12; ++sequence) {
+        const std::uint64_t observed = sequence % 2 ? 100 + sequence : 0;
+        auto callback = bridge.begin_callback(input, sequence, observed);
+        (void)bridge.consume_output(callback, output);
+        REQUIRE(bridge.begin_worker_admission());
+        auto lease = bridge.acquire_input();
+        REQUIRE(lease);
+        CHECK(lease->stamp() == Bridge::Stamp{1, sequence});
+        CHECK(lease->callback_ingress_ns() == observed);
+        REQUIRE(bridge.release_input(*lease));
+        bridge.end_worker_admission();
+    }
+    bridge.suspend_delivery();
+    REQUIRE(bridge.activate_epoch(2));
+    auto callback = bridge.begin_callback(input, 12, 0);
+    (void)bridge.consume_output(callback, output);
+    REQUIRE(bridge.begin_worker_admission());
+    auto lease = bridge.acquire_input();
+    REQUIRE(lease);
+    CHECK(lease->stamp() == Bridge::Stamp{2, 12});
+    CHECK(lease->callback_ingress_ns() == 0);
+    REQUIRE(bridge.release_input(*lease));
+    bridge.end_worker_admission();
+}
+
+TEST_CASE("WaveNet trace is off by default and reprepare keeps engine but advances epoch", "[gpu_audio][wavenet][trace]") {
+    Harness off;
+    off.callback(1); off.service(); off.service();
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_engine(off.node) == 0);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_stats(off.node).attempted == 0);
+    Harness h(1, 1, 0, true);
+    h.callback(1); h.service(); h.service();
+    const auto generation = detail::WaveNetRealtimeTestAccess::last_terminal(h.node).generation;
+    const auto engine = detail::WaveNetRealtimeTestAccess::trace_engine(h.node);
+    REQUIRE(engine != 0);
+    REQUIRE(h.node.release());
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(h.controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(h.node, std::move(providers), h.sequence));
+    h.callback(2); h.service(); h.service();
+    CHECK(detail::WaveNetRealtimeTestAccess::last_terminal(h.node).generation > generation);
+    CHECK(detail::WaveNetRealtimeTestAccess::trace_engine(h.node) == engine);
+    CHECK(detail::next_shared_io_trace_engine_id() != engine);
 }

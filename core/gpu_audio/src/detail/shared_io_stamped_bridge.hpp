@@ -60,6 +60,7 @@ class SharedIoStampedBridge {
 
     class Lease {
       public:
+        std::uint64_t callback_ingress_ns() const noexcept { return callback_ingress_ns_; }
         Stamp stamp() const noexcept {
             return stamp_;
         }
@@ -72,6 +73,7 @@ class SharedIoStampedBridge {
         const void* queue_ = nullptr;
         std::uint64_t cursor_ = 0;
         Stamp stamp_;
+        std::uint64_t callback_ingress_ns_ = 0;
         std::span<const float> samples_;
     };
     struct Claim {
@@ -149,12 +151,13 @@ class SharedIoStampedBridge {
     static constexpr std::uint64_t kNoLease = std::numeric_limits<std::uint64_t>::max();
     struct Queue {
         std::vector<Stamp> stamps;
+        std::vector<std::uint64_t> callback_ingress_ns;
         std::vector<float> samples;
         alignas(64) std::atomic<std::uint64_t> read{0};
         alignas(64) std::atomic<std::uint64_t> write{0};
         std::uint64_t claimed = kNoLease; // consumer only
     };
-    Publication publish(Queue&, Stamp, std::span<const float>) noexcept;
+    Publication publish(Queue&, Stamp, std::span<const float>, std::uint64_t ingress_ns = 0) noexcept;
     std::optional<Lease> acquire(Queue&) noexcept;
     bool release(Queue&, const Lease&) noexcept;
     bool current_callback(const Callback&) const noexcept;

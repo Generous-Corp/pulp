@@ -73,6 +73,9 @@ struct SharedIoTransferCounters {
 };
 static_assert(std::is_trivially_copyable_v<SharedIoTransferCounters>);
 
+// Shared by all producer families in one linked runtime. Zero is reserved.
+std::uint64_t next_shared_io_trace_engine_id() noexcept;
+
 struct SharedIoTraceRecord {
     SharedIoTraceKind kind = SharedIoTraceKind::Terminal;
     std::uint64_t next_generation = 0;
@@ -93,6 +96,8 @@ struct SharedIoTraceRecord {
     bool output_eligible = false;
     std::uint64_t gpu_elapsed_ns = 0;
     bool gpu_elapsed_available = false;
+    // Actual callback ingress, not an intended schedule or GPU timestamp.
+    std::uint64_t callback_ingress_ns = 0;
     std::uint64_t callback_start_ns = 0;
     std::uint64_t callback_end_ns = 0;
     std::uint64_t result_visible_ns = 0;

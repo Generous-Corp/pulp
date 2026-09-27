@@ -6,6 +6,11 @@
 
 namespace pulp::gpu_audio::detail {
 
+std::uint64_t next_shared_io_trace_engine_id() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
 bool SharedIoTraceRecord::valid() const noexcept {
     if (static_cast<unsigned>(kind) > static_cast<unsigned>(SharedIoTraceKind::Recovery) ||
         generation == 0 || valid_stages >> kSharedIoTraceStageCount != 0 ||
@@ -279,6 +284,10 @@ void emit_record([[maybe_unused]] const SharedIoTraceConfig& config,
         shared_io_fallback_reason_name(r.gpu_reason), "delivery_reason",
         shared_io_fallback_reason_name(r.delivery_reason), "valid_stages", r.valid_stages,
         "gpu_work_admitted", r.gpu_work_admitted, "output_eligible", r.output_eligible,
+        "callback_ingress_ns", r.callback_ingress_ns ? static_cast<std::int64_t>(r.callback_ingress_ns) : -1,
+        "ingress_to_worker_ns", r.callback_ingress_ns && r.has(S::WorkerEntry) && r.cpu_ns[1] >= r.callback_ingress_ns
+            ? static_cast<std::int64_t>(r.cpu_ns[1] - r.callback_ingress_ns) : -1,
+        "worker_to_observed_ns", elapsed(r, S::WorkerEntry, S::CompletionObserved),
         "gpu_terminal", shared_io_gpu_terminal_name(r.gpu_terminal), "delivery",
         shared_io_delivery_name(r.delivery), "scheduled_ns",
         r.has(S::Scheduled) ? static_cast<std::int64_t>(r.cpu_ns[0]) : -1, "worker_entry_ns",

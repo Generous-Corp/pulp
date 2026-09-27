@@ -212,8 +212,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
     }
     config_ = config;
     if (config_.trace.enabled && config_.trace.engine_id == 0) {
-        static std::atomic<std::uint64_t> next_engine{1};
-        config_.trace.engine_id = next_engine.fetch_add(1, std::memory_order_relaxed);
+        config_.trace.engine_id = next_shared_io_trace_engine_id();
         if (config_.trace.engine_id == 0)
             config_.trace.enabled = false;
     }

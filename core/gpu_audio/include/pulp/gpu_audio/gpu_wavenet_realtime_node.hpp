@@ -18,6 +18,14 @@ GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept;
 /// worker; callbacks never encode, submit, wait, or call Dawn. An application may
 /// override prime_fallback/process_cpu_fallback to maintain its exact CPU shadow.
 /// This removes duplicate worker inference, not the cost of that CPU shadow.
+struct GpuWaveNetTraceConfig {
+    bool enabled = false;
+    bool capture_admissions = false;
+    bool capture_callback_timing = false;
+    std::uint32_t success_stride = 1;
+};
+#define PULP_GPU_WAVENET_TRACE_CONFIG_API 1
+
 class GpuWaveNetRealtimeNode : public GpuAudioNode {
   public:
     struct Config {
@@ -41,6 +49,9 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
+    /// Host-only, before prepare. The sole transport worker drains bounded
+    /// records; quiescent release closes the generation. No callback logging.
+    bool configure_trace(const GpuWaveNetTraceConfig&) noexcept;
     /// Stop/join callback and worker first. False retains provider owners for retry.
     bool release() noexcept;
     /// Diagnostic snapshot: true before preparation or after delivery was fenced.
