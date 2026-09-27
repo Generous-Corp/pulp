@@ -55,6 +55,7 @@ FLOOR = 2
 #   STUB_MAX_GRANT     grant `leases acquire` iff --cores <= this; unset → deny
 #   STUB_FAIL_ALL      any value → every subcommand fails (a wedged store)
 #   STUB_HOLDER_PIDS   comma-separated pids to report as lease holders
+#   STUB_FLOOR_AVAILABLE floor_available_cores to report; unset → omitted
 STUB = r"""#!/usr/bin/env bash
 [ -n "${STUB_FAIL_ALL:-}" ] && exit 3
 if [ "$1" = "host-profile" ]; then
@@ -75,7 +76,12 @@ if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
       sep=","
     done
   fi
-  printf '{"capacity":{"non_gate_available_cores":%s,' "${STUB_FREE_CORES}"
+  if [ -n "${STUB_FLOOR_AVAILABLE:-}" ]; then
+    printf '{"capacity":{"floor_available_cores":%s,"non_gate_available_cores":%s,' \
+      "${STUB_FLOOR_AVAILABLE}" "${STUB_FREE_CORES}"
+  else
+    printf '{"capacity":{"non_gate_available_cores":%s,' "${STUB_FREE_CORES}"
+  fi
   printf '"non_gate_limit_cores":12,"total_cores":26,"used_cores":12},'
   printf '"leases":[%s],"schema":2}\n' "$holders"
   exit 0
@@ -147,7 +153,7 @@ class GovernedBuildTests(unittest.TestCase):
                   "PULP_GOVERNED_TARTCI_BIN", "PULP_REAL_TARTCI_BIN",
                   "STUB_PROFILE_JOBS", "STUB_FREE_CORES", "STUB_MAX_GRANT",
                   "STUB_FAIL_ALL", "STUB_HOLDER_PIDS",
-                  "STUB_FLOOR_GRANT", "STUB_NO_FLOOR_FLAG",
+                  "STUB_FLOOR_GRANT", "STUB_NO_FLOOR_FLAG", "STUB_FLOOR_AVAILABLE",
                   "PULP_TARTCI_TASKPOLICY",
                   "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
@@ -598,6 +604,217 @@ class GovernedBuildTests(unittest.TestCase):
         r = subprocess.run(["bash", str(SCRIPT)],
                            capture_output=True, text=True, check=False)
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+
+class ProbeJobsTests(unittest.TestCase):
+    """--probe-jobs reports the share a build would get, acquiring nothing."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.bindir = Path(cls._tmp.name)
+        stub = cls.bindir / "tartci"
+        stub.write_text(STUB)
+        stub.chmod(0o755)
+        cls.acquires = cls.bindir / "acquires.log"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def _probe(self, **stub_env: str) -> str:
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("STUB_") and k not in (
+                   "PULP_TARTCI_BIN", "PULP_TARTCI_LEASES", "PULP_BUILD_JOBS")}
+        env.update({"PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+                    "PULP_GOVERNED_BUILD_MIN_JOBS": str(FLOOR)})
+        env.update(stub_env)
+        r = subprocess.run(["bash", str(SCRIPT), "--probe-jobs"], capture_output=True,
+                           text=True, check=False, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def test_free_host_reports_the_profile_share(self) -> None:
+        self.assertEqual(self._probe(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                                     STUB_FREE_CORES=str(PROFILE_JOBS)),
+                         f"jobs={PROFILE_JOBS} grant=lease")
+
+    def test_partly_busy_host_reports_what_is_free(self) -> None:
+        self.assertEqual(self._probe(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                                     STUB_FREE_CORES=str(FREE_CORES)),
+                         f"jobs={FREE_CORES} grant=partial-lease")
+
+    def test_starved_host_reports_the_floor(self) -> None:
+        self.assertEqual(self._probe(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                                     STUB_FREE_CORES="0"),
+                         f"jobs={FLOOR} grant=floor")
+
+    def test_agent_floor_capacity_counts(self) -> None:
+        self.assertEqual(self._probe(STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                                     STUB_FREE_CORES="0", STUB_FLOOR_AVAILABLE="6"),
+                         "jobs=6 grant=agent-floor")
+
+    def test_probe_acquires_nothing(self) -> None:
+        # STUB_MAX_GRANT makes any acquire succeed; a probe that acquired would
+        # still print, so assert through the stub's argv instead.
+        spy = self.bindir / "spy"
+        spy.mkdir(exist_ok=True)
+        wrapper = spy / "tartci"
+        wrapper.write_text(
+            "#!/usr/bin/env bash\n"
+            f"[ \"$1 $2\" = 'leases acquire' ] && echo acquire >> {self.acquires}\n"
+            f"exec {self.bindir / 'tartci'} \"$@\"\n")
+        wrapper.chmod(0o755)
+        self._probe(PULP_TARTCI_BIN=str(wrapper), STUB_PROFILE_JOBS="4",
+                    STUB_FREE_CORES="4", STUB_MAX_GRANT="99")
+        self.assertFalse(self.acquires.exists())
+
+    def test_no_tartci_reports_tier0(self) -> None:
+        self.assertRegex(self._probe(PULP_TARTCI_LEASES="0"), r"^jobs=[1-9][0-9]* grant=tier0$")
+
+
+@unittest.skipIf(sys.platform == "win32", "POSIX wrapper")
+class BuildDirLockTests(unittest.TestCase):
+    """A second `cmake --build` into a live tree is refused, naming its holder."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.bindir = self.tmp / "bin"
+        self.bindir.mkdir()
+        cmake = self.bindir / "cmake"
+        cmake.write_text("#!/usr/bin/env bash\n"
+                         'touch "$PULP_TEST_READY"; echo "BUILT $*"; sleep "${PULP_TEST_SLEEP:-0}"\n')
+        cmake.chmod(0o755)
+        self.build = self.tmp / "build"
+        self.ready = self.tmp / "ready"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _env(self, **extra: str) -> dict[str, str]:
+        env = {k: v for k, v in os.environ.items() if k not in (
+            "PULP_BUILD_DIR_LOCK_HELD", "PULP_BUILD_DIR_LOCK")}
+        env.update({
+            "PATH": f"{self.bindir}{os.pathsep}{os.environ['PATH']}",
+            "PULP_TARTCI_LEASES": "0",
+            "PULP_BUILD_DIR_LOCK_ROOT": str(self.tmp / "state"),
+            "PULP_TEST_READY": str(self.ready),
+        })
+        env.update(extra)
+        return env
+
+    def _build(self, **extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(SCRIPT), "cmake", "--build", str(self.build)],
+                              capture_output=True, text=True, check=False,
+                              env=self._env(**extra), timeout=60)
+
+    def _hold(self) -> subprocess.Popen:
+        proc = subprocess.Popen(["bash", str(SCRIPT), "cmake", "--build", str(self.build)],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                env=self._env(PULP_TEST_SLEEP="30"),
+                                start_new_session=True)
+        deadline = time.monotonic() + 20
+        while not self.ready.exists():
+            self.assertLess(time.monotonic(), deadline, "first build never started")
+            time.sleep(0.05)
+        self.ready.unlink()
+        return proc
+
+    @staticmethod
+    def _stop(proc: subprocess.Popen, sig: int = signal.SIGTERM) -> None:
+        # The whole build tree, as a terminal or a job runner would signal it.
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=20)
+
+    def test_control_an_uncontended_build_runs(self) -> None:
+        r = self._build()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("BUILT --build", r.stdout)
+
+    def test_concurrent_build_into_the_same_tree_is_refused(self) -> None:
+        holder = self._hold()
+        try:
+            r = self._build()
+        finally:
+            self._stop(holder)
+        self.assertEqual(r.returncode, 75, r.stderr)
+        self.assertNotIn("BUILT", r.stdout)
+        self.assertIn("is already being built", r.stderr)
+        self.assertIn("(alive)", r.stderr)
+
+    def test_a_different_tree_is_not_blocked(self) -> None:
+        holder = self._hold()
+        try:
+            r = subprocess.run(
+                ["bash", str(SCRIPT), "cmake", "--build", str(self.tmp / "other")],
+                capture_output=True, text=True, check=False, env=self._env(), timeout=60)
+        finally:
+            self._stop(holder)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_killed_build_leaves_no_stale_lock(self) -> None:
+        holder = self._hold()
+        self._stop(holder, signal.SIGKILL)
+        r = self._build()
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_locked_parent_stage_may_build_its_own_tree(self) -> None:
+        r = subprocess.run(
+            [sys.executable, str(SCRIPT.with_name("build_dir_lock.py")),
+             "--build-dir", str(self.build), "--",
+             "bash", str(SCRIPT), "cmake", "--build", str(self.build)],
+            capture_output=True, text=True, check=False, env=self._env(), timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("BUILT --build", r.stdout)
+
+
+@unittest.skipIf(sys.platform == "win32", "POSIX wrapper")
+class CheckoutLocationTests(unittest.TestCase):
+    """A checkout in a temporary directory is refused before any lease."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.checkout = self.tmp / "checkout"
+        ci = self.checkout / "tools" / "ci"
+        ci.mkdir(parents=True)
+        for name in ("governed-build.sh", "checkout_location_guard.py",
+                     "build_dir_lock.py", "record_build_metric.sh"):
+            shutil.copy2(SCRIPT.with_name(name), ci / name)
+        self.copy = ci / "governed-build.sh"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, script: Path, **extra: str) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GITHUB_ACTIONS", "PULP_ALLOW_TMP_CHECKOUT")}
+        env.update({"TMPDIR": str(self.tmp), "PULP_TARTCI_LEASES": "0"})
+        env.update(extra)
+        return subprocess.run(["bash", str(script), "sh", "-c", "echo RAN"],
+                              capture_output=True, text=True, check=False, env=env,
+                              timeout=60)
+
+    def test_control_the_real_checkout_is_allowed(self) -> None:
+        r = self._run(SCRIPT)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("RAN", r.stdout)
+
+    def test_temporary_checkout_is_refused(self) -> None:
+        r = self._run(self.copy)
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertNotIn("RAN", r.stdout)
+        self.assertIn("temporary directory", r.stderr)
+        self.assertNotIn("lease", r.stderr)
+
+    def test_override_allows_a_deliberate_temporary_checkout(self) -> None:
+        r = self._run(self.copy, PULP_ALLOW_TMP_CHECKOUT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("RAN", r.stdout)
 
 
 class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):

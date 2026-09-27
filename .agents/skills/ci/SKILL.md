@@ -730,6 +730,20 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### The pre-push coverage build skips itself on a starved host: a skip, not a pass
+
+On a host whose cores are leased to gate VMs, `governed-build.sh` pins a build at
+its `-j2` floor, and the pre-push diff-coverage build then runs for hours (m5,
+7 days to 2026-09-27: 18 sessions, 12.6 agent-hours, one push waited 12,300 s)
+for a check CI runs anyway. The hook now sets `PULP_DIFF_COVER_SKIP_WHEN_STARVED=1`;
+`local_diff_cover.sh` asks `governed-build.sh --probe-jobs` (acquires nothing) and,
+when the answer is at or below `PULP_DIFF_COVER_STARVED_MAX_JOBS` (default 2),
+exits **4** having built nothing. The hook prints `DIFF COVERAGE SKIPPED (host
+starved): NOT checked for this push` and lets the push through. Count that line;
+never read it as coverage evidence. `PULP_DIFF_COVER_IGNORE_STARVATION=1` forces the
+build, and a direct `tools/scripts/local_diff_cover.sh` or `pulp coverage diff`
+never skips.
+
 ### A PR does not re-pin `gpu-vellum-handoff.yaml` — the version bot does
 
 `docs/status/gpu-vellum-handoff.yaml` pins every referenced Pulp path to an
