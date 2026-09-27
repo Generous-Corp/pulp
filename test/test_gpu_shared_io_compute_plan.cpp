@@ -9,6 +9,7 @@
 #include <array>
 #include <cstring>
 #include <memory>
+#include <chrono>
 
 using namespace pulp::gpu_audio::detail;
 
@@ -223,6 +224,26 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     CHECK(completion->token.slot.stream_sequence == 7);
     CHECK(completion->late);
     CHECK(completion->status == SharedIoArena::CompletionStatus::RetiredSuccess);
+    REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO compute plan classifies completion after bounded wake",
+          "[gpu_audio][shared_io][p2]") {
+    FakeProvider provider;
+    SharedIoComputePlan plan;
+    REQUIRE(plan.prepare(provider,
+                         {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    const auto now = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+    auto input = plan.acquire_input(9, now + 1);
+    REQUIRE(input);
+    REQUIRE(plan.submit({input->token, now + 1}));
+    REQUIRE(plan.drain_until(now, now + 1'000'000) == 1);
+    const auto completion = plan.pop_completion();
+    REQUIRE(completion);
+    CHECK(completion->late);
     REQUIRE(plan.release());
 }
 
