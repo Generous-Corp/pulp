@@ -21,7 +21,11 @@ is off. Enable admissions and success_stride=1 for lifecycle acceptance. The
 node owns its recorder and each prepared epoch. Callback code publishes fixed
 records to bounded queues; the sole worker drains them. Release after both
 callers stop records any pending cancellation and drains before destroying the
-recorder. Failed physical release retains the recorder for retry. Never drain
+recorder. A known submission or completion failure remains the terminal reason
+if teardown drains it before the next service pass; teardown does not replace
+that cause with cancellation. A stale result retains the bridge recovery cause
+(input saturation, provider loss, or another explicit recovery request). Failed
+physical release retains the recorder for retry. Never drain
 from a second consumer or call Perfetto in the audio callback.
 
 Correlate `(upid, engine_id, generation, sequence)`. Engine IDs share an allocator
@@ -69,3 +73,14 @@ Run the physical host's normal stop/restart/destroy path, preserving its existin
 external watchdog and explicit physical device selection. A forced process exit
 cannot establish final flush or complete terminal accounting. Keep trace runs
 separate from uninstrumented performance comparisons.
+
+## Lifecycle regression evidence
+
+The deterministic node tests observe records removed by the production drain,
+then match every admission to exactly one terminal by engine, generation and
+sequence. They cover repeated fence/release, a failed physical release followed
+by retry, partial channel rejection before teardown, completion failure, and
+sequence reuse after reprepare. Recovery injection includes provider loss; it
+proves attribution at that private seam, not actual GPU device-loss recovery.
+These source tests do not replace an installed-SDK trace capture or a physical
+plugin test.

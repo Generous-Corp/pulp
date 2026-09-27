@@ -48,13 +48,14 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::unique_ptr<detail::SharedIoTraceRecorder> trace;
     detail::SharedIoTelemetry telemetry;
     detail::SharedIoTraceStats closed_trace_stats;
+    detail::SharedIoTraceDrainObserver trace_observer;
     detail::SharedIoTraceRecord trace_record;
     bool trace_pending = false;
     detail::SharedIoTraceOutcome pending_outcome = detail::SharedIoTraceOutcome::Success;
 
     void drain_trace() noexcept {
         if (trace) (void)detail::drain_shared_io_trace(*trace, telemetry.snapshot(),
-            static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity));
+            static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity), &trace_observer);
     }
     void trace_admit(const Bridge::Lease& input) noexcept {
         if (!trace) return;
@@ -79,11 +80,36 @@ struct GpuWaveNetRealtimeNode::Impl {
         (void)trace->publish_worker(trace_record);
         telemetry.record_retired(outcome == detail::SharedIoTraceOutcome::Success);
     }
+    detail::SharedIoFallbackReason recovery_trace_reason() const noexcept {
+        using Recovery = detail::SharedIoRecoveryReason;
+        using Reason = detail::SharedIoFallbackReason;
+        switch (bridge->recovery_reason()) {
+        case Recovery::InputSaturated: return Reason::InputSaturated;
+        case Recovery::ProviderFailure: return Reason::CompletionFailed;
+        case Recovery::ProviderLost: return Reason::DeviceLost;
+        case Recovery::OfflineFence: return Reason::Teardown;
+        case Recovery::None: return Reason::None;
+        case Recovery::InvalidCallback:
+        case Recovery::SequenceGap: return Reason::SequenceGap;
+        }
+        return Reason::None;
+    }
+    void close_pending_trace() noexcept {
+        // Physical drain closes ownership; it must not erase a failure already
+        // observed before teardown. No completion timestamp is inferred here.
+        if (pending_outcome != detail::SharedIoTraceOutcome::Success)
+            trace_terminal(pending_outcome, detail::SharedIoGpuTerminalDisposition::ProviderFailed,
+                pending_outcome == detail::SharedIoTraceOutcome::SubmissionRejected
+                    ? detail::SharedIoFallbackReason::SubmissionRejected
+                    : detail::SharedIoFallbackReason::CompletionFailed);
+        else
+            trace_terminal(detail::SharedIoTraceOutcome::Cancelled,
+                detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
+                detail::SharedIoFallbackReason::Teardown);
+    }
     void close_trace() noexcept {
         if (!trace) return;
-        trace_terminal(detail::SharedIoTraceOutcome::Cancelled,
-            detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
-            detail::SharedIoFallbackReason::Teardown);
+        close_pending_trace();
         // Producers are quiescent; a bounded number of drains covers all queues.
         for (int i = 0; i < 4; ++i) drain_trace();
         closed_trace_stats = trace->stats();
@@ -207,7 +233,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             } else if (bridge->delivery_epoch() != pending.epoch) {
                 trace_terminal(detail::SharedIoTraceOutcome::StaleRejected,
                     detail::SharedIoGpuTerminalDisposition::StaleRejected,
-                    detail::SharedIoFallbackReason::SequenceGap, true);
+                    recovery_trace_reason(), true);
             }
             if (!suppress_pending && bridge->delivery_epoch() == pending.epoch) {
                 const auto publication = bridge->publish_output(pending, worker_output);
@@ -429,9 +455,7 @@ bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
         if (!channel->release())
             drained = false;
     if (drained) {
-        s.trace_terminal(detail::SharedIoTraceOutcome::Cancelled,
-            detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
-            detail::SharedIoFallbackReason::Teardown);
+        s.close_pending_trace();
     }
     return drained;
 }
@@ -442,6 +466,12 @@ void GpuWaveNetRealtimeNode::delivered(void* self, std::uint64_t sequence, std::
         (void)s.bridge->complete_callback_delivery(
             s.callback, static_cast<detail::SharedIoDeliveryDisposition>(disposition), end,
             visible);
+}
+void detail::WaveNetRealtimeTestAccess::request_recovery(GpuWaveNetRealtimeNode& node, SharedIoRecoveryReason reason) noexcept {
+    node.impl_->bridge->request_recovery(reason);
+}
+void detail::WaveNetRealtimeTestAccess::observe_trace(GpuWaveNetRealtimeNode& node, SharedIoTraceDrainObserver observer) noexcept {
+    node.impl_->trace_observer = observer;
 }
 detail::SharedIoTraceStats detail::WaveNetRealtimeTestAccess::trace_stats(const GpuWaveNetRealtimeNode& node) noexcept {
     return node.impl_->trace ? node.impl_->trace->stats() : node.impl_->closed_trace_stats;

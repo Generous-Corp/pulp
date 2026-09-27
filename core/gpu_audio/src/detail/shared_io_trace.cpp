@@ -315,7 +315,7 @@ void emit_admission([[maybe_unused]] const SharedIoTraceConfig& config,
 SharedIoTraceDrainResult
 drain_shared_io_trace(SharedIoTraceRecorder& recorder,
                       [[maybe_unused]] const SharedIoTelemetrySnapshot& telemetry,
-                      std::uint32_t budget) noexcept {
+                      std::uint32_t budget, const SharedIoTraceDrainObserver* observer) noexcept {
     SharedIoTraceDrainResult result;
     result.tracing_compiled = runtime::kTracingEnabled;
     result.recording_enabled = recorder.enabled();
@@ -335,9 +335,11 @@ drain_shared_io_trace(SharedIoTraceRecorder& recorder,
         "event_time", "drain", "gpu_clock_mapped", false);
     const auto emit_terminal = [&](const SharedIoTraceRecord& record) {
         emit_record(config, record);
+        if (observer && observer->record) observer->record(observer->context, config.engine_id, record);
     };
     const auto emit_admitted = [&](const SharedIoTraceAdmission& admission) {
         emit_admission(config, admission);
+        if (observer && observer->admission) observer->admission(observer->context, config.engine_id, admission);
     };
     std::uint32_t admissions_drained = 0;
     const bool terminals_first = recorder.terminals_first_for_next_drain();

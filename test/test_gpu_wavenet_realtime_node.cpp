@@ -65,6 +65,58 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     std::uint64_t sequence_ = 0;
     bool pending_ = false;
 };
+// Observe the real sole-consumer drain, including release and reprepare drains.
+// Fixed storage keeps the observer safe even in noexcept release paths.
+struct TraceCapture {
+    struct Admission { std::uint64_t engine; detail::SharedIoTraceAdmission value; };
+    struct Record { std::uint64_t engine; detail::SharedIoTraceRecord value; };
+    std::array<Admission, 64> admissions{};
+    std::array<Record, 128> records{};
+    std::size_t admission_count = 0, record_count = 0;
+    bool overflow = false;
+    void attach(GpuWaveNetRealtimeNode& node) {
+        detail::WaveNetRealtimeTestAccess::observe_trace(node, {this,
+            [](void* context, std::uint64_t engine, const detail::SharedIoTraceRecord& record) noexcept {
+                auto& self = *static_cast<TraceCapture*>(context);
+                if (self.record_count == self.records.size()) { self.overflow = true; return; }
+                self.records[self.record_count++] = {engine, record};
+            },
+            [](void* context, std::uint64_t engine, const detail::SharedIoTraceAdmission& admission) noexcept {
+                auto& self = *static_cast<TraceCapture*>(context);
+                if (self.admission_count == self.admissions.size()) { self.overflow = true; return; }
+                self.admissions[self.admission_count++] = {engine, admission};
+            }});
+    }
+    std::size_t terminal_count() const {
+        return std::count_if(records.begin(), records.begin() + record_count, [](const auto& r) {
+            return r.value.gpu_terminal != detail::SharedIoGpuTerminalDisposition::None;
+        });
+    }
+    void require_closed() const {
+        REQUIRE_FALSE(overflow);
+        REQUIRE(admission_count > 0);
+        CHECK(terminal_count() == admission_count);
+        for (std::size_t i = 0; i < admission_count; ++i) {
+            const auto& a = admissions[i];
+            CHECK(std::count_if(admissions.begin(), admissions.begin() + admission_count, [&](const auto& other) {
+                return a.engine == other.engine && a.value.generation == other.value.generation &&
+                       a.value.sequence == other.value.sequence;
+            }) == 1);
+            CHECK(std::count_if(records.begin(), records.begin() + record_count, [&](const auto& r) {
+                return a.engine == r.engine && a.value.generation == r.value.generation &&
+                       a.value.sequence == r.value.sequence &&
+                       r.value.gpu_terminal != detail::SharedIoGpuTerminalDisposition::None;
+            }) == 1);
+        }
+        for (std::size_t i = 0; i < record_count; ++i) CHECK(records[i].value.valid());
+    }
+    const detail::SharedIoTraceRecord& only_terminal() const {
+        REQUIRE(terminal_count() == 1);
+        return std::find_if(records.begin(), records.begin() + record_count, [](const auto& r) {
+            return r.value.gpu_terminal != detail::SharedIoGpuTerminalDisposition::None;
+        })->value;
+    }
+};
 struct Shape {
     GpuWaveNetLayerDescriptor layer{.input_size = 1,
                                     .condition_size = 1,
@@ -569,4 +621,92 @@ TEST_CASE("WaveNet trace is off by default and reprepare keeps engine but advanc
     CHECK(detail::WaveNetRealtimeTestAccess::last_terminal(h.node).generation > generation);
     CHECK(detail::WaveNetRealtimeTestAccess::trace_engine(h.node) == engine);
     CHECK(detail::next_shared_io_trace_engine_id() != engine);
+}
+
+TEST_CASE("WaveNet teardown preserves drained partial submission failure", "[gpu_audio][wavenet][trace]") {
+    for (bool fence_first : {false, true}) {
+        TraceCapture capture;
+        Harness h(1, 2, 0, true);
+        capture.attach(h.node);
+        h.controls[0].complete = false;
+        h.controls[1].reject = true;
+        h.callback(1); h.service();
+        REQUIRE(capture.admission_count == 1);
+        REQUIRE(capture.terminal_count() == 0);
+        h.controls[0].release = false;
+        if (fence_first) CHECK_FALSE(h.path.fence(h.path.context));
+        else CHECK_FALSE(h.node.release());
+        CHECK(capture.terminal_count() == 0);
+        h.controls[0].release = true;
+        if (fence_first) REQUIRE(h.path.fence(h.path.context));
+        REQUIRE(h.node.release());
+        REQUIRE(h.node.release());
+        capture.require_closed();
+        const auto& terminal = capture.only_terminal();
+        CHECK(terminal.outcome == detail::SharedIoTraceOutcome::SubmissionRejected);
+        CHECK(terminal.gpu_terminal == detail::SharedIoGpuTerminalDisposition::ProviderFailed);
+        CHECK(terminal.gpu_reason == detail::SharedIoFallbackReason::SubmissionRejected);
+        CHECK_FALSE(terminal.has(detail::SharedIoTraceStage::CompletionObserved));
+    }
+}
+
+TEST_CASE("WaveNet drained records close reused sequences in separate epochs", "[gpu_audio][wavenet][trace]") {
+    TraceCapture capture;
+    Harness h(1, 1, 0, true);
+    capture.attach(h.node);
+    h.callback(1); h.service(); h.service();
+    h.callback(2); h.service();
+    REQUIRE(h.path.fence(h.path.context));
+    REQUIRE(h.node.release());
+    const auto first_generation = capture.admissions[0].value.generation;
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(h.controls[0]));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(h.node, std::move(providers), 0));
+    h.sequence = 0;
+    h.callback(3); h.service(); h.service();
+    REQUIRE(h.node.release());
+    REQUIRE(capture.admission_count == 3);
+    CHECK(capture.admissions[2].value.sequence == 0);
+    CHECK(capture.admissions[2].value.generation != first_generation);
+    CHECK(capture.admissions[2].engine == capture.admissions[0].engine);
+    capture.require_closed();
+}
+
+TEST_CASE("WaveNet drained provider failure remains terminal across repeated fence", "[gpu_audio][wavenet][trace]") {
+    TraceCapture capture;
+    Harness h(1, 1, 0, true);
+    capture.attach(h.node);
+    h.controls[0].fail = true;
+    h.callback(1); h.service(); h.service();
+    REQUIRE(h.path.fence(h.path.context));
+    REQUIRE(h.path.fence(h.path.context));
+    REQUIRE(h.node.release());
+    capture.require_closed();
+    CHECK(capture.only_terminal().gpu_reason == detail::SharedIoFallbackReason::CompletionFailed);
+}
+
+TEST_CASE("WaveNet stale terminal preserves the bridge recovery cause", "[gpu_audio][wavenet][trace]") {
+    using Recovery = detail::SharedIoRecoveryReason;
+    using Reason = detail::SharedIoFallbackReason;
+    const std::array cases{
+        std::pair{Recovery::InputSaturated, Reason::InputSaturated},
+        std::pair{Recovery::ProviderFailure, Reason::CompletionFailed},
+        std::pair{Recovery::ProviderLost, Reason::DeviceLost},
+        std::pair{Recovery::OfflineFence, Reason::Teardown},
+        std::pair{Recovery::SequenceGap, Reason::SequenceGap}};
+    for (const auto& [recovery, reason] : cases) {
+        TraceCapture capture;
+        Harness h(1, 1, 0, true);
+        capture.attach(h.node);
+        h.controls[0].complete = false;
+        h.callback(1); h.service();
+        // This tests the node's device-loss/recovery seam, not a real lost GPU.
+        detail::WaveNetRealtimeTestAccess::request_recovery(h.node, recovery);
+        h.controls[0].complete = true;
+        h.service();
+        REQUIRE(h.node.release());
+        capture.require_closed();
+        CHECK(capture.only_terminal().gpu_terminal == detail::SharedIoGpuTerminalDisposition::StaleRejected);
+        CHECK(capture.only_terminal().gpu_reason == reason);
+    }
 }

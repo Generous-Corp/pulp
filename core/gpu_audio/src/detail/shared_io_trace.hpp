@@ -268,12 +268,21 @@ struct SharedIoTraceDrainResult {
     std::uint32_t emission_attempts = 0;
 };
 
+// Private diagnostic observer. Called only by the sole drain consumer, never
+// by callback producers. Its lifetime must cover every drain, including release.
+struct SharedIoTraceDrainObserver {
+    void* context = nullptr;
+    void (*record)(void*, std::uint64_t, const SharedIoTraceRecord&) noexcept = nullptr;
+    void (*admission)(void*, std::uint64_t, const SharedIoTraceAdmission&) noexcept = nullptr;
+};
+
 // Non-RT diagnostic thread ONLY, including when the producer becomes a future
 // realtime auxiliary worker. This is the sole Perfetto edge for these records.
 // Counters are approximate cumulative snapshots; no per-block timing is
 // inferred from the independent "latest sample" atomics.
 SharedIoTraceDrainResult drain_shared_io_trace(SharedIoTraceRecorder& recorder,
                                                const SharedIoTelemetrySnapshot& telemetry,
-                                               std::uint32_t budget = 256) noexcept;
+                                               std::uint32_t budget = 256,
+                                               const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
 
 } // namespace pulp::gpu_audio::detail
