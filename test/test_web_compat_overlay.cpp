@@ -945,3 +945,24 @@ TEST_CASE("a menu mounted after its panel and owning nothing replaces it",
     )");
     REQUIRE(h.root.overlay_depth() == 1);
 }
+
+// Scripts position popovers against the window's size, so it has to be the
+// size of the surface they are in. A constant 800x600 made a menu in a larger
+// editor believe it had no room on the right. Two sizes, because a single
+// reading that happened to equal the constant would prove nothing.
+TEST_CASE("window.innerWidth and innerHeight report the live root size",
+          "[view][web-compat][window]") {
+    Harness h;
+    const auto read = [&h](const char* expr) {
+        h.eval(std::string("globalThis.__pulpWindowProbe = String(") + expr + ");");
+        const auto v = h.engine.evaluate("globalThis.__pulpWindowProbe");
+        return v.isString() ? std::string(v.getString()) : std::string("<not a string>");
+    };
+    h.root.set_bounds({0, 0, 1320, 860});
+    CHECK(read("window.innerWidth") == "1320");
+    CHECK(read("window.innerHeight") == "860");
+    // It follows a resize rather than caching the first answer.
+    h.root.set_bounds({0, 0, 990, 645});
+    CHECK(read("window.innerWidth") == "990");
+    CHECK(read("window.innerHeight") == "645");
+}

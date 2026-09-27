@@ -1,4 +1,5 @@
 #include "detail/shared_io_compute_plan.hpp"
+#include "detail/shared_io_program_session.hpp"
 #include "detail/shared_io_transport_bridge.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,6 +11,10 @@
 using namespace pulp::gpu_audio::detail;
 
 namespace {
+struct FakeLifecycleState {
+    bool program_released = false;
+};
+
 class FakeProvider final : public SharedIoArenaProvider {
     struct Slot {
         std::byte* input;
@@ -122,6 +127,7 @@ class FakeProvider final : public SharedIoArenaProvider {
     bool retired_before_program_release = false;
     CompletionStatus terminal_status = CompletionStatus::RetiredSuccess;
     std::shared_ptr<const void> lifetime_ = std::make_shared<int>(0);
+    std::shared_ptr<FakeLifecycleState> lifecycle_state = std::make_shared<FakeLifecycleState>();
     std::vector<Slot*> slots_;
 };
 
@@ -157,6 +163,7 @@ class FakePreparedProgram final : public SharedIoPreparedProgram {
         if (!allow_release)
             return false;
         expected_.program_released = true;
+        expected_.lifecycle_state->program_released = true;
         prepared = false;
         return true;
     }
@@ -187,6 +194,36 @@ TEST_CASE("shared IO compute plan keeps deadline outside slot token",
     CHECK(completion->late);
     CHECK(completion->status == SharedIoArena::CompletionStatus::RetiredSuccess);
     REQUIRE(plan.release());
+}
+
+TEST_CASE("shared IO program session owns generic provider lifecycle",
+          "[gpu_audio][shared_io][p2]") {
+    auto provider = std::make_unique<FakeProvider>();
+    const auto lifecycle_state = provider->lifecycle_state;
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    auto* control = program.get();
+    control->allow_release = true;
+
+    SharedIoProgramSession session;
+    CHECK_FALSE(
+        session.prepare({}, {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    REQUIRE(session.prepared());
+    auto input = session.acquire_input(7, 100);
+    REQUIRE(input);
+    reinterpret_cast<float*>(input->bytes.data())[0] = 2.0f;
+    REQUIRE(session.submit({input->token, 100}));
+    REQUIRE(session.service(100) == 1);
+    auto completion = session.pop_completion();
+    REQUIRE(completion);
+    auto output = session.acquire_output(*completion);
+    REQUIRE(output);
+    CHECK(reinterpret_cast<const float*>(output->bytes.data())[0] == 6.0f);
+    REQUIRE(session.release_output({output->token}));
+    output.reset();
+    REQUIRE(session.release());
+    CHECK(lifecycle_state->program_released);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",

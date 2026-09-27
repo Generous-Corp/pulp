@@ -1515,6 +1515,91 @@ TEST_CASE("a lifted sibling submenu that names its menu stacks on it",
     menu->release_overlay();
 }
 
+// An outside press across a nest. A menu and its submenu both consume their
+// outside press, so a press outside the nest must not reach the canvas behind
+// it -- but the walk used to STOP at the first consuming entry, so it closed
+// the submenu and left the menu it belonged to open. A nested entry now defers
+// that decision to the overlay it nests on.
+TEST_CASE("an outside press closes every level of a consuming nest",
+          "[view][overlay][stack][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* submenu =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    int menu_dismissed = 0, submenu_dismissed = 0;
+    menu->on_overlay_dismissed = [&] { ++menu_dismissed; };
+    submenu->on_overlay_dismissed = [&] { ++submenu_dismissed; };
+    menu->claim_overlay();
+    menu->set_overlay_consumes_outside_click(true);
+    submenu->claim_overlay(menu);
+    submenu->set_overlay_consumes_outside_click(true);
+    REQUIRE(submenu->overlay_nests_on(menu));
+
+    const auto press = pulp::view::route_press_to_active_overlay(root, {700.0f, 550.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    REQUIRE(press.consume_press);
+    CHECK(submenu_dismissed == 1);
+    CHECK(menu_dismissed == 1);
+    CHECK(root.overlay_depth() == 0);
+}
+
+TEST_CASE("a press on the menu under a consuming submenu closes only the submenu",
+          "[view][overlay][stack][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* row = add_child_at(*menu, std::make_unique<TestView>(), {0.0f, 0.0f, 200.0f, 30.0f});
+    View* submenu =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    int menu_dismissed = 0;
+    menu->on_overlay_dismissed = [&] { ++menu_dismissed; };
+    menu->claim_overlay();
+    menu->set_overlay_consumes_outside_click(true);
+    submenu->claim_overlay(menu);
+    submenu->set_overlay_consumes_outside_click(true);
+
+    // CONTROL for the deferral: a press that lands ON a lower overlay keeps
+    // the consumption rule. The consuming submenu spends it on its own close,
+    // the menu stays open, and the row is not also operated -- the same rule
+    // that stops a dialog nested on a panel from clicking through to it.
+    (void)row;
+    const auto press = pulp::view::route_press_to_active_overlay(root, {150.0f, 110.0f});
+
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::dismissed);
+    CHECK(press.consume_press);
+    CHECK(menu_dismissed == 0);
+    CHECK(root.overlay_depth() == 1);
+    CHECK(root.interaction().active_overlay == menu);
+    menu->release_overlay();
+}
+
+TEST_CASE("a press on the menu under a non-consuming submenu lands on its row",
+          "[view][overlay][stack][pointer]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    View* menu = add_child_at(root, std::make_unique<TestView>(), {100.0f, 100.0f, 200.0f, 300.0f});
+    View* row = add_child_at(*menu, std::make_unique<TestView>(), {0.0f, 0.0f, 200.0f, 30.0f});
+    View* submenu =
+        add_child_at(root, std::make_unique<TestView>(), {300.0f, 140.0f, 180.0f, 120.0f});
+    menu->claim_overlay();
+    menu->set_overlay_consumes_outside_click(true);
+    submenu->claim_overlay(menu);
+    // The menu-to-menu shape a toolkit wants: the submenu lets its outside
+    // press through, so pressing a row of the menu under it closes the
+    // submenu and operates that row in one press.
+    const auto press = pulp::view::route_press_to_active_overlay(root, {150.0f, 110.0f});
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::routed);
+    CHECK(press.target == row);
+    CHECK(root.overlay_depth() == 1);
+    CHECK(root.interaction().active_overlay == menu);
+    menu->release_overlay();
+}
+
 TEST_CASE("a lifted sibling that names nothing still dismisses the open menu",
           "[view][overlay][stack][lifted]") {
     OverlayGuard g;

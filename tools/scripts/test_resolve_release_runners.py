@@ -15,13 +15,19 @@ resolve, not silently produce a labelset nothing matches.
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from resolve_release_runners import HOSTED, SOURCES, resolve  # noqa: E402
+from resolve_release_runners import (  # noqa: E402
+    HOSTED,
+    SOURCES,
+    apply_class_label_raw,
+    resolve,
+)
 
 LEGS = (
     "darwin-arm64", "darwin-x64",
@@ -115,6 +121,53 @@ class FailLoud(unittest.TestCase):
     def test_empty_labelset_aborts(self) -> None:
         with self.assertRaises(SystemExit):
             resolve({"LINUX_ARM64": "[]"})
+
+
+GATE = '["self-hosted","macOS","ARM64","pulp-build-vm","pulp-gate-fast"]'
+
+
+class ReleaseClassLabelOptIn(unittest.TestCase):
+    """PULP_RELEASE_CLASS_TOKENS: unset is a no-op; 1/true adds the class."""
+
+    def test_unset_is_exactly_todays_routing(self) -> None:
+        env = {"DARWIN_ARM64": GATE, "DARWIN_X64": GATE, "LINUX_ARM64": LOCAL_LINUX}
+        today = {**HOSTED, "darwin-arm64": json.loads(GATE),
+                 "darwin-x64": json.loads(GATE), "linux-arm64": json.loads(LOCAL_LINUX)}
+        self.assertEqual(resolve(env), today)
+        self.assertEqual(resolve({**env, "PULP_RELEASE_CLASS_TOKENS": ""}), today)
+        self.assertEqual(resolve({}), HOSTED)
+
+    def test_enabled_appends_the_tagged_class_to_darwin_legs_only(self) -> None:
+        for flag in ("1", "true"):
+            out = resolve({"DARWIN_ARM64": GATE, "DARWIN_X64": GATE,
+                           "LINUX_ARM64": LOCAL_LINUX, "PULP_RELEASE_CLASS_TOKENS": flag})
+            for leg in ("darwin-arm64", "darwin-x64"):
+                self.assertEqual(
+                    out[leg],
+                    ["self-hosted", "macOS", "ARM64", "pulp-build-vm", "pulp-release-tagged"],
+                )
+            self.assertEqual(out["linux-arm64"], json.loads(LOCAL_LINUX))
+
+    def test_enabled_does_not_duplicate_or_touch_hosted(self) -> None:
+        labelled = '["self-hosted","macOS","pulp-release-tagged"]'
+        out = resolve({"DARWIN_ARM64": labelled, "PULP_RELEASE_CLASS_TOKENS": "1"})
+        self.assertEqual(out["darwin-arm64"], json.loads(labelled))
+        self.assertEqual(out["darwin-x64"], HOSTED["darwin-x64"])
+
+    def test_other_values_are_ignored(self) -> None:
+        for flag in ("0", "yes", "TRUE", "1 "):
+            with self.subTest(flag=flag):
+                out = resolve({"DARWIN_ARM64": GATE, "PULP_RELEASE_CLASS_TOKENS": flag})
+                self.assertEqual(out["darwin-arm64"], json.loads(GATE))
+
+    def test_raw_entry_point_is_verbatim_when_disabled(self) -> None:
+        spaced = '[ "self-hosted", "pulp-gate-fast" ]'
+        self.assertEqual(apply_class_label_raw(spaced, "pulp-release-pr-gate", {}), spaced)
+        self.assertEqual(
+            apply_class_label_raw(spaced, "pulp-release-pr-gate",
+                                  {"PULP_RELEASE_CLASS_TOKENS": "1"}),
+            '["self-hosted","pulp-release-pr-gate"]',
+        )
 
 
 if __name__ == "__main__":
