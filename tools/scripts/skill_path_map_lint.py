@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import json_schema_lite  # noqa: E402  — path inserted above
 from gate_common import glob_match as _glob_match  # noqa: E402
+from gate_common import resolve_git_comparison  # noqa: E402
 
 MAP_RELPATH = "tools/scripts/skill_path_map.json"
 SCHEMA_RELPATH = "tools/scripts/skill_path_map.schema.json"
@@ -358,7 +359,11 @@ def main(argv: list[str]) -> int:
         if args.base_map:
             base_map = json.loads(Path(args.base_map).read_text())
         elif args.base:
-            blob = read_blob(repo, args.base, MAP_RELPATH)
+            # The base map is read at the merge-base, not the base tip: a
+            # claim main narrowed after this branch point would otherwise look
+            # like a claim this branch just added.
+            anchor = resolve_git_comparison(repo, args.base).comparison_anchor
+            blob = read_blob(repo, anchor or args.base, MAP_RELPATH)
             if blob is not None:
                 try:
                     base_map = json.loads(blob)

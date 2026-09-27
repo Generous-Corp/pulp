@@ -369,6 +369,29 @@ class HotspotSizeGuardIntegrationTests(unittest.TestCase):
         self.assertIn("large new-file warning", result.stderr)
         self.assertIn("new_renderer.cpp", result.stderr)
 
+    def test_new_file_warning_ignores_a_file_main_deleted_after_the_branch_point(self) -> None:
+        self.commit_baseline()
+        large = self.tmp / "core" / "render" / "src" / "legacy_renderer.cpp"
+        large.parent.mkdir(parents=True, exist_ok=True)
+        large.write_text("1\n2\n3\n4\n5\n6\n", encoding="utf-8")
+        self.commit_all("large file predates the branch")
+        branch_tip = subprocess.run(
+            ["git", "-C", str(self.tmp), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        git(self.tmp, "rm", "-q", str(large.relative_to(self.tmp)))
+        git(self.tmp, "commit", "-q", "-m", "main deletes the large file")
+        git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.tmp, "reset", "-q", "--hard", branch_tip)
+
+        result = self.run_guard("--warnings-as-errors")
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertNotIn("legacy_renderer.cpp", result.stderr)
+
     def test_warnings_can_be_promoted_to_errors(self) -> None:
         self.commit_baseline()
         added = self.tmp / "tools" / "new_tool.py"
