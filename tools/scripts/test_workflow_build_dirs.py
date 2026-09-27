@@ -344,6 +344,23 @@ class WorkflowBuildDirTests(unittest.TestCase):
                 ).stdout.strip()
                 self.assertEqual(resolved, base_sha)
 
+    def test_receipt_issuer_failure_is_announced_not_swallowed(self) -> None:
+        """The receipt issue step is continue-on-error, so a failing issuer
+        must name its reason where a PR reader sees it: a warning annotation
+        and a job-summary line, on every non-success path; success also
+        writes a notice so the absence of both is itself a signal."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Issue exact protected-validation receipt")
+        self.assertTrue(step.get("continue-on-error"))
+        run = str(step["run"])
+        self.assertIn("::warning title=protected receipt NOT issued", run)
+        self.assertIn("::notice title=protected receipt issued", run)
+        self.assertEqual(run.count("GITHUB_STEP_SUMMARY"), 2)
+        # The issuer's stderr is what the warning carries.
+        self.assertIn('2> "$issue_err"', run)
+        self.assertIn('< "$issue_err"', run)
+        # The failure path still ends the step non-success so Publish is skipped.
+        self.assertIn("exit 1", run.split("::warning title=protected receipt NOT issued", 1)[1])
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 

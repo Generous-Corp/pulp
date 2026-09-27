@@ -2429,7 +2429,16 @@ jobs:
           checkout_sha="$(git rev-parse --verify 'HEAD^{commit}')"
           receipt_dir="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}"
           mkdir -p "$receipt_dir"
-          python3 tools/scripts/protected_merge_receipt.py issue \
+          # This step is continue-on-error (a receipt is an optimization for
+          # the merge group, not a verdict on the PR), so its failure must be
+          # LOUD or it disappears: the step's conclusion reads success, the
+          # Publish step is skipped, and nothing on the PR says why. That is
+          # how a duplicated ctest name disabled every PR-head receipt for
+          # days ("CTest selection lists a test twice") with 0 annotations.
+          # Every exit path below names its reason in a warning annotation
+          # and in the job summary.
+          issue_err="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}.err"
+          if python3 tools/scripts/protected_merge_receipt.py issue \
             --repository "$GITHUB_REPOSITORY" --target "${{ matrix.key }}" \
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
             --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
@@ -2439,8 +2448,19 @@ jobs:
             --ctest-selection "$RUNNER_TEMP/ctest-evidence/selection.json" \
             --ctest-selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
             --ctest-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
-            --output "$receipt_dir/receipt.json"
-          echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
+            --output "$receipt_dir/receipt.json" 2> "$issue_err"; then
+            echo "::notice title=protected receipt issued (${{ matrix.key }})::exact-tree receipt for $PR_HEAD_SHA on base $PR_BASE_SHA"
+            printf '### Protected receipt (%s): issued for head %s\n\n' \
+              "${{ matrix.key }}" "$PR_HEAD_SHA" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
+          else
+            reason="$(tr '\n' ' ' < "$issue_err" | cut -c1-600)"
+            reason="${reason:-issuer exited nonzero without a reason}"
+            echo "::warning title=protected receipt NOT issued (${{ matrix.key }})::${reason} — the merge group will validate in full"
+            printf '### Protected receipt (%s): NOT issued\n\nReason: %s\n\nThe merge group for this PR cannot reuse this run and will validate in full.\n\n' \
+              "${{ matrix.key }}" "$reason" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
+          fi
 
       - name: Publish exact protected-validation receipt
         if: steps.protected_receipt.outcome == 'success'
