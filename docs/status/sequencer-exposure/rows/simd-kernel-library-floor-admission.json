@@ -1,0 +1,48 @@
+{
+  "id": "simd-kernel-library-floor-admission",
+  "title": "Engine floors admit the pulp-simd kernel library that pulp-runtime now links",
+  "classification": "engine_internal",
+  "delivery_state": "pending",
+  "claim_id": "simd-kernel-library-floor-admission-20260926",
+  "owned_paths": [
+    "tools/scripts/timeline_engine_dependency_floor_check.py",
+    "tools/cmake/PulpLinkFloor.cmake",
+    "docs/status/sequencer-exposure/rows/simd-kernel-library-floor-admission.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/timeline_engine_dependency_floor_check.py",
+      "needles": [
+        "Every row that admits `runtime` also admits `simd`"
+      ]
+    },
+    {
+      "path": "tools/cmake/PulpLinkFloor.cmake",
+      "needles": [
+        "`simd` rides with `runtime` in every tier"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline, editor or playback header, target or symbol changes. The runtime rung these modules already link now carries the pulp-simd kernel archive, so their closure names one more module that was previously compiled inside pulp-runtime."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command gains, loses or changes behaviour."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added or altered."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "A dependency-floor admission creates no product capability, grant or policy projection."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The change describes no authoring capability; it widens two build-graph bounds by the module their existing runtime link already reaches."
+    }
+  }
+}

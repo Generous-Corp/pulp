@@ -35,6 +35,13 @@ public:
     enum class AdapterBackendPreference {
         default_backend,
         null_backend,
+        /// Use the Vulkan backend without Dawn's fallback-adapter hint. This
+        /// lets a hosted Linux lane select its configured software ICD
+        /// (lavapipe) and is intentionally separate from force_fallback_adapter.
+        vulkan,
+        /// Use the D3D12 backend without Dawn's fallback-adapter hint. On a
+        /// hosted Windows runner this resolves to the WARP adapter.
+        d3d12,
     };
 
     struct AdapterInfo {

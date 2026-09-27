@@ -157,6 +157,7 @@ nav:
       - "@pulp/react": reference/pulp-react.md
   - Guides:
       - Signal Processing: guides/signal-processing.md
+      - DSP Throughput Benchmark: guides/dsp-throughput-benchmark.md
       - Multirate FDN Reverb: guides/fdn-reverb.md
       - Hosting Plugins: guides/hosting.md
       - Plugin Interrogation: guides/plugin-interrogation.md

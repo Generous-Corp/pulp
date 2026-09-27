@@ -91,7 +91,6 @@ target_sources(pulp-runtime PRIVATE
     src/trace.cpp
     src/identity.cpp
     src/scoped_no_alloc.cpp
-    src/simd.cpp
     src/memory_mapped_file.cpp
     src/temporary_file.cpp
     src/durable_file_replacement.cpp
@@ -177,7 +176,9 @@ endif()
 unset(_pulp_ubsan_enabled)
 
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
-target_link_libraries(pulp-runtime PRIVATE hwy)
+# The vectorized kernels live in pulp-simd; <pulp/runtime/simd.hpp> forwards to
+# them, so every runtime consumer keeps resolving the old spelling.
+target_link_libraries(pulp-runtime PUBLIC pulp::simd)
 
 if(WIN32)
     target_link_libraries(pulp-runtime PRIVATE Advapi32)

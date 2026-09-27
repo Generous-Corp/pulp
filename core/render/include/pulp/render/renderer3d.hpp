@@ -15,6 +15,8 @@ namespace pulp::render {
 enum class Renderer3DAdapterBackendPreference {
     default_backend,
     null_backend,
+    vulkan,
+    d3d12,
 };
 
 struct HardcodedCubeRenderConfig {
