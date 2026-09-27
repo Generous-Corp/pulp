@@ -18,6 +18,41 @@ static std::array<float, 8> frame(float a, float b, float c = 0, float d = 0) {
     return {a, 0, b, 0, c, 0, d, 0};
 }
 
+TEST_CASE("cold shared convolution delivers zero-history FIR output from sequence zero",
+          "[gpu_audio][shared_io][executor]") {
+    E executor;
+    constexpr std::array<float, 5> ir{0.75f, -0.125f, 0.f, 0.f, 0.25f};
+    constexpr std::array<float, 12> input{1.f, 2.f, 4.f, 3.f, -1.f, 0.5f,
+                                         0.25f, -2.f, 8.f, 1.f, 3.f, -4.f};
+    REQUIRE(executor.prepare(
+        {.capacity = 3, .channels = 1, .block = 2, .fft_size = 8, .ir_length = 5}, 7, 0));
+    CHECK(executor.valid_from_sequence() == 0);
+    for (std::uint64_t sequence = 0; sequence < input.size() / 2; ++sequence) {
+        // Emulate the provider's per-block linear convolution, without any
+        // overlap state. The executor must add and retain that overlap.
+        std::array<float, 16> time{};
+        for (std::size_t i = 0; i < 2; ++i)
+            for (std::size_t tap = 0; tap < ir.size(); ++tap)
+                time[2 * (i + tap)] += input[2 * sequence + i] * ir[tap];
+        REQUIRE(executor.record_terminal(7, sequence, E::Terminal::Success, time));
+        REQUIRE(executor.collect() == 1);
+        const auto output = executor.take_ready(sequence);
+        REQUIRE(output.size() == 2);
+        for (std::size_t i = 0; i < 2; ++i) {
+            const auto sample = 2 * sequence + i;
+            float expected = 0;
+            // Independent full-stream FIR oracle, with known zeros before t=0.
+            for (std::size_t tap = 0; tap < ir.size() && tap <= sample; ++tap)
+                expected += input[sample - tap] * ir[tap];
+            CHECK(output[i] == expected);
+        }
+        REQUIRE(executor.release_ready(sequence));
+    }
+    // Explicit recovery still requires history, even when resetting to zero.
+    REQUIRE(executor.fence_and_reprime(8, 0));
+    CHECK(executor.valid_from_sequence() == 2);
+}
+
 TEST_CASE("shared convolution executor advances OLA in exact sequence",
           "[gpu_audio][shared_io][executor]") {
     E executor;
@@ -122,6 +157,7 @@ TEST_CASE("ready output ownership publishes safely to callback",
           "[gpu_audio][shared_io][executor]") {
     E executor;
     prepare(executor, 9, 100);
+    CHECK(executor.valid_from_sequence() == 101);
     auto x = frame(1, 2);
     std::atomic<bool> published{false}, producer_ok{true}, callback_ok{true};
     std::thread producer([&] {
