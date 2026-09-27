@@ -750,6 +750,15 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-measured-budgets PROPERTIES TIMEOUT 120)
 
+    # Scheduling half of the same picture: the tests measured as long carry a
+    # COST so ctest starts them first, and every Chrome-launching test shares
+    # the `browser` lock instead of RUN_SERIAL, so neither shape can reappear
+    # as a serial tail at the end of the gate's test step.
+    add_test(NAME ctest-scheduling-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_scheduling_contract.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-scheduling-contract PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -776,6 +785,7 @@ if(Python3_Interpreter_FOUND)
     if(APPLE)
         add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
+        set_tests_properties(combined-installer-selftest PROPERTIES COST 45)
         # Product projection over the shared recipe: a current exact Forge
         # build contributes only Modular AU/VST3/CLAP/Standalone, and the
         # expanded-package check rejects sibling Forge product bundles.
@@ -958,12 +968,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
     # Five positive roles plus thirty-nine planted negatives, each a sealed
-    # build driving its own subprocess tree. That cost is invisible to the
-    # scheduler at the default single slot, so co-scheduled heavy tests inflate
-    # each other past the suite-wide default timeout on a loaded host. Declare
-    # what the test actually consumes and give it a budget sized to the work.
+    # build driving its own subprocess tree, run one after another: user+sys
+    # time tracks wall time, so the work occupies about one core. Two slots
+    # declare that cost with room for the child tree, without holding every
+    # slot: a full-width reservation cannot start until the rest of the suite
+    # drains, which made this test run alone at the end of the gate. COST
+    # starts it early; the 300s budget covers the 80-115s seen on a loaded host.
     set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
-        PROCESSORS 8
+        PROCESSORS 2
+        COST 55
         TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
@@ -977,6 +990,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
     set_tests_properties(gpu-trace-overhead-acceptance-selftest PROPERTIES
+        COST 55
         TIMEOUT 180)
     add_test(NAME gpu-trace-overhead-verifier-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")

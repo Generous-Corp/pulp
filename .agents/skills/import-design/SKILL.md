@@ -3914,15 +3914,22 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   second candidate list, and remember that on a host with no system Chrome the
   cost of getting this wrong is a silent skip rather than a failure.
 - **Real-browser cases live in `*.integration.test.mjs` files, and they run
-  concurrently.** The ctest `pulp-browser-capture-node-integration` is
-  `RUN_SERIAL` (a CDP screenshot once crossed its 20 s deadline while unrelated
-  ctest work shared the VM) and runs every `*.integration.test.mjs` file through
-  `browser_capture/run_integration.mjs`, which calls `node --test` with a file
-  concurrency of one Chrome per two cores and per 2 GiB of a declared memory
-  lease, capped by the file count: 1 on m1's 3-vCPU VM, 3 on m5's 6-vCPU VM,
-  6 on the Studio's 12-vCPU VM. Node runs the cases *within* one file in
+  concurrently.** The ctest `pulp-browser-capture-node-integration` reserves
+  `PROCESSORS 4` and holds the `browser` RESOURCE_LOCK (a CDP screenshot once
+  crossed its 20 s deadline while unrelated ctest work shared the VM). It is
+  NOT `RUN_SERIAL`: that held every slot and made it run alone at the end of
+  the gate's test step; `COST` now starts it first. It runs every
+  `*.integration.test.mjs` file through `browser_capture/run_integration.mjs`,
+  which calls `node --test` with a file concurrency of one Chrome per two cores
+  and per 2 GiB of a declared memory lease, capped by the file count and by the
+  slots ctest reserved (`PULP_BROWSER_CAPTURE_RESERVED_CORES`, set from the
+  same value as `PROCESSORS`): 1 on m1's 3-vCPU VM (ctest clamps the
+  reservation to `-j3`, so it runs alone there), 2 on m5 and the Studio. Any
+  other test that launches a real Chrome must take the same `browser` lock;
+  `ctest-scheduling-contract` (`tools/scripts/test_ctest_scheduling_contract.py`)
+  lists them and fails if one loses it or gains `RUN_SERIAL`. Node runs the cases *within* one file in
   sequence, so the files are the unit of parallelism: each case mostly waits on
-  a cold Chrome launch, so files overlap well inside the serial slot on a large
+  a cold Chrome launch, so files overlap well inside the reserved slots on a large
   VM. On m1 a fixed width of 3 made every capture time out
   (`stalled=Page.captureScreenshot`) and failed every merge group that landed
   there, while m3 and m5 passed. The width is read when the suite runs
