@@ -25,6 +25,10 @@ that mechanism directly from logs, labels or annotations:
   gate_runs           native gate runs per merged PR: PR head, merge group,
                       wasted (cancelled after a runner took it, or a failed
                       merge group)
+  base_red            merge-group `macos` failures inside a cross-host streak
+                      of consecutive failures sharing a failing test (main
+                      itself carried the failure), per merge-group `macos`
+                      failure (failed-job logs)
 
 Every proxy carries a CONTROL: a count on the same instrument and target that
 must be non-zero. A zero control means the instrument saw nothing, and the row
@@ -45,8 +49,14 @@ import json
 import random
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The ctest failure-block parser the queue attributor already uses, so a
+# "failing test" means the same thing in both.
+from queue_batch_attribute import FAILED_TEST_LINE_RE, parse_failing_tests  # noqa: E402
 
 MIN_UNITS = 20
 IDLE_MIN_SECONDS = 120
@@ -503,6 +513,83 @@ def gate_runs(runs: list[dict], merged: list[dict], win: Windows) -> dict:
     return {"rows": out}
 
 
+def base_red(runs: list[dict], digests: dict[str, dict], win: Windows) -> dict:
+    """Merge-group `macos` failures that main itself carried, per `macos` failure.
+
+    A merge group is main plus its entries, so when main fails a test every
+    group inherits it. That shows up as a streak: consecutive merge-group
+    `macos` jobs (by creation) that fail sharing a test, with no executed pass
+    between them, on two or more hosts. Every member of such a streak counts.
+    A streak on one host is that host's problem (a poisoned cache, a
+    host-sensitive test), not main's, so it does not count.
+
+    Only self-hosted jobs that ran are in the sequence: a hosted placeholder
+    or a cancelled job observed nothing. A failure whose log names no test (a
+    compile, link or infrastructure failure) neither extends nor breaks a
+    streak, but it is in the denominator. The control is the test failures
+    outside any cross-host streak (unique causes): a zero there means the log
+    reader saw no single failure, so the ratio cannot be trusted.
+    """
+    seq = sorted((j for j in gate_jobs(runs)
+                  if j.get("event") == "merge_group" and physical_host(j.get("runner_name"))
+                  and j.get("conclusion") in ("success", "failure", "timed_out")),
+                 key=lambda j: (j.get("created_at") or "", j.get("id") or 0))
+    tests: dict[Any, frozenset[str]] = {}
+    unread = 0
+    for j in seq:
+        if j["conclusion"] == "success":
+            continue
+        d = digests.get(str(j["id"])) or {}
+        if not d.get("read", False):
+            unread += 1
+        tests[j["id"]] = frozenset(parse_failing_tests(d.get("digest", "")))
+
+    streaks: list[dict] = []
+    cur: dict | None = None
+    for j in seq:
+        if j["conclusion"] == "success":
+            cur = None
+            continue
+        names = tests[j["id"]]
+        if not names:
+            continue
+        if cur and cur["shared"] & names:
+            cur["shared"] = cur["shared"] & names
+            cur["members"].append(j)
+        else:
+            cur = {"shared": names, "members": [j]}
+            streaks.append(cur)
+    red: set[Any] = set()
+    summary: dict[str, list[str]] = {"before": [], "after": []}
+    for st in streaks:
+        hosts = {physical_host(m.get("runner_name")) for m in st["members"]}
+        if len(st["members"]) < 2 or len(hosts) < 2:
+            continue
+        red |= {m["id"] for m in st["members"]}
+        side = win.side(st["members"][0].get("created_at"))
+        if side:
+            summary[side].append(f"{','.join(sorted(st['shared'])[:2])} x{len(st['members'])} "
+                                 f"on {'/'.join(sorted(hosts))}")
+
+    units: dict[str, list[float]] = {"before": [], "after": []}
+    unique = 0
+    for j in seq:
+        if j["conclusion"] == "success":
+            continue
+        side = win.side(j.get("created_at"))
+        if not side:
+            continue
+        units[side].append(1.0 if j["id"] in red else 0.0)
+        if tests[j["id"]] and j["id"] not in red:
+            unique += 1
+    return row("base_red", "main is kept green, so no merge group inherits a failure from "
+               "its base", "merge-group `macos` failures inside a cross-host streak sharing "
+               "a failing test, per merge-group `macos` failure", "failed merge-group "
+               "`macos` job logs (ctest FAILED block) + job runner/creation order", units,
+               "failures with a unique cause (a named test, no cross-host streak)", unique,
+               extra={"streaks": summary, "logs_unread": unread})
+
+
 # --------------------------------------------------------------------------
 # proxies over tartci supervisor events (pure)
 # --------------------------------------------------------------------------
@@ -798,7 +885,8 @@ def compute(data: dict, win: Windows) -> dict:
             wait_per_job_ahead(all_jobs, win),
             refresh_cancels(runs, data.get("commits", {}), merged, win),
             mq_attempts(merged, win),
-            *gate_runs(runs, merged, win)["rows"]]
+            *gate_runs(runs, merged, win)["rows"],
+            base_red(runs, data.get("log_digests") or {}, win)]
     return {"windows": {"since": win.since.isoformat(), "split": win.split.isoformat(),
                         "after_from": win.after_from.isoformat(),
                         "until": win.until.isoformat() if win.until else None,
@@ -1037,7 +1125,15 @@ def collect(gh, since: dt.datetime, hosts: Iterable[str], ssh: Callable,
 
 
 def _log_digest(text: str) -> str:
-    """The lines a cause is read from: failures, errors and ctest's failed list."""
-    keep = [ln for ln in text.splitlines()
-            if any(rx.search(ln) for _, rx in LOG_CAUSES) or FAILED_TEST.search(ln)]
-    return "\n".join(keep[:200])
+    """The lines a cause is read from: failures, errors and ctest's failed list.
+
+    ctest's FAILED block comes last and the error lines of a failing test's
+    output can fill the cap before it, so the block is always kept in full.
+    """
+    lines = text.splitlines()
+    keep = [ln for ln in lines
+            if any(rx.search(ln) for _, rx in LOG_CAUSES) or FAILED_TEST.search(ln)][:200]
+    kept = set(keep)
+    block = [ln for ln in lines if ln not in kept and (
+        "The following tests FAILED" in ln or FAILED_TEST_LINE_RE.search(ln))]
+    return "\n".join(keep + block)

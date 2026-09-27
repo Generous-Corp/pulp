@@ -226,6 +226,87 @@ class RefreshAndQueueTests(unittest.TestCase):
         self.assertEqual(px.classify_log("", None, win(), read=False), "log_unavailable")
 
 
+def _failed_block(*names: str) -> str:
+    """A `macos` job log's ctest FAILED block, with GitHub's per-line prefix."""
+    return "\n".join(["macos\tTest\t2026-09-05T00:00:00Z The following tests FAILED:"] + [
+        f"macos\tTest\t2026-09-05T00:00:00Z \t{i + 10} - {n} (Failed)"
+        for i, n in enumerate(names)])
+
+
+class BaseRedTests(unittest.TestCase):
+    """A failure main carried: a cross-host streak of merge groups sharing a failing test."""
+
+    def _mg(self, jobs):
+        """jobs: (id, created, runner, conclusion, failing tests or None for a non-test log)."""
+        runs, digests = [], {}
+        for jid, at, runner, concl, names in jobs:
+            runs.append({"event": "merge_group", "id": jid, "created_at": at,
+                         "jobs": [job(at, runner=runner, conclusion=concl, jid=jid)]})
+            if concl != "success":
+                digests[str(jid)] = {"digest": _failed_block(*names) if names else
+                                     "macos\tBuild\tts error: no member named 'x'",
+                                     "read": True, "at": at}
+        return runs, digests
+
+    def test_cross_host_streak_counts_every_member_and_a_lone_failure_is_the_control(self):
+        runs, digests = self._mg([
+            (1, "2026-09-05T01:00:00Z", "m1-a", "failure", ["base-red-test"]),
+            (2, "2026-09-05T01:10:00Z", "m5-a", "failure", ["base-red-test", "other"]),
+            (3, "2026-09-05T01:20:00Z", "studio-a", "failure", ["base-red-test"]),
+            (4, "2026-09-05T02:00:00Z", "studio-a", "success", None),
+            (5, "2026-09-05T03:00:00Z", "m5-a", "failure", ["flaky test with spaces"]),
+            # a compile error neither breaks nor extends a streak, but is a failure
+            (6, "2026-09-05T04:00:00Z", "m1-a", "failure", None),
+        ])
+        r = px.base_red(runs, digests, win())
+        self.assertEqual(r["before"]["n"], 5)
+        self.assertAlmostEqual(r["before"]["value"], 3 / 5)
+        self.assertEqual(r["control"]["value"], 1)  # the lone flake
+        self.assertEqual(r["streaks"]["before"], ["base-red-test x3 on m1/m3/m5"])
+
+    def test_one_host_streak_is_a_host_problem_not_main(self):
+        runs, digests = self._mg([
+            (1, "2026-09-05T01:00:00Z", "m1-a", "failure", ["browser-capture"]),
+            (2, "2026-09-05T01:10:00Z", "m1-b", "failure", ["browser-capture"]),
+        ])
+        r = px.base_red(runs, digests, win())
+        self.assertEqual((r["before"]["value"], r["control"]["value"]), (0.0, 2))
+
+    def test_an_executed_pass_breaks_the_streak_and_placeholders_do_not(self):
+        runs, digests = self._mg([
+            (1, "2026-09-05T01:00:00Z", "m1-a", "failure", ["t"]),
+            (2, "2026-09-05T01:05:00Z", "GitHub Actions 7", "success", None),
+            (3, "2026-09-05T01:06:00Z", "m3-a", "cancelled", None),
+            (4, "2026-09-05T01:10:00Z", "m5-a", "failure", ["t"]),
+            (5, "2026-09-05T01:20:00Z", "m3-a", "success", None),
+            (6, "2026-09-05T01:30:00Z", "m1-a", "failure", ["t"]),
+        ])
+        r = px.base_red(runs, digests, win())
+        self.assertEqual(r["before"]["n"], 3)
+        self.assertAlmostEqual(r["before"]["value"], 2 / 3)  # 1+4 streak; 6 after a real pass
+        self.assertEqual(r["control"]["value"], 1)
+
+    def test_a_failure_that_names_no_test_does_not_break_a_streak(self):
+        runs, digests = self._mg([
+            (1, "2026-09-05T01:00:00Z", "m1-a", "failure", ["t"]),
+            (2, "2026-09-05T01:05:00Z", "m3-a", "failure", None),
+            (3, "2026-09-05T01:10:00Z", "m5-a", "failure", ["t"]),
+        ])
+        r = px.base_red(runs, digests, win())
+        self.assertAlmostEqual(r["before"]["value"], 2 / 3)
+        self.assertEqual(r["streaks"]["before"], ["t x2 on m1/m5"])
+
+    def test_no_named_failure_is_instrument_blind(self):
+        runs, digests = self._mg([(1, "2026-09-05T01:00:00Z", "m1-a", "failure", None)])
+        self.assertTrue(px.base_red(runs, digests, win())["verdict"].startswith(
+            "INSTRUMENT BLIND"))
+
+    def test_digest_keeps_the_failed_block_past_the_cap(self):
+        noise = "\n".join(f"macos\tTest\tts error: line {i}" for i in range(400))
+        digest = px._log_digest(noise + "\n" + _failed_block("a name with spaces", "b"))
+        self.assertEqual(px.parse_failing_tests(digest), ["a name with spaces", "b"])
+
+
 class TartciEventTests(unittest.TestCase):
     def _vm(self, vm, t0, served=True, minted=True, host="m3", lane="pulp-gate",
             labels="self-hosted,macOS,ARM64,pulp-build,pulp-build-vm,pulp-build-pr-head",
