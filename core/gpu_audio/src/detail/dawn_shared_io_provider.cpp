@@ -4,8 +4,8 @@
 
 #include "dawn_submission_tracker.hpp"
 #include "shared_spectral_kernels.hpp"
-#include <pulp/signal/windowing.hpp>
 #include <cmath>
+#include <pulp/signal/windowing.hpp>
 
 #include "dawn/dawn_proc.h"
 #include "dawn/dawn_version.h"
@@ -1381,27 +1381,32 @@ bool DawnSharedIoProvider::prepare_convolution_program(
         }
 
         if (spec.spectral_hop) {
-            const auto kernels = shared_spectral_kernels(spec.fft_size, spec.spectral_hop, spec.channels);
+            const auto kernels =
+                shared_spectral_kernels(spec.fft_size, spec.spectral_hop, spec.channels);
             plan->append = pipeline(kernels[0].c_str());
             plan->window = pipeline(kernels[1].c_str());
             plan->ola = pipeline(kernels[2].c_str());
             plan->output = pipeline(kernels[3].c_str());
             // Mutable history + OLA + norm, followed by immutable window/floor.
             const auto n = spec.fft_size, h = spec.spectral_hop;
-            const auto window = signal::WindowFunction::generate(n, signal::WindowFunction::Type::hann);
+            const auto window =
+                signal::WindowFunction::generate(n, signal::WindowFunction::Type::hann);
             const auto window_offset = 3u * n * spec.channels + 2u * n;
             std::vector<float> initial(window_offset + n + 1u, 0.0f);
             std::copy(window.begin(), window.end(), initial.begin() + window_offset);
             double steady = 0;
             for (int j = -int(n / h) - 1; j <= int(n / h) + 1; ++j) {
                 const int index = int(n) - j * int(h) - int(n / 2);
-                if (index >= 0 && index < int(n)) steady += double(window[index]) * window[index];
+                if (index >= 0 && index < int(n))
+                    steady += double(window[index]) * window[index];
             }
             initial.back() = std::max(float(steady) * 0.25f, 1e-9f);
             plan->spectral_state = make_buffer(initial.size() * sizeof(float), storage);
-            if (!plan->append || !plan->window || !plan->ola || !plan->output || !plan->spectral_state)
+            if (!plan->append || !plan->window || !plan->ola || !plan->output ||
+                !plan->spectral_state)
                 return fail_preparation();
-            impl_->queue.WriteBuffer(plan->spectral_state, 0, initial.data(), initial.size() * sizeof(float));
+            impl_->queue.WriteBuffer(plan->spectral_state, 0, initial.data(),
+                                     initial.size() * sizeof(float));
         }
 
         plan->slots.resize(impl_->slots.size());
@@ -1416,12 +1421,18 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             if (spec.spectral_hop) {
                 groups.windowed = make_buffer(plan->bytes, storage);
                 groups.synthesized = make_buffer(plan->bytes, storage);
-                if (!groups.windowed || !groups.synthesized) return fail_preparation();
-                groups.append = bind_three(plan->append, slot->input_buffer, plan->spectral_state, groups.windowed);
-                groups.window = bind_three(plan->window, slot->input_buffer, plan->spectral_state, groups.windowed);
-                groups.ola = bind_three(plan->ola, slot->input_buffer, plan->spectral_state, groups.synthesized);
-                groups.output = bind_three(plan->output, slot->input_buffer, plan->spectral_state, slot->output_buffer);
-                if (!groups.append || !groups.window || !groups.ola || !groups.output) return fail_preparation();
+                if (!groups.windowed || !groups.synthesized)
+                    return fail_preparation();
+                groups.append = bind_three(plan->append, slot->input_buffer, plan->spectral_state,
+                                           groups.windowed);
+                groups.window = bind_three(plan->window, slot->input_buffer, plan->spectral_state,
+                                           groups.windowed);
+                groups.ola = bind_three(plan->ola, slot->input_buffer, plan->spectral_state,
+                                        groups.synthesized);
+                groups.output = bind_three(plan->output, slot->input_buffer, plan->spectral_state,
+                                           slot->output_buffer);
+                if (!groups.append || !groups.window || !groups.ola || !groups.output)
+                    return fail_preparation();
                 source = groups.windowed;
             }
             wgpu::Buffer destination = groups.a;
@@ -1736,12 +1747,15 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
 bool DawnSharedIoProvider::submit_convolution_program(
     const SlotResources& resources, SlotToken token,
     std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-    if (!impl_ || !impl_->convolution) return false;
+    if (!impl_ || !impl_->convolution)
+        return false;
     auto& plan = *impl_->convolution;
     if (plan.spectral_hop && plan.has_sequence &&
         (plan.last_sequence == std::numeric_limits<std::uint64_t>::max() ||
-         token.stream_sequence != plan.last_sequence + 1u)) return false;
-    if (!submit_impl(resources, token, std::move(inbox), 1)) return false;
+         token.stream_sequence != plan.last_sequence + 1u))
+        return false;
+    if (!submit_impl(resources, token, std::move(inbox), 1))
+        return false;
     plan.last_sequence = token.stream_sequence;
     plan.has_sequence = true;
     return true;
@@ -1863,7 +1877,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         const auto& groups = plan.slots[slot->index];
         const auto fft_wg = (plan.channels * (plan.fft_size / 2u) + 255u) / 256u;
         const auto spectral_dispatch = [&](const wgpu::ComputePipeline& pipeline,
-                                            const wgpu::BindGroup& group, std::uint32_t count) {
+                                           const wgpu::BindGroup& group, std::uint32_t count) {
             auto pass = encoder.BeginComputePass();
             pass.SetPipeline(pipeline);
             pass.SetBindGroup(0, group);
@@ -2036,12 +2050,18 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
 }
 
 void DawnSharedIoProvider::poll() noexcept {
+    service_until(0);
+}
+
+void DawnSharedIoProvider::service_until(std::uint64_t deadline_ns) noexcept {
     if (!impl_)
         return;
-    // poll() is the nonblocking dispatcher hook. Timed waits are reserved for
-    // the serialized drain barrier; WaitAny(0) is Dawn's explicit nonblocking
-    // path and TimedWaitAny sees an expired deadline here.
-    const auto deadline = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    const auto max_ns = static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
+    const auto deadline = deadline_ns == 0 || deadline_ns > max_ns
+                              ? now
+                              : std::chrono::steady_clock::time_point(
+                                    std::chrono::nanoseconds(deadline_ns));
     (void)impl_->wait_for_queue_callbacks(deadline);
     for (auto* slot : impl_->slots) {
         if (impl_->options.fault == Fault::DelayCompletion &&
@@ -2166,5 +2186,7 @@ DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() c
 } // namespace pulp::gpu_audio::detail
 
 namespace pulp::gpu_audio::detail {
-std::string DawnSharedIoProvider::dawn_revision() const { return revision(dawn::kDawnVersion.data()); }
+std::string DawnSharedIoProvider::dawn_revision() const {
+    return revision(dawn::kDawnVersion.data());
 }
+} // namespace pulp::gpu_audio::detail

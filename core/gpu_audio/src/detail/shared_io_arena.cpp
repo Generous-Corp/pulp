@@ -354,14 +354,15 @@ void SharedIoArena::retry_rejected_submissions() noexcept {
 }
 
 SharedIoArena::CompletionDrain
-SharedIoArena::drain_completions(CompletionObserver observer) noexcept {
+SharedIoArena::drain_completions(CompletionObserver observer,
+                                 std::uint64_t service_deadline_ns) noexcept {
     CompletionDrain result;
     if (!terminal_inbox_)
         return result;
     // Native Dawn's AllowProcessEvents callbacks advance only when the owning
     // instance is pumped. Keep that backend work on this serialized non-RT
     // dispatcher, then consume the terminal records it published.
-    provider_->poll();
+    provider_->service_until(service_deadline_ns);
     retry_rejected_submissions();
     SharedIoTerminalInbox::Record record;
     while (terminal_inbox_->try_pop(record)) {

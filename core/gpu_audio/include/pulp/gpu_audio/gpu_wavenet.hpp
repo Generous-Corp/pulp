@@ -152,6 +152,10 @@ class GpuWaveNetSession {
     /// completion. Returns the number of newly visible terminal records.
     std::size_t service(std::uint64_t now_ns) noexcept;
 
+    /// Services completions until the supplied steady-clock deadline. This is
+    /// serialized non-realtime work; never call it from an audio callback.
+    std::size_t service_until(std::uint64_t deadline_ns) noexcept;
+
     /// Copies one completed block into `output` and releases its shared slot.
     /// A failed provider completion returns a result with no output written.
     std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept;

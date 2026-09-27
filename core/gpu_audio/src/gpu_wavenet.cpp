@@ -7,6 +7,7 @@
 #endif
 
 #include <cstring>
+#include <chrono>
 #include <utility>
 #include <vector>
 
@@ -84,11 +85,14 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
         }
 
         auto policy = detail::DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
-        if (config.completion_policy == GpuWaveNetCompletionPolicy::WaitAny) policy = detail::DawnSharedIoProvider::CompletionPolicy::WaitAny;
-        if (config.completion_policy == GpuWaveNetCompletionPolicy::TimedWaitAny) policy = detail::DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::WaitAny)
+            policy = detail::DawnSharedIoProvider::CompletionPolicy::WaitAny;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::TimedWaitAny)
+            policy = detail::DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
         auto created = detail::DawnSharedIoProvider::create(
             {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-             .completion_policy = policy, .completion_wait_ns = config.completion_wait_ns});
+             .completion_policy = policy,
+             .completion_wait_ns = config.completion_wait_ns});
         if (!created.provider) {
             result.error = GpuWaveNetSessionError::ProviderUnavailable;
             return result;
@@ -177,6 +181,21 @@ std::size_t GpuWaveNetSession::service(std::uint64_t now_ns) noexcept {
         return impl_->session->service(now_ns);
 #else
     (void)now_ns;
+#endif
+    return 0;
+}
+
+std::size_t GpuWaveNetSession::service_until(std::uint64_t deadline_ns) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (prepared()) {
+        const auto now = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        return impl_->session->service_until(now, deadline_ns);
+    }
+#else
+    (void)deadline_ns;
 #endif
     return 0;
 }

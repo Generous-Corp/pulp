@@ -93,10 +93,12 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
 TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
           "[gpu_audio][wavenet][completion]") {
     Fixture fixture;
-    const auto result = GpuWaveNetSession::create(
-        {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = 2,
-         .completion_policy = GpuWaveNetCompletionPolicy::TimedWaitAny,
-         .completion_wait_ns = 500'000});
+    const auto result =
+        GpuWaveNetSession::create({.descriptor = fixture.descriptor(),
+                                   .weights = fixture.weights,
+                                   .slots = 2,
+                                   .completion_policy = GpuWaveNetCompletionPolicy::TimedWaitAny,
+                                   .completion_wait_ns = 500'000});
     if (!result.session) {
         CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
         return;
@@ -104,5 +106,17 @@ TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
     CHECK(result.session->prepared());
     CHECK(result.session->completion_policy() == GpuWaveNetCompletionPolicy::TimedWaitAny);
     CHECK(result.session->completion_policy_supported());
+    const std::array<float, 2> input{1.0f, 2.0f};
+    std::array<float, 2> output{0.0f, 0.0f};
+    REQUIRE(result.session->submit_block(input, 1));
+    const auto deadline = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count()) + 2'000'000;
+    result.session->service_until(deadline);
+    CHECK(result.session->receive(output).has_value());
+    REQUIRE(result.session->submit_block(input, 2));
+    result.session->service_until(deadline + 2'000'000);
+    CHECK(result.session->receive(output).has_value());
     CHECK(result.session->release());
 }

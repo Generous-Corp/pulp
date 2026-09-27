@@ -194,6 +194,16 @@ class SharedIoArenaProvider {
     // make accepted work visible to drain_completions(); it must not wait for a
     // future callback or start a new provider lifecycle phase.
     virtual void poll() noexcept = 0;
+    // Serialized non-RT wake service. A zero deadline is strictly
+    // nonblocking and is the compatibility path used by poll().
+    virtual void service_until(std::uint64_t deadline_ns) noexcept {
+        (void)deadline_ns;
+        poll();
+    }
+    // Optional bounded wait budget for a serialized service call.
+    virtual std::uint64_t service_wait_ns() const noexcept {
+        return 0;
+    }
     // Serialized non-RT diagnostic. A lost provider cannot open another epoch;
     // retirement still requires the independent physical drain barrier.
     virtual bool device_lost() const noexcept {
@@ -349,7 +359,8 @@ class SharedIoArena {
     bool expire_delivery(const SlotToken& token) noexcept {
         return ledger_.expire_delivery(token);
     }
-    CompletionDrain drain_completions(CompletionObserver observer) noexcept;
+    CompletionDrain drain_completions(CompletionObserver observer,
+                                      std::uint64_t service_deadline_ns = 0) noexcept;
     CompletionDrain drain_completions() noexcept {
         return drain_completions(CompletionObserver{});
     }

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -24,9 +25,6 @@ using pulp::gpu_audio::detail::DawnSharedIoProvider;
 using pulp::gpu_audio::detail::SharedIoArena;
 
 namespace {
-
-constexpr auto kMaxCompletionWaitNs =
-    static_cast<std::uint64_t>(std::chrono::nanoseconds::max().count());
 
 using Clock = std::chrono::steady_clock;
 enum class TransferControl : std::uint8_t { None, WriteBuffer, CopyBuffer, MapAsync };
@@ -304,7 +302,7 @@ int main(int argc, char** argv) {
             return 1;
     }
     if (verify_completion_wait_bound) {
-        const auto invalid_wait_ns = kMaxCompletionWaitNs + 1;
+        const auto invalid_wait_ns = std::numeric_limits<std::uint64_t>::max();
         const auto rejected = DawnSharedIoProvider::create({.completion_wait_ns = invalid_wait_ns});
         return !rejected.provider && rejected.reason == "completion_wait_ns_out_of_range" ? 0 : 1;
     }

@@ -110,15 +110,26 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
 }
 
 std::size_t SharedIoComputePlan::drain(std::uint64_t now_ns) noexcept {
+    return drain_until(now_ns, 0);
+}
+
+std::size_t SharedIoComputePlan::drain_until(std::uint64_t now_ns,
+                                             std::uint64_t service_deadline_ns) noexcept {
     const auto started = std::chrono::steady_clock::now();
     const auto before = completion_write_;
-    arena_.drain_completions({this, &SharedIoComputePlan::on_terminal});
+    arena_.drain_completions({this, &SharedIoComputePlan::on_terminal}, service_deadline_ns);
+    const auto observed_now_ns = service_deadline_ns == 0
+                                     ? now_ns
+                                     : static_cast<std::uint64_t>(
+                                           std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now().time_since_epoch())
+                                               .count());
     std::size_t count = 0;
     auto cursor = before;
     while (cursor != completion_write_) {
         auto& completion = completions_[cursor];
-        completion.late =
-            completion.token.deadline_ns != 0 && now_ns > completion.token.deadline_ns;
+        completion.late = completion.token.deadline_ns != 0 &&
+                          observed_now_ns > completion.token.deadline_ns;
         if (completion.late)
             ++telemetry_.late_completions;
         ++count;

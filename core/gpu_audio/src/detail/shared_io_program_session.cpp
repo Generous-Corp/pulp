@@ -1,5 +1,6 @@
 #include "shared_io_program_session.hpp"
 
+
 namespace pulp::gpu_audio::detail {
 
 SharedIoProgramSession::~SharedIoProgramSession() {
@@ -40,6 +41,13 @@ std::size_t SharedIoProgramSession::service(std::uint64_t now_ns) noexcept {
     if (!prepared_ || !provider_)
         return 0;
     return plan_.drain(now_ns);
+}
+
+std::size_t SharedIoProgramSession::service_until(std::uint64_t now_ns,
+                                                  std::uint64_t deadline_ns) noexcept {
+    if (!prepared_ || !provider_)
+        return 0;
+    return plan_.drain_until(now_ns, deadline_ns);
 }
 
 std::optional<SharedIoProgramSession::Completion>

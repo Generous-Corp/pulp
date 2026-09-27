@@ -45,6 +45,7 @@ class SharedIoProgramSession {
     bool submit(const SubmitToken& token) noexcept;
     bool cancel(const SubmitToken& token) noexcept;
     std::size_t service(std::uint64_t now_ns) noexcept;
+    std::size_t service_until(std::uint64_t now_ns, std::uint64_t deadline_ns) noexcept;
     std::optional<Completion> pop_completion() noexcept;
     std::optional<OutputLease> acquire_output(const Completion& completion) noexcept;
     bool release_output(const SharedIoArena::ReleaseRecord& record) noexcept;
