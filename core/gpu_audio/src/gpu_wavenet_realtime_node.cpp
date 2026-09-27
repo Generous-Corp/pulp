@@ -100,6 +100,36 @@ struct GpuWaveNetRealtimeNode::Impl {
         prepared = true;
         return true;
     }
+    std::uint32_t service_and_collect(std::uint64_t service_now, std::uint64_t deadline) noexcept {
+        const auto n = config.session.descriptor.block_size;
+        for (std::size_t ch = 0; ch < channels.size(); ++ch) {
+            if (deadline != 0)
+                channels[ch]->service_until(service_now, deadline);
+            else
+                channels[ch]->service(service_now);
+            if (inflight && !completed[ch]) {
+                if (auto result = channels[ch]->receive({worker_output.data() + ch * n, n})) {
+                    completed[ch] = 1;
+                    suppress_pending = suppress_pending || result->late;
+                    if (result->sequence != pending.sequence ||
+                        result->status != GpuWaveNetBlockStatus::GpuDelivered)
+                        fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                }
+            }
+        }
+        std::uint32_t produced = 0;
+        if (inflight &&
+            std::all_of(completed.begin(), completed.end(), [](auto v) { return v != 0; })) {
+            inflight = false;
+            if (!suppress_pending && bridge->delivery_epoch() == pending.epoch) {
+                const auto publication = bridge->publish_output(pending, worker_output);
+                produced = publication == Bridge::Publication::Published ? 1 : 0;
+                if (publication != Bridge::Publication::Published)
+                    fail(detail::SharedIoRecoveryReason::InputSaturated);
+            }
+        }
+        return produced;
+    }
     void fail(detail::SharedIoRecoveryReason reason) noexcept {
         bridge->request_recovery(reason);
     }
@@ -246,35 +276,10 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
     const auto pump_now = now_ns();
     const auto wait_ns = s.config.completion_service_wait_ns;
     const auto deadline = wait_ns != 0 && pump_now <= UINT64_MAX - wait_ns ? pump_now + wait_ns : 0;
-    // One all-channel block in flight; each call services once, never spins.
-    for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
-        if (deadline != 0)
-            s.channels[ch]->service_until(pump_now, deadline);
-        else
-            s.channels[ch]->service(pump_now);
-        if (s.inflight && !s.completed[ch]) {
-            if (auto result = s.channels[ch]->receive({s.worker_output.data() + ch * n, n})) {
-                s.completed[ch] = 1;
-                s.suppress_pending = s.suppress_pending || result->late;
-                if (result->sequence != s.pending.sequence ||
-                    result->status != GpuWaveNetBlockStatus::GpuDelivered)
-                    s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
-            }
-        }
-    }
-    std::uint32_t produced = 0;
-    if (s.inflight &&
-        std::all_of(s.completed.begin(), s.completed.end(), [](auto v) { return v != 0; })) {
-        s.inflight = false;
-        if (!s.suppress_pending && s.bridge->delivery_epoch() == s.pending.epoch) {
-            const auto publication = s.bridge->publish_output(s.pending, s.worker_output);
-            produced = publication == Bridge::Publication::Published ? 1 : 0;
-            if (publication != Bridge::Publication::Published)
-                s.fail(detail::SharedIoRecoveryReason::InputSaturated);
-        }
-    }
+    auto produced = s.service_and_collect(pump_now, deadline);
     if (s.inflight || !s.bridge->begin_worker_admission())
         return produced;
+    bool all_submitted = false;
     auto input = s.bridge->acquire_input();
     if (input) {
         const auto stamp = input->stamp();
@@ -285,8 +290,10 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             s.suppress_pending = false;
             std::fill(s.completed.begin(), s.completed.end(), 0);
             s.inflight = true;
+            all_submitted = true;
             for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
                 if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
+                    all_submitted = false;
                     s.completed[ch] = 1;
                     s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
                 }
@@ -296,6 +303,8 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         (void)s.bridge->release_input(*input);
     }
     s.bridge->end_worker_admission();
+    if (deadline != 0 && all_submitted)
+        produced += s.service_and_collect(now_ns(), deadline);
     return produced;
 }
 bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {

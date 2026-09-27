@@ -15,6 +15,7 @@ struct Control {
     bool wrong_sequence = false, late = false;
     int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
     std::uint64_t last_wait_deadline = 0;
+    std::array<std::uint64_t, 8> wait_deadlines{}, wait_starts{};
 };
 class Channel final : public detail::WaveNetRealtimeChannel {
   public:
@@ -31,7 +32,11 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     void service(std::uint64_t) noexcept override {
         ++control_.services;
     }
-    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
+    void service_until(std::uint64_t now, std::uint64_t deadline) noexcept override {
+        if (control_.wait_services < static_cast<int>(control_.wait_deadlines.size())) {
+            control_.wait_deadlines[control_.wait_services] = deadline;
+            control_.wait_starts[control_.wait_services] = now;
+        }
         ++control_.wait_services;
         control_.last_wait_deadline = deadline;
         ++control_.services;
@@ -68,7 +73,8 @@ struct Shape {
                                     .dilation = 1,
                                     .tanh_activation = true};
     std::array<float, 9> weights{};
-    GpuWaveNetRealtimeNode::Config config(std::uint32_t lead = 1, std::uint32_t channels = 1) {
+    GpuWaveNetRealtimeNode::Config config(std::uint32_t lead = 1, std::uint32_t channels = 1,
+                                          std::uint64_t wait_ns = 0) {
         return {.session = {.descriptor = {.block_size = 2,
                                            .sample_rate = 48000,
                                            .stream_instances = 1,
@@ -77,7 +83,8 @@ struct Shape {
                             .weights = weights},
                 .channels = channels,
                 .lead_blocks = lead,
-                .capacity = lead + 3};
+                .capacity = lead + 3,
+                .completion_service_wait_ns = wait_ns};
     }
 };
 struct Harness {
@@ -90,8 +97,8 @@ struct Harness {
     std::array<float, 2> a{}, b{}, outa{}, outb{};
     std::array<const float*, 2> inputs{a.data(), b.data()};
     std::array<float*, 2> outputs{outa.data(), outb.data()};
-    explicit Harness(std::uint32_t lead = 1, std::uint32_t count = 1)
-        : node(shape.config(lead, count)), channels(count) {
+    explicit Harness(std::uint32_t lead = 1, std::uint32_t count = 1, std::uint64_t wait_ns = 0)
+        : node(shape.config(lead, count, wait_ns)), channels(count) {
         std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
         for (std::uint32_t ch = 0; ch < count; ++ch)
             providers.push_back(std::make_unique<Channel>(controls[ch]));
@@ -114,8 +121,8 @@ struct Harness {
         path.delivered(path.context, sequence++, static_cast<std::uint8_t>(disposition), 0, 0);
         return status;
     }
-    void service() {
-        path.service(path.context, 0);
+    std::uint32_t service() {
+        return path.service(path.context, 0);
     }
 };
 } // namespace
@@ -144,41 +151,85 @@ TEST_CASE("WaveNet stamped node never calls providers from callback and honors l
     }
 }
 
-TEST_CASE("WaveNet worker completion budget is shared and recomputed per pump",
+TEST_CASE("WaveNet timed service publishes new work with one shared pump deadline",
           "[gpu_audio][wavenet][realtime]") {
-    Shape shape;
-    auto config = shape.config(1, 2);
-    config.completion_service_wait_ns = 500'000;
-    GpuWaveNetRealtimeNode node(config);
-    Control first, second;
-    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
-    providers.push_back(std::make_unique<Channel>(first));
-    providers.push_back(std::make_unique<Channel>(second));
-    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
-    auto path = detail::realtime_gpu_node_path(&node);
-    REQUIRE(path.active());
-    std::array<float, 2> input_a{1, 1}, input_b{2, 2}, output_a{}, output_b{};
-    const std::array<const float*, 2> inputs{input_a.data(), input_b.data()};
-    std::array<float*, 2> outputs{output_a.data(), output_b.data()};
-    pulp::audio::BufferView<const float> in(inputs.data(), 2, 2);
-    pulp::audio::BufferView<float> out(outputs.data(), 2, 2);
-    path.process(path.context, in, out, 2, 0, true, 0);
-    path.service(path.context, 0);
-    CHECK(first.wait_services == 1);
-    CHECK(second.wait_services == 1);
-    CHECK(first.last_wait_deadline != 0);
-    CHECK(first.last_wait_deadline == second.last_wait_deadline);
-    const auto first_deadline = first.last_wait_deadline;
-    path.service(path.context, 0);
-    CHECK(first.wait_services == 2);
-    CHECK(second.wait_services == 2);
-    CHECK(first.last_wait_deadline == second.last_wait_deadline);
-    CHECK(first.last_wait_deadline >= first_deadline);
-    path.process(path.context, in, out, 2, 1, true, 0);
-    path.service(path.context, 0);
-    path.service(path.context, 0);
-    CHECK(first.wait_services == 4);
+    Harness h(1, 2, 500'000);
+    CHECK(h.callback(1) == detail::kRealtimeGpuPriming);
+    CHECK(h.controls[0].services == 0);
+    CHECK(h.controls[1].services == 0);
+    CHECK(h.service() == 1);
+    for (const auto& control : h.controls) {
+        CHECK(control.wait_services == 2);
+        CHECK(control.wait_deadlines[0] == control.wait_starts[0] + 500'000);
+        CHECK(control.wait_deadlines[0] == control.wait_deadlines[1]);
+        CHECK(control.wait_starts[1] >= control.wait_starts[0]);
+        CHECK(control.wait_deadlines[0] == h.controls[0].wait_deadlines[0]);
+        CHECK(control.submits == 1);
+    }
+    REQUIRE(h.callback(2) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 1);
+    CHECK(h.outb[0] == 101);
+    CHECK(h.controls[0].wait_services == 2);
+    CHECK(h.service() == 1);
+    CHECK(h.controls[0].wait_services == 4);
+    CHECK(h.controls[0].wait_deadlines[2] >= h.controls[0].wait_deadlines[0]);
+    CHECK(h.controls[0].wait_deadlines[2] == h.controls[0].wait_deadlines[3]);
+    CHECK(h.controls[0].wait_deadlines[2] == h.controls[1].wait_deadlines[3]);
+    CHECK(h.service() == 0);
+    CHECK(h.controls[0].wait_services == 5);
 }
+
+TEST_CASE("WaveNet zero wait retains completion on the following pump",
+          "[gpu_audio][wavenet][realtime]") {
+    Harness h;
+    h.callback(1);
+    CHECK(h.service() == 0);
+    CHECK(h.controls[0].services == 1);
+    CHECK(h.controls[0].receives == 0);
+    CHECK(h.service() == 1);
+    CHECK(h.controls[0].services == 2);
+    CHECK(h.controls[0].wait_services == 0);
+    REQUIRE(h.callback(2) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 1);
+}
+
+TEST_CASE("WaveNet timed service counts both publications without admitting a third block",
+          "[gpu_audio][wavenet][realtime]") {
+    Harness h(3, 2, 500'000);
+    h.controls[0].complete = h.controls[1].complete = false;
+    h.callback(1);
+    CHECK(h.service() == 0);
+    h.callback(2);
+    h.callback(3);
+    h.controls[0].complete = h.controls[1].complete = true;
+    CHECK(h.service() == 2);
+    for (const auto& control : h.controls) {
+        CHECK(control.submits == 2);
+        CHECK(control.wait_services == 4);
+        CHECK(control.wait_deadlines[2] == control.wait_deadlines[3]);
+    }
+    REQUIRE(h.callback(4) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 1);
+    REQUIRE(h.callback(5) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 2);
+}
+
+TEST_CASE("WaveNet incomplete timed submission stops after two service passes",
+          "[gpu_audio][wavenet][realtime]") {
+    Harness h(1, 2, 500'000);
+    h.controls[1].complete = false;
+    h.callback(1);
+    CHECK(h.service() == 0);
+    CHECK(h.controls[0].wait_services == 2);
+    CHECK(h.controls[1].wait_services == 2);
+    CHECK(h.service() == 0);
+    CHECK(h.controls[0].wait_services == 3);
+    CHECK(h.controls[1].wait_services == 3);
+    CHECK(h.controls[0].submits == 1);
+    CHECK(h.controls[1].submits == 1);
+    CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
+}
+
 TEST_CASE("WaveNet delayed completion cannot fill a later block with stale audio",
           "[gpu_audio][wavenet][realtime]") {
     Harness h;
@@ -196,23 +247,29 @@ TEST_CASE("WaveNet delayed completion cannot fill a later block with stale audio
 }
 TEST_CASE("WaveNet channel failure fences all channel output and future admission",
           "[gpu_audio][wavenet][realtime]") {
-    for (auto mode : {0, 1, 2}) {
-        Harness h(1, 2);
-        h.controls[1].fail = mode == 0;
-        h.controls[1].reject = mode == 1;
-        h.controls[1].wrong_sequence = mode == 2;
-        h.callback(1);
-        h.service();
-        h.service();
-        CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
-        h.controls[1].fail = false;
-        h.controls[1].reject = false;
-        h.controls[1].wrong_sequence = false;
-        h.service();
-        h.service();
-        CHECK(h.callback(3) == detail::kRealtimeGpuMissed);
-        CHECK(h.controls[0].submits == 1);
-        CHECK(h.node.fenced());
+    for (auto wait_ns : {0ull, 500'000ull}) {
+        for (auto mode : {0, 1, 2}) {
+            Harness h(1, 2, wait_ns);
+            h.controls[1].fail = mode == 0;
+            h.controls[1].reject = mode == 1;
+            h.controls[1].wrong_sequence = mode == 2;
+            h.callback(1);
+            CHECK(h.service() == 0);
+            if (wait_ns != 0) {
+                CHECK(h.controls[0].wait_services == (mode == 1 ? 1 : 2));
+                CHECK(h.controls[1].wait_services == (mode == 1 ? 1 : 2));
+            }
+            CHECK(h.service() == 0);
+            CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
+            h.controls[1].fail = false;
+            h.controls[1].reject = false;
+            h.controls[1].wrong_sequence = false;
+            h.service();
+            h.service();
+            CHECK(h.callback(3) == detail::kRealtimeGpuMissed);
+            CHECK(h.controls[0].submits == 1);
+            CHECK(h.node.fenced());
+        }
     }
 }
 TEST_CASE("WaveNet ingress loss fences history rather than skipping an input",
@@ -246,30 +303,34 @@ TEST_CASE("WaveNet transport rejects legacy route when realtime node is unprepar
 }
 TEST_CASE("WaveNet fence leaves later callbacks on fallback until preparation",
           "[gpu_audio][wavenet][realtime]") {
-    Harness h;
-    h.callback(1);
-    h.service();
-    h.service();
-    CHECK(h.path.fence(h.path.context));
-    CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
-    h.service();
-    CHECK(h.controls[0].submits == 1);
+    for (auto wait_ns : {0ull, 500'000ull}) {
+        Harness h(1, 1, wait_ns);
+        h.callback(1);
+        h.service();
+        h.service();
+        CHECK(h.path.fence(h.path.context));
+        CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
+        h.service();
+        CHECK(h.controls[0].submits == 1);
+    }
 }
 
 TEST_CASE("WaveNet callback performs no C++ allocations", "[gpu_audio][wavenet][realtime]") {
-    Harness h;
-    h.callback(1);
-    h.service();
-    h.service();
-    std::size_t allocations = 0;
-    std::uint8_t status;
-    {
-        pulp::test::RtAllocationProbe probe;
-        status = h.callback(2);
-        allocations = probe.allocation_count();
+    for (auto wait_ns : {0ull, 500'000ull}) {
+        Harness h(1, 1, wait_ns);
+        h.callback(1);
+        h.service();
+        h.service();
+        std::size_t allocations = 0;
+        std::uint8_t status;
+        {
+            pulp::test::RtAllocationProbe probe;
+            status = h.callback(2);
+            allocations = probe.allocation_count();
+        }
+        CHECK(status == detail::kRealtimeGpuReady);
+        CHECK(allocations == 0);
     }
-    CHECK(status == detail::kRealtimeGpuReady);
-    CHECK(allocations == 0);
 }
 TEST_CASE("WaveNet invalid config and prewarm overflow are rejected before provider calls",
           "[gpu_audio][wavenet][realtime]") {
@@ -372,15 +433,17 @@ TEST_CASE("WaveNet transport primes one callback shadow on hits and misses",
 
 TEST_CASE("WaveNet late retirement leaves a sequence hole without resetting valid history",
           "[gpu_audio][wavenet][realtime]") {
-    Harness h;
-    h.controls[0].late = true;
-    h.callback(1);
-    h.service();
-    h.service();
-    CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
-    h.controls[0].late = false;
-    h.service();
-    h.service();
-    REQUIRE(h.callback(3) == detail::kRealtimeGpuReady);
-    CHECK(h.outa[0] == 2);
+    for (auto wait_ns : {0ull, 500'000ull}) {
+        Harness h(1, 1, wait_ns);
+        h.controls[0].late = true;
+        h.callback(1);
+        h.service();
+        h.service();
+        CHECK(h.callback(2) == detail::kRealtimeGpuMissed);
+        h.controls[0].late = false;
+        h.service();
+        h.service();
+        REQUIRE(h.callback(3) == detail::kRealtimeGpuReady);
+        CHECK(h.outa[0] == 2);
+    }
 }
