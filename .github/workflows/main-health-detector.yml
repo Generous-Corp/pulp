@@ -25,9 +25,19 @@ name: Base health detector
 # prioritising the fix - is Shipyard's side and is not wired here.
 
 on:
+  # The primary trigger: read main's health right after a merge group fails,
+  # which is the moment a poisoned base first shows. GitHub runs a
+  # `workflow_run` workflow from the DEFAULT branch with base-repository
+  # permissions, never from the triggering run's code, and this job checks out
+  # only the default branch and only reads, so the trigger adds no path for
+  # queued code to act with this workflow's token.
+  workflow_run:
+    workflows: ["Build and Test"]
+    types: [completed]
   schedule:
-    # Often enough to catch a poisoned base within one batch's lifetime,
-    # rarely enough that the read volume is negligible.
+    # A backstop only. GitHub throttles this repository's schedules to about
+    # one run every four hours whatever the cron says, far longer than a
+    # batch's lifetime, so the cron cannot be what catches a red base.
     - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
@@ -42,7 +52,8 @@ on:
         default: true
         type: boolean
 
-# One detector at a time, and never per-sha. A superseded tick loses nothing:
+# One detector at a time, and never per-sha. A burst of failed batches
+# collapses to the running read plus one pending. A superseded tick loses nothing:
 # the next one reads main's CURRENT head, which is strictly more relevant than
 # the head the cancelled tick would have reported on. That is the property the
 # push lane lacks - it pins its own sha, so a cancelled run's observation is
@@ -60,9 +71,17 @@ jobs:
   triage:
     name: Base health
     # A fork's copy of this workflow would probe THIS repository's runs and mail
-    # its owner every failure, so a scheduled run no-ops off the primary repo.
+    # its owner every failure, so an unattended run no-ops off the primary repo.
     # `workflow_dispatch` is untouched, so a fork owner can still run it by hand.
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    # A `workflow_run` read happens only after a FAILED merge-group run: a PR
+    # run, a push run or a green batch says nothing new about main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.repository == vars.PULP_PRIMARY_REPO &&
+       (github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'merge_group' &&
+         github.event.workflow_run.conclusion == 'failure')))
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:

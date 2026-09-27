@@ -1813,7 +1813,15 @@ batch's own report says the base is the cause, so each batch reads as a new
 culprit in turn.
 
 `.github/workflows/main-health-detector.yml` runs `tools/ci/base_poison_detector.py`
-on a schedule and on demand. It is read-only, runs on the preamble Linux runner,
+right after every failed merge-group `Build and Test` run (`workflow_run`,
+`completed`, gated to `event == 'merge_group'` and `conclusion == 'failure'`),
+on a schedule as a backstop, and on demand. The event trigger is the one that
+matters: GitHub throttles this repository's schedules to roughly one run every
+four hours whatever the cron says, longer than a batch's lifetime. A
+`workflow_run` job runs the default branch's copy of the workflow with
+base-repository permissions, so the detector checks out only the default branch
+(never the triggering run's head) and its token is read-only (`actions`,
+`contents`, `pull-requests`). It runs on the preamble Linux runner,
 draws no macOS gate host, and **reports only** — pausing a re-forming batch or
 prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a

@@ -374,6 +374,44 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("schedule:", self.detector_code)
         self.assertIn("cron:", self.detector_code)
 
+    def test_a_failed_merge_group_run_triggers_the_detector(self) -> None:
+        """The schedule is throttled to about one run in four hours, so the read
+        that catches a red base within a batch's lifetime is the one a failed
+        merge group triggers. The workflow name must be build.yml's own, or the
+        trigger silently never fires."""
+        build_name = re.search(r"^name:\s*(.+?)\s*$", self.build, re.MULTILINE)
+        self.assertIsNotNone(build_name)
+        on = re.search(r"^on:\n((?:[ \t]+\S.*\n|[ \t]*\n)+)", self.detector_code,
+                       re.MULTILINE)
+        self.assertIsNotNone(on, "the detector declares no top-level on:")
+        block = on.group(1)
+        self.assertRegex(block, r"(?m)^  workflow_run:\s*$")
+        self.assertIn(f'workflows: ["{build_name.group(1)}"]', block)
+        self.assertIn("types: [completed]", block)
+        job_if = re.search(r"^    if: >-\n((?:      .*\n)+)", self.detector_code, re.MULTILINE)
+        self.assertIsNotNone(job_if, "the triage job has no folded if: guard")
+        guard = job_if.group(1)
+        self.assertIn("github.event.workflow_run.event == 'merge_group'", guard)
+        self.assertIn("github.event.workflow_run.conclusion == 'failure'", guard)
+        self.assertIn("github.event_name == 'workflow_run' &&", guard)
+
+    def test_a_workflow_run_read_never_runs_the_triggering_code(self) -> None:
+        """`workflow_run` carries base-repository permissions; checking out the
+        triggering run's head would hand that token to queued code."""
+        self.assertNotIn("workflow_run.head", self.detector_code)
+        for step in re.findall(r"uses: actions/checkout@\S+\n((?:\s{8,}.*\n)*)",
+                               self.detector_code):
+            self.assertNotIn("ref:", step, step)
+
+    def test_the_detector_token_is_read_only(self) -> None:
+        perms = re.search(r"^permissions:\n((?:[ \t]+\S.*\n)+)", self.detector_code,
+                          re.MULTILINE)
+        self.assertIsNotNone(perms, "no top-level permissions: the token defaults wide")
+        grants = dict(line.strip().split(":", 1) for line in perms.group(1).splitlines())
+        self.assertEqual({k: v.strip() for k, v in grants.items()},
+                         {"actions": "read", "contents": "read", "pull-requests": "read"})
+        self.assertNotRegex(self.detector_code, r"(?m)^[ \t]+permissions:")  # no job widening
+
     def test_the_detector_group_is_shared_and_never_cancels_in_progress(self) -> None:
         """One at a time, and a superseded tick must lose nothing.
 
