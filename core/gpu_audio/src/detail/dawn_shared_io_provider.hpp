@@ -20,6 +20,8 @@ struct SharedIoConvolutionProgramSpec {
     std::uint32_t logical_frames = 0;
     std::uint32_t ir_length = 0;
     std::span<const float> normalized_ir_spectrum;
+    // Nonzero selects immutable-mask WOLA using this prepared FFT graph.
+    std::uint32_t spectral_hop = 0;
 };
 
 class DawnSharedIoProvider final : public SharedIoArenaProvider {
@@ -83,6 +85,9 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     };
 
     struct Stats {
+        std::uint64_t runtime_write_buffer_calls = 0;
+        std::uint64_t runtime_copy_buffer_calls = 0;
+        std::uint64_t runtime_map_async_calls = 0;
         std::uint64_t slots_created = 0;
         std::uint64_t slots_destroyed = 0;
         std::uint64_t allocations = 0;
@@ -143,6 +148,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     Stats stats() const noexcept;
     CompletionPolicy completion_policy() const noexcept;
     AdapterIdentity adapter_identity() const;
+    std::string dawn_revision() const;
 
     bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
                                  std::span<const SlotBufferHandle> slots) noexcept;

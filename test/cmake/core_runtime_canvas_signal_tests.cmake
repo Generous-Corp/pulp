@@ -942,3 +942,12 @@ pulp_add_test_suite(pulp-test-mmap-reader-ranged GROUP pulp-test-group-core-audi
 # SearchIndex — pure ranking/matching core of the off-UI-thread query service (R7).
 pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
+
+# Explicit physical-provider gate; ordinary VM/GPU-off runs must not claim a
+# skipped hardware run as shared spectral correctness evidence.
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
+    target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
+    add_test(NAME pulp-gpu-shared-spectral-probe COMMAND pulp-gpu-shared-spectral-probe)
+    set_tests_properties(pulp-gpu-shared-spectral-probe PROPERTIES TIMEOUT 60)
+endif()

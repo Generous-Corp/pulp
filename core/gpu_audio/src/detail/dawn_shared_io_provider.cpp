@@ -3,6 +3,9 @@
 #include "dawn_shared_io_wavenet_program.hpp"
 
 #include "dawn_submission_tracker.hpp"
+#include "shared_spectral_kernels.hpp"
+#include <pulp/signal/windowing.hpp>
+#include <cmath>
 
 #include "dawn/dawn_proc.h"
 #include "dawn/dawn_version.h"
@@ -367,12 +370,19 @@ struct DawnSharedIoProvider::Impl {
         std::size_t bytes = 0;
         wgpu::ComputePipeline fft, multiply;
         wgpu::Buffer ir;
+        std::uint32_t spectral_hop = 0;
+        std::uint64_t last_sequence = 0;
+        bool has_sequence = false;
+        wgpu::Buffer spectral_state;
+        wgpu::ComputePipeline append, window, ola, output;
         std::vector<wgpu::Buffer> forward_uniforms, inverse_uniforms;
         struct SlotGroups {
             // Submissions from different arena slots may overlap. Keep every
             // writable FFT intermediate slot-local; only immutable IR and
             // uniforms are shared by the prepared program.
             wgpu::Buffer a, b, product;
+            wgpu::Buffer windowed, synthesized;
+            wgpu::BindGroup append, window, ola, output;
             std::vector<wgpu::BindGroup> forward, inverse;
             wgpu::BindGroup multiply;
         };
@@ -843,6 +853,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
                                    const SharedIoConvolutionProgramSpec& spec)
         : provider_(&provider), fft_size_(spec.fft_size), channels_(spec.channels),
           logical_frames_(spec.logical_frames), ir_length_(spec.ir_length),
+          spectral_hop_(spec.spectral_hop),
           normalized_ir_spectrum_(spec.normalized_ir_spectrum.begin(),
                                   spec.normalized_ir_spectrum.end()) {}
 
@@ -860,6 +871,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
             .logical_frames = logical_frames_,
             .ir_length = ir_length_,
             .normalized_ir_spectrum = normalized_ir_spectrum_,
+            .spectral_hop = spectral_hop_,
         };
         prepared_ = provider_->prepare_convolution_program(spec);
         return prepared_;
@@ -886,6 +898,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
     std::uint32_t channels_ = 0;
     std::uint32_t logical_frames_ = 0;
     std::uint32_t ir_length_ = 0;
+    std::uint32_t spectral_hop_ = 0;
     std::vector<float> normalized_ir_spectrum_;
     bool prepared_ = false;
 };
@@ -1257,12 +1270,14 @@ bool DawnSharedIoProvider::prepare_convolution_program(
         spec.normalized_ir_spectrum.size() != spec.fft_size * 2u) {
         return false;
     }
+    if (spec.spectral_hop && (spec.spectral_hop > spec.fft_size / 2 ||
+        spec.fft_size % spec.spectral_hop != 0)) return false;
     const auto bytes64 = std::uint64_t(spec.fft_size) * spec.channels * 2u * sizeof(float);
     if (bytes64 > std::numeric_limits<std::uint32_t>::max())
         return false;
     for (const auto* slot : impl_->slots) {
         if (slot == nullptr || slot->retired || slot->index >= impl_->slots.size() ||
-            slot->input_logical_bytes < bytes64 || slot->output_logical_bytes < bytes64) {
+            slot->input_logical_bytes < bytes64 + (spec.spectral_hop ? 24u : 0u) || slot->output_logical_bytes < bytes64) {
             return false;
         }
     }
@@ -1271,6 +1286,7 @@ bool DawnSharedIoProvider::prepare_convolution_program(
     try {
         auto plan = std::make_unique<Impl::ConvolutionPlan>();
         plan->fft_size = spec.fft_size;
+        plan->spectral_hop = spec.spectral_hop;
         plan->channels = spec.channels;
         plan->logical_frames = spec.logical_frames;
         plan->bytes = static_cast<std::size_t>(bytes64);
@@ -1357,6 +1373,30 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             plan->inverse_uniforms.push_back(std::move(inverse));
         }
 
+        if (spec.spectral_hop) {
+            const auto kernels = shared_spectral_kernels(spec.fft_size, spec.spectral_hop, spec.channels);
+            plan->append = pipeline(kernels[0].c_str());
+            plan->window = pipeline(kernels[1].c_str());
+            plan->ola = pipeline(kernels[2].c_str());
+            plan->output = pipeline(kernels[3].c_str());
+            // Mutable history + OLA + norm, followed by immutable window/floor.
+            const auto n = spec.fft_size, h = spec.spectral_hop;
+            const auto window = signal::WindowFunction::generate(n, signal::WindowFunction::Type::hann);
+            const auto window_offset = 3u * n * spec.channels + 2u * n;
+            std::vector<float> initial(window_offset + n + 1u, 0.0f);
+            std::copy(window.begin(), window.end(), initial.begin() + window_offset);
+            double steady = 0;
+            for (int j = -int(n / h) - 1; j <= int(n / h) + 1; ++j) {
+                const int index = int(n) - j * int(h) - int(n / 2);
+                if (index >= 0 && index < int(n)) steady += double(window[index]) * window[index];
+            }
+            initial.back() = std::max(float(steady) * 0.25f, 1e-9f);
+            plan->spectral_state = make_buffer(initial.size() * sizeof(float), storage);
+            if (!plan->append || !plan->window || !plan->ola || !plan->output || !plan->spectral_state)
+                return fail_preparation();
+            impl_->queue.WriteBuffer(plan->spectral_state, 0, initial.data(), initial.size() * sizeof(float));
+        }
+
         plan->slots.resize(impl_->slots.size());
         for (const auto* slot : impl_->slots) {
             auto& groups = plan->slots[slot->index];
@@ -1366,6 +1406,17 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             if (!groups.a || !groups.b || !groups.product)
                 return fail_preparation();
             wgpu::Buffer source = slot->input_buffer;
+            if (spec.spectral_hop) {
+                groups.windowed = make_buffer(plan->bytes, storage);
+                groups.synthesized = make_buffer(plan->bytes, storage);
+                if (!groups.windowed || !groups.synthesized) return fail_preparation();
+                groups.append = bind_three(plan->append, slot->input_buffer, plan->spectral_state, groups.windowed);
+                groups.window = bind_three(plan->window, slot->input_buffer, plan->spectral_state, groups.windowed);
+                groups.ola = bind_three(plan->ola, slot->input_buffer, plan->spectral_state, groups.synthesized);
+                groups.output = bind_three(plan->output, slot->input_buffer, plan->spectral_state, slot->output_buffer);
+                if (!groups.append || !groups.window || !groups.ola || !groups.output) return fail_preparation();
+                source = groups.windowed;
+            }
             wgpu::Buffer destination = groups.a;
             for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
                 auto group =
@@ -1384,7 +1435,7 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             destination = groups.a;
             for (std::uint32_t stage = 0; stage < plan->log2; ++stage) {
                 if (stage + 1u == plan->log2)
-                    destination = slot->output_buffer;
+                    destination = spec.spectral_hop ? groups.synthesized : slot->output_buffer;
                 auto group =
                     bind_three(plan->fft, source, destination, plan->inverse_uniforms[stage]);
                 if (!group)
@@ -1677,7 +1728,15 @@ bool DawnSharedIoProvider::prepare_wavenet_program(
 bool DawnSharedIoProvider::submit_convolution_program(
     const SlotResources& resources, SlotToken token,
     std::shared_ptr<SharedIoTerminalInbox> inbox) noexcept {
-    return submit_impl(resources, token, std::move(inbox), 1);
+    if (!impl_ || !impl_->convolution) return false;
+    auto& plan = *impl_->convolution;
+    if (plan.spectral_hop && plan.has_sequence &&
+        (plan.last_sequence == std::numeric_limits<std::uint64_t>::max() ||
+         token.stream_sequence != plan.last_sequence + 1u)) return false;
+    if (!submit_impl(resources, token, std::move(inbox), 1)) return false;
+    plan.last_sequence = token.stream_sequence;
+    plan.has_sequence = true;
+    return true;
 }
 
 bool DawnSharedIoProvider::submit_wavenet_program(
@@ -1769,6 +1828,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         impl_->device.ForceLoss(wgpu::DeviceLostReason::Unknown, "P1 loss before submit");
     if (impl_->options.fault == Fault::PlantWriteBuffer) {
         constexpr float planted = -123.0f;
+        ++impl_->stats.runtime_write_buffer_calls;
         impl_->queue.WriteBuffer(slot->input_buffer, 0, &planted, sizeof(planted));
     }
     auto encoder = impl_->device.CreateCommandEncoder();
@@ -1777,6 +1837,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         return false;
     }
     if (impl_->options.fault == Fault::PlantCopyBuffer) {
+        ++impl_->stats.runtime_copy_buffer_calls;
         encoder.CopyBufferToBuffer(slot->input_buffer, 0, slot->output_buffer, 0, sizeof(float));
     }
     if (impl_->options.fault == Fault::PlantMapAsync) {
@@ -1784,6 +1845,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         control_descriptor.size = sizeof(float);
         control_descriptor.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
         auto control = impl_->device.CreateBuffer(&control_descriptor);
+        ++impl_->stats.runtime_map_async_calls;
         control.MapAsync(wgpu::MapMode::Read, 0, sizeof(float),
                          wgpu::CallbackMode::AllowProcessEvents,
                          [](wgpu::MapAsyncStatus, wgpu::StringView) {});
@@ -1792,6 +1854,18 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         const auto& plan = *convolution;
         const auto& groups = plan.slots[slot->index];
         const auto fft_wg = (plan.channels * (plan.fft_size / 2u) + 255u) / 256u;
+        const auto spectral_dispatch = [&](const wgpu::ComputePipeline& pipeline,
+                                            const wgpu::BindGroup& group, std::uint32_t count) {
+            auto pass = encoder.BeginComputePass();
+            pass.SetPipeline(pipeline);
+            pass.SetBindGroup(0, group);
+            pass.DispatchWorkgroups((count + 63u) / 64u);
+            pass.End();
+        };
+        if (plan.spectral_hop) {
+            spectral_dispatch(plan.append, groups.append, plan.channels * plan.spectral_hop);
+            spectral_dispatch(plan.window, groups.window, plan.channels * plan.fft_size);
+        }
         for (const auto& group : groups.forward) {
             auto pass = encoder.BeginComputePass();
             pass.SetPipeline(plan.fft);
@@ -1813,6 +1887,10 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             pass.DispatchWorkgroups(fft_wg);
             pass.End();
         }
+        if (plan.spectral_hop) {
+            spectral_dispatch(plan.ola, groups.ola, plan.channels * plan.fft_size);
+            spectral_dispatch(plan.output, groups.output, plan.spectral_hop);
+        }
     } else if (wavenet != nullptr) {
         const auto& plan = *wavenet;
         const auto& groups = plan.slots[slot->index];
@@ -1823,6 +1901,7 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             const auto& array_groups = groups.arrays[index];
             if (index > 0) {
                 const auto& previous = groups.arrays[index - 1u];
+                ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(previous.headout, 0, array_groups.headacc, 0,
                                            array_groups.headacc.GetSize());
             }
@@ -1853,8 +1932,10 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             const auto tail_offset =
                 static_cast<std::uint64_t>(array.channels) * plan.block_size * sizeof(float);
             for (const auto& activation : array.activations) {
+                ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(activation, tail_offset, plan.history_temp, 0,
                                            history_bytes);
+                ++impl_->stats.runtime_copy_buffer_calls;
                 encoder.CopyBufferToBuffer(plan.history_temp, 0, activation, 0, history_bytes);
             }
         }
@@ -2075,3 +2156,7 @@ DawnSharedIoProvider::AdapterIdentity DawnSharedIoProvider::adapter_identity() c
 }
 
 } // namespace pulp::gpu_audio::detail
+
+namespace pulp::gpu_audio::detail {
+std::string DawnSharedIoProvider::dawn_revision() const { return revision(dawn::kDawnVersion.data()); }
+}
