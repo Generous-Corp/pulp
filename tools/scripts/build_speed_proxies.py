@@ -22,6 +22,8 @@ that mechanism directly from logs, labels or annotations:
                       per merged PR (run cancellation + head-SHA change + the
                       superseding commit's parents and subject)
   mq_attempts         merge-queue entries per merged PR, and ejections by cause
+  tree_identical_groups  merged PRs whose merge-commit tree equals the PR-head
+                      tree (the ceiling on exact-tree receipt reuse, G5)
   gate_runs           native gate runs per merged PR: PR head, merge group,
                       wasted (cancelled after a runner took it, or a failed
                       merge group)
@@ -811,6 +813,33 @@ def idle_with_demand(events: list[dict], gjobs: list[dict], win: Windows) -> lis
 # context (wall time; reported beside the proxies, never the verdict)
 # --------------------------------------------------------------------------
 
+def tree_identical_groups(merged: list[dict], commits: dict[str, dict], win: Windows) -> dict:
+    """Share of merged PRs whose merge commit has the same tree as the PR head.
+
+    A merge group is built on the merge commit; an exact-tree receipt from the
+    PR head can only be reused when that tree equals the head's, i.e. main did
+    not move under the PR. This is the ceiling on whole-job receipt reuse (G5),
+    read from commit trees, not from reuse verdicts."""
+    units: dict[str, list[float]] = {"before": [], "after": []}
+    resolved = 0
+    for p in merged:
+        side = win.side(p.get("mergedAt"))
+        mc = commits.get(p.get("mergeCommit") or "") or {}
+        parents = mc.get("parents") or []
+        if not side or len(parents) != 2 or not mc.get("tree"):
+            continue
+        head = commits.get(parents[1]) or {}
+        if not head.get("tree"):
+            continue
+        resolved += 1
+        units[side].append(1.0 if head["tree"] == mc["tree"] else 0.0)
+    return row("tree_identical_groups", "a merge group's tree equals its PR head's, so an "
+               "exact-tree PR-head receipt could serve it (the G5 reuse ceiling)",
+               "merged PRs whose merge-commit tree == PR-head tree, share",
+               "GitHub commits API (merge commit + second parent trees)", units,
+               "merged PRs with both trees resolved", resolved, lower_is_better=False)
+
+
 def context_rows(runs: list[dict], merged: list[dict], win: Windows) -> list[dict]:
     lat: dict[str, list[float]] = {"before": [], "after": []}
     for p in merged:
@@ -885,6 +914,7 @@ def compute(data: dict, win: Windows) -> dict:
             wait_per_job_ahead(all_jobs, win),
             refresh_cancels(runs, data.get("commits", {}), merged, win),
             mq_attempts(merged, win),
+            tree_identical_groups(merged, data.get("commits", {}), win),
             *gate_runs(runs, merged, win)["rows"],
             base_red(runs, data.get("log_digests") or {}, win)]
     return {"windows": {"since": win.since.isoformat(), "split": win.split.isoformat(),
@@ -1053,7 +1083,7 @@ def collect(gh, since: dt.datetime, hosts: Iterable[str], ssh: Callable,
 
     query = ("query($q:String!,$after:String){search(query:$q,type:ISSUE,first:100,"
              "after:$after){pageInfo{hasNextPage endCursor} nodes{... on PullRequest{"
-             "number createdAt mergedAt headRefName timelineItems(first:100,itemTypes:"
+             "number createdAt mergedAt headRefName mergeCommit{oid} timelineItems(first:100,itemTypes:"
              "[ADDED_TO_MERGE_QUEUE_EVENT,REMOVED_FROM_MERGE_QUEUE_EVENT]){nodes{__typename"
              " ... on AddedToMergeQueueEvent{createdAt}"
              " ... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}}")
@@ -1068,6 +1098,7 @@ def collect(gh, since: dt.datetime, hosts: Iterable[str], ssh: Callable,
                 if n:
                     merged.append({"number": n["number"], "createdAt": n["createdAt"],
                                    "mergedAt": n["mergedAt"], "headRefName": n.get("headRefName"),
+                                   "mergeCommit": (n.get("mergeCommit") or {}).get("oid"),
                                    "events": [{"type": e["__typename"], "at": e["createdAt"],
                                                "reason": e.get("reason")}
                                               for e in n["timelineItems"]["nodes"]]})
@@ -1093,7 +1124,8 @@ def collect(gh, since: dt.datetime, hosts: Iterable[str], ssh: Callable,
     def commit(sha: str) -> tuple[str, dict]:
         c = _retry(gh.api, f"repos/{gh.repo}/commits/{sha}")
         return sha, {"parents": [p["sha"] for p in c.get("parents", [])],
-                     "subject": (c.get("commit", {}).get("message") or "").splitlines()[0]}
+                     "subject": (c.get("commit", {}).get("message") or "").splitlines()[0],
+                     "tree": ((c.get("commit") or {}).get("tree") or {}).get("sha")}
 
     digests = dict(cache.get("log_digests", {}))
     failed = [j for r in runs if r["event"] == "merge_group" for j in r["jobs"]
@@ -1107,8 +1139,19 @@ def collect(gh, since: dt.datetime, hosts: Iterable[str], ssh: Callable,
         return str(j["id"]), {"digest": _log_digest(text), "read": proc.returncode == 0,
                               "runner": j.get("runner_name"), "at": j.get("created_at")}
 
+    # Merge commits (and, once known, their PR-head parents) carry the trees the
+    # tree_identical_groups proxy compares. Cached rows without a tree are
+    # re-read once.
+    need |= {p["mergeCommit"] for p in merged
+             if p.get("mergeCommit") and not (commits.get(p["mergeCommit"]) or {}).get("tree")}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         for sha, c in pool.map(commit, sorted(need)):
+            commits[sha] = c
+        heads = {c["parents"][1] for p in merged
+                 for c in [commits.get(p.get("mergeCommit") or "") or {}]
+                 if len(c.get("parents") or []) == 2
+                 and not (commits.get(c["parents"][1]) or {}).get("tree")}
+        for sha, c in pool.map(commit, sorted(heads)):
             commits[sha] = c
         digests.update(pool.map(log_of, failed))
     log(f"proxies: {len(merged)} merged PRs, {len(need)} commits, {len(failed)} failed-job logs")
