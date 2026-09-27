@@ -1698,7 +1698,21 @@ CoreMIDI harness sources, and each `test/`/`docs/` file a non-test CMake file
 names, re-derived from the tree by `test_classify_changes.py`). The macOS job then skips the
 two-SDK iOS compile step but still performs its ordinary desktop build and
 tests. Missing, malformed, empty, mixed, unknown, policy, CMake, CI, public
-header, non-test `tools/scripts`, or `apple/**` evidence runs the iOS gate. Pushes to main,
+header, non-test `tools/scripts`, or `apple/**` evidence runs the iOS gate.
+
+Paths outside that allowlist no longer run it by default either: on pull
+requests and merge groups the gate runs only when a path reaches an iOS-only
+surface (`ios_surface` in `classify_changes.py`: `apple/**`, iOS
+examples/templates, iOS platform sources, any source that branches on an iOS
+target, non-test CMake, dependency pins, the simulator Skia fetcher, the gate's
+own wiring). Shared code is compiled for macOS by the same job, so a break there
+fails the macOS build; measured over 14 days the per-PR iOS gate ran 1,374
+times and caught nothing the macOS build would have missed, at about 790 gate
+slot-minutes a day. The full gate runs nightly on main
+(`.github/workflows/ios-compile-gate-nightly.yml`, on the base self-hosted gate
+labels, opening one de-duplicated tracking issue on failure) and on every
+release tag (`release-cli.yml` `ios-compile-gate`, which the publish job
+requires). Pushes to main,
 manual runs, nightly/release workflows, and audits never accept this skip;
 their existing event policy remains unchanged. Keep the condition inside the
 required job: path-filtering the workflow or job would prevent the stable
