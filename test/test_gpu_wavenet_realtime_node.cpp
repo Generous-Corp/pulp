@@ -305,8 +305,9 @@ TEST_CASE("WaveNet transport rejects legacy route when realtime node is unprepar
 }
 TEST_CASE("WaveNet fence leaves later callbacks on fallback until preparation",
           "[gpu_audio][wavenet][realtime]") {
+    for (auto trace_enabled : {false, true})
     for (auto wait_ns : {0ull, 500'000ull}) {
-        Harness h(1, 1, wait_ns);
+        Harness h(1, 1, wait_ns, trace_enabled);
         h.callback(1);
         h.service();
         h.service();
@@ -318,8 +319,9 @@ TEST_CASE("WaveNet fence leaves later callbacks on fallback until preparation",
 }
 
 TEST_CASE("WaveNet callback performs no C++ allocations", "[gpu_audio][wavenet][realtime]") {
+    for (auto trace_enabled : {false, true})
     for (auto wait_ns : {0ull, 500'000ull}) {
-        Harness h(1, 1, wait_ns);
+        Harness h(1, 1, wait_ns, trace_enabled);
         h.callback(1);
         h.service();
         h.service();
@@ -435,8 +437,9 @@ TEST_CASE("WaveNet transport primes one callback shadow on hits and misses",
 
 TEST_CASE("WaveNet late retirement leaves a sequence hole without resetting valid history",
           "[gpu_audio][wavenet][realtime]") {
+    for (auto trace_enabled : {false, true})
     for (auto wait_ns : {0ull, 500'000ull}) {
-        Harness h(1, 1, wait_ns);
+        Harness h(1, 1, wait_ns, trace_enabled);
         h.controls[0].late = true;
         h.callback(1);
         h.service();
