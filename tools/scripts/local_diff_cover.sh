@@ -30,6 +30,9 @@
 #   2 — missing required dependency, or evidence invalidated by a worktree
 #       change during the run (both require an explicit rerun/remediation)
 #   3 — not enough free disk space to run the coverage build (nothing built)
+#   4 — skipped, NOT passed: PULP_DIFF_COVER_SKIP_WHEN_STARVED=1 (the pre-push
+#       hook sets it) and the host governor would grant this build no more than
+#       PULP_DIFF_COVER_STARVED_MAX_JOBS (default 2) jobs; nothing built
 #  10 — preflight-only mode found potentially coverable lines (caller should run)
 #
 # Design (mirrors CI):
@@ -101,6 +104,31 @@ run_coverage_ctest() {
         args+=(--tests-from-file "${tests_file}")
     fi
     ctest "${args[@]}"
+}
+
+# Starved-host skip, for the pre-push hook only. A coverage build at the
+# governor's -j2 floor runs for hours on a host whose cores are leased to gate
+# VMs, and the push waits on it for a check CI already runs. The hook opts in
+# with PULP_DIFF_COVER_SKIP_WHEN_STARVED=1; a direct run (or
+# PULP_DIFF_COVER_IGNORE_STARVATION=1) always builds. The probe acquires
+# nothing, so deciding costs milliseconds. Returns 0 (and says so, loudly) when
+# the build should be skipped.
+starved_host_skip() {
+    [ "${PULP_DIFF_COVER_SKIP_WHEN_STARVED:-0}" = "1" ] || return 1
+    [ "${PULP_DIFF_COVER_IGNORE_STARVATION:-0}" != "1" ] || return 1
+    local max_jobs="${PULP_DIFF_COVER_STARVED_MAX_JOBS:-2}"
+    local probe jobs
+    probe="$("${GOVERNED_BUILD}" --probe-jobs 2>/dev/null || true)"
+    jobs="${probe#jobs=}"
+    jobs="${jobs%% *}"
+    [[ "${jobs}" =~ ^[0-9]+$ ]] && [[ "${max_jobs}" =~ ^[0-9]+$ ]] || return 1
+    [ "${jobs}" -le "${max_jobs}" ] || return 1
+    echo "[local_diff_cover] SKIPPED, NOT PASSED: the host governor would grant this coverage" >&2
+    echo "[local_diff_cover]   build only -j${jobs} right now (${probe}); at that share it" >&2
+    echo "[local_diff_cover]   takes hours. Diff coverage was NOT checked for this push." >&2
+    echo "[local_diff_cover]   Run it when the host is quieter:  tools/scripts/local_diff_cover.sh" >&2
+    echo "[local_diff_cover]   Or build it now regardless:       PULP_DIFF_COVER_IGNORE_STARVATION=1 git push" >&2
+    return 0
 }
 
 run_coverage_build() {
@@ -762,6 +790,10 @@ fi
 
 if [ "${PULP_DIFF_COVER_PREFLIGHT_ONLY:-0}" = "1" ]; then
     exit 10
+fi
+
+if starved_host_skip; then
+    exit 4
 fi
 
 # Disk precondition, ahead of the dependency preflight, the fetch, the lock and

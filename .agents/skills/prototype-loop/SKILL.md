@@ -85,6 +85,13 @@ What to know before trusting it:
   selector widens to `all`; on a seeded dir that is exactly the leftover
   edges, not a full build.
 
+**Never start the worktree under `/tmp` or `$TMPDIR`.** Configure and
+`governed-build.sh` refuse it (exit 3), because a temporary tree misses the
+shared ccache and starts every build cold; create it under
+`$PULP_WORKTREES_ROOT` or beside the primary checkout. A second `pulp build`
+into a tree that is still building exits 75 and names the running build:
+attach to that one instead of relaunching.
+
 ## Step 1 — AOT analyze the consumer's bundle
 
 Run `pulp-css-analyze` over the consumer's pre-built React bundle. The output is a coverage report listing unmapped CSS props with occurrence counts.

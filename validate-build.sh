@@ -150,6 +150,9 @@ if [ -n "$ROOT_OVERRIDE" ]; then
 else
     tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/pulp-validate.XXXXXX")"
 fi
+# This pass is deliberately a cold, throwaway clone, which is the one case the
+# configure-time temporary-checkout refusal exists to exempt.
+export PULP_ALLOW_TMP_CHECKOUT=1
 src_dir="$tmp_root/src"
 build_dir="$tmp_root/build"
 setup_log="$tmp_root/setup.log"
