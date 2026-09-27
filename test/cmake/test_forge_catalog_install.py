@@ -15,7 +15,7 @@ args, remaining = parser.parse_known_args()
 SOURCE = args.source.resolve()
 CMAKE = shutil.which('cmake')
 GPU = {'schema': 'pulp.forge-catalog.v1', 'nodes': [
-    {'key': 'convolution_reverb', 'realizations': [{'mode': 'default'}, {'mode': 'gpu'}]}]}
+    {'key': 'convolution_reverb', 'realizations': [{'mode': 'default'}, {'mode': 'gpu', 'type_id': 'space.convolution_reverb_gpu'}]}]}
 CPU = {'schema': 'pulp.forge-catalog.v1', 'nodes': [
     {'key': 'convolution_reverb', 'realizations': [{'mode': 'default'}]}]}
 
@@ -98,6 +98,25 @@ endif()
         self.install()
         self.assertEqual(self.installed.read_bytes(), self.snapshot.read_bytes())
 
+    def test_embedded_default_uses_pulp_snapshot_not_consumer_snapshot(self):
+        child = self.source / 'embedded-pulp'
+        (child / 'docs/status').mkdir(parents=True)
+        expected = dict(CPU, owner='embedded-pulp')
+        (child / 'docs/status/forge-catalog.json').write_text(json.dumps(expected))
+        self.snapshot.write_text(json.dumps(dict(CPU, owner='consumer')))
+        (child / 'CMakeLists.txt').write_text('''
+include("${PULP_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake")
+pulp_install_forge_catalog()
+''')
+        (self.source / 'CMakeLists.txt').write_text('''
+cmake_minimum_required(VERSION 3.24)
+project(Consumer LANGUAGES NONE)
+add_subdirectory(embedded-pulp)
+''')
+        self.configure(enabled=False, omit=True)
+        self.install()
+        self.assertEqual(json.loads(self.installed.read_text()), expected)
+
     def test_enabled_generates_installs_and_rebuilds_from_exporter(self):
         self.configure()
         self.install()
@@ -135,6 +154,15 @@ endif()
     def test_cpu_only_export_is_rejected(self):
         self.configure()
         self.payload.write_text(json.dumps(CPU))
+        result = self.install(success=False)
+        self.assertIn('missing from the exported Forge catalog', result.stdout + result.stderr)
+        self.assertFalse(self.installed.exists())
+
+    def test_gpu_mode_with_wrong_type_is_rejected(self):
+        self.configure()
+        wrong = json.loads(json.dumps(GPU))
+        wrong['nodes'][0]['realizations'][1]['type_id'] = 'space.convolution_reverb'
+        self.payload.write_text(json.dumps(wrong))
         result = self.install(success=False)
         self.assertIn('missing from the exported Forge catalog', result.stdout + result.stderr)
         self.assertFalse(self.installed.exists())

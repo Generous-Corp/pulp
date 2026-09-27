@@ -34,7 +34,11 @@ if(NOT _json_error AND _count GREATER 0)
                 foreach(_j RANGE 0 ${_last_realization})
                     string(JSON _mode ERROR_VARIABLE _mode_error
                         GET "${_json}" nodes ${_i} realizations ${_j} mode)
-                    if(NOT _mode_error AND _mode STREQUAL "gpu")
+                    string(JSON _type_id ERROR_VARIABLE _type_error
+                        GET "${_json}" nodes ${_i} realizations ${_j} type_id)
+                    if(NOT _mode_error AND NOT _type_error AND
+                       _mode STREQUAL "gpu" AND
+                       _type_id STREQUAL "space.convolution_reverb_gpu")
                         set(_gpu_found TRUE)
                     endif()
                 endforeach()

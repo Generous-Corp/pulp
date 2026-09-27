@@ -19,7 +19,8 @@ function(pulp_add_generated_forge_catalog_check)
 endfunction()
 
 function(pulp_install_forge_catalog)
-    set(_catalog "${CMAKE_SOURCE_DIR}/docs/status/forge-catalog.json")
+    # The caller is PulpInstallRules, including when Pulp is a subdirectory.
+    set(_catalog "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/forge-catalog.json")
     if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
         if(CMAKE_CROSSCOMPILING OR NOT TARGET pulp-cli)
             message(FATAL_ERROR
