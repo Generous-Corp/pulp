@@ -184,6 +184,19 @@ def test_class5_dflag_arm64_only_flagged():
     assert 5 in _classes(f), "-D...=arm64 (no x86_64) must flag C5"
 
 
+def test_gpu_provider_exemption_does_not_hide_a_new_arm_asset():
+    root = lint._repo_root()
+    path = "tools/cmake/PulpGpuAudioProviderIdentity.cmake"
+    allow = lint.Allowlist.load(root / "tools/scripts/intel_canary_allowlist.txt")
+    source = (root / path).read_text()
+    assert lint.find_arch_strings(path, source, allow) == []
+    injected = source + '\nset(unreviewed_provider "darwin-arm64")\n'
+    findings = lint.find_arch_strings(path, injected, allow)
+    assert len(findings) == 1 and findings[0].klass == 3, (
+        "Exact-proof exemptions must not suppress unrelated ARM asset selection"
+    )
+
+
 # ── End-to-end: the real tree must be clean ──────────────────────────────────
 def test_tree_is_clean():
     root = lint._repo_root()

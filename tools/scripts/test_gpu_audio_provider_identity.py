@@ -395,6 +395,17 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/selected.txt" "${{identity}}\\n${{definitions}
                 self.assertFalse((build / "gpu-audio-provider-identity/configure.json").exists())
         self.assertEqual(selected[0], selected[1])
 
+    def test_nonexact_intel_and_universal_do_not_request_arm_provider_proof(self):
+        for arch in ("x86_64", "arm64;x86_64"):
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory() as temporary:
+                result, _, build = self.configure(
+                    Path(temporary), tests=False, arch=arch, exact=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                selected = (build / "selected.txt").read_text()
+                self.assertIn('PULP_GPU_AUDIO_EXPECTED_DAWN_SHA=""', selected)
+                self.assertNotIn(DAWN_SHA, selected)
+                self.assertFalse((build / "gpu-audio-provider-identity").exists())
+
     def test_tests_disabled_rejects_provider_mismatch(self):
         for mutation in ("header", "library", "manifest"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:

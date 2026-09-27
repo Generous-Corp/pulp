@@ -63,6 +63,14 @@ tools/cmake/test_pulp_rack_contract.py :: "Fixture-1.0.0-mac-arm64.vcvplugin"
 tools/cmake/check_control_shipping_artifact.cmake :: MATCHES "^(arm64|aarch64)$"
 tools/cmake/check_control_shipping_artifact.cmake :: MATCHES "arm64|aarch64|aa64"
 
+# GPU-audio exact-provider receipts authenticate the thin Apple-Silicon asset only.
+# The helper checks CMAKE_OSX_ARCHITECTURES (host fallback only when unset) and
+# rejects x86_64/universal exact-proof requests before either validator command.
+# Nonexact Intel/universal identity initialization remains available. CMake
+# controls live in test_gpu_audio_provider_identity.py; this is not a file waiver.
+tools/cmake/PulpGpuAudioProviderIdentity.cmake :: _pulp_gpu_audio_target_arch MATCHES "^(arm64|aarch64)$"
+tools/cmake/PulpGpuAudioProviderIdentity.cmake :: --platform darwin-arm64
+
 # Test fixture: a synthetic wgpu cache path exercising the relocatable check.
 tools/cmake/scripts/test_check_bundle_relocatable.py :: wgpu-macos-aarch64
 
