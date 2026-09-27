@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: vellum-freeze-recovery-${{ inputs.pr_number }}
@@ -17,14 +18,24 @@ concurrency:
 
 jobs:
   rerun-pr-context:
-    name: Re-run exact PR context
+    name: Validate exact PR head against protected main
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      actions: write
       contents: read
+      statuses: write
     steps:
-      - name: Re-run the exact restricted PR run
+      - name: Check out trusted protected main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          # Keep this ref literal. The recovery workflow runs trusted controls
+          # from protected main and treats the PR tree as data only.
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve live pull request
+        id: pr
         env:
           DISPATCH_PR: ${{ inputs.pr_number }}
           GH_TOKEN: ${{ github.token }}
@@ -39,39 +50,151 @@ jobs:
           state="$(printf '%s' "$pr_json" | jq -r .state)"
           base_repo="$(printf '%s' "$pr_json" | jq -r .base.repo.full_name)"
           base_ref="$(printf '%s' "$pr_json" | jq -r .base.ref)"
-          base_head="$(printf '%s' "$pr_json" | jq -r .base.sha)"
+          historical_base="$(printf '%s' "$pr_json" | jq -r .base.sha)"
           source_head="$(printf '%s' "$pr_json" | jq -r .head.sha)"
           if [ "$state" != "open" ]; then
-            echo "PR #$DISPATCH_PR is $state; only an open PR can be recovered" >&2
+            echo "PR #$DISPATCH_PR is $state; refusing recovery" >&2
             exit 1
           fi
           if [ "$base_repo" != "$GITHUB_REPOSITORY" ] || [ "$base_ref" != "main" ]; then
             echo "only $GITHUB_REPOSITORY:main is trusted for manual recovery" >&2
             exit 1
           fi
+          {
+            echo "number=$DISPATCH_PR"
+            echo "source_head=$source_head"
+            echo "historical_base=$historical_base"
+          } >> "$GITHUB_OUTPUT"
+          echo "PR #$DISPATCH_PR: exact head=$source_head historical base=$historical_base" >&2
 
-          runs_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/vellum-freeze-check.yml/runs?event=pull_request&head_sha=$source_head&per_page=100")"
-          candidate="$(printf '%s' "$runs_json" | jq -c \
-            --arg sha "$source_head" --arg base "$base_head" --argjson pr "$DISPATCH_PR" '
-              [.workflow_runs[]
-               | select(.event == "pull_request" and .head_sha == $sha)
-               | select(any(.pull_requests[]?;
-                   .number == $pr and .head.sha == $sha and .base.sha == $base))]
-              | sort_by(.created_at)
-              | last // empty')"
-          if [ -z "$candidate" ]; then
-            echo "no exact-head pull_request-context Vellum freeze run exists for PR #$DISPATCH_PR at $source_head" >&2
+      - name: Bind checked-out protected main
+        id: trusted-base
+        run: |
+          set -euo pipefail
+          base="$(git rev-parse --verify HEAD^{commit})"
+          git cat-file -e "$base^{commit}"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+          echo "validation base is current protected main $base" >&2
+
+      - name: Install inventory parser dependency without secrets
+        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+
+      - name: Mint one-repository Vellum reader token
+        id: vellum-reader-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: '3878000'
+          private-key: ${{ secrets.VELLUM_READER_APP_PRIVATE_KEY }}
+          owner: Generous-Corp
+          repositories: vellum
+          permission-checks: read
+          permission-contents: read
+
+      - name: Mint short-lived Vellum reader App identity proof
+        id: vellum-reader-jwt
+        env:
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.VELLUM_READER_APP_PRIVATE_KEY }}
+        run: |
+          python3 tools/scripts/github_app_jwt.py \
+            --app-id 3878000 \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Validate current protected-main candidate and publish head status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VELLUM_READER_TOKEN: ${{ steps.vellum-reader-token.outputs.token }}
+          VELLUM_READER_APP_JWT: ${{ steps.vellum-reader-jwt.outputs.app_jwt }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_BASE: ${{ steps.trusted-base.outputs.base_sha }}
+          PR_HISTORICAL_BASE: ${{ steps.pr.outputs.historical_base }}
+          PR_HEAD: ${{ steps.pr.outputs.source_head }}
+          STATUS_REPOSITORY: ${{ github.repository }}
+          STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          trusted_root=$PWD
+          proposed_tree="$RUNNER_TEMP/vellum-recovery-proposed-$PR_NUMBER"
+          candidate_file="$RUNNER_TEMP/vellum-recovery-candidate"
+          log="$RUNNER_TEMP/vellum-recovery-validation.log"
+          : >"$log"
+
+          post_status() {
+            live_pr="$(gh api "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER")"
+            live_state="$(printf '%s' "$live_pr" | jq -r .state)"
+            live_head="$(printf '%s' "$live_pr" | jq -r .head.sha)"
+            if [ "$live_state" != "open" ] || [ "$live_head" != "$PR_HEAD" ]; then
+              echo "PR #$PR_NUMBER is state=$live_state head=$live_head; suppressing stale $1 status" >&2
+              return 0
+            fi
+            gh api --method POST \
+              "repos/$STATUS_REPOSITORY/statuses/$PR_HEAD" \
+              -f state="$1" \
+              -f context='Vellum freeze' \
+              -f description="$2" \
+              -f target_url="$STATUS_TARGET" >/dev/null
+          }
+
+          failed() {
+            reason="$(grep -oE '^[a-z0-9-]+: .*' "$log" | tail -n 1 | cut -c1-120)"
+            if [ -n "$reason" ]; then
+              post_status failure "$reason"
+            else
+              post_status failure 'Vellum freeze recovery validation failed'
+            fi
+          }
+          trap failed EXIT
+
+          echo "historical PR base=$PR_HISTORICAL_BASE; current protected-main base=$PR_BASE" >&2
+          git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/vellum/pr-head"
+          fetched_head="$(git rev-parse refs/vellum/pr-head)"
+          if [ "$fetched_head" != "$PR_HEAD" ]; then
+            live_head="$(gh api "repos/$STATUS_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+            if [ "$live_head" != "$PR_HEAD" ]; then
+              trap - EXIT
+              echo "PR #$PR_NUMBER advanced to $live_head; ignoring stale recovery" >&2
+              exit 0
+            fi
+            echo "vellum-freeze-recovery: fetched PR head $fetched_head does not match live head $PR_HEAD" >&2
             exit 1
           fi
+          git cat-file -e "$PR_HEAD^{commit}"
 
-          run_id="$(printf '%s' "$candidate" | jq -r .id)"
-          run_status="$(printf '%s' "$candidate" | jq -r .status)"
-          conclusion="$(printf '%s' "$candidate" | jq -r .conclusion)"
-          if [ "$run_status" != "completed" ] || [ "$conclusion" = "success" ]; then
-            echo "run $run_id is status=$run_status conclusion=$conclusion; refusing a redundant or competing re-run" >&2
+          # Build the merge candidate with trusted-main code. The PR checkout is
+          # never used as an executable script source.
+          if ! python3 "$trusted_root/tools/scripts/vellum_trusted_merge.py" \
+            --repo "$trusted_root" \
+            --base "$PR_BASE" \
+            --head "$PR_HEAD" \
+            --output "$candidate_file" 2>&1 | tee -a "$log"
+          then
+            exit "${PIPESTATUS[0]}"
+          fi
+          proposed_head="$(cat "$candidate_file")"
+          parents="$(git rev-list --parents -n 1 "$proposed_head")"
+          expected_parents="$proposed_head $PR_BASE $PR_HEAD"
+          if [ "$parents" != "$expected_parents" ]; then
+            echo "vellum-freeze-recovery: candidate parents are not current base plus exact PR head" >&2
             exit 1
           fi
+          post_status pending 'Validating exact PR head against current protected main'
+          git worktree add --detach "$proposed_tree" "$proposed_head"
 
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/rerun"
-          echo "re-run requested for exact PR head $source_head via pull_request run $run_id"
+          run_validator() {
+            "$@" 2>&1 | tee -a "$log"
+            return "${PIPESTATUS[0]}"
+          }
+          run_validator python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+            --repo "$proposed_tree" \
+            --base "$PR_BASE" \
+            --head "$proposed_head" \
+            --source-head "$PR_HEAD" \
+            --verify-authority \
+            --output "$RUNNER_TEMP/vellum-recovery-outbox.json"
+          run_validator python3 "$trusted_root/tools/scripts/vellum_expansion_watch_check.py" \
+            --repo "$proposed_tree" \
+            --base "$PR_BASE" \
+            --head "$proposed_head" \
+            --output "$RUNNER_TEMP/vellum-recovery-expansion-watch.json"
+
+          trap - EXIT
+          post_status success 'Vellum freeze recovery validation passed'
