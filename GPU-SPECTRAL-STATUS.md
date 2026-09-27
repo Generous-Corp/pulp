@@ -46,3 +46,23 @@ Runtime-v4 passed with public diagnostics: Apple M5 Max, authenticated Dawn
 1e897275172a23f27b0022fa6beae3084ed54a9b, 6 imports, 48 successful retirements,
 zero runtime WebGPU payload calls, 98304 host input bytes; physical release
 confirmed. build-v6 and runtime-v4 are current evidence before further tests.
+
+## Review and expanded acceptance
+
+Root review fixes: raw provider observer is assigned only from retained session
+ownership after prepare, including failed preparations. Diagnostics distinguish
+header/native/proc agreement from configured manifest revision verification.
+Runtime copy counters count all runtime WebGPU buffer calls, not just payload.
+Result success is physical success, not deadline acceptance. Process-unique
+stream epochs prevent old results aliasing a recreated session.
+
+build-v8/runtime-v6 passed three real-Metal cases: FFT256 identity impulse
+verifies actual FFT+hop latency (error 1.78814e-07), FFT1024 stereo static mask
+8.9407e-08, FFT8192 stereo static mask 5.96046e-08. 48 hops each includes startup
+and drained tail, independent CPU SpectralFrameEngine. Extra cases cover
+invalid shape/NaN gains, nonfinite oracle negative controls, gap refusal, late
+physical completion, slot exhaustion followed by same-sequence retry, distinct
+session epochs and release with in-flight work. Runtime WebGPU calls all zero.
+Configured revision verified remains false in the provisional build, explicitly
+pending the production testsOFF exact-provider fix owned by planning_audit.
+GPU-off source compilation with -Wall -Wextra -Werror also passes.

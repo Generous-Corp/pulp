@@ -1,21 +1,35 @@
 #include <pulp/gpu_audio/gpu_spectral_mask.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <vector>
+#include <string_view>
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
 #include "detail/dawn_shared_io_provider.hpp"
 #include "detail/shared_io_program_session.hpp"
 #endif
 namespace pulp::gpu_audio {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+namespace {
+std::uint64_t allocate_stream_epoch() noexcept {
+    static std::atomic<std::uint64_t> next{1};
+    auto value = next.load(std::memory_order_relaxed);
+    while (value != std::numeric_limits<std::uint64_t>::max()) {
+        if (next.compare_exchange_weak(value, value + 1, std::memory_order_relaxed)) return value;
+    }
+    return 0; // Never wrap and alias an earlier stream.
+}
+}
+#endif
 struct GpuSpectralMaskSession::Impl {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     detail::SharedIoProgramSession session;
     detail::DawnSharedIoProvider* provider = nullptr;
 #endif
     std::uint32_t n=0, h=0, channels=0;
-    std::uint64_t submitted=0, last_sequence=0;
+    std::uint64_t submitted=0, last_sequence=0, stream_epoch=0;
     bool failed=false;
     Diagnostics report;
 };
@@ -50,9 +64,11 @@ GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config
             .ir_length=1,.normalized_ir_spectrum=mask,.spectral_hop=c.hop});
         if (!program) {result.error=Error::PreparationFailed; return result;}
         auto impl=std::make_unique<Impl>();
-        impl->provider = provider.provider.get();
-        const auto identity = impl->provider->adapter_identity();
-        impl->report.dawn_revision = impl->provider->dawn_revision();
+        impl->stream_epoch = allocate_stream_epoch();
+        if (!impl->stream_epoch) { result.error=Error::PreparationFailed; return result; }
+        const auto identity = provider.provider->adapter_identity();
+        impl->report.dawn_revision = provider.provider->dawn_revision();
+        impl->report.configured_revision_verified = std::string_view(PULP_GPU_AUDIO_EXPECTED_DAWN_SHA).size() != 0;
         impl->report.adapter_name = identity.name;
         impl->report.vendor_id = identity.vendor_id;
         impl->report.device_id = identity.device_id;
@@ -62,6 +78,7 @@ GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config
         if (!impl->session.prepare({std::move(provider.provider),std::move(program)},
                 {.slots=c.slots,.input_bytes_per_slot=bytes+24,.output_bytes_per_slot=bytes}))
             result.error=Error::PreparationFailed;
+        impl->provider = static_cast<detail::DawnSharedIoProvider*>(impl->session.owned_provider());
         result.session=std::unique_ptr<GpuSpectralMaskSession>(new GpuSpectralMaskSession(std::move(impl)));
         return result;
     } catch (...) {result.error=Error::PreparationFailed; return result;}
@@ -77,7 +94,7 @@ bool GpuSpectralMaskSession::prepared() const noexcept {
 std::uint32_t GpuSpectralMaskSession::latency_samples() const noexcept {return impl_?impl_->n+impl_->h:0;}
 std::uint64_t GpuSpectralMaskSession::epoch() const noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
-    return impl_?impl_->session.preparation_epoch():0;
+    return impl_?impl_->stream_epoch:0;
 #else
     return 0;
 #endif
@@ -118,7 +135,7 @@ std::optional<GpuSpectralMaskSession::Result> GpuSpectralMaskSession::receive(st
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (!impl_ || output.size()<std::size_t(impl_->h)*impl_->channels) return std::nullopt;
     auto completion=impl_->session.pop_completion(); if (!completion) return std::nullopt;
-    Result r{completion->token.slot.preparation_epoch,completion->token.slot.stream_sequence,false,completion->late};
+    Result r{impl_->stream_epoch,completion->token.slot.stream_sequence,false,completion->late};
     if(completion->status!=detail::SharedIoArena::CompletionStatus::RetiredSuccess){
         impl_->failed=true; (void)impl_->session.discard_completion(*completion); return r;
     }

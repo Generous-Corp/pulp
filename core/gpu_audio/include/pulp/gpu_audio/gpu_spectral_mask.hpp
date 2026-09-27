@@ -32,7 +32,10 @@ public:
     struct Diagnostics {
         std::string dawn_revision, adapter_name;
         std::uint32_t vendor_id = 0, device_id = 0;
-        bool authenticated_shared_metal = false, physical_release_confirmed = false;
+        // Header/native/proc revision agreement plus Metal host-pointer import.
+        // This does not imply a separately configured manifest pin was checked.
+        bool authenticated_shared_metal = false, configured_revision_verified = false;
+        bool physical_release_confirmed = false;
         std::uint64_t cpu_input_bytes = 0, cpu_output_bytes = 0;
         std::uint64_t runtime_write_buffer_calls = 0, runtime_copy_buffer_calls = 0,
                       runtime_map_async_calls = 0, imported_allocations = 0,
@@ -44,6 +47,7 @@ public:
     ~GpuSpectralMaskSession();
     bool prepared() const noexcept;
     std::uint32_t latency_samples() const noexcept; // intrinsic FFT+hop only
+    // Process-unique stream identity, never reused by a recreated session.
     std::uint64_t epoch() const noexcept;
     // A refusal does not advance history. Retry the same sequence/input or
     // drain and recreate; silently dropping hops invalidates causal history.
