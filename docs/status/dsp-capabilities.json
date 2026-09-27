@@ -3,8 +3,8 @@
   "counts": {
     "catalogs": 31,
     "type_ids": 115,
-    "factories": 78,
-    "baked_params": 407
+    "factories": 77,
+    "baked_params": 400
   },
   "catalogs": [
     {
@@ -2637,53 +2637,6 @@
           ]
         },
         {
-          "factory": "make_gpu_convolution_reverb_node",
-          "baked_params": [
-            {
-              "id": "kIrGainDb",
-              "min": "static_cast<float>(Engine::kIrGainDbMin)",
-              "max": "static_cast<float>(Engine::kIrGainDbMax)",
-              "default": "static_cast<float>(Engine::kIrGainDbDefault)"
-            },
-            {
-              "id": "kPredelayMs",
-              "min": "static_cast<float>(Engine::kPredelayMsMin)",
-              "max": "static_cast<float>(Engine::kPredelayMsMax)",
-              "default": "static_cast<float>(Engine::kPredelayMsDefault)"
-            },
-            {
-              "id": "kWetPercent",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kWetPercentDefault)"
-            },
-            {
-              "id": "kDryPercent",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "static_cast<float>(Engine::kDryPercentDefault)"
-            },
-            {
-              "id": "kWidthPercent",
-              "min": "static_cast<float>(Engine::kWidthPercentMin)",
-              "max": "static_cast<float>(Engine::kWidthPercentMax)",
-              "default": "static_cast<float>(Engine::kWidthPercentDefault)"
-            },
-            {
-              "id": "kLowcutHz",
-              "min": "static_cast<float>(Engine::kLowcutHzMin)",
-              "max": "static_cast<float>(Engine::kLowcutHzMax)",
-              "default": "static_cast<float>(Engine::kLowcutHzDefault)"
-            },
-            {
-              "id": "kHighcutHz",
-              "min": "static_cast<float>(Engine::kHighcutHzMin)",
-              "max": "static_cast<float>(Engine::kHighcutHzMax)",
-              "default": "static_cast<float>(Engine::kHighcutHzDefault)"
-            }
-          ]
-        },
-        {
           "factory": "make_nonlin_ambience_node",
           "baked_params": [
             {
@@ -2864,6 +2817,55 @@
         {
           "factory": "make_speaker_emulation_node",
           "baked_params": []
+        }
+      ],
+      "shared_param_declarers": [
+        {
+          "function": "make_gpu_convolution_reverb_node",
+          "baked_params": [
+            {
+              "id": "kIrGainDb",
+              "min": "static_cast<float>(Engine::kIrGainDbMin)",
+              "max": "static_cast<float>(Engine::kIrGainDbMax)",
+              "default": "static_cast<float>(Engine::kIrGainDbDefault)"
+            },
+            {
+              "id": "kPredelayMs",
+              "min": "static_cast<float>(Engine::kPredelayMsMin)",
+              "max": "static_cast<float>(Engine::kPredelayMsMax)",
+              "default": "static_cast<float>(Engine::kPredelayMsDefault)"
+            },
+            {
+              "id": "kWetPercent",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kWetPercentDefault)"
+            },
+            {
+              "id": "kDryPercent",
+              "min": "0.0f",
+              "max": "100.0f",
+              "default": "static_cast<float>(Engine::kDryPercentDefault)"
+            },
+            {
+              "id": "kWidthPercent",
+              "min": "static_cast<float>(Engine::kWidthPercentMin)",
+              "max": "static_cast<float>(Engine::kWidthPercentMax)",
+              "default": "static_cast<float>(Engine::kWidthPercentDefault)"
+            },
+            {
+              "id": "kLowcutHz",
+              "min": "static_cast<float>(Engine::kLowcutHzMin)",
+              "max": "static_cast<float>(Engine::kLowcutHzMax)",
+              "default": "static_cast<float>(Engine::kLowcutHzDefault)"
+            },
+            {
+              "id": "kHighcutHz",
+              "min": "static_cast<float>(Engine::kHighcutHzMin)",
+              "max": "static_cast<float>(Engine::kHighcutHzMax)",
+              "default": "static_cast<float>(Engine::kHighcutHzDefault)"
+            }
+          ]
         }
       ]
     },
