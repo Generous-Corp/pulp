@@ -1036,7 +1036,7 @@ if(Python3_Interpreter_FOUND)
     # drains, which made this test run alone at the end of the gate. COST
     # starts it early; the 300s budget covers the 80-115s seen on a loaded host.
     set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
-        PROCESSORS 2
+        PROCESSORS 8
         COST 55
         TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
