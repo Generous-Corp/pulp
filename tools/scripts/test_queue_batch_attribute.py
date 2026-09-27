@@ -843,14 +843,16 @@ class GuardContractTests(unittest.TestCase):
         self.assertEqual(payload["run_id"], 36245658496)
 
     def test_a_non_certifying_verdict_carries_a_null_not_a_false(self) -> None:
-        payload = qba.Certification(
-            run_id=1,
-            pr=2,
-            verdict=qba.VERDICT_UNEXPLAINED,
-            implicates_head=None,
-            evidence="because",
+        # Routed through `certify` rather than built by hand: the rule under test
+        # is that a refusal reaches null, and a hand-built Certification would
+        # only restate the value the test itself passed in.
+        payload = qba.certify(
+            1, 2, qba.Explanation(unexplained=[qba.StepFailure("macos", "Build")])
         ).as_json()
         self.assertIsNone(payload["implicates_head"])
+        # `false` here would be a positive claim that the head is innocent, from a
+        # reading that established nothing.
+        self.assertIsNot(payload["implicates_head"], False)
 
     def test_other_pull_request_always_names_a_different_int(self) -> None:
         verdict = qba.certify(
