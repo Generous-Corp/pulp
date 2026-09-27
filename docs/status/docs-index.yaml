@@ -256,10 +256,13 @@ docs:
 
   - slug: character-delay
     path: guides/character-delay.md
+    kind: guide
+    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
+
   - slug: sample-granular-graphs
     path: guides/sample-granular-graphs.md
     kind: guide
-    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
+    summary: Bounded scalar DSP inside an ordinary SignalGraph — declaring sample regions, UnitDelay causality, promoted parameters, and lowering to one prepared Processor
 
   - slug: dsp-dynamics
     path: guides/dsp-dynamics.md

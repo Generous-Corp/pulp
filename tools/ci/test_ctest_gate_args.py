@@ -150,6 +150,136 @@ class ShellOutputTests(unittest.TestCase):
         self.assertEqual(payload["stop_on_failure"], "")
 
 
+BASE = "b" * 40
+HEAD = "h" * 40
+MOVED = "m" * 40
+
+
+def _ready(**overrides):
+    values = dict(
+        armed=True, base_ref="main", event_base_sha=BASE, base_tip_sha=BASE,
+        event_head_sha=HEAD, live_head_sha=HEAD,
+    )
+    values.update(overrides)
+    return ctest_gate_args.pr_suite(**values)
+
+
+class PrSuiteTests(unittest.TestCase):
+    """The full suite runs on a pull-request head only when its receipt can land."""
+
+    def test_ready_head_runs_the_full_suite(self) -> None:
+        self.assertEqual(_ready()[0], "full")
+
+    def test_unarmed_head_keeps_the_fast_tier(self) -> None:
+        self.assertEqual(_ready(armed=False), ("fast", "not armed for auto-merge"))
+
+    def test_moved_base_keeps_the_fast_tier(self) -> None:
+        # The receipt names the exact base; a moved main can never consume it.
+        suite, reason = _ready(base_tip_sha=MOVED)
+        self.assertEqual(suite, "fast")
+        self.assertIn("base branch moved", reason)
+
+    def test_superseded_head_keeps_the_fast_tier(self) -> None:
+        suite, reason = _ready(live_head_sha=MOVED)
+        self.assertEqual(suite, "fast")
+        self.assertIn("newer commit", reason)
+
+    def test_branch_without_a_merge_queue_keeps_the_fast_tier(self) -> None:
+        self.assertEqual(_ready(base_ref="develop/x")[0], "fast")
+
+    def test_missing_event_shas_never_match(self) -> None:
+        self.assertEqual(_ready(event_base_sha="", base_tip_sha="")[0], "fast")
+        self.assertEqual(_ready(event_head_sha="", live_head_sha="")[0], "fast")
+
+
+def _fake_fetch(pull, ref):
+    calls = []
+
+    def fetch(path):
+        calls.append(path)
+        if path.startswith("repos/o/r/pulls/"):
+            if isinstance(pull, Exception):
+                raise pull
+            return pull
+        if path.startswith("repos/o/r/git/ref/heads/"):
+            if isinstance(ref, Exception):
+                raise ref
+            return ref
+        raise AssertionError(f"unexpected fetch {path}")
+    fetch.calls = calls
+    return fetch
+
+
+def _pull(auto_merge=None, head=HEAD, base_ref="main"):
+    return {"auto_merge": auto_merge, "head": {"sha": head}, "base": {"ref": base_ref}}
+
+
+class PrSuiteProbeTests(unittest.TestCase):
+    def _probe(self, fetch):
+        return ctest_gate_args.probe_pr_suite(
+            fetch, repository="o/r", number="7", event_base_sha=BASE,
+            event_head_sha=HEAD)
+
+    def test_armed_pull_request_on_current_main_is_full(self) -> None:
+        fetch = _fake_fetch(_pull(auto_merge={"merge_method": "merge"}),
+                            {"object": {"sha": BASE}})
+        self.assertEqual(self._probe(fetch)[0], "full")
+        self.assertEqual(fetch.calls, ["repos/o/r/pulls/7", "repos/o/r/git/ref/heads/main"])
+
+    def test_null_auto_merge_is_not_armed(self) -> None:
+        fetch = _fake_fetch(_pull(auto_merge=None), {"object": {"sha": BASE}})
+        self.assertEqual(self._probe(fetch)[0], "fast")
+
+    def test_armed_but_main_moved_is_fast(self) -> None:
+        fetch = _fake_fetch(_pull(auto_merge={}), {"object": {"sha": MOVED}})
+        self.assertEqual(self._probe(fetch)[0], "fast")
+
+    def test_unreadable_state_fails_closed_to_fast(self) -> None:
+        for fetch in (
+            _fake_fetch(OSError("network down"), {"object": {"sha": BASE}}),
+            _fake_fetch(_pull(auto_merge={}), OSError("404")),
+            _fake_fetch({"auto_merge": {}}, {"object": {"sha": BASE}}),
+            _fake_fetch(["not", "an", "object"], {"object": {"sha": BASE}}),
+        ):
+            suite, reason = self._probe(fetch)
+            self.assertEqual(suite, "fast")
+            self.assertIn("unavailable", reason)
+
+    def test_cli_outside_a_pull_request_is_fast_without_a_probe(self) -> None:
+        out = subprocess.run(
+            [sys.executable, str(SCRIPT), "--event-name", "merge_group", "--pr-suite"],
+            check=True, capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin"},
+        ).stdout
+        self.assertIn("pr_suite=fast", out)
+
+
+class PrSuiteWorkflowWiringTests(unittest.TestCase):
+    """The decision is inert unless the Test step and the issuer consume it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not BUILD_YML.is_file():
+            raise unittest.SkipTest(f"{BUILD_YML} not present")
+        text = BUILD_YML.read_text(encoding="utf-8")
+        cls.decide = text.split("- name: Decide pull-request test suite", 1)[1].split(
+            "\n      - name:", 1)[0]
+        cls.test = text.split("- name: Test (non-Windows)", 1)[1].split(
+            "\n        run: |", 1)[0]
+
+    def test_decision_step_calls_the_probe_on_pull_requests(self) -> None:
+        self.assertIn("id: pr_suite", self.decide)
+        self.assertIn("--pr-suite", self.decide)
+        self.assertIn("github.event_name == 'pull_request'", self.decide)
+        self.assertIn('echo "suite=$pr_suite" >> "$GITHUB_OUTPUT"', self.decide)
+
+    def test_full_suite_on_a_pull_request_is_gated_by_the_decision(self) -> None:
+        self.assertIn("steps.pr_suite.outputs.suite == 'full'", self.test)
+
+    def test_full_suite_on_a_pull_request_never_gates_the_check(self) -> None:
+        self.assertIn("continue-on-error: ${{ github.event_name == 'pull_request' }}", self.test)
+
+
 class WorkflowWiringTests(unittest.TestCase):
     """The rules above are inert unless build.yml actually uses them."""
 

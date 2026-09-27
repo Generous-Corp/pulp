@@ -68,6 +68,7 @@ set(_PULP_WAM_INCLUDES
     ${_PULP_WAM_ROOT}/core/events/include
     ${_PULP_WAM_ROOT}/core/format/include
     ${_PULP_WAM_ROOT}/core/signal/include
+    ${_PULP_WAM_ROOT}/core/simd/include
     ${_PULP_WAM_WAV_INCLUDES}
     ${PULP_WAM_CHOC_INCLUDE}
 )

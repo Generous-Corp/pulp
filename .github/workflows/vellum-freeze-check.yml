@@ -40,19 +40,30 @@ jobs:
       - name: Resolve exact comparison
         id: comparison
         env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
           MERGE_BASE: ${{ github.event.merge_group.base_sha }}
           MERGE_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            # The pull-request checkout is GitHub's proposed merge commit.
+            # Its first parent is the protected-main snapshot that was used to
+            # construct this candidate.  Comparing from the event payload's
+            # original PR base replays every watch event that landed on main
+            # after the branch fork and can report an unrelated duplicate
+            # family claim as if this PR authored it.
+            protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"
+            git fetch --no-tags origin refs/heads/main
+            live_base="$(git rev-parse --verify FETCH_HEAD)"
+            if [[ "$protected_base" != "$live_base" ]]; then
+              echo "proposed merge base $protected_base is not current protected main $live_base; rerun this check" >&2
+              exit 1
+            fi
             {
-              echo "base=$PR_BASE"
+              echo "base=$protected_base"
               echo "head=$GITHUB_SHA"
               echo "source_head=$PR_SOURCE_HEAD"
             } >> "$GITHUB_OUTPUT"
-            git fetch --no-tags origin "$PR_BASE"
           else
             {
               echo "base=$MERGE_BASE"

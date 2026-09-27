@@ -3918,18 +3918,29 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `RUN_SERIAL` (a CDP screenshot once crossed its 20 s deadline while unrelated
   ctest work shared the VM) and runs every `*.integration.test.mjs` file through
   `browser_capture/run_integration.mjs`, which calls `node --test` with a file
-  concurrency of 3 on a machine with 6 or more cores and 1 below that. Node runs
-  the cases *within* one file in sequence, so the files are the unit of
-  parallelism: each case mostly waits on a cold Chrome launch, so three files
-  overlap well inside the serial slot on a large VM. On m1's 3-vCPU gate VM a
-  fixed width of 3 made every capture time out (`stalled=Page.captureScreenshot`)
-  and failed every merge group that landed there, while m3 and m5 passed. The
-  width is read when the suite runs (`TARTCI_GUEST_CORES`, else
-  `os.availableParallelism()`), never at configure time. Add
-  a new real-browser case to the file whose theme it shares (capture,
-  interactions, frame fitting) and keep the three roughly balanced by runtime;
-  a new integration file is picked up by the glob and excluded from the unit
-  aggregate automatically.
+  concurrency of one Chrome per two cores and per 2 GiB of a declared memory
+  lease, capped by the file count: 1 on m1's 3-vCPU VM, 3 on m5's 6-vCPU VM,
+  6 on the Studio's 12-vCPU VM. Node runs the cases *within* one file in
+  sequence, so the files are the unit of parallelism: each case mostly waits on
+  a cold Chrome launch, so files overlap well inside the serial slot on a large
+  VM. On m1 a fixed width of 3 made every capture time out
+  (`stalled=Page.captureScreenshot`) and failed every merge group that landed
+  there, while m3 and m5 passed. The width is read when the suite runs
+  (`TARTCI_GUEST_CORES` / `TARTCI_GUEST_MEM_MB`, else
+  `os.availableParallelism()`), never at configure time. The six files are
+  split by theme (capture, paint, interactions, interaction guards, geometry,
+  frame fitting) and balanced near a minute each serially; the slowest file
+  bounds the wide run, so add a new case to a short file of the same theme
+  rather than to the longest. A new integration file is picked up by the glob
+  and excluded from the unit aggregate automatically.
+- **The per-case cost is the capture's own fidelity work, not test overhead.**
+  A trivial page takes ~12 s: `captureStableScreenshot` always observes its full
+  32-frame horizon (an early A,A plateau must not hide a later B,B
+  presentation) at ~50 ms per frame of headless software-compositing pacing,
+  once per pixel artifact, plus settle, launch and shutdown.
+  `--disable-frame-rate-limit --disable-gpu-vsync` cut frames to ~5 ms but only
+  ~15% of suite time, raised CPU ~60%, and would shrink the horizon's wall-clock
+  span for every real import, so it is not used.
 - **"Could not read the version" is not "wrong version".** Reading `--version`
   has been observed to fail once and then succeed moments later on the same
   browser, and it used to surface as "too old or incompatible" — a message that

@@ -61,8 +61,9 @@ FAKE_GH = textwrap.dedent(
     """
 )
 
-# The dispatch path fetches the base and reads the already-checked-out merge
-# commit; neither should reach the network in a test.
+# The resolve paths read the already-checked-out merge commit; the freeze check
+# also fetches the live protected branch to detect a moving base. Neither
+# should reach the network in a test.
 FAKE_GIT = textwrap.dedent(
     """\
     #!/bin/sh
@@ -230,13 +231,17 @@ class FreezeCheckResolve(unittest.TestCase):
     def script(self) -> str:
         return _step_script("vellum-freeze-check.yml", "freeze-check", "comparison")
 
-    def test_pull_request_path_unchanged(self):
+    def test_pull_request_path_uses_proposed_merge_base(self):
         rc, out, _ = _run(self.script(), {
             "GITHUB_EVENT_NAME": "pull_request",
             "PR_BASE": "B", "PR_SOURCE_HEAD": "SH",
         })
         self.assertEqual(rc, 0)
-        self.assertEqual(out, {"base": "B", "head": "EVENT_MERGE", "source_head": "SH"})
+        self.assertEqual(out, {
+            "base": "MERGE_COMMIT",
+            "head": "EVENT_MERGE",
+            "source_head": "SH",
+        })
 
     def test_merge_group_path_unchanged(self):
         rc, out, _ = _run(self.script(), {

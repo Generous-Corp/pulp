@@ -4517,6 +4517,10 @@
         "disposition": "candidate-shared-later"
       },
       {
+        "name": "proxy-first-eval",
+        "disposition": "pulp-owned"
+      },
+      {
         "name": "pulp-vellum-change-routing",
         "disposition": "pulp-owned"
       },

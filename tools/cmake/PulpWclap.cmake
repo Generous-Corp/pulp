@@ -103,6 +103,7 @@ set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/events/include
     ${_PULP_WCLAP_ROOT}/core/format/include
     ${_PULP_WCLAP_ROOT}/core/signal/include
+    ${_PULP_WCLAP_ROOT}/core/simd/include
     ${_PULP_WCLAP_WAV_INCLUDES}
     ${PULP_WCLAP_CHOC_INCLUDE}
     ${PULP_WCLAP_CLAP_INCLUDE}

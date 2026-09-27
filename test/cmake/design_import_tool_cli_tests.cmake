@@ -91,10 +91,11 @@ if(_PULP_NODE_FOR_TESTS)
         TIMEOUT 60
         LABELS "parser-import;browser-capture;node")
 
-    # The launcher picks the file concurrency from the cores of the machine
-    # running the suite: one file at a time on a small gate VM (three Chrome
-    # captures starve a 3-vCPU guest past the capture deadline), three
-    # otherwise. See run_integration.mjs.
+    # The launcher picks the file concurrency from the machine running the
+    # suite: one Chrome per two cores and per 2 GiB of a declared memory lease,
+    # capped by the file count. A 3-vCPU gate VM therefore runs one file at a
+    # time (three Chrome captures starve it past the capture deadline) and a
+    # 12-vCPU VM runs all of them at once. See run_integration.mjs.
     add_test(NAME pulp-browser-capture-node-integration
              COMMAND ${_PULP_NODE_FOR_TESTS}
                      ${CMAKE_SOURCE_DIR}/tools/import-design/browser_capture/run_integration.mjs
