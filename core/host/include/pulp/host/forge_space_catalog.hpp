@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstring>
+#include <type_traits>
+#include <pulp/host/custom_node_diagnostics.hpp>
+
 // Space — bake-layer catalog nodes.
 //
 // The home for the reverb / room family. Two members today, a third landing
@@ -346,7 +350,35 @@ inline int gpu_internal_block_size(int max_block) noexcept {
 
 struct GpuInstance {
     std::unique_ptr<gpu_audio::GpuConvolutionReverb> engine;
+    std::uint64_t preparation_generation = 0;
 };
+
+// Fixed POD schema. Lane counters count transport quanta, not arbitrary host
+// callbacks. Both mono lanes stay separate; worker output is not GPU delivery.
+inline constexpr std::uint64_t kGpuDiagnosticSchema = 0x4750554352560001ULL;
+enum class GpuDiagnosticCounterUnit : std::uint8_t { TransportQuantum = 1 };
+struct GpuConvolutionDiagnostics {
+    std::uint32_t schema_version = 1;
+    std::uint32_t lane_count = 2;
+    gpu_audio::GpuConvolutionReverbReport report{};
+    GpuDiagnosticCounterUnit delivery_counter_unit = GpuDiagnosticCounterUnit::TransportQuantum;
+};
+inline CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
+    return {kGpuTypeId, 1, kGpuDiagnosticSchema, sizeof(GpuConvolutionDiagnostics),
+        [](const void* opaque, std::span<std::byte> output,
+           std::uint64_t& generation) noexcept {
+            const auto& instance = *static_cast<const GpuInstance*>(opaque);
+            if (!instance.engine || !instance.engine->prepared())
+                return CustomNodeDiagnosticAvailability::NotPrepared;
+            const GpuConvolutionDiagnostics value{1, 2, instance.engine->report()};
+            static_assert(std::is_trivially_copyable_v<GpuConvolutionDiagnostics>);
+            if (output.size() != sizeof(value))
+                return CustomNodeDiagnosticAvailability::SchemaMismatch;
+            std::memcpy(output.data(), &value, sizeof(value));
+            generation = instance.preparation_generation;
+            return CustomNodeDiagnosticAvailability::Available;
+        }};
+}
 
 /// Construct the opt-in GPU realization.  It deliberately accepts only the
 /// one/two-channel asset shapes admitted by Forge: two concrete authenticated
@@ -371,6 +403,7 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPol
     t.destroy = [](void* p) { delete static_cast<GpuInstance*>(p); };
     t.prepare = [shared, policy](void* p, double sr, int max_block) {
         auto* instance = static_cast<GpuInstance*>(p);
+        ++instance->preparation_generation;
         const int internal_block = gpu_internal_block_size(max_block);
         if (!std::isfinite(sr) || sr <= 0.0 || max_block <= 0 ||
             sr > static_cast<double>(std::numeric_limits<std::uint32_t>::max()) ||

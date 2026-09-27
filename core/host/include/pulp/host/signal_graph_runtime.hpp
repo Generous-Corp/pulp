@@ -21,6 +21,7 @@
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_lane.hpp>
 #include <pulp/host/custom_node_type.hpp>
+#include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
@@ -38,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -167,6 +169,26 @@ public:
     // placeholder passthrough semantics instead of attaching the callback.
     bool register_custom_node_type(CustomNodeType type);
     bool register_custom_node_type(CustomNodeType type, SampleKernelDescriptor sample_kernel);
+    bool register_custom_node_diagnostics(CustomNodeDiagnosticsDescriptor descriptor);
+    // Try-lock reads fail Busy instead of waiting for prepare/release. A graph
+    // generation change invalidates handles; obtain a fresh one after prepare.
+    CustomNodeDiagnosticResult custom_node_diagnostic_handle(NodeId id) const;
+    CustomNodeDiagnosticResult query_custom_node_diagnostics(
+        CustomNodeDiagnosticHandle handle, std::uint64_t schema,
+        std::span<std::byte> output,
+        CustomNodeDiagnosticConsistency consistency =
+            CustomNodeDiagnosticConsistency::LiveApproximate) const;
+    template <typename Report>
+        requires (!std::is_same_v<std::remove_cvref_t<Report>, std::span<std::byte>>)
+    CustomNodeDiagnosticResult query_custom_node_diagnostics(
+        CustomNodeDiagnosticHandle handle, std::uint64_t schema, Report& output,
+        CustomNodeDiagnosticConsistency consistency =
+            CustomNodeDiagnosticConsistency::LiveApproximate) const {
+        static_assert(std::is_trivially_copyable_v<Report>);
+        return query_custom_node_diagnostics(handle, schema,
+            std::as_writable_bytes(std::span<Report>(&output, 1)), consistency);
+    }
+
     // Returns a callback-free, value-owned snapshot sorted lexicographically by
     // (type_id, version). The snapshot remains valid across later registrations
     // and after this graph is destroyed.
@@ -1197,6 +1219,10 @@ private:
     std::uint64_t next_connection_identity_{1};
     std::unordered_map<std::string, CustomNodeType> custom_node_types_;
     std::unordered_map<std::string, SampleKernelDescriptor> sample_kernel_types_;
+    std::unordered_map<std::string, CustomNodeDiagnosticsDescriptor> custom_node_diagnostics_;
+    static std::uint64_t next_diagnostic_graph_identity_() noexcept;
+    const std::uint64_t diagnostic_graph_identity_ = next_diagnostic_graph_identity_();
+
     std::vector<SampleRegionDefinition> sample_region_definitions_;
     const SampleRegionParameterBinding* sample_region_parameter_binding_ = nullptr;
     std::uint32_t sample_region_proof_block_size_ = 16384;
@@ -1446,6 +1472,15 @@ private:
         {
             note_acquired_();
         }
+        GraphMutationLock(const SignalGraph& graph, std::try_to_lock_t)
+            : lock_(graph.graph_mutation_mutex_, std::try_to_lock)
+#ifndef NDEBUG
+            , owner_(&graph.graph_mutation_owner_)
+#endif
+        {
+            if (lock_.owns_lock()) note_acquired_();
+        }
+        bool owns_lock() const noexcept { return lock_.owns_lock(); }
         ~GraphMutationLock() {
             if (lock_.owns_lock()) note_released_();
         }

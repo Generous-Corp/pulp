@@ -20,8 +20,18 @@
 #include <pulp/midi/ump_buffer.hpp>
 
 #include <cstddef>
+#include <string>
+#include <string_view>
 
 namespace pulp::host {
+
+inline std::string custom_node_key(std::string_view type_id, int version) {
+    std::string key(type_id);
+    key.push_back('\x1f');
+    key += std::to_string(version);
+    return key;
+}
+
 
 using midi::clear_midi_block;
 using midi::copy_midi_block;

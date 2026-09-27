@@ -173,12 +173,6 @@ bool custom_type_matches_node_shape(const CustomNodeType& type,
         && type.num_output_ports == node.num_output_ports;
 }
 
-std::string custom_node_key(std::string_view type_id, int version) {
-    std::string key(type_id);
-    key.push_back('\x1f');
-    key += std::to_string(version);
-    return key;
-}
 
 bool metadata_equal(const SampleKernelMetadata& lhs, const SampleKernelMetadata& rhs) noexcept {
     return lhs.category == rhs.category && lhs.parameter == rhs.parameter &&
@@ -724,6 +718,7 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // This preserves the historical one-argument replacement behavior without
     // leaving a stale descriptor paired with different callbacks.
     sample_kernel_types_.erase(key);
+    custom_node_diagnostics_.erase(key);
     custom_node_types_[key] = std::move(type);
     // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
     // compiled against an older generation is rejected (a re-register rebinds
