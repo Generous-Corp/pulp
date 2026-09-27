@@ -22,6 +22,7 @@ struct SharedIoConvolutionProgramSpec {
     std::span<const float> normalized_ir_spectrum;
     // Nonzero selects immutable-mask WOLA using this prepared FFT graph.
     std::uint32_t spectral_hop = 0;
+    bool spectral_per_hop_gains = false;
 };
 
 class DawnSharedIoProvider final : public SharedIoArenaProvider {

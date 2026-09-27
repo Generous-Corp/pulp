@@ -111,6 +111,54 @@ int capacity_case() {
     return 0;
 }
 
+// Queue distinct masks before observing completion. Mutating the caller's table
+// after each successful submission must not alter any still-owned GPU slot.
+int live_gain_case(unsigned n,unsigned h,unsigned c) {
+    std::vector<float> initial(n/2+1,1.f), gains(initial), input(c*h),actual(c*h);
+    auto created=Session::create_with_per_hop_gains({n,h,c,48000,3,initial});
+    if(!created)return 40;
+    auto& gpu=*created.session;
+    pulp::signal::SpectralFrameEngine cpu;
+    cpu.prepare({.fft_size=int(n),.analysis_hop=int(h),.channels=int(c),.max_block=int(h)});
+    std::vector<float> expected(48*c*h);
+    std::vector<const float*> in(c);std::vector<float*> out(c);
+    unsigned rng=91234;double error=0;
+    for(unsigned batch=0;batch<48;batch+=3){
+        for(unsigned q=batch;q<batch+3;++q){
+            for(unsigned k=0;k<gains.size();++k)
+                gains[k]=((k/7+q)%5==0)?0.f:0.1f+0.15f*float((k+q)%6);
+            for(auto& v:input){rng=rng*1664525u+1013904223u;v=q<36?float(rng>>8)/16777216.f-0.5f:0.f;}
+            for(unsigned ch=0;ch<c;++ch){in[ch]=input.data()+ch*h;out[ch]=expected.data()+q*c*h+ch*h;}
+            cpu.process(in.data(),out.data(),h,[&](auto frames,int bins){
+                for(unsigned ch=0;ch<c;++ch)for(int k=0;k<bins;++k)frames[ch][k]*=gains[k];
+            });
+            if(gpu.submit_hop_with_gains(input,q,std::span<const float>(gains).first(gains.size()-1)))return 41;
+            const auto saved=gains[0];gains[0]=std::numeric_limits<float>::quiet_NaN();
+            if(gpu.submit_hop_with_gains(input,q,gains))return 42;
+            gains[0]=saved;
+            if(!gpu.submit_hop_with_gains(input,q,gains))return 43;
+            std::fill(gains.begin(),gains.end(),-99.f);
+        }
+        // All three imported slots remain owned until physical completion is
+        // observed and released. Refusal must leave the causal sequence intact.
+        if(gpu.submit_hop_with_gains(input,batch+3,initial))return 44;
+        for(unsigned q=batch;q<batch+3;++q){
+            auto result=receive(gpu,actual);
+            if(!result || !result->delivered || result->sequence!=q)return 45;
+            for(unsigned k=0;k<c*h;++k)
+                if(!update_error(actual[k],expected[q*c*h+k],error))return 46;
+        }
+    }
+    auto report=gpu.diagnostics();
+    if(report.runtime_write_buffer_calls || report.runtime_copy_buffer_calls || report.runtime_map_async_calls ||
+       report.retired_success!=48 || report.retired_failure ||
+       report.cpu_input_bytes!=48*(c*h+initial.size())*sizeof(float))return 47;
+    if(!gpu.release() || !gpu.diagnostics().physical_release_confirmed)return 48;
+    std::cout<<"per_hop_gains fft="<<n<<" hop="<<h<<" channels="<<c<<" max_error="<<error
+             <<" retired="<<report.retired_success<<" runtime_webgpu_calls=0 cpu_input_bytes="<<report.cpu_input_bytes<<'\n';
+    return error<1e-4?0:49;
+}
+
 int main() {
     double error=0;
     const float nan=std::numeric_limits<float>::quiet_NaN();
@@ -123,6 +171,10 @@ int main() {
     for (const auto n : {256u,1024u,8192u}) {
         const int rc=run_case(n,n/4,n==256?1:2,n==256);
         if (rc) {std::cerr<<"case "<<n<<" failed "<<rc<<'\n';return rc;}
+    }
+    for(const auto n:{256u,1024u}) {
+        const auto rc=live_gain_case(n,n/4,2);
+        if(rc){std::cerr<<"live_gain_failure="<<rc<<'\n';return rc;}
     }
     return capacity_case();
 }

@@ -44,6 +44,8 @@ public:
     // Non-RT snapshot. Transfer counters exclude resource initialization.
     Diagnostics diagnostics() const;
     static CreateResult create(const Config&) noexcept;
+    // Opt-in prepared program reading one effective gain snapshot per hop.
+    static CreateResult create_with_per_hop_gains(const Config&) noexcept;
     ~GpuSpectralMaskSession();
     bool prepared() const noexcept;
     std::uint32_t latency_samples() const noexcept; // intrinsic FFT+hop only
@@ -53,6 +55,14 @@ public:
     // drain and recreate; silently dropping hops invalidates causal history.
     bool submit_hop(std::span<const float> planar, std::uint64_t sequence,
                     std::uint64_t deadline_ns = 0) noexcept;
+    // Non-RT, create_with_per_hop_gains preparation only. Copies one complete caller-owned
+    // effective table into the leased imported input slot. No interpolation or
+    // latest-value adoption occurs here. The table applies to this hop's analysis
+    // frame (none during initial FFT fill); overlap-add combines prior frames.
+    // A refusal consumes neither sequence nor table. Retry identical input/table.
+    bool submit_hop_with_gains(std::span<const float> planar, std::uint64_t sequence,
+                               std::span<const float> gains,
+                               std::uint64_t deadline_ns = 0) noexcept;
     std::size_t service(std::uint64_t now_ns) noexcept;
     // A failed result poisons this epoch: prepared() becomes false, future
     // submissions are refused, and remaining completions are retired without
@@ -62,6 +72,9 @@ public:
     // Retain the session and retry if its physical drain cannot yet finish.
     bool release() noexcept;
 private:
+    static CreateResult create_impl(const Config&, bool per_hop_gains) noexcept;
+    bool submit_impl(std::span<const float>, std::uint64_t, std::span<const float>,
+                     std::uint64_t) noexcept;
     struct Impl;
     explicit GpuSpectralMaskSession(std::unique_ptr<Impl>) noexcept;
     std::unique_ptr<Impl> impl_;

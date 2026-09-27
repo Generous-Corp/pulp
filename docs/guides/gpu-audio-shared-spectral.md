@@ -2,7 +2,8 @@
 
 `pulp::gpu_audio::GpuSpectralMaskSession` provides persistent Hann-windowed
 FFT/mask/inverse-FFT processing through Dawn's Metal shared-memory provider.
-The first API accepts immutable, real, nonnegative gains from DC to Nyquist.
+The default API accepts immutable, real, nonnegative gains from DC to Nyquist.
+An explicit opt-in also accepts effective gain snapshots per hop.
 It is an optional SDK building block, not an audio callback implementation.
 
 All methods must run on one serialized, non-realtime owner. The plugin supplies
@@ -52,3 +53,35 @@ agreement between the Dawn header and procedure table. The hardware probe
 checks output against an independent CPU spectral engine, latency, sequencing,
 slot capacity, transfer counters, and release with in-flight work. A passing
 functional probe is not a speedup or callback-deadline result.
+
+## Effective gains supplied per hop
+
+Use `create_with_per_hop_gains(config)` to prepare a program that reads a
+complete gain snapshot from each imported input slot. Submit with
+`submit_hop_with_gains(input, sequence, gains, deadline)`. Gains must contain
+`fft_size/2+1` finite nonnegative values. The call copies them before returning;
+the caller can reuse its source table immediately. The leased slot remains
+immutable until physical retirement and CPU release. Capacity refusal does not
+advance sequence or adopt the rejected table.
+
+This is a transport seam for an existing control authority. It neither compiles
+layouts nor adopts latest values nor interpolates transitions. Supply the exact
+effective table chosen by the CPU authority for the analysis frame generated
+by that hop. Initial FFT-fill hops do not generate an analysis frame. Output
+contains overlap-add contributions from several previous tables, so an output
+sequence is not a claim that every sample uses one current control generation.
+The caller must preserve ordered input and control history together.
+
+Ordinary `create` retains the immutable program and refuses
+`submit_hop_with_gains`. Ordinary `submit_hop` on the opt-in program uses the
+initial configured table for that hop, not the most recently supplied table.
+This explicit rule avoids mutable last-value state across retries. Per-hop gain
+bytes count toward `cpu_input_bytes`; metadata remains excluded as before.
+There are no new runtime WebGPU uploads, copies or readbacks. CPU table copies
+remain, and this feature makes no claim of lower callback or total CPU cost.
+
+The spectral probe queues three different tables without receiving, mutates the
+source arrays immediately, checks capacity refusal/retry, and compares every
+output against the existing CPU spectral engine. It retains immutable-mode,
+latency, retirement and failure-history controls. Full plugin automation,
+callback-safe table capture and host validation are separate work.

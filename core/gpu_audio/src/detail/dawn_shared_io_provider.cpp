@@ -854,6 +854,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
         : provider_(&provider), fft_size_(spec.fft_size), channels_(spec.channels),
           logical_frames_(spec.logical_frames), ir_length_(spec.ir_length),
           spectral_hop_(spec.spectral_hop),
+          spectral_per_hop_gains_(spec.spectral_per_hop_gains),
           normalized_ir_spectrum_(spec.normalized_ir_spectrum.begin(),
                                   spec.normalized_ir_spectrum.end()) {}
 
@@ -872,6 +873,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
             .ir_length = ir_length_,
             .normalized_ir_spectrum = normalized_ir_spectrum_,
             .spectral_hop = spectral_hop_,
+            .spectral_per_hop_gains = spectral_per_hop_gains_,
         };
         prepared_ = provider_->prepare_convolution_program(spec);
         return prepared_;
@@ -899,6 +901,7 @@ class DawnSharedIoConvolutionProgram final : public SharedIoPreparedProgram {
     std::uint32_t logical_frames_ = 0;
     std::uint32_t ir_length_ = 0;
     std::uint32_t spectral_hop_ = 0;
+    bool spectral_per_hop_gains_ = false;
     std::vector<float> normalized_ir_spectrum_;
     bool prepared_ = false;
 };
@@ -1270,6 +1273,7 @@ bool DawnSharedIoProvider::prepare_convolution_program(
         spec.normalized_ir_spectrum.size() != spec.fft_size * 2u) {
         return false;
     }
+    if (spec.spectral_per_hop_gains && !spec.spectral_hop) return false;
     if (spec.spectral_hop && (spec.spectral_hop > spec.fft_size / 2 ||
         spec.fft_size % spec.spectral_hop != 0)) return false;
     const auto bytes64 = std::uint64_t(spec.fft_size) * spec.channels * 2u * sizeof(float);
@@ -1277,7 +1281,8 @@ bool DawnSharedIoProvider::prepare_convolution_program(
         return false;
     for (const auto* slot : impl_->slots) {
         if (slot == nullptr || slot->retired || slot->index >= impl_->slots.size() ||
-            slot->input_logical_bytes < bytes64 + (spec.spectral_hop ? 24u : 0u) || slot->output_logical_bytes < bytes64) {
+            slot->input_logical_bytes < bytes64 + (spec.spectral_hop ? 24u : 0u) +
+                (spec.spectral_per_hop_gains ? (spec.fft_size/2u+1u)*sizeof(float) : 0u) || slot->output_logical_bytes < bytes64) {
             return false;
         }
     }
@@ -1344,7 +1349,9 @@ bool DawnSharedIoProvider::prepare_convolution_program(
             return fail_preparation();
         }
         plan->fft = pipeline(kSharedIoFftWgsl);
-        plan->multiply = pipeline(kSharedIoMulWgsl);
+        const auto spectral_gain_source = spec.spectral_per_hop_gains
+            ? shared_spectral_gain_kernel(spec.fft_size, spec.channels) : std::string{};
+        plan->multiply = pipeline(spec.spectral_per_hop_gains ? spectral_gain_source.c_str() : kSharedIoMulWgsl);
         const auto storage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
         plan->ir =
             make_buffer(static_cast<std::size_t>(spec.fft_size) * 2u * sizeof(float), storage);
@@ -1427,7 +1434,8 @@ bool DawnSharedIoProvider::prepare_convolution_program(
                 source = destination;
                 destination = destination.Get() == groups.a.Get() ? groups.b : groups.a;
             }
-            groups.multiply = bind_three(plan->multiply, source, plan->ir, groups.product);
+            groups.multiply = bind_three(plan->multiply, source,
+                spec.spectral_per_hop_gains ? slot->input_buffer : plan->ir, groups.product);
             if (!groups.multiply)
                 return fail_preparation();
 

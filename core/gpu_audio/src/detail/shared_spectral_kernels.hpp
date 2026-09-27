@@ -49,4 +49,20 @@ fn slot_word(i:u32)->u32 { return bitcast<u32>(input[META+i]); }
  state[NORM+index]=0.0;
 })WGSL"};
 }
+// Read the immutable gain snapshot from this dispatch's imported input slot.
+// The first 2*N*C floats reserve FFT payload, followed by six metadata words.
+inline std::string shared_spectral_gain_kernel(unsigned n, unsigned c) {
+    return "const N:u32=" + std::to_string(n) + "u; const C:u32=" +
+        std::to_string(c) + R"WGSL(u;
+@group(0) @binding(0) var<storage,read> spectrum:array<vec2<f32>>;
+@group(0) @binding(1) var<storage,read> input:array<f32>;
+@group(0) @binding(2) var<storage,read_write> product:array<vec2<f32>>;
+@compute @workgroup_size(256) fn main(@builtin(global_invocation_id) id:vec3<u32>) {
+ let k=id.x; if(k>=N*C){return;} let bin=k%N;
+ let positive=select(N-bin,bin,bin<=N/2u);
+ let gain=input[2u*N*C+6u+positive]/f32(N);
+ product[k]=spectrum[k]*gain;
+})WGSL";
+}
+
 }

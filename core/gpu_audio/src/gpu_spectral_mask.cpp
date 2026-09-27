@@ -31,12 +31,19 @@ struct GpuSpectralMaskSession::Impl {
 #endif
     std::uint32_t n=0, h=0, channels=0;
     std::uint64_t submitted=0, last_sequence=0, stream_epoch=0;
-    bool failed=false;
+    bool failed=false, per_hop_gains=false;
+    std::vector<float> initial_gains;
     Diagnostics report;
 };
 GpuSpectralMaskSession::GpuSpectralMaskSession(std::unique_ptr<Impl> p) noexcept : impl_(std::move(p)) {}
 GpuSpectralMaskSession::~GpuSpectralMaskSession() { (void)release(); }
 GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config& c) noexcept {
+    return create_impl(c,false);
+}
+GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create_with_per_hop_gains(const Config& c) noexcept {
+    return create_impl(c,true);
+}
+GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create_impl(const Config& c,bool per_hop_gains) noexcept {
     CreateResult result;
     if (c.fft_size < 256 || c.fft_size > 16384 || (c.fft_size & (c.fft_size-1)) ||
         !c.hop || c.hop > c.fft_size/2 || c.fft_size % c.hop || !c.channels ||
@@ -46,6 +53,7 @@ GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config
         result.error=Error::InvalidConfig; return result;
     }
 #if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    (void)per_hop_gains;
     result.error=Error::ProviderUnavailable; return result;
 #else
 #ifndef PULP_GPU_AUDIO_EXPECTED_DAWN_SHA
@@ -62,7 +70,8 @@ GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config
             mask[2*k]=c.gains[k<=c.fft_size/2?k:c.fft_size-k]/float(c.fft_size);
         auto program=provider.provider->make_convolution_program({
             .fft_size=c.fft_size,.channels=c.channels,.logical_frames=c.fft_size,
-            .ir_length=1,.normalized_ir_spectrum=mask,.spectral_hop=c.hop});
+            .ir_length=1,.normalized_ir_spectrum=mask,.spectral_hop=c.hop,
+            .spectral_per_hop_gains=per_hop_gains});
         if (!program) {result.error=Error::PreparationFailed; return result;}
         auto impl=std::make_unique<Impl>();
         impl->stream_epoch = allocate_stream_epoch();
@@ -75,9 +84,11 @@ GpuSpectralMaskSession::CreateResult GpuSpectralMaskSession::create(const Config
         impl->report.device_id = identity.device_id;
         impl->report.authenticated_shared_metal = true;
         impl->n=c.fft_size; impl->h=c.hop; impl->channels=c.channels;
+        impl->per_hop_gains=per_hop_gains;
+        if(per_hop_gains)impl->initial_gains.assign(c.gains.begin(),c.gains.end());
         const auto bytes=std::size_t(c.fft_size)*c.channels*2*sizeof(float);
         if (!impl->session.prepare({std::move(provider.provider),std::move(program)},
-                {.slots=c.slots,.input_bytes_per_slot=bytes+24,.output_bytes_per_slot=bytes}))
+                {.slots=c.slots,.input_bytes_per_slot=bytes+24+(per_hop_gains?c.gains.size_bytes():0),.output_bytes_per_slot=bytes}))
             result.error=Error::PreparationFailed;
         impl->provider = static_cast<detail::DawnSharedIoProvider*>(impl->session.owned_provider());
         result.session=std::unique_ptr<GpuSpectralMaskSession>(new GpuSpectralMaskSession(std::move(impl)));
@@ -102,11 +113,22 @@ std::uint64_t GpuSpectralMaskSession::epoch() const noexcept {
 }
 bool GpuSpectralMaskSession::submit_hop(std::span<const float> input,std::uint64_t sequence,
                                        std::uint64_t deadline) noexcept {
+    return submit_impl(input,sequence,impl_?std::span<const float>(impl_->initial_gains):std::span<const float>{},deadline);
+}
+bool GpuSpectralMaskSession::submit_hop_with_gains(std::span<const float> input,
+    std::uint64_t sequence,std::span<const float> gains,std::uint64_t deadline) noexcept {
+    if(!impl_ || !impl_->per_hop_gains)return false;
+    return submit_impl(input,sequence,gains,deadline);
+}
+bool GpuSpectralMaskSession::submit_impl(std::span<const float> input,
+    std::uint64_t sequence,std::span<const float> gains,std::uint64_t deadline) noexcept {
 #if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
     if (!prepared() || input.size()!=std::size_t(impl_->h)*impl_->channels ||
         impl_->submitted==std::numeric_limits<std::uint64_t>::max() ||
         (impl_->submitted && (impl_->last_sequence==std::numeric_limits<std::uint64_t>::max() ||
                              sequence!=impl_->last_sequence+1))) return false;
+    if(impl_->per_hop_gains && (gains.size()!=impl_->n/2+1 ||
+       !std::all_of(gains.begin(),gains.end(),[](float v){return std::isfinite(v)&&v>=0;})))return false;
     auto lease=impl_->session.acquire_input(sequence,deadline);
     if (!lease) return false;
     std::memcpy(lease->bytes.data(),input.data(),input.size_bytes());
@@ -118,11 +140,16 @@ bool GpuSpectralMaskSession::submit_hop(std::span<const float> input,std::uint64
         output?std::uint32_t(((q-(n/h+1))%(2*n/h))*h):0u,
         output && q-(n/h+1)<n/h?1u:0u};
     std::memcpy(lease->bytes.data()+std::size_t(impl_->n)*impl_->channels*2*sizeof(float),metadata,sizeof(metadata));
+    if(impl_->per_hop_gains){
+        std::memcpy(lease->bytes.data()+std::size_t(impl_->n)*impl_->channels*2*sizeof(float)+24,
+                    gains.data(),gains.size_bytes());
+        impl_->report.cpu_input_bytes += gains.size_bytes();
+    }
     const detail::SharedIoProgramSession::SubmitToken token{lease->token,deadline};
     if (!impl_->session.submit(token)) {(void)impl_->session.cancel(token); return false;}
     ++impl_->submitted; impl_->last_sequence=sequence; return true;
 #else
-    (void)input;(void)sequence;(void)deadline;return false;
+    (void)input;(void)sequence;(void)gains;(void)deadline;return false;
 #endif
 }
 std::size_t GpuSpectralMaskSession::service(std::uint64_t now) noexcept {
