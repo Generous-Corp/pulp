@@ -13,7 +13,8 @@ namespace {
 struct Control {
     bool complete = true, fail = false, reject = false, release = true;
     bool wrong_sequence = false, late = false;
-    int submits = 0, services = 0, receives = 0, releases = 0;
+    int submits = 0, services = 0, wait_services = 0, receives = 0, releases = 0;
+    std::uint64_t last_wait_deadline = 0;
 };
 class Channel final : public detail::WaveNetRealtimeChannel {
   public:
@@ -28,6 +29,11 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         return true;
     }
     void service(std::uint64_t) noexcept override {
+        ++control_.services;
+    }
+    void service_until(std::uint64_t, std::uint64_t deadline) noexcept override {
+        ++control_.wait_services;
+        control_.last_wait_deadline = deadline;
         ++control_.services;
     }
     std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
@@ -136,6 +142,39 @@ TEST_CASE("WaveNet stamped node never calls providers from callback and honors l
         }
         CHECK(detail::realtime_gpu_provider(&h.node) == GpuAudioProvider::Unknown);
     }
+}
+
+TEST_CASE("WaveNet worker completion budget is shared and recomputed per pump",
+          "[gpu_audio][wavenet][realtime]") {
+    Shape shape;
+    auto config = shape.config(1, 2);
+    config.completion_service_wait_ns = 500'000;
+    GpuWaveNetRealtimeNode node(config);
+    Control first, second;
+    std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> providers;
+    providers.push_back(std::make_unique<Channel>(first));
+    providers.push_back(std::make_unique<Channel>(second));
+    REQUIRE(detail::WaveNetRealtimeTestAccess::prepare(node, std::move(providers)));
+    auto path = detail::realtime_gpu_node_path(&node);
+    REQUIRE(path.active());
+    std::array<float, 2> input_a{1, 1}, input_b{2, 2}, output_a{}, output_b{};
+    const std::array<const float*, 2> inputs{input_a.data(), input_b.data()};
+    std::array<float*, 2> outputs{output_a.data(), output_b.data()};
+    pulp::audio::BufferView<const float> in(inputs.data(), 2, 2);
+    pulp::audio::BufferView<float> out(outputs.data(), 2, 2);
+    path.process(path.context, in, out, 2, 0, true, 0);
+    path.service(path.context, 0);
+    path.service(path.context, 0);
+    CHECK(first.wait_services == 1);
+    CHECK(second.wait_services == 1);
+    CHECK(first.last_wait_deadline != 0);
+    CHECK(first.last_wait_deadline == second.last_wait_deadline);
+    const auto first_deadline = first.last_wait_deadline;
+    path.process(path.context, in, out, 2, 1, true, 0);
+    path.service(path.context, 0);
+    path.service(path.context, 0);
+    CHECK(first.wait_services == 2);
+    CHECK(first.last_wait_deadline >= first_deadline);
 }
 TEST_CASE("WaveNet delayed completion cannot fill a later block with stale audio",
           "[gpu_audio][wavenet][realtime]") {
