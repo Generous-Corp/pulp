@@ -31,6 +31,10 @@ fi
 # scrubbed to /usr/bin:/bin so a globally-installed pulp can't pollute
 # results. PULP_CHECK_CWD points the hook at the per-case fake build
 # tree so cases 2 + 3 are independent.
+# The session-start mode also runs the CLI auto-update; keep it off (and off
+# the real ~/.pulp/state) except in the case that checks the wiring.
+export PULP_AUTO_UPDATE_CLI=0
+
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok: $*"; }
 
@@ -240,5 +244,20 @@ out=$(PATH="/usr/bin:/bin" PULP_CHECK_CWD="$case10" "$HOOK" --session-start 2>&1
 pass "case10: --session-start without pulp → silent"
 rm -rf "$case10"
 
+# ── Case 11: --session-start runs the CLI auto-update ───────────────────────
+# pulp-cli-autoupdate.sh has its own suite; this only proves the wiring, by
+# the one line it reports from a previous background run.
+case11=$(mktemp -d)
+make_checkout "$case11"
+make_pulp "$case11" 0.876.1
+mkdir -p "$case11/state"
+echo "2026-01-01T00:00:00Z updated v0.876.0 -> v0.876.1" > "$case11/state/cli-autoupdate.log"
+out=$(PATH="$case11/bin:/usr/bin:/bin" PULP_CHECK_CWD="$case11" PULP_AUTO_UPDATE_CLI=1 \
+    PULP_AUTO_UPDATE_STATE_DIR="$case11/state" CI= GITHUB_ACTIONS= "$HOOK" --session-start 2>&1)
+grep -q "CLI auto-update: .*updated v0.876.0 -> v0.876.1" <<<"$out" ||
+    fail "case11: --session-start should run the auto-update, got: $out"
+pass "case11: --session-start runs the CLI auto-update"
+rm -rf "$case11"
+
 echo ""
-echo "All 11 cases passed."
+echo "All 12 cases passed."

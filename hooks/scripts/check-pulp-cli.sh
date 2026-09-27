@@ -104,6 +104,10 @@ Or build this checkout's own CLI and use ./build/pulp:
 # Case 1: pulp already on PATH.
 if command -v pulp >/dev/null 2>&1; then
     stale_cli_banner || true
+    # Keep the installed CLI at the latest release (cached, backgrounded).
+    if [ "$PULP_CHECK_MODE" = "--session-start" ]; then
+        bash "$(dirname "$0")/pulp-cli-autoupdate.sh" || true
+    fi
     exit 0
 fi
 
