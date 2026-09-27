@@ -2307,6 +2307,16 @@ expected-node inventory. Keep the missing-node negative control: removing a
 registry entry must fail instead of emitting a shorter, superficially valid
 document. SDK installs carry the checked projection at
 `share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
+With `PULP_HOST_ENABLE_GPU_CONVOLUTION=ON`, the SDK install builds that JSON
+from its own native `pulp-cli forge catalog export --json`; the default CPU
+snapshot cannot describe this option. The generated file stays in the build
+tree, depends on the exporter, and fails installation if generation fails or
+omits the GPU realization. Default-OFF builds still install the checked snapshot.
+A raw `cmake --install` does not build missing outputs; use the build's `install`
+target to generate the enabled catalog before copying it.
+The `cli-forge-catalog-check` test compares the complete runtime export against
+that generated artifact when enabled, and against the committed snapshot in
+default builds. A GPU mode's presence alone does not prove metadata equality.
 
 The export's `add(...)` registrations live in one translation unit per catalog
 family (`core/host/src/forge_catalog_export_<family>.cpp`, behind the private
