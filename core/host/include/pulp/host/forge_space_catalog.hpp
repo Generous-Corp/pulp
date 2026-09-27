@@ -1,8 +1,8 @@
 #pragma once
 
 #include <cstring>
-#include <type_traits>
 #include <pulp/host/custom_node_diagnostics.hpp>
+#include <type_traits>
 
 // Space — bake-layer catalog nodes.
 //
@@ -370,9 +370,9 @@ struct GpuConvolutionDiagnostics {
     GpuDiagnosticCounterUnit delivery_counter_unit = GpuDiagnosticCounterUnit::TransportQuantum;
 };
 inline CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
-    return {kGpuTypeId, 1, kGpuDiagnosticSchema, sizeof(GpuConvolutionDiagnostics),
-        [](const void* opaque, std::span<std::byte> output,
-           std::uint64_t& generation) noexcept {
+    return {
+        kGpuTypeId, 1, kGpuDiagnosticSchema, sizeof(GpuConvolutionDiagnostics),
+        [](const void* opaque, std::span<std::byte> output, std::uint64_t& generation) noexcept {
             const auto& instance = *static_cast<const GpuInstance*>(opaque);
             if (!instance.engine || !instance.engine->prepared())
                 return CustomNodeDiagnosticAvailability::NotPrepared;
@@ -390,9 +390,9 @@ inline CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
 /// one/two-channel asset shapes admitted by Forge: two concrete authenticated
 /// mono lanes preserve dual-mono identity, while a four-cell true-stereo IR
 /// remains on the CPU realization until a channel-matrix GPU node exists.
-inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
-                                                       IrPolicy policy = {},
-                                                       gpu_audio::GpuConvolverTraceConfig trace = {}) {
+inline CustomNodeType
+make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {},
+                                 gpu_audio::GpuConvolverTraceConfig trace = {}) {
     if (!valid_impulse_response(ir) || ir.channels.size() > 2u || policy.true_stereo)
         throw std::invalid_argument("GPU convolution requires a one- or two-channel dual-mono IR");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
@@ -428,8 +428,7 @@ inline CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse ir,
         config.resample_taps_per_phase = policy.resample_taps_per_phase;
         config.gpu_enabled = true;
         config.trace = trace;
-        instance->engine = std::make_unique<gpu_audio::GpuConvolutionReverb>(
-            std::move(config));
+        instance->engine = std::make_unique<gpu_audio::GpuConvolutionReverb>(std::move(config));
         if (!instance->engine->prepare())
             throw std::runtime_error("authenticated GPU convolution provider unavailable");
     };

@@ -32,7 +32,6 @@ inline std::string custom_node_key(std::string_view type_id, int version) {
     return key;
 }
 
-
 using midi::clear_midi_block;
 using midi::copy_midi_block;
 using midi::midi_block_has_drops;

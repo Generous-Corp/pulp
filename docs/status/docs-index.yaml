@@ -19,6 +19,11 @@ docs:
     summary: Subsystem dependencies, thread model, build system, GPU stack
 
   # Guides
+  - slug: gpu-audio-wavenet-trace
+    path: guides/gpu-audio-wavenet-trace.md
+    kind: guide
+    summary: Attribute stamped WaveNet fallback and diagnose unresolved physical ownership without inventing GPU timing
+
   - slug: custom-node-diagnostics
     path: guides/custom-node-diagnostics.md
     kind: guide

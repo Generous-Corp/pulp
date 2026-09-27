@@ -22,8 +22,7 @@ bool SignalGraph::register_custom_node_diagnostics(CustomNodeDiagnosticsDescript
         descriptor.producer_type_id.find('\0') != std::string::npos ||
         descriptor.type_version <= 0 || descriptor.producer_type_id.size() >= 128 ||
         (!descriptor.producer_type_id.empty() && descriptor.producer_type_version <= 0) ||
-        !descriptor.schema || !descriptor.query ||
-        !descriptor.report_bytes ||
+        !descriptor.schema || !descriptor.query || !descriptor.report_bytes ||
         descriptor.report_bytes > CustomNodeDiagnosticsDescriptor::kMaximumReportBytes)
         return false;
     GraphMutationLock lock(*this);
@@ -47,8 +46,8 @@ CustomNodeDiagnosticResult SignalGraph::custom_node_diagnostic_handle(NodeId id)
         return result;
     }
     result.handle = {diagnostic_graph_identity_, authoring_generation_, id};
-    const auto found = std::find_if(nodes_.begin(), nodes_.end(),
-        [id](const auto& n) { return n.id == id; });
+    const auto found =
+        std::find_if(nodes_.begin(), nodes_.end(), [id](const auto& n) { return n.id == id; });
     if (found == nodes_.end()) {
         result.availability = CustomNodeDiagnosticAvailability::MissingNode;
         return result;
@@ -64,14 +63,15 @@ CustomNodeDiagnosticResult SignalGraph::custom_node_diagnostic_handle(NodeId id)
     std::copy(producer.begin(), producer.end(), result.producer_type_id.begin());
     result.producer_type_version = descriptor->second.producer_type_version;
     result.availability = diagnostic_graph_identity_ == 0
-        ? CustomNodeDiagnosticAvailability::StaleHandle
-        : CustomNodeDiagnosticAvailability::Available;
+                              ? CustomNodeDiagnosticAvailability::StaleHandle
+                              : CustomNodeDiagnosticAvailability::Available;
     return result;
 }
 
-CustomNodeDiagnosticResult SignalGraph::query_custom_node_diagnostics(
-    CustomNodeDiagnosticHandle handle, std::uint64_t schema, std::span<std::byte> output,
-    CustomNodeDiagnosticConsistency consistency) const {
+CustomNodeDiagnosticResult
+SignalGraph::query_custom_node_diagnostics(CustomNodeDiagnosticHandle handle, std::uint64_t schema,
+                                           std::span<std::byte> output,
+                                           CustomNodeDiagnosticConsistency consistency) const {
     CustomNodeDiagnosticResult result;
     result.handle = handle;
     result.schema = schema;
@@ -93,7 +93,7 @@ CustomNodeDiagnosticResult SignalGraph::query_custom_node_diagnostics(
         return result;
     }
     const auto found = std::find_if(nodes_.begin(), nodes_.end(),
-        [handle](const auto& n) { return n.id == handle.node_id; });
+                                    [handle](const auto& n) { return n.id == handle.node_id; });
     if (found == nodes_.end()) {
         result.availability = CustomNodeDiagnosticAvailability::MissingNode;
         return result;
@@ -126,8 +126,8 @@ CustomNodeDiagnosticResult SignalGraph::query_custom_node_diagnostics(
         result.availability = CustomNodeDiagnosticAvailability::StaleHandle;
         return result;
     }
-    result.availability = inspector.query(found->custom_instance.get(), output,
-                                          result.preparation_generation);
+    result.availability =
+        inspector.query(found->custom_instance.get(), output, result.preparation_generation);
     if (result.availability != CustomNodeDiagnosticAvailability::Available) {
         std::fill(output.begin(), output.end(), std::byte{});
         result.preparation_generation = 0;

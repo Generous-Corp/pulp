@@ -20,8 +20,8 @@
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/format/processor_node_adapter.hpp>
 #include <pulp/host/anticipation_lane.hpp>
-#include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/custom_node_diagnostics.hpp>
+#include <pulp/host/custom_node_type.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/sample_region_authoring.hpp>
@@ -173,20 +173,21 @@ public:
     // Try-lock reads fail Busy instead of waiting for prepare/release. A graph
     // generation change invalidates handles; obtain a fresh one after prepare.
     CustomNodeDiagnosticResult custom_node_diagnostic_handle(NodeId id) const;
-    CustomNodeDiagnosticResult query_custom_node_diagnostics(
-        CustomNodeDiagnosticHandle handle, std::uint64_t schema,
-        std::span<std::byte> output,
-        CustomNodeDiagnosticConsistency consistency =
-            CustomNodeDiagnosticConsistency::LiveApproximate) const;
+    CustomNodeDiagnosticResult
+    query_custom_node_diagnostics(CustomNodeDiagnosticHandle handle, std::uint64_t schema,
+                                  std::span<std::byte> output,
+                                  CustomNodeDiagnosticConsistency consistency =
+                                      CustomNodeDiagnosticConsistency::LiveApproximate) const;
     template <typename Report>
-        requires (!std::is_same_v<std::remove_cvref_t<Report>, std::span<std::byte>>)
-    CustomNodeDiagnosticResult query_custom_node_diagnostics(
-        CustomNodeDiagnosticHandle handle, std::uint64_t schema, Report& output,
-        CustomNodeDiagnosticConsistency consistency =
-            CustomNodeDiagnosticConsistency::LiveApproximate) const {
+        requires(!std::is_same_v<std::remove_cvref_t<Report>, std::span<std::byte>>)
+    CustomNodeDiagnosticResult
+    query_custom_node_diagnostics(CustomNodeDiagnosticHandle handle, std::uint64_t schema,
+                                  Report& output,
+                                  CustomNodeDiagnosticConsistency consistency =
+                                      CustomNodeDiagnosticConsistency::LiveApproximate) const {
         static_assert(std::is_trivially_copyable_v<Report>);
-        return query_custom_node_diagnostics(handle, schema,
-            std::as_writable_bytes(std::span<Report>(&output, 1)), consistency);
+        return query_custom_node_diagnostics(
+            handle, schema, std::as_writable_bytes(std::span<Report>(&output, 1)), consistency);
     }
 
     // Returns a callback-free, value-owned snapshot sorted lexicographically by
@@ -1475,12 +1476,16 @@ private:
         GraphMutationLock(const SignalGraph& graph, std::try_to_lock_t)
             : lock_(graph.graph_mutation_mutex_, std::try_to_lock)
 #ifndef NDEBUG
-            , owner_(&graph.graph_mutation_owner_)
+              ,
+              owner_(&graph.graph_mutation_owner_)
 #endif
         {
-            if (lock_.owns_lock()) note_acquired_();
+            if (lock_.owns_lock())
+                note_acquired_();
         }
-        bool owns_lock() const noexcept { return lock_.owns_lock(); }
+        bool owns_lock() const noexcept {
+            return lock_.owns_lock();
+        }
         ~GraphMutationLock() {
             if (lock_.owns_lock()) note_released_();
         }
