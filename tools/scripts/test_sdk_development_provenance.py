@@ -47,7 +47,10 @@ class AdoptionTest(unittest.TestCase):
                         (self.build / 'core/gpu_audio/libpulp-gpu-audio.a', archive()),
                         (self.installed_archive, archive('123')),
                         (self.prefix / 'lib/cmake/Pulp/PulpConfig.cmake', b'config'),
-                        (self.prefix / 'lib/cmake/Pulp/PulpTargets.cmake', b'targets')):
+                        (self.prefix / 'lib/cmake/Pulp/PulpTargets.cmake', b'targets'),
+                        (self.build / 'PulpConfig.cmake', b'config'),
+                        (self.prefix / 'version.txt', b'0.876.1\n'),
+                        (self.prefix / 'sdk_build_type.txt', b'Release\n')):
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
         self.mock = patch.object(tool, 'git', side_effect=lambda source, *args: SHA if args[0] == 'rev-parse' else '')
@@ -63,6 +66,7 @@ class AdoptionTest(unittest.TestCase):
         self.assertEqual(doc['cache_features']['PULP_BUILD_WEBVIEW'], 'OFF')
         self.assertEqual(doc['profile'], 'existing-build-experiment')
         tool.publish(self.prefix, doc)
+        self.assertEqual((self.prefix / 'sdk-provenance.json').stat().st_mode & 0o777, 0o644)
         with self.assertRaises(FileExistsError):
             tool.publish(self.prefix, doc)
 
@@ -97,6 +101,25 @@ class AdoptionTest(unittest.TestCase):
         self.cache.write_text(self.cache.read_text().replace(str(self.source), str(self.prefix)))
         with self.assertRaisesRegex(tool.ProvenanceError, 'cache source'):
             self.inspect()
+
+    def test_config_drift_rejected(self):
+        (self.prefix / 'lib/cmake/Pulp/PulpConfig.cmake').write_text('wrong config')
+        with self.assertRaisesRegex(tool.ProvenanceError, 'package config drift'):
+            self.inspect()
+
+    def test_marker_drift_rejected(self):
+        for name, original in [('version.txt', '0.876.1'), ('sdk_build_type.txt', 'Release')]:
+            with self.subTest(name=name):
+                path = self.prefix / name
+                path.write_text('wrong')
+                with self.assertRaisesRegex(tool.ProvenanceError, 'marker drift'):
+                    self.inspect()
+                path.write_text(original)
+
+    def test_unrelated_cache_entries_not_disclosed(self):
+        with self.cache.open('a') as stream:
+            stream.write('PULP_SECRET_TOKEN:STRING=never-publish-this\n')
+        self.assertNotIn('never-publish-this', str(self.inspect()))
 
     def test_release_eligibility_rejected(self):
         for field, value in [('kind', 'release'), ('distribution_eligible', True)]:
