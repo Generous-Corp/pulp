@@ -28,10 +28,13 @@ EVERYTHING ELSE forces the native build — including `core/**`,
 `apple/**`, `examples/**`, `test/**`, every `CMakeLists.txt`,
 `tools/cmake/**`, `.github/workflows/**` (a `build.yml` change MUST get
 a real run to validate itself), `tools/scripts/**` (some are
-build-coupled), `*.toml`/`*.json` config, this classifier itself, and
+build-coupled), `*.toml`/`*.json` config, this classifier itself, and two deny-list
+exceptions that override the `.md`/`docs/` skip-safe rules:
 `docs/migrations/*.md` (globbed with CONFIGURE_DEPENDS into the
-generated `migration_index.cpp` by `tools/cli/CMakeLists.txt` — a
-deny-list exception that overrides the `.md`/`docs/` skip-safe rules).
+generated `migration_index.cpp` by `tools/cli/CMakeLists.txt`) and
+`docs/status/consumption-profiles.*` (the published consumption census
+and its schema, whose only gates — `consumption-census-drift` and its
+siblings — live inside a configured build tree).
 That is intentional: the conservative allowlist IS the fail-closed
 mechanism — anything we did not explicitly reason about runs the build.
 
@@ -86,11 +89,28 @@ SKIP_SAFE_EXACT = {
 
 # Paths that LOOK skip-safe (e.g. a `.md` file under `docs/`) but are in
 # fact native build inputs. Checked FIRST so they override every
-# skip-safe rule below. `docs/migrations/*.md` is globbed with
-# CONFIGURE_DEPENDS by tools/cli/CMakeLists.txt and compiled into pulp-cli
-# as `migration_index.cpp` — editing one genuinely changes compiled C++.
+# skip-safe rule below.
+#
+# `docs/migrations/*.md` is globbed with CONFIGURE_DEPENDS by
+# tools/cli/CMakeLists.txt and compiled into pulp-cli as
+# `migration_index.cpp` — editing one genuinely changes compiled C++.
+#
+# `docs/status/consumption-profiles.*` is the published consumption census and
+# its schema. Neither is compiled, but both are the SUBJECT of gates that exist
+# only inside a configured build tree: `consumption-census-drift` regenerates
+# the census from the tree's own target graph and compares, and
+# `consumption-census-schema` / `-negative-contract` read the same pair. The
+# census records counts nothing else in the repo can confirm, so a census-only
+# change that classifies skip-safe is a claim about the build graph that
+# nothing ever checks — it reaches main unmeasured and then fails every later
+# merge group, whose batches did not touch it. The prefix deliberately stops at
+# the filename stem so the document, its schema, and any future sibling are all
+# covered by one entry; tools/scripts/test_classify_changes.py re-derives the
+# pair from consumption_census.py, so a rename fails that test rather than
+# silently reopening the hole.
 FORCE_BUILD_PREFIXES = (
     "docs/migrations/",
+    "docs/status/consumption-profiles.",
 )
 
 # The installed-SDK capability proof installs Pulp, then compiles and runs one
