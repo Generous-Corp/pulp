@@ -206,7 +206,7 @@ def case_conflict_resolution_logged_not_warned(fx: Fixture) -> None:
     assert r.returncode != 0, "fixture must conflict"
     fx.write("shared.txt", "resolved\n")
     fx.git("add", "shared.txt")
-    fx.git("commit", "-q", "--no-edit")
+    fx.git("commit", "-q", "-m", "resolve conflict fixture")
     fx.set_pr(pr_fixture(head=feat))
     res = fx.run(feat)
     assert res.returncode == 0, res.stderr
