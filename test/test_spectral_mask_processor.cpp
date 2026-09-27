@@ -648,3 +648,111 @@ TEST_CASE("SpectralMaskProcessor publishes concurrently without torn tables",
     REQUIRE(frames_ok);
     REQUIRE_FALSE(torn);
 }
+
+
+TEST_CASE("effective spectral observer sees the applied interrupted transition once per channel group",
+          "[signal][spectral_mask][observer]") {
+    SpectralMaskProcessor processor;
+    struct Capture {
+        std::array<float, 16> gains{};
+        std::array<std::uint64_t, 16> ordinals{};
+        unsigned count = 0;
+    } captured;
+    const auto observe = [](void* context, const SpectralMaskTable& table,
+                            std::uint64_t ordinal) noexcept {
+        auto& value = *static_cast<Capture*>(context);
+        if (value.count < value.gains.size()) {
+            value.gains[value.count] = table.gain_linear[20];
+            value.ordinals[value.count] = ordinal;
+        }
+        ++value.count;
+    };
+    CHECK_FALSE(processor.set_effective_frame_observer(&captured, observe));
+    REQUIRE(processor.prepare(config(2)));
+    REQUIRE(processor.set_effective_frame_observer(&captured, observe));
+    SpectralMaskTable table{};
+    REQUIRE(pulp::signal::build_spectral_mask(layout(1), kFftSize, kSampleRate, table));
+    std::fill_n(table.gain_linear.begin(), table.num_bins, 0.f);
+    table.transition_frames = 4;
+    REQUIRE(processor.publish_table(table));
+    std::array<std::complex<float>, kFftSize / 2 + 1> left{}, right{};
+    std::complex<float>* frames[]{left.data(), right.data()};
+    const auto frame = [&] {
+        left.fill({1.f, -1.f}); right.fill({2.f, -2.f});
+        const auto before = g_alloc_count.load();
+        const bool ok = processor.process_frame(frames, left.size());
+        const auto allocations = g_alloc_count.load() - before;
+        REQUIRE(ok);
+        CHECK(allocations == 0);
+        CHECK(captured.gains[captured.count - 1] == left[20].real());
+        CHECK(right[20].real() == 2.f * left[20].real());
+    };
+    frame(); frame();
+    std::fill_n(table.gain_linear.begin(), table.num_bins, 1.f);
+    table.transition_frames = 2;
+    REQUIRE(processor.publish_table(table));
+    frame(); frame();
+    CHECK(captured.count == 4); // One callback per frame, not per channel.
+    CHECK(captured.gains[0] == 0.75f);
+    CHECK(captured.gains[1] == 0.5f);
+    CHECK(captured.gains[2] == 0.75f);
+    CHECK(captured.gains[3] == 1.f);
+    for (unsigned i = 0; i < 4; ++i) CHECK(captured.ordinals[i] == i);
+    CHECK_FALSE(processor.process_frame(frames, 3));
+    CHECK(captured.count == 4);
+    processor.reset();
+    frame();
+    CHECK(captured.ordinals[4] == 0);
+    CHECK(captured.gains[4] == 1.f);
+    auto invalid = config(2); invalid.sample_rate = 0;
+    CHECK_FALSE(processor.prepare(invalid));
+    frame();
+    CHECK(captured.ordinals[5] == 1);
+    REQUIRE(processor.prepare(config(2)));
+    REQUIRE(processor.process_frame(frames, left.size()));
+    CHECK(captured.count == 6); // Successful prepare cleared the observer.
+    REQUIRE(processor.set_effective_frame_observer(&captured, observe));
+    frame();
+    CHECK(captured.ordinals[6] == 1); // Counts successful frames, including unobserved ones.
+    REQUIRE(processor.set_effective_frame_observer(nullptr, nullptr));
+    REQUIRE(processor.process_frame(frames, left.size()));
+    CHECK(captured.count == 7);
+}
+
+TEST_CASE("effective spectral observer follows audio owner override after control publication",
+          "[signal][spectral_mask][observer]") {
+    SpectralMaskProcessor processor;
+    REQUIRE(processor.prepare(config()));
+    float observed = -1;
+    REQUIRE(processor.set_effective_frame_observer(&observed,
+        [](void* p, const SpectralMaskTable& table, std::uint64_t) noexcept {
+            *static_cast<float*>(p) = table.gain_linear[40];
+        }));
+    auto control = layout(1); control.bands[0].gain_db = -12;
+    auto audio = layout(1); audio.bands[0].gain_db = 6;
+    REQUIRE(processor.publish_layout(control));
+    REQUIRE(processor.set_layout_rt(audio));
+    std::array<std::complex<float>, kFftSize / 2 + 1> values;
+    values.fill({1,0}); std::complex<float>* frames[]{values.data()};
+    REQUIRE(processor.process_frame(frames, values.size()));
+    CHECK_THAT(observed, WithinAbs(std::pow(10.f, 6.f/20.f), 1e-6));
+    CHECK(observed == values[40].real());
+}
+
+TEST_CASE("effective spectral observation leaves streaming samples unchanged",
+          "[signal][spectral_mask][observer]") {
+    SpectralMaskProcessor observed, baseline;
+    REQUIRE(observed.prepare(config())); REQUIRE(baseline.prepare(config()));
+    auto mask = layout(1); mask.bands[0].gain_db = -9; mask.transition_frames = 5;
+    REQUIRE(observed.publish_layout(mask)); REQUIRE(baseline.publish_layout(mask));
+    std::uint64_t count = 0;
+    REQUIRE(observed.set_effective_frame_observer(&count,
+        [](void* p, const SpectralMaskTable&, std::uint64_t) noexcept {
+            ++*static_cast<std::uint64_t*>(p);
+        }));
+    const auto input = signal(8192);
+    const auto actual = render(observed, input, {1,31,128,7,256});
+    const auto expected = render(baseline, input, {256});
+    CHECK(maximum_error(actual, expected) == 0.f);
+    CHECK(count > 0);
+}

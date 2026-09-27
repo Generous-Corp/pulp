@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <type_traits>
 #include <vector>
@@ -92,6 +93,25 @@ public:
     using Table = SpectralMaskTableT<SampleType>;
     using PreMaskStage = SpectralPreMaskStageT<SampleType>;
     using WetSourceStage = SpectralWetSourceStageT<SampleType>;
+
+    using EffectiveFrameObserver = void (*)(void*, const Table&, std::uint64_t) noexcept;
+
+    /// Install/remove only while the processing owner is stopped. The observer
+    /// runs once per successfully processed coherent channel-group frame, after
+    /// adoption/interpolation and mask application. Its Table reference is borrowed
+    /// only for that call: copy into bounded prepared storage before returning.
+    /// It must not allocate, wait, throw, or reenter this processor.
+    /// The ordinal counts successful frames since prepare/reset, not samples or
+    /// host callbacks. The caller supplies stream identity and sample chronology.
+    /// Successful prepare removes the observer; reset preserves it and restarts
+    /// the ordinal. Failed prepare preserves the entire previous prepared state.
+    [[nodiscard]] bool set_effective_frame_observer(
+        void* context, EffectiveFrameObserver observer) noexcept {
+        if (!state_) return false;
+        state_->observer_context = context;
+        state_->observer = observer;
+        return true;
+    }
 
     /// Prepare a complete replacement state. Failure leaves the prior prepared
     /// state intact. This control-thread operation allocates the STFT and dry
@@ -234,7 +254,8 @@ public:
     /// called by exactly one audio-side consumer in chronological frame order.
     [[nodiscard]] bool process_frame(std::complex<SampleType>* const* frames,
                                      int num_bins) noexcept {
-        if (!state_ || num_bins != state_->frame_table.num_bins) {
+        if (!state_ || num_bins != state_->frame_table.num_bins
+            || state_->next_frame_ordinal == std::numeric_limits<std::uint64_t>::max()) {
             zero_frames_(frames, num_bins);
             return false;
         }
@@ -247,6 +268,10 @@ public:
             zero_frames_(frames, num_bins);
             return false;
         }
+        if (state_->observer)
+            state_->observer(state_->observer_context, state_->frame_table,
+                             state_->next_frame_ordinal);
+        ++state_->next_frame_ordinal;
         return true;
     }
 
@@ -282,6 +307,7 @@ public:
     /// while preserving the latest adopted mask as the new settled curve.
     void reset() noexcept {
         if (!state_) return;
+        state_->next_frame_ordinal = 0;
         state_->engine.reset();
         state_->mixer.reset();
         state_->frame_table = state_->target_table;
@@ -324,6 +350,9 @@ private:
 
     struct PreparedState {
         Config config{};
+        EffectiveFrameObserver observer = nullptr;
+        void* observer_context = nullptr;
+        std::uint64_t next_frame_ordinal = 0;
         SpectralFrameEngineT<SampleType> engine;
         DryWetMixerT<SampleType> mixer;
         std::unique_ptr<runtime::TripleBuffer<PublishedTable>> publication;
