@@ -9,18 +9,37 @@ import test from "node:test";
 
 import {
   availableCores,
+  CORES_PER_BROWSER,
+  declaredMemoryMb,
   integrationConcurrency,
-  SMALL_MACHINE_CORES,
+  MEMORY_MB_PER_BROWSER,
 } from "./run_integration.mjs";
 
 test("a 3-vCPU gate VM runs the browser files one at a time", () => {
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "3" }, 28)), 1);
-  assert.equal(integrationConcurrency(SMALL_MACHINE_CORES - 1), 1);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "3" }, 28), 6), 1);
+  assert.equal(integrationConcurrency(1, 6), 1);
 });
 
-test("a 6-core or wider machine keeps three files in flight", () => {
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "6" }, 2)), 3);
-  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "12" }, 2)), 3);
+test("each concurrent browser file gets two cores", () => {
+  assert.equal(CORES_PER_BROWSER, 2);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "6" }, 2), 6), 3);
+  assert.equal(integrationConcurrency(availableCores({ TARTCI_GUEST_CORES: "12" }, 2), 6), 6);
+});
+
+test("a declared memory lease can only narrow the width", () => {
+  assert.equal(MEMORY_MB_PER_BROWSER, 2048);
+  assert.equal(integrationConcurrency(12, 6, 16384), 6);
+  assert.equal(integrationConcurrency(12, 6, 8192), 4);
+  assert.equal(integrationConcurrency(12, 6, 1024), 1);
+  assert.equal(integrationConcurrency(3, 6, 65536), 1);
+  assert.equal(declaredMemoryMb({ TARTCI_GUEST_MEM_MB: "10240" }), 10240);
+  assert.equal(declaredMemoryMb({ TARTCI_GUEST_MEM_MB: "" }), undefined);
+  assert.equal(declaredMemoryMb({}), undefined);
+});
+
+test("the width never exceeds the number of files", () => {
+  assert.equal(integrationConcurrency(28, 6), 6);
+  assert.equal(integrationConcurrency(12, 2), 2);
 });
 
 test("without a guest lease the process's own parallelism decides", () => {
@@ -64,7 +83,7 @@ test("the launcher passes the derived width to node --test and its exit status b
     assert.equal(readFileSync(log, "utf8"), "sese");
     rmSync(log);
     const wide = run([...slow, passing, failing], "12");
-    assert.match(wide.stdout, /--test-concurrency=3 \(cores=12\)/);
+    assert.match(wide.stdout, /--test-concurrency=4 \(cores=12\)/);
     assert.notEqual(wide.status, 0);
     assert.equal(readFileSync(log, "utf8"), "ssee");
     assert.equal(spawnSync(process.execPath, [launcher], { env }).status, 2);
