@@ -813,7 +813,12 @@ only on whole days ago and cannot filter by target.
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate
-cache, gate-VM count and memory, tartci's installed commit (the sealed
+cache (cumulative for the cache directory; the per-job figure for one gate
+run is the `ccache per-job:` line that `build.yml`'s "Ccache stats" step
+prints from `tools/ci/ccache_job_delta.py`, the difference between the
+`--print-stats` snapshots taken before and after the Build step — the
+cumulative "Hits" line a job prints is the host's history and cannot show a
+cold or poisoned cache on that job), gate-VM count and memory, tartci's installed commit (the sealed
 launcher bundle's `source_commit`, else the fleet install record, as
 `tartci fleet-macos self-update` reports it), executing generation and
 checkout, lease usage and host profile, wheelhouse contents. Each probe runs

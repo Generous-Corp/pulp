@@ -1451,6 +1451,19 @@ the two `scene3d-native-slice-handoff` tests, only one names the plan file in
 its ctest arguments; the other reaches it through a verifier that hardcodes the
 path, so excluding the obvious one alone leaves a permanent red.
 
+## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
+
+`ccache --show-stats` counts for the life of the cache directory, and the
+gate VMs mount one directory per host. Across 13 merge-group jobs that each
+compiled the same ~10k TUs the denominator ran from 4,315 to 67,142, so that
+line cannot show a cold or poisoned cache on the job that printed it (the
+09-26 poisoned-ccache incident, 18 red jobs on one host, was invisible in
+it). Read the `ccache per-job:` line the same step prints instead:
+`tools/ci/ccache_job_delta.py` diffs `--print-stats` snapshots taken before
+and after the Build step. No per-job line means the instrument failed (exit
+2), never that the cache hit; the cumulative line stays for continuity.
+Typical healthy job: misses 13–315 of ~10k calls.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
