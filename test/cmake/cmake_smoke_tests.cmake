@@ -406,6 +406,7 @@ if(PULP_ENABLE_INSPECTOR)
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
         set_tests_properties(cmake-control-sdk-consumer PROPERTIES
             LABELS "cmake;sdk;inspect;control;headless"
+            COST 60
             TIMEOUT 300)
     endif()
 
@@ -675,8 +676,11 @@ if(Python3_Interpreter_FOUND)
                 --repo "${CMAKE_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}/sample-region-compat-baseline-build"
                 --negative-controls)
+        # The longest test in the suite (70-270s on the gate). With no COST it
+        # starts minutes in and finishes last; highest cost starts it first.
         set_tests_properties(sample-region-compat-baseline PROPERTIES
             LABELS "compatibility;sample-region"
+            COST 150
             TIMEOUT 3600)
     endif()
     add_test(NAME sample-region-compat-baseline-selftest

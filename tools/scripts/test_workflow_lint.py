@@ -117,6 +117,15 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             r"(?m)^\s{4}runs-on:\s*\[self-hosted, pulp-queue-authority-studio\]\s*$",
         )
 
+    def test_post_tag_sync_does_not_queue_on_every_tag(self) -> None:
+        """Its runner label has no registration, so a tag trigger only parks
+        a run in the queue until GitHub cancels it."""
+        doc = yaml.safe_load(POST_TAG_SYNC_WORKFLOW.read_text(encoding="utf-8"))
+        triggers = doc.get("on", doc.get(True))
+        self.assertIsInstance(triggers, dict)
+        self.assertNotIn("push", triggers)
+        self.assertIn("workflow_dispatch", triggers)
+
     def test_workflow_lint_gate_runs_this_regression_suite(self) -> None:
         self.assertIn(
             "python3 tools/scripts/test_workflow_lint.py",

@@ -421,6 +421,11 @@ def failing_tests(repo: str, run_id: str) -> list[str]:
     return names
 
 
+# One entry of ctest's "The following tests FAILED:" block. A test name may
+# contain spaces, so the name is everything up to the parenthesised result.
+FAILED_TEST_LINE_RE = re.compile(r"\d+\s+-\s+(.+?)\s+\((Failed|Timeout|Subprocess aborted)\)")
+
+
 def parse_failing_tests(log: str) -> list[str]:
     """Pull the ctest failure block out of a job log."""
     names: list[str] = []
@@ -431,9 +436,7 @@ def parse_failing_tests(log: str) -> list[str]:
             continue
         if not seen:
             continue
-        match = re.search(
-            r"\d+\s+-\s+(.+?)\s+\((Failed|Timeout|Subprocess aborted)\)", line
-        )
+        match = FAILED_TEST_LINE_RE.search(line)
         if match:
             names.append(match.group(1).strip())
         elif "Errors while running CTest" in line:

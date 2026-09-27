@@ -722,6 +722,56 @@ def _mins(rows: list[dict]) -> list[float]:
     return [r["total_ms"] / 60000.0 for r in rows if r.get("total_ms") is not None]
 
 
+MACOS_FAILED = ("failure", "timed_out")
+
+
+def _run_key(external_id: str, prefix: str) -> tuple[str, str] | None:
+    """(run id, attempt) of a `github-run:<run>/<attempt>` or `github:<run>/<job>/<attempt>` id."""
+    if not external_id.startswith(prefix):
+        return None
+    parts = external_id[len(prefix):].split("/")
+    if prefix == "github-run:" and len(parts) == 2:
+        return parts[0], parts[1]
+    if prefix == "github:" and len(parts) >= 3:
+        return parts[0], parts[2]
+    return None
+
+
+def macos_status_by_run(job_rows: list[dict]) -> dict[tuple[str, str], str]:
+    """Merge-group run attempt → its required `macos` job's conclusion.
+
+    A hosted placeholder is the required check too: its green is a green.
+    """
+    out: dict[tuple[str, str], str] = {}
+    for r in job_rows:
+        if r.get("target") not in ("macos-gate/merge_group", PLACEHOLDER):
+            continue
+        key = _run_key(str(r.get("external_id") or ""), "github:")
+        if key and r.get("status"):
+            out[key] = r["status"]
+    return out
+
+
+def failed_run_split(mg_runs: list[dict], macos: dict[tuple[str, str], str]) -> dict[str, int]:
+    """Failed merge_group runs by which job failed them.
+
+    `macos` is the required check. A run whose `macos` is green failed on an
+    advisory job only (the hosted Linux leg) and ejected nothing.
+    """
+    out = {"macos": 0, "other_only": 0, "macos_unrecorded": 0}
+    for r in mg_runs:
+        if r.get("status") != "failure":
+            continue
+        st = macos.get(_run_key(str(r.get("external_id") or ""), "github-run:") or ("", ""))
+        if st in MACOS_FAILED:
+            out["macos"] += 1
+        elif st == "success":
+            out["other_only"] += 1
+        else:
+            out["macos_unrecorded"] += 1
+    return out
+
+
 def pipeline_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: list[dict],
                    since: dt.datetime) -> dict:
     """Windowed pipeline numbers from Shipyard `metrics list` rows."""
@@ -749,14 +799,28 @@ def pipeline_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: list
     reused = [r for r in jobs if r.get("target") == "macos-gate/merge_group/receipt-reused"]
     mg_runs = [r for r in queue if r.get("target") == "merge-group-run"
                and r.get("status") in ("success", "failure")]
+    macos = macos_status_by_run(job_rows)
     per_day: dict[str, list[int]] = {}
+    split_day: dict[str, dict[str, int]] = {}
     for r in mg_runs:
         day = r["completed_at"][:10]
         tally = per_day.setdefault(day, [0, 0])
         tally[0] += r.get("status") == "failure"
         tally[1] += 1
+        for k, v in failed_run_split([r], macos).items():
+            split_day.setdefault(day, {"macos": 0, "other_only": 0, "macos_unrecorded": 0})[k] += v
     fail_total = sum(v[0] for v in per_day.values())
     runs_total = sum(v[1] for v in per_day.values())
+    # The required check itself, on the native gate jobs that ran it.
+    req_day: dict[str, list[int]] = {}
+    for r in jobs:
+        if r.get("target") == "macos-gate/merge_group" and r.get("status") in (
+                "success", *MACOS_FAILED):
+            tally = req_day.setdefault(r["completed_at"][:10], [0, 0])
+            tally[0] += r["status"] in MACOS_FAILED
+            tally[1] += 1
+    req_fail = sum(v[0] for v in req_day.values())
+    req_total = sum(v[1] for v in req_day.values())
     lat = {}
     for tgt, scale in (("pr/enqueue-to-merged", 1.0), ("pr/last-enqueue-to-merged", 1.0),
                        ("pr/open-to-merged", 1 / 60.0)):
@@ -771,11 +835,18 @@ def pipeline_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: list
                                   and r.get("status") == "failure") for ev in EVENTS},
         "steps": step_p50,
         "receipt_reused": len(reused),
+        "merge_group_macos_failure": {
+            "per_day": {d: {"failed": v[0], "jobs": v[1], "rate": v[0] / v[1]}
+                        for d, v in sorted(req_day.items())},
+            "window_rate": (req_fail / req_total) if req_total else None,
+            "jobs": req_total,
+        },
         "merge_group_failure": {
-            "per_day": {d: {"failed": v[0], "runs": v[1], "rate": v[0] / v[1]}
+            "per_day": {d: {"failed": v[0], "runs": v[1], "rate": v[0] / v[1], **split_day[d]}
                         for d, v in sorted(per_day.items())},
             "window_rate": (fail_total / runs_total) if runs_total else None,
             "runs": runs_total,
+            "by_failing_job": failed_run_split(mg_runs, macos),
         },
         "latency": lat,
     }
@@ -915,6 +986,7 @@ def merge_split_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: l
         reused = kinds.get("receipt-reused", 0)
         mg = [r for r in q if r.get("target") == "merge-group-run"]
         mg_done = [r for r in mg if r.get("status") in ("success", "failure")]
+        by_job = failed_run_split(mg_done, macos_status_by_run(job_rows))
         ejected = [r for r in q if str(r.get("target", "")).startswith("pr/ejected/")]
         reasons: dict[str, int] = {}
         for r in ejected:
@@ -976,7 +1048,10 @@ def merge_split_stats(job_rows: list[dict], step_rows: list[dict], queue_rows: l
                 "completed": len(mg), "failed": sum(1 for r in mg_done if r["status"] == "failure"),
                 "cancelled": sum(1 for r in mg if r.get("status") == "cancelled"),
                 "failure_rate": (sum(1 for r in mg_done if r["status"] == "failure") / len(mg_done)
-                                 if mg_done else None)},
+                                 if mg_done else None),
+                "by_failing_job": by_job,
+                "macos_failed_rate": by_job["macos"] / len(mg_done) if mg_done else None,
+                "other_only_rate": by_job["other_only"] / len(mg_done) if mg_done else None},
             "ejections": {"total": len(ejected), "by_reason": dict(sorted(reasons.items())),
                           "per_merged_pr": len(ejected) / merged_n if merged_n else None},
             "queue_by_host": hosts,
@@ -1032,13 +1107,22 @@ def render_merge_split_markdown(ms: dict) -> list[str]:
              r_b["merge_groups"] + r_b["unknown"], r_b["rate_upper"] and r_b["rate_upper"] * 100,
              r_a["merge_groups"] + r_a["unknown"], r_a["rate_upper"] and r_a["rate_upper"] * 100,
              "%", 0)
-    m_b, m_a = b["merge_group_runs"], a["merge_group_runs"]
-    line("merge_group run failure rate", m_b["completed"], m_b["failure_rate"] and m_b["failure_rate"] * 100,
-         m_a["completed"], m_a["failure_rate"] and m_a["failure_rate"] * 100, "%", 0)
     g_b2, g_a2 = b["merge_group_gate"], a["merge_group_gate"]
-    line("merge_group `macos` gate failure rate", g_b2["completed"],
+    line("merge_group `macos` gate failure rate (the required check)", g_b2["completed"],
          g_b2["failure_rate"] and g_b2["failure_rate"] * 100, g_a2["completed"],
          g_a2["failure_rate"] and g_a2["failure_rate"] * 100, "%", 0)
+    m_b, m_a = b["merge_group_runs"], a["merge_group_runs"]
+    line("merge_group run failure rate (any job)", m_b["completed"],
+         m_b["failure_rate"] and m_b["failure_rate"] * 100,
+         m_a["completed"], m_a["failure_rate"] and m_a["failure_rate"] * 100, "%", 0)
+
+    def pct(v: float | None) -> float | None:
+        return None if v is None else v * 100
+
+    line("  of which `macos` failed", m_b["completed"], pct(m_b["macos_failed_rate"]),
+         m_a["completed"], pct(m_a["macos_failed_rate"]), "%", 0)
+    line("  of which only other jobs failed (`macos` green)", m_b["completed"],
+         pct(m_b["other_only_rate"]), m_a["completed"], pct(m_a["other_only_rate"]), "%", 0)
     e_b, e_a = b["ejections"], a["ejections"]
     line("ejections per 100 merged PRs", e_b["total"],
          e_b["per_merged_pr"] and e_b["per_merged_pr"] * 100, e_a["total"],
@@ -1069,7 +1153,9 @@ def render_merge_split_markdown(ms: dict) -> list[str]:
             f"{k} {e_b['by_reason'].get(k, 0)} → {e_a['by_reason'].get(k, 0)}" for k in reasons) + ".")
     L.append("\nn is merged PRs for latency rows, gate-minute rows for per-PR cost, cancelled "
              "self-hosted gate jobs for cancelled minutes, merge groups for reuse, completed "
-             "merge_group runs for the failure rate (cancelled runs count toward n, not failures), "
+             "merge_group runs for the run failure rate (cancelled runs count toward n, not "
+             "failures; a run whose `macos` job was not recorded counts in neither split row), "
+             "native merge-group `macos` jobs for the required-check rate, "
              "and ejections for the ejection row. Gate-minutes cover PRs opened inside the "
              "ingested window only; a side with n < 5 is anecdote.")
     return L
@@ -1219,6 +1305,12 @@ def to_sections(pipe: dict | None, fleet: list[dict] | None, local: dict | None)
         secs.append({"title": "PR opened→merged (h)", "unit": "h", "lower_is_better": True,
                      "values": {"p50": _r(lat["pr/open-to-merged"]["p50"]),
                                 "p90": _r(lat["pr/open-to-merged"]["p90"])}})
+        req = pipe["merge_group_macos_failure"]
+        secs.append({"title": "merge_group required macos failure rate (%)", "unit": "%",
+                     "lower_is_better": True,
+                     "values": {"window": _r(None if req["window_rate"] is None
+                                             else req["window_rate"] * 100),
+                                **{d: _r(v["rate"] * 100) for d, v in req["per_day"].items()}}})
         mg = pipe["merge_group_failure"]
         secs.append({"title": "merge_group failure rate (%)", "unit": "%", "lower_is_better": True,
                      "values": {"window": _r(None if mg["window_rate"] is None else mg["window_rate"] * 100),
@@ -1349,12 +1441,26 @@ def render_markdown(rep: dict) -> str:
                            ("pr/open-to-merged", "PR opened → merged")):
             v = lat[tgt]
             L.append(f"| {label} | {v['n']} | {_fmt(_r(v['p50']), v['unit'])} | {_fmt(_r(v['p90']), v['unit'])} |")
-        mg = pipe["merge_group_failure"]
-        L += ["", "| merge_group runs (by day) | failed / completed | rate |", "|---|---:|---:|"]
-        for d, v in mg["per_day"].items():
-            L.append(f"| {d} | {v['failed']} / {v['runs']} | {v['rate'] * 100:.0f}% |")
-        wr = mg["window_rate"]
+        req = pipe["merge_group_macos_failure"]
+        L += ["", "| Required `macos` check, merge_group (by day) | failed / completed | rate |",
+              "|---|---:|---:|"]
+        for d, v in req["per_day"].items():
+            L.append(f"| {d} | {v['failed']} / {v['jobs']} | {v['rate'] * 100:.0f}% |")
+        wr = req["window_rate"]
         L.append(f"| window | | {'NOT MEASURED' if wr is None else f'{wr * 100:.0f}%'} |")
+        mg = pipe["merge_group_failure"]
+        L += ["", "| merge_group runs, any job (by day) | failed / completed | `macos` failed | "
+              "only other jobs failed | `macos` not recorded | rate |",
+              "|---|---:|---:|---:|---:|---:|"]
+        for d, v in mg["per_day"].items():
+            L.append(f"| {d} | {v['failed']} / {v['runs']} | {v['macos']} | {v['other_only']} | "
+                     f"{v['macos_unrecorded']} | {v['rate'] * 100:.0f}% |")
+        wr = mg["window_rate"]
+        bj = mg["by_failing_job"]
+        L.append(f"| window | | {bj['macos']} | {bj['other_only']} | {bj['macos_unrecorded']} | "
+                 f"{'NOT MEASURED' if wr is None else f'{wr * 100:.0f}%'} |")
+        L.append("\nThe required check is `macos`; a run whose `macos` is green failed on an "
+                 "advisory job only (the hosted Linux leg) and ejected nothing.")
         L.append(f"\nMerge groups whose `macos` was a hosted placeholder (a reused receipt or a "
                  f"skip-safe group; `--split` separates them): {pipe['receipt_reused']}.")
         drift = rep.get("drift") or []
