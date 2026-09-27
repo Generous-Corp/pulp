@@ -90,12 +90,8 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF
-       "Require the GPU-audio probe to use the manifest-pinned Skia/Dawn generation"
+       "Require GPU-audio library and probes to use the manifest-pinned Skia/Dawn generation"
        OFF)
-if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_BUILD_TESTS)
-    message(FATAL_ERROR
-        "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_BUILD_TESTS=ON")
-endif()
 if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_ENABLE_GPU)
     message(FATAL_ERROR
         "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_ENABLE_GPU=ON")

@@ -219,3 +219,7 @@ else()
     target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::signal)
 endif()
+
+# Provider authentication is needed in installed SDK builds even when tests are off.
+include("${PROJECT_SOURCE_DIR}/tools/cmake/PulpGpuAudioProviderIdentity.cmake")
+pulp_gpu_audio_configure_provider_identity(pulp-gpu-audio)
