@@ -406,10 +406,12 @@ class GatesWiringTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "tools" / "ci").mkdir(parents=True)
+            (root / ".github" / "workflows").mkdir(parents=True)
+            (root / ".github" / "workflows" / "workflow-lint.yml").write_text("", encoding="utf-8")
             calls = root / "calls"
             (root / "tools" / "ci" / "source_selftests.py").write_text(
                 "import sys, pathlib\n"
-                f"pathlib.Path({str(calls)!r}).write_text(' '.join(sys.argv[1:]))\n"
+                f"with open({str(calls)!r}, 'a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')\n"
                 "print('source-selftests: stub')\n"
                 f"raise SystemExit({stub_exit})\n",
                 encoding="utf-8",
@@ -426,12 +428,74 @@ class GatesWiringTests(unittest.TestCase):
     def test_a_failing_lane_fails_gates(self) -> None:
         out, argv = self._run_block(1).split("|", 1)
         self.assertEqual(out, "fail=1")
-        self.assertEqual(argv, "run --changed-from origin/main")
+        calls = argv.splitlines()
+        self.assertEqual(calls[0], "run --changed-from origin/main")
 
-    def test_a_passing_lane_leaves_gates_green(self) -> None:
+    def test_both_lanes_run_and_a_passing_pair_stays_green(self) -> None:
         out, argv = self._run_block(0).split("|", 1)
         self.assertEqual(out, "fail=0")
-        self.assertIn("--changed-from", argv)
+        calls = argv.splitlines()
+        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual(calls[0], "run --changed-from origin/main")
+        self.assertRegex(calls[1], r"^run --workflow \S+/\.github/workflows/workflow-lint\.yml "
+                                   r"--changed-from origin/main$")
+
+
+class WorkflowEntriesTests(unittest.TestCase):
+    """The workflow-lint list is read from the workflow, and scoped like the lane."""
+
+    def _workflow(self, root: pathlib.Path) -> pathlib.Path:
+        for name in ("test_contract.py", "test_other.py", "portability.py"):
+            (root / "tools" / "scripts").mkdir(parents=True, exist_ok=True)
+            (root / "tools" / "scripts" / name).write_text("pass\n", encoding="utf-8")
+        (root / "tools" / "scripts" / "test_contract.py").write_text(
+            'MANIFEST = ROOT / "test" / "cmake" / "design_import_tool_cli_tests.cmake"\n',
+            encoding="utf-8")
+        (root / "tools" / "ci").mkdir(parents=True, exist_ok=True)
+        workflow = root / "workflow-lint.yml"
+        workflow.write_text(
+            "      - run: |\n"
+            "          python3 -m pip install --quiet 'pyyaml>=6'\n"
+            "          python3 tools/scripts/test_contract.py\n"
+            "          python3 tools/scripts/test_other.py\n"
+            "          python3 tools/scripts/portability.py tools/ci tools/scripts\n"
+            "          python3 tools/scripts/test_missing.py\n"
+            "          python3 - <<'PY'\n",
+            encoding="utf-8")
+        return workflow
+
+    def test_every_repo_script_line_becomes_an_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            entries = lane.workflow_entries(self._workflow(root), root)
+        self.assertEqual(
+            [e["name"] for e in entries],
+            ["tools/scripts/test_contract.py", "tools/scripts/test_other.py",
+             "tools/scripts/portability.py tools/ci tools/scripts"])
+        self.assertTrue(all(e["cwd"] == "{repo}" for e in entries))
+
+    def test_a_ctest_property_change_selects_the_contract_that_pins_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            entries = lane.workflow_entries(self._workflow(root), root)
+            picked = lane.select_for_changes(
+                entries, ["test/cmake/design_import_tool_cli_tests.cmake"], root)
+        self.assertEqual([e["name"] for e in picked], ["tools/scripts/test_contract.py"])
+
+    def test_a_checker_handed_a_directory_is_selected_by_a_change_inside_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            entries = lane.workflow_entries(self._workflow(root), root)
+            picked = lane.select_for_changes(entries, ["tools/ci/new_runner.sh"], root)
+        self.assertEqual([e["name"] for e in picked],
+                         ["tools/scripts/portability.py tools/ci tools/scripts"])
+
+    def test_the_real_workflow_yields_its_contract_suites(self) -> None:
+        # Control: the parser sees the real workflow, not an empty list.
+        entries = lane.workflow_entries()
+        self.assertGreaterEqual(len(entries), 40)
+        self.assertIn("tools/scripts/test_ci_throughput_workflows.py",
+                      [e["name"] for e in entries])
 
 
 if __name__ == "__main__":

@@ -339,15 +339,52 @@ def change_tokens(path: str) -> set[str]:
     return tokens
 
 
+WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
+WORKFLOW_TIMEOUT = 600.0
+_WORKFLOW_PYTHON = re.compile(r"^\s+python3\s+((?:tools|scripts|test)/[\w./-]+\.py)((?:\s+[\w./-]+)*)\s*$")
+
+
+def workflow_entries(
+    workflow: pathlib.Path = WORKFLOW_LINT, repo: pathlib.Path = REPO_ROOT
+) -> list[dict[str, Any]]:
+    """Every ``python3 <repo script> [args]`` line a workflow runs, as entries.
+
+    Read from the workflow file itself so the local list and the workflow can
+    never diverge. Entries run from the checkout root, as the workflow's steps
+    do, with a timeout sized for a whole contract suite rather than one test.
+    """
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        match = _WORKFLOW_PYTHON.match(line)
+        if not match:
+            continue
+        script, args = match.group(1), match.group(2).split()
+        name = " ".join([script, *args])
+        if name in seen or not (repo / script).is_file():
+            continue
+        seen.add(name)
+        entries.append({
+            "name": name,
+            "argv": ["{repo}/" + script, *args],
+            "cwd": "{repo}",
+            "timeout": WORKFLOW_TIMEOUT,
+        })
+    return entries
+
+
 def select_for_changes(
-    entries: list[dict[str, Any]], changed: list[str], repo: pathlib.Path = REPO_ROOT
+    entries: list[dict[str, Any]],
+    changed: list[str],
+    repo: pathlib.Path = REPO_ROOT,
+    lane_files: tuple[str, ...] = LANE_FILES,
 ) -> list[dict[str, Any]]:
     """Entries a diff can plausibly break: every entry when the lane itself
     changed, otherwise each entry whose own script changed or whose source
     names a changed file. A textual reference is a heuristic that
     over-selects rather than under-selects; the required lane still runs all.
     """
-    if any(path in LANE_FILES for path in changed):
+    if any(path in lane_files for path in changed):
         return list(entries)
     changed_abs = {(repo / path).resolve() for path in changed}
     tokens = set().union(*(change_tokens(path) for path in changed)) if changed else set()
@@ -357,6 +394,12 @@ def select_for_changes(
     for entry in entries:
         sources = entry_sources(entry, repo)
         if any(src.resolve() in changed_abs for src in sources):
+            selected.append(entry)
+            continue
+        # A checker handed directories scans whatever is in them.
+        scanned = [arg.rstrip("/") + "/" for arg in entry["argv"][1:]
+                   if not arg.startswith("-") and (repo / arg).is_dir()]
+        if any(path.startswith(tuple(scanned)) for path in changed) if scanned else False:
             selected.append(entry)
             continue
         text = ""
@@ -556,6 +599,12 @@ def main(argv: list[str] | None = None) -> int:
         help="fail when the manifest lists fewer entries (a shrunken lane)",
     )
     p_run.add_argument(
+        "--workflow",
+        type=pathlib.Path,
+        help="run the repo Python scripts a workflow file invokes instead of the "
+        "manifest (e.g. .github/workflows/workflow-lint.yml)",
+    )
+    p_run.add_argument(
         "--changed-from",
         metavar="BASE",
         help="run only entries a diff against BASE can plausibly break (local "
@@ -576,7 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "run":
-        entries = load_manifest(args.manifest)
+        entries = (workflow_entries(args.workflow.resolve()) if args.workflow
+                   else load_manifest(args.manifest))
         if len(entries) < args.min_count:
             print(
                 f"source-selftests: manifest lists {len(entries)} entries, "
@@ -586,7 +636,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if args.changed_from:
             total = len(entries)
-            entries = select_for_changes(entries, changed_paths(args.changed_from))
+            lane_files = LANE_FILES
+            if args.workflow:
+                lane_files += (args.workflow.resolve().relative_to(REPO_ROOT).as_posix(),)
+            entries = select_for_changes(
+                entries, changed_paths(args.changed_from), lane_files=lane_files)
             print(
                 f"source-selftests: {len(entries)} of {total} entries selected "
                 f"by the diff against {args.changed_from}",
