@@ -79,6 +79,7 @@ enum class GpuWaveNetBlockStatus : std::uint8_t {
     GpuDelivered = 0,
     ProviderFailed,
 };
+enum class GpuWaveNetCompletionPolicy : std::uint8_t { ProcessEvents, WaitAny, TimedWaitAny };
 
 struct GpuWaveNetBlockResult {
     std::uint64_t sequence = 0;
@@ -105,6 +106,8 @@ class GpuWaveNetSession {
         GpuWaveNetDescriptor descriptor{};
         std::span<const float> weights{};
         std::uint32_t slots = 2;
+        GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
+        std::uint64_t completion_wait_ns = 0;
     };
 
     struct CreateResult {

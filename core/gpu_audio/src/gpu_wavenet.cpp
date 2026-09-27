@@ -81,8 +81,12 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
             return result;
         }
 
+        auto policy = detail::DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::WaitAny) policy = detail::DawnSharedIoProvider::CompletionPolicy::WaitAny;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::TimedWaitAny) policy = detail::DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
         auto created = detail::DawnSharedIoProvider::create(
-            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA});
+            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+             .completion_policy = policy, .completion_wait_ns = config.completion_wait_ns});
         if (!created.provider) {
             result.error = GpuWaveNetSessionError::ProviderUnavailable;
             return result;
