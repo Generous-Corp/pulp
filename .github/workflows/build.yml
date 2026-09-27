@@ -2322,9 +2322,20 @@ jobs:
         # invisible remotely. ctest's own result logs name it: dump them into
         # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
+        #
+        # This step only reports; it must never decide the job's result. On a
+        # pull-request head the full suite runs as non-gating receipt evidence
+        # (the Test step is continue-on-error), so a non-zero exit here would
+        # turn the required check red for a failure the workflow deliberately
+        # does not gate on. On other events the Test step already failed
+        # visibly as its own step. The default shell is `bash -e -o pipefail`,
+        # under which a grep that matches nothing (a failure that is a timeout
+        # or a non-Catch2 test) ends the step with exit 1, so errexit is off
+        # and every command that may legitimately return non-zero is guarded.
         if: (failure() || steps.ctest.outcome == 'failure') && runner.os != 'Windows'
         shell: bash
         run: |
+          set +e
           tdir="$PULP_BUILD_DIR/Testing/Temporary"
           {
             echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
@@ -2333,7 +2344,7 @@ jobs:
               echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
               echo "### Failing assertions (from LastTest.log)"
               echo '```'
-              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60 || true
               echo '```'
             else
               echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
@@ -2341,6 +2352,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           # Also echo failed-test names to the (locally-readable) job log.
           { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== ctest failed tests ==="; cat "$tdir/LastTestsFailed.log"; }; } || true
+          exit 0
 
       - name: Upload ctest logs and JUnit report
         # Full Testing/Temporary/ (LastTest.log, LastTestsFailed.log, …) as an
