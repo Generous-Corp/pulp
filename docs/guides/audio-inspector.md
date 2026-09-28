@@ -219,6 +219,18 @@ valid only for `sine`; amplitude is linear from 0 through 1 (default 0.5).
 Malformed, non-finite, out-of-range, or inapplicable values disable the
 environment-requested signal rather than falling back to unexpected audio.
 
+To run the audio graph without any output device at all, add
+`PULP_AUDIO_DEVICE=null`: the standalone renders on a thread paced to the
+configured sample rate and block size, opens no platform audio API, and
+discards the output, so probes, meters and analyzers publish at their normal
+rate while nothing reaches the speakers. The null device is a per-session
+choice and is never saved as the selected device.
+
+```bash
+PULP_AUDIO_DEVICE=null PULP_TEST_SIGNAL=sine \
+pulp run <target> --audio-probe-json /tmp/probe.json --frames 90
+```
+
 `--audio-probe-json` implies `--headless` (one-shot dump + exit, like
 `--screenshot`). It is forwarded as `--audio-probe-json <file>` and via
 `PULP_AUDIO_PROBE_JSON=<file>`. The frame delay reuses the same

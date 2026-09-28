@@ -22,6 +22,11 @@
       "reason": "WasapiDevice destructor calls stop before close; the self-thread branch retires the loop before detach"
     },
     {
+      "path": "core/format/src/null_audio_device.cpp",
+      "needle": "std::thread([this]",
+      "reason": "NullAudioDevice destructor calls close(), which stops and joins the render thread before member teardown"
+    },
+    {
       "path": "core/audio/src/streaming_sample_source.cpp",
       "needle": "std::thread([this]",
       "reason": "StreamingSampleSource release stops and joins the reader thread before clearing the reader"
