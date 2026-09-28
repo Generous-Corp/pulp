@@ -64,13 +64,22 @@ for arg in "$@"; do
     esac
 done
 
+# A fresh build dir gets Ninja when it is available, like `pulp build`: the
+# default Makefiles generator rebuilds and relinks far more slowly. CMake cannot
+# switch an existing cache's generator, so an existing dir keeps its own.
+GENERATOR=""
+if [ ! -f "$REPO_ROOT/build/CMakeCache.txt" ] && command -v ninja >/dev/null 2>&1; then
+    GENERATOR=Ninja
+fi
+
 # The resolved plan is the one testable artifact of the argument parsing above,
 # so expose it directly instead of making a caller infer it from a full run.
 if $PRINT_PLAN; then
     echo "build_type=$BUILD_TYPE"
     echo "examples=$BUILD_EXAMPLES"
     echo "deps_only=$DEPS_ONLY"
-    echo "configure=cmake -S $REPO_ROOT -B $REPO_ROOT/build -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPULP_BUILD_EXAMPLES=$BUILD_EXAMPLES"
+    echo "generator=${GENERATOR:-default}"
+    echo "configure=cmake ${GENERATOR:+-G $GENERATOR }-S $REPO_ROOT -B $REPO_ROOT/build -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DPULP_BUILD_EXAMPLES=$BUILD_EXAMPLES"
     exit 0
 fi
 
@@ -1242,7 +1251,7 @@ fi
 
 step "Configuring CMake"
 
-cmake -S "$REPO_ROOT" -B "$REPO_ROOT/build" \
+cmake ${GENERATOR:+-G "$GENERATOR"} -S "$REPO_ROOT" -B "$REPO_ROOT/build" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DPULP_BUILD_EXAMPLES="$BUILD_EXAMPLES"
 

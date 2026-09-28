@@ -697,3 +697,8 @@ ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"
 [release.post_tag_hook.bot_identity]
 name  = "pulp-release-bot"
 email = "25807+danielraffel@users.noreply.github.com"
+
+[pr.body]
+# Closes every PR body `shipyard pr` composes, so agents stop editing the
+# attribution line in by hand after the PR opens.
+attribution = "🤖 Generated with [Claude Code](https://claude.com/claude-code)"

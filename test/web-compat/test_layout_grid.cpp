@@ -50,7 +50,7 @@ TEST_CASE("Grid: fixed + fr columns", "[layout][grid]") {
     REQUIRE_THAT(root.child_at(1)->bounds().width, WithinAbs(300.0f, 1.0f));
 }
 
-TEST_CASE("Grid: column gap", "[layout][grid]") {
+TEST_CASE("Grid (web-compat): column gap", "[layout][grid]") {
     View root;
     root.set_bounds({0, 0, 410, 200});
     root.set_layout_mode(LayoutMode::grid);
@@ -80,7 +80,7 @@ TEST_CASE("Grid: row gap", "[layout][grid]") {
     REQUIRE_THAT(root.child_at(1)->bounds().y, WithinAbs(50.0f, 1.0f));
 }
 
-TEST_CASE("Grid: auto row wrapping with 2 columns", "[layout][grid]") {
+TEST_CASE("Grid (web-compat): auto row wrapping with 2 columns", "[layout][grid]") {
     View root;
     root.set_bounds({0, 0, 200, 400});
     root.set_layout_mode(LayoutMode::grid);

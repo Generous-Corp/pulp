@@ -315,6 +315,10 @@ int cmd_loop(const std::vector<std::string>& args) {
     ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
     auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
 
+    // A build dir an older CLI configured (Makefiles, Debug, examples ON)
+    // moves aside here so the bootstrap below reconfigures it.
+    migrate_slow_build_dir(build_dir, !standalone_mode, examples);
+
     // Ensure configured. Reuse cmd_build's bootstrap path and the current
     // project's normal build configuration.
     if (!fs::exists(build_dir / "CMakeCache.txt")
@@ -348,9 +352,11 @@ int cmd_loop(const std::vector<std::string>& args) {
     for (auto& arg : capped_build.args) build_cmd += " " + arg;
     build_cmd = focused_build_command(build_cmd, selection);
     int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-        apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
-                                   lease.jobs(),
-                                   lease.active()),
+        apply_build_dir_lock(
+            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+                                       lease.jobs(),
+                                       lease.active()),
+            project_root, build_dir),
         "Building");
     if (rc != 0) {
         std::cerr << "Initial build failed. Watch loop will retry on changes.\n";

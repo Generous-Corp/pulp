@@ -4056,3 +4056,14 @@ Forge-side change, because `tools/cli/cmd_control.cpp` and
 `tools/mcp/mcp_control_tool_catalog.cpp` both walk the registry rather than
 enumerating operations by hand — declaring the capability grantable is what
 projects it to both surfaces.
+
+## Register a test source in one suite only
+
+`examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp` runs in
+`pulp-test-timeline-multitrack-pdc`; the phase-1 examples aggregate
+(`pulp-test-timeline-phase1-examples`) compiles the example *implementation*
+but not that test file. Compiling one Catch2 source into two executables
+registers every case twice under the same ctest name, and
+`protected_merge_receipt.py issue` refuses an inventory with a duplicated
+name, which silently disabled PR-head receipt reuse for weeks. The pr-fast
+`ctest-unique-names` guard now catches it on the PR head.

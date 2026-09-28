@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -96,6 +97,55 @@ TEST_CASE("cmake_cache_value reads typed entries", "[cli][configure-defaults]") 
     REQUIRE_FALSE(cmake_cache_value(cache, "CMAKE_BUILD").has_value());
 }
 
+// ── migrating a slow existing build dir ────────────────────────────────────
+
+namespace {
+const char* kMakefilesDebugExamples =
+    "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=Debug\n"
+    "PULP_BUILD_EXAMPLES:BOOL=ON\n";
+
+std::vector<std::string> stale_reasons(const std::string& cache, bool ninja,
+                                       std::optional<std::string> env, bool examples,
+                                       bool source_checkout = true) {
+    ConfigureDefaults in;
+    in.existing_cache = cache;
+    in.ninja_available = ninja;
+    in.build_type_env = std::move(env);
+    in.examples = examples;
+    in.source_checkout = source_checkout;
+    return pulp::cli::stale_build_config_reasons(in);
+}
+} // namespace
+
+TEST_CASE("stale build dirs name Makefiles, Debug, and unrequested examples",
+          "[cli][configure-defaults]") {
+    REQUIRE(stale_reasons(kMakefilesDebugExamples, true, std::nullopt, false) ==
+            std::vector<std::string>{"Unix Makefiles", "Debug", "examples ON"});
+    // Without ninja the generator stays; the build type still migrates.
+    REQUIRE(stale_reasons(kMakefilesDebugExamples, false, std::nullopt, true) ==
+            std::vector<std::string>{"Debug"});
+    REQUIRE(stale_reasons("CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=\n",
+                          false, std::nullopt, false) == std::vector<std::string>{"no build type"});
+}
+
+TEST_CASE("explicit requests and matching dirs are not stale", "[cli][configure-defaults]") {
+    // PULP_BUILD_TYPE=Debug plus --examples asks for exactly this dir.
+    REQUIRE(stale_reasons(kMakefilesDebugExamples, false, std::string("debug"), true).empty());
+    REQUIRE(stale_reasons("CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n"
+                          "PULP_BUILD_EXAMPLES:BOOL=OFF\n",
+                          true, std::nullopt, false)
+                .empty());
+    // IDE generators are a deliberate choice and carry no build type.
+    REQUIRE(stale_reasons("CMAKE_GENERATOR:INTERNAL=Xcode\n", true, std::nullopt, false).empty());
+    // A cache with no generator is not a real configure.
+    REQUIRE(stale_reasons("CMAKE_BUILD_TYPE:STRING=Debug\n", true, std::nullopt, false).empty());
+    // Standalone projects have no examples option to migrate.
+    REQUIRE(stale_reasons("CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n"
+                          "PULP_BUILD_EXAMPLES:BOOL=ON\n",
+                          true, std::nullopt, false, /*source_checkout=*/false)
+                .empty());
+}
+
 // ── helpers that read a real build dir ─────────────────────────────────────
 
 namespace {
@@ -146,6 +196,39 @@ TEST_CASE("build-dir helpers read the cache the configure decision depends on",
             == std::vector<std::string>{"-DPULP_BUILD_EXAMPLES=ON"});
 }
 
+TEST_CASE("migrating a slow build dir moves its cache and CMakeFiles aside",
+          "[cli][configure-defaults]") {
+    TempDir tmp("pulp-configure-migrate");
+    const auto build = tmp.path / "build";
+    write_text(build / "CMakeCache.txt", kMakefilesDebugExamples);
+    write_text(build / "CMakeFiles" / "obj" / "a.o", "");
+    ConfigureDefaults in;
+    in.existing_cache = pulp::cli::read_cmake_cache(build);
+    in.ninja_available = true;
+    in.source_checkout = true;
+    std::ostringstream out;
+    REQUIRE(pulp::cli::migrate_stale_build_dir(build, in, out));
+    const auto aside = build / pulp::cli::kPreMigrationDir;
+    REQUIRE(fs::is_regular_file(aside / "CMakeCache.txt"));
+    REQUIRE(fs::is_regular_file(aside / "CMakeFiles" / "obj" / "a.o"));
+    REQUIRE_FALSE(fs::exists(build / "CMakeCache.txt"));
+    REQUIRE_FALSE(fs::exists(build / "CMakeFiles"));
+    const std::string printed = out.str();
+    INFO(printed);
+    REQUIRE(printed.rfind("Reconfiguring ", 0) == 0);
+    REQUIRE(std::count(printed.begin(), printed.end(), '\n') == 1);
+    REQUIRE(printed.find("Unix Makefiles, Debug, examples ON") != std::string::npos);
+
+    // A dir that already matches is left alone.
+    write_text(build / "CMakeCache.txt",
+               "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n");
+    in.existing_cache = pulp::cli::read_cmake_cache(build);
+    std::ostringstream quiet;
+    REQUIRE_FALSE(pulp::cli::migrate_stale_build_dir(build, in, quiet));
+    REQUIRE(quiet.str().empty());
+    REQUIRE(fs::exists(build / "CMakeCache.txt"));
+}
+
 #if !defined(_WIN32)
 namespace {
 class ScopedEnv {
@@ -178,6 +261,7 @@ struct FakeCheckout {
     fs::path root = tmp.path / "checkout";
     fs::path bin = tmp.path / "bin";
     fs::path log = tmp.path / "cmake-argv.log";
+    std::string last_stdout;
 
     explicit FakeCheckout(bool with_ninja) {
         fs::create_directories(root / "core");
@@ -207,6 +291,7 @@ struct FakeCheckout {
         argv.insert(argv.end(), args.begin(), args.end());
         auto r = pulp::platform::ChildProcess::run(cpp_cli().string(), argv, options);
         INFO(r.stdout_output << r.stderr_output);
+        last_stdout = r.stdout_output;
         REQUIRE_FALSE(r.timed_out);
         REQUIRE(r.exit_code == 0);
         std::istringstream lines(read_text(log));
@@ -251,5 +336,38 @@ TEST_CASE("pulp-cpp build --examples reconfigures a cache that has examples off"
     REQUIRE(line.find("-DPULP_BUILD_EXAMPLES=ON") != std::string::npos);
     REQUIRE(line.find("-G") == std::string::npos);
     REQUIRE(line.find("--examples") == std::string::npos);
+}
+
+TEST_CASE("pulp-cpp build migrates a Makefiles Debug examples-on build dir",
+          "[cli][configure-defaults][shellout]") {
+    if (!fs::exists(cpp_cli()))
+        SKIP("pulp-cpp not built");
+    FakeCheckout checkout(/*with_ninja=*/true);
+    write_text(checkout.root / "tools/deps/shared-source-contract.txt", "fixture-contract\n");
+    fs::create_directories(checkout.root / "external/vst3sdk/pluginterfaces");
+    const std::string complete =
+        "PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\nPULP_HAS_VST3:INTERNAL=ON\n"
+        "PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=OFF\n"
+        "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract\n";
+    const auto cache = checkout.root / "build" / "CMakeCache.txt";
+
+    // Control: a complete Ninja + Release cache goes straight to the build.
+    write_text(cache, "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n"
+                      "PULP_BUILD_EXAMPLES:BOOL=OFF\n" +
+                          complete);
+    REQUIRE(checkout.configure_line({}).rfind("--build ", 0) == 0);
+    fs::remove(checkout.log);
+
+    write_text(cache, std::string(kMakefilesDebugExamples) + complete);
+    const auto line = checkout.configure_line({});
+    INFO(line);
+    INFO(checkout.last_stdout);
+    REQUIRE(line.rfind("-B ", 0) == 0); // a configure, not a build
+    REQUIRE(line.find("-G Ninja") != std::string::npos);
+    REQUIRE(line.find("-DCMAKE_BUILD_TYPE=Release") != std::string::npos);
+    REQUIRE(line.find("-DPULP_BUILD_EXAMPLES=OFF") != std::string::npos);
+    REQUIRE(fs::is_regular_file(checkout.root / "build" / pulp::cli::kPreMigrationDir /
+                                "CMakeCache.txt"));
+    REQUIRE(checkout.last_stdout.find("Reconfiguring ") != std::string::npos);
 }
 #endif

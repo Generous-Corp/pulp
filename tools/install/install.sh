@@ -175,14 +175,16 @@ if printf '%s\n' "$ARCHIVE_MEMBERS" | grep -qx 'pulp-control-broker'; then
     CONTROL_STANDALONE_HOST_STAGE="$TMP_DIR/control-broker-stage/pulp-control-standalone-host"
     CONTROL_STANDALONE_MANIFEST_STAGE="$TMP_DIR/control-broker-stage/pulp-control-standalone-host.inspector-capabilities.json"
     CONTROL_STANDALONE_RUNTIME_STAGE="$TMP_DIR/control-broker-stage/libwgpu_native.dylib"
-    # The Rust installer owns the broker transaction. For current releases it
-    # also owns the complete host closure; historical broker-only archives
-    # still install their shared WebGPU runtime through the ordinary payload.
+    # The Rust installer owns the broker transaction and, for current
+    # releases, the host closure. The shared WebGPU runtime is ALSO ordinary
+    # payload: pulp-cpp, pulp-mcp and pulp-import-design load it from this
+    # directory (@loader_path), and the broker transaction installs it only
+    # when activation succeeds. Extracting it here means a failed or refused
+    # activation rolls back to this release's runtime instead of to none.
     if [ "$CONTROL_PAYLOAD_HAS_COMPANIONS" = "1" ]; then
         tar --exclude='pulp-control-broker' \
             --exclude='pulp-control-standalone-host' \
             --exclude='pulp-control-standalone-host.inspector-capabilities.json' \
-            --exclude='libwgpu_native.dylib' \
             -xzf "$TMP_DIR/pulp.tar.gz" -C "$INSTALL_DIR"
     else
         tar --exclude='pulp-control-broker' \
@@ -224,10 +226,13 @@ if [ -n "$CONTROL_BROKER_STAGE" ]; then
             --standalone-runtime "$CONTROL_STANDALONE_RUNTIME_STAGE" || \
             CONTROL_BROKER_RECONCILE_FAILED=1
     fi
+    # The broker is optional: the CLI, its sibling binaries and their shared
+    # runtime are already installed, so a broker that cannot activate is a
+    # warning, never a failed install.
     if [ "$CONTROL_BROKER_RECONCILE_FAILED" = "1" ]; then
-        echo "Error: Pulp CLI installed, but control broker activation failed."
+        echo "Warning: Pulp CLI installed, but control broker activation failed."
+        echo "The optional health-only broker is not running; the CLI works without it."
         echo "Run 'pulp doctor --only Control broker' after correcting the reported error."
-        exit 1
     fi
 fi
 

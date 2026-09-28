@@ -4,6 +4,7 @@
 #include "focused_build.hpp"
 
 #include "cli_common.hpp"
+#include "configure_defaults.hpp"
 #include "shell_quote.hpp"
 
 #include <cstdlib>
@@ -30,6 +31,21 @@ std::vector<std::string> read_lines(const fs::path& path) {
 }
 
 }  // namespace
+
+// Declared in cli_common.hpp next to configure_default_flags; defined here so
+// the configure helpers do not grow the cli_common.cpp hotspot.
+bool configure_ninja_available() {
+#ifdef _WIN32
+    return false; // Windows keeps the Visual Studio generator.
+#else
+    return !find_executable_in_path("ninja").empty();
+#endif
+}
+
+bool migrate_slow_build_dir(const fs::path& build_dir, bool source_checkout, bool examples) {
+    return pulp::cli::migrate_stale_build_dir_for(build_dir, source_checkout, examples,
+                                                  configure_ninja_available(), std::cout);
+}
 
 bool focused_build_disabled_by_env() {
     const char* value = std::getenv("PULP_BUILD_FOCUS");

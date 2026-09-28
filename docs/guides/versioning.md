@@ -311,6 +311,8 @@ Typing `shipyard pr` (or saying "push a PR" / "ship this" / "we're done" to an a
 5. Cross-platform validation + merge on green.
 6. On merge, `.github/workflows/auto-release.yml` diffs the version files against the previous push, creates the matching tag(s), and the existing tag-triggered release workflows publish binaries.
 
+The PR title and body come from the branch's non-merge commits (`origin/main..HEAD`), never only the tip commit, so the body is never empty. `.shipyard/config.toml` sets `[pr.body] attribution`, which Shipyard appends once to every body it composes; a PR opened this way needs no hand edit to add the attribution line.
+
 Never type `gh pr create` + `shipyard ship` separately. Never run the version-bump scripts by hand unless debugging. Direct `gh pr create` is a manual bypass only and can leave a PR outside Shipyard's tracked state until reconciled.
 
 ---

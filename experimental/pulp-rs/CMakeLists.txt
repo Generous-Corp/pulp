@@ -207,6 +207,52 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(pulp-rust-gpu-trace-analysis-ctest-selftest
         PROPERTIES LABELS "trace;gpu;rust")
 
+    # The stale-CLI guard: unit cases plus the real binary refusing, or
+    # re-running through a checkout's own CLI, before any configure.
+    add_test(NAME pulp-rust-stale-cli-guard
+        COMMAND ${CMAKE_COMMAND} -E env
+            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            ${CARGO_EXECUTABLE} test
+            --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+            stale_cli)
+    set_tests_properties(pulp-rust-stale-cli-guard
+        PROPERTIES LABELS "cli;rust")
+
+    # The whole crate's unit and integration tests. Only named slices above
+    # used to run, which left ~94% of them (about 1,120 of 1,200) unexecuted
+    # and let five go red on main unnoticed. trace_gpu_analysis_tool_test is
+    # excluded here because it fails closed without the SDK-matched
+    # trace_processor; pulp-rust-gpu-trace-analysis-integration runs it, or
+    # reports the skip, when one is available. The file list is globbed so a
+    # new tests/*.rs file is picked up at the next configure.
+    file(GLOB _pulp_rs_test_sources CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.rs")
+    set(_pulp_rs_test_target_args)
+    foreach(_pulp_rs_test_source IN LISTS _pulp_rs_test_sources)
+        get_filename_component(_pulp_rs_test_name "${_pulp_rs_test_source}" NAME_WE)
+        if(NOT _pulp_rs_test_name STREQUAL "trace_gpu_analysis_tool_test")
+            list(APPEND _pulp_rs_test_target_args --test "${_pulp_rs_test_name}")
+        endif()
+    endforeach()
+    add_test(NAME pulp-rust-cli-cargo-tests
+        COMMAND ${CMAKE_COMMAND} -E env
+            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            ${CARGO_EXECUTABLE} test
+            --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+            --no-fail-fast --lib --bins ${_pulp_rs_test_target_args})
+    set_tests_properties(pulp-rust-cli-cargo-tests PROPERTIES
+        LABELS "cli;rust"
+        TIMEOUT 900)
+    add_test(NAME pulp-rust-cli-doc-tests
+        COMMAND ${CMAKE_COMMAND} -E env
+            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            ${CARGO_EXECUTABLE} test
+            --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
+            --doc)
+    set_tests_properties(pulp-rust-cli-doc-tests PROPERTIES
+        LABELS "cli;rust"
+        TIMEOUT 600)
+
     # A no-op build must not spawn cargo: the cargo step has to stay an edge
     # with real outputs, Cargo's dep-info as its depfile, and the manifests as
     # inputs. Skips (77) on non-Ninja generators.

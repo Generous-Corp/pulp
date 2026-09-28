@@ -884,6 +884,45 @@ TEST_CASE("pulp status reports effective PR workflow", "[cli][shellout][pr-workf
                 "ir-json (implied by config:import_design.default_mode)") != std::string::npos);
 }
 
+TEST_CASE("pulp status --broker-only reports the broker outside any project",
+          "[cli][shellout][misc]") {
+    if (!binary_exists()) {
+        SKIP("pulp not built");
+    }
+    // The installer's broker health probe runs from wherever `curl | sh` was
+    // started, which is usually not a Pulp project.
+    auto outside = unique_temp_dir("pulp-status-broker-only");
+    fs::create_directories(outside);
+#ifndef _WIN32
+    // A `gh` stub that records its calls: the probe must not pay for the
+    // doctor's GitHub round-trips (they took ~3.7 s, longer than the
+    // installer's whole health deadline).
+    const auto stub_bin = outside / "stub-bin";
+    const auto gh_log = outside / "gh.log";
+    fs::create_directories(stub_bin);
+    {
+        std::ofstream gh(stub_bin / "gh");
+        gh << "#!/bin/sh\necho \"$*\" >> '" << gh_log.string() << "'\nexit 1\n";
+    }
+    fs::permissions(stub_bin / "gh", fs::perms::owner_all);
+    ScopedEnvVar scoped_path("PATH");
+    const char* old_path = std::getenv("PATH");
+    scoped_path.set(stub_bin.string() + ":" + (old_path ? old_path : "/usr/bin:/bin"));
+#endif
+    auto r = run_pulp_in_directory(outside, {"status", "--broker-only"});
+#ifndef _WIN32
+    const bool gh_called = fs::exists(gh_log);
+#endif
+    fs::remove_all(outside);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.rfind("Control broker: ", 0) == 0);
+    REQUIRE(r.stderr_output.find("not in a Pulp project") == std::string::npos);
+#ifndef _WIN32
+    REQUIRE_FALSE(gh_called);
+#endif
+}
+
 TEST_CASE("pulp status and clean reject unexpected arguments before side effects",
           "[cli][shellout][misc]") {
     if (!binary_exists()) {

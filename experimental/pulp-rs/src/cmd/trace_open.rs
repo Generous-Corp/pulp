@@ -95,6 +95,10 @@ fn open_in_browser(url: &str) -> bool {
 /// Read an HTTP request head (up to the blank line) with a short timeout.
 /// Returns the raw head text, or an empty string on timeout / EOF.
 fn read_request_head(stream: &mut std::net::TcpStream) -> String {
+    // On macOS and the BSDs an accepted socket inherits the listener's
+    // O_NONBLOCK, and a read timeout does nothing on a nonblocking socket: a
+    // request that had not arrived yet read as empty and got a 404.
+    stream.set_nonblocking(false).ok();
     stream
         .set_read_timeout(Some(Duration::from_millis(500)))
         .ok();
@@ -285,6 +289,28 @@ mod tests {
         let u = build_perfetto_url("http://127.0.0.1:5000/trace.pftrace");
         assert!(u.starts_with("https://ui.perfetto.dev/#!/?url="), "{u}");
         assert!(u.contains("http%3A%2F%2F127.0.0.1%3A5000%2Ftrace.pftrace"), "{u}");
+    }
+
+    #[test]
+    fn serve_pftrace_waits_for_a_request_that_arrives_after_the_connection() {
+        // A browser connects first and sends its request a moment later; the
+        // accepted socket must block for it rather than read it as empty.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body = b"LATE-REQUEST".to_vec();
+        std::thread::scope(|scope| {
+            let h = scope.spawn(|| {
+                serve_pftrace(&listener, &body, Instant::now() + Duration::from_secs(3))
+            });
+            let mut c = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            std::thread::sleep(Duration::from_millis(200));
+            c.write_all(b"GET /trace.pftrace HTTP/1.1\r\nHost: x\r\n\r\n")
+                .unwrap();
+            let mut resp = Vec::new();
+            c.read_to_end(&mut resp).unwrap();
+            assert!(h.join().unwrap().unwrap(), "a late request must be served");
+            assert!(String::from_utf8_lossy(&resp).contains("200 OK"));
+        });
     }
 
     #[test]

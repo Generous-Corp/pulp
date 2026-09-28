@@ -1,4 +1,5 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
 #include "widget_bridge/registrars.hpp"
 #include "widget_bridge/gpu_common.hpp"

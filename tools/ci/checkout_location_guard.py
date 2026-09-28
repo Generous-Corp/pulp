@@ -137,11 +137,34 @@ def refusal_message(source: Path, temp_root: Path, env: Mapping[str, str], conte
     return "\n".join(lines)
 
 
-def base_dir_warning(source: Path, base_dir: str | None, context: str) -> str | None:
+def expected_cache_miss_roots(env: Mapping[str, str]) -> list[Path]:
+    """Tool-owned checkouts whose ccache misses are by design, not actionable.
+
+    ``pulp sdk install --local`` builds an immutable source snapshot under the
+    Pulp home, and Shipyard materializes integration checkouts under its state
+    directory. Neither location is chosen by the person building, so a warning
+    there would fire on every configure and teach everyone to skip the line.
+    """
+
+    home = Path(env.get("HOME") or Path.home())
+    pulp_home = Path(env["PULP_HOME"]) if env.get("PULP_HOME") else home / ".pulp"
+    roots = [pulp_home / "sdk-source-dev"]
+    for stem in ("shipyard", "shipyard-dev"):
+        roots.append(home / "Library" / "Application Support" / stem)
+        roots.append(home / ".local" / "state" / stem)
+    return [_real(root) for root in roots]
+
+
+def base_dir_warning(
+    source: Path, base_dir: str | None, context: str, env: Mapping[str, str] | None = None
+) -> str | None:
     if not base_dir:
         return None
     resolved_base = _real(base_dir)
-    if _is_within(_real(source), resolved_base):
+    resolved_source = _real(source)
+    if _is_within(resolved_source, resolved_base):
+        return None
+    if any(_is_within(resolved_source, root) for root in expected_cache_miss_roots(env or {})):
         return None
     return (
         f"{context}: warning: checkout {_real(source)} is outside ccache base_dir "
@@ -169,7 +192,7 @@ def evaluate(
             )
         else:
             return REFUSED_EXIT, [refusal_message(source, temp_root, env, context)]
-    warning = base_dir_warning(source, ccache_base_dir(ccache), context)
+    warning = base_dir_warning(source, ccache_base_dir(ccache), context, env)
     if warning:
         messages.append(warning)
     return 0, messages
