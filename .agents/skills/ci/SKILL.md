@@ -2724,6 +2724,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   process — so it is safe to run on the required-gate host. Installed on the m3/m5
   /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
   reading; `--uninstall` removes the agent.
+- **fseventsd is in the health reading** (`--json` key `fseventsd`: `rss_mb`,
+  `cpu_pct`, `warn`, `warn_mb`; the human line appends `fseventsd=NMB`). It warns
+  above `PULP_VITALS_FSEVENTSD_WARN_MB` (1024) but never moves the level: a
+  runaway fseventsd (m5 reached 10.6 GB RSS at 107% CPU after 15 days of uptime;
+  a restart dropped it to 12 MB) needs `sudo killall fseventsd`, which no
+  consumer can run, so it is an alert for a person, not back-off. Because it is
+  in the health reading it lands in `host_vitals.log` every 60 s, which is the
+  growth-rate record: `grep -o '"rss_mb":[0-9]*' ~/.local/state/pulp/host_vitals.log`.
+  `null` means the process was not found (or not macOS), never 0.
 - **The published reading also carries a `build` snapshot** (`host_vitals.sh
   --build-json`: host and gate ccache hit/fill/cleanups, gate-VM count and RSS,
   tartci executing generation vs `~/Code/tartci` checkout, lease usage, wheelhouse
@@ -5300,34 +5309,20 @@ Two consequences:
   `install.sh`). Routing a downgrade through `shipyard update` is a silent
   no-op, so an ahead-of-pin machine would never converge.
 
-Never trust either path's exit code alone — re-read `shipyard --version` and
-compare it to the pin. `tools/scripts/shipyard_autoupdate.py` encodes all of
-this (direction dispatch + outcome verification); `--check --json` reports
-pin-vs-installed without touching anything.
+Never trust either path's exit code alone — re-read `shipyard --version`.
 
-#### Optional: keep a fleet Mac on the pin automatically
+#### Fleet Macs: tartci keeps Shipyard current, not a Pulp script
 
-`tools/scripts/install_shipyard_autoupdate.sh` installs an hourly launchd agent
-that converges this machine onto the pin when it is idle. Opt-in per machine
-and irrelevant to public Pulp (which just runs `install-shipyard.sh` once).
-Kill switch, no uninstall needed:
-
-```bash
-echo off > ~/.config/pulp/shipyard-autoupdate   # stop; `on` resumes
-tools/scripts/install_shipyard_autoupdate.sh --status
-```
-
-Two gotchas worth knowing if you touch it:
-
-- **The pin it obeys is `origin/main`'s, not the working tree's.** A dev
-  checkout is routinely parked on a feature branch, and a branch may carry an
-  experimental pin; converging the machine onto that would be a bug. Override
-  with `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree`.
-- **The idle probe must parse the `shipyard` command line, not substring-match
-  it.** The persistent daemon runs as `shipyard --mode shipyard daemon run` —
-  a substring match on `run` reads it as a live ship and the machine then never
-  updates at all, while `--mode shipyard` puts the literal token `shipyard`
-  where a subcommand would be.
+The fleet runs Shipyard's latest release, not the pin (the pin in
+`tools/shipyard.toml` is what `install-shipyard.sh` and the workflows install).
+tartci's watchdog owns host updates: `tartci fleet-macos tool-freshness` reads
+installed vs latest release, applies `shipyard update --to <tag>
+--refresh-daemon` once a release is 30 minutes old, verifies the re-read
+version, logs `tool_deployed` events, and reports STALE in `tartci pool status`
+and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
+`[tools.shipyard]` in `~/.config/tartci/tool-freshness.toml`. A Pulp-side
+pin converger existed and was removed: its pin lagged
+the fleet by ~78 releases, so installing it would have downgraded every host.
 
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
 Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
