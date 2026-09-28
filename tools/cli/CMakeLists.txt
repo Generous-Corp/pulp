@@ -225,6 +225,7 @@ target_include_directories(pulp-cli PRIVATE
 # stale or never-built pulp-cpp turns the whole suite green. Attach every CLI
 # shell-out suite here, now that the real CLI target exists.
 foreach(_cli_shellout_suite IN ITEMS
+        pulp-test-cli-configure-defaults
         pulp-test-cli-designmd-subcommands
         pulp-test-cli-shellout
         pulp-test-cli-overflow-shellout

@@ -836,6 +836,20 @@ must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
   change. The functions only emit `-G` when there is no `CMakeCache.txt`, and
   only fill an *empty* cached build type — an explicit `PULP_BUILD_TYPE` is the
   one way to change a non-empty one.
+- **A slow existing dir is migrated, not kept.** Build dirs an older CLI
+  created stay Makefiles + Debug + examples ON forever otherwise (on m3,
+  2026-09-27: 33 of 43 agent `build/` dirs). `stale_build_config_reasons` /
+  `migrate_stale_build_dir` (both languages, same rules) move `CMakeCache.txt`
+  and `CMakeFiles` into `build/.pulp-pre-migration/` and print one
+  `Reconfiguring … (was: Unix Makefiles, Debug, examples ON)` line when the
+  cache has a Makefiles generator and ninja is available, an empty or `Debug`
+  build type `PULP_BUILD_TYPE` did not ask for, or examples ON without
+  `--examples`. Xcode / Visual Studio caches are left alone. Rust calls it in
+  `build_with_dependency_policy`; C++ in `cmd_build`, and dev/loop call it
+  before their "is it configured?" check so their `cmd_build` bootstrap runs.
+  `PULP_KEEP_BUILD_CONFIG=1` is the opt-out. A cache without
+  `CMAKE_GENERATOR` is a test fixture, not a real configure, and never
+  migrates — keep fixtures that way unless the test is about migration.
 - **A command that needs an example target must ask for it.** Examples are off
   in a fresh dev tree, so anything that builds `pulp-design-tool` (or another
   `examples/` target) passes `examples=true` / `--examples`; `pulp design` and
@@ -1025,6 +1039,26 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   real timestamped probe against the dedicated keychain. Android signing stays
   outside this macOS preflight. Keep secrets in `~/.config/pulp/secrets/`, never
   the repo.
+
+### The Rust CLI's cargo tests run in ctest — all of them
+
+Until 2026-09-27 only two filtered slices (`trace_gpu_analysis`, `stale_cli`)
+ran anywhere in CI: 75 of the crate's 1,200 tests. Five had gone red on main
+unnoticed, and three of those were real defects: `pulp upgrade`'s
+import-design runtime completeness list was 13 of the 18 shipped files,
+`pulp trace open` answered a request that arrived a moment after the
+connection with a 404 (an accepted socket inherits the listener's
+`O_NONBLOCK` on macOS, where a read timeout does nothing), and the help banner
+fixture missed `gpu`. Running them from ctest found a sixth: the
+`pulp upgrade --install` cargo-artifact guard only recognized `target/`, not
+the CMake build's `cargo-target/`, so the guard test fell through to a live
+GitHub API call. `pulp-rust-cli-cargo-tests` now runs every unit and
+integration target (`--lib --bins` plus each globbed `tests/*.rs`), and
+`pulp-rust-cli-doc-tests` the doctests. The one exclusion is
+`trace_gpu_analysis_tool_test`, which fails closed without the SDK-matched
+`trace_processor` and is run by `pulp-rust-gpu-trace-analysis-integration`.
+A new `tests/*.rs` file is picked up at the next configure; a new exclusion
+needs a named reason in `experimental/pulp-rs/CMakeLists.txt`.
 
 ### Rust CLI cutover path convention
 

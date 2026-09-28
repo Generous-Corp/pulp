@@ -660,11 +660,7 @@ bool checkout_supports_au(const fs::path& repo_root) {
 
 std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
                                     bool examples) {
-#ifdef _WIN32
-    const bool ninja = false;  // Windows keeps the Visual Studio generator.
-#else
-    const bool ninja = !find_executable_in_path("ninja").empty();
-#endif
+    const bool ninja = configure_ninja_available();
     std::string flags;
     for (const auto& arg : pulp::cli::configure_default_args_for(build_dir, source_checkout, examples, ninja))
         flags += " " + shell_quote(arg);
