@@ -861,6 +861,14 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_worktree_lineage_hook.sh)
     set_tests_properties(inject-worktree-lineage-hook PROPERTIES TIMEOUT 15)
 
+    # claude_md_sync.py — injects origin/main's CLAUDE.md/AGENTS.md when a
+    # checkout on an old branch would otherwise serve stale instructions.
+    # Hermetic temp repos; also proves the user-level launcher refuses to run
+    # a non-Pulp repository's script and that git status/index are untouched.
+    add_test(NAME claude-md-sync-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_claude_md_sync_hook.sh)
+    set_tests_properties(claude-md-sync-hook PROPERTIES TIMEOUT 60)
+
     # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
     # hand-rolling a tool the registry already lists. Hermetic (synthetic tool
     # payloads). Asserts it fires on the real incident's signature and, just as
