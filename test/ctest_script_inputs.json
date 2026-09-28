@@ -1228,6 +1228,27 @@
    ],
    "kind": "python"
   },
+  "gate-python-imports": {
+   "entry": "tools/scripts/gate_python_imports_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/source_selftests.json",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py"
+   ],
+   "kind": "python"
+  },
+  "gate-python-imports-selftest": {
+   "entry": "tools/scripts/test_gate_python_imports_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/source_selftests.json",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/test_gate_python_imports_check.py"
+   ],
+   "kind": "python"
+  },
   "gate-suite-executed-selftest": {
    "entry": "tools/scripts/test_gate_suite_executed.py",
    "inputs": [
@@ -4283,6 +4304,7 @@
   "source-selftest-lane-contract": {
    "entry": "tools/ci/source_selftests.py",
    "inputs": [
+    "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
@@ -4296,6 +4318,7 @@
     ".githooks/pre-push",
     ".github/workflows/build.yml",
     "test/cmake/design_import_tool_cli_tests.cmake",
+    "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
@@ -4782,6 +4805,8 @@
     "test/CMakeLists.txt",
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
+    "tools/ci/source_selftests.py",
+    "tools/ci/test_source_selftests.py",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
     "tools/import-validation/check_agent_panel_invariants.py",
@@ -4793,6 +4818,7 @@
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/doxygen_installed_header_check.py",
+    "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/mac_objc_source_list_guard.py",
     "tools/scripts/msvc_string_literal_guard.py",
     "tools/scripts/raw_this_async_check.py",
