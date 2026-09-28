@@ -109,23 +109,27 @@ TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
     const std::array<float, 2> input{1.0f, 2.0f};
     std::array<float, 2> output{0.0f, 0.0f};
     REQUIRE(result.session->submit_block(input, 1));
-    const auto deadline =
-        static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                       std::chrono::steady_clock::now().time_since_epoch())
-                                       .count()) +
-        2'000'000;
-    std::optional<GpuWaveNetBlockResult> completion;
-    for (int attempt = 0; attempt < 20 && !completion; ++attempt) {
-        result.session->service_until(deadline);
-        completion = result.session->receive(output);
-    }
-    CHECK(completion.has_value());
+    // This test verifies that the explicit non-realtime policy is accepted and
+    // serviced. It is not a realtime deadline test. Merge-group runners can be
+    // occupied by unrelated jobs, so give the asynchronous Dawn callback a
+    // bounded but deliberately generous observation window.
+    const auto wait_for_completion = [&](std::uint64_t sequence) {
+        const auto deadline =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count()) +
+            250'000'000;
+        std::optional<GpuWaveNetBlockResult> completion;
+        for (int attempt = 0; attempt < 500 && !completion; ++attempt) {
+            result.session->service_until(deadline);
+            completion = result.session->receive(output);
+        }
+        CHECK(completion.has_value());
+        if (completion)
+            CHECK(completion->sequence == sequence);
+    };
+    wait_for_completion(1);
     REQUIRE(result.session->submit_block(input, 2));
-    completion.reset();
-    for (int attempt = 0; attempt < 20 && !completion; ++attempt) {
-        result.session->service_until(deadline + 2'000'000);
-        completion = result.session->receive(output);
-    }
-    CHECK(completion.has_value());
+    wait_for_completion(2);
     CHECK(result.session->release());
 }
