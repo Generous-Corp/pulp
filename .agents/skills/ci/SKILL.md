@@ -675,7 +675,42 @@ consequences worth knowing before you debug:
   not fail. A new failing test in that suite, a suite absent on the base, a
   timeout, or output with no nameable failing tests still fails, so the label is
   never a way to hide a branch-caused red. The re-run cost ~2 min for one suite
-  on a full checkout (mostly the worktree checkout itself).
+  on a full checkout (mostly the worktree checkout itself). A suite whose
+  failures cannot be named counts as pre-existing only when it fails with the
+  same output on the base, paths and timings aside.
+- Two more lanes cover ctest-registered Python contracts. The whole `pr-fast`
+  tier runs (`--ctest-label pr-fast`): from `build/`'s registrations when it is
+  configured, otherwise parsed from `test/cmake/*.cmake` (73 of 95 members run
+  without a build; the rest need `${CMAKE_BINARY_DIR}` and print NOT CHECKED),
+  about 15 s. Every other ctest that runs a checkout Python script
+  (`--ctest-python`, 122 of them) runs when the diff can reach it. A contract
+  that walks a directory (`rglob`, `os.walk`) is selected by any change under a
+  directory its source names; that is how `wide-non-native-selftest`, which
+  reads every `test/**/*.cmake` and runs only in the merge group, is picked for
+  a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
+  `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
+  the test manifests last changed is treated as stale and the tier is read from
+  the manifests instead, and a merge-base re-run keeps build-tree paths pointed
+  at the branch's build (the base checkout has none), so an inventory check that
+  fails on a local build's options (examples ON duplicates `ctest-unique-names`)
+  is labelled pre-existing rather than blamed on the branch.
+
+### A Python test that imports what the gate VM lacks fails only in the merge group
+
+The gate VM's Python has the standard library plus exactly
+`tools/motion/visual/requirements.lock` (build.yml's visual-analysis step). A
+test that imports anything else, often `yaml` inside a helper or a function the
+full suite reaches, passes locally and on the PR-head fast tier, then dies with
+`ModuleNotFoundError` in the merge group and ejects the batch. The pr-fast
+`gate-python-imports` ctest (`tools/scripts/gate_python_imports_check.py
+--build-dir`) reads every Python script the configured ctest inventory runs and
+follows every import statement through repo helpers; the allowlist is derived
+from that lock, and the check refuses to run if build.yml stops installing it.
+The source-selftest lane installs nothing, so its scripts are held to the
+standard library. An import under `try/except ImportError`, in an `except
+ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
+branch is allowed. Needing a new third-party package means adding it to the lock
+(and the wheelhouse), not to the check.
 
 ### A green ctest job proves nothing about a label its event excludes
 
