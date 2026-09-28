@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260928-gpu-startup-diagnostics-watch",
+  "created_at": "2026-09-28T06:35:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a diagnostics-only change that crosses two families through their core/render/**, core/view/** and test/** selectors. The Dawn GpuSurface records per-stage startup timings and the macOS window host records bounded per-frame main-thread cost, and the standalone and headless screenshot paths log the chosen adapter, the startup timings and a frame-time summary at the end of a bounded run. New public headers (gpu_startup_report.hpp, host_frame_timing.hpp, detail/frame_time_summary.hpp) and tests in test_gpu_diagnostics.cpp, test_gpu_surface.cpp and test_screenshot_capture.cpp cover the formatting and the defaulted virtuals. No importer, DesignIR, capture path, renderer output, render asset, codegen output, visual fixture, threshold or Vellum-owned source changes, and no existing visual verdict changes. Registered as watch-only so the families' coverage stays honest about a change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-gpu-diagnostics",
+    "pulp-test-screenshot-capture",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
