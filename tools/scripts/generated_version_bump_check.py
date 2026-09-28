@@ -193,6 +193,44 @@ def _commit_provenance(
         raise NotGeneratedBump("candidate is not a one-commit fast-forward from protected main")
 
 
+def _prove_pr_merge_ref(
+    repo: Path,
+    *,
+    merge_head: str,
+    event_base: Any,
+    candidate: Any,
+) -> None:
+    """Bind a checked-out ``refs/pull/N/merge`` commit to the event's own SHAs.
+
+    A freshly opened pull request's payload often carries a null or stale
+    ``merge_commit_sha`` and no ``after`` field, so ``GITHUB_SHA`` (the merge
+    ref GitHub synthesized for this run) cannot be matched by value. Accept it
+    only when the local, immutable commit object proves it IS the merge of the
+    event's base and head: exactly ``[base.sha, head.sha]`` as parents, in that
+    order, and the working checkout's HEAD. Its tree must equal the head's
+    tree; ``_commit_provenance`` separately requires the head's sole parent to
+    be ``base.sha``, so the only faithful merge is the head tree itself and a
+    merge commit carrying any extra byte is refused here.
+    """
+    for value in (merge_head, event_base, candidate):
+        if not isinstance(value, str) or not SHA_RE.fullmatch(value):
+            raise NotGeneratedBump("pull-request merge ref proof has a malformed commit id")
+    checked_out = _git(
+        repo, "rev-parse", "--verify", "--quiet", "HEAD^{commit}", check=False
+    ).stdout.strip()
+    if checked_out != merge_head:
+        raise NotGeneratedBump("workflow head is not the checked-out pull-request merge ref")
+    if _parents(repo, merge_head) != [event_base, candidate]:
+        raise NotGeneratedBump(
+            "pull-request merge ref parents are not exactly [base.sha, head.sha]"
+        )
+    _fetch_commit(repo, candidate)
+    merge_tree = _git_text(repo, "rev-parse", f"{merge_head}^{{tree}}")
+    head_tree = _git_text(repo, "rev-parse", f"{candidate}^{{tree}}")
+    if merge_tree != head_tree:
+        raise NotGeneratedBump("pull-request merge ref tree differs from the head tree")
+
+
 def _event_commits(
     repo: Path,
     event_name: str,
@@ -200,6 +238,7 @@ def _event_commits(
     *,
     explicit_base: str,
     explicit_head: str,
+    accept_pr_merge_ref: bool = False,
 ) -> tuple[str, str, str, str | None]:
     repository = event.get("repository") or {}
     repo_name = repository.get("full_name")
@@ -218,7 +257,16 @@ def _event_commits(
                 event.get("pull_request", {}).get("merge_commit_sha"),
                 merge_sha,
             }:
-                raise NotGeneratedBump("workflow head is unrelated to the pull request event")
+                if not accept_pr_merge_ref:
+                    raise NotGeneratedBump(
+                        "workflow head is unrelated to the pull request event"
+                    )
+                _prove_pr_merge_ref(
+                    repo,
+                    merge_head=explicit_head,
+                    event_base=event_base,
+                    candidate=candidate,
+                )
         candidate_base = event_base
         validation_head = None
     elif event_name == "merge_group":
@@ -490,6 +538,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         event,
         explicit_base=args.base,
         explicit_head=args.head,
+        accept_pr_merge_ref=bool(getattr(args, "accept_pr_merge_ref", False)),
     )
     _fetch_commit(repo, args.base)
     _fetch_commit(repo, candidate)
@@ -561,6 +610,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--commit-json", type=Path)
     parser.add_argument("--pulls-json", type=Path)
     parser.add_argument("--pull-json", type=Path)
+    parser.add_argument(
+        "--accept-pr-merge-ref",
+        action="store_true",
+        help=(
+            "on pull_request events, accept a GITHUB_SHA that is the checked-out "
+            "merge of exactly [base.sha, head.sha]; the workflow passes this only "
+            "when the PULP_BUMP_FASTPATH_PR_MERGE_REF repository variable is 1"
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:

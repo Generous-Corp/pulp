@@ -390,9 +390,7 @@ class IosCompileRequiredTests(unittest.TestCase):
             # Neighbouring non-test scripts may be build-coupled.
             ["tools/scripts/classify_changes.py"],
             ["tools/scripts/fetch_skia_for_release.py"],
-            # A test-named script matching a sensitive full-required glob.
-            ["tools/scripts/test_release_notes.py"],
-            ["test/test_widgets.cpp", "core/midi/src/midi_system.cpp"],
+            ["test/test_widgets.cpp", "apple/Sources/PulpSwift/PulpBridge.swift"],
         ):
             with self.subTest(paths=paths):
                 self.assertTrue(classify.ios_compile_required(paths))
@@ -476,9 +474,6 @@ class IosCompileRequiredTests(unittest.TestCase):
     def test_mobile_global_unknown_and_mixed_surfaces_run(self) -> None:
         for paths in (
             ["apple/auv3/Sources/PulpAudioUnit.swift"],
-            ["core/format/src/auv3_adapter.mm"],
-            ["core/platform/platform/macos/environment_macos.mm"],
-            ["core/view/include/pulp/view/view.hpp"],
             ["CMakeLists.txt"],
             [".github/workflows/build.yml"],
             ["docs/guides/local-ci.md", "apple/ios/HostApp.swift"],
@@ -486,6 +481,86 @@ class IosCompileRequiredTests(unittest.TestCase):
         ):
             with self.subTest(paths=paths):
                 self.assertTrue(classify.ios_compile_required(paths))
+
+    def test_the_ios_only_surface_list_is_pinned(self) -> None:
+        """Every surface the macOS build never compiles, and nothing shared.
+
+        Widening this list moves shared code back onto the per-PR iOS gate;
+        narrowing it lets an iOS-only break land and wait for the nightly.
+        Either is a reviewed decision, so the list is pinned exactly.
+        """
+        self.assertEqual(classify.IOS_SURFACE_PATTERNS, (
+            "apple/**", "examples/ios-*", "examples/ios-*/**", "templates/ios-*/**",
+            "tools/templates/auv3/**", "*/platform/ios/**", "*/ios/*", "*_ios.*",
+            "*_ios_*", "*/ios_*", "CMakeLists.txt", "cmake/**", "tools/cmake/**",
+            "setup.sh", "tools/deps/**", ".gitmodules",
+            "tools/scripts/fetch_skia_for_release.py", ".github/workflows/build.yml",
+            ".github/workflows/ios-*.yml", "tools/ci/ios_gate_digest.py",
+            "tools/scripts/classify_changes.py", "tools/scripts/test_ios_compile_gate_legs.py",
+            ".shipyard/config.toml",
+        ))
+        self.assertEqual(classify.IOS_SOURCE_MARKERS, (
+            "TARGET_OS_IPHONE", "TARGET_OS_IOS", "TARGET_OS_SIMULATOR", "PULP_IOS", "UIKit"))
+
+    def test_shared_core_no_longer_runs_the_per_pr_gate(self) -> None:
+        """The macOS gate compiles these for macOS, so a break fails it there."""
+        # Control: each file exists and carries no iOS branch, so the verdict
+        # comes from the rule and not from a missing-file fail-closed.
+        repo = THIS_DIR.parent.parent
+        for paths in (
+            # The AUv3 adapter: the one real break the per-PR gate reported in
+            # 14 days, which the macOS build compiles into two test targets.
+            ["core/format/src/au_adapter.mm"],
+            ["core/midi/src/midi_file.cpp"],
+            ["core/view/include/pulp/view/view.hpp"],
+            ["core/platform/platform/mac/environment_mac.mm"],
+            ["core/signal/include/pulp/signal/biquad.hpp", "README.md"],
+            ["tools/scripts/test_release_build_matrix.py"],
+        ):
+            with self.subTest(paths=paths):
+                for path in paths:
+                    self.assertTrue((repo / path).is_file(), path)
+                self.assertFalse(classify.ios_compile_required(paths))
+
+    def test_ios_only_surfaces_run_the_per_pr_gate(self) -> None:
+        for paths in (
+            ["apple/Sources/PulpSwift/PulpBridge.swift"],
+            ["core/view/platform/ios/window_host_ios.mm"],
+            ["examples/ios-auv3-synth/src/sine_synth.cpp"],
+            ["templates/ios-auv3/HostApp/ContentView.swift"],
+            ["tools/cmake/PulpAuv3.cmake"],
+            ["core/midi/CMakeLists.txt"],
+            ["tools/deps/manifest.json"],
+            ["tools/scripts/fetch_skia_for_release.py"],
+            [".github/workflows/build.yml"],
+            ["core/signal/src/fft_backend.cpp", "apple/Package.swift"],
+        ):
+            with self.subTest(paths=paths):
+                # Real files, so a pass is the rule's, not the fail-closed
+                # verdict for a path that cannot be read.
+                for path in paths:
+                    self.assertTrue((THIS_DIR.parent.parent / path).is_file(), path)
+                self.assertTrue(classify.ios_compile_required(paths))
+
+    def test_a_shared_source_with_an_ios_branch_runs_the_gate(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "core/x/src").mkdir(parents=True)
+            (root / "core/x/src/branchy.mm").write_text(
+                "#if TARGET_OS_IPHONE\nint x;\n#endif\n", encoding="utf-8")
+            (root / "core/x/src/plain.mm").write_text("int y;\n", encoding="utf-8")
+            self.assertTrue(classify.ios_compile_required(
+                ["core/x/src/branchy.mm"], root=root))
+            self.assertFalse(classify.ios_compile_required(
+                ["core/x/src/plain.mm"], root=root))
+            # A deleted source: the macOS build cannot vouch for it.
+            self.assertTrue(classify.ios_compile_required(
+                ["core/x/src/deleted.cpp"], root=root))
+            # A markdown file is never read for markers.
+            self.assertFalse(classify.ios_compile_required(
+                ["core/x/README.md"], root=root))
 
     def test_missing_or_malformed_policy_runs_fail_closed(self) -> None:
         import tempfile
@@ -686,7 +761,7 @@ class CliTests(unittest.TestCase):
         payload = json.loads(r.stdout)
         self.assertEqual(payload["changed_file_count"], 2)
         self.assertFalse(payload["native_build_required"])
-        self.assertTrue(payload["ios_compile_required"])
+        self.assertFalse(payload["ios_compile_required"])
         self.assertIn("skip-safe", payload["reason"])
         self.assertIn("native_build_required=false", r.stderr)
 
@@ -730,7 +805,7 @@ class CliTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             content = Path(out_path).read_text()
             self.assertIn("native_build_required=false", content)
-            self.assertIn("ios_compile_required=true", content)
+            self.assertIn("ios_compile_required=false", content)
             self.assertIn(
                 "agent_capability_installed_sdk_required=false", content
             )

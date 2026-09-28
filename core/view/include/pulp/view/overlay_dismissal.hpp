@@ -108,6 +108,22 @@ void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy);
 /// `hit_test`.
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt);
 
+/// The view a HOVER at `root_pt` lands on: the deepest hit inside the topmost
+/// open overlay that contains the point, otherwise `root.hit_test(root_pt)`.
+///
+/// An open overlay paints above everything else in its root, and a press over
+/// it is routed into it by `route_press_to_active_overlay`. A hover has to
+/// resolve the same way, or the cursor and the hover highlight report the
+/// content painted UNDER the menu: an overlay that reaches far outside the view
+/// it is mounted in (a dropdown that opens upward from a bottom rail) escapes
+/// the tree hit test, so the pointer over its rows shows the cursor of whatever
+/// the menu covers while a click on the same pixel operates the row.
+///
+/// Read-only: unlike a press, a hover never dismisses anything. An overlay whose
+/// own guards reject the point (for example `pointerEvents: none`) is skipped,
+/// so the one beneath it, or the ordinary tree, answers instead.
+View* hover_target_at(View& root, Point root_pt);
+
 /// What a context (right-button) press resolved to.
 struct ContextPressResult {
     /// A view claimed the context menu, so the host must not fall through to

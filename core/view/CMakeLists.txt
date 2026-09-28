@@ -314,6 +314,7 @@ if(APPLE)
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac_host_lifetime.mm
             platform/mac/accessibility_mac.mm
+            platform/mac/accessibility_provider_mac_stub.cpp
             platform/mac/appearance_mac.mm
             platform/mac/motion_preferences_mac.mm
             # Host-backend registration APIs. The stub files compile

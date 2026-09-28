@@ -19,6 +19,7 @@
 // "nothing was wired up" is always distinguishable from "nothing went wrong".
 #pragma once
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -92,6 +93,42 @@ struct SkiaLogBridgeState {
     /// status means Skia has logged nothing — a different fact from a status of
     /// `declined_handler_present`, where nothing could ever arrive.
     std::uint64_t records_forwarded = 0;
+    /// Forwarded records also written to the text log (runtime::log_*).
+    std::uint64_t text_logged = 0;
+    /// Forwarded records NOT written to the text log because the budget below
+    /// ran out. They still reached the diagnostic sink and its counters.
+    std::uint64_t text_suppressed = 0;
+};
+
+/// How many Skia log records the bridge copies into the text log before it
+/// stops, so a chatty Skia cannot flood a user's log. The remainder is counted
+/// and reported once by log_gpu_diagnostics_summary().
+inline constexpr std::uint64_t kSkiaLogTextLimit = 50;
+
+/// A thread-safe "first N" budget: admit() returns true for the first `limit`
+/// calls and false afterwards, counting both.
+class LogTextBudget {
+  public:
+    explicit constexpr LogTextBudget(std::uint64_t limit) noexcept : limit_(limit) {}
+
+    bool admit() noexcept {
+        const auto index = seen_.fetch_add(1, std::memory_order_relaxed);
+        return index < limit_;
+    }
+
+    std::uint64_t admitted() const noexcept {
+        const auto seen = seen_.load(std::memory_order_relaxed);
+        return seen < limit_ ? seen : limit_;
+    }
+
+    std::uint64_t suppressed() const noexcept {
+        const auto seen = seen_.load(std::memory_order_relaxed);
+        return seen > limit_ ? seen - limit_ : 0;
+    }
+
+  private:
+    std::uint64_t limit_;
+    std::atomic<std::uint64_t> seen_{0};
 };
 
 SkiaLogBridgeState skia_log_bridge_state() noexcept;

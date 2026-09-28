@@ -1,6 +1,7 @@
 #include <pulp/format/standalone.hpp>
 #include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
+#include <pulp/format/detail/frame_time_summary.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/format/detail/standalone_key_driver.hpp>
 #include <pulp/format/detail/standalone_key_schedule.hpp>
@@ -1374,7 +1375,15 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             }
             return host->capture_back_buffer_png();
         };
-        cap.close_fn   = [host] { host->request_close(); };
+        cap.close_fn   = [host] {
+            // A screenshot run is finite, so it can say how it went: one
+            // frame-time summary and one GPU-diagnostics line, never per frame.
+            runtime::log_info("Standalone: {}",
+                              detail::format_frame_time_summary(
+                                  detail::summarize_frame_times(host->frame_time_samples_ms())));
+            host->log_gpu_diagnostics_summary();
+            host->request_close();
+        };
         cap.on_error   = [out_path = effective_config.screenshot_path](const std::string& msg) {
             runtime::log_error("Standalone: screenshot {} ({})", msg, out_path);
         };

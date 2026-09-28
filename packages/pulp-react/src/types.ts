@@ -780,6 +780,15 @@ export interface PulpInstance {
     /// element publishes these renderer targets by ordinal so Chromium text
     /// evidence can address mixed content such as `<button><span>*</span>Save`.
     anonymousTextTarget?: boolean;
+    /// Mount-time focus bookkeeping, filled in while React assembles a new
+    /// subtree (appendInitialChild runs in document order, after each child
+    /// subtree is complete). `autoFocusRequested` mirrors the element's own
+    /// `autoFocus` prop; `hasAutoFocusDescendant` and `firstTextField` summarize
+    /// its initial descendants so a mounting dialog can pick its first text
+    /// field without walking the tree.
+    autoFocusRequested?: boolean;
+    hasAutoFocusDescendant?: boolean;
+    firstTextField?: PulpInstance;
 }
 
 // ── Container ──────────────────────────────────────────────────────

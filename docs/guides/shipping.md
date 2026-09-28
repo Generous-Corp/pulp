@@ -35,6 +35,78 @@ cmake --build build --config Release
 
 Output appears in `build/VST3/`, `build/CLAP/`, `build/AU/`.
 
+### Build identity in every bundle
+
+Every bundle `pulp_add_plugin()` / `pulp_add_plugin_bundle()` produces carries
+a machine-readable build record, so a support or diagnostics tool can report
+exactly what is installed and what it was built with from the installed bundle
+alone (Info.plist carries only a product version):
+
+| Bundle | Location |
+|--------|----------|
+| macOS `.vst3`, `.component`, `.clap`, `.aaxplugin`, `.appex`, `.app` | `Contents/Resources/pulp-build-info.json` |
+| iOS flat bundles | `Resources/pulp-build-info.json` |
+| LV2 | `<name>.lv2/pulp-build-info.json` |
+| other single-file modules (Windows/Linux) | `<binary>.pulp-build-info.json` beside the binary |
+
+The file is written by a `POST_BUILD` step of the bundle's own target, so it is
+already present when `pulp ship sign` runs and is covered by the bundle's
+sealed resources — editing it afterwards invalidates the signature, as it
+should. It is a plain resource (no code, no absolute paths), so bundle
+relocatability, codesign, and notarization are unaffected. The AUv3
+framework embedded in the extension does not get its own copy; the extension
+and host app do.
+
+Schema `pulp.build-info.v1`:
+
+| Field | Meaning |
+|-------|---------|
+| `product.name` / `target` / `format` / `bundle_id` / `version` / `manufacturer` | Product identity from `pulp_add_plugin()`. `format` is `VST3`, `AU`, `CLAP`, `LV2`, `AAX`, `AUv3` (extension), `AUv3Host` (container app), or `Standalone`. |
+| `product.source_git_sha` / `source_git_dirty` | Product source commit and whether tracked files were modified. See below. |
+| `build.type` / `archs` / `min_os` / `compiler` | Build configuration, target architectures, deployment floor (`{platform, version}`), and C++ compiler id/version. |
+| `pulp_sdk.version` / `provenance_kind` / `source_git_sha` | The Pulp SDK the product was built against. `provenance_kind` is the installed SDK's `sdk-provenance.json` kind (`release`, `development`, `unmarked`) or `source-tree` for an in-tree build. |
+| `runtime_pins` | The SDK's `runtime-pins.json` record, embedded verbatim (or `null` for an SDK that predates it). |
+| `bundled_runtime_libraries[]` | Runtime libraries staged beside the bundle's own binary (empty for the AUv3 extension and host app, whose libraries live in the embedded framework): `file`, `component`, and pinned `version` (for example `libwgpu_native.dylib`, `wgpu-native`, `v24.0.3.1`). |
+
+**Product commit.** By default the commit of the git checkout that contains the
+`CMakeLists.txt` calling `pulp_add_plugin()` is read when the bundle is built
+(not at configure time, so a commit followed by a rebuild is recorded
+correctly), and `"unknown"` / `null` is recorded outside a checkout. Pass it
+explicitly for release builds from a source archive or a history-less CI
+checkout — either per target (`pulp_add_plugin(... SOURCE_GIT_SHA <sha>
+SOURCE_GIT_DIRTY FALSE)`) or project-wide at configure time:
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DPULP_PRODUCT_GIT_SHA="$GITHUB_SHA" -DPULP_PRODUCT_GIT_DIRTY=FALSE
+```
+
+The file is refreshed whenever the bundle's binary relinks; an edit that does
+not relink any bundle leaves the previous record in place, so build release
+artifacts from a clean build directory.
+
+**SDK runtime pins.** The SDK installs `share/pulp/runtime-pins.json`
+(schema `pulp.runtime-pins.v1`), generated from the pins' existing sources of
+truth rather than a second hand-maintained copy:
+
+| Field | Source |
+|-------|--------|
+| `pulp.sdk_version` / `source_git_sha` / `source_git_dirty` / `build_type` | Pulp project version and git state when the SDK was built |
+| `skia.release` / `commit` / `builder_ref` | `VERSION.md` of the linked Skia prebuilt |
+| `skia.asset_sha256` / `asset_in_manifest` | The prebuilt's `.skia-asset-sha256` stamp and whether `tools/deps/manifest.json` pins that exact archive (`null` for a hand-provisioned `SKIA_DIR` without the stamp) |
+| `skia.graphite_backend` / `dawn.commit` | Graphite runs on Dawn; the Dawn commit is decoded from the linked `dawn/dawn_version.h` (`kDawnVersion`) |
+| `webgpu.backend` / `wgpu_native_version` / `distribution_ref` | The configured WebGPU backend, `PULP_WGPU_NATIVE_VERSION` in `tools/cmake/PulpDependencies.cmake`, and the `webgpu=` entry of `tools/deps/shared-source-contract.txt` |
+| `js_engine.requested` / `default` / `v8_runtime_version` | `PULP_JS_ENGINE` and the resolved backend |
+| `min_os.<platform>` | `{unit, floor}` for every platform in `tools/deps/min_os.json` |
+
+A value that cannot be resolved (for example `dawn.commit` in a build without
+Skia) is `null`, never guessed. To read what a user has installed:
+
+```bash
+plutil -p ~/Library/Audio/Plug-Ins/Components/MyPlugin.component/Contents/Info.plist | grep Version
+python3 -m json.tool ~/Library/Audio/Plug-Ins/Components/MyPlugin.component/Contents/Resources/pulp-build-info.json
+```
+
 ## Step 2: Validate
 
 ```bash

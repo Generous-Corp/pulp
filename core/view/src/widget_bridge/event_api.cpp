@@ -4,6 +4,7 @@
 #include "api_registry.hpp"
 #include "bridge_dispatch.hpp"
 #include "../pointer_dispatch_internal.hpp"
+#include <pulp/view/pointer_dispatch.hpp>
 
 #include <pulp/view/gesture.hpp>
 #include <pulp/platform/popup_menu.hpp>
@@ -218,6 +219,38 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
             self.release_document_navigation_focus();
             return choc::value::Value();
         });
+
+    // setFocus(id) - give the native view behind `id` keyboard focus, the
+    // same way a pointer press on it does: transfer_input_focus() blurs the
+    // previous holder in this root (commit / blur callbacks included), runs
+    // the gain hook, and only then publishes the root focus slot that the
+    // window hosts read for key and text delivery. A view that could not take
+    // focus from a click is refused here too - not focusable, disabled, or
+    // hidden (itself or an ancestor) - and the current focus is left alone,
+    // as `element.focus()` on an unfocusable element does in a browser.
+    // Returns true when the view holds focus afterwards.
+    register_bridge_function(api, "setFocus", [&self](choc::javascript::ArgumentList args) {
+        View* view = self.widget(args.get<std::string>(0, ""));
+        if (!view || !view->focusable() || !view->enabled())
+            return choc::value::createBool(false);
+        for (View* cur = view; cur && cur != &self.root_; cur = cur->parent()) {
+            if (!cur->visible()) return choc::value::createBool(false);
+        }
+        if (focused_input_under_root(self.root_) == view)
+            return choc::value::createBool(true);
+        return choc::value::createBool(transfer_input_focus(self.root_, view));
+    });
+    // clearFocus(id) - blur `id` if, and only if, it holds this root's focus.
+    // A stale blur for a view that already lost focus must not knock focus
+    // off whichever view took it since. Returns true when focus was removed.
+    register_bridge_function(api, "clearFocus", [&self](choc::javascript::ArgumentList args) {
+        View* view = self.widget(args.get<std::string>(0, ""));
+        if (!view || focused_input_under_root(self.root_) != view)
+            return choc::value::createBool(false);
+        transfer_input_focus(self.root_, nullptr);
+        return choc::value::createBool(
+            focused_input_under_root(self.root_) != view);
+    });
 
     // registerPointer(id) - enables pointer event dispatch for a widget.
     register_bridge_function(api, "registerPointer", [&self](choc::javascript::ArgumentList args) {

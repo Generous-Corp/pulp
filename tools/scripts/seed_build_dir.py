@@ -675,6 +675,10 @@ def cmake_rerun_pending(build_dir: Path) -> list[str]:
     return newer
 
 
+class DryRunError(RuntimeError):
+    """The seeded tree's closing ``ninja -n`` failed."""
+
+
 def count_dirty_edges(build_dir: Path, ninja: str) -> int:
     """Edges a build would run, counted without Ninja's manifest check.
 
@@ -694,11 +698,27 @@ def count_dirty_edges(build_dir: Path, ninja: str) -> int:
     finally:
         manifest.unlink(missing_ok=True)
     if dry.returncode != 0:
-        raise RuntimeError(f"ninja -n failed: {dry.stderr.strip() or dry.stdout[-500:]}")
+        detail = (dry.stderr.strip() or dry.stdout[-500:]).splitlines()
+        raise DryRunError(f"ninja -n failed: {detail[-1] if detail else dry.returncode}")
     # The "[i/N]" total, not a line count: a dry run skips the status line
     # of edges that finish together, so lines undercount by half or more.
     totals = [int(n) for n in re.findall(r"^\[\d+/(\d+)\] ", dry.stdout, re.M)]
     return max(totals, default=0)
+
+
+def missing_dependency_links(donor_src: Path, target: Path) -> list[str]:
+    """``external/`` entries the donor's build compiles from that the target lacks.
+
+    A fresh worktree has no dependency links until setup runs. Its seeded
+    build.ninja would then name sources that do not exist, and the closing dry
+    run fails; checking first turns that into a one-line refusal.
+    """
+    donor_ext = donor_src / "external"
+    if not donor_ext.is_dir():
+        return []
+    return sorted(
+        f"external/{entry.name}" for entry in donor_ext.iterdir()
+        if entry.is_symlink() and not os.path.lexists(target / "external" / entry.name))
 
 
 def unsupported(msg: str) -> int:
@@ -755,6 +775,11 @@ def main(argv=None) -> int:
     old_build = cache_value(donor_build / "CMakeCache.txt", "CMAKE_CACHEFILE_DIR")
     if not old_src or not old_build:
         return unsupported("donor CMakeCache.txt lacks CMAKE_HOME_DIRECTORY/CMAKE_CACHEFILE_DIR")
+    missing = missing_dependency_links(Path(old_src), target)
+    if missing:
+        return unsupported(
+            f"the target checkout's dependencies are not set up ({', '.join(missing)}); "
+            f"run ./setup.sh --deps-only first (pulp build does)")
     if not args.allow_busy_donor and donor_busy(donor_build):
         return unsupported(f"a live process has its cwd inside {donor_build}")
 
@@ -825,11 +850,13 @@ def main(argv=None) -> int:
             rerun = cmake_rerun_pending(target_build)
             receipt["cmake_rerun_pending"] = rerun[:20]
             receipt["verify_s"] = round(time.monotonic() - t, 3)
-    except Exception:
+    except Exception as e:
         if tmp is not None and tmp.exists():
             shutil.rmtree(tmp)
         elif target_build.exists():
             shutil.rmtree(target_build)
+        if isinstance(e, DryRunError):
+            return unsupported(f"the seeded tree does not plan cleanly: {e}")
         raise
     receipt["total_s"] = round(time.monotonic() - t0, 3)
     (target_build / RECEIPT_NAME).write_text(json.dumps(receipt, indent=2) + "\n")

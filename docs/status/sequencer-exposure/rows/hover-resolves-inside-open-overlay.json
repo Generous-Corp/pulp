@@ -1,0 +1,69 @@
+{
+  "id": "hover-resolves-inside-open-overlay",
+  "title": "A pointer hover over an open overlay resolves inside that overlay, as a press does",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "0ad22b29-a7e3-4631-9134-38817289a1a2",
+  "owned_paths": [
+    "core/view/src/pointer_dispatch.cpp",
+    "docs/status/sequencer-exposure/rows/hover-resolves-inside-open-overlay.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/src/pointer_dispatch.cpp",
+      "needles": [
+        "auto* target = hover_target_at(root, root_pt);"
+      ]
+    },
+    {
+      "path": "core/view/include/pulp/view/overlay_dismissal.hpp",
+      "needles": [
+        "View* hover_target_at(View& root, Point root_pt);"
+      ]
+    },
+    {
+      "path": "test/test_overlay_routing.cpp",
+      "needles": [
+        "a hover over an open overlay resolves inside it like a press does",
+        "a hover over an open overlay moves and highlights its row, not the view beneath"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "hover_target_at is declared in the installed overlay_dismissal.hpp beside route_press_to_active_overlay, and the existing installed verbs deliver_hover_move and hover_cursor_at now resolve through it. No signature an SDK consumer already calls changes; a tree with no open overlay resolves exactly as before. The delivery stays pending its installed-consumer proof.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/view/include/pulp/view/overlay_dismissal.hpp",
+          "needles": [
+            "View* hover_target_at(View& root, Point root_pt);"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or accepted document shape changes. Hover routing runs inside a live view tree, which the offline timeline CLI never constructs."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes. Nothing in tools/mcp routes pointer hovers."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes. The change decides which view a buttonless pointer move reaches; it adds no controllable operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged. Hover routing over an open popover is host input plumbing, not a generator-facing design capability."
+    }
+  }
+}

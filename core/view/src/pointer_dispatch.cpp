@@ -1,5 +1,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 
+#include <pulp/view/overlay_dismissal.hpp>
+
 #include <pulp/view/ui_components.hpp>  // ScrollView
 #include <pulp/view/view_lifecycle.hpp>
 #include "pointer_dispatch_internal.hpp"
@@ -259,8 +261,9 @@ void deliver_hover_move(View& root, Point root_pt, uint16_t modifiers,
 
     // 2. Hit-test AFTER the state pass: an `on_hover_move` handler is allowed
     //    to restructure the tree, and a target captured before it ran could
-    //    already be detached.
-    auto* target = root.hit_test(root_pt);
+    //    already be detached. An open overlay answers first, exactly as it does
+    //    for a press, so a row of an open menu sees the move that is over it.
+    auto* target = hover_target_at(root, root_pt);
     if (!target) return;
 
     MouseEvent me;

@@ -598,7 +598,9 @@ mod tests {
         assert!(leftovers.is_empty(), "transaction debris: {leftovers:?}");
     }
 
-    #[cfg(not(windows))]
+    // Drives the Windows extraction path with the host `tar`, which must be
+    // bsdtar to read a ZIP: macOS ships it, GNU tar on Linux cannot.
+    #[cfg(target_os = "macos")]
     #[test]
     fn windows_tar_extraction_path_installs_a_hermetic_zip_fixture() {
         let source = tempfile::tempdir().unwrap();

@@ -148,6 +148,30 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     return {OverlayPressRouting::dismissed, nullptr, consume_press};
 }
 
+View* hover_target_at(View& root, Point root_pt) {
+    if (auto* state = root.existing_interaction()) {
+        const auto& stack = state->overlay_stack;
+        for (std::size_t i = stack.size(); i > 0; --i) {
+            View* open = stack[i - 1];
+            // Removing a subtree retires its stack entries, so an entry is
+            // live; what is checked here is that it is on screen in THIS root.
+            // The walk is the overlay's depth, not the tree's size, because it
+            // runs on every pointer move.
+            bool shown = open != nullptr;
+            View* top = open;
+            for (View* v = open; shown && v != nullptr; v = v->parent()) {
+                shown = v->visible();
+                top = v;
+            }
+            if (!shown || top != &root || !open->overlay_contains(root_pt))
+                continue;
+            if (auto* hit = open->hit_test(point_to_local(root_pt, open, &root)))
+                return hit;
+        }
+    }
+    return root.hit_test(root_pt);
+}
+
 ContextPressResult route_context_press(View& root, Point root_pt) {
     const auto overlay_press = route_press_to_active_overlay(root, root_pt);
     if (overlay_press.consume_press) {

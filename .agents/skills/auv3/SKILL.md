@@ -582,6 +582,14 @@ the macOS framework path on macOS.
   `<plugin-bundle-id>.AUv3Host`. The user runs it once after install
   to trigger Launch Services scan.
 
+`pulp-build-info.json` (the build-identity record every bundle carries; see
+the `ship` skill) goes into the `.appex` (format `AUv3`) and the container
+`.app` (format `AUv3Host`), never the framework: `_pulp_attach_build_info`
+skips `FRAMEWORK` targets because a `Contents/Resources` directory at a
+framework root is an unsealed-root codesign failure. `pulp_add_ios_auv3()`
+bypasses `pulp_add_plugin()`, so it attaches the record itself — keep that
+call when editing either entry point.
+
 **Do NOT put `au_entry.mm`'s `PulpAUFactoryObj` (legacy
 AudioComponentRegister factory C function) anywhere in the macOS AU v3
 lane.** The macOS path uses `_NSExtensionMain` + `NSExtensionPrincipalClass`

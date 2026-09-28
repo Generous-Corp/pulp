@@ -73,6 +73,17 @@ Windows remain advisory and do not produce this authority.
 
 ## A merge queue amplifies a broken base instead of catching it
 
+### Duplicate PR heads are an admission smell
+
+The Shipyard merge steward snapshots all open pull-request heads and runs
+`tools/scripts/shipyard_duplicate_pr_heads.py` before cleanup planning. A
+duplicate exact head identity means two open PRs are asking the queue to spend
+validation capacity on the same source state; consolidate them before adding
+more fixup commits. The check is read-only and diagnostic because a REST
+snapshot has a time-of-check/time-of-use gap. Shipyard's atomic exact-head
+handoff remains the merge-time authority, and malformed census data must stay
+failed closed.
+
 The merge queue's failure mode is not that it misses a break. It is that it
 inherits one and repeats it. A batch validates `main` plus its entries, so a
 break already on `main` fails every batch, ejects the innocent entries,
@@ -200,9 +211,18 @@ python3 tools/ci/base_poison_detector.py --name-fix-pr
 
 Read-only. It answers "is the base carrying the failure these batches keep
 dying on?" and prints a one-line `base-poison-signal/v1` JSON annotation plus a
-table. `.github/workflows/main-health-detector.yml` runs it on a schedule and on
+table. `.github/workflows/main-health-detector.yml` runs it after every failed
+merge-group `Build and Test` run (`workflow_run`), on a backstop schedule, and on
 demand; it draws no macOS gate host and **reports only** — pausing a re-forming
 batch is Shipyard's side.
+
+**Do not rely on `schedule` for anything time-critical in this repo.** GitHub
+throttles its crons to about one run every four hours whatever the expression
+says (`*/30` workflows fired at 10:27, 15:15 and 19:12 on one day), which is
+why the detector is event-triggered. When you need a read NOW, dispatch it:
+`ghapp workflow run main-health-detector.yml`. A `workflow_run` workflow runs the
+default branch's copy with base-repo permissions: never check out
+`github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
 **Where main's evidence comes from without a build.** A merge queue validates
 `main` plus its entries as one commit, and the commit that lands carries that
@@ -2759,6 +2779,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   process — so it is safe to run on the required-gate host. Installed on the m3/m5
   /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
   reading; `--uninstall` removes the agent.
+- **fseventsd is in the health reading** (`--json` key `fseventsd`: `rss_mb`,
+  `cpu_pct`, `warn`, `warn_mb`; the human line appends `fseventsd=NMB`). It warns
+  above `PULP_VITALS_FSEVENTSD_WARN_MB` (1024) but never moves the level: a
+  runaway fseventsd (m5 reached 10.6 GB RSS at 107% CPU after 15 days of uptime;
+  a restart dropped it to 12 MB) needs `sudo killall fseventsd`, which no
+  consumer can run, so it is an alert for a person, not back-off. Because it is
+  in the health reading it lands in `host_vitals.log` every 60 s, which is the
+  growth-rate record: `grep -o '"rss_mb":[0-9]*' ~/.local/state/pulp/host_vitals.log`.
+  `null` means the process was not found (or not macOS), never 0.
 - **The published reading also carries a `build` snapshot** (`host_vitals.sh
   --build-json`: host and gate ccache hit/fill/cleanups, gate-VM count and RSS,
   tartci executing generation vs `~/Code/tartci` checkout, lease usage, wheelhouse
@@ -5335,34 +5364,20 @@ Two consequences:
   `install.sh`). Routing a downgrade through `shipyard update` is a silent
   no-op, so an ahead-of-pin machine would never converge.
 
-Never trust either path's exit code alone — re-read `shipyard --version` and
-compare it to the pin. `tools/scripts/shipyard_autoupdate.py` encodes all of
-this (direction dispatch + outcome verification); `--check --json` reports
-pin-vs-installed without touching anything.
+Never trust either path's exit code alone — re-read `shipyard --version`.
 
-#### Optional: keep a fleet Mac on the pin automatically
+#### Fleet Macs: tartci keeps Shipyard current, not a Pulp script
 
-`tools/scripts/install_shipyard_autoupdate.sh` installs an hourly launchd agent
-that converges this machine onto the pin when it is idle. Opt-in per machine
-and irrelevant to public Pulp (which just runs `install-shipyard.sh` once).
-Kill switch, no uninstall needed:
-
-```bash
-echo off > ~/.config/pulp/shipyard-autoupdate   # stop; `on` resumes
-tools/scripts/install_shipyard_autoupdate.sh --status
-```
-
-Two gotchas worth knowing if you touch it:
-
-- **The pin it obeys is `origin/main`'s, not the working tree's.** A dev
-  checkout is routinely parked on a feature branch, and a branch may carry an
-  experimental pin; converging the machine onto that would be a bug. Override
-  with `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree`.
-- **The idle probe must parse the `shipyard` command line, not substring-match
-  it.** The persistent daemon runs as `shipyard --mode shipyard daemon run` —
-  a substring match on `run` reads it as a live ship and the machine then never
-  updates at all, while `--mode shipyard` puts the literal token `shipyard`
-  where a subcommand would be.
+The fleet runs Shipyard's latest release, not the pin (the pin in
+`tools/shipyard.toml` is what `install-shipyard.sh` and the workflows install).
+tartci's watchdog owns host updates: `tartci fleet-macos tool-freshness` reads
+installed vs latest release, applies `shipyard update --to <tag>
+--refresh-daemon` once a release is 30 minutes old, verifies the re-read
+version, logs `tool_deployed` events, and reports STALE in `tartci pool status`
+and `tartci doctor fleet`. Per-host opt-out: `auto_apply = false` under
+`[tools.shipyard]` in `~/.config/tartci/tool-freshness.toml`. A Pulp-side
+pin converger existed and was removed: its pin lagged
+the fleet by ~78 releases, so installing it would have downgraded every host.
 
 Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
 Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
@@ -6256,6 +6271,24 @@ or add it to unrelated tests. Prefer this over an exclude — it keeps the test
 enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
 serializing the audio tests among themselves still leaves unrelated tests
 starving the RT thread.)
+starving the RT thread.)
+
+**Scheduling classes live in ONE module: `tools/scripts/ctest_scheduling_policy.py`.**
+Weighted `PROCESSORS 8` suites, serial-first tests (`RUN_SERIAL` plus a COST
+above every other test, so they run alone at the START while every slot is
+free), `browser`-locked Chrome tests, and long tests that carry a `COST` and at
+most four slots are listed there. Two checks import
+it: `test_ci_throughput_workflows.py` reads the manifests' source (runs in
+`workflow-lint`, which is NOT a required check, so a PR can merge with it red),
+and `ctest-scheduling-contract` reads a configured build on the gate. Change a
+test's `PROCESSORS` / `RUN_SERIAL` / lock / `COST` by moving its name between
+classes in that module, never by editing only one check's expectations. Before
+landing a scheduling change, look at `workflow-lint` on the PR as well as the
+required contexts. A full-width reservation (`PROCESSORS` >= ctest `-j`, or
+`RUN_SERIAL`) can only start when every slot is free: without the top COST it
+waits for the parallel phase to drain and runs alone at the end. Keep isolation
+where the evidence needs it (the real-browser suite failed 4 of 20 merge groups
+when co-scheduled) and move it to the front with COST rather than removing it.
 
 The required `macos` context comes directly from the native macOS matrix child
 on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore
@@ -6782,9 +6815,25 @@ paths under those prefixes that the gate does read (its own
 denied first by `IOS_COMPILE_REQUIRED_PATTERNS` in `classify_changes.py`;
 `test_classify_changes.py` re-derives that list from the live CMake tree, so a
 new reference has to be added there. Test-topology paths no longer force the
-gate on their own. Any missing/malformed value, empty or mixed diff, unknown
-path, mobile/Apple path, public header, CMake/CI/policy change, non-test
-`tools/scripts` file, or policy read failure runs the gate. Main, manual, nightly, release, and audit execution
+gate on their own.
+
+Beyond that allowlist, the per-PR and merge-group gate runs only when a path
+reaches an iOS-only surface (`ios_surface` / `IOS_SURFACE_PATTERNS` in
+`classify_changes.py`): `apple/**`, iOS examples/templates/AUv3 templates,
+iOS platform sources by path, any source that branches on an iOS target
+(`TARGET_OS_IPHONE`, `TARGET_OS_IOS`, `TARGET_OS_SIMULATOR`, `PULP_IOS`,
+`UIKit`), every non-test CMake file, the dependency pins and bootstrap, the
+simulator Skia fetcher, and the gate's own wiring. Shared core code does NOT
+run it: the macOS gate compiles it for macOS, so a break fails there too (the
+one real per-PR iOS failure in 14 days, `au_adapter.mm`, is compiled into two
+macOS test targets). An empty diff, an unreadable policy, or a deleted source
+still runs it. The full gate runs nightly on main
+(`ios-compile-gate-nightly.yml`, local gate hardware, one tracking issue) and
+on every release tag (`release-cli.yml` `ios-compile-gate`, in the publish
+job's `needs`, so no tag ships without a green iOS compile). When the nightly
+reds, record in its tracking issue whether the culprit touched an
+`IOS_SURFACE_PATTERNS` path; a culprit that did not is the evidence for
+widening the list. Main, manual, nightly, release, and audit execution
 never accepts this skip and retains its existing event policy. Condition the
 expensive step, never the required workflow/job, so the stable required context
 still reports.
@@ -9318,6 +9367,17 @@ Key facts:
   version projection. Any missing script, API/signature error, nested/unknown
   topology, writer drift, extra byte, or ambiguous association retains the full
   native path. The verifier's own PR therefore cannot approve itself.
+- **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
+  `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
+  commit, and a freshly opened bump PR's payload has a null/stale
+  `merge_commit_sha` and no `after`, so the default verifier logs
+  `workflow head is unrelated to the pull request event` and the run takes the
+  full native build (only merge groups skip). The opt-in repo variable makes the
+  workflow pass `--accept-pr-merge-ref`, which accepts the checkout only when it
+  is HEAD, its parents are exactly `[base.sha, head.sha]`, and its tree equals
+  the head tree. The flag reaches only a base verifier that knows it; an older
+  base rejects the unknown flag and keeps the full path, so the variable has no
+  effect until this verifier is on the bump PR's base.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
   `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
   and add a case to `test_classify_changes.py`. Never widen the

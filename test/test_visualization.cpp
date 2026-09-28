@@ -93,6 +93,7 @@ TEST_CASE("VisualizationConfig preserves positional aggregate initialization",
     REQUIRE(cfg.max_frames_per_poll == 1024);
     REQUIRE(cfg.spectrum_floor_db == -96.0f);
     REQUIRE(cfg.max_callback_frames == 4096);
+    REQUIRE(cfg.backlog_policy == VisualizationBacklogPolicy::in_order);
 }
 
 TEST_CASE("VisualizationBridge configure and process", "[view][vizbridge]") {
@@ -1039,4 +1040,119 @@ TEST_CASE("CorrelationMeter settles at a non-zero target and then goes quiet",
     CHECK(meter.display_correlation() == -1.0f);
     for (int i = 0; i < 120; ++i)
         CHECK_FALSE(meter.update(-1.0f, dt));
+}
+
+namespace {
+
+// Drives a bridge the way a UI that polls slower than audio arrives does:
+// each tick delivers two 256-frame callbacks of a continuous bin-centered tone
+// but the consumer polls once, with a per-poll budget of one hop (256 frames).
+struct SlowConsumerRig {
+    static constexpr int kFftSize = 1024;
+    static constexpr int kHop = 256;
+    static constexpr int kBlock = 256;
+    static constexpr int kBlocksPerTick = 2;
+
+    VisualizationBridge bridge;
+    std::vector<float> block = std::vector<float>(kBlock, 0.0f);
+    long long phase_index = 0;
+
+    explicit SlowConsumerRig(VisualizationBacklogPolicy policy) {
+        VisualizationConfig cfg;
+        cfg.fft_size = kFftSize;
+        cfg.hop_size = kHop;
+        cfg.num_channels = 1;
+        cfg.sample_rate = 48000.0f;
+        cfg.capture_waveform = false;
+        cfg.max_frames_per_poll = kHop;
+        cfg.max_callback_frames = kBlock;
+        cfg.backlog_policy = policy;
+        bridge.configure(cfg);
+    }
+
+    void deliver(int bin, int blocks) {
+        for (int b = 0; b < blocks; ++b) {
+            for (int i = 0; i < kBlock; ++i, ++phase_index) {
+                block[static_cast<std::size_t>(i)] = std::sin(
+                    2.0f * kPi * static_cast<float>(
+                        (static_cast<long long>(bin) * phase_index) % kFftSize)
+                    / static_cast<float>(kFftSize));
+            }
+            const float* channels[] = {block.data()};
+            bridge.process(channels, 1, kBlock);
+        }
+    }
+};
+
+} // namespace
+
+TEST_CASE("VisualizationBridge latest_window keeps a slow consumer current",
+          "[view][vizbridge][spectrum][backlog]") {
+    SlowConsumerRig rig(VisualizationBacklogPolicy::latest_window);
+    auto& bridge = rig.bridge;
+    std::uint64_t first_epoch = 0;
+    std::uint64_t last_sequence = 0;
+
+    auto tick = [&](int bin, int blocks, bool expect_publish) {
+        rig.deliver(bin, blocks);
+        const bool published = bridge.poll();
+        const auto& spectrum = bridge.peek_spectrum();
+        CHECK(spectrum.dropped_frames == 0);
+        if (published && first_epoch == 0) first_epoch = spectrum.epoch;
+        if (published) CHECK(spectrum.epoch == first_epoch);
+        if (expect_publish) {
+            REQUIRE(published);
+            REQUIRE(spectrum.sequence_number > last_sequence);
+            last_sequence = spectrum.sequence_number;
+        }
+        return peak_bin(spectrum);
+    };
+
+    // The first tick delivers half a window, so nothing can be analyzed yet.
+    tick(10, SlowConsumerRig::kBlocksPerTick, false);
+    for (int t = 1; t < 12; ++t)
+        REQUIRE(tick(10, SlowConsumerRig::kBlocksPerTick, true) == 10);
+
+    // One window of the new tone is all it takes to show it.
+    tick(40, SlowConsumerRig::kBlocksPerTick, true);
+    REQUIRE(tick(40, SlowConsumerRig::kBlocksPerTick, true) == 40);
+
+    // An in-order consumer overflows the 4096-frame tap long before this.
+    for (int t = 0; t < 40; ++t)
+        REQUIRE(tick(40, SlowConsumerRig::kBlocksPerTick, true) == 40);
+
+    // A stall longer than one window skips the stale audio and publishes the
+    // newest window at once, with no reset and no dropped frames.
+    rig.deliver(40, 4);
+    REQUIRE(tick(60, 4, true) == 60);
+    REQUIRE(tick(60, SlowConsumerRig::kBlocksPerTick, true) == 60);
+}
+
+TEST_CASE("VisualizationBridge in_order backlog lags, overflows, and resets",
+          "[view][vizbridge][spectrum][backlog]") {
+    SlowConsumerRig rig(VisualizationBacklogPolicy::in_order);
+    auto& bridge = rig.bridge;
+
+    for (int t = 0; t < 12; ++t) {
+        rig.deliver(10, SlowConsumerRig::kBlocksPerTick);
+        (void)bridge.poll();
+    }
+    const auto first_epoch = bridge.peek_spectrum().epoch;
+    REQUIRE(first_epoch != 0);
+    for (int t = 0; t < 2; ++t) {
+        rig.deliver(40, SlowConsumerRig::kBlocksPerTick);
+        (void)bridge.poll();
+    }
+    // The consumer is still analyzing audio from before the change.
+    REQUIRE(peak_bin(bridge.peek_spectrum()) == 10);
+
+    bool saw_blank_poll = false;
+    for (int t = 0; t < 40; ++t) {
+        rig.deliver(40, SlowConsumerRig::kBlocksPerTick);
+        saw_blank_poll = !bridge.poll() || saw_blank_poll;
+    }
+    const auto& spectrum = bridge.peek_spectrum();
+    REQUIRE(saw_blank_poll);
+    REQUIRE(spectrum.dropped_frames > 0);
+    REQUIRE(spectrum.epoch != first_epoch);
 }

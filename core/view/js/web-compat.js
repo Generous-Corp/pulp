@@ -747,9 +747,12 @@ Element.prototype.replaceWith = function() {
 
 // ── focus() / blur() event shims ─────────────────────────────────────────
 
+// Kept in step with web-compat-element-events.js, which is the live prelude:
+// focus() / blur() move native keyboard focus through the bridge before the
+// DOM event fires.
 Element.prototype.focus = function() {
     if (this._nativeCreated) {
-        // Dispatch focus event
+        if (typeof setFocus === "function") setFocus(this._id);
         var evt = _makeEvent("focus", this);
         this.dispatchEvent(evt);
     }
@@ -757,6 +760,7 @@ Element.prototype.focus = function() {
 
 Element.prototype.blur = function() {
     if (this._nativeCreated) {
+        if (typeof clearFocus === "function") clearFocus(this._id);
         var evt = _makeEvent("blur", this);
         this.dispatchEvent(evt);
     }

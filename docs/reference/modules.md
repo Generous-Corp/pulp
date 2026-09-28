@@ -2585,6 +2585,12 @@ is invariant: mismatched blocks are metered but not captured. Stop the audio
 producer and UI consumer before `configure()` or `reset()`.
 Set `max_frames_per_poll` when a UI needs a stricter per-tick analysis budget;
 zero still consumes no more than the frames visible when `poll()` begins.
+A display that polls from its frame tick, possibly slower than the hop rate,
+should set `backlog_policy = VisualizationBacklogPolicy::latest_window`: each
+poll then consumes the whole backlog, skips anything older than one analysis
+window, and publishes the newest spectrum, instead of lagging until the capture
+tap overflows and the analysis resets. The default `in_order` policy keeps
+every hop.
 The legacy `read_spectrum()` and `read_waveform()` snapshot reads remain
 available. The behavioral compatibility break is that `process()` no longer
 performs FFT/waveform work or publishes those snapshots. Existing callers must

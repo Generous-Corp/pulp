@@ -170,7 +170,7 @@ class InstallerLayoutTest(unittest.TestCase):
         _write_exec(self.mock_bin / "uname", MOCK_UNAME)
         _write_exec(self.mock_bin / "curl", MOCK_CURL)
 
-    def run_installer(self, install_dir: Path) -> subprocess.CompletedProcess[str]:
+    def run_installer(self, install_dir: Path, **extra: str) -> subprocess.CompletedProcess[str]:
         home = self.tmp / "home"
         home.mkdir(exist_ok=True)
         env = dict(os.environ)
@@ -184,6 +184,8 @@ class InstallerLayoutTest(unittest.TestCase):
             PULP_SKIP_SDK_INSTALL="1",
         )
         env.pop("PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT", None)
+        env.pop("PULP_INSTALL_ARCHIVE", None)
+        env.update(extra)
         return subprocess.run(
             ["bash", str(REPO / "tools" / "install" / "install.sh")],
             env=env, capture_output=True, text=True, timeout=120,
@@ -203,6 +205,23 @@ class InstallerLayoutTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Warning: Pulp CLI installed, but control broker activation failed", result.stdout)
         self.assert_loadable(install_dir)
+
+    def test_a_local_archive_installs_without_the_network(self) -> None:
+        # The release smoke installs the artifact it is about to publish.
+        install_dir = self.tmp / "home" / ".pulp" / "bin"
+        (self.mock_bin / "curl").write_text("#!/bin/sh\necho curl-called >&2\nexit 7\n")
+        result = self.run_installer(install_dir, PULP_INSTALL_ARCHIVE=str(self.archive))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Using local archive", result.stdout)
+        self.assertNotIn("curl-called", result.stdout + result.stderr)
+        self.assert_loadable(install_dir)
+
+    def test_a_missing_local_archive_is_an_error(self) -> None:
+        result = self.run_installer(
+            self.tmp / "bin", PULP_INSTALL_ARCHIVE=str(self.tmp / "absent.tar.gz")
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("PULP_INSTALL_ARCHIVE is not a file", result.stdout)
 
     def test_a_stale_runtime_is_replaced_even_when_the_broker_fails(self) -> None:
         install_dir = self.tmp / "home" / ".pulp" / "bin"
