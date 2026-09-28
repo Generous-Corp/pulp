@@ -72,3 +72,30 @@ if(PULP_HAS_VST3)
             ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 endif()
+
+# pulp-build-info.json in every Apple bundle, with its runtime pins checked
+# against the repository's independent pin records.
+if(APPLE AND NOT PULP_IOS)
+    set(_pulp_gain_build_info_bundles "")
+    foreach(_fmt VST3 AU CLAP AAX AUv3 AUv3Host Standalone)
+        if(TARGET PulpGain_${_fmt})
+            list(APPEND _pulp_gain_build_info_bundles
+                "${_fmt}=$<TARGET_BUNDLE_DIR:PulpGain_${_fmt}>")
+        endif()
+    endforeach()
+    add_test(NAME bundle-build-info-PulpGain
+        COMMAND ${CMAKE_COMMAND}
+            "-DBUNDLES=${_pulp_gain_build_info_bundles}"
+            -DPRODUCT_NAME=PulpGain
+            -DPRODUCT_TARGET=PulpGain
+            -DBUNDLE_ID=com.pulp.gain
+            -DPRODUCT_VERSION=1.0.0
+            -DSDK_VERSION=${Pulp_VERSION}
+            -DPINS_FILE=${PULP_RUNTIME_PINS_FILE}
+            -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DDEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+            -P ${CMAKE_SOURCE_DIR}/test/cmake/check_bundle_build_info.cmake)
+    set_tests_properties(bundle-build-info-PulpGain PROPERTIES
+        LABELS "packaging;ship"
+        TIMEOUT 60)
+endif()

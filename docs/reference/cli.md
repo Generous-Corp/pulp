@@ -150,7 +150,7 @@ On macOS, `--install` runs the strict validator gate before copying AU, VST3, an
 For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 Before configure/build, `pulp build` also compares the active project's pinned `sdk_version` / `cli_min_version` against the running CLI. If the project is ahead, it fails fast and points at `pulp upgrade`; use `--allow-unsupported-sdk` only as an explicit unsupported escape hatch.
 
-`pulp build`, `dev`, `loop`, `run`, and `test` also refuse to run with a CLI more than 50 releases older than the project (the Pulp checkout's `project(Pulp VERSION …)` or an SDK project's `sdk_version`; a newer major always counts). Configure defaults (generator, build type, examples, parallelism) live in the CLI binary, so a stale CLI silently configures a current checkout the way its own release did. Inside a Pulp checkout that already has `build/pulp`, the command is re-run through that binary instead; otherwise the error names both versions, the installer command, and a governed bootstrap for the checkout's own CLI. `PULP_STALE_CLI_LIMIT` changes the threshold; `--allow-unsupported-sdk` or `PULP_ALLOW_STALE_CLI=1` bypasses the guard once. CLIs installed before this guard existed get the same warning from the repository's SessionStart hook (`hooks/scripts/check-pulp-cli.sh --session-start`).
+Inside a Pulp source checkout (`project(Pulp VERSION …)`), `pulp` always runs the CLI that matches the checkout. When the running CLI's version differs from the checkout's at all, the command is re-run through the checkout's `build/pulp`; when that does not exist yet, `build`, `dev`, `loop`, `run`, and `test` first build it (the checkout's own `setup.sh --deps-only` and a Release, examples-OFF configure for a fresh tree, then the `pulp-rust-cli` and `pulp-cli` targets through `tools/ci/governed-build.sh`) and re-run through it, refusing only when that build fails. Other commands run with a one-line note. In an SDK project (`pulp.toml`), those five commands refuse when the pinned `sdk_version` or `cli_min_version` is newer than the CLI. `--allow-unsupported-sdk` or `PULP_ALLOW_STALE_CLI=1` bypasses the guard once. The repository's SessionStart hook (`hooks/scripts/check-pulp-cli.sh --session-start`) also keeps an installer-managed `~/.pulp/bin/pulp` at the latest release: at most every 6 hours it resolves the latest tag and, when the CLI is behind, runs that release's `install.sh` pinned to it in the background, logging one line to `~/.pulp/state/cli-autoupdate.log` (opt out with `PULP_AUTO_UPDATE_CLI=0`).
 
 When `pulp build` decides a CMake reconfigure is required, it also runs the FetchContent cache preflight from `pulp doctor --caches` first. If the shared cache (`~/Library/Caches/Pulp/fetchcontent-src/` on macOS, `$XDG_CACHE_HOME/pulp/fetchcontent-src/` on Linux, `%LOCALAPPDATA%/Pulp/fetchcontent-src/` on Windows) contains a dangling symlink or stale-commit entry, `pulp build` aborts with a one-screen remediation message instead of letting `cmake` blow up 200 lines into the configure log. Run `pulp doctor --caches --fix` to heal user-owned drift, or set `PULP_SKIP_CACHE_PREFLIGHT=1` to bypass the gate.
 
@@ -348,6 +348,27 @@ audio live: ask for a readout in the same run (`--audio-probe-json`,
 each produced by the render callback), or opt in explicitly with
 `PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
 when the pixels themselves must show live signal.
+
+A headless screenshot run also prints a few stable, info-level diagnostic
+lines for support reads — never one per frame:
+
+- `GpuSurface: adapter name="…" vendor="…" architecture="…" description="…"
+  type=<integrated|discrete|cpu|unknown> backend=<Metal|D3D12|Vulkan|…>
+  null=<true|false>` — the adapter Dawn picked, once per GPU surface.
+- `GpuSurface: startup_ms instance=… adapter=… device=… surface=… graphite=…
+  first_frame=…` — bring-up stage timings in milliseconds (macOS GPU window
+  host; `n/a` marks a stage that was not measured).
+- `Standalone: frame_ms frames=… p50=… p95=… max=… over16=… over33=…` —
+  main-thread time per host frame up to the capture, with the counts over a
+  16.7 ms and a 33.3 ms budget.
+- `GpuDiagnostics: skia_bridge=<status> skia_records=… gpu_diagnostics_emitted=…
+  truncated=… skia_text_suppressed=…` — whether the Skia log bridge is wired
+  (`PULP_GPU_LOG_BRIDGE=1`) and what reached it. With the bridge installed,
+  Skia's own records also appear as `skia: [<severity>] <message>`, capped at
+  50 per process.
+
+Each line is one physical line; field order is stable, and new fields are only
+ever appended.
 
 #### Capability control
 

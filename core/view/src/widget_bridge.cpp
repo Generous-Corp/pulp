@@ -958,10 +958,20 @@ void WidgetBridge::load_script(const std::string& code) {
     // evaluation above. Its native callback only records this budget; drain it
     // now that the outer QuickJS evaluation has returned, so startup remains
     // synchronously materialized without recursively entering QuickJS.
+    // Settle passes belong to this load, not to a host frame tick.
+    const bool pump_was_live = frame_pump_live_;
     const int settle_rounds = std::exchange(pending_runtime_settle_rounds_, 0);
     for (int round = 0; round < settle_rounds; ++round)
         service_frame_callbacks();
-    // Flush any pending requestAnimationFrame callbacks
+    frame_pump_live_ = pump_was_live;
+    // Without a frame pump, flush rAF so the load materializes synchronously.
+    // With one, a flush here would run a self-rearming callback an extra time
+    // outside the frame; leave it for the next tick and request that tick.
+    if (frame_pump_live_) {
+        if (!pending_frame_ids_.empty())
+            request_repaint();
+        return;
+    }
     eval_or_throw(engine_, "flush_frames", "if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
 }
 
@@ -1179,6 +1189,7 @@ void WidgetBridge::poll_async_results() {
 
 void WidgetBridge::service_frame_callbacks() {
     PULP_TRACE_SCOPE_NAMED("js", "frame_callback_pump");
+    frame_pump_live_ = true;
     if (pending_runtime_settle_rounds_ > 0)
         --pending_runtime_settle_rounds_;
     // Declarative bindings first: pure C++ store→widget push, no JS crossing.

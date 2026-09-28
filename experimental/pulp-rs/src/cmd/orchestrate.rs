@@ -504,7 +504,21 @@ fn build_with_dependency_policy<S: Spawner>(
     if reject_stale_cmake_context(proj, &build_dir, out)? {
         return Ok(1);
     }
+    // Seeding clones a donor tree whose build.ninja names the checkout's
+    // dependency links (external/vst3sdk, ...). A fresh worktree has none until
+    // the dependency bootstrap runs, so it runs first; otherwise the seed
+    // cannot plan and the build falls back to configuring from scratch.
+    let mut dependencies_prepared = false;
     if let Some(donor) = &args.seed_build {
+        if !proj.standalone && !args.trace && !build_dir.exists() && !skip_dependency_bootstrap {
+            let setup = checkout_dependency_invocation(proj)?;
+            writeln!(out, "Preparing shared checkout dependencies").map_err(io_err)?;
+            let rc = spawner.run(&setup)?;
+            if rc != 0 {
+                return Ok(rc);
+            }
+            dependencies_prepared = true;
+        }
         seed_build_dir(proj, &build_dir, donor, args, spawner, out)?;
     }
     let configured = if args.trace {
@@ -558,7 +572,9 @@ fn build_with_dependency_policy<S: Spawner>(
     }
     if needs_configure {
         if !proj.standalone {
-            if skip_dependency_bootstrap {
+            if dependencies_prepared {
+                // Already ran ahead of the seed attempt.
+            } else if skip_dependency_bootstrap {
                 writeln!(
                     out,
                     "Warning: skipping checkout dependency bootstrap because \
@@ -4413,7 +4429,16 @@ mod tests {
         let calls = spawner.calls.borrow();
         let seeds = seed_calls(&calls);
         assert_eq!(seeds.len(), 1, "{calls:?}");
-        assert_eq!(calls[0].program, "python3", "seeding must come first: {calls:?}");
+        // A fresh worktree's dependency links must exist before the seed plans
+        // against them, and the bootstrap then runs only once.
+        let setup_calls: Vec<_> = calls
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.args.iter().any(|a| a == "--deps-only"))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(setup_calls, [0], "dependencies first, exactly once: {calls:?}");
+        assert_eq!(calls[1].program, "python3", "seeding before any configure: {calls:?}");
         let a = &seeds[0].args;
         let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].clone());
         assert_eq!(after("--from").as_deref(), Some(SEED_AUTO));
@@ -4434,13 +4459,15 @@ mod tests {
         let proj = focused_source_tree(td.path(), FOCUSED_SELECTION);
         std::fs::remove_dir_all(&proj.build_dir).unwrap();
         std::fs::write(td.path().join(SEED_SCRIPT_RELATIVE), "#!/usr/bin/env python3\n").unwrap();
-        let spawner = RecordingSpawner::with_codes(vec![SEED_UNSUPPORTED_RC, 0]);
+        let spawner = RecordingSpawner::with_codes(vec![0, SEED_UNSUPPORTED_RC, 0]);
         let mut out = Vec::new();
         let args = parse_build_args(&["--seed-build=/nowhere".to_owned()]);
         let rc = build_with(&proj, &args, &spawner, &mut out).unwrap();
         assert_eq!(rc, 0);
         let calls = spawner.calls.borrow();
         assert_eq!(seed_calls(&calls).len(), 1);
+        let setups = calls.iter().filter(|c| c.args.iter().any(|a| a == "--deps-only")).count();
+        assert_eq!(setups, 1, "the fallback configure must not bootstrap again: {calls:?}");
         assert!(calls.iter().any(|c| c.program == "cmake" && c.args.iter().any(|x| x == "-B")));
         assert!(String::from_utf8(out).unwrap().contains("configuring from scratch"));
     }

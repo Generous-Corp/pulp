@@ -108,20 +108,178 @@ Element.prototype.click = function() {
         { bubbles: true, cancelable: true, button: 0, buttons: 0 }));
 };
 
+// focus() / blur() move NATIVE keyboard focus as well as the DOM bookkeeping.
+// Without the native half, focusing an <input> set activeElement and fired a
+// focus event while the TextEditor behind it never received a caret or a key.
+// setFocus()/clearFocus() run the same transfer a pointer press does, and
+// refuse views that cannot take focus (not focusable, disabled, hidden), so a
+// focus() on a plain container leaves the focused field alone.
 Element.prototype.focus = function() {
-    if (typeof document !== "undefined") document.activeElement = this;
-    if (this.getAttribute && this.getAttribute("aria-haspopup")
+    var navigationClaim = this.getAttribute && this.getAttribute("aria-haspopup")
         && this.getAttribute("data-pulp-popup-default") !== "off"
-        && typeof claimDocumentNavigationFocus === "function")
-        claimDocumentNavigationFocus();
+        && typeof claimDocumentNavigationFocus === "function";
+    // A popup trigger hands keyboard focus to the document navigation owner
+    // instead, so giving the trigger native focus first would only be undone.
+    if (!navigationClaim && this._nativeCreated && typeof setFocus === "function")
+        setFocus(this._id);
+    if (typeof document !== "undefined") document.activeElement = this;
+    if (navigationClaim) claimDocumentNavigationFocus();
     this.dispatchEvent(_makeEvent("focus", this, { bubbles: false }));
 };
 
 Element.prototype.blur = function() {
+    if (this._nativeCreated && typeof clearFocus === "function")
+        clearFocus(this._id);
     if (typeof document !== "undefined" && document.activeElement === this)
         document.activeElement = null;
     this.dispatchEvent(_makeEvent("blur", this, { bubbles: false }));
 };
+
+// ── Mount-time focus: `autofocus` and the dialog default ────────────────────
+//
+// Runs when a subtree becomes connected to the document (appendChild /
+// insertBefore under document.body). Mirrors the browser rule for the
+// `autofocus` attribute: the FIRST not-yet-processed autofocus element in the
+// newly connected subtree takes focus, once. Every autofocus element seen is
+// marked processed, so re-inserting or re-rendering never steals focus again.
+//
+// When the subtree has no autofocus element, a mounted dialog (role="dialog",
+// role="alertdialog", or aria-modal="true") focuses its first enabled text
+// field, so a dialog that opens with a text field gets a live caret without
+// app code. Opt out per dialog, or app-wide on any ancestor such as
+// document.body, with data-pulp-autofocus="off". A dialog mounted hidden is
+// left unprocessed: the default applies at mount, not when CSS later shows
+// it. An open <dialog> counts as a dialog, and <dialog>.show() / showModal()
+// run the same focusing step each time they open one.
+var __pulpTextFieldTypes__ = {
+    "": true, text: true, search: true, email: true, url: true, tel: true,
+    password: true
+};
+
+function __pulpIsTextField__(el) {
+    if (!el || !el.tagName) return false;
+    if (el.tagName === "TEXTAREA") return true;
+    if (el.tagName !== "INPUT") return false;
+    var type = String(el._type || (el.getAttribute && el.getAttribute("type")) || "")
+        .toLowerCase();
+    return __pulpTextFieldTypes__[type] === true;
+}
+
+function __pulpIsDialog__(el) {
+    if (!el || !el.getAttribute) return false;
+    if (el.tagName === "DIALOG") return !!el._dialogOpen;
+    var role = el.getAttribute("role");
+    return role === "dialog" || role === "alertdialog"
+        || el.getAttribute("aria-modal") === "true";
+}
+
+function __pulpHasAutofocus__(el) {
+    return !!(el && el.hasAttribute && el.hasAttribute("autofocus"));
+}
+
+function __pulpConnectedToDocument__(el) {
+    var body = typeof __bodyElement__ !== "undefined" ? __bodyElement__ : null;
+    var html = typeof __documentElement__ !== "undefined" ? __documentElement__ : null;
+    for (var cur = el; cur; cur = cur._parentElement) {
+        if (cur === body || cur === html) return true;
+    }
+    return false;
+}
+
+function __pulpRenderedFrom__(el, stop) {
+    for (var cur = el; cur && cur !== stop; cur = cur._parentElement) {
+        if (cur._hidden || cur._disabled) return false;
+        if (cur.style && cur.style.display === "none") return false;
+    }
+    return true;
+}
+
+function __pulpAutofocusOptedOut__(el) {
+    for (var cur = el; cur; cur = cur._parentElement) {
+        if (cur.getAttribute && cur.getAttribute("data-pulp-autofocus") === "off")
+            return true;
+    }
+    return false;
+}
+
+function __pulpWalkElements__(root, visit) {
+    var stack = [root];
+    while (stack.length) {
+        var el = stack.pop();
+        if (visit(el) === false) return;
+        var kids = el._children;
+        if (!kids) continue;
+        for (var i = kids.length - 1; i >= 0; --i) stack.push(kids[i]);
+    }
+}
+
+function __pulpFirstTextField__(root) {
+    var found = null;
+    __pulpWalkElements__(root, function(el) {
+        if (el !== root && __pulpIsTextField__(el) && !el._disabled
+            && __pulpRenderedFrom__(el, root)) {
+            found = el;
+            return false;
+        }
+    });
+    return found;
+}
+
+// The element a dialog should focus when it opens: its first autofocus
+// descendant, else (unless opted out) its first text field.
+function __pulpDialogFocusTarget__(dialog) {
+    var explicit = null;
+    __pulpWalkElements__(dialog, function(el) {
+        if (el !== dialog && __pulpHasAutofocus__(el)) { explicit = el; return false; }
+    });
+    if (explicit) return explicit;
+    if (__pulpAutofocusOptedOut__(dialog)) return null;
+    return __pulpFirstTextField__(dialog);
+}
+
+// <dialog>.show() / showModal() on a connected dialog run the dialog focusing
+// step every time it opens, as in a browser.
+function __pulpFocusOpenedDialog__(dialog) {
+    if (!dialog || !__pulpConnectedToDocument__(dialog)) return null;
+    dialog.__pulpDialogFocusProcessed = true;
+    var target = __pulpDialogFocusTarget__(dialog);
+    if (target && typeof target.focus === "function") target.focus();
+    return target;
+}
+
+function __pulpApplyMountFocus__(root) {
+    if (!root || !__pulpConnectedToDocument__(root)) return null;
+    var target = null;
+    var dialogs = [];
+    __pulpWalkElements__(root, function(el) {
+        if (__pulpHasAutofocus__(el) && !el.__pulpAutofocusProcessed) {
+            el.__pulpAutofocusProcessed = true;
+            if (!target) target = el;
+        }
+        if (__pulpIsDialog__(el) && !el.__pulpDialogFocusProcessed)
+            dialogs.push(el);
+    });
+    if (!target) {
+        for (var i = 0; i < dialogs.length && !target; ++i) {
+            var dialog = dialogs[i];
+            if (!__pulpRenderedFrom__(dialog, null)) continue;
+            dialog.__pulpDialogFocusProcessed = true;
+            // An autofocus element inside this dialog was already processed
+            // by an earlier mount; the dialog default must not override it.
+            var hasOwnAutofocus = false;
+            __pulpWalkElements__(dialog, function(el) {
+                if (__pulpHasAutofocus__(el)) { hasOwnAutofocus = true; return false; }
+            });
+            if (hasOwnAutofocus || __pulpAutofocusOptedOut__(dialog)) continue;
+            target = __pulpFirstTextField__(dialog);
+        }
+    } else {
+        for (var d = 0; d < dialogs.length; ++d)
+            dialogs[d].__pulpDialogFocusProcessed = true;
+    }
+    if (target && typeof target.focus === "function") target.focus();
+    return target;
+}
 
 Element.prototype._registerNativeEvent = function(type) {
     var id = this._id;

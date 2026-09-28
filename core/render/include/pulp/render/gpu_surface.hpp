@@ -141,6 +141,24 @@ public:
     virtual AdapterInfo adapter_info() const = 0;
 
     static std::unique_ptr<GpuSurface> create_dawn();
+
+    /// Wall-clock milliseconds spent in each stage of initialize(), measured
+    /// with a monotonic clock. A stage that did not run (initialize() failed
+    /// before it, or the implementation has no such stage) stays negative.
+    struct StartupTimings {
+        double instance_ms = -1.0;
+        /// Adapter request (RequestAdapter / EnumerateAdapters).
+        double adapter_ms = -1.0;
+        /// Device request, including feature and toggle negotiation.
+        double device_ms = -1.0;
+        /// Native surface creation plus the first swapchain configure.
+        double surface_ms = -1.0;
+    };
+
+    /// Stage timings recorded by the most recent initialize() call. The base
+    /// implementation reports nothing measured. Kept at the vtable tail so
+    /// existing GpuSurface subclasses keep their slot layout.
+    virtual StartupTimings startup_timings() const { return {}; }
 };
 
 } // namespace pulp::render

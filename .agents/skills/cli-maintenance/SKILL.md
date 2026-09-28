@@ -876,7 +876,14 @@ broker transaction backs up and restores that copy. Guard:
 `tools/scripts/check_installed_rpaths.py <install-dir>` resolves every Mach-O
 dependency against the INSTALLED tree; the `install-rpath-closure` ctest runs
 `install.sh` on real compiled fixtures with a failing broker and requires a
-clean result, and it also checks that a stale runtime already in the install
+clean result. The release smoke (`release-cli.yml`, Unix legs) installs the
+artifact it is about to publish through the default branch's `install.sh`
+(`PULP_INSTALL_ARCHIVE`, no download) and runs the checker on the installed
+tree, since the flat unpack it did before could not see this class. Any edit
+to `tools/install/install.sh` or `install.ps1` must regenerate
+`tools/install/SHA256SUMS` (`install-sha256sums-current` ctest): the README's
+verify-before-install recipe checks the website copy, which is main's, against
+it, and a stale entry fails that recipe for every user, and it also checks that a stale runtime already in the install
 directory is replaced. The broker is optional, so `install.sh` reports a
 failed activation as a warning and exits 0. Never "fix" a missing runtime
 with a symlink to `~/.pulp/lib`: that directory is an old SDK install prefix holding an unrelated wgpu build,
@@ -893,21 +900,32 @@ with no `-j` (serial under Makefiles). It prints no error. Measured on m3
 agent `pulp build`-family launches that week resolved to the installed binary
 rather than `./build/pulp`.
 
-Two layers, because the fix inside the CLI only reaches hosts after they update:
+There is no tolerance for drift, in three layers:
 
 - **In the Rust CLI** (`experimental/pulp-rs/src/stale_cli.rs`, called first in
-  `main()`, before the `PULP_USE_CPP` rollback lever): for `build`, `dev`,
-  `loop`, `run`, `test`, when the project is more than 50 releases ahead
-  (`PULP_STALE_CLI_LIMIT`; a newer major always counts), a Pulp checkout with a
-  built `build/pulp` gets the command re-run through it
-  (`PULP_STALE_CLI_REDIRECTED=1` stops a second hop); otherwise it exits 1 with
-  both versions, the installer command, and a governed bootstrap. Bypass:
-  `--allow-unsupported-sdk` (the Rust build parser swallows it so it never
-  reaches `cmake --build`) or `PULP_ALLOW_STALE_CLI=1`.
-- **In the repo** (`hooks/scripts/check-pulp-cli.sh --session-start`, wired as
-  a SessionStart hook in `.claude/settings.json` and `.codex/hooks.json`): the
-  same comparison from the checkout side, printed as agent context. This is
-  the one that helps a host whose CLI predates the guard.
+  `main()`, before the `PULP_USE_CPP` rollback lever). In a Pulp source
+  checkout, any version difference between the running CLI and the checkout
+  re-runs the command through `build/pulp` (`PULP_STALE_CLI_REDIRECTED=1`
+  stops a second hop; the checkout's own binary always runs). When there is no
+  `build/pulp` yet, `build`/`dev`/`loop`/`run`/`test` build it first:
+  `setup.sh --deps-only` plus a Release, examples-OFF configure for a fresh
+  tree, then `tools/ci/governed-build.sh cmake --build build --target
+  pulp-rust-cli pulp-cli`; only a failed build refuses. Other commands run with
+  a note rather than a cold build. In an SDK project the five build-family
+  commands refuse when `sdk_version` or `cli_min_version` is newer than the CLI.
+  Bypass: `--allow-unsupported-sdk` (the Rust build parser swallows it so it
+  never reaches `cmake --build`) or `PULP_ALLOW_STALE_CLI=1`.
+- **Auto-update** (`hooks/scripts/pulp-cli-autoupdate.sh`, run by
+  `check-pulp-cli.sh --session-start`): at most every 6 h it resolves the
+  latest tag from the `github.com/.../releases/latest` redirect (not the REST
+  API, which 403s under rate limits), and when `~/.pulp/bin/pulp` is behind,
+  runs THAT tag's `install.sh` pinned with `PULP_VERSION`, CLI only, in a
+  detached background job, logging one line to
+  `~/.pulp/state/cli-autoupdate.log` that the next session reports. It refuses
+  an installer that still excludes `libwgpu_native.dylib` (it would strand
+  `pulp-cpp`). Opt out with `PULP_AUTO_UPDATE_CLI=0`; CI never runs it.
+- **The session banner** (same hook): prints `STALE CLI` for a CLI any amount behind
+  the checkout, which is what a host with a CLI older than the guard sees.
 
 Traps:
 
@@ -921,8 +939,9 @@ Traps:
   `cargo build` reports the crate's `0.0.1`, which would refuse every build in
   the checkout.
 - **Covered by** `pulp-rust-stale-cli-guard` (cargo `stale_cli` filter: unit
-  cases plus `tests/stale_cli_test.rs` driving the real binary with a `cmake`
-  stub that must stay unused on refusal) and `check-pulp-cli-hook`.
+  cases plus `tests/stale_cli_test.rs` driving the real binary through stub
+  `cmake`, `setup.sh` and `governed-build.sh`, including build-then-rerun),
+  `pulp-cli-autoupdate-hook`, and `check-pulp-cli-hook`.
 
 ### `pulp status` — build-governance tier line
 
@@ -3600,3 +3619,44 @@ a success status — a valid-looking WAV of zeros, no error.
 If you add a command that hosts a plugin at a caller-chosen width, plumb the widths through the
 same way `cmd_audio_render.cpp` does, and sanity-check the AU slot's
 `initialized with N channels` log against the width you asked for.
+## A caller and its definition must share an archive, or Apple `ld` drops it
+
+Apple's linker scans a static archive **once**. A member that becomes newly
+needed *after* the scan has passed it is not revisited, so the CLI can fail with
+an undefined symbol even though every object that defines it was built. The CLI
+therefore force-loads its own implementation archives on Apple —
+`pulp-view-core`, `pulp-view-script`, `pulp-canvas`, `pulp-runtime`,
+`pulp-inspect-protocol` — in `tools/cli/CMakeLists.txt`, guarded by `if(APPLE)`
+and `if(TARGET ...)` so plugin consumers are unaffected.
+
+Force-loading only helps if the definition is actually *in* the archive being
+force-loaded. The sharper rule is about placement: **when a TU compiled into
+archive A calls a symbol, the definition belongs in A**, not in a sibling target
+the CLI does not link. `session.cpp` is compiled into `pulp-inspect-protocol`
+and calls `InspectorMainThreadRpc::call` in every configuration, while
+`main_thread_rpc.cpp` sat in `pulp-inspect-runtime`; with the inspector enabled
+— the default — the CLI linked the protocol archive, never the runtime one, and
+the symbol had no definition to find. Adding the TU to the protocol archive only
+under `if(NOT PULP_ENABLE_INSPECTOR)` fixes the stripped build and leaves the
+default one broken. Put it in unconditionally and remove it from the other
+target, so the symbol is defined exactly once rather than duplicated across two
+archives that link together.
+
+Two traps when verifying a link repair:
+
+- **Read the build's own status, not a wrapper's.** A backgrounded
+  `governed-build.sh … > log` reports the *wrapper's* exit; the build's result is
+  whatever you echoed into the log. `BUILD_RC=2` with a trailing
+  `[exited with code 0]` is a failed build, and `ls` on the expected binary is
+  the independent check.
+- **`governed-build.sh` blames host contention generically.** Its verdict
+  ("pinned at the parallelism floor … this signature has passed on re-run with no
+  code change") is about flaky *timing*. An undefined symbol is deterministic:
+  re-running on a quiet host reproduces it exactly, so do not spend another full
+  build on that advice.
+
+Prove the repair with `nm -C` rather than a successful exit: the symbol should
+appear as `T` (defined) with **zero** `U` entries, and the binary should run —
+`pulp-cpp version` and `pulp-cpp sdk` are the cheapest live checks. Note the
+argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
+`pulp-cpp sdk` rather than `sdk --help`.

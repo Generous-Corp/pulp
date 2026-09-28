@@ -124,7 +124,14 @@ make it safe:
   build that owns the handler keeps it.
 - **Off unless asked.** Installation is gated on `skia_log_bridge_enabled()`
   (tracing built in, or `PULP_GPU_LOG_BRIDGE`), so an ordinary product build
-  installs nothing.
+  installs nothing. The macOS GPU window host asks once, for a primary window
+  only; a secondary window never does.
+- **Bounded text copy.** An installed bridge also writes each record to the
+  text log (`skia: [<severity>] …`), because the Perfetto event does not exist
+  in a `PULP_TRACING=OFF` release build. Only the first `kSkiaLogTextLimit` (50)
+  are copied; the rest are counted and reported once by
+  `log_gpu_diagnostics_summary()`. Check the `GpuDiagnostics: skia_bridge=…`
+  line a headless screenshot run prints before concluding Skia was silent.
 - **Degrades, never breaks.** `PULP_RENDER_HAS_SK_LOG_HANDLER` requires both
   `PULP_HAS_SKIA` and `__has_include("include/utils/SkLogHandler.h")`, so a
   headers-only or pre-m153 tree compiles to `unavailable_no_skia`.

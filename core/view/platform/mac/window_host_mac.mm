@@ -43,8 +43,11 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/dirty_tracker.hpp>
+#include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/view/host_frame_timing.hpp>
 #include <pulp/view/repaint_damage.hpp>
 #include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
@@ -1162,14 +1165,12 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         pulp::view::MouseEvent cme;
         cme.position = {pt.x, pt.y};
         cme.is_down = false;
-        // Gate to this window's root so the canvas overlay's cursor affordance
-        // is not driven by moves inside a secondary window.
-        inspector_cursor =
-            pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
+        // Gated to this window's root: a secondary window's moves never drive it.
+        inspector_cursor = pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
     }
     if (inspector_cursor >= 0)
         return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
-    if (auto* target = self.rootView->hit_test(pt)) return target->cursor();
+    if (auto* target = pulp::view::hover_target_at(*self.rootView, pt)) return target->cursor();
     return std::nullopt;
 }
 
@@ -1180,12 +1181,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // hover-set cursor used to survive only while a button was held.
 // An attached native child (a WKWebView, a hosted editor) is not in the Pulp
 // View tree and picks its own cursor, but this view's tracking area is not
-// occluded by subviews — so -mouseMoved:/-cursorUpdate: still arrive over it.
-// Publishing a Pulp-tree answer there would set the arrow on every button-less
-// move and wipe the child's choice; the cursor would then appear to change only
-// once a button went down, because the drag path publishes the captured cursor
-// and no -mouseMoved: arrives mid-drag. Record ownership and leave the cursor
-// to AppKit.
+// occluded by subviews, so -mouseMoved:/-cursorUpdate: still arrive over it.
+// Publishing a Pulp-tree answer there would wipe the child's choice on every
+// button-less move. Record ownership and leave the cursor to AppKit.
 - (BOOL)noteNativeChildOwnsEvent:(NSEvent*)event {
     _pointerOverNativeChild = pulp::view::mac_geometry::native_child_owns_window_point(
         self, event.locationInWindow) ? YES : NO;
@@ -1203,11 +1201,16 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     _hoverCursor.note_published(*style);
 }
 
+// A held right or middle button suppresses -mouseMoved:, so resolve like the cursor
+// pass: a context menu that press opened shows its own cursor. Dispatches nothing.
+- (void)rightMouseDragged:(NSEvent*)e { [self cursorUpdate:e]; [super rightMouseDragged:e]; }
+- (void)rightMouseUp:(NSEvent*)e { [self cursorUpdate:e]; [super rightMouseUp:e]; }
+- (void)otherMouseDragged:(NSEvent*)e { [self cursorUpdate:e]; [super otherMouseDragged:e]; }
+- (void)otherMouseUp:(NSEvent*)e { [self cursorUpdate:e]; [super otherMouseUp:e]; }
+
 // Re-resolve the cursor at the LAST KNOWN pointer position and push it only
-// when it changed. Driven from the frame path, so a layout pass that slides a
-// different view under a pointer that never moved still updates the cursor —
-// AppKit re-asks on pointer motion only and would otherwise show the stale one
-// until the next move or click.
+// when it changed, from the frame path: AppKit re-asks on pointer motion only,
+// so content sliding under a still pointer would otherwise keep a stale cursor.
 - (void)refreshHoverCursor {
     if (!self.rootView || !_hoverCursor.has_pointer()) return;
     if (_pointerOverNativeChild) return;
@@ -2163,6 +2166,10 @@ public:
             // windowDidResize, which paints the first frame at the wrong size
             // with truncated content and feeds the same wrong numbers to the
             // editor bridge's initial resize.
+            // Opt-in only (PULP_GPU_LOG_BRIDGE / tracing build); a secondary
+            // window never claims Skia's process-global log handler.
+            if (!options.secondary_window)
+                render::install_skia_log_bridge_if_enabled();
             const NSSize content = metal_view_.bounds.size;
             init_gpu(content.width > 0.0 ? static_cast<float>(content.width)
                                          : options.width,
@@ -2413,6 +2420,12 @@ public:
     // the drawable's contents are undefined. Failing closed is the safe
     // direction here — an unproven frame must never read as submission
     // evidence.
+    std::vector<double> frame_time_samples_ms() const override {
+        return frame_times_.samples();
+    }
+
+    void log_gpu_diagnostics_summary() override { render::log_gpu_diagnostics_summary(); }
+
     bool last_frame_gpu_submission_observed() const override {
         return last_submission_observed_.load(std::memory_order_relaxed);
     }
@@ -2715,6 +2728,10 @@ private:
     uint64_t request_repaint_dirty_frames_ = 0;
     int frame_fail_count_ = 0;
     int frame_ok_count_ = 0;
+    pulp::view::HostClock::time_point gpu_bringup_start_{};
+    render::GpuStartupReport startup_report_{};
+    bool startup_logged_ = false;
+    pulp::view::HostFrameTimeRecorder frame_times_;
     float width_ = 0, height_ = 0;
     // ── Design viewport (see WindowHost::set_design_viewport) ──────────
     // When set (> 0), root_ is laid out at design size and paint applies
@@ -2840,6 +2857,7 @@ private:
     void init_gpu(float width, float height) {
         width_ = width;
         height_ = height;
+        gpu_bringup_start_ = pulp::view::HostClock::now();
 
         gpu_surface_ = render::GpuSurface::create_dawn();
         if (!gpu_surface_) return;
@@ -2868,7 +2886,9 @@ private:
         skia_config.height = static_cast<uint32_t>(height);
         skia_config.scale_factor = static_cast<float>(scale);
 
+        const auto graphite_start = pulp::view::HostClock::now();
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, skia_config);
+        startup_report_.graphite_ms = pulp::view::host_elapsed_ms(graphite_start);
         configured_scale_ = static_cast<float>(scale);
 
         // FU-2: put the surface in persistent-scene mode when partial repaint is
@@ -3172,6 +3192,12 @@ private:
         }
 
         gpu_surface_->end_frame(); // present to Metal surface
+        if (!startup_logged_) {
+            startup_logged_ = true;
+            startup_report_.surface = gpu_surface_->startup_timings();
+            startup_report_.first_frame_ms = pulp::view::host_elapsed_ms(gpu_bringup_start_);
+            runtime::log_info("{}", render::format_gpu_startup_line(startup_report_));
+        }
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
@@ -3238,6 +3264,7 @@ private:
                 @autoreleasepool {
                     if (!alive_token || !alive_token->load(std::memory_order_acquire))
                         return;
+                    const auto frame_start = pulp::view::HostClock::now();
 
                     // Release drag motion held since the last frame, BEFORE
                     // the idle pump and before the render decision below.
@@ -3297,6 +3324,7 @@ private:
                     if (!tick.should_render) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
                         self->render_dispatch_queued_.store(false, std::memory_order_release);
+                        self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
                         return;
                     }
                     pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
@@ -3315,6 +3343,7 @@ private:
                         ++self->pump_dirty_frames_;
                     }
                     self->render_frame();
+                    self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
                     self->render_dispatch_queued_.store(false, std::memory_order_release);
                 }
             });

@@ -416,9 +416,19 @@ GPU, so the sink reports its own state:
   arrive. `skia_log_bridge_available()` separates "no Skia in this build" from
   "declined to".
 
-Nothing installs the Skia bridge implicitly: a host or app calls
+Nothing installs the Skia bridge unasked: a host or app calls
 `install_skia_log_bridge_if_enabled()` (or `install_skia_log_bridge()`, which
 is itself the explicit opt-in), and a plugin build ships with the opt-in off.
+The macOS GPU window host calls `install_skia_log_bridge_if_enabled()` once for
+a primary (non-secondary) window, so a standalone app honours the opt-in
+without app code. An installed bridge also copies each record into the text
+log as `skia: [<severity>] <message>` — the Perfetto event is compiled out of a
+`PULP_TRACING=OFF` build, so this copy is what a release log shows — capped at
+`kSkiaLogTextLimit` (50) records per process; `log_gpu_diagnostics_summary()`
+reports the remainder as `skia: N more records suppressed` plus a
+`GpuDiagnostics: skia_bridge=… skia_records=… gpu_diagnostics_emitted=…
+truncated=… skia_text_suppressed=…` line, which a headless screenshot run
+prints when it captures.
 The opt-in is satisfied by a `PULP_TRACING=ON` build or
 `PULP_GPU_LOG_BRIDGE` set to `1`/`true`/`yes`/`on`; an explicit
 `0`/`false`/`no`/`off` wins over the tracing build, so a tracing run can still

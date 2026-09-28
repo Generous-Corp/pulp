@@ -690,6 +690,14 @@ if(UNIX)
         set_tests_properties(install-rpath-closure PROPERTIES
             LABELS "tooling;installer"
             TIMEOUT 120)
+        # The README's verify-before-install recipe checks the website's
+        # installer against tools/install/SHA256SUMS.
+        add_test(NAME install-sha256sums-current
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_install_sha256sums.py)
+        set_tests_properties(install-sha256sums-current PROPERTIES
+            LABELS "tooling;installer"
+            TIMEOUT 30)
     endif()
 endif()
 if(Python3_Interpreter_FOUND)
@@ -833,6 +841,12 @@ if(UNIX)
     add_test(NAME check-pulp-cli-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_check_pulp_cli_hook.sh)
     set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
+    # pulp-cli-autoupdate.sh — the SessionStart CLI auto-update. Hermetic
+    # (stub curl and installer in a throwaway HOME); includes the case that
+    # proves the session never waits on the network.
+    add_test(NAME pulp-cli-autoupdate-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_cli_autoupdate.sh)
+    set_tests_properties(pulp-cli-autoupdate-hook PROPERTIES TIMEOUT 60)
 
     # inject-claude-prefs.sh — the SessionStart hook that reads
     # claude.send_user_file from ~/.pulp/config.toml and injects the
@@ -1092,3 +1106,16 @@ set_tests_properties(cmake-test-manifest-parse-selftest PROPERTIES
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-contract)
+
+# pulp-build-info.json / runtime-pins.json machinery that needs no built
+# bundle: build-time commit resolution, overrides, embedding, refusal of
+# malformed input, and the Skia/Dawn/min-OS pin parsers against independent
+# records. The per-bundle proof lives with the PulpGain example.
+add_test(NAME cmake-bundle-build-info-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/bundle-build-info-contract
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_bundle_build_info_contract.cmake)
+set_tests_properties(cmake-bundle-build-info-contract PROPERTIES
+    LABELS "cmake;ship"
+    TIMEOUT 60)

@@ -1,0 +1,180 @@
+# Assert that each built Apple bundle carries a correct pulp-build-info.json.
+#
+# Inputs (-D):
+#   BUNDLES          ;-separated FORMAT=<bundle path> pairs
+#   PRODUCT_NAME / PRODUCT_TARGET / BUNDLE_ID / PRODUCT_VERSION
+#   SDK_VERSION      the Pulp project version the bundle was built against
+#   PINS_FILE        the build tree's runtime-pins.json
+#   PULP_SOURCE_DIR  repository root (source-of-truth pins, git HEAD)
+#   DEPLOYMENT_TARGET the configured CMAKE_OSX_DEPLOYMENT_TARGET
+#
+# Pins are compared with records kept independently of the generator's inputs
+# wherever one exists: tools/deps/shared-source-contract.txt for wgpu-native,
+# the webgpu FetchContent registration for WebGPU-distribution,
+# tools/deps/manifest.json for Skia and Dawn, and
+# tools/deps/min_os.json for the macOS floor.
+
+foreach(_required BUNDLES PRODUCT_NAME PRODUCT_TARGET BUNDLE_ID PRODUCT_VERSION
+                  SDK_VERSION PINS_FILE PULP_SOURCE_DIR DEPLOYMENT_TARGET)
+    if(NOT DEFINED ${_required} OR "${${_required}}" STREQUAL "")
+        message(FATAL_ERROR "${_required} is required")
+    endif()
+endforeach()
+
+function(_expect label actual expected)
+    if(NOT "${actual}" STREQUAL "${expected}")
+        message(FATAL_ERROR "${label}: expected '${expected}', got '${actual}'")
+    endif()
+endfunction()
+
+# ── Independent source-of-truth values ────────────────────────────────────
+file(READ "${PULP_SOURCE_DIR}/tools/deps/shared-source-contract.txt" _contract)
+if(NOT _contract MATCHES "wgpu-native=([^;\n]+)")
+    message(FATAL_ERROR "shared-source-contract.txt names no wgpu-native pin")
+endif()
+set(_truth_wgpu "${CMAKE_MATCH_1}")
+file(READ "${PULP_SOURCE_DIR}/tools/cmake/PulpDependencies.cmake" _deps_cmake)
+if(NOT _deps_cmake MATCHES "pulp_register_fetchcontent_source\\(webgpu REF ([0-9a-f]+)\\)")
+    message(FATAL_ERROR "PulpDependencies.cmake registers no webgpu source ref")
+endif()
+set(_truth_webgpu_ref "${CMAKE_MATCH_1}")
+
+file(READ "${PULP_SOURCE_DIR}/tools/deps/manifest.json" _manifest)
+string(JSON _dep_count LENGTH "${_manifest}" dependencies)
+math(EXPR _last "${_dep_count} - 1")
+foreach(_i RANGE ${_last})
+    string(JSON _name GET "${_manifest}" dependencies ${_i} name)
+    if(_name STREQUAL "Skia")
+        string(JSON _truth_skia_release GET "${_manifest}" dependencies ${_i} version)
+    elseif(_name STREQUAL "Dawn")
+        string(JSON _dawn_notes GET "${_manifest}" dependencies ${_i} notes)
+    endif()
+endforeach()
+if(NOT _dawn_notes MATCHES "DEPS file at ([0-9a-f]+)")
+    message(FATAL_ERROR "manifest Dawn notes name no Skia DEPS commit")
+endif()
+set(_truth_skia_commit "${CMAKE_MATCH_1}")
+if(NOT _dawn_notes MATCHES "Dawn SHA1 ([0-9a-f]+)")
+    message(FATAL_ERROR "manifest Dawn notes name no Dawn SHA1")
+endif()
+set(_truth_dawn "${CMAKE_MATCH_1}")
+
+file(READ "${PULP_SOURCE_DIR}/tools/deps/min_os.json" _min_os)
+string(JSON _truth_mac_floor GET "${_min_os}" platforms macos-arm64 floor)
+
+find_program(_git git)
+execute_process(COMMAND "${_git}" -C "${PULP_SOURCE_DIR}" rev-parse HEAD
+    OUTPUT_VARIABLE _truth_head OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _head_result)
+if(NOT _head_result EQUAL 0)
+    message(FATAL_ERROR "cannot read git HEAD of ${PULP_SOURCE_DIR}")
+endif()
+
+# ── The SDK pins record ───────────────────────────────────────────────────
+if(NOT EXISTS "${PINS_FILE}")
+    message(FATAL_ERROR "runtime pins record missing: ${PINS_FILE}")
+endif()
+file(READ "${PINS_FILE}" _pins)
+string(JSON _v GET "${_pins}" schema)
+_expect("pins schema" "${_v}" "pulp.runtime-pins.v1")
+string(JSON _v GET "${_pins}" webgpu wgpu_native_version)
+_expect("pins wgpu-native" "${_v}" "${_truth_wgpu}")
+string(JSON _v GET "${_pins}" webgpu backend)
+_expect("pins webgpu backend" "${_v}" "wgpu-native")
+string(JSON _v GET "${_pins}" webgpu distribution_ref)
+_expect("pins WebGPU-distribution" "${_v}" "${_truth_webgpu_ref}")
+string(JSON _v GET "${_pins}" skia linked)
+_expect("pins skia linked" "${_v}" "ON")
+string(JSON _v GET "${_pins}" skia asset_in_manifest)
+_expect("pins skia asset is the manifest-pinned prebuilt" "${_v}" "ON")
+string(JSON _v GET "${_pins}" skia release)
+_expect("pins skia release" "${_v}" "${_truth_skia_release}")
+string(JSON _v GET "${_pins}" skia commit)
+_expect("pins skia commit" "${_v}" "${_truth_skia_commit}")
+string(JSON _v GET "${_pins}" dawn commit)
+_expect("pins dawn commit" "${_v}" "${_truth_dawn}")
+string(JSON _v GET "${_pins}" min_os macos-arm64 floor)
+_expect("pins macos floor" "${_v}" "${_truth_mac_floor}")
+string(JSON _v GET "${_pins}" pulp sdk_version)
+_expect("pins sdk version" "${_v}" "${SDK_VERSION}")
+string(JSON _v GET "${_pins}" pulp source_git_sha)
+_expect("pins sdk commit" "${_v}" "${_truth_head}")
+message(STATUS "ok: runtime pins match source of truth")
+
+# ── Each bundle ───────────────────────────────────────────────────────────
+set(_checked 0)
+foreach(_pair IN LISTS BUNDLES)
+    if(NOT _pair MATCHES "^([A-Za-z0-9]+)=(.+)$")
+        message(FATAL_ERROR "malformed BUNDLES entry '${_pair}'")
+    endif()
+    set(_format "${CMAKE_MATCH_1}")
+    set(_bundle "${CMAKE_MATCH_2}")
+    set(_info "${_bundle}/Contents/Resources/pulp-build-info.json")
+    if(NOT EXISTS "${_info}")
+        message(FATAL_ERROR "${_format}: no build-info at ${_info}")
+    endif()
+    file(READ "${_info}" _json)
+    string(JSON _v ERROR_VARIABLE _err GET "${_json}" schema)
+    if(_err)
+        message(FATAL_ERROR "${_format}: build-info is not valid JSON: ${_err}")
+    endif()
+    _expect("${_format} schema" "${_v}" "pulp.build-info.v1")
+    string(JSON _v GET "${_json}" product name)
+    _expect("${_format} product name" "${_v}" "${PRODUCT_NAME}")
+    string(JSON _v GET "${_json}" product target)
+    _expect("${_format} product target" "${_v}" "${PRODUCT_TARGET}")
+    string(JSON _v GET "${_json}" product format)
+    _expect("${_format} format label" "${_v}" "${_format}")
+    string(JSON _v GET "${_json}" product bundle_id)
+    _expect("${_format} bundle id" "${_v}" "${BUNDLE_ID}")
+    string(JSON _v GET "${_json}" product version)
+    _expect("${_format} product version" "${_v}" "${PRODUCT_VERSION}")
+    string(JSON _v GET "${_json}" product source_git_sha)
+    _expect("${_format} product commit" "${_v}" "${_truth_head}")
+    string(JSON _v GET "${_json}" build min_os platform)
+    _expect("${_format} min-os platform" "${_v}" "macos")
+    string(JSON _v GET "${_json}" build min_os version)
+    _expect("${_format} min-os version" "${_v}" "${DEPLOYMENT_TARGET}")
+    string(JSON _v GET "${_json}" pulp_sdk version)
+    _expect("${_format} sdk version" "${_v}" "${SDK_VERSION}")
+
+    # The embedded pins are the SDK record, field for field.
+    foreach(_path "schema" "webgpu;wgpu_native_version" "skia;release"
+                  "skia;commit" "dawn;commit" "pulp;source_git_sha"
+                  "min_os;macos-arm64;floor" "js_engine;default")
+        string(JSON _embedded GET "${_json}" runtime_pins ${_path})
+        string(JSON _sdk GET "${_pins}" ${_path})
+        _expect("${_format} embedded pin ${_path}" "${_embedded}" "${_sdk}")
+    endforeach()
+
+    # Every runtime library the record claims is bundled must be in the
+    # bundle, and wgpu-native must be listed when it is.
+    string(JSON _lib_count LENGTH "${_json}" bundled_runtime_libraries)
+    set(_saw_wgpu FALSE)
+    if(_lib_count GREATER 0)
+        math(EXPR _lib_last "${_lib_count} - 1")
+        foreach(_li RANGE ${_lib_last})
+            string(JSON _file GET "${_json}" bundled_runtime_libraries ${_li} file)
+            string(JSON _component GET "${_json}" bundled_runtime_libraries ${_li} component)
+            file(GLOB_RECURSE _found "${_bundle}/Contents/*/${_file}")
+            if(NOT _found)
+                message(FATAL_ERROR "${_format}: lists ${_file} but the bundle has none")
+            endif()
+            if(_component STREQUAL "wgpu-native")
+                set(_saw_wgpu TRUE)
+                string(JSON _v GET "${_json}" bundled_runtime_libraries ${_li} version)
+                _expect("${_format} bundled wgpu-native version" "${_v}" "${_truth_wgpu}")
+            endif()
+        endforeach()
+    endif()
+    file(GLOB _staged_wgpu "${_bundle}/Contents/MacOS/libwgpu_native.dylib")
+    if(_staged_wgpu AND NOT _saw_wgpu)
+        message(FATAL_ERROR "${_format}: bundle ships libwgpu_native.dylib unlisted")
+    endif()
+    message(STATUS "ok: ${_format} ${_info}")
+    math(EXPR _checked "${_checked} + 1")
+endforeach()
+if(_checked EQUAL 0)
+    message(FATAL_ERROR "no bundles were checked")
+endif()
+message(STATUS "bundle_build_info_verified=${_checked}")

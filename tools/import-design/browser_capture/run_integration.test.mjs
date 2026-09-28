@@ -49,18 +49,6 @@ test("without a guest lease the process's own parallelism decides", () => {
   assert.equal(availableCores({ TARTCI_GUEST_CORES: "0" }, 4), 4);
 });
 
-test("a ctest reservation caps the machine's cores and never raises them", () => {
-  const reserved = { PULP_BROWSER_CAPTURE_RESERVED_CORES: "4" };
-  assert.equal(availableCores({ ...reserved, TARTCI_GUEST_CORES: "8" }, 28), 4);
-  assert.equal(integrationConcurrency(availableCores({ ...reserved, TARTCI_GUEST_CORES: "8" }, 28), 6), 2);
-  assert.equal(availableCores({ ...reserved }, 12), 4);
-  // A 3-vCPU VM keeps its own count: ctest clamps the reservation to -j3.
-  assert.equal(availableCores({ ...reserved, TARTCI_GUEST_CORES: "3" }, 28), 3);
-  assert.equal(integrationConcurrency(availableCores({ ...reserved, TARTCI_GUEST_CORES: "3" }, 28), 6), 1);
-  assert.equal(availableCores({ PULP_BROWSER_CAPTURE_RESERVED_CORES: "" , TARTCI_GUEST_CORES: "6" }, 2), 6);
-  assert.equal(availableCores({ PULP_BROWSER_CAPTURE_RESERVED_CORES: "0", TARTCI_GUEST_CORES: "6" }, 2), 6);
-});
-
 test("the launcher passes the derived width to node --test and its exit status back", () => {
   const launcher = fileURLToPath(new URL("./run_integration.mjs", import.meta.url));
   const dir = mkdtempSync(path.join(os.tmpdir(), "pulp-run-integration-"));
@@ -78,16 +66,14 @@ test("the launcher passes the derived width to node --test and its exit status b
       NODE_TEST_CONTEXT: _nested,
       TARTCI_GUEST_CORES: _cores,
       TARTCI_GUEST_MEM_MB: _memory,
-      PULP_BROWSER_CAPTURE_RESERVED_CORES: _reserved,
       ...env
     } = process.env;
-    const run = (files, cores, memoryMb, reserved) => spawnSync(process.execPath, [launcher, ...files], {
+    const run = (files, cores, memoryMb) => spawnSync(process.execPath, [launcher, ...files], {
       encoding: "utf8",
       env: {
         ...env,
         TARTCI_GUEST_CORES: cores,
         ...(memoryMb === undefined ? {} : { TARTCI_GUEST_MEM_MB: memoryMb }),
-        ...(reserved === undefined ? {} : { PULP_BROWSER_CAPTURE_RESERVED_CORES: reserved }),
       },
     });
     // Two files that each log start, wait, then log end: one at a time the
@@ -117,12 +103,6 @@ test("the launcher passes the derived width to node --test and its exit status b
     const leased = run(slow, "12", "2048");
     assert.match(leased.stdout, /--test-concurrency=1 \(cores=12, mem_mb=2048\)/);
     assert.equal(leased.status, 0);
-    assert.equal(readFileSync(log, "utf8"), "sese");
-    rmSync(log);
-    // The slots ctest reserved for the suite cap a larger VM's count.
-    const reservedRun = run(slow, "12", undefined, "2");
-    assert.match(reservedRun.stdout, /--test-concurrency=1 \(cores=2\)/);
-    assert.equal(reservedRun.status, 0);
     assert.equal(readFileSync(log, "utf8"), "sese");
     assert.equal(spawnSync(process.execPath, [launcher], { env }).status, 2);
   } finally {

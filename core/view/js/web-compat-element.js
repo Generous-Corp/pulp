@@ -884,6 +884,10 @@ Element.prototype.show = function() {
         __invalidateStyleCache__(this);
         setVisible(this._id, true);
     }
+    // Dialog focusing: the first autofocus descendant, else the first text
+    // field (opt out with data-pulp-autofocus="off").
+    if (typeof __pulpFocusOpenedDialog__ === "function")
+        __pulpFocusOpenedDialog__(this);
 };
 Element.prototype.showModal = function() {
     if (this.tagName !== "DIALOG") return;
@@ -949,9 +953,8 @@ Object.defineProperty(Element.prototype, "returnValue", {
 
 // ── <label> for-attribute focus routing ─────────────────────────────────
 // Clicking a <label> with a `for` attribute transfers focus / activation to
-// the labeled element. We don't yet
-// have a unified focus layer but the bridge has setFocus() — wire the
-// click handler so the harness gap is closed at the JS layer.
+// the labeled element through Element.focus(), which moves native keyboard
+// focus (setFocus) and keeps activeElement and the focus event in step.
 
 Element.prototype._labelForRoutingInstalled = false;
 Element.prototype._installLabelForRouting = function() {
@@ -965,11 +968,8 @@ Element.prototype._installLabelForRouting = function() {
         var target = document.getElementById(forId);
         if (!target) return;
         // Focus the labeled element. For checkbox/radio inputs the
-        // standard behavior is to also toggle/activate; if we have a
-        // bridge setFocus, prefer it; fall back to dispatchEvent.
-        if (typeof setFocus === "function" && target._nativeCreated) {
-            setFocus(target._id);
-        }
+        // standard behavior is to also toggle/activate.
+        if (typeof target.focus === "function") target.focus();
         if (target.tagName === "INPUT" &&
             (target._type === "checkbox" || target._type === "radio")) {
             target.checked = !target._checked;
@@ -985,6 +985,16 @@ Element.prototype._installLabelForRouting = function() {
 };
 
 // ── Input-specific properties ────────────────────────────────────────────────
+
+// Reflects the `autofocus` content attribute. Honoured once, when the element
+// is first connected to the document (see __pulpApplyMountFocus__).
+Object.defineProperty(Element.prototype, "autofocus", {
+    get: function() { return this.hasAttribute("autofocus"); },
+    set: function(v) {
+        if (v) this.setAttribute("autofocus", "");
+        else this.removeAttribute("autofocus");
+    }
+});
 
 Object.defineProperty(Element.prototype, "type", {
     get: function() { return this._type; },

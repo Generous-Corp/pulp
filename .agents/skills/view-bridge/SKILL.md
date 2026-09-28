@@ -2288,6 +2288,31 @@ block. When enqueuing overlays from host code, push onto the *painting root's*
 `interaction().overlay_queue`, not a process-global queue, or the overlay
 paints on the wrong editor (see `standalone.cpp`).
 
+## High-rate data pushes must not drive the page's render loop
+
+A native editor that pushes analyzer or meter data into its page every tick
+must not make `requestAnimationFrame` callbacks run outside the frame. Each
+extra drain of a self-rearming `draw()` is a full scene draw; measured on a
+materialized React import, a `load_script` push per audio-rate update drained
+rAF ~44 extra times a second at ~6.5 ms each and halved the frame rate.
+
+- `WidgetBridge::load_script` flushes pending rAF only until the host's frame
+  pump is live (the first `service_frame_callbacks()`). After that it leaves
+  rAF for the next tick and requests a repaint. Headless tests and a first
+  script load with no pump still materialize synchronously; a host that drives
+  only `poll_async_results()` never goes live and keeps the eager flush.
+  `frame_pump_live()` reports which regime a bridge is in.
+- Prefer `dispatch_native_message(receiver, type, payload)` for per-tick data:
+  typed arguments, no source generation or parse, microtasks pumped, rAF left
+  to the frame tick.
+- A spectrum display that polls `VisualizationBridge` from its frame tick
+  should set `VisualizationConfig::backlog_policy =
+  VisualizationBacklogPolicy::latest_window`. With the default `in_order`
+  policy and a `max_frames_per_poll` budget, a consumer polling slower than the
+  hop rate falls behind, overflows the capture tap, and the resulting
+  discontinuity blanks the spectrum until a full `fft_size` refills —
+  a freeze/jump cycle that looks like the analyzer "disappearing".
+
 ## Editor-INITIATED host resize (`Processor::request_editor_resize`)
 
 `on_view_resized` is the host→plugin direction (the DAW dragged the window,

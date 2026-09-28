@@ -124,8 +124,12 @@ public:
     // will route through Pulp's Dawn).
     bool has_native_gpu_bridge() const noexcept;
 
-    // Load and execute a UI script
+    /// Load and execute a UI script. Pending rAF callbacks are flushed only
+    /// until the host first calls service_frame_callbacks(); after that they
+    /// wait for the next frame tick. Push per-tick data with
+    /// dispatch_native_message() instead.
     void load_script(const std::string& code);
+    bool frame_pump_live() const noexcept { return frame_pump_live_; }
 
     /// Deliver one typed host-owned message to a named receiver in this UI
     /// realm. Arguments cross the engine binding directly; no JavaScript source
@@ -576,6 +580,7 @@ private:
     // service pass that already drew. A host that drives poll alone therefore
     // keeps drawing on every poll.
     bool frames_drained_by_service_ = false;
+    bool frame_pump_live_ = false;  // set by the first host frame service
     // Requested by __pulpRuntimeSettle__ while QuickJS is inside a native
     // callback. Drained only from the outer host-frame boundary; this is a
     // budget, not a synchronous recursion request.

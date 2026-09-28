@@ -181,6 +181,24 @@ static pulp::view::View* pulp_plugin_cancel_marked_text_and_revalidate(
 // AppKit ObjC frame that delivered the event → undefined behavior / host crash.
 // Wrap each dispatch in try/catch, exactly as the standalone PulpView mouse
 // handlers do (window_host_mac.mm), so a throwing handler is contained.
+
+// The open ComboBox dropdown under `pt` (root coords), or null. Scoped to THIS
+// editor's root. Several Pulp plugins can be open in one AU hosting-service
+// process; the process-wide `active_popup_` mirror would hand this editor's
+// click/wheel/hover to another plugin's open dropdown whenever the rects
+// overlap, and would leave the drag capture pointing into a tree this host does
+// not own.
+pulp::view::ComboBox* pulp_plugin_open_popup_at(pulp::view::View* root,
+                                                pulp::view::Point pt) {
+    if (!root) return nullptr;
+    auto* combo = pulp::view::ComboBox::active_popup_in(*root);
+    if (!combo) return nullptr;
+    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
+    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return nullptr;
+    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return nullptr;
+    return combo;
+}
+
 // Route an event at window-point `pt` to an open ComboBox popup when the point
 // falls inside its (flip/scroll/clamp-aware) menu rect. The dropdown paints as an
 // overlay OVER sibling views, so a plain hit_test lands on the sibling
@@ -194,17 +212,8 @@ bool pulp_plugin_route_to_open_popup(
     pulp::view::View* root, pulp::view::Point pt,
     const std::function<void(pulp::view::MouseEvent&)>& configure,
     pulp::view::ViewCapture* capture = nullptr) {
-    if (!root) return false;
-    // Scoped to THIS editor's root. Several Pulp plugins can be open in one AU
-    // hosting-service process; the process-wide `active_popup_` mirror would
-    // hand this editor's click/wheel/hover to another plugin's open dropdown
-    // whenever the rects overlap, and would leave the drag capture pointing
-    // into a tree this host does not own.
-    auto* combo = pulp::view::ComboBox::active_popup_in(*root);
+    auto* combo = pulp_plugin_open_popup_at(root, pt);
     if (!combo) return false;
-    float ddx = 0, ddy = 0, ddw = 0, ddh = 0;
-    if (!combo->dropdown_window_rect(ddx, ddy, ddw, ddh)) return false;
-    if (pt.x < ddx || pt.x > ddx + ddw || pt.y < ddy || pt.y > ddy + ddh) return false;
     pulp::view::MouseEvent me;
     me.position = pulp::view::mac_geometry::to_local(pt, combo, root);
     me.window_position = pt;
@@ -983,6 +992,30 @@ void pulp_plugin_refresh_hover_cursor(pulp::view::View* root,
   }
 }
 
+// Re-resolve the cursor while a right or middle button is held, and on its
+// release. AppKit delivers no -mouseMoved: while any button is down, so without
+// this the cursor stayed whatever it was when the button went down -- over the
+// context menu that press just opened, the cursor of the view it was opened on.
+// Cursor only: nothing is dispatched to the tree or to script, so a held
+// non-primary button reaches the editor exactly as it did before.
+void pulp_plugin_apply_held_button_cursor(NSView* view, NSEvent* event,
+                                          pulp::view::View* root,
+                                          pulp::view::Point local,
+                                          pulp::view::HoverCursorTracker* tracker,
+                                          BOOL* over_native_child) {
+  try {
+    if (!root || pulp_plugin_note_native_child(view, event, over_native_child)) return;
+    if (tracker) tracker->set_pointer(local);
+    const auto style = pulp_plugin_open_popup_at(root, local)
+                           ? pulp::view::View::CursorStyle::default_
+                           : pulp::view::hover_cursor_at(*root, local);
+    pulp::view::mac_geometry::set_ns_cursor_for_style(style);
+    if (tracker) tracker->note_published(style);
+  } catch (...) {
+    // A cursor update must never take down the host process.
+  }
+}
+
 // Forward a key the plugin did NOT consume to the DAW host, so transport keys
 // (Space = play/stop, R = record, …) keep working while a plugin editor is
 // frontmost. The DAW embeds our editor as a SUBVIEW of its own container view
@@ -1214,6 +1247,26 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     std::cerr << "PulpPluginView rightMouseDown NSException: "
               << [[exception name] UTF8String] << "\n";
   }
+}
+- (void)rightMouseDragged:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super rightMouseDragged:event];
+}
+- (void)rightMouseUp:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super rightMouseUp:event];
+}
+- (void)otherMouseDragged:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super otherMouseDragged:event];
+}
+- (void)otherMouseUp:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super otherMouseUp:event];
 }
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;
@@ -2018,6 +2071,26 @@ private:
                          &_dragCoalescer);
     if (self.rootView) self.rootView->request_repaint();
     [self syncKeyFocus];
+}
+- (void)rightMouseDragged:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super rightMouseDragged:event];
+}
+- (void)rightMouseUp:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super rightMouseUp:event];
+}
+- (void)otherMouseDragged:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super otherMouseDragged:event];
+}
+- (void)otherMouseUp:(NSEvent*)event {
+    pulp_plugin_apply_held_button_cursor(self, event, self.rootView, [self localPoint:event],
+                                         &_hoverCursor, &_pointerOverNativeChild);
+    [super otherMouseUp:event];
 }
 - (void)scrollWheel:(NSEvent*)event {
     if (!self.rootView) return;

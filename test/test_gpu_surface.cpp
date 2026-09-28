@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/render/gpu_surface.hpp>
+
+#include "support/stderr_capture.hpp"
 
 #include <cstdlib>
 #include <string_view>
@@ -238,6 +241,43 @@ TEST_CASE("GpuSurface adapter_info reports the driver's own identity",
     const bool identity_is_generic = generic_name && generic_vendor && generic_description;
     REQUIRE_FALSE(identity_is_generic);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("GpuSurface logs its adapter identity and stage timings on initialize",
+          "[render][gpu][startup-log]") {
+    auto surface = GpuSurface::create_dawn();
+    if (!surface)
+        SKIP(kNoGpu);
+
+    const auto before = surface->startup_timings();
+    REQUIRE(before.instance_ms < 0.0);  // nothing measured before initialize()
+
+    GpuSurface::Config config{};
+    config.width = 64;
+    config.height = 32;
+    pulp::test::StderrCapture capture;
+    const bool ok = surface->initialize(config);
+    const auto text = capture.text();
+    if (!ok)
+        SKIP(kNoSurfaceInit);
+
+    // The logged line is exactly the formatter applied to the surface's own
+    // adapter record — one line, with every identity field.
+    const auto expected = format_gpu_adapter_line(surface->adapter_info());
+    INFO(text);
+    REQUIRE(text.find(expected + "\n") != std::string::npos);
+    REQUIRE(text.find("GpuSurface: adapter name=\"") != std::string::npos);
+
+    // Only the Dawn-backed surface times its stages; every stage it ran is
+    // measured, and an offscreen surface still reports a (zero) surface stage.
+    const auto timings = surface->startup_timings();
+    if (timings.instance_ms >= 0.0) {
+        REQUIRE(timings.adapter_ms >= 0.0);
+        REQUIRE(timings.device_ms >= 0.0);
+        REQUIRE(timings.surface_ms >= 0.0);
+    }
+}
+#endif
 
 TEST_CASE("GpuSurface begin_frame before initialize returns false", "[render][gpu]") {
     auto surface = GpuSurface::create_dawn();

@@ -435,11 +435,51 @@ style.opacity;  // e.g., "1"
 ## Focus Management
 
 ```js
-el.focus();   // Gives keyboard focus
-el.blur();    // Removes keyboard focus
+el.focus();   // Gives the native view keyboard focus (caret + key delivery)
+el.blur();    // Removes it, if this element holds focus
 ```
 
+`focus()` moves real keyboard focus, not only `document.activeElement`: it
+calls the bridge's `setFocus(id)`, which runs the same focus transfer a mouse
+press does. The previously focused field blurs (committing its edit), the
+`TextEditor` behind an `<input>` / `<textarea>` gets a caret, and typed keys go
+to it. Elements whose native view cannot take focus - a plain `<div>`, a
+disabled field, anything hidden - are refused and the current focus is left
+alone, as in a browser. `blur()` calls `clearFocus(id)`, which only removes
+focus when this element actually holds it. The `focus` / `blur` events and
+`document.activeElement` are updated as before.
+
 Tab / Shift+Tab cycles through focusable elements automatically.
+
+### autofocus
+
+The `autofocus` attribute (`el.autofocus = true`, or React's `autoFocus` prop)
+is honoured once, when the element first mounts: the first autofocus element in
+a newly mounted subtree takes focus, later ones in the same mount are ignored,
+and re-inserting or re-rendering never steals focus back. With plain DOM calls
+"mounted" means connected under `document.body`; building a subtree while it
+is detached defers the focus until the subtree is appended.
+
+### Dialogs focus their first text field
+
+When a dialog mounts - `role="dialog"`, `role="alertdialog"`, or
+`aria-modal="true"` - and contains no autofocus element, Pulp focuses its first
+enabled text field (`<input>` of a text-like type, or `<textarea>`), so a
+rename or save dialog opens with a live caret without any app code. An explicit
+`autofocus` / `autoFocus` always wins.
+
+Opt out with `data-pulp-autofocus="off"`:
+
+```html
+<div role="dialog" data-pulp-autofocus="off">...</div>   <!-- one dialog -->
+<body data-pulp-autofocus="off">                            <!-- the whole app -->
+```
+
+In script, `document.body.setAttribute("data-pulp-autofocus", "off")` turns the
+default off app-wide; with `@pulp/react`, set the attribute on the dialog or on
+any ancestor element (such as your app's root). The default runs at mount: a
+dialog that mounts hidden (`display: none`) and is shown later is not focused,
+so render dialogs conditionally, or call `focus()` when you show one.
 
 ## Timers
 
