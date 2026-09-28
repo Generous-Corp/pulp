@@ -169,9 +169,8 @@ python3 tools/scripts/queue_batch_attribute.py --history [--limit 30] [<run-id>]
 
 For each failing test it names the entry whose presence EXACTLY separates the
 failing batches from the green ones: in every failing batch, in no passing
-batch. It names a culprit only from 2 or more failing batches, and breaks a tie
-between entries that always travelled together only with one that failed a batch
-on its own. A test no entry separates, failing at a low rate or rescued by a
+batch. It names a culprit only from 2 or more failing batches, and names nobody
+(`ambiguous`) while two entries have always travelled together. A test no entry separates, failing at a low rate or rescued by a
 retry, is reported as `flake`. Membership comes from each group's first-parent
 chain down to its merge base with main; the `pr-N-<sha>` ref's sha is the
 previous entry's group commit, so reading members from it sees only the last

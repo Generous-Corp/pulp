@@ -1126,7 +1126,7 @@ class HistoryAttributionTests(unittest.TestCase):
         self.assertIsNone(hist.culprit)
         self.assertEqual([s.pr for s in hist.separators], [10])
 
-    def test_entries_that_always_travelled_together_are_not_split_by_a_coin(self) -> None:
+    def test_entries_that_always_travelled_together_are_split_only_by_evidence(self) -> None:
         together = [
             group("1", {10, 11}, failed={self.T}),
             group("2", {10, 11}, failed={self.T}),

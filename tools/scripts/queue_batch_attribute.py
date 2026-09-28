@@ -1139,13 +1139,12 @@ def history_attribution(
 def classify_history(hist: TestHistory) -> None:
     strong = [s for s in hist.separators if s.with_fail >= MIN_SEPARATING_FAILURES]
     if strong:
-        # Entries that always travelled together separate equally well; one
-        # that failed a batch on its own breaks the tie, and nothing else may.
-        alone = [s for s in strong if s.alone_fail]
-        pool = alone if alone else strong
-        if len(pool) == 1:
+        # Entries that always travelled together separate equally well, and
+        # picking one is a coin toss. A later failing group holding only one of
+        # them is the evidence that splits them.
+        if len(strong) == 1:
             hist.verdict = HISTORY_CULPRIT
-            hist.culprit = pool[0].pr
+            hist.culprit = strong[0].pr
         else:
             hist.verdict = HISTORY_AMBIGUOUS
         return
