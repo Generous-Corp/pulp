@@ -601,6 +601,20 @@ pulp import-design --from pencil --file design.json --debug
 
 Reports: element counts (containers/widgets/labels), token counts, timing (ms), validation results, and gaps (unmapped shapes).
 
+## Interaction Performance in React Imports
+
+A captured or materialized React import re-applies its captured metadata on
+every React commit, so the app code that drives it must keep commits off
+per-move and per-frame paths: keep pointer, hover and animation state in refs,
+draw from them on the canvas and request a repaint, update small readouts
+imperatively, never call a setter with an unchanged value, and handle each
+event once. A commit per `pointermove` renders identically and passes every
+visual check, then stalls frames only while the mouse moves.
+
+The rule, the five usual commit sources, and a measurement recipe are in
+[Keeping a drag interaction cheap](interaction-cost.md); agents also get them
+from the `import-design` and `trace-analysis` skills.
+
 ## Acquisition vs Import
 
 MCP connectors are acquisition helpers unless a source contract says otherwise. They can read a live tool, capture screenshots, or gather metadata, then an agent writes a supported file for `pulp import-design`.
