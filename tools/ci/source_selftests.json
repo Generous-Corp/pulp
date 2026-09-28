@@ -62,6 +62,13 @@
       "timeout": 120.0
     },
     {
+      "name": "build-dir-lock-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_build_dir_lock.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "build-matrix-contract",
       "argv": [
         "{repo}/tools/ci/test_build_matrix_contract.py"
@@ -105,6 +112,13 @@
       "argv": [
         "{repo}/tools/scripts/test_changed_surface_policy.py"
       ]
+    },
+    {
+      "name": "checkout-location-guard-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_checkout_location_guard.py"
+      ],
+      "timeout": 120.0
     },
     {
       "name": "ci-python-selector-selftest",

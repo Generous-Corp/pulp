@@ -630,6 +630,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+        # The two refusals governed-build applies before a lease: a checkout in
+        # a temporary directory (it misses the shared ccache on every compile),
+        # and a second build into a tree another live build holds.
+        add_test(NAME checkout-location-guard-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_checkout_location_guard.py")
+        add_test(NAME build-dir-lock-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
+        set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
+            PROPERTIES TIMEOUT 120)
     endif()
 
     # Shadow-mode affected-test set the merge-group macos job annotates after

@@ -234,6 +234,37 @@ cascade: attribute it with `queue_batch_attribute.py`, and check whether the
 landing batch that produced main's current tree reused a receipt (three steps,
 green, ran nothing) — if it did, main's tree has never been tested.
 
+### Main is red: land the fix first by jumping it to the head of the queue
+
+When `base_poison_detector.py` says `poisoned`, or the same failing test name
+appears in two or more consecutive merge-group `macos` jobs on different hosts,
+every batch that forms behind the break will fail after a full gate and eject
+innocent entries. Fixing the ejected PRs is wasted work. Land the fix instead,
+ahead of everything else:
+
+```bash
+id=$(ghapp api repos/Generous-Corp/pulp/pulls/<fix-pr> --jq .node_id)
+GHAPP_ALLOW_QUEUE_REMOVAL=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+  dequeuePullRequest(input:{id:$id}){mergeQueueEntry{id}}}'
+GHAPP_ALLOW_REARM=1 ghapp api graphql -F id="$id" -f query='mutation($id:ID!){
+  enqueuePullRequest(input:{pullRequestId:$id,jump:true}){mergeQueueEntry{position}}}'
+```
+
+The dequeue is only needed when the fix PR already sits in the queue; a PR not
+yet queued goes straight to the enqueue. The jump is pre-approved for a PR whose
+title or body names the failing test or the change being reverted. If no fix PR
+exists, open the revert or the one-line fix and jump that. Record the PR, the
+failing test, and how long main was red. Jumping anything else, or switching on
+an automatic jump, is a maintainer decision.
+
+## Wait on a blocking waiter, not a poll loop
+
+A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|release`,
+`shipyard ship --pr <n>` (merges on green), or a background command that exits
+when the condition holds. A loop that reads the same state every few seconds
+costs an agent turn per read and changes nothing: in one week of agent sessions
+on one host, poll turns were a fifth of all tool calls.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
@@ -531,6 +562,9 @@ current `main` tip. That full run is what issues the receipt. Three traps:
 - The Test step is `continue-on-error` on pull requests, so its `conclusion`
   is always `success`. Anything that must know whether the tests passed (the
   issuer, `Surface ctest failures`) reads `steps.ctest.outcome`.
+  Because of that, `Surface ctest failures` must always exit 0: it runs on
+  a non-gating PR-head failure, and under `bash -e -o pipefail` a grep that
+  matched no Catch2 assertion once made the reporter the job's only red step.
 - REST `auto_merge` is non-null only while an armed PR waits on its checks; it
   reads null once the queue holds the PR. Arming a PR whose checks are already
   green enqueues it at once and starts no new run, so it gets no receipt.
@@ -744,6 +778,20 @@ to slip past. It executes in three places with different force:
 them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
+
+### The pre-push coverage build skips itself on a starved host: a skip, not a pass
+
+On a host whose cores are leased to gate VMs, `governed-build.sh` pins a build at
+its `-j2` floor, and the pre-push diff-coverage build then runs for hours (m5,
+7 days to 2026-09-27: 18 sessions, 12.6 agent-hours, one push waited 12,300 s)
+for a check CI runs anyway. The hook now sets `PULP_DIFF_COVER_SKIP_WHEN_STARVED=1`;
+`local_diff_cover.sh` asks `governed-build.sh --probe-jobs` (acquires nothing) and,
+when the answer is at or below `PULP_DIFF_COVER_STARVED_MAX_JOBS` (default 2),
+exits **4** having built nothing. The hook prints `DIFF COVERAGE SKIPPED (host
+starved): NOT checked for this push` and lets the push through. Count that line;
+never read it as coverage evidence. `PULP_DIFF_COVER_IGNORE_STARVATION=1` forces the
+build, and a direct `tools/scripts/local_diff_cover.sh` or `pulp coverage diff`
+never skips.
 
 ### A PR does not re-pin `gpu-vellum-handoff.yaml` — the version bot does
 
@@ -1476,6 +1524,17 @@ its fail-closed rules (CMake change selects all; script-driven tests are
 affected whenever a script surface changed; a changed file no edge reads
 selects all) are the contract any real selector inherits. The ctest step takes
 no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
+## The iOS gate shadow annotation is evidence, not a skip
+
+`pulp-ios-gate-shadow/v1` notices on the `macos` job (`would_skip` / `run`,
+then `ran_ok` / `ran_failed`) come from `tools/ci/ios_gate_digest.py`, which
+digests the gate's input set + toolchain and looks it up among passing runs.
+Shadow mode changes no gating: a `would_skip` job still ran the gate. Read
+`would_skip ÷ runs` per event (merge group and PR head separately, n ≥ 20)
+and, as the safety control, `would_skip` followed by `ran_failed` (must be
+0). Do not turn the verdict into a skip in build.yml; that is a decisions-
+contract amendment with the shadow data as its Step Zero.
 
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 

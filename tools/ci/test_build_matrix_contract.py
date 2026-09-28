@@ -16,13 +16,22 @@ The workflow also embeds Python in shell heredocs inside YAML block scalars,
 where indentation carries meaning three times over. A mis-indented edit there
 produces a file that still loads as YAML and still lints, and fails only when
 the job runs. Compiling every heredoc catches that locally instead.
+
+The step that surfaces ctest failures into the job summary is a reporter, and a
+reporter must never decide the job's result. It runs whenever the Test step's
+outcome is failure, which on a pull-request head is non-gating receipt evidence,
+so a non-zero exit from the reporter alone turns the required check red. Its
+script is executed here under the exact shell GitHub uses for `shell: bash`.
 """
 
 from __future__ import annotations
 
 import ast
 import pathlib
+import os
 import re
+import subprocess
+import tempfile
 import textwrap
 import unittest
 
@@ -30,6 +39,31 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 BUILD_YML = REPO_ROOT / ".github" / "workflows" / "build.yml"
 
 HEREDOC_RE = re.compile(r"<<'(\w+)'\s*$")
+SURFACE_STEP = "Surface ctest failures (non-Windows)"
+# The command line GitHub Actions runs a `shell: bash` step with.
+GITHUB_BASH = ["bash", "--noprofile", "--norc", "-e", "-o", "pipefail"]
+EXPRESSION_RE = re.compile(r"\$\{\{[^}]*\}\}")
+
+
+def step_run_script(text: str, step_name: str) -> str:
+    """The `run: |` body of the named step, dedented, expressions blanked out."""
+    lines = text.splitlines()
+    start = next(
+        i for i, line in enumerate(lines) if line.strip() == f"- name: {step_name}"
+    )
+    step_indent = len(lines[start]) - len(lines[start].lstrip())
+    i = start + 1
+    while not lines[i].strip().startswith("run: |"):
+        if lines[i].strip().startswith("- name:"):
+            raise AssertionError(f"step {step_name!r} has no `run: |` block")
+        i += 1
+    body: list[str] = []
+    for line in lines[i + 1 :]:
+        indent = len(line) - len(line.lstrip())
+        if line.strip() and indent <= step_indent + 2:
+            break
+        body.append(line)
+    return EXPRESSION_RE.sub("x", textwrap.dedent("\n".join(body)))
 
 
 def extract_heredocs(text: str) -> list[tuple[int, str, str]]:
@@ -179,6 +213,79 @@ class MacosLegAlwaysRunsTests(unittest.TestCase):
             "build.yml no longer runs on push to main, so the macOS leg above "
             "would never execute against main.",
         )
+
+
+class SurfaceCtestFailuresStepTests(unittest.TestCase):
+    """The failure reporter exits 0 in every state a failed test run leaves."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not BUILD_YML.is_file():
+            raise unittest.SkipTest(f"{BUILD_YML} not present")
+        cls.script = step_run_script(
+            BUILD_YML.read_text(encoding="utf-8"), SURFACE_STEP
+        )
+
+    def _run(self, files: dict[str, str]) -> tuple[subprocess.CompletedProcess, str]:
+        with tempfile.TemporaryDirectory() as root:
+            build = pathlib.Path(root, "build")
+            for rel, content in files.items():
+                path = build / "Testing" / "Temporary" / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+            summary = pathlib.Path(root, "summary.md")
+            env = dict(
+                os.environ,
+                PULP_BUILD_DIR=str(build),
+                GITHUB_STEP_SUMMARY=str(summary),
+            )
+            proc = subprocess.run(
+                GITHUB_BASH + ["-c", self.script],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            written = summary.read_text(encoding="utf-8") if summary.exists() else ""
+        return proc, written
+
+    def test_extracted_the_reporter_script(self) -> None:
+        """Control: the extractor found the step, not an empty body."""
+        self.assertIn("LastTestsFailed.log", self.script)
+        self.assertIn("GITHUB_STEP_SUMMARY", self.script)
+
+    def test_failed_tests_without_catch2_assertions_exit_zero(self) -> None:
+        # A timed-out or non-Catch2 test leaves no line the assertion grep
+        # matches; under pipefail that grep used to end the step with exit 1.
+        proc, summary = self._run(
+            {
+                "LastTestsFailed.log": "20705:a mouse-opened popup\n",
+                "LastTest.log": "Test timed out after 120 seconds\n",
+            }
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("a mouse-opened popup", summary)
+        self.assertIn("a mouse-opened popup", proc.stdout)
+
+    def test_failed_tests_without_a_last_test_log_exit_zero(self) -> None:
+        proc, summary = self._run({"LastTestsFailed.log": "7:only-the-name\n"})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("only-the-name", summary)
+
+    def test_catch2_assertions_are_surfaced(self) -> None:
+        proc, summary = self._run(
+            {
+                "LastTestsFailed.log": "3:named\n",
+                "LastTest.log": "x.cpp:9: FAILED:\n  REQUIRE( a == b )\n",
+            }
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("REQUIRE( a == b )", summary)
+
+    def test_no_ctest_result_log_exits_zero(self) -> None:
+        proc, summary = self._run({})
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("No ctest result log", summary)
 
 
 if __name__ == "__main__":

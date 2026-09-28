@@ -192,6 +192,29 @@ class RefreshAndQueueTests(unittest.TestCase):
         r = px.mq_attempts(merged, win())
         self.assertEqual(r["before"]["value"], 1.5)
 
+    def test_tree_identical_groups_reads_trees_not_shas(self):
+        merged = [{"number": 1, "mergedAt": "2026-09-05T05:00:00Z", "mergeCommit": "m1"},
+                  {"number": 2, "mergedAt": "2026-09-05T06:00:00Z", "mergeCommit": "m2"},
+                  {"number": 3, "mergedAt": "2026-09-05T07:00:00Z", "mergeCommit": "m3"},
+                  {"number": 4, "mergedAt": "2026-09-12T07:00:00Z", "mergeCommit": "m4"}]
+        commits = {
+            # main did not move: merge tree == head tree although the SHAs differ
+            "m1": {"parents": ["base", "h1"], "tree": "T1"}, "h1": {"parents": ["x"], "tree": "T1"},
+            # main moved under the PR: trees differ
+            "m2": {"parents": ["base2", "h2"], "tree": "T2m"}, "h2": {"parents": ["x"], "tree": "T2h"},
+            # head tree unknown: not resolved, not counted
+            "m3": {"parents": ["base3", "h3"], "tree": "T3"},
+            # after the split
+            "m4": {"parents": ["base4", "h4"], "tree": "T4"}, "h4": {"parents": ["x"], "tree": "T4"}}
+        r = px.tree_identical_groups(merged, commits, win())
+        self.assertEqual(r["control"]["value"], 3)
+        self.assertEqual(r["before"]["n"], 2)
+        self.assertEqual(r["before"]["value"], 0.5)
+        self.assertEqual(r["after"]["value"], 1.0)
+        blind = px.tree_identical_groups(merged, {}, win())
+        self.assertEqual(blind["control"]["value"], 0)
+        self.assertIn("BLIND", blind["verdict"].upper())
+
     def test_ejections_are_attributed_by_log_and_window(self):
         w = win(exclude=[(T("2026-09-06T00:00:00"), T("2026-09-07T00:00:00"))])
         merged = []

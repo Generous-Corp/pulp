@@ -1818,8 +1818,10 @@ jobs:
 
       - name: Build
         shell: bash
+        id: build
         env:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
+          IOS_GATE_TOKEN: ${{ github.token }}
         run: |
           # Snapshot the cumulative ccache counters so the "Ccache stats" step
           # can print this job's own calls (see tools/ci/ccache_job_delta.py).
@@ -1840,6 +1842,35 @@ jobs:
             if [ "$IOS_COMPILE_REQUIRED" = false ]; then
               echo "::notice::iOS compile gate skipped by exact changed-surface authorization"
             else
+              # SHADOW MODE (tools/ci/ios_gate_digest.py): identify this gate run
+              # by a digest of every file the gate's configures can read plus
+              # the Apple toolchain, look the digest up among passing runs, and
+              # ANNOTATE what a digest-keyed skip would have done. The gate
+              # still runs; nothing is skipped and no gating changes. The
+              # annotations are the evidence for (or against) a later
+              # switch-on: would_skip ÷ runs, and would_skip verdicts followed
+              # by a real failure, which must stay at zero.
+              ios_digest="$(python3 tools/ci/ios_gate_digest.py compute \
+                --repo "$GITHUB_WORKSPACE" 2>/dev/null \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')" \
+                || ios_digest=""
+              ios_shadow_src=""
+              if [ -n "$ios_digest" ]; then
+                ios_lookup="$(python3 tools/ci/ios_gate_digest.py lookup \
+                  --repository "$GITHUB_REPOSITORY" --token "$IOS_GATE_TOKEN" \
+                  --digest "$ios_digest")" || ios_lookup='{"found": false}'
+                ios_shadow_src="$(printf '%s' "$ios_lookup" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          print(d.get("source_run_id") or "") if d.get("found") else print("")')"
+                if [ -n "$ios_shadow_src" ]; then
+                  python3 tools/ci/ios_gate_digest.py note --verdict would_skip \
+                    --digest "$ios_digest" --source-run-id "$ios_shadow_src"
+                  echo "iOS compile gate shadow: would skip (digest ${ios_digest} passed in run ${ios_shadow_src}); running anyway"
+                else
+                  python3 tools/ci/ios_gate_digest.py note --verdict run --digest "$ios_digest"
+                fi
+              fi
               set +e
               bash test/cmake/test_ios_compile_gate.sh \
                 "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
@@ -1848,8 +1879,19 @@ jobs:
               if [ "$ios_gate_rc" = 77 ]; then
                 echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
               elif [ "$ios_gate_rc" != 0 ]; then
+                [ -z "$ios_digest" ] || python3 tools/ci/ios_gate_digest.py note \
+                  --verdict ran_failed --digest "$ios_digest" \
+                  ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
                 echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
                 exit "$ios_gate_rc"
+              elif [ -n "$ios_digest" ]; then
+                python3 tools/ci/ios_gate_digest.py note --verdict ran_ok \
+                  --digest "$ios_digest" ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
+                mkdir -p "$RUNNER_TEMP/ios-gate-shadow"
+                printf '{"schema":"pulp-ios-gate-shadow/v1","digest":"%s","run_id":"%s","sha":"%s","event":"%s"}\n' \
+                  "$ios_digest" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" \
+                  > "$RUNNER_TEMP/ios-gate-shadow/marker.json"
+                echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"
               fi
             fi
           fi
@@ -1886,6 +1928,19 @@ jobs:
           fi
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
+
+      # A passing iOS gate run is recorded under its input digest so later runs
+      # (PR heads and merge groups alike: artifacts are repository-wide, not
+      # branch-scoped like the Actions cache) can find it. Shadow mode only
+      # reads these to annotate; see the Build step.
+      - name: Record iOS gate digest (shadow)
+        if: steps.build.outputs.ios_gate_digest != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
+          path: ${{ runner.temp }}/ios-gate-shadow/marker.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Ccache stats
         if: always()
@@ -2363,9 +2418,20 @@ jobs:
         # invisible remotely. ctest's own result logs name it: dump them into
         # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
+        #
+        # This step only reports; it must never decide the job's result. On a
+        # pull-request head the full suite runs as non-gating receipt evidence
+        # (the Test step is continue-on-error), so a non-zero exit here would
+        # turn the required check red for a failure the workflow deliberately
+        # does not gate on. On other events the Test step already failed
+        # visibly as its own step. The default shell is `bash -e -o pipefail`,
+        # under which a grep that matches nothing (a failure that is a timeout
+        # or a non-Catch2 test) ends the step with exit 1, so errexit is off
+        # and every command that may legitimately return non-zero is guarded.
         if: (failure() || steps.ctest.outcome == 'failure') && runner.os != 'Windows'
         shell: bash
         run: |
+          set +e
           tdir="$PULP_BUILD_DIR/Testing/Temporary"
           {
             echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
@@ -2374,7 +2440,7 @@ jobs:
               echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
               echo "### Failing assertions (from LastTest.log)"
               echo '```'
-              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60 || true
               echo '```'
             else
               echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
@@ -2382,6 +2448,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           # Also echo failed-test names to the (locally-readable) job log.
           { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== ctest failed tests ==="; cat "$tdir/LastTestsFailed.log"; }; } || true
+          exit 0
 
       - name: Upload ctest logs and JUnit report
         # Full Testing/Temporary/ (LastTest.log, LastTestsFailed.log, …) as an
