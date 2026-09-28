@@ -177,7 +177,17 @@ The window is time-based (default 24 h, capped at `--limit` runs, and it says
 when the cap cut it). Completed runs are cached per run under
 `~/.cache/pulp/queue-history/` (`PULP_QUEUE_HISTORY_CACHE` overrides), so a
 repeated pass reads only new runs; membership is recomputed every pass because
-it depends on where main is now. A test no entry separates, failing at a low rate or rescued by a
+it depends on where main is now.
+
+It judges every REQUIRED context, read from branch protection and rulesets
+(never a hard-coded list): `macos` failures by ctest name, any other required
+failure as `[<context>] <failing step>`. A red outside the required set (the
+hosted Linux job, coverage, CodeQL) is listed as advisory and never counted:
+the queue does not eject on it. Add `--pr <n>` to explain each of that PR's
+`failed_checks` ejections from the exact group that caused it (the removal
+event's `beforeCommit` is that group's head sha, so the run is found by
+identity, not time). A group whose `build.yml` run shows only a Linux red did
+not eject anyone; look for the entry's own group instead. A test no entry separates, failing at a low rate or rescued by a
 retry, is reported as `flake`. Membership comes from each group's first-parent
 chain down to its merge base with main; the `pr-N-<sha>` ref's sha is the
 previous entry's group commit, so reading members from it sees only the last

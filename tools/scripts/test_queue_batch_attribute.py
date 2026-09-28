@@ -1364,6 +1364,152 @@ class HistoryWindowTests(unittest.TestCase):
         self.assertIsNone(qba.members_from_chain(chain, "elsewhere"))
 
 
+class FakeGitHub:
+    """Just enough of the REST API for one merge-group run's required contexts."""
+
+    def __init__(self, runs=(), required=("macos", "Enforce version & skill sync"),
+                 protection_readable=True):
+        self.runs = list(runs)
+        self.required = list(required)
+        self.protection_readable = protection_readable
+        self.checks: dict[str, list[dict]] = {}
+        self.steps: dict[str, list[dict]] = {}
+        self.calls: list[str] = []
+
+    def check(self, sha, name, conclusion, job=1, steps=None, runner="m5"):
+        job = str(job) + str(len(self.steps))
+        self.checks.setdefault(sha, []).append({
+            "id": len(self.steps) + 1, "name": name, "conclusion": conclusion,
+            "details_url": f"https://github.com/o/r/actions/runs/77/job/{job}",
+        })
+        if steps is None:
+            steps = [{"name": "Test (non-Windows)", "conclusion": conclusion}]
+        self.steps[job] = [dict(step, runner=runner) for step in steps]
+
+    def __call__(self, path, jq=None, **_):
+        self.calls.append(path)
+        if "/actions/workflows/" in path:
+            return json.dumps({"workflow_runs": self.runs if "page=1" in path else []})
+        if path.endswith("/protection/required_status_checks"):
+            return "\n".join(self.required) if self.protection_readable else None
+        if "/rules/branches/" in path:
+            return "" if self.protection_readable else None
+        if "/check-runs" in path:
+            sha = path.split("/commits/")[1].split("/")[0]
+            return "\n".join(json.dumps(c) for c in self.checks.get(sha, []))
+        if "/actions/jobs/" in path:
+            job = path.rsplit("/", 1)[1]
+            steps = self.steps.get(job, [])
+            if jq and "failure" in jq:
+                return "\n".join(s["name"] for s in steps if s["conclusion"] == "failure")
+            runner = steps[0]["runner"] if steps else ""
+            return json.dumps({"runner_name": runner, "steps": steps})
+        if "/compare/" in path:
+            return "base"
+        if "/commits/g" in path:
+            pr = path.rsplit("g", 1)[1]
+            return f"Merge pull request #{pr}0 from a/b\tbase"
+        return None
+
+
+class RequiredContextTests(unittest.TestCase):
+    RUN = {"id": 5, "status": "completed", "created_at": "2026-09-28T06:21:00Z",
+           "head_branch": f"gh-readonly-queue/main/pr-50-{'a' * 40}", "head_sha": "g5"}
+    REQUIRED = frozenset({"macos", "Enforce version & skill sync"})
+
+    def read(self, fake, log="", required=None):
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("2_macos.txt", log)
+        with mock.patch.object(qba, "gh", side_effect=fake), mock.patch.object(
+            qba, "run_log_zip", return_value=archive.getvalue()
+        ):
+            return qba.read_group("o/r", self.RUN, required or self.REQUIRED)
+
+    def test_an_advisory_red_is_recorded_and_never_counted_as_a_failure(self) -> None:
+        fake = FakeGitHub()
+        fake.check("g5", "macos", "success")
+        fake.check("g5", "Enforce version & skill sync", "success")
+        fake.check("g5", "Linux (x64) [github-hosted]", "failure")
+        record = self.read(fake)
+        self.assertTrue(record["evidence"])
+        self.assertEqual(record["failed"], [])
+        self.assertEqual(record["advisory_failed"], ["Linux (x64) [github-hosted]"])
+        self.assertIsNone(record["passed"])
+
+    def test_a_required_red_outside_macos_is_named_by_its_failing_step(self) -> None:
+        fake = FakeGitHub()
+        fake.check("g5", "macos", "success")
+        fake.check("g5", "Enforce version & skill sync", "failure",
+                   steps=[{"name": "Checkout", "conclusion": "success"},
+                          {"name": "Run source selftests", "conclusion": "failure"}])
+        record = self.read(fake)
+        self.assertEqual(
+            record["failed"], ["[Enforce version & skill sync] Run source selftests"]
+        )
+
+    def test_a_macos_red_without_a_ctest_block_is_named_by_its_step(self) -> None:
+        fake = FakeGitHub()
+        fake.check("g5", "macos", "failure",
+                   steps=[{"name": "Build", "conclusion": "failure"}])
+        fake.check("g5", "Enforce version & skill sync", "success")
+        record = self.read(fake, log="error: linker command failed")
+        self.assertEqual(record["failed"], ["[macos] Build"])
+        self.assertEqual(record["passed"], [])
+
+    def test_a_green_macos_placeholder_is_not_a_full_suite_pass(self) -> None:
+        fake = FakeGitHub()
+        fake.check("g5", "macos", "success",
+                   steps=[{"name": "Report placeholder", "conclusion": "success"}])
+        self.assertEqual(self.read(fake)["passed"], [])
+
+    def test_the_required_set_comes_from_protection_not_a_constant(self) -> None:
+        fake = FakeGitHub(required=("macos", "custom-gate"))
+        with mock.patch.object(qba, "gh", side_effect=fake):
+            self.assertEqual(qba.required_contexts("o/r"), {"macos", "custom-gate"})
+        with mock.patch.object(
+            qba, "gh", side_effect=FakeGitHub(protection_readable=False)
+        ):
+            self.assertIsNone(qba.required_contexts("o/r"))
+
+    def test_unreadable_protection_judges_macos_only_and_says_so(self) -> None:
+        fake = FakeGitHub(runs=[self.RUN], protection_readable=False)
+        fake.check("g5", "macos", "success")
+        fake.check("g5", "Enforce version & skill sync", "failure")
+        with mock.patch.object(qba, "gh", side_effect=fake):
+            read = qba.observe_history(
+                "o/r", since="24h", cache_dir=None,
+                now=qba.datetime(2026, 9, 28, 7, 0, tzinfo=qba.timezone.utc),
+            )
+        self.assertTrue(read.required_unread)
+        self.assertEqual(read.required, ["macos"])
+        self.assertEqual(read.observations[0].failed, frozenset())
+        self.assertEqual(
+            read.observations[0].advisory_failed, {"Enforce version & skill sync"}
+        )
+
+    def test_a_context_failure_is_attributed_like_a_test(self) -> None:
+        gate = qba.context_item("Enforce version & skill sync", "Run source selftests")
+        both = frozenset({"macos", "Enforce version & skill sync"})
+
+        def obs(run_id, members, failed=()):
+            return qba.GroupObservation(
+                run_id=run_id, members=frozenset(members), failed=frozenset(failed),
+                passed=None, required_ran=both,
+            )
+
+        [hist] = qba.history_attribution(
+            [obs("1", {7}, {gate}), obs("2", {7, 8}, {gate}), obs("3", {8})], [gate]
+        )
+        self.assertEqual(hist.culprits, [7])
+        self.assertTrue(obs("3", {8}).ran(gate))
+        self.assertFalse(
+            qba.GroupObservation(
+                run_id="4", members=frozenset(), required_ran=frozenset({"macos"})
+            ).ran(gate)
+        )
+
+
 class HistoryCacheTests(unittest.TestCase):
     """A completed run never changes, so a second pass reads only new runs."""
 
@@ -1383,35 +1529,20 @@ class HistoryCacheTests(unittest.TestCase):
     )
 
     def run_pass(self, cache_dir, runs):
-        calls: list[str] = []
-
-        def gh(path, jq=None, **_):
-            calls.append(path)
-            if "/actions/workflows/" in path:
-                return json.dumps({"workflow_runs": runs if "page=1" in path else []})
-            if path.endswith("/jobs?per_page=100"):
-                return json.dumps({"jobs": [{
-                    "name": "macos", "conclusion": "failure", "runner_name": "m5",
-                    "steps": [{"name": "Test (non-Windows)", "conclusion": "failure"}],
-                }]})
-            if "/compare/" in path:
-                return "base"
-            if "/commits/g" in path:
-                pr = path.rsplit("g", 1)[1]
-                return f"Merge pull request #{pr}0 from a/b\tbase"
-            return None
-
+        fake = FakeGitHub(runs=runs)
+        for run in runs:
+            fake.check(run["head_sha"], "macos", "failure", job=run["id"])
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w") as bundle:
             bundle.writestr("2_macos.txt", self.LOG)
-        with mock.patch.object(qba, "gh", side_effect=gh), mock.patch.object(
+        with mock.patch.object(qba, "gh", side_effect=fake), mock.patch.object(
             qba, "run_log_zip", return_value=archive.getvalue()
         ) as logs:
             read = qba.observe_history(
                 "o/r", since="24h", cache_dir=cache_dir,
                 now=qba.datetime(2026, 9, 28, 6, 0, tzinfo=qba.timezone.utc),
             )
-        return read, calls, logs.call_count
+        return read, fake.calls, logs.call_count
 
     def test_a_second_pass_fetches_nothing_already_read(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1419,7 +1550,7 @@ class HistoryCacheTests(unittest.TestCase):
             second, calls, second_logs = self.run_pass(pathlib.Path(tmp), self.RUNS)
         self.assertEqual((first.fetched, first.from_cache, first_logs), (2, 0, 2))
         self.assertEqual((second.fetched, second.from_cache, second_logs), (0, 2, 0))
-        self.assertFalse([c for c in calls if c.endswith("/jobs?per_page=100")])
+        self.assertFalse([c for c in calls if "/check-runs" in c])
         self.assertEqual(
             {o.run_id: o.members for o in second.observations},
             {"1": {10}, "2": {20}},
@@ -1443,6 +1574,57 @@ class HistoryCacheTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in runs], [2])
 
     NOW_SINCE = qba.datetime(2026, 9, 27, 6, 0, tzinfo=qba.timezone.utc)
+
+
+class EjectionTests(unittest.TestCase):
+    PAYLOAD = {"data": {"repository": {"pullRequest": {"timelineItems": {"nodes": [
+        {"createdAt": "2026-09-28T03:55:40Z", "reason": "failed_checks",
+         "beforeCommit": {"oid": "b" * 40}},
+        {"createdAt": "2026-09-28T05:00:00Z", "reason": "manually_removed",
+         "beforeCommit": {"oid": "c" * 40}},
+        {"createdAt": "2026-09-28T06:32:28Z", "reason": "failed_checks",
+         "beforeCommit": {"oid": "4" * 40}},
+    ]}}}}}
+
+    def test_only_failed_checks_removals_are_ejections(self) -> None:
+        found = qba.parse_ejections(self.PAYLOAD)
+        self.assertEqual([e.before for e in found], ["b" * 40, "4" * 40])
+
+    def test_the_ejecting_run_is_the_group_built_on_the_removed_head(self) -> None:
+        seen: list[str] = []
+
+        def gh(path, jq=None, **_):
+            seen.append(path)
+            return "36383717569" if f"head_sha={'4' * 40}" in path else "1"
+
+        with mock.patch.object(qba, "graphql", return_value=self.PAYLOAD), \
+                mock.patch.object(qba, "gh", side_effect=gh):
+            found = qba.ejections("o/r", 8966)
+        self.assertEqual(found[-1].run_id, "36383717569")
+        self.assertTrue(all("event=merge_group" in path for path in seen))
+
+    def test_the_report_names_the_required_cause_and_sets_aside_advisory_reds(self) -> None:
+        flake = qba.TestHistory(test="browser", verdict=qba.HISTORY_FLAKE)
+        obs = qba.GroupObservation(
+            run_id="36383717569", members=frozenset({8966}),
+            failed=frozenset({"browser"}), passed=frozenset(),
+            advisory_failed=frozenset({"Linux (x64) [github-hosted]"}),
+        )
+        ejection = qba.Ejection(removed_at="2026-09-28T06:32:28Z", before="4" * 40,
+                                run_id="36383717569")
+        text = "\n".join(qba.render_ejection(8966, ejection, obs, {"browser": flake}))
+        self.assertIn("required failure: browser -> flake", text)
+        self.assertIn("advisory reds, not the cause: Linux (x64) [github-hosted]", text)
+
+    def test_an_ejection_no_required_context_explains_says_so(self) -> None:
+        obs = qba.GroupObservation(
+            run_id="9", members=frozenset({1}),
+            advisory_failed=frozenset({"Linux (x64) [github-hosted]"}),
+        )
+        ejection = qba.Ejection(removed_at="t", before="4" * 40, run_id="9")
+        text = "\n".join(qba.render_ejection(1, ejection, obs, {}))
+        self.assertIn("no required context failed", text)
+        self.assertEqual(qba.advisory_only([obs]), [obs])
 
 
 if __name__ == "__main__":
