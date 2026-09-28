@@ -203,6 +203,26 @@ class SignalTests(unittest.TestCase):
         for key in ("status", "proof", "tests", "reason", "min_streak"):
             self.assertIn(key, payload)
 
+    def test_membership_culprits_are_carried_apart_from_the_fix_pr(self) -> None:
+        payload = bp.signal(
+            bp.detect(None, LIVE_STREAK),
+            None,
+            {8933: ["wavenet", "abi-baseline"]},
+        )
+        self.assertIsNone(payload["candidate_fix_pr"])
+        self.assertEqual(
+            payload["likely_culprits"],
+            [{"pr": 8933, "tests": ["abi-baseline", "wavenet"]}],
+        )
+        lines, markdown = bp.render(payload)
+        self.assertIn("| likely culprit PR | #8933 (abi-baseline, wavenet) |", markdown)
+        self.assertEqual(json.loads(lines[0].split("::", 2)[2])["likely_culprits"][0]["pr"], 8933)
+
+    def test_no_membership_finding_is_an_empty_list_and_a_dash(self) -> None:
+        payload = bp.signal(bp.detect(None, LIVE_STREAK))
+        self.assertEqual(payload["likely_culprits"], [])
+        self.assertIn("| likely culprit PR | — |", bp.render(payload)[1])
+
     def test_annotation_is_one_line_and_titled_for_its_reader(self) -> None:
         lines, markdown = bp.render(bp.signal(bp.detect(None, LIVE_STREAK)))
         self.assertEqual(len(lines), 1)

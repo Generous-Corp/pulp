@@ -158,6 +158,26 @@ read that as "go ask the base health detector", never as "no culprit exists". A
 batch whose macos gate never ran the suite yields nothing, which is the previous
 section's problem wearing a different hat.
 
+**When file ownership names nobody, ask the queue's history.** A change can
+break a test it never names (an ABI size moved by a node header, a new test file
+a tier audit has not heard of), and file scoring is blind to it. The queue is
+not: over a few hours it runs many batches with overlapping memberships.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --history [--limit 30] [<run-id>]
+```
+
+For each failing test it names the entry whose presence EXACTLY separates the
+failing batches from the green ones: in every failing batch, in no passing
+batch. It names a culprit only from 2 or more failing batches, and breaks a tie
+between entries that always travelled together only with one that failed a batch
+on its own. A test no entry separates, failing at a low rate or rescued by a
+retry, is reported as `flake`. Membership comes from each group's first-parent
+chain down to its merge base with main; the `pr-N-<sha>` ref's sha is the
+previous entry's group commit, so reading members from it sees only the last
+entry. `base_poison_detector.py --name-fix-pr` carries the same finding as
+`likely_culprits` (a PR to dequeue, never a fix to jump).
+
 **Read logs from the RUN, never the job.** `ghapp api
 repos/<o>/<r>/actions/jobs/<id>/logs` withholds any response carrying terminal
 escape sequences and returns a short refusal instead of the log, so a reader

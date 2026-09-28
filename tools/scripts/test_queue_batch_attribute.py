@@ -1062,5 +1062,241 @@ class GhCliOverrideTests(unittest.TestCase):
         self.assertEqual(argv[0], "ghapp")
 
 
+def group(run_id, members, failed=(), passed=None, retried=()):
+    # A green group ran the whole suite; a red one ran only what it names.
+    if passed is None and failed:
+        passed = ()
+    return qba.GroupObservation(
+        run_id=run_id,
+        members=None if members is None else frozenset(members),
+        failed=frozenset(failed),
+        passed=None if passed is None else frozenset(passed),
+        retried=frozenset(retried),
+    )
+
+
+class HistoryAttributionTests(unittest.TestCase):
+    T = "abi-baseline"
+
+    def only(self, observations):
+        [hist] = qba.history_attribution(observations, [self.T])
+        return hist
+
+    def test_the_entry_in_every_failing_group_and_no_passing_one_is_named(self) -> None:
+        hist = self.only(
+            [
+                group("1", {10}, failed={self.T}),
+                group("2", {11, 10}, failed={self.T}),
+                group("3", {11}),
+                group("4", {12}),
+                group("5", {12, 10}, failed={self.T}),
+            ]
+        )
+        self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
+        self.assertEqual(hist.culprit, 10)
+        self.assertEqual([s.pr for s in hist.separators], [10])
+        self.assertEqual(hist.separators[0].with_fail, 3)
+        self.assertEqual(hist.separators[0].alone_fail, 1)
+
+    def test_one_green_group_containing_the_entry_clears_it(self) -> None:
+        hist = self.only(
+            [
+                group("1", {10}, failed={self.T}),
+                group("2", {10, 11}, failed={self.T}),
+                group("3", {10}),
+            ]
+        )
+        self.assertIsNone(hist.culprit)
+        self.assertEqual(hist.separators, [])
+
+    def test_one_failing_group_without_the_entry_clears_it(self) -> None:
+        hist = self.only(
+            [
+                group("1", {10}, failed={self.T}),
+                group("2", {10}, failed={self.T}),
+                group("3", {11}, failed={self.T}),
+            ]
+        )
+        self.assertIsNone(hist.culprit)
+        self.assertNotIn(10, [s.pr for s in hist.separators])
+
+    def test_a_single_failing_group_is_reported_but_never_named(self) -> None:
+        hist = self.only([group("1", {10}, failed={self.T}), group("2", {11})])
+        self.assertEqual(hist.verdict, qba.HISTORY_WEAK)
+        self.assertIsNone(hist.culprit)
+        self.assertEqual([s.pr for s in hist.separators], [10])
+
+    def test_entries_that_always_travelled_together_are_not_split_by_a_coin(self) -> None:
+        together = [
+            group("1", {10, 11}, failed={self.T}),
+            group("2", {10, 11}, failed={self.T}),
+            group("3", {12}),
+        ]
+        self.assertEqual(self.only(together).verdict, qba.HISTORY_AMBIGUOUS)
+        self.assertIsNone(self.only(together).culprit)
+        hist = self.only(together + [group("4", {11}, failed={self.T})])
+        self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
+        self.assertEqual(hist.culprit, 11)
+
+    def test_a_group_that_never_ran_the_test_is_not_a_pass(self) -> None:
+        hist = self.only(
+            [
+                group("1", {10}, failed={self.T}),
+                group("2", {10}, failed={self.T}),
+                # Failed early on another test; this one never ran.
+                group("3", {10, 11}, failed={"other"}, passed={"unrelated"}),
+            ]
+        )
+        self.assertEqual(hist.culprit, 10)
+        self.assertEqual(len(hist.ran_runs), 2)
+
+    def test_a_low_rate_failure_across_unrelated_memberships_is_a_flake(self) -> None:
+        observations = [group(str(i), {i}) for i in range(1, 11)]
+        observations[3] = group("4", {4, 20}, failed={self.T})
+        observations[7] = group("8", {8, 21}, failed={self.T})
+        hist = self.only(observations)
+        self.assertEqual(hist.verdict, qba.HISTORY_FLAKE)
+        self.assertIsNone(hist.culprit)
+
+    def test_a_high_rate_failure_no_entry_separates_is_left_unattributed(self) -> None:
+        hist = self.only(
+            [
+                group("1", {1}, failed={self.T}),
+                group("2", {2}, failed={self.T}),
+                group("3", {3}, failed={self.T}),
+                group("4", {4}),
+            ]
+        )
+        self.assertEqual(hist.verdict, qba.HISTORY_UNATTRIBUTED)
+
+    def test_a_failure_rescued_by_a_retry_is_a_flake(self) -> None:
+        by_test = {
+            h.test: h
+            for h in qba.history_attribution(
+                [group("1", {1}, failed={"x"}, passed={self.T}, retried={self.T}), group("2", {2})]
+            )
+        }
+        hist = by_test[self.T]
+        self.assertEqual(hist.test, self.T)
+        self.assertEqual(hist.verdict, qba.HISTORY_FLAKE)
+        self.assertEqual(hist.retried_runs, ["1"])
+
+    def test_unknown_membership_is_reported_and_proves_nothing(self) -> None:
+        hist = self.only(
+            [
+                group("1", {10}, failed={self.T}),
+                group("2", {10}, failed={self.T}),
+                group("3", None),
+            ]
+        )
+        self.assertEqual(hist.culprit, 10)
+        self.assertEqual(hist.unknown_membership_runs, ["3"])
+
+    def test_the_stalled_queue_names_what_file_ownership_could_not(self) -> None:
+        # Merge groups 01:53-03:55Z on 2026-09-28, members from each group's
+        # first-parent chain. File scoring named nobody for any of these tests.
+        abi = "sample-region-compat-baseline"
+        wavenet = "WaveNet completion policy is explicit non-realtime configuration"
+        wide = "wide-non-native-selftest"
+        ios = "ios-compile-gate-legs"
+        browser = "pulp-browser-capture-node-integration"
+        runs = [
+            group("36367719695", {8933}, failed={abi, wavenet}),
+            group("36368234938", {8973, 8933}, failed={abi, wavenet}),
+            group("36368583867", {8973}),
+            group("36368584598", {8963}, failed={wide}, retried={browser}, passed={browser}),
+            group("36370683008", {8969, 8963}, failed={wide}),
+            group("36371244137", {8966, 8969, 8963}, failed={browser}, passed={"x"}),
+            group("36371478451", {8969}),
+            group("36371479614", {8966}, failed={ios}),
+            group("36371480054", {8976, 8966}, failed={ios}),
+            group("36375083794", {8966, 8976, 8933}, failed={abi, wavenet}),
+            group("36375618641", {8976}),
+            group("36375619396", {8933}, failed={abi, wavenet}),
+            group("36357201769", {8952}, failed={browser}, passed={"x"}),
+            group("36366180491", {8972}),
+            group("36365948555", {8961}),
+        ]
+        by_test = {h.test: h for h in qba.history_attribution(runs)}
+        self.assertEqual(by_test[abi].culprit, 8933)
+        self.assertEqual(by_test[wavenet].culprit, 8933)
+        self.assertEqual(by_test[wide].culprit, 8963)
+        self.assertEqual(by_test[ios].culprit, 8966)
+        self.assertEqual(by_test[browser].verdict, qba.HISTORY_FLAKE)
+        named = qba.likely_culprits(list(by_test.values()))
+        self.assertEqual(set(named), {8933, 8963, 8966})
+        self.assertEqual(set(named[8933]), {abi, wavenet})
+
+
+class ParseCtestResultsTests(unittest.TestCase):
+    LOG = "\n".join(
+        [
+            "2026-09-28T03:08:46Z  3/9 Test  #7: alpha test ........***Failed    0.36 sec",
+            "2026-09-28T03:08:47Z  4/9 Test  #8: beta ..............   Passed    0.02 sec",
+            "2026-09-28T03:08:48Z  5/9 Test  #9: gamma .............***Timeout 60.00 sec",
+            "2026-09-28T03:09:48Z          Test  #9: gamma .........   Passed    2.00 sec",
+            "The following tests FAILED:",
+            "\t  7 - alpha test (Failed)",
+            "Errors while running CTest",
+        ]
+    )
+
+    def test_the_final_block_is_the_verdict_and_a_passed_retry_is_flake_evidence(self) -> None:
+        failed, passed, retried = qba.parse_ctest_results(self.LOG)
+        self.assertEqual(failed, {"alpha test"})
+        self.assertEqual(passed, {"beta", "gamma"})
+        self.assertEqual(retried, {"gamma"})
+
+
+class GroupMembersTests(unittest.TestCase):
+    BASE = "b" * 40
+    PREV = "e" * 40
+
+    def fake(self, answers):
+        def gh(path, jq=None, **_):
+            for key, value in answers.items():
+                if key in path:
+                    return value
+            return None
+
+        return mock.patch.object(qba, "gh", side_effect=gh)
+
+    def test_a_stacked_group_names_every_entry_down_to_its_merge_base(self) -> None:
+        answers = {
+            "compare/main...h3": self.BASE,
+            "commits/h3": "Merge pull request #8933 from a/x\th2",
+            "commits/h2": "Merge pull request #8976 from a/y\th1",
+            "commits/h1": f"Merge pull request #8966 from a/z\t{self.BASE}",
+        }
+        with self.fake(answers):
+            members = qba.group_members(
+                "o/r", f"gh-readonly-queue/main/pr-8933-{'c' * 40}", "h3"
+            )
+        self.assertEqual(members, {8933, 8976, 8966})
+
+    def test_a_landed_group_is_walked_to_the_commit_it_was_stacked_on(self) -> None:
+        answers = {
+            "compare/main...h3": "h3",
+            "commits/h3": f"Merge pull request #8976 from a/y\t{self.PREV}",
+        }
+        with self.fake(answers):
+            members = qba.group_members(
+                "o/r", f"gh-readonly-queue/main/pr-8976-{self.PREV}", "h3"
+            )
+        self.assertEqual(members, {8976})
+
+    def test_a_chain_that_is_not_queue_merges_is_unknown_not_partial(self) -> None:
+        answers = {
+            "compare/main...h2": self.BASE,
+            "commits/h2": "Merge pull request #1 from a/y\th1",
+            "commits/h1": f"fix: something\t{self.BASE}",
+        }
+        with self.fake(answers):
+            members = qba.group_members(
+                "o/r", f"gh-readonly-queue/main/pr-1-{'c' * 40}", "h2"
+            )
+        self.assertIsNone(members)
+
+
 if __name__ == "__main__":
     unittest.main()

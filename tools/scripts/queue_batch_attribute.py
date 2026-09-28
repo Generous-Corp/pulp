@@ -952,6 +952,353 @@ def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Cer
     )
 
 
+# --------------------------------------------------------------------------
+# Membership history: who separates the failing batches from the passing ones.
+# --------------------------------------------------------------------------
+#
+# File ownership is blind to a pull request that breaks a test it never names:
+# a change to a node header that moves an ABI size, or a new test file a tier
+# audit has not heard of. The queue's own history is not. A merge_group batch is
+# a controlled experiment -- the same base plus a known set of entries -- and
+# over a few hours the queue runs many of them with overlapping memberships. The
+# entry whose presence exactly separates the batches that failed a test from the
+# batches that ran it green is the culprit, whatever its diff looks like.
+#
+# The rule is deliberately exact. One passing batch that contained the entry
+# clears it, and one failing batch without it clears it, because either is a
+# direct observation that the entry is neither necessary nor sufficient. A test
+# that no entry separates, failing at a low rate across unrelated memberships or
+# rescued by a retry, is a flake and is named as one rather than pinned on
+# whichever entry it happened to eject.
+
+# The job whose ctest results decide the merge.
+REQUIRED_JOB = "macos"
+
+# A separator seen in only one failing batch is reported but never named: one
+# ejection is equally explained by a flake that happened to land there.
+MIN_SEPARATING_FAILURES = 2
+
+# At or below this failure rate, among batches that ran the test, a test with
+# no separating entry reads as a flake rather than a break.
+FLAKE_MAX_RATE = 0.34
+
+HISTORY_CULPRIT = "culprit"
+HISTORY_AMBIGUOUS = "ambiguous"
+HISTORY_WEAK = "weak"
+HISTORY_FLAKE = "flake"
+HISTORY_UNATTRIBUTED = "unattributed"
+
+# One ctest result line, as ctest prints it during the run (padded with dots).
+CTEST_RESULT_RE = re.compile(
+    r"Test\s+#\d+:\s+(?P<name>.+?)\s+\.+\s*"
+    r"(?P<result>Passed|\*\*\*Failed|\*\*\*Timeout|\*\*\*Exception|Subprocess aborted)"
+)
+
+
+@dataclass(frozen=True)
+class GroupObservation:
+    """What one merge_group batch showed about its tests.
+
+    `passed is None` means the required job's test step succeeded, so every test
+    it runs passed; otherwise only the tests seen passing count as run, because a
+    failed test step can stop before most of the suite ran, and a test that never
+    ran is no evidence either way.
+    """
+
+    run_id: str
+    members: frozenset[int] | None
+    host: str = ""
+    failed: frozenset[str] = frozenset()
+    passed: frozenset[str] | None = None
+    retried: frozenset[str] = frozenset()
+
+    def ran(self, test: str) -> bool:
+        return test in self.failed or self.passed is None or test in self.passed
+
+
+@dataclass
+class Separator:
+    pr: int
+    with_fail: int
+    with_pass: int
+    without_fail: int
+    alone_fail: int
+
+    @property
+    def exact(self) -> bool:
+        return self.with_fail > 0 and self.with_pass == 0 and self.without_fail == 0
+
+
+@dataclass
+class TestHistory:
+    test: str
+    failed_runs: list[str] = field(default_factory=list)
+    ran_runs: list[str] = field(default_factory=list)
+    retried_runs: list[str] = field(default_factory=list)
+    unknown_membership_runs: list[str] = field(default_factory=list)
+    separators: list[Separator] = field(default_factory=list)
+    verdict: str = HISTORY_UNATTRIBUTED
+    culprit: int | None = None
+
+    @property
+    def failure_rate(self) -> float:
+        return len(self.failed_runs) / len(self.ran_runs) if self.ran_runs else 0.0
+
+    def as_json(self) -> dict:
+        return {
+            "test": self.test,
+            "verdict": self.verdict,
+            "culprit": self.culprit,
+            "failed_runs": self.failed_runs,
+            "ran": len(self.ran_runs),
+            "retried_runs": self.retried_runs,
+            "unknown_membership_runs": self.unknown_membership_runs,
+            "separators": [
+                {
+                    "pr": s.pr,
+                    "with_fail": s.with_fail,
+                    "with_pass": s.with_pass,
+                    "without_fail": s.without_fail,
+                    "alone_fail": s.alone_fail,
+                }
+                for s in self.separators
+            ],
+        }
+
+
+def parse_ctest_results(log: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """(final failures, tests seen passing, tests that failed then passed).
+
+    The final "tests FAILED" block is the verdict; a failure line for a test that
+    is absent from it was a retry that passed, which is flake evidence.
+    """
+    final = frozenset(parse_failing_tests(log))
+    passed: set[str] = set()
+    failed_once: set[str] = set()
+    for match in CTEST_RESULT_RE.finditer(log):
+        name = match.group("name").strip()
+        if match.group("result") == "Passed":
+            passed.add(name)
+        else:
+            failed_once.add(name)
+    retried = frozenset((failed_once & passed) - final)
+    return final, frozenset(passed - final), retried
+
+
+def history_attribution(
+    observations: list[GroupObservation], tests: list[str] | None = None
+) -> list[TestHistory]:
+    """For each failing test, the entries whose presence separates its batches."""
+    if tests is None:
+        names: list[str] = []
+        for obs in observations:
+            for name in sorted(obs.failed | obs.retried):
+                if name not in names:
+                    names.append(name)
+        tests = names
+    candidates = sorted(
+        {pr for obs in observations if obs.members for pr in obs.members}
+    )
+    histories: list[TestHistory] = []
+    for test in tests:
+        hist = TestHistory(test=test)
+        known: list[GroupObservation] = []
+        for obs in observations:
+            if test in obs.retried:
+                hist.retried_runs.append(obs.run_id)
+            if not obs.ran(test):
+                continue
+            hist.ran_runs.append(obs.run_id)
+            if test in obs.failed:
+                hist.failed_runs.append(obs.run_id)
+            if obs.members is None:
+                hist.unknown_membership_runs.append(obs.run_id)
+            else:
+                known.append(obs)
+        for pr in candidates:
+            sep = Separator(pr=pr, with_fail=0, with_pass=0, without_fail=0, alone_fail=0)
+            for obs in known:
+                failed = test in obs.failed
+                present = pr in (obs.members or frozenset())
+                if present and failed:
+                    sep.with_fail += 1
+                    if obs.members == frozenset({pr}):
+                        sep.alone_fail += 1
+                elif present:
+                    sep.with_pass += 1
+                elif failed:
+                    sep.without_fail += 1
+            if sep.exact:
+                hist.separators.append(sep)
+        hist.separators.sort(key=lambda s: (-s.with_fail, -s.alone_fail, s.pr))
+        classify_history(hist)
+        histories.append(hist)
+    return histories
+
+
+def classify_history(hist: TestHistory) -> None:
+    strong = [s for s in hist.separators if s.with_fail >= MIN_SEPARATING_FAILURES]
+    if strong:
+        # Entries that always travelled together separate equally well; one
+        # that failed a batch on its own breaks the tie, and nothing else may.
+        alone = [s for s in strong if s.alone_fail]
+        pool = alone if alone else strong
+        if len(pool) == 1:
+            hist.verdict = HISTORY_CULPRIT
+            hist.culprit = pool[0].pr
+        else:
+            hist.verdict = HISTORY_AMBIGUOUS
+        return
+    if not hist.failed_runs:
+        hist.verdict = HISTORY_FLAKE if hist.retried_runs else HISTORY_UNATTRIBUTED
+        return
+    if hist.separators:
+        hist.verdict = HISTORY_WEAK
+        return
+    if hist.retried_runs or hist.failure_rate <= FLAKE_MAX_RATE:
+        hist.verdict = HISTORY_FLAKE
+    else:
+        hist.verdict = HISTORY_UNATTRIBUTED
+
+
+def likely_culprits(histories: list[TestHistory]) -> dict[int, list[str]]:
+    """Pull request -> the tests the history names it the culprit for."""
+    named: dict[int, list[str]] = {}
+    for hist in histories:
+        if hist.verdict == HISTORY_CULPRIT and hist.culprit is not None:
+            named.setdefault(hist.culprit, []).append(hist.test)
+    return named
+
+
+def render_history(histories: list[TestHistory]) -> list[str]:
+    if not histories:
+        return ["no failing test in the observed merge groups"]
+    lines: list[str] = []
+    for hist in histories:
+        lines.append(
+            f"{hist.test}: {hist.verdict}"
+            + (f" -> #{hist.culprit}" if hist.culprit else "")
+            + f"  (failed {len(hist.failed_runs)} of {len(hist.ran_runs)} groups that ran it"
+            + (f", retry-rescued in {len(hist.retried_runs)}" if hist.retried_runs else "")
+            + ")"
+        )
+        for sep in hist.separators:
+            lines.append(
+                f"    #{sep.pr}: in {sep.with_fail} failing group(s)"
+                f" ({sep.alone_fail} alone), 0 passing with it, 0 failing without it"
+            )
+        if hist.unknown_membership_runs:
+            lines.append(
+                "    membership unreadable for: "
+                + ", ".join(hist.unknown_membership_runs)
+            )
+    return lines
+
+
+def group_members(repo: str, head_branch: str, head_sha: str, base: str = "main") -> frozenset[int] | None:
+    """Every entry a merge_group batch contains, from its commit chain.
+
+    The ref's embedded sha is the commit the entry was stacked on, which is the
+    previous entry's group commit rather than the branch base, so a compare from
+    it sees only the last entry. The chain is walked by first parent from the
+    group head down to its merge base with `base`; each step is one entry's
+    "Merge pull request #N" commit. An entry whose group commit later landed is
+    part of `base` by then and correctly drops out; a group that itself landed
+    is walked down to the commit it was stacked on instead.
+    """
+    ref = BATCH_BRANCH_RE.match(head_branch.strip())
+    if not ref:
+        return None
+    stop = gh(f"repos/{repo}/compare/{base}...{head_sha}", ".merge_base_commit.sha")
+    if not stop:
+        return None
+    if stop.strip() == head_sha.strip():
+        # The group landed, so its whole chain is on `base` now. Every stacked
+        # entry below it landed from its own passing group, so this group adds
+        # only the entry it is named for: walk down to the commit it was
+        # stacked on.
+        stop = ref.group(2)
+    members: set[int] = set()
+    sha = head_sha.strip()
+    for _ in range(16):
+        if sha == stop.strip():
+            break
+        raw = gh(
+            f"repos/{repo}/commits/{sha}",
+            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//"")]|@tsv',
+        )
+        if not raw or "\t" not in raw:
+            return None
+        subject, parent = raw.split("\t", 1)
+        merged = MERGED_PR_RE.match(subject.strip())
+        if not merged:
+            return None
+        members.add(int(merged.group(1)))
+        sha = parent.strip()
+    else:
+        return None
+    return frozenset(members) if members else None
+
+
+def observe_group(repo: str, run: dict) -> GroupObservation | None:
+    """One merge_group run as an observation, or None when it proves nothing.
+
+    A run whose required job did not reach a verdict on its tests (a build error,
+    a hosted placeholder, a cancellation) is not evidence about any test.
+    """
+    run_id = str(run.get("id"))
+    jobs = failing_jobs(repo, run_id)
+    if not jobs:
+        return None
+    job = next((j for j in jobs if j.get("name") == REQUIRED_JOB), None)
+    if not job:
+        return None
+    test_steps = [
+        s for s in (job.get("steps") or []) if test_step(str(s.get("name") or ""))
+    ]
+    members = group_members(
+        repo, str(run.get("head_branch") or ""), str(run.get("head_sha") or "")
+    )
+    host = str(job.get("runner_name") or "")
+    if job.get("conclusion") == "success":
+        if not any(s.get("conclusion") == "success" for s in test_steps):
+            return None
+        return GroupObservation(run_id=run_id, members=members, host=host)
+    if job.get("conclusion") != "failure":
+        return None
+    archive = run_log_zip(repo, run_id)
+    log = unpack_job_logs(archive).get(REQUIRED_JOB, "") if archive else ""
+    failed, passed, retried = parse_ctest_results(log)
+    if not failed:
+        return None
+    return GroupObservation(
+        run_id=run_id,
+        members=members,
+        host=host,
+        failed=failed,
+        passed=passed,
+        retried=retried,
+    )
+
+
+def observe_history(repo: str, limit: int = 30) -> list[GroupObservation]:
+    raw = gh(
+        f"repos/{repo}/actions/workflows/build.yml/runs?event=merge_group&per_page={min(limit, 100)}"
+    )
+    try:
+        runs = json.loads(raw or "{}").get("workflow_runs", [])
+    except ValueError:
+        return []
+    observations: list[GroupObservation] = []
+    for run in runs[:limit]:
+        if run.get("status") != "completed":
+            continue
+        obs = observe_group(repo, run)
+        if obs is not None:
+            observations.append(obs)
+    return observations
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", nargs="?", help="failed merge_group run id")
@@ -979,6 +1326,19 @@ def main(argv: list[str] | None = None) -> int:
         help="checkout whose committed census names the exported include roots",
     )
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="attribute by batch membership over the recent merge groups: name "
+        "the entry whose presence separates the failing batches from the passing "
+        "ones, and name flakes as flakes",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=30,
+        help="merge_group runs --history reads (default 30)",
+    )
     args = parser.parse_args(argv)
 
     if args.run_id and args.run_id_flag and args.run_id != args.run_id_flag:
@@ -1003,6 +1363,34 @@ def main(argv: list[str] | None = None) -> int:
             args.repo, given, args.pr, Path(args.source_root)
         )
         print(json.dumps(verdict.as_json(), indent=2, sort_keys=True))
+        return 0
+
+    if args.history:
+        observations = observe_history(args.repo, args.limit)
+        focus = None
+        if given:
+            focus = sorted(
+                {t for obs in observations if obs.run_id == given for t in obs.failed}
+            )
+        histories = history_attribution(observations, focus)
+        if args.format == "json":
+            print(
+                json.dumps(
+                    {
+                        "observed_groups": len(observations),
+                        "tests": [h.as_json() for h in histories],
+                        "likely_culprits": {
+                            str(pr): tests
+                            for pr, tests in likely_culprits(histories).items()
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"{len(observations)} merge group(s) observed")
+            print("\n".join(render_history(histories)))
         return 0
 
     run_id = given or latest_failed_merge_group(args.repo)

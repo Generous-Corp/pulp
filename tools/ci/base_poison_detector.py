@@ -296,8 +296,18 @@ def detect(
     return verdict
 
 
-def signal(verdict: Verdict, candidate_fix_pr: int | None = None) -> dict:
-    """The machine-readable record. Every consumer reads `safe_to_pause_queue`."""
+def signal(
+    verdict: Verdict,
+    candidate_fix_pr: int | None = None,
+    likely_culprits: dict[int, list[str]] | None = None,
+) -> dict:
+    """The machine-readable record. Every consumer reads `safe_to_pause_queue`.
+
+    `likely_culprits` is the batch-membership finding: the queued entry whose
+    presence separates the batches that failed a test from the ones that ran it
+    green. It names a PR to dequeue, never a fix to prioritise, so it is kept
+    apart from `candidate_fix_pr`.
+    """
     return {
         "schema": SIGNAL_SCHEMA,
         "status": verdict.status,
@@ -316,6 +326,10 @@ def signal(verdict: Verdict, candidate_fix_pr: int | None = None) -> dict:
         "batch_non_evidence_skipped": verdict.streak.skipped_non_evidence,
         "min_streak": verdict.min_streak,
         "candidate_fix_pr": candidate_fix_pr,
+        "likely_culprits": [
+            {"pr": pr, "tests": sorted(tests)}
+            for pr, tests in sorted((likely_culprits or {}).items())
+        ],
         "reason": " ".join(verdict.reason.split()),
     }
 
@@ -330,6 +344,13 @@ def render(payload: dict) -> tuple[list[str], str]:
     lines = [f"::notice title={SIGNAL_TITLE}::" + _escape_command_data(compact)]
     tests = ", ".join(payload["tests"]) or "—"
     fix = payload["candidate_fix_pr"]
+    culprits = (
+        "; ".join(
+            f"#{entry['pr']} ({', '.join(entry['tests'])})"
+            for entry in payload.get("likely_culprits") or []
+        )
+        or "—"
+    ).replace("|", chr(92) + "|")
     md = [
         "### Base health",
         "",
@@ -344,6 +365,7 @@ def render(payload: dict) -> tuple[list[str], str]:
         f"{', via ' + payload['main_evidence_source'] if payload['main_evidence_source'] else ''}) |",
         f"| batch streak | {payload['batch_streak']} (min {payload['min_streak']}) |",
         f"| candidate fix PR | {('#%d' % fix) if fix else '—'} |",
+        f"| likely culprit PR | {culprits} |",
         f"| reason | {payload['reason'].replace('|', chr(92) + '|')} |",
         "",
     ]
@@ -618,6 +640,20 @@ def candidate_fix_pr(repo: str, tests: tuple[str, ...]) -> int | None:
     )
 
 
+def membership_culprits(repo: str, limit: int) -> dict[int, list[str]]:
+    """Queued entries the merge-group history names as breaking a test.
+
+    File ownership cannot see a change that breaks a test it never names; the
+    queue's overlapping batch memberships can. Reuses the attributor's rule.
+    """
+    try:
+        import queue_batch_attribute as attributor
+    except ImportError:
+        return {}
+    observations = attributor.observe_history(repo, limit)
+    return attributor.likely_culprits(attributor.history_attribution(observations))
+
+
 def _emit(payload: dict, output: str | None) -> None:
     lines, markdown = render(payload)
     for line in lines:
@@ -642,7 +678,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--name-fix-pr",
         action="store_true",
-        help="also look for the open pull request that decisively owns the test",
+        help="also look for the open pull request that decisively owns the test, "
+        "and for the queued entry the batch-membership history names as the culprit",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        default=30,
+        help="merge_group runs --name-fix-pr reads for batch-membership culprits",
     )
     parser.add_argument(
         "--fail-on-poisoned",
@@ -657,7 +700,10 @@ def main(argv: list[str] | None = None) -> int:
         min_streak=args.min_streak,
     )
     fix = candidate_fix_pr(args.repo, verdict.tests) if args.name_fix_pr else None
-    payload = signal(verdict, fix)
+    culprits = (
+        membership_culprits(args.repo, args.history_limit) if args.name_fix_pr else None
+    )
+    payload = signal(verdict, fix, culprits)
     _emit(payload, args.output or None)
     if args.fail_on_poisoned and payload["safe_to_pause_queue"]:
         return 1
