@@ -3799,7 +3799,12 @@
       {
         "name": "status",
         "disposition": "candidate-shared-later",
-        "arguments": [],
+        "arguments": [
+          {
+            "name": "--broker-only",
+            "kind": "flag"
+          }
+        ],
         "subcommands": []
       },
       {

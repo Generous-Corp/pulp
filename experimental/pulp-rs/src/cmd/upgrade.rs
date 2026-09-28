@@ -403,19 +403,22 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
 
     let report = crate::install::install_extracted(&plan, &archive)?;
     let broker_install = if let Some(broker_config) = broker_config {
-        crate::install::install_control_broker_with(&plan, &archive, |_, rollback_binary| {
-            crate::control_broker_service::reconcile_control_broker_service_transactional(
-                &broker_config,
-                rollback_binary,
-            )
-            .map(|_| ())
-            .map_err(|error| {
-                CliError::Other(format!(
-                    "control broker activation failed [{}]: {error}",
-                    error.code()
-                ))
-            })
-        })?
+        optional_broker_outcome(
+            crate::install::install_control_broker_with(&plan, &archive, |_, rollback_binary| {
+                crate::control_broker_service::reconcile_control_broker_service_transactional(
+                    &broker_config,
+                    rollback_binary,
+                )
+                .map(|_| ())
+                .map_err(|error| {
+                    CliError::Other(format!(
+                        "control broker activation failed [{}]: {error}",
+                        error.code()
+                    ))
+                })
+            }),
+            &mut std::io::stderr(),
+        )
     } else {
         crate::install::ControlBrokerInstall::NotPresent
     };
@@ -460,6 +463,28 @@ fn do_install<F: Fetcher>(args: &UpgradeArgs, fetcher: &F, out: &mut impl Write)
         }
     }
     Ok(())
+}
+
+/// The broker is optional: by the time it is reconciled the CLI, its sibling
+/// binaries and their shared runtime are already installed, so a broker that
+/// cannot activate is reported as a warning, exactly as `install.sh` does,
+/// and the upgrade still succeeds.
+fn optional_broker_outcome(
+    result: Result<crate::install::ControlBrokerInstall>,
+    err: &mut impl Write,
+) -> crate::install::ControlBrokerInstall {
+    match result {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let _ = writeln!(
+                err,
+                "warning: Pulp CLI upgraded, but {error}. The optional health-only broker is not \
+                 running; the CLI works without it. Run `pulp doctor --only 'Control broker'` \
+                 after correcting the reported error."
+            );
+            crate::install::ControlBrokerInstall::NotPresent
+        }
+    }
 }
 
 fn verified_broker_config(
@@ -887,6 +912,29 @@ mod tests {
         assert_eq!(v["from"], "0.30.0");
         assert_eq!(v["to"], "0.40.0");
         assert!(v["entries"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_failed_optional_broker_is_a_warning_not_a_failed_upgrade() {
+        let mut err = Vec::new();
+        let outcome = optional_broker_outcome(
+            Err(CliError::Other(
+                "control broker activation failed [health-unreachable]: never healthy".to_owned(),
+            )),
+            &mut err,
+        );
+        assert_eq!(outcome, crate::install::ControlBrokerInstall::NotPresent);
+        let err = String::from_utf8(err).unwrap();
+        assert!(err.starts_with("warning: Pulp CLI upgraded, but control broker activation failed"));
+        assert!(err.contains("pulp doctor --only 'Control broker'"));
+
+        let mut quiet = Vec::new();
+        let outcome = optional_broker_outcome(
+            Ok(crate::install::ControlBrokerInstall::Created),
+            &mut quiet,
+        );
+        assert_eq!(outcome, crate::install::ControlBrokerInstall::Created);
+        assert!(quiet.is_empty());
     }
 
     #[test]
