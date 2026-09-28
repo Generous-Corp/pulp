@@ -1,0 +1,55 @@
+{
+  "id": "unique-ctest-names-timeline-registration",
+  "title": "The multitrack arrangement test registers in one timeline suite so every ctest name is unique",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "b0a67ce2-094f-4a98-9b83-8556f9d60244",
+  "owned_paths": [
+    "test/cmake/timeline_tests.cmake",
+    ".agents/skills/timeline/SKILL.md",
+    "docs/status/sequencer-exposure/rows/unique-ctest-names-timeline-registration.json"
+  ],
+  "evidence": [
+    {
+      "path": "test/cmake/timeline_tests.cmake",
+      "needles": [
+        "test_timeline_multitrack_arrangement.cpp runs in pulp-test-timeline-multitrack-pdc",
+        "pulp_add_test_suite(pulp-test-timeline-multitrack-pdc"
+      ]
+    },
+    {
+      "path": ".agents/skills/timeline/SKILL.md",
+      "needles": [
+        "## Register a test source in one suite only"
+      ]
+    },
+    {
+      "path": "tools/scripts/ctest_unique_names_check.py",
+      "needles": [
+        "Every ctest entry in the build must have a unique name"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "Test registration only: no header, target, or installed artifact changes. The timeline example implementation still compiles in the phase-1 aggregate; only the Catch2 test source stops being compiled twice."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or document shape changes; the change is which ctest executable runs an existing test file."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; deduplicating ctest names is CI test topology, not a design-time capability."
+    }
+  }
+}

@@ -130,7 +130,7 @@ TEST_CASE("buffers are sized from the parameter ranges, not the current setting"
     }
 }
 
-TEST_CASE("the float and double instantiations agree", "[leslie][scanner]") {
+TEST_CASE("Leslie: the float and double instantiations agree", "[leslie][scanner]") {
     // Guards against a `SampleType`-dependent constant leaking in — the
     // modulation maths is deliberately all in double so the two differ only by
     // the audio path's own precision.

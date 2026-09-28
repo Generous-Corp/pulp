@@ -32,6 +32,21 @@ add_test(NAME pr-fast-tier-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_fast_tier_check.py")
 
+# Every ctest name must be unique: the name is the join key for the JUnit
+# report and for the receipt a merge group reuses from its PR head, and the
+# receipt issuer refuses an inventory with a duplicated name. Reads the
+# configured inventory, so a duplicate shows up on the PR head, not in the
+# merge group's receipt log.
+add_test(NAME ctest-unique-names
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/ctest_unique_names_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --ctest "${CMAKE_CTEST_COMMAND}")
+set_tests_properties(ctest-unique-names PROPERTIES TIMEOUT 120)
+add_test(NAME ctest-unique-names-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_unique_names_check.py")
+
 # The native-build and iOS-compile skip classifier, including the check that
 # every test/ or docs/ path non-test CMake names stays denied from the iOS skip
 # allowlist. Needs tomllib.
@@ -50,6 +65,8 @@ endif()
 set(PULP_PR_FAST_TESTS
     pr-fast-tier-contract
     pr-fast-tier-selftest
+    ctest-unique-names
+    ctest-unique-names-selftest
     advisory-macos-runner-policy
     agent-capability-manifest-check
     agent-hook-paths

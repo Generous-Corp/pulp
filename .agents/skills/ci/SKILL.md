@@ -1559,6 +1559,20 @@ and after the Build step. No per-job line means the instrument failed (exit
 2), never that the cache hit; the cumulative line stays for continuity.
 Typical healthy job: misses 13–315 of ~10k calls.
 
+## A `continue-on-error` step's conclusion is not its outcome
+
+The jobs API reports `conclusion: success` for a continue-on-error step that
+FAILED; only `outcome` (visible to later steps' `if:`) says it failed. This
+is how the PR-head receipt issuer failed on every full-suite run for days
+("CTest selection lists a test twice", 21 duplicated ctest names) while the
+API read success and the Publish step was merely "skipped": 12 runs should
+have issued, 0 did, 0 annotations named why. Two rules follow. A
+continue-on-error step must announce its own failure (`::warning` with the
+reason plus a job-summary line; the receipt step now does). And when a
+downstream step is unexpectedly skipped, read the upstream step's LOG, not
+its API conclusion. The pr-fast `ctest-unique-names` guard now catches the
+original cause on the PR head.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on

@@ -810,6 +810,14 @@ either side of an explicit instant instead. It reads the `metrics list` rows
 the pipeline section already fetched, because `shipyard metrics compare` splits
 only on whole days ago and cannot filter by target.
 
+On a pull-request head that ran the full suite green, the **receipt issue
+step** (`protected_merge_receipt.py issue`) now announces its result: a
+`protected receipt issued` notice and job-summary line on success, or a
+`protected receipt NOT issued` warning carrying the issuer's reason (and a
+summary line) on failure. The step stays `continue-on-error`; the merge group
+then validates in full. A missing receipt with no such line is itself a defect
+to report.
+
 The gate's Build step also runs the **iOS compile gate in shadow-identity
 mode**: `tools/ci/ios_gate_digest.py` digests every tracked file the gate's
 three iOS configures can read (product sources, examples, CMake, dependency
