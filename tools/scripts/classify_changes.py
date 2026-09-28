@@ -220,6 +220,90 @@ IOS_COMPILE_REQUIRED_PATTERNS = (
 )
 
 
+# Surfaces only the iOS compile gate builds. The macOS gate compiles every
+# shared source (core/**, the AUv3 adapter, public headers) for macOS, so a
+# break there fails the macOS build as well and the per-PR iOS gate adds
+# nothing for it; over 14 days its 1,374 per-PR runs caught no break the macOS
+# build would have missed. The gate stays required only for what the macOS
+# build never compiles or never reads, and runs in full nightly on main and on
+# every release tag.
+IOS_SURFACE_PATTERNS = (
+    # Apple app, extension and template sources.
+    "apple/**",
+    "examples/ios-*",
+    "examples/ios-*/**",
+    "templates/ios-*/**",
+    "tools/templates/auv3/**",
+    # iOS platform sources by path convention.
+    "*/platform/ios/**",
+    "*/ios/*",
+    "*_ios.*",
+    "*_ios_*",
+    "*/ios_*",
+    # CMake: iOS configure branches (`if(IOS)`, PULP_IOS, the toolchain and
+    # the AUv3 packaging module) live in shared CMake files.
+    "CMakeLists.txt",
+    "cmake/**",
+    "tools/cmake/**",
+    # Dependency pins and bootstrap that feed the iOS configure, and the
+    # simulator Skia slice the GPU leg fetches.
+    "setup.sh",
+    "tools/deps/**",
+    ".gitmodules",
+    "tools/scripts/fetch_skia_for_release.py",
+    # The gate itself: where it runs, the rule that selects it, and its
+    # reviewed skip allowlist.
+    ".github/workflows/build.yml",
+    ".github/workflows/ios-*.yml",
+    "tools/ci/ios_gate_digest.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    ".shipyard/config.toml",
+)
+
+# A source that branches on an iOS target contains code the macOS build
+# preprocesses away, so its content decides, not its path.
+IOS_SOURCE_MARKERS = (
+    "TARGET_OS_IPHONE",
+    "TARGET_OS_IOS",
+    "TARGET_OS_SIMULATOR",
+    "PULP_IOS",
+    "UIKit",
+)
+IOS_MARKER_SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".m", ".mm", ".swift",
+                       ".cmake", ".in")
+
+
+def _is_cmake(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return name == "CMakeLists.txt" or name.endswith((".cmake", ".cmake.in"))
+
+
+def _carries_ios_markers(path: str, root: Path) -> bool:
+    """True when the source branches on iOS, or cannot be read (fail closed)."""
+    if not path.endswith(IOS_MARKER_SUFFIXES):
+        return False
+    try:
+        text = (root / path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        # Deleted or unreadable: the macOS build cannot vouch for it.
+        return True
+    return any(marker in text for marker in IOS_SOURCE_MARKERS)
+
+
+def ios_surface(path: str, root: Path = REPO_ROOT) -> bool:
+    """Does this path reach code or configuration only the iOS gate builds?"""
+    if _matches(path, list(IOS_COMPILE_REQUIRED_PATTERNS)):
+        return True
+    if _matches(path, list(IOS_SURFACE_PATTERNS)):
+        return True
+    # Non-test CMake reaches the iOS configure; test/ CMake does not (the gate
+    # configures PULP_BUILD_TESTS=OFF) except the top-level test manifest.
+    if _is_cmake(path) and (not path.startswith("test/") or path == "test/CMakeLists.txt"):
+        return True
+    return _carries_ios_markers(path, root)
+
+
 def _matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
@@ -245,9 +329,15 @@ def _mobile_skip_authorized(policy: dict, path: str) -> bool:
 
 
 def ios_compile_required(
-    files: list[str], *, config_path: Path = CHANGED_SURFACE_CONFIG
+    files: list[str], *, config_path: Path = CHANGED_SURFACE_CONFIG,
+    root: Path = REPO_ROOT,
 ) -> bool:
-    """Fail closed unless every path has reviewed non-mobile authorization."""
+    """Run the per-PR iOS gate only when a path reaches an iOS-only surface.
+
+    Fails closed on an empty diff or an unreadable policy. A path with
+    reviewed non-mobile authorization never runs it; any other path runs it
+    when `ios_surface` says only the iOS gate would build it.
+    """
     if not files:
         return True
     try:
@@ -255,7 +345,10 @@ def ios_compile_required(
             policy = tomllib.load(config_file)["targets"]["mac"][
                 "changed_surface_selection"
             ]
-        return not all(_mobile_skip_authorized(policy, path) for path in files)
+        return any(
+            not _mobile_skip_authorized(policy, path) and ios_surface(path, root)
+            for path in files
+        )
     except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
         return True
 

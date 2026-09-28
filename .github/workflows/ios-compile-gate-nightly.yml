@@ -1,0 +1,156 @@
+name: Nightly iOS compile gate
+
+# The per-PR and merge-group `macos` gate runs the iOS compile gate only when a
+# change reaches a surface the macOS build never compiles (apple/**, iOS
+# platform sources, sources that branch on an iOS target, CMake, the dependency
+# pins; see IOS_SURFACE_PATTERNS in tools/scripts/classify_changes.py). Shared
+# code is compiled for macOS by that gate, so a break there fails it anyway.
+# Over 14 days the per-PR iOS gate ran 1,374 times and caught no break the
+# macOS build would have missed, at roughly 790 gate slot-minutes a day on the
+# critical path of every gated job.
+#
+# This workflow keeps the full iOS gate honest on main: every night it runs
+# the same `test/cmake/test_ios_compile_gate.sh` the per-PR gate runs, on the
+# same local gate hardware. A failure here is an iOS break that landed; it
+# opens or updates one de-duplicated tracking issue (the watchdog pattern of
+# nightly-full-build.yml) and the next green run closes it. Release tags run
+# the same gate before they publish (release-cli.yml `ios-compile-gate`).
+#
+# Runner: the base self-hosted gate label set (PULP_RELEASE_MACOS_RUNS_ON_JSON,
+# a contracted lane in tools/scripts/runner_topology.json). Like the release
+# legs it is served opportunistically by an idle gate runner, so it may wait
+# for gate demand; that suits a nightly. GitHub throttles this repository's
+# schedules to about one run every four hours, so a daily cron still fires.
+
+on:
+  schedule:
+    # 09:07 UTC: off-peak (overnight in the Americas); odd minute avoids the
+    # top-of-hour scheduler stampede.
+    - cron: '7 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ios-compile-gate-nightly
+  cancel-in-progress: false
+
+jobs:
+  ios-compile-gate:
+    name: iOS compile gate (nightly, main)
+    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    runs-on: ${{ fromJSON(vars.PULP_RELEASE_MACOS_RUNS_ON_JSON || '["macos-15"]') }}
+    timeout-minutes: 90
+    env:
+      # The same ccache correctness overrides as the required macOS gate: the
+      # host ccache is shared with it.
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+
+      - name: Bootstrap repository dependencies
+        timeout-minutes: 15
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: iOS compile gate
+        id: gate
+        shell: bash
+        run: |
+          set -uo pipefail
+          bash test/cmake/test_ios_compile_gate.sh \
+            "$GITHUB_WORKSPACE" "$RUNNER_TEMP/build-ios" 2>&1 | tee ios-gate.log
+          rc=${PIPESTATUS[0]}
+          # 77 is the gate's "SDKs absent" skip: no evidence either way, and it
+          # must not read as a pass.
+          case "$rc" in
+            0) result=success ;;
+            77) result=skipped ;;
+            *) result=failure ;;
+          esac
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "iOS compile gate exit $rc -> $result"
+
+      - name: Upload the gate log
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: ios-compile-gate-nightly-log
+          path: ios-gate.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Maintain tracking issue
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRACKING_TITLE: 'Nightly iOS compile gate is broken on main'
+          RESULT: ${{ steps.gate.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+          existing_json=$(
+              gh issue list --repo "$repo" --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; print(json.load(sys.stdin).get('number', '') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; print(json.load(sys.stdin).get('state', '') or '')")
+
+          if [ "$RESULT" = "success" ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "The nightly iOS compile gate is green again on ${RUN_URL} (sha ${RUN_SHA}). Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              fi
+              exit 0
+          fi
+
+          {
+            echo "_Auto-generated by \`.github/workflows/ios-compile-gate-nightly.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            echo "The nightly iOS compile gate on main did not pass (result: \`${RESULT:-not run}\`)."
+            echo "Per-PR gates run it only for changes to iOS-only surfaces, so this is"
+            echo "an iOS break that landed through shared-looking code, or an"
+            echo "environment problem on the gate runner."
+            echo
+            echo "**Run:** ${RUN_URL}"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo
+            echo "The \`ios-compile-gate-nightly-log\` artifact holds the full gate output."
+            echo "Record here whether the per-PR gate would have caught it (the change"
+            echo "touched an IOS_SURFACE_PATTERNS path) or not; that count decides"
+            echo "whether the per-PR trigger list needs widening."
+            echo
+            echo "_One issue, edited in place; the next green nightly closes it._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label bug,ci 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Fail the run when the gate did not pass
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.gate.outputs.result }}" != "success" ]; then
+            echo "Nightly iOS compile gate did not pass; see the tracking issue."
+            exit 1
+          fi

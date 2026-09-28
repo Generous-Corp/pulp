@@ -229,6 +229,25 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 
 ## Gotchas (hard-won)
 
+### When the iOS compile gate runs
+
+- **Per PR and merge group, only for iOS-only surfaces.** `ios_surface` in
+  `tools/scripts/classify_changes.py` selects it: `apple/**`, `examples/ios-*`,
+  `templates/ios-*`, the AUv3 templates, `*/platform/ios/**` and `*_ios.*`
+  sources, any source containing `TARGET_OS_IPHONE` / `TARGET_OS_IOS` /
+  `TARGET_OS_SIMULATOR` / `PULP_IOS` / `UIKit`, every non-test CMake file,
+  the dependency pins, and the gate's own wiring. A change to shared core code
+  does not run it, because the macOS job compiles that code for macOS.
+- **So an iOS break in shared-looking code can land.** The full gate runs
+  nightly on main (`ios-compile-gate-nightly.yml`, one tracking issue titled
+  "Nightly iOS compile gate is broken on main") and on every release tag
+  (`release-cli.yml` `ios-compile-gate`, required for publish). If you add
+  iOS-only code to a file, guard it with `TARGET_OS_IPHONE` (or put it under
+  `platform/ios/`) so the per-PR selector sees it.
+- **Run it yourself before landing iOS-affecting work**:
+  `bash test/cmake/test_ios_compile_gate.sh "$PWD" "$PWD/build-ios"`, or
+  `ghapp workflow run ios-compile-gate-nightly.yml --ref <branch>`.
+
 ### Platform
 
 - **Deployment target floor is 16.3; recipes use 16.4** — iPhoneSimulator SDK
@@ -946,7 +965,8 @@ compile gate now carries an iphonesimulator GPU leg
 (`-DPULP_ENABLE_GPU=ON -DPULP_REQUIRE_GPU_FOR_SDK=ON`, manifest-pinned
 `ios-simulator-arm64-x86_64` Skia slice fetched into the build tree)
 that builds `PulpGpuSmoke_AUv3` + `PulpGpuSmoke_HostApp_Embed`, so
-breakage there reds the required macos check. When editing the GPU half
+breakage there reds the required macos check when the change runs the per-PR
+iOS gate (see "When the iOS compile gate runs"), and the nightly otherwise. When editing the GPU half
 of the iOS host, that leg is the compile proof — a CG-only green run
 says nothing about it.
 

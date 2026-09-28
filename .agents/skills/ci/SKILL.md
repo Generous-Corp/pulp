@@ -6760,9 +6760,25 @@ paths under those prefixes that the gate does read (its own
 denied first by `IOS_COMPILE_REQUIRED_PATTERNS` in `classify_changes.py`;
 `test_classify_changes.py` re-derives that list from the live CMake tree, so a
 new reference has to be added there. Test-topology paths no longer force the
-gate on their own. Any missing/malformed value, empty or mixed diff, unknown
-path, mobile/Apple path, public header, CMake/CI/policy change, non-test
-`tools/scripts` file, or policy read failure runs the gate. Main, manual, nightly, release, and audit execution
+gate on their own.
+
+Beyond that allowlist, the per-PR and merge-group gate runs only when a path
+reaches an iOS-only surface (`ios_surface` / `IOS_SURFACE_PATTERNS` in
+`classify_changes.py`): `apple/**`, iOS examples/templates/AUv3 templates,
+iOS platform sources by path, any source that branches on an iOS target
+(`TARGET_OS_IPHONE`, `TARGET_OS_IOS`, `TARGET_OS_SIMULATOR`, `PULP_IOS`,
+`UIKit`), every non-test CMake file, the dependency pins and bootstrap, the
+simulator Skia fetcher, and the gate's own wiring. Shared core code does NOT
+run it: the macOS gate compiles it for macOS, so a break fails there too (the
+one real per-PR iOS failure in 14 days, `au_adapter.mm`, is compiled into two
+macOS test targets). An empty diff, an unreadable policy, or a deleted source
+still runs it. The full gate runs nightly on main
+(`ios-compile-gate-nightly.yml`, local gate hardware, one tracking issue) and
+on every release tag (`release-cli.yml` `ios-compile-gate`, in the publish
+job's `needs`, so no tag ships without a green iOS compile). When the nightly
+reds, record in its tracking issue whether the culprit touched an
+`IOS_SURFACE_PATTERNS` path; a culprit that did not is the evidence for
+widening the list. Main, manual, nightly, release, and audit execution
 never accepts this skip and retains its existing event policy. Condition the
 expensive step, never the required workflow/job, so the stable required context
 still reports.

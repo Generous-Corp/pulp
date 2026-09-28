@@ -825,6 +825,18 @@ store_pass = "@env:ANDROID_STORE_PASS"
 
 ## Common Issues
 
+### A tag did not publish and `ios-compile-gate` is red
+
+`release-cli.yml` runs the full iOS compile gate
+(`test/cmake/test_ios_compile_gate.sh`) on the tag, on the darwin-arm64 leg's
+runner, and the `release` publish job requires it. Per-PR gates run the iOS gate
+only for iOS-only surfaces, so a tag can be the first place an iOS break in
+shared-looking code shows (the nightly `ios-compile-gate-nightly.yml` normally
+catches it first and opens a tracking issue). A 77 exit (iOS SDKs absent on the
+runner) is a failure here, not a skip. Fix forward and cut a new tag; re-running
+the job only helps for an environment failure such as a configure timeout.
+
+
 ### `hdiutil: create failed - Resource busy` — a process is vetoing unmounts
 
 `hdiutil create -srcfolder` builds a DMG by attaching a temporary volume, copying
