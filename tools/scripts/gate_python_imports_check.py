@@ -159,6 +159,46 @@ def _resolve_local(name: str, importer: Path, modules: dict[str, list[Path]],
     return candidates
 
 
+def _local_targets(dotted: str, names: list[str], importer: Path, repo: Path,
+                   modules: dict[str, list[Path]], stdlib: set[str]) -> list[Path] | None:
+    """Repo files an import loads, [] for the standard library, None if foreign."""
+    if dotted.startswith("."):
+        level = len(dotted) - len(dotted.lstrip("."))
+        base = importer.parent
+        for _ in range(level - 1):
+            base = base.parent
+        return [p.resolve() for p in _module_files(base, dotted.lstrip("."), names)]
+    name = dotted.split(".")[0]
+    if name in stdlib or name == "__main__":
+        return []
+    if (repo / name).is_dir():
+        # A repo-root namespace package (`from tools.scripts import x`).
+        return [p.resolve() for p in _module_files(repo, dotted, names)]
+    local = _resolve_local(name, importer, modules, repo)
+    return [p.resolve() for p in local] if local else None
+
+
+def local_import_closure(script: Path, repo: Path = REPO_ROOT,
+                         modules: dict[str, list[Path]] | None = None) -> set[Path]:
+    """Every repo file ``script`` loads, directly or through repo helpers."""
+    modules = modules if modules is not None else tracked_python(repo)
+    stdlib = set(sys.stdlib_module_names)
+    seen: set[Path] = set()
+    stack = [script.resolve()]
+    while stack:
+        path = stack.pop()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            found = imports_of(path)
+        except SyntaxError:
+            continue
+        for dotted, names, _line, _guarded in found:
+            stack.extend(_local_targets(dotted, names, path, repo, modules, stdlib) or [])
+    return seen
+
+
 def violations(scripts: list[Path], allowed: set[str], *, repo: Path = REPO_ROOT,
                modules: dict[str, list[Path]] | None = None) -> list[str]:
     """Unavailable, unguarded imports reachable from ``scripts``."""
@@ -180,25 +220,11 @@ def violations(scripts: list[Path], allowed: set[str], *, repo: Path = REPO_ROOT
                 continue
             here = chain + (str(path.relative_to(repo)),)
             for dotted, names, line, guarded in found:
-                if dotted.startswith("."):
-                    level = len(dotted) - len(dotted.lstrip("."))
-                    base = path.parent
-                    for _ in range(level - 1):
-                        base = base.parent
-                    stack.extend((p.resolve(), here)
-                                 for p in _module_files(base, dotted.lstrip("."), names))
+                local = _local_targets(dotted, names, path, repo, modules, stdlib)
+                if local is not None:
+                    stack.extend((p, here) for p in local)
                     continue
                 name = dotted.split(".")[0]
-                if name in stdlib or name == "__main__":
-                    continue
-                if (repo / name).is_dir():
-                    # A repo-root namespace package (`from tools.scripts import x`).
-                    stack.extend((p.resolve(), here) for p in _module_files(repo, dotted, names))
-                    continue
-                local = _resolve_local(name, path, modules, repo)
-                if local:
-                    stack.extend((p.resolve(), here) for p in local)
-                    continue
                 if guarded or name in allowed:
                     continue
                 problems.append(
