@@ -97,6 +97,7 @@ target_sources(pulp-view-core PRIVATE
     src/waveform_headless_render_backend.cpp
     src/frame_clock.cpp
     src/host_frame_pump.cpp
+    src/gpu_acquire_diagnostics.cpp
     src/hover_cursor.cpp
     src/motion.cpp
     src/motion_geometry.cpp

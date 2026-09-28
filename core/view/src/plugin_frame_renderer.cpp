@@ -132,10 +132,13 @@ PluginFrameRenderer::Frame PluginFrameRenderer::render(
     // that BLOCKS: under a Fifo (vsync) present mode GetCurrentTexture() waits
     // for the next refresh. Without this span a trace shows a frame whose
     // children sum to ~2 ms but whose total is 20-45 ms, with nowhere to
-    // attribute the difference.
+    // attribute the difference. frames_in_flight separates a GPU that is
+    // behind from a CPU that presented too fast (gpu_acquire_diagnostics.hpp).
     bool acquired = false;
     {
-        PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
+        PULP_TRACE_SCOPE_NAMED_ARGS("gpu", "gpu_acquire",
+                                    "frames_in_flight", skia.gpu_frames_in_flight(),
+                                    "gpu_render_ms", skia.gpu_render_time_ms());
         acquired = gpu.begin_frame();
     }
     if (!acquired) {

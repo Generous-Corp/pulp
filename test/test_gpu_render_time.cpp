@@ -199,3 +199,23 @@ TEST_CASE("timestamp queries disable Dawn's quantization toggle", "[render][gpu-
     // defaults untouched.
     REQUIRE(gpu_surface_disabled_toggles(false).empty());
 }
+
+// ── Frames submitted but not finished on the GPU ────────────────────────────
+
+TEST_CASE("GpuFramesInFlight counts submissions until their finished callback",
+          "[render][gpu-frames-in-flight]") {
+    GpuFramesInFlight f;
+    REQUIRE(f.count() == 0);
+    f.on_submitted();
+    f.on_submitted();
+    f.on_submitted();
+    REQUIRE(f.count() == 3);
+    f.on_finished();
+    REQUIRE(f.count() == 2);
+    f.on_finished();
+    f.on_finished();
+    REQUIRE(f.count() == 0);
+    // A stray callback never drives the count negative.
+    f.on_finished();
+    REQUIRE(f.count() == 0);
+}
