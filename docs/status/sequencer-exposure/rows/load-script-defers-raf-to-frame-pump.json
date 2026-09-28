@@ -1,0 +1,65 @@
+{
+  "id": "load-script-defers-raf-to-frame-pump",
+  "title": "A script load after the host frame pump is live leaves requestAnimationFrame callbacks for the next frame tick",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "7cc4ac50-3732-4555-939a-410790dd7f42",
+  "owned_paths": [
+    "core/view/src/widget_bridge.cpp",
+    "test/test_widget_bridge_animation.cpp",
+    "docs/status/sequencer-exposure/rows/load-script-defers-raf-to-frame-pump.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/view/src/widget_bridge.cpp",
+      "needles": [
+        "if (frame_pump_live_) {",
+        "frame_pump_live_ = true;"
+      ]
+    },
+    {
+      "path": "test/test_widget_bridge_animation.cpp",
+      "needles": [
+        "WidgetBridge load_script data pushes defer rAF to the frame once the pump is live",
+        "WidgetBridge load_script flushes rAF before any frame pump runs"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "WidgetBridge::load_script keeps its signature; its documented contract now defers rAF callbacks once service_frame_callbacks() has run, and frame_pump_live() is a public const query on the installed widget_bridge.hpp. Callers with no frame pump keep the synchronous flush.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/view/include/pulp/view/widget_bridge.hpp",
+          "needles": [
+            "bool frame_pump_live() const noexcept"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or accepted document shape changes; the change is when a live UI bridge runs animation-frame callbacks."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes; frame-callback scheduling inside the scripted UI bridge is not a controllable operation."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; frame-callback scheduling is runtime plumbing, not a design-time capability."
+    }
+  }
+}
