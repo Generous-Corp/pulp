@@ -624,6 +624,12 @@ owns Skia's process-global handler. A capture with Dawn diagnostics but no Skia
 ones is therefore an ordinary outcome (a host already held the slot), not a
 dropped event. `skia_log_bridge_state()` reports which it was.
 
+The log copy of a Skia record is capped (`kSkiaLogTextLimit`, 50 per process)
+while the trace event is not, so past that cap a trace legitimately holds Skia
+records the log does not — the `GpuDiagnostics: … skia_text_suppressed=N` line
+a headless screenshot run prints says how many. Compare `skia_records` on that
+line against your `gpu.diagnostic` count before calling the two out of sync.
+
 ## DPR experiment traces reuse A2T
 
 A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.

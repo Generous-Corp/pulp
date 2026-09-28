@@ -43,8 +43,11 @@
 
 #ifdef PULP_HAS_SKIA
 #include <pulp/render/dirty_tracker.hpp>
+#include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/runtime/log.hpp>
+#include <pulp/view/host_frame_timing.hpp>
 #include <pulp/view/repaint_damage.hpp>
 #include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
@@ -2163,6 +2166,10 @@ public:
             // windowDidResize, which paints the first frame at the wrong size
             // with truncated content and feeds the same wrong numbers to the
             // editor bridge's initial resize.
+            // Opt-in only (PULP_GPU_LOG_BRIDGE / tracing build); a secondary
+            // window never claims Skia's process-global log handler.
+            if (!options.secondary_window)
+                render::install_skia_log_bridge_if_enabled();
             const NSSize content = metal_view_.bounds.size;
             init_gpu(content.width > 0.0 ? static_cast<float>(content.width)
                                          : options.width,
@@ -2413,6 +2420,12 @@ public:
     // the drawable's contents are undefined. Failing closed is the safe
     // direction here — an unproven frame must never read as submission
     // evidence.
+    std::vector<double> frame_time_samples_ms() const override {
+        return frame_times_.samples();
+    }
+
+    void log_gpu_diagnostics_summary() override { render::log_gpu_diagnostics_summary(); }
+
     bool last_frame_gpu_submission_observed() const override {
         return last_submission_observed_.load(std::memory_order_relaxed);
     }
@@ -2715,6 +2728,10 @@ private:
     uint64_t request_repaint_dirty_frames_ = 0;
     int frame_fail_count_ = 0;
     int frame_ok_count_ = 0;
+    pulp::view::HostClock::time_point gpu_bringup_start_{};
+    render::GpuStartupReport startup_report_{};
+    bool startup_logged_ = false;
+    pulp::view::HostFrameTimeRecorder frame_times_;
     float width_ = 0, height_ = 0;
     // ── Design viewport (see WindowHost::set_design_viewport) ──────────
     // When set (> 0), root_ is laid out at design size and paint applies
@@ -2840,6 +2857,7 @@ private:
     void init_gpu(float width, float height) {
         width_ = width;
         height_ = height;
+        gpu_bringup_start_ = pulp::view::HostClock::now();
 
         gpu_surface_ = render::GpuSurface::create_dawn();
         if (!gpu_surface_) return;
@@ -2868,7 +2886,9 @@ private:
         skia_config.height = static_cast<uint32_t>(height);
         skia_config.scale_factor = static_cast<float>(scale);
 
+        const auto graphite_start = pulp::view::HostClock::now();
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, skia_config);
+        startup_report_.graphite_ms = pulp::view::host_elapsed_ms(graphite_start);
         configured_scale_ = static_cast<float>(scale);
 
         // FU-2: put the surface in persistent-scene mode when partial repaint is
@@ -3172,6 +3192,12 @@ private:
         }
 
         gpu_surface_->end_frame(); // present to Metal surface
+        if (!startup_logged_) {
+            startup_logged_ = true;
+            startup_report_.surface = gpu_surface_->startup_timings();
+            startup_report_.first_frame_ms = pulp::view::host_elapsed_ms(gpu_bringup_start_);
+            runtime::log_info("{}", render::format_gpu_startup_line(startup_report_));
+        }
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
@@ -3238,6 +3264,7 @@ private:
                 @autoreleasepool {
                     if (!alive_token || !alive_token->load(std::memory_order_acquire))
                         return;
+                    const auto frame_start = pulp::view::HostClock::now();
 
                     // Release drag motion held since the last frame, BEFORE
                     // the idle pump and before the render decision below.
@@ -3297,6 +3324,7 @@ private:
                     if (!tick.should_render) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
                         self->render_dispatch_queued_.store(false, std::memory_order_release);
+                        self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
                         return;
                     }
                     pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
@@ -3315,6 +3343,7 @@ private:
                         ++self->pump_dirty_frames_;
                     }
                     self->render_frame();
+                    self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
                     self->render_dispatch_queued_.store(false, std::memory_order_release);
                 }
             });

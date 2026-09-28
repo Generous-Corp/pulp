@@ -349,6 +349,27 @@ each produced by the render callback), or opt in explicitly with
 `PULP_SCREENSHOT_KEEP_AUDIO=1` / `StandaloneConfig::screenshot_keeps_audio`
 when the pixels themselves must show live signal.
 
+A headless screenshot run also prints a few stable, info-level diagnostic
+lines for support reads — never one per frame:
+
+- `GpuSurface: adapter name="…" vendor="…" architecture="…" description="…"
+  type=<integrated|discrete|cpu|unknown> backend=<Metal|D3D12|Vulkan|…>
+  null=<true|false>` — the adapter Dawn picked, once per GPU surface.
+- `GpuSurface: startup_ms instance=… adapter=… device=… surface=… graphite=…
+  first_frame=…` — bring-up stage timings in milliseconds (macOS GPU window
+  host; `n/a` marks a stage that was not measured).
+- `Standalone: frame_ms frames=… p50=… p95=… max=… over16=… over33=…` —
+  main-thread time per host frame up to the capture, with the counts over a
+  16.7 ms and a 33.3 ms budget.
+- `GpuDiagnostics: skia_bridge=<status> skia_records=… gpu_diagnostics_emitted=…
+  truncated=… skia_text_suppressed=…` — whether the Skia log bridge is wired
+  (`PULP_GPU_LOG_BRIDGE=1`) and what reached it. With the bridge installed,
+  Skia's own records also appear as `skia: [<severity>] <message>`, capped at
+  50 per process.
+
+Each line is one physical line; field order is stable, and new fields are only
+ever appended.
+
 #### Capability control
 
 The legacy `pulp run --inspect*` launcher flags are retired and rejected before

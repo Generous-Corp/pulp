@@ -4,9 +4,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/render/gpu_diagnostics.hpp>
+#include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/runtime/trace.hpp>
 
+#include "support/stderr_capture.hpp"
+
 #include <cstdarg>
+#include <cstdint>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -20,6 +24,9 @@
 #endif
 
 using namespace pulp::render;
+#if !defined(_WIN32)
+using pulp::test::StderrCapture;
+#endif
 
 namespace {
 
@@ -174,6 +181,118 @@ TEST_CASE("an explicit install reports a terminal, idempotent outcome", "[gpu][d
     REQUIRE(skia_log_bridge_state().status == first);
 }
 
+TEST_CASE("a log-text budget admits the first N records and counts the rest",
+          "[gpu][diagnostics]") {
+    LogTextBudget budget(3);
+    REQUIRE(budget.admitted() == 0);
+    REQUIRE(budget.suppressed() == 0);
+    REQUIRE(budget.admit());
+    REQUIRE(budget.admit());
+    REQUIRE(budget.admit());
+    REQUIRE_FALSE(budget.admit());
+    REQUIRE_FALSE(budget.admit());
+    REQUIRE(budget.admitted() == 3);
+    REQUIRE(budget.suppressed() == 2);
+
+    LogTextBudget none(0);
+    REQUIRE_FALSE(none.admit());
+    REQUIRE(none.suppressed() == 1);
+}
+
+TEST_CASE("the adapter line carries every AdapterInfo field", "[gpu][diagnostics][startup-log]") {
+    GpuSurface::AdapterInfo info;
+    info.available = true;
+    info.adapter_type = GpuSurface::AdapterType::integrated_gpu;
+    info.null_backend = false;
+    info.backend_type = "Metal";
+    info.name = "Apple M3 Max";
+    info.vendor = "apple";
+    info.architecture = "metal-3";
+    info.description = "Metal driver on macOS Version 26.1";
+
+    REQUIRE(format_gpu_adapter_line(info) ==
+            "GpuSurface: adapter name=\"Apple M3 Max\" vendor=\"apple\" "
+            "architecture=\"metal-3\" description=\"Metal driver on macOS Version 26.1\" "
+            "type=integrated backend=Metal null=false");
+
+    info.adapter_type = GpuSurface::AdapterType::cpu;
+    info.null_backend = true;
+    info.backend_type = "Null";
+    const auto null_line = format_gpu_adapter_line(info);
+    REQUIRE(null_line.find(" type=cpu backend=Null null=true") != std::string::npos);
+}
+
+TEST_CASE("the adapter line keeps a hostile driver string on one line and in its field",
+          "[gpu][diagnostics][startup-log]") {
+    GpuSurface::AdapterInfo info;
+    info.name = "evil\" type=discrete\nGpuSurface: forged";
+    info.vendor = "back\\slash";
+    const auto line = format_gpu_adapter_line(info);
+    REQUIRE(line.find('\n') == std::string::npos);
+    REQUIRE(line.find("name=\"evil\\\" type=discrete GpuSurface: forged\"") != std::string::npos);
+    REQUIRE(line.find("vendor=\"back\\\\slash\"") != std::string::npos);
+    // The only real type field is the one the formatter wrote.
+    REQUIRE(line.find(" type=unknown ") != std::string::npos);
+}
+
+TEST_CASE("adapter type labels are distinct and stable", "[gpu][diagnostics][startup-log]") {
+    REQUIRE(std::string(adapter_type_label(GpuSurface::AdapterType::integrated_gpu)) == "integrated");
+    REQUIRE(std::string(adapter_type_label(GpuSurface::AdapterType::discrete_gpu)) == "discrete");
+    REQUIRE(std::string(adapter_type_label(GpuSurface::AdapterType::cpu)) == "cpu");
+    REQUIRE(std::string(adapter_type_label(GpuSurface::AdapterType::unknown)) == "unknown");
+}
+
+TEST_CASE("the startup line prints each stage in ms and n/a for an unmeasured one",
+          "[gpu][diagnostics][startup-log]") {
+    GpuStartupReport report;
+    report.surface.instance_ms = 0.44;
+    report.surface.adapter_ms = 12.06;
+    report.surface.device_ms = 8.3;
+    report.surface.surface_ms = 1.0;
+    report.graphite_ms = 20.51;
+    report.first_frame_ms = 95.25;
+    REQUIRE(format_gpu_startup_line(report) ==
+            "GpuSurface: startup_ms instance=0.4 adapter=12.1 device=8.3 surface=1.0 "
+            "graphite=20.5 first_frame=95.2");
+
+    REQUIRE(format_gpu_startup_line(GpuStartupReport{}) ==
+            "GpuSurface: startup_ms instance=n/a adapter=n/a device=n/a surface=n/a "
+            "graphite=n/a first_frame=n/a");
+}
+
+TEST_CASE("the diagnostics line distinguishes not-wired from nothing-logged",
+          "[gpu][diagnostics][startup-log]") {
+    SkiaLogBridgeState bridge;
+    bridge.status = SkiaLogBridgeStatus::installed;
+    bridge.records_forwarded = 3;
+    bridge.text_suppressed = 0;
+    GpuDiagnosticsStats stats;
+    stats.emitted = 5;
+    stats.truncated = 1;
+    REQUIRE(format_gpu_diagnostics_line(bridge, stats) ==
+            "GpuDiagnostics: skia_bridge=installed skia_records=3 gpu_diagnostics_emitted=5 "
+            "truncated=1 skia_text_suppressed=0");
+
+    bridge.status = SkiaLogBridgeStatus::declined_not_enabled;
+    bridge.records_forwarded = 0;
+    REQUIRE(format_gpu_diagnostics_line(bridge, GpuDiagnosticsStats{}) ==
+            "GpuDiagnostics: skia_bridge=declined_not_enabled skia_records=0 "
+            "gpu_diagnostics_emitted=0 truncated=0 skia_text_suppressed=0");
+}
+
+#if !defined(_WIN32)
+TEST_CASE("the diagnostics summary logs the process's own bridge state",
+          "[gpu][diagnostics][startup-log]") {
+    StderrCapture capture;
+    log_gpu_diagnostics_summary();
+    const auto text = capture.text();
+    const auto expected =
+        format_gpu_diagnostics_line(skia_log_bridge_state(), gpu_diagnostics_stats());
+    INFO(text);
+    REQUIRE(text.find(expected) != std::string::npos);
+}
+#endif
+
 #if PULP_TEST_HAS_SK_LOG_HANDLER
 namespace {
 
@@ -206,4 +325,57 @@ TEST_CASE("an installed Skia handler forwards records into the same sink", "[gpu
     REQUIRE(bridge_after.records_forwarded == bridge_before.records_forwarded + 1);
     REQUIRE(sink_after.emitted == sink_before.emitted + 1);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("an installed Skia handler also writes the record to the text log",
+          "[gpu][diagnostics][startup-log]") {
+    if (install_skia_log_bridge() != SkiaLogBridgeStatus::installed)
+        SKIP("another SkLogHandler owns this process, so forwarding is unverifiable here");
+    auto handler = SkLogHandler::GetInstance();
+    REQUIRE(handler != nullptr);
+    if (skia_log_bridge_state().text_logged >= kSkiaLogTextLimit)
+        SKIP("this process already spent the Skia text budget");
+
+    StderrCapture capture;
+    log_through_skia(*handler, SkLogPriority::kWarning, "graphite: %s stalled (%d)\n", "atlas", 3);
+    const auto text = capture.text();
+    INFO(text);
+    REQUIRE(text.find("[pulp:warn]  skia: [warning] graphite: atlas stalled (3)\n") !=
+            std::string::npos);
+}
+
+TEST_CASE("the Skia text copy stops at its budget and counts what it dropped",
+          "[gpu][diagnostics][startup-log]") {
+    if (install_skia_log_bridge() != SkiaLogBridgeStatus::installed)
+        SKIP("another SkLogHandler owns this process, so forwarding is unverifiable here");
+    auto handler = SkLogHandler::GetInstance();
+    REQUIRE(handler != nullptr);
+
+    const auto before = skia_log_bridge_state();
+    const std::uint64_t pushed = kSkiaLogTextLimit + 7;
+    StderrCapture capture;
+    for (std::uint64_t i = 0; i < pushed; ++i)
+        log_through_skia(*handler, SkLogPriority::kInfo, "record %llu",
+                         static_cast<unsigned long long>(i));
+    log_gpu_diagnostics_summary();
+    const auto text = capture.text();
+
+    const auto after = skia_log_bridge_state();
+    // Every record still reaches the sink; only the text copy is bounded.
+    REQUIRE(after.records_forwarded == before.records_forwarded + pushed);
+    REQUIRE(after.text_logged == kSkiaLogTextLimit);
+    REQUIRE(after.text_suppressed == before.text_suppressed + before.text_logged + pushed -
+                                         kSkiaLogTextLimit);
+
+    std::size_t copies = 0;
+    for (auto at = text.find("skia: [info] record "); at != std::string::npos;
+         at = text.find("skia: [info] record ", at + 1))
+        ++copies;
+    REQUIRE(copies == kSkiaLogTextLimit - before.text_logged);
+    REQUIRE(text.find("skia: " + std::to_string(after.text_suppressed) +
+                      " more records suppressed") != std::string::npos);
+    REQUIRE(text.find("skia_text_suppressed=" + std::to_string(after.text_suppressed)) !=
+            std::string::npos);
+}
+#endif
 #endif // PULP_TEST_HAS_SK_LOG_HANDLER
