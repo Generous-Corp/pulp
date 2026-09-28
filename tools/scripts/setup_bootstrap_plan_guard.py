@@ -7,6 +7,9 @@ silently because nothing else in the tree reads them:
 
   * it must be a Release build — Release is this repo's documented default, and
     a Debug GPU/JS UI build is dramatically slower for anyone who then runs it;
+  * a fresh build dir must use Ninja when it is available — the Makefiles
+    default rebuilds and relinks far more slowly, and CMake keeps a dir's
+    generator for good once it is created;
   * it must leave the example projects out — a from-scratch examples tree is
     many minutes of compile nobody asked for, and it hard-fails the
     PULP_HAS_SKIA gate on a checkout whose Skia is still an LFS pointer.
@@ -23,6 +26,7 @@ Exit 0 when the plan holds, 1 with a diagnosis when it does not.
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -81,6 +85,19 @@ def check(setup: Path) -> list[str]:
         if expected not in configure:
             problems.append(f"configure command is missing {expected}: {configure}")
 
+    # A fresh build dir must get Ninja when it is available; the Makefiles
+    # default rebuilds and relinks far more slowly. An existing cache keeps
+    # its generator (CMake cannot switch it), so only a fresh dir is judged.
+    fresh = not (setup.parent / "build" / "CMakeCache.txt").exists()
+    if fresh and shutil.which("ninja"):
+        if default.get("generator") != "Ninja":
+            problems.append(
+                f"fresh build dir generator is {default.get('generator')!r} with ninja "
+                "on PATH, expected 'Ninja'"
+            )
+        if "-G Ninja" not in configure:
+            problems.append(f"configure command is missing -G Ninja: {configure}")
+
     # The overrides are the reason the defaults are safe to tighten.
     debug = resolve_plan(setup, ["--debug"])
     if debug.get("build_type") != "Debug":
@@ -104,11 +121,12 @@ def check_source(setup: Path) -> list[str]:
     problems: list[str] = []
     source = setup.read_text()
 
-    configure = extract_command(source, "cmake -S ")
+    configure = extract_command(source, '-S "$REPO_ROOT" -B ')
     if configure is None:
-        problems.append("no `cmake -S` configure invocation found in setup.sh")
+        problems.append("no `cmake ... -S` configure invocation found in setup.sh")
     else:
-        for expected in ('-DCMAKE_BUILD_TYPE="$BUILD_TYPE"',
+        for expected in ('${GENERATOR:+-G "$GENERATOR"}',
+                         '-DCMAKE_BUILD_TYPE="$BUILD_TYPE"',
                          '-DPULP_BUILD_EXAMPLES="$BUILD_EXAMPLES"'):
             if expected not in configure:
                 problems.append(
@@ -172,13 +190,13 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         print(
-            "\nsetup.sh bootstraps a checkout: its build must default to Release\n"
-            "with examples off. Use --debug / --examples to opt back in.",
+            "\nsetup.sh bootstraps a checkout: its build must default to Ninja and\n"
+            "Release with examples off. Use --debug / --examples to opt back in.",
             file=sys.stderr,
         )
         return 1
 
-    print("setup-bootstrap-plan-guard: OK — bootstrap builds Release, examples off.")
+    print("setup-bootstrap-plan-guard: OK — bootstrap builds Ninja + Release, examples off.")
     return 0
 
 
