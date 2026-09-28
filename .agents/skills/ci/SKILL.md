@@ -9312,6 +9312,17 @@ Key facts:
   version projection. Any missing script, API/signature error, nested/unknown
   topology, writer drift, extra byte, or ambiguous association retains the full
   native path. The verifier's own PR therefore cannot approve itself.
+- **PR-event bump runs never fast-path unless `PULP_BUMP_FASTPATH_PR_MERGE_REF=1`.**
+  `GITHUB_SHA` on a `pull_request` run is the synthesized `refs/pull/N/merge`
+  commit, and a freshly opened bump PR's payload has a null/stale
+  `merge_commit_sha` and no `after`, so the default verifier logs
+  `workflow head is unrelated to the pull request event` and the run takes the
+  full native build (only merge groups skip). The opt-in repo variable makes the
+  workflow pass `--accept-pr-merge-ref`, which accepts the checkout only when it
+  is HEAD, its parents are exactly `[base.sha, head.sha]`, and its tree equals
+  the head tree. The flag reaches only a base verifier that knows it; an older
+  base rejects the unknown flag and keeps the full path, so the variable has no
+  effect until this verifier is on the bump PR's base.
 - To change what counts as skip-safe: edit `SKIP_SAFE_PREFIXES` /
   `SKIP_SAFE_EXACT` / `FORCE_BUILD_PREFIXES` in `classify_changes.py`
   and add a case to `test_classify_changes.py`. Never widen the
