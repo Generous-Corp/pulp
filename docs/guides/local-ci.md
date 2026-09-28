@@ -830,6 +830,17 @@ verdicts followed by `ran_failed`, which must be zero before a digest-keyed
 skip could be proposed (that switch-on is a decisions-contract amendment,
 not a workflow edit).
 
+Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
+verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
+App-opened pull requests (most of this repository's), so the verifier binds
+such a run to its pull request through the commit (`commits/<head>/pulls`)
+and accepts only when exactly one open pull request from this repository
+carries that head, its base is the protected base, the run is a successful
+`pull_request` run of `build.yml`, and the pull request number equals the
+merge-group entry parsed from the queue ref. Any other shape refuses with a
+`commit-pull lookup:` reason that the `shipyard-receipt-decision` annotation
+carries, so refusals caused by the binding are countable.
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate

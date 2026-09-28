@@ -593,6 +593,44 @@ def _api_json(opener, url: str, token: str) -> dict[str, Any]:
         return json.load(response)
 
 
+def _verify_run_by_commit_pull(opener, root: str, args: argparse.Namespace, run: dict[str, Any]) -> None:
+    """Bind a run whose `pull_requests` is empty to exactly one pull request.
+
+    GitHub leaves `pull_requests` empty on runs for App-opened pull requests,
+    which is most of this repository's. The binding is re-derived from the
+    commit instead (`commits/{head_sha}/pulls`) and accepted only when every
+    condition below holds; each failure names its own reason, prefixed
+    `commit-pull lookup:` so a refusal caused here is countable.
+    """
+    if run.get("path") != args.workflow_path:
+        raise ReceiptError(
+            f"commit-pull lookup: run is not from {args.workflow_path} (got {run.get('path')!r})")
+    if run.get("repository", {}).get("full_name") not in (None, args.repository) or \
+            run.get("head_repository", {}).get("full_name") not in (None, args.repository):
+        raise ReceiptError("commit-pull lookup: run's repositories are not this repository")
+    encoded = urllib.parse.quote(args.head_sha, safe="")
+    pulls = _api_json(opener, f"{root}/repos/{args.repository}/commits/{encoded}/pulls?per_page=100", args.token)
+    if not isinstance(pulls, list):
+        raise ReceiptError("commit-pull lookup: malformed pull request listing")
+    if len(pulls) != 1:
+        raise ReceiptError(f"commit-pull lookup: {len(pulls)} pull requests carry head {args.head_sha[:12]}; need exactly one")
+    pr = pulls[0]
+    if pr.get("state") != "open":
+        raise ReceiptError(f"commit-pull lookup: pull request #{pr.get('number')} is {pr.get('state')!r}, not open")
+    if pr.get("head", {}).get("sha") != args.head_sha:
+        raise ReceiptError("commit-pull lookup: pull request head is not the run's head")
+    if pr.get("head", {}).get("repo", {}).get("full_name") != args.repository:
+        raise ReceiptError("commit-pull lookup: pull request head is not from this repository (fork)")
+    if pr.get("base", {}).get("repo", {}).get("full_name") != args.repository:
+        raise ReceiptError("commit-pull lookup: pull request base is not this repository")
+    if pr.get("base", {}).get("sha") != args.base_sha:
+        raise ReceiptError("commit-pull lookup: pull request base is not the protected base")
+    if args.entry_pr is None:
+        raise ReceiptError("commit-pull lookup: no merge-group entry named; refusing to bind by commit alone")
+    if pr.get("number") != args.entry_pr:
+        raise ReceiptError(f"commit-pull lookup: pull request #{pr.get('number')} is not the merge-group entry #{args.entry_pr}")
+
+
 def download(args: argparse.Namespace) -> dict[str, Any]:
     opener = urllib.request.build_opener(_CredentialSafeRedirect())
     encoded_name = urllib.parse.quote(args.artifact_name, safe="")
@@ -621,12 +659,19 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
         or run.get("event") != "pull_request"
         or run.get("conclusion") != "success"
         or run.get("head_sha") != args.head_sha
-        or not isinstance(pulls, list)
-        or len(pulls) != 1
-        or pulls[0].get("head", {}).get("sha") != args.head_sha
-        or pulls[0].get("base", {}).get("sha") != args.base_sha
     ):
         raise ReceiptError("artifact workflow run is not the exact successful pull request")
+    if isinstance(pulls, list) and pulls:
+        if (
+            len(pulls) != 1
+            or pulls[0].get("head", {}).get("sha") != args.head_sha
+            or pulls[0].get("base", {}).get("sha") != args.base_sha
+        ):
+            raise ReceiptError("artifact workflow run is not the exact successful pull request")
+        if args.entry_pr is not None and pulls[0].get("number") != args.entry_pr:
+            raise ReceiptError("artifact workflow run's pull request is not the merge-group entry")
+    else:
+        _verify_run_by_commit_pull(opener, root, args, run)
     archive_request = urllib.request.Request(
         artifact["archive_download_url"],
         headers={
@@ -709,6 +754,11 @@ def _parser() -> argparse.ArgumentParser:
     fetch.add_argument("--base-sha", required=True)
     fetch.add_argument("--head-sha", required=True)
     fetch.add_argument("--output", type=Path, required=True)
+    fetch.add_argument("--entry-pr", type=int, default=None,
+                       help="the pull request number the merge-group entry names; required for a "
+                            "run whose pull_requests is empty (App-opened pull requests)")
+    fetch.add_argument("--workflow-path", default=".github/workflows/build.yml",
+                       help="workflow file the artifact's run must come from")
     return parser
 
 
