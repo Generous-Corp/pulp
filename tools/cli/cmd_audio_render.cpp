@@ -309,6 +309,10 @@ static int cmd_audio_render_impl(const std::vector<std::string>& args, bool work
         return 1;
     }
 
+    // The requested widths must reach the slot BEFORE prepare(): an AU
+    // negotiates its stream format at initialize time.
+    slot->set_preferred_channel_layout(static_cast<int>(req.in_channels),
+                                       static_cast<int>(req.out_channels));
     if (!slot->prepare(req.sample_rate, static_cast<int>(req.block))) {
         std::fprintf(stderr, "pulp audio render: prepare() failed\n");
         slot->release();

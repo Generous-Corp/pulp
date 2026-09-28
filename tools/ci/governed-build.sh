@@ -15,6 +15,13 @@
 # tier-0 bound. Usage:
 #
 #   tools/ci/governed-build.sh cmake --build build [--target ...]
+#   tools/ci/governed-build.sh --probe-jobs   # print the share a build would get
+#
+# Before any lease is requested it refuses two things that waste a shared host:
+# a source checkout in a temporary directory (checkout_location_guard.py; the
+# same rule the root CMake configure applies), and a second `cmake --build`
+# into a build directory another live build already holds
+# (build_dir_lock.py --no-wait, which names the holder).
 #
 # The build command MUST NOT carry its own --parallel/-j (a bare flag is
 # rejected by build_parallelism_guard.py anyway); CMAKE_BUILD_PARALLEL_LEVEL
@@ -27,6 +34,51 @@ if [ "$#" -eq 0 ]; then
 fi
 
 log() { echo "[governed-build] $*" >&2; }
+
+GOVERNED_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+GOVERNED_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# --- Pre-lease refusals ---------------------------------------------------------
+# Both run before a lease is requested, so a refused build never holds cores.
+# The build-dir lock re-executes this script as the child of the lock holder;
+# that child is marked with a private variable (unset at once, so it never leaks
+# to a nested build) and skips straight to lease admission.
+#
+# Both are POSIX-only, like the CMake-side check. Under Git Bash on Windows a
+# native python3 cannot re-execute this script: its `bash` can resolve to WSL,
+# and the POSIX paths this script sees mean nothing to it.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) GOVERNED_POSIX_HOST=0 ;;
+  *) GOVERNED_POSIX_HOST=1 ;;
+esac
+if [ "${_PULP_GOVERNED_BUILD_LOCKED:-}" = "1" ]; then
+  unset _PULP_GOVERNED_BUILD_LOCKED
+elif [ "${1:-}" != "--probe-jobs" ] && [ "$GOVERNED_POSIX_HOST" = "1" ]; then
+  guard_py="$GOVERNED_REPO_ROOT/tools/ci/checkout_location_guard.py"
+  lock_py="$GOVERNED_REPO_ROOT/tools/ci/build_dir_lock.py"
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "python3 not found: skipping the checkout-location and build-dir lock checks"
+  else
+    # A checkout in /tmp, /private/tmp or $TMPDIR misses the shared ccache on
+    # every compile. Exit 3 is the guard's refusal; anything else it prints is
+    # a warning and the build proceeds.
+    guard_rc=0
+    if [ -f "$guard_py" ]; then
+      python3 "$guard_py" --context governed-build "$GOVERNED_REPO_ROOT" || guard_rc=$?
+    fi
+    if [ "$guard_rc" -eq 3 ]; then exit 3; fi
+
+    # Hold the build directory for the life of this build, or refuse and name
+    # whoever already holds it. A holder's own descendants inherit the lock
+    # (PULP_BUILD_DIR_LOCK_HELD), so a locked validation stage can still call
+    # this wrapper for the same tree. Exit 75 is the refusal.
+    if [ -f "$lock_py" ] && [ "$(basename "${1:-}")" = "cmake" ] && [ "${2:-}" = "--build" ] \
+        && [ -n "${3:-}" ] && [ "${PULP_BUILD_DIR_LOCK:-1}" != "0" ]; then
+      exec env _PULP_GOVERNED_BUILD_LOCKED=1 python3 "$lock_py" --no-wait --build-dir "$3" \
+        -- bash "$GOVERNED_SCRIPT" "$@"
+    fi
+  fi
+fi
 
 # --- Tier-0 bound: min(cores, RAM_budget / 1.5 GiB), always >= 1 ---------------
 # This is the no-tartci bound: it keeps a build from exhausting RAM, but on a
@@ -191,6 +243,62 @@ find_tartci() {
   fi
   command -v tartci 2>/dev/null || true
 }
+
+# Named capacity field from `tartci leases status --json`, or "" if unknown.
+status_field() {
+  printf '%s' "$1" \
+    | grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" \
+    | grep -o '[0-9][0-9]*$' | head -n 1 || true
+}
+
+# Print the parallelism a build started now would most likely run at, without
+# acquiring anything: `jobs=<N> grant=<lease|partial-lease|agent-floor|floor|tier0>`.
+# It is a snapshot, so a caller may use it to decide whether a build is worth
+# starting (the pre-push coverage build skips itself when this says the floor),
+# never to size one. Always exits 0.
+probe_jobs() {
+  local profile status jobs avail floor_avail best grant partial fl
+  local requested="${PULP_BUILD_JOBS:-}"
+  if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
+    TARTCI_BIN="$(find_tartci)"
+  fi
+  if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; then
+    jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
+    positive_int "$jobs" || jobs="$(tier0_jobs)"
+    if positive_int "$requested" && [ "$requested" -lt "$jobs" ]; then jobs="$requested"; fi
+    status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || status=""
+    avail="$(status_field "$status" non_gate_available_cores)"
+    floor_avail="$(status_field "$status" floor_available_cores)"
+    if positive_int "$avail" && [ "$avail" -ge "$jobs" ]; then
+      best="$jobs"; grant="lease"
+    else
+      partial=0; fl=0
+      if positive_int "$avail"; then partial="$avail"; fi
+      if positive_int "$floor_avail"; then
+        fl="$floor_avail"
+        if [ "$fl" -gt "$jobs" ]; then fl="$jobs"; fi
+      fi
+      if [ "$partial" -ge "$fl" ] && [ "$partial" -ge 1 ]; then
+        best="$partial"; grant="partial-lease"
+      elif [ "$fl" -ge 1 ]; then
+        best="$fl"; grant="agent-floor"
+      else
+        best="$(min_jobs)"; grant="floor"
+      fi
+    fi
+  else
+    compute_tier0
+    best="$TIER0_JOBS"; grant="tier0"
+    if positive_int "$requested" && [ "$requested" -lt "$best" ]; then best="$requested"; fi
+  fi
+  echo "jobs=$best grant=$grant"
+}
+
+TARTCI_BIN=""
+if [ "${1:-}" = "--probe-jobs" ]; then
+  probe_jobs
+  exit 0
+fi
 
 LEASE_ID=""
 TARTCI_BIN=""

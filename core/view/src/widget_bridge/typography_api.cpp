@@ -1,6 +1,7 @@
 // widget_bridge/typography_api.cpp - typography registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 #include "css_color.hpp"
 

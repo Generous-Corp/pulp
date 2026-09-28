@@ -1,6 +1,7 @@
 #include "tartci_lease.hpp"
 
 #include "cli_common.hpp"
+#include "shell_quote.hpp"
 #include "shell_redirect.hpp"
 
 #include <pulp/runtime/system.hpp>
@@ -338,6 +339,24 @@ std::string apply_agent_build_qos(const std::string& command, const std::string&
     (void)qos;
 #endif
     return command;
+}
+
+std::string apply_build_dir_lock(const std::string& command,
+                                 const fs::path& project_root,
+                                 const fs::path& build_dir) {
+#ifdef _WIN32
+    (void)project_root;
+    (void)build_dir;
+    return command;
+#else
+    if (env_value("PULP_BUILD_DIR_LOCK") == "0") return command;
+    const auto script = project_root / "tools" / "ci" / "build_dir_lock.py";
+    std::error_code ec;
+    if (!fs::is_regular_file(script, ec)) return command;
+    if (find_executable_in_path("python3").empty()) return command;
+    return "python3 " + shell_quote(script) + " --no-wait --build-dir " + shell_quote(build_dir)
+        + " -- /bin/sh -c " + shell_quote(command);
+#endif
 }
 
 static std::string tartci_watchdog_mode() {

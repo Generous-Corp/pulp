@@ -79,8 +79,9 @@ jobs:
   #      is low-volume (tags only) so it won't starve that gate, and the
   #      `actions/checkout` default `clean: true` (git clean -ffdx) wipes the
   #      untracked build dirs each run, so a release build on the persistent
-  #      self-hosted disk is clean-by-construction (no warm-dir ODR — release
-  #      also never touches the shared ccache).
+  #      self-hosted disk is clean-by-construction (no warm-dir ODR). The
+  #      host-shared ccache IS reused there; build-cli pins the same
+  #      correctness settings the PR gate uses and prints per-job hit counts.
   #   3. PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON — Namespace cloud (off for cost).
   #   4. GitHub-hosted macos-15 — last-resort fallback.
   #
@@ -110,6 +111,9 @@ jobs:
       # platform -> runs-on. Every build/smoke leg indexes this by matrix.platform,
       # so routing is data, not a chain of ternaries in the `runs-on:` key.
       map: ${{ steps.resolve.outputs.map }}
+      # platform -> runs-on for smoke-cli. Identical to `map` except the darwin
+      # legs, which default to GitHub-hosted macOS (see resolve_smoke).
+      smoke_map: ${{ steps.resolve.outputs.smoke_map }}
       # The platforms this release SHIPS and the matrix legs that build/smoke
       # them — release_product_matrix.json's `active_platforms` (absent =
       # every platform), expanded to `matrix.include` lists by the unit-tested
@@ -230,6 +234,9 @@ jobs:
           # dedicated release Tart pool as darwin-arm64. Keep the old
           # Intel-specific variable as a lower-priority compatibility fallback.
           DARWIN_X64: ${{ vars.PULP_RELEASE_DARWIN_X64_RUNS_ON_JSON || vars.PULP_RELEASE_MACOS_RUNS_ON_JSON || vars.PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON }}
+          # Both darwin smoke legs. Unset = GitHub-hosted macos-15, so a smoke
+          # never waits for a gate VM; set it to route them elsewhere.
+          SMOKE_DARWIN: ${{ vars.PULP_RELEASE_SMOKE_DARWIN_RUNS_ON_JSON }}
           LINUX_X64: ${{ vars.PULP_RELEASE_LINUX_X64_RUNS_ON_JSON }}
           LINUX_ARM64: ${{ vars.PULP_RELEASE_LINUX_ARM64_RUNS_ON_JSON }}
           WINDOWS_X64: ${{ vars.PULP_RELEASE_WINDOWS_X64_RUNS_ON_JSON }}
@@ -298,6 +305,15 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    # The same ccache correctness settings the required macOS gate uses
+    # (build.yml's macos job env). The self-hosted macOS release VMs share the
+    # host's ccache with the gate, so without them a release inherits the
+    # runner service's depend mode and mtime compiler keying — the settings
+    # behind the stale-object poisoning the gate pins these against.
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
 
     steps:
       - name: Container pre-setup (ubuntu:22.04 — build toolchain the bare image lacks)
@@ -437,6 +453,14 @@ jobs:
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
+
+      - name: Compiler cache environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Per-job counters. The self-hosted macOS cache is shared by every
+          # job on the host, so its own totals say nothing about this build.
+          echo "CCACHE_STATSLOG=${RUNNER_TEMP}/ccache-stats.log" >> "$GITHUB_ENV"
 
       # Fetch Skia prebuilt binaries — the root fix for pulp #1817.
       #
@@ -1362,6 +1386,25 @@ jobs:
       # artifact. A workflow_dispatch backfill may build an old tag while the
       # release job itself runs from current main, so the release job must not
       # read compatibility metadata from its own checkout.
+      # The proof that the cache is configured the way the gate's is, and how
+      # much of this build it served. Per-job numbers come from CCACHE_STATSLOG.
+      - name: Ccache stats
+        if: always()
+        shell: bash
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "ccache not available; skipping stats"
+            exit 0
+          fi
+          ccache --version | head -1
+          ccache --show-config 2>/dev/null \
+            | grep -iE 'compiler_check|depend_mode|direct_mode|sloppiness|cache_dir|base_dir|stats_log' || true
+          if [ -s "${CCACHE_STATSLOG:-}" ]; then
+            ccache --show-log-stats -v || ccache --show-stats
+          else
+            echo "no compile in this job went through ccache (empty stats log)"
+          fi
+
       - name: Record macOS release floor
         if: runner.os == 'macOS'
         env:
@@ -1442,18 +1485,18 @@ jobs:
       # Same data-derived legs as build-cli (release_build_matrix.py, filtered
       # by active_platforms), minus the linux-x64 build container — the smoke
       # deliberately runs each artifact on the bare runner image. The
-      # darwin-x64 leg (when active) smokes the thin x86_64 tarball on the
-      # same pinned Apple-Silicon pool as its build leg: the binary execs
-      # transparently under Rosetta, and the EXPECT_ARCH / dylib-arch asserts
-      # prove we shipped a real x86_64 slice (not an arm64 mislabel).
+      # darwin-x64 leg (when active) smokes the thin x86_64 tarball on an
+      # Apple-Silicon image: the binary execs transparently under Rosetta, and
+      # the EXPECT_ARCH / dylib-arch asserts prove we shipped a real x86_64
+      # slice (not an arm64 mislabel).
       matrix:
         include: ${{ fromJSON(needs.resolve-macos-runner.outputs.smoke_include) }}
     # Routing is DATA: resolve-macos-runner emits a platform -> runs-on map, and
-    # each leg indexes it. Previously only the macOS legs were variable-driven and
-    # everything else fell through to `|| matrix.os` — a literal GitHub-hosted
-    # label — which is the only reason Linux/Windows releases could not use the
-    # self-hosted VMs that were already running and idle.
-    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)[matrix.platform] }}
+    # each leg indexes it. The darwin smoke legs default to GitHub-hosted macOS
+    # instead of the self-hosted build pool: the check needs a machine other
+    # than the builder, not a build slot, and on the gate pool it waited
+    # 16-29 minutes (p50) for under 1.5 minutes of work.
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.smoke_map)[matrix.platform] }}
     timeout-minutes: 360
     name: Smoke ${{ matrix.platform }}
 

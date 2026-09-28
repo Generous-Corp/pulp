@@ -1489,6 +1489,10 @@ GpuSurface::AdapterBackendPreference map_backend_preference(
     switch (preference) {
         case Renderer3DAdapterBackendPreference::null_backend:
             return GpuSurface::AdapterBackendPreference::null_backend;
+        case Renderer3DAdapterBackendPreference::vulkan:
+            return GpuSurface::AdapterBackendPreference::vulkan;
+        case Renderer3DAdapterBackendPreference::d3d12:
+            return GpuSurface::AdapterBackendPreference::d3d12;
         case Renderer3DAdapterBackendPreference::default_backend:
             return GpuSurface::AdapterBackendPreference::default_backend;
     }

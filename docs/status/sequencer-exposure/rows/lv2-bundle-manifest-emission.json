@@ -70,7 +70,7 @@
     },
     "design_time_agent_manifest": {
       "disposition": "not_applicable",
-      "rationale": "docs/status/agent-capabilities.json is byte-identical and the capability contract reports fresh: the same 111 capabilities and 496 public headers, none added, removed or re-keyed. Packaging an existing format's bundle publishes no new design-time capability."
+      "rationale": "docs/status/agent-capabilities.json is byte-identical and the capability contract reports fresh: the same 112 capabilities and 497 public headers, none added, removed or re-keyed. Packaging an existing format's bundle publishes no new design-time capability."
     }
   }
 }

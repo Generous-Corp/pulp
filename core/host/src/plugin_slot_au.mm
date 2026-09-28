@@ -115,6 +115,11 @@ public:
     const PluginInfo& info() const override { return info_; }
     bool is_loaded() const override { return au_ != nullptr; }
 
+    void set_preferred_channel_layout(int inputs, int outputs) override {
+        preferred_inputs_ = inputs;
+        preferred_outputs_ = outputs;
+    }
+
     bool prepare(double sample_rate, int max_block_size) override {
         if (!au_) return false;
         if (prepared_) release();
@@ -124,7 +129,15 @@ public:
 
         // 32-bit float, non-interleaved, 2 channels. Most AUs support this
         // natively; a fuller host negotiates per-scope/element.
-        const int channels = std::max(1, info_.num_outputs > 0 ? info_.num_outputs : 2);
+        // Per-scope widths. The caller's requested layout wins when it was
+        // supplied, because the AU negotiates its stream shape HERE and cannot
+        // adapt to a differently shaped buffer later; falling back to the
+        // descriptor (or 2) is what silently rejected every mono render.
+        const int out_channels = preferred_outputs_ > 0
+                                     ? preferred_outputs_
+                                     : std::max(1, info_.num_outputs > 0 ? info_.num_outputs : 2);
+        const int in_channels = preferred_inputs_ >= 0 ? preferred_inputs_ : out_channels;
+        const int channels = out_channels;
         AudioStreamBasicDescription asbd{};
         asbd.mSampleRate       = sample_rate;
         asbd.mFormatID         = kAudioFormatLinearPCM;
@@ -134,7 +147,7 @@ public:
         asbd.mBytesPerPacket   = sizeof(float);
         asbd.mFramesPerPacket  = 1;
         asbd.mBytesPerFrame    = sizeof(float);
-        asbd.mChannelsPerFrame = static_cast<UInt32>(channels);
+        asbd.mChannelsPerFrame = static_cast<UInt32>(channels); // per-scope below
         asbd.mBitsPerChannel   = 32;
 
         // An instrument (aumu) and a generator (augn) have NO input element, so
@@ -150,9 +163,13 @@ public:
         // shape to expect.
         for (auto scope : {kAudioUnitScope_Input, kAudioUnitScope_Output}) {
             if (scope == kAudioUnitScope_Input && !has_input_bus) continue;
-            OSStatus st = AudioUnitSetProperty(
-                au_, kAudioUnitProperty_StreamFormat, scope, 0,
-                &asbd, sizeof(asbd));
+            AudioStreamBasicDescription scope_asbd = asbd;
+            scope_asbd.mChannelsPerFrame =
+                static_cast<UInt32>(scope == kAudioUnitScope_Input ? in_channels : out_channels);
+            if (scope_asbd.mChannelsPerFrame == 0)
+                continue;
+            OSStatus st = AudioUnitSetProperty(au_, kAudioUnitProperty_StreamFormat, scope, 0,
+                                               &scope_asbd, sizeof(scope_asbd));
             if (st != noErr) {
                 runtime::log_error("AU: set StreamFormat failed (scope {}, status {})",
                                    static_cast<int>(scope), static_cast<int>(st));
@@ -641,6 +658,9 @@ private:
     }
 
     PluginInfo info_;
+    // -1 = caller supplied no preference; honour the descriptor/default instead.
+    int preferred_inputs_ = -1;
+    int preferred_outputs_ = -1;
     AudioUnit au_ = nullptr;
     void* editor_container_ = nullptr;  // hosted editor container, null unless open
 

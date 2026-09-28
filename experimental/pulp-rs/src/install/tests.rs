@@ -930,6 +930,10 @@ fn looks_like_build_artifact_detects_cargo_target() {
     assert!(looks_like_build_artifact(Path::new(
         "/tmp/pulp-validate/experimental/pulp-rs/target/release/deps/pulp_rs-abcd1234"
     )));
+    // The CMake build's cargo target dir, where ctest runs the tests from.
+    assert!(looks_like_build_artifact(Path::new(
+        "/w/pulp/build/experimental/pulp-rs/cargo-target/debug/pulp"
+    )));
     assert!(!looks_like_build_artifact(Path::new("/usr/local/bin/pulp")));
     assert!(!looks_like_build_artifact(Path::new(
         "/opt/pulp/bin/pulp-cpp"
@@ -976,4 +980,70 @@ fn backup_path_appends_dot_bak() {
         backup_path(Path::new("C:\\bin\\pulp.exe")),
         PathBuf::from("C:\\bin\\pulp.exe.bak")
     );
+}
+
+fn runtime_plan(bin_dir: &Path) -> InstallPlan {
+    InstallPlan {
+        version: "0.50.0".into(),
+        url: "ignored".into(),
+        asset: "ignored".into(),
+        self_path: bin_dir.join(pulp_basename()),
+        cpp_path: Some(bin_dir.join(cpp_basename())),
+        mcp_path: None,
+        is_zip: false,
+    }
+}
+
+#[test]
+fn install_extracted_installs_the_shared_runtime_beside_its_binaries() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    fs::write(bin_dir.path().join(pulp_basename()), b"old-pulp").unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(cpp_basename()), b"new-cpp").unwrap();
+    fs::write(arch_dir.path().join(shared_runtime_basename()), b"new-runtime").unwrap();
+
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    install_extracted(&runtime_plan(bin_dir.path()), &arch).unwrap();
+
+    assert_eq!(
+        fs::read(bin_dir.path().join(shared_runtime_basename())).unwrap(),
+        b"new-runtime",
+        "pulp-cpp loads the runtime from its own directory; an upgrade must put it there"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn install_extracted_replaces_a_runtime_symlink_with_the_release_runtime() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    fs::write(bin_dir.path().join(pulp_basename()), b"old-pulp").unwrap();
+    let stale = elsewhere.path().join(shared_runtime_basename());
+    fs::write(&stale, b"stale-runtime").unwrap();
+    std::os::unix::fs::symlink(&stale, bin_dir.path().join(shared_runtime_basename())).unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+    fs::write(arch_dir.path().join(shared_runtime_basename()), b"new-runtime").unwrap();
+
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    install_extracted(&runtime_plan(bin_dir.path()), &arch).unwrap();
+
+    let dst = bin_dir.path().join(shared_runtime_basename());
+    assert!(!fs::symlink_metadata(&dst).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(&dst).unwrap(), b"new-runtime");
+    assert_eq!(fs::read(&stale).unwrap(), b"stale-runtime", "the link target is left alone");
+}
+
+#[test]
+fn install_extracted_without_a_shipped_runtime_leaves_the_slot_alone() {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let arch_dir = tempfile::tempdir().unwrap();
+    fs::write(bin_dir.path().join(pulp_basename()), b"old-pulp").unwrap();
+    fs::write(arch_dir.path().join(pulp_basename()), b"new-pulp").unwrap();
+
+    let arch = locate_binaries_in_archive(arch_dir.path()).unwrap();
+    assert!(arch.shared_runtime.is_none());
+    install_extracted(&runtime_plan(bin_dir.path()), &arch).unwrap();
+    assert!(!bin_dir.path().join(shared_runtime_basename()).exists());
 }

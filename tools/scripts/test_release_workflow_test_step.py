@@ -127,6 +127,84 @@ class SignAndReleaseNoTestGate(unittest.TestCase):
         )
 
 
+class SignAndReleaseSkipsWithoutSigningInputs(unittest.TestCase):
+    """With no signing or notary secret the macOS job signs nothing, so it must
+    not take a release runner. Executes the real preflight step body."""
+
+    SECRETS = ("MACOS_CERTIFICATE", "MACOS_CERTIFICATE_PWD", "KEYCHAIN_PASSWORD",
+               "SIGNING_IDENTITY", "APPLE_ID", "APPLE_TEAM_ID", "APPLE_PASSWORD")
+
+    def setUp(self) -> None:
+        self.doc = yaml.safe_load(SIGN_AND_RELEASE.read_text(encoding="utf-8"))
+        resolver = self.doc["jobs"]["resolve-macos-runner"]
+        self.preflight = next(s for s in resolver["steps"] if s.get("id") == "preflight")
+        self.resolver = resolver
+
+    def _decide(self, **env: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            base = {k: v for k, v in os.environ.items() if k not in self.SECRETS}
+            base.update({"GITHUB_OUTPUT": str(out), "UNSIGNED_POLICY": "mark", **env})
+            proc = subprocess.run(["/bin/bash", "-c", self.preflight["run"]],
+                                  env=base, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            return out.read_text().strip()
+
+    def test_the_preflight_reads_every_secret_the_signing_job_reads(self) -> None:
+        self.assertEqual(set(self.preflight["env"]) - {"UNSIGNED_POLICY"}, set(self.SECRETS))
+
+    def test_no_secret_skips_the_macos_job(self) -> None:
+        self.assertEqual(self._decide(), "build=false")
+
+    def test_any_secret_or_a_strict_policy_runs_it(self) -> None:
+        for name in self.SECRETS:
+            with self.subTest(secret=name):
+                self.assertEqual(self._decide(**{name: "x"}), "build=true")
+        self.assertEqual(self._decide(UNSIGNED_POLICY="fail"), "build=true")
+
+    def test_the_macos_job_is_gated_on_the_decision(self) -> None:
+        self.assertEqual(self.resolver["outputs"]["build"],
+                         "${{ steps.preflight.outputs.build }}")
+        self.assertEqual(self.doc["jobs"]["build-and-sign-macos"]["if"],
+                         "needs.resolve-macos-runner.outputs.build == 'true'")
+
+
+class ReleaseCliDarwinCompilerCache(unittest.TestCase):
+    """The self-hosted darwin release VMs share the host ccache with the gate,
+    so the release must pin the gate's correctness settings and print this
+    job's own hit counts rather than the host cache's lifetime totals."""
+
+    def setUp(self) -> None:
+        self.job = yaml.safe_load(RELEASE_CLI.read_text(encoding="utf-8"))["jobs"]["build-cli"]
+        self.steps = {step.get("name", ""): step for step in self.job["steps"]}
+
+    def test_build_legs_use_the_gates_ccache_correctness_settings(self) -> None:
+        gate = yaml.safe_load(BUILD_WORKFLOW.read_text(encoding="utf-8"))
+        gate_env = next(
+            job["env"] for job in gate["jobs"].values()
+            if isinstance(job.get("env"), dict) and "CCACHE_COMPILERCHECK" in job["env"]
+        )
+        wanted = {k: v for k, v in gate_env.items() if k.startswith("CCACHE_")}
+        # Control: the instrument found the gate's settings at all.
+        self.assertEqual(
+            set(wanted), {"CCACHE_COMPILERCHECK", "CCACHE_NODEPEND", "CCACHE_SLOPPINESS"}
+        )
+        self.assertEqual(
+            {k: v for k, v in self.job["env"].items() if k.startswith("CCACHE_")}, wanted
+        )
+
+    def test_stats_are_per_job_and_printed_even_when_the_build_fails(self) -> None:
+        names = list(self.steps)
+        env_step = self.steps["Compiler cache environment"]
+        self.assertIn('CCACHE_STATSLOG=${RUNNER_TEMP}/', env_step["run"])
+        self.assertLess(names.index(env_step["name"]), names.index("Build"))
+        stats = self.steps["Ccache stats"]
+        self.assertEqual(stats.get("if"), "always()")
+        self.assertIn("compiler_check", stats["run"])
+        self.assertIn("ccache --show-log-stats", stats["run"])
+        self.assertLess(names.index("Prepare SDK build dir (macOS)"), names.index(stats["name"]))
+
+
 class ReleaseCliDispatchAttestsItsTag(unittest.TestCase):
     """A workflow_dispatch must run on the tag it publishes.
 
@@ -1704,10 +1782,10 @@ class EveryLegIsIndividuallyRoutable(unittest.TestCase):
         cls.workflow = yaml.safe_load(RELEASE_CLI.read_text(encoding="utf-8"))
 
     def test_build_and_smoke_legs_index_the_resolver_map(self) -> None:
-        for job in ("build-cli", "smoke-cli"):
+        for job, output in (("build-cli", "map"), ("smoke-cli", "smoke_map")):
             with self.subTest(job=job):
                 runs_on = self.workflow["jobs"][job]["runs-on"]
-                self.assertIn("resolve-macos-runner.outputs.map", runs_on)
+                self.assertIn(f"resolve-macos-runner.outputs.{output})", runs_on)
                 self.assertIn("matrix.platform", runs_on)
 
     def test_no_leg_falls_through_to_a_hardcoded_hosted_label(self) -> None:

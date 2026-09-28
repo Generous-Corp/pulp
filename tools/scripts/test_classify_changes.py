@@ -16,6 +16,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -62,6 +63,29 @@ class SkipSafeTests(unittest.TestCase):
         self.assertTrue(classify.is_skip_safe("docs/migrations-guide.md"))
         self.assertTrue(classify.is_skip_safe("docs/migrations_old/foo.md"))
         self.assertFalse(classify.is_skip_safe("docs/migrations/foo.md"))
+
+    def test_consumption_census_documents_are_NOT_skip_safe(self) -> None:
+        # The published consumption census and its schema live under docs/, so
+        # every skip-safe rule would otherwise admit them. Their only gates
+        # (consumption-census-drift / -schema / -negative-contract) exist only
+        # inside a configured build tree, so a skip-safe census change is a
+        # claim about the build graph that nothing checks.
+        for path in ("docs/status/consumption-profiles.json",
+                     "docs/status/consumption-profiles.schema.json"):
+            self.assertFalse(classify.is_skip_safe(path), path)
+
+    def test_consumption_census_force_build_stays_precise(self) -> None:
+        # The deny-list entry must not swallow the rest of docs/status/: those
+        # manifests have their own build-free checks, and forcing a native
+        # build for them would make every docs PR pay for a census it cannot
+        # affect.
+        for path in ("docs/status/modules.yaml",
+                     "docs/status/support-matrix.yaml",
+                     "docs/status/cli-commands.yaml",
+                     "docs/status/tools.yaml",
+                     "docs/status/consumption.md",
+                     "docs/guides/test-lanes.md"):
+            self.assertTrue(classify.is_skip_safe(path), path)
 
     def test_build_inputs_are_NOT_skip_safe(self) -> None:
         for path in ("core/signal/src/fft.cpp",
@@ -137,6 +161,144 @@ class NativeBuildRequiredTests(unittest.TestCase):
             "tools/scripts/test_prepush_gate_supervisor.py",
             ".agents/skills/ci/SKILL.md",
         ]))
+
+
+class ConsumptionCensusNativePathTests(unittest.TestCase):
+    """The census-only diff shape that reached main unmeasured.
+
+    `docs/status/consumption-profiles.json` records target-graph facts — link
+    closures and exported public-header counts — that only a configured build
+    tree can confirm. Its gates (`consumption-census-drift` and siblings in
+    test/cmake/consumption_census_tests.cmake) therefore run nowhere else: they
+    are not in tools/ci/source_selftests.json, so the build-free required
+    context never sees them. A census change that classifies skip-safe gets the
+    hosted placeholder instead of the native leg, lands whatever it claims, and
+    then fails every later merge group whose batches did not touch it.
+    """
+
+    REPO_ROOT = THIS_DIR.parents[1]
+
+    def _census_module_paths(self) -> tuple[str, str]:
+        """The census document + schema, re-derived from the census tool.
+
+        Read from consumption_census.py's own constants rather than retyped, so
+        renaming either file fails this test instead of silently restoring the
+        skip-safe classification.
+        """
+        spec = importlib.util.spec_from_file_location(
+            "consumption_census_for_classify_test",
+            THIS_DIR / "consumption_census.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return (
+            module.CENSUS_RELPATH.as_posix(),
+            module.SCHEMA_RELPATH.as_posix(),
+        )
+
+    def test_census_only_diff_requires_the_native_build(self) -> None:
+        # The exact one-file diff shape that took the hosted placeholder.
+        self.assertTrue(classify.native_build_required(
+            ["docs/status/consumption-profiles.json"]))
+
+    def test_census_schema_only_diff_requires_the_native_build(self) -> None:
+        self.assertTrue(classify.native_build_required(
+            ["docs/status/consumption-profiles.schema.json"]))
+
+    def test_census_change_among_plain_docs_requires_the_native_build(self) -> None:
+        self.assertTrue(classify.native_build_required([
+            "README.md",
+            "docs/guides/test-lanes.md",
+            "docs/status/consumption-profiles.json",
+        ]))
+
+    def test_census_tool_paths_force_the_native_build(self) -> None:
+        census, schema = self._census_module_paths()
+        # Control: the re-derivation must have produced the real pair. An
+        # empty or renamed constant would otherwise let the assertions below
+        # pass over paths that classify native for unrelated reasons.
+        self.assertTrue(census.startswith("docs/"), census)
+        self.assertTrue(schema.startswith("docs/"), schema)
+        self.assertNotEqual(census, schema)
+        for path in (census, schema):
+            self.assertFalse(classify.is_skip_safe(path), path)
+            self.assertTrue(classify.native_build_required([path]), path)
+
+    def test_census_gates_exist_only_inside_a_build_tree(self) -> None:
+        """Pin the premise the deny-list entry rests on.
+
+        The census gates are worth forcing a native build for only because
+        nothing else runs them. If they ever move to the build-free lane in
+        tools/ci/source_selftests.json, that reasoning changes and this test
+        says so instead of leaving a stale rationale in the classifier.
+        """
+        manifest = (
+            self.REPO_ROOT / "test/cmake/consumption_census_tests.cmake"
+        ).read_text(encoding="utf-8")
+        gates = [
+            "consumption-census-drift",
+            "consumption-census-schema",
+            "consumption-census-negative-contract",
+        ]
+        # Control: the manifest must actually register them. A renamed or
+        # emptied manifest would make the absence assertion below vacuous.
+        # Match to the end of the name token, or `consumption-census-drift`
+        # would be satisfied by a renamed `…-drift-anything` registration.
+        registrations = set(
+            re.findall(r"add_test\(NAME\s+(\S+)", manifest)
+        )
+        for gate in gates:
+            self.assertIn(gate, registrations, sorted(registrations))
+        selftests = json.loads(
+            (self.REPO_ROOT / "tools/ci/source_selftests.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        registered = {test["name"] for test in selftests["tests"]}
+        # Control: the build-free lane must be populated, or "not in it" is
+        # true of everything.
+        self.assertGreater(len(registered), 20, len(registered))
+        for gate in gates:
+            self.assertNotIn(gate, registered, gate)
+
+    def _exported_public_header_roots(self) -> set[str]:
+        """Exported include roots, re-derived from the committed census."""
+        document = json.loads(
+            (self.REPO_ROOT / "docs/status/consumption-profiles.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        roots: set[str] = set()
+        for profile in document["profiles"].values():
+            for target in profile["targets"].values():
+                roots.update(target["public_headers"].get("roots", []))
+        return roots
+
+    def test_every_exported_public_header_root_forces_the_native_build(self) -> None:
+        # A new header under a root a target already exports drifts the census
+        # with no CMake or symbol change, so the header side of the gate is only
+        # honest while every exported root classifies native.
+        roots = self._exported_public_header_roots()
+        # Control: the re-derivation must find the real roots. A structural
+        # change that yields an empty set would make every assertion below
+        # vacuous, which is exactly how a gate goes green measuring nothing.
+        self.assertGreaterEqual(len(roots), 20, sorted(roots))
+        in_repo = sorted(
+            root for root in roots if (self.REPO_ROOT / root).is_dir()
+        )
+        self.assertGreaterEqual(len(in_repo), 20, in_repo)
+        # Second control: the roots must actually hold headers.
+        with_headers = [
+            root
+            for root in in_repo
+            if any((self.REPO_ROOT / root).rglob("*.hpp"))
+            or any((self.REPO_ROOT / root).rglob("*.h"))
+        ]
+        self.assertGreaterEqual(len(with_headers), 20, with_headers)
+        for root in sorted(roots):
+            path = f"{root}/pulp/probe_header.hpp"
+            self.assertFalse(classify.is_skip_safe(path), path)
+            self.assertTrue(classify.native_build_required([path]), path)
 
 
 class AgentCapabilityInstalledSdkRequiredTests(unittest.TestCase):

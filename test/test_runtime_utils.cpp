@@ -1628,7 +1628,7 @@ TEST_CASE("ScopeGuard dismiss and move transfer ownership", "[runtime][scope_gua
     REQUIRE(calls == 1);
 }
 
-TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit", "[runtime][scope_guard]") {
+TEST_CASE("PULP_ON_SCOPE_EXIT runs at block exit (runtime utils)", "[runtime][scope_guard]") {
     int value = 0;
     {
         PULP_ON_SCOPE_EXIT(value = 42);

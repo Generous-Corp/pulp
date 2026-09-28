@@ -1273,6 +1273,59 @@ def _lib_eval(root: pathlib.Path, snippet: str, timeout: float = 30,
     )
 
 
+class StarvedHostSkipTests(unittest.TestCase):
+    """The pre-push coverage build skips itself, loudly, on a starved host."""
+
+    def _decide(self, probe: str, **env: str) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as td:
+            root = _fake_worktree(pathlib.Path(td), "wt")
+            governor = root / "tools" / "ci" / "governed-build.sh"
+            governor.write_text(
+                "#!/usr/bin/env bash\n"
+                '[ "$1" = "--probe-jobs" ] && { echo "' + probe + '"; exit 0; }\n'
+                "exit 99\n"
+            )
+            governor.chmod(0o755)
+            return _lib_eval(root, "if starved_host_skip; then echo rc=0; else echo rc=1; fi",
+                             env_extra=env)
+
+    def test_hook_opt_in_skips_at_the_floor(self) -> None:
+        r = self._decide("jobs=2 grant=floor", PULP_DIFF_COVER_SKIP_WHEN_STARVED="1")
+        self.assertIn("rc=0", r.stdout, r.stderr)
+        self.assertIn("SKIPPED, NOT PASSED", r.stderr)
+        self.assertIn("tools/scripts/local_diff_cover.sh", r.stderr)
+
+    def test_control_a_fair_share_builds(self) -> None:
+        r = self._decide("jobs=6 grant=agent-floor", PULP_DIFF_COVER_SKIP_WHEN_STARVED="1")
+        self.assertIn("rc=1", r.stdout, r.stderr)
+        self.assertNotIn("SKIPPED", r.stderr)
+
+    def test_direct_runs_never_skip(self) -> None:
+        r = self._decide("jobs=1 grant=floor")
+        self.assertIn("rc=1", r.stdout, r.stderr)
+
+    def test_ignore_starvation_forces_the_build(self) -> None:
+        r = self._decide("jobs=2 grant=floor", PULP_DIFF_COVER_SKIP_WHEN_STARVED="1",
+                         PULP_DIFF_COVER_IGNORE_STARVATION="1")
+        self.assertIn("rc=1", r.stdout, r.stderr)
+
+    def test_unreadable_probe_builds_rather_than_skipping(self) -> None:
+        r = self._decide("garbage", PULP_DIFF_COVER_SKIP_WHEN_STARVED="1")
+        self.assertIn("rc=1", r.stdout, r.stderr)
+
+    def test_skip_exits_four_before_any_build(self) -> None:
+        text = SCRIPT.read_text()
+        self.assertIn("if starved_host_skip; then\n    exit 4", text)
+        self.assertLess(text.index("if starved_host_skip; then"),
+                        text.index("require_free_disk \"${BUILD_DIR}\""))
+
+    def test_hook_opts_in_and_reports_a_skip_not_a_pass(self) -> None:
+        hook = (REPO_ROOT / ".githooks" / "pre-push").read_text()
+        self.assertIn("PULP_DIFF_COVER_SKIP_WHEN_STARVED=1", hook)
+        self.assertIn('if [ "$_diff_cover_rc" -eq 4 ]; then', hook)
+        self.assertIn("DIFF COVERAGE SKIPPED (host starved)", hook)
+
+
 class CoverageBuildGovernorTests(unittest.TestCase):
     """Every compiler phase in the mandatory local gate shares host capacity."""
 

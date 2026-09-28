@@ -236,7 +236,7 @@ fn explicit_reconcile_validates_then_starts_and_requires_unverified_health() {
         health.program,
         Path::new("/Users/tester/.pulp/bin/pulp-cpp")
     );
-    assert_eq!(health.args, ["status"]);
+    assert_eq!(health.args, ["status", "--broker-only"]);
     assert_eq!(health.cwd.as_deref(), Some(Path::new("/work/project")));
     assert!(fs
         .private_files

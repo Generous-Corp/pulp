@@ -650,8 +650,10 @@ add_executable(pulp-test-timeline-phase1-examples
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_codec.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_edits.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_standalone.cpp
-    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
+# test_timeline_multitrack_arrangement.cpp runs in pulp-test-timeline-multitrack-pdc
+# above; the implementation source stays here so the example still compiles in
+# this aggregate, but its cases must register under one ctest name only.
 target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
     pulp::format pulp::host pulp::playback pulp::timeline pulp::timebase
     pulp::standalone Catch2::Catch2WithMain)

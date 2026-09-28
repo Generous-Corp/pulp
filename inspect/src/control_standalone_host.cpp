@@ -370,20 +370,24 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
             });
         auto sample_region_read =
             make_control_sample_region_read_executor([this](const ControlAdmissionPlan& plan) {
-                if (!store_ || !sample_region_target_ ||
-                    !sample_region_target_->uses_state_store(*store_))
+                if (std::this_thread::get_id() != main_thread_ || !store_ ||
+                    !sample_region_target_ || !sample_region_target_->uses_state_store(*store_))
                     return std::shared_ptr<ControlSampleRegionTarget>{};
                 sample_region_target_->set_preparation_context(sample_rate_, 0);
                 return sample_region_target_;
             });
         auto sample_region_edit =
             make_control_sample_region_edit_executor([this](const ControlAdmissionPlan& plan) {
-                if (!store_ || !sample_region_target_ ||
-                    !sample_region_target_->uses_state_store(*store_))
+                if (std::this_thread::get_id() != main_thread_ || !store_ ||
+                    !sample_region_target_ || !sample_region_target_->uses_state_store(*store_))
                     return std::shared_ptr<ControlSampleRegionTarget>{};
                 sample_region_target_->set_preparation_context(sample_rate_, 0);
                 return sample_region_target_;
             });
+        ControlMainThreadExecutor main_sample_region_read(rpc_, std::move(sample_region_read));
+        auto fenced_sample_region_read = main_sample_region_read.executor();
+        ControlMainThreadExecutor main_sample_region_edit(rpc_, std::move(sample_region_edit));
+        auto fenced_sample_region_edit = main_sample_region_edit.executor();
         auto state_write = make_control_state_write_executor(
             [this](const ControlAdmissionPlan& plan) -> std::optional<ControlStateWriteTarget> {
                 const auto generation = stable_generation();
@@ -470,8 +474,8 @@ class CanonicalStandaloneControlHost final : public format::StandaloneControlHos
              transport_read = std::move(fenced_transport_read),
              transport_write = std::move(fenced_transport_write),
              timeline_document_session = std::move(timeline_document_session),
-             sample_region_read = std::move(sample_region_read),
-             sample_region_edit = std::move(sample_region_edit)](
+             sample_region_read = std::move(fenced_sample_region_read),
+             sample_region_edit = std::move(fenced_sample_region_edit)](
                 const ControlAdmissionPlan& plan, const ControlRequestEnvelope& request,
                 const ControlExecutionContext& context) {
                 if (request.operation_id == "dev.pulp.state/read@1")

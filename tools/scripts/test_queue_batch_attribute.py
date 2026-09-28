@@ -10,10 +10,17 @@ including the exact incidental overlap observed in a real batch.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import pathlib
+import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
+import zipfile
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -502,6 +509,557 @@ class RenderTests(unittest.TestCase):
         text = "\n".join(qba.render(result, "123"))
         self.assertIn("LIKELY PRE-EXISTING ON MAIN", text)
         self.assertNotIn("CULPRIT", text)
+
+
+# ---------------------------------------------------------------------------
+# Certification: the verdict Shipyard's queue-arm-guard reads.
+#
+# The behaviour worth protecting is again the REFUSAL, and harder here than in
+# attribution: a wrong refusal costs a stuck pull request, but a wrong
+# CERTIFICATION re-queues a head that ejects its innocent batch-mates -- the
+# exact harm the guard exists to prevent. So every fixture below that must not
+# certify is drawn from a real ejecting batch, and the one that must certify is
+# too.
+# ---------------------------------------------------------------------------
+
+# Recorded from runs 36245658496 and 36093055057, the two batches that ejected
+# pull requests 8896 and 8811. A merge_group run is mostly `skipped` jobs, and
+# the failing step names are exactly these.
+JOBS_LINK_ERROR = [
+    {"name": "windows", "conclusion": "skipped", "steps": []},
+    {"name": "linux", "conclusion": "skipped", "steps": []},
+    {
+        "name": "macos",
+        "conclusion": "failure",
+        "steps": [
+            {"name": "Configure", "conclusion": "success"},
+            {"name": "Build", "conclusion": "failure"},
+        ],
+    },
+]
+JOBS_CCACHE_PLUS_BUILD = [
+    {
+        "name": "macos",
+        "conclusion": "failure",
+        "steps": [{"name": "Install ccache (macOS)", "conclusion": "failure"}],
+    },
+    {
+        "name": "Linux (x64) [github-hosted]",
+        "conclusion": "failure",
+        "steps": [{"name": "Build", "conclusion": "failure"}],
+    },
+]
+# Recorded from run 35973715485, where a curl of a pinned wasi-sdk release --
+# and nothing else -- ejected pull request 8773.
+JOBS_WASI_SDK = [
+    {
+        "name": "Build + prove + (owner-gated) deploy",
+        "conclusion": "failure",
+        "steps": [{"name": "Set up wasi-sdk (pinned)", "conclusion": "failure"}],
+    },
+]
+
+
+class NonContentStepTests(unittest.TestCase):
+    def test_observed_non_content_failures_are_recognised(self) -> None:
+        for step in (
+            "Install ccache (macOS)",
+            "Install visual-analysis Python dependencies",
+            "Install Linux dependencies",
+            "Upload exact GPU-audio SDK (macOS ARM64)",
+            "Upload ctest logs and JUnit report",
+            "Set up wasi-sdk (pinned)",
+            "Set up job",
+            "Checkout",
+        ):
+            with self.subTest(step=step):
+                self.assertTrue(qba.non_content_step(step))
+
+    def test_a_step_that_compiles_or_runs_the_tree_is_content(self) -> None:
+        for step in (
+            "Build",
+            "Configure",
+            "Test (non-Windows)",
+            "Surface ctest failures (non-Windows)",
+            "Skill-sync check",
+            "Validate durable source-authority events",
+        ):
+            with self.subTest(step=step):
+                self.assertFalse(qba.non_content_step(step))
+
+    def test_a_step_running_a_repository_script_is_content(self) -> None:
+        # `Hydrate bounded GPU provenance commits` runs
+        # tools/scripts/hydrate_gpu_provenance_commits.py over inputs this module
+        # cannot enumerate, so no name pattern could tell whether a head broke it.
+        self.assertFalse(qba.non_content_step("Hydrate bounded GPU provenance commits"))
+
+    def test_the_allowlist_is_anchored_so_install_does_not_swallow_a_build(self) -> None:
+        # `cmake --install` builds and installs the tree, and an unanchored
+        # "install" would read that as infrastructure.
+        for step in ("Install and test the SDK", "Build then upload the bundle"):
+            with self.subTest(step=step):
+                self.assertFalse(qba.non_content_step(step))
+
+    def test_an_empty_step_name_is_never_non_content(self) -> None:
+        # A failing job with no failing step is an absence, not a cause.
+        self.assertFalse(qba.non_content_step(""))
+
+
+class HeadReachesStepTests(unittest.TestCase):
+    def test_a_workflow_change_reaches_every_allowlisted_step(self) -> None:
+        changes = [qba.ChangedFile(path=".github/workflows/build.yml")]
+        for step in ("Install ccache (macOS)", "Upload ctest logs and JUnit report"):
+            with self.subTest(step=step):
+                self.assertEqual(
+                    qba.head_reaches_step(step, changes), ".github/workflows/build.yml"
+                )
+
+    def test_a_composite_action_change_reaches_the_step_it_defines(self) -> None:
+        changes = [qba.ChangedFile(path=".github/actions/install-linux-build-deps/action.yml")]
+        self.assertIsNotNone(qba.head_reaches_step("Install Linux dependencies", changes))
+
+    def test_a_build_system_change_reaches_only_a_dependency_install(self) -> None:
+        changes = [qba.ChangedFile(path="CMakeLists.txt")]
+        # It reads $PULP_BUILD_DIR/CMakeCache.txt, so a configure change can break it.
+        self.assertEqual(
+            qba.head_reaches_step("Install visual-analysis Python dependencies", changes),
+            "CMakeLists.txt",
+        )
+        # A curl of a pinned external release cannot fail because a version moved.
+        # Refusing here would make the rule fire on every version bump, which is
+        # most of them, and certify nothing ever.
+        self.assertIsNone(qba.head_reaches_step("Set up wasi-sdk (pinned)", changes))
+        self.assertIsNone(qba.head_reaches_step("Upload ctest logs", changes))
+
+    def test_a_cmake_module_change_reaches_a_dependency_install(self) -> None:
+        self.assertEqual(
+            qba.head_reaches_step(
+                "Install visual-analysis Python dependencies",
+                [qba.ChangedFile(path="test/cmake/quality_tests.cmake")],
+            ),
+            "test/cmake/quality_tests.cmake",
+        )
+
+    def test_declarative_ci_data_reaches_nothing(self) -> None:
+        # A watch-event JSON is read by its own gate job. If a head broke that,
+        # THAT job's step fails and no allowlist pattern matches it, so it is
+        # refused on its own account. Counting it here would refuse nearly every
+        # Pulp pull request.
+        self.assertIsNone(
+            qba.head_reaches_step(
+                "Install ccache (macOS)",
+                [
+                    qba.ChangedFile(
+                        path=".github/vellum-expansion-watch-events/20260926-x.json"
+                    ),
+                    qba.ChangedFile(path="core/view/src/widgets.cpp"),
+                ],
+            )
+        )
+
+
+class ParseFailingStepsTests(unittest.TestCase):
+    def test_only_failing_jobs_contribute(self) -> None:
+        failures = qba.parse_failing_steps(JOBS_LINK_ERROR)
+        self.assertEqual(failures, [qba.StepFailure(job="macos", step="Build")])
+
+    def test_a_failing_job_with_no_failing_step_is_recorded_steplessly(self) -> None:
+        failures = qba.parse_failing_steps(
+            [{"name": "macos", "conclusion": "failure", "steps": []}]
+        )
+        self.assertEqual(failures, [qba.StepFailure(job="macos", step="")])
+
+    def test_every_failing_step_of_every_failing_job_is_kept(self) -> None:
+        self.assertEqual(
+            qba.parse_failing_steps(JOBS_CCACHE_PLUS_BUILD),
+            [
+                qba.StepFailure(job="macos", step="Install ccache (macOS)"),
+                qba.StepFailure(job="Linux (x64) [github-hosted]", step="Build"),
+            ],
+        )
+
+
+class CertifyTests(unittest.TestCase):
+    SOURCE = [qba.ChangedFile(path="core/view/src/widgets.cpp")]
+
+    def rule(self, pr, jobs, changes=None, ctest=None):
+        return qba.certify(
+            99,
+            pr,
+            qba.explain_failures(
+                pr,
+                qba.parse_failing_steps(jobs),
+                ctest,
+                self.SOURCE if changes is None else changes,
+            ),
+        )
+
+    def test_a_toolchain_fetch_out_of_the_head_s_reach_certifies(self) -> None:
+        verdict = self.rule(8773, JOBS_WASI_SDK)
+        self.assertEqual(verdict.verdict, qba.VERDICT_INFRASTRUCTURE)
+        self.assertIs(verdict.implicates_head, False)
+
+    def test_one_content_step_beside_an_infrastructure_one_refuses(self) -> None:
+        # Run 36093055057: `Install ccache (macOS)` is accountable, the Linux
+        # `Build` is not, and that head's own later commit admits it was broken.
+        # Certifying on the accountable half is the whole failure mode.
+        verdict = self.rule(8811, JOBS_CCACHE_PLUS_BUILD)
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        self.assertIsNone(verdict.implicates_head)
+        self.assertIn("Build", verdict.evidence)
+
+    def test_a_link_error_with_no_test_failure_refuses(self) -> None:
+        # Run 36245658496. "No ctest block, therefore infrastructure" is the
+        # tempting rule and the wrong one: a link error is how a head most often
+        # breaks a batch, and it produces no ctest block at all.
+        verdict = self.rule(8896, JOBS_LINK_ERROR)
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_an_unreadable_head_diff_refuses(self) -> None:
+        # A queued pull request always changes something, so an empty diff is a
+        # failed read. Scoring it as "reaches nothing" would certify on a
+        # measurement that never happened.
+        verdict = self.rule(8773, JOBS_WASI_SDK, changes=[])
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_a_workflow_change_makes_its_own_step_failure_unexplained(self) -> None:
+        verdict = self.rule(
+            8773,
+            JOBS_WASI_SDK,
+            changes=[qba.ChangedFile(path=".github/workflows/wclap-cloudflare.yml")],
+        )
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+
+    def test_no_failing_job_read_refuses_rather_than_certifying(self) -> None:
+        # A run that ejected a pull request failed. A reading that finds no
+        # failing step measured the wrong thing.
+        verdict = self.rule(8773, [])
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_a_stepless_job_failure_is_an_absence_not_a_cause(self) -> None:
+        verdict = self.rule(
+            8773, [{"name": "macos", "conclusion": "failure", "steps": []}]
+        )
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        # The refusal must name the job that failed. Dropping a stepless failure
+        # would also refuse -- via the "no failing job was read" path -- so the
+        # verdict alone cannot tell the two apart, and the one that silently
+        # discards a real failing job is the dangerous one.
+        self.assertIn("macos", verdict.evidence)
+        self.assertNotIn("no failing job was read", verdict.evidence)
+
+
+TEST_JOBS = [
+    {
+        "name": "macos",
+        "conclusion": "failure",
+        "steps": [
+            {"name": "Test (non-Windows)", "conclusion": "failure"},
+            {"name": "Surface ctest failures (non-Windows)", "conclusion": "failure"},
+        ],
+    },
+]
+
+
+class CertifyAgainstTestOwnershipTests(unittest.TestCase):
+    SOURCE = [qba.ChangedFile(path="core/view/src/widgets.cpp")]
+
+    def rule(self, pr, ctest):
+        return qba.certify(
+            99,
+            pr,
+            qba.explain_failures(pr, qba.parse_failing_steps(TEST_JOBS), ctest, self.SOURCE),
+        )
+
+    def test_a_batch_mate_owning_the_failing_tests_certifies_and_names_it(self) -> None:
+        ctest = qba.attribute(
+            ["prepush-cannot-measure"],
+            {8001: ["tools/scripts/test_prepush_cannot_measure.py"]},
+        )
+        verdict = self.rule(8002, ctest)
+        self.assertEqual(verdict.verdict, qba.VERDICT_OTHER_PR)
+        self.assertIs(verdict.implicates_head, False)
+        self.assertEqual(verdict.implicated_pr, 8001)
+        # The guard rejects an `other_pull_request` verdict that names this same
+        # pull request, so an unattributed one certifies nothing.
+        payload = verdict.as_json()
+        self.assertIsInstance(payload["implicated_pr"], int)
+        self.assertNotEqual(payload["implicated_pr"], payload["pr"])
+        self.assertIn("prepush-cannot-measure", verdict.evidence)
+
+    def test_the_head_owning_a_failing_test_is_positively_implicated(self) -> None:
+        ctest = qba.attribute(
+            ["prepush-cannot-measure"],
+            {8001: ["tools/scripts/test_prepush_cannot_measure.py"]},
+        )
+        verdict = self.rule(8001, ctest)
+        self.assertEqual(verdict.verdict, qba.VERDICT_IMPLICATED)
+        self.assertIs(verdict.implicates_head, True)
+
+    def test_co_owners_at_equal_strength_refuse_rather_than_pick_one(self) -> None:
+        # The module never picks between equals in its human output either.
+        # Naming one of them to Shipyard would be a coin toss dressed as evidence.
+        ctest = qba.attribute(
+            ["prepush-cannot-measure"],
+            {
+                8001: ["tools/scripts/test_prepush_cannot_measure.py"],
+                8002: ["tools/other/test_prepush_cannot_measure.py"],
+            },
+        )
+        verdict = self.rule(8003, ctest)
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_a_weak_match_naming_nobody_refuses(self) -> None:
+        # "No open PR strongly matches" records what was NOT found, which
+        # certifies nothing.
+        ctest = qba.attribute(
+            ["cmake-control-sdk-consumer"],
+            {8672: ["test/cmake/test_gpu_audio_sdk_consumer.cmake"]},
+        )
+        verdict = self.rule(8673, ctest)
+        self.assertEqual(verdict.verdict, qba.VERDICT_UNEXPLAINED)
+
+    def test_a_test_failure_with_no_ctest_block_read_refuses(self) -> None:
+        self.assertEqual(self.rule(8673, None).verdict, qba.VERDICT_UNEXPLAINED)
+
+
+class GuardContractTests(unittest.TestCase):
+    """The shape Shipyard's read_attributor_verdict accepts, field by field."""
+
+    CERTIFYING = ("infrastructure", "other_pull_request")
+
+    def test_only_the_guard_s_two_verdicts_can_certify(self) -> None:
+        self.assertEqual(
+            sorted((qba.VERDICT_INFRASTRUCTURE, qba.VERDICT_OTHER_PR)),
+            sorted(self.CERTIFYING),
+        )
+        for label in (qba.VERDICT_UNEXPLAINED, qba.VERDICT_IMPLICATED):
+            with self.subTest(label=label):
+                self.assertNotIn(label, self.CERTIFYING)
+
+    def test_run_id_is_an_int_because_the_guard_compares_it_exactly(self) -> None:
+        # The guard rejects a verdict whose run_id != the run it resolved, and it
+        # holds an int. A stringified id would silently never match.
+        payload = qba.Certification(
+            run_id=36245658496,
+            pr=8896,
+            verdict=qba.VERDICT_INFRASTRUCTURE,
+            implicates_head=False,
+            evidence="because",
+        ).as_json()
+        self.assertIsInstance(payload["run_id"], int)
+        self.assertEqual(payload["run_id"], 36245658496)
+
+    def test_a_non_certifying_verdict_carries_a_null_not_a_false(self) -> None:
+        # Routed through `certify` rather than built by hand: the rule under test
+        # is that a refusal reaches null, and a hand-built Certification would
+        # only restate the value the test itself passed in.
+        payload = qba.certify(
+            1, 2, qba.Explanation(unexplained=[qba.StepFailure("macos", "Build")])
+        ).as_json()
+        self.assertIsNone(payload["implicates_head"])
+        # `false` here would be a positive claim that the head is innocent, from a
+        # reading that established nothing.
+        self.assertIsNot(payload["implicates_head"], False)
+
+    def test_other_pull_request_always_names_a_different_int(self) -> None:
+        verdict = qba.certify(
+            7,
+            8002,
+            qba.Explanation(reasons=["because"], implicated_pr=8001),
+        )
+        payload = verdict.as_json()
+        self.assertIsInstance(payload["implicated_pr"], int)
+        self.assertNotEqual(payload["implicated_pr"], payload["pr"])
+
+    def test_infrastructure_omits_implicated_pr(self) -> None:
+        payload = qba.certify(7, 8002, qba.Explanation(reasons=["because"])).as_json()
+        self.assertNotIn("implicated_pr", payload)
+        self.assertEqual(payload["verdict"], qba.VERDICT_INFRASTRUCTURE)
+
+    def test_every_verdict_carries_evidence_the_guard_can_quote(self) -> None:
+        for verdict in (
+            qba.certify(7, 1, qba.Explanation(reasons=["r"])),
+            qba.certify(7, 1, qba.Explanation(unexplained=[qba.StepFailure("j", "s")])),
+            qba.certify(7, 1, qba.Explanation(head_owns_a_test=True)),
+        ):
+            with self.subTest(verdict=verdict.verdict):
+                self.assertTrue(verdict.evidence.strip())
+
+
+class UnpackJobLogsTests(unittest.TestCase):
+    def archive(self, entries: dict[str, str]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            for name, body in entries.items():
+                bundle.writestr(name, body)
+        return buffer.getvalue()
+
+    def test_the_ordinal_prefix_is_stripped_so_jobs_key_by_name(self) -> None:
+        # The ordinal is the job's position in THIS run, so the same job is
+        # `2_macos.txt` in one run and `3_macos.txt` in the next. Keying on it
+        # would read the wrong job's log.
+        logs = qba.unpack_job_logs(
+            self.archive({"3_macos.txt": "hello", "macos/system.txt": "noise"})
+        )
+        self.assertEqual(logs, {"macos": "hello"})
+
+    def test_a_job_name_with_spaces_and_brackets_survives(self) -> None:
+        logs = qba.unpack_job_logs(
+            self.archive({"2_Linux (x64) [github-hosted].txt": "body"})
+        )
+        self.assertIn("Linux (x64) [github-hosted]", logs)
+
+    def test_a_corrupt_archive_reads_as_no_logs_rather_than_raising(self) -> None:
+        self.assertEqual(qba.unpack_job_logs(b"not a zip"), {})
+
+
+class CertifyCliTests(unittest.TestCase):
+    """--certify must put exactly one JSON object on stdout and exit 0."""
+
+    def run_cli(self, argv, jobs, changes):
+        with mock.patch.object(qba, "failing_jobs", return_value=jobs), mock.patch.object(
+            qba, "pr_files", return_value=changes
+        ), contextlib.redirect_stdout(io.StringIO()) as out:
+            code = qba.main(argv)
+        return code, out.getvalue()
+
+    def test_a_certifying_run_prints_one_object_and_exits_zero(self) -> None:
+        code, text = self.run_cli(
+            ["--certify", "--repo", "o/n", "--pr", "8773", "--run-id", "35973715485"],
+            JOBS_WASI_SDK,
+            [qba.ChangedFile(path="core/view/src/widgets.cpp")],
+        )
+        self.assertEqual(code, 0)
+        payload = json.loads(text)
+        self.assertEqual(payload["run_id"], 35973715485)
+        self.assertIs(payload["implicates_head"], False)
+        self.assertEqual(payload["verdict"], "infrastructure")
+
+    def test_a_refusing_run_still_exits_zero_so_the_guard_reads_the_reason(self) -> None:
+        # A non-zero exit reads to the guard as "did not rule", which discards
+        # the evidence a refusal should carry into its message.
+        code, text = self.run_cli(
+            ["--certify", "--repo", "o/n", "--pr", "8896", "--run-id", "36245658496"],
+            JOBS_LINK_ERROR,
+            [qba.ChangedFile(path="core/view/src/widgets.cpp")],
+        )
+        self.assertEqual(code, 0)
+        self.assertIsNone(json.loads(text)["implicates_head"])
+
+    def test_certify_without_a_pr_is_a_usage_error_not_a_verdict(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            code = qba.main(["--certify", "--run-id", "1"])
+        self.assertEqual(code, 2)
+        self.assertEqual(out.getvalue().strip(), "")
+
+    def test_a_non_numeric_run_id_is_refused_before_any_api_call(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            self.assertEqual(qba.main(["--certify", "--pr", "1", "--run-id", "abc"]), 2)
+
+    def test_the_run_id_flag_and_the_positional_must_agree(self) -> None:
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            qba.main(["111", "--run-id", "222", "--certify", "--pr", "1"])
+
+
+class DeclarationTests(unittest.TestCase):
+    """The declaration is the whole feature: undeclared, the guard reads nothing."""
+
+    def config(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        return tomllib.loads((root / ".shipyard" / "config.toml").read_text())
+
+    def test_pulp_declares_this_module_as_its_batch_attributor(self) -> None:
+        command = self.config()["queue"]["attribution"]["command"]
+        # An argv list, never a shell string: Shipyard rejects a string by design
+        # rather than quoting a command it runs on an operator's machine.
+        self.assertIsInstance(command, list)
+        self.assertTrue(all(isinstance(part, str) and part for part in command))
+        self.assertIn("tools/scripts/queue_batch_attribute.py", command)
+        self.assertIn("--certify", command)
+
+    def test_the_declared_script_exists(self) -> None:
+        root = pathlib.Path(__file__).resolve().parents[2]
+        script = next(
+            part for part in self.config()["queue"]["attribution"]["command"]
+            if part.endswith(".py")
+        )
+        self.assertTrue((root / script).is_file(), f"{script} is declared but missing")
+
+    def test_the_declared_argv_plus_the_guard_s_own_yields_a_verdict(self) -> None:
+        """The exact argv the guard builds must parse and produce a verdict.
+
+        Asserted by running it, not by looking for the flags in `--help`: the
+        module docstring names them too, so a help-text search passes even after
+        an option is deleted. This drops the interpreter and script path and
+        replays the rest of the declaration in process, so it exercises the whole
+        argv the guard assembles without a network call.
+        """
+        declared = self.config()["queue"]["attribution"]["command"]
+        extra = [
+            part
+            for part in declared[1:]
+            if not part.endswith(".py") and not part.endswith("python3")
+        ]
+        argv = [
+            *extra,
+            "--repo",
+            "Generous-Corp/pulp",
+            "--pr",
+            "8773",
+            "--run-id",
+            "35973715485",
+        ]
+        with mock.patch.object(qba, "failing_jobs", return_value=JOBS_WASI_SDK), (
+            mock.patch.object(
+                qba, "pr_files", return_value=[qba.ChangedFile(path="core/x.cpp")]
+            )
+        ), contextlib.redirect_stdout(io.StringIO()) as out:
+            code = qba.main(argv)
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["run_id"], 35973715485)
+        self.assertEqual(payload["pr"], 8773)
+        self.assertIs(payload["implicates_head"], False)
+
+
+class GhCliOverrideTests(unittest.TestCase):
+    """Both API readers honour PULP_GH_CLI, so a GitHub runner can use `gh`."""
+
+    def _argv(self, call, env: dict[str, str]) -> list[str]:
+        seen: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"x", stderr=b"")
+
+        with mock.patch.dict("os.environ", env, clear=False), mock.patch.object(
+            qba.subprocess, "run", side_effect=fake_run
+        ):
+            call()
+        self.assertTrue(seen, "the reader never shelled out")
+        return seen[0]
+
+    def test_run_log_zip_uses_the_override(self) -> None:
+        argv = self._argv(
+            lambda: qba.run_log_zip("o/r", "1"), {"PULP_GH_CLI": "gh"}
+        )
+        self.assertEqual(argv[:2], ["gh", "api"])
+        self.assertEqual(argv[2], "repos/o/r/actions/runs/1/logs")
+
+    def test_run_log_zip_defaults_to_ghapp(self) -> None:
+        argv = self._argv(
+            lambda: qba.run_log_zip("o/r", "1"), {"PULP_GH_CLI": "  "}
+        )
+        self.assertEqual(argv[0], "ghapp")
 
 
 if __name__ == "__main__":

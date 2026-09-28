@@ -69,6 +69,16 @@ RELEASE_PR_GATE_CLASS = "pulp-release-pr-gate"
 LEGACY_GATE_LABEL = "pulp-gate-fast"
 CLASS_LABELLED_LEGS = ("darwin-arm64", "darwin-x64")
 
+# The darwin smoke legs run each packaged tarball on a machine other than the one
+# that built it, which is what exposes an LC_RPATH baked to the build host. That
+# only needs a fresh macOS image, not a build slot, so they default to
+# GitHub-hosted macOS rather than following the build legs onto the self-hosted
+# gate pool, where they queued for a free VM for 0.4-1.5 minutes of work.
+# darwin-x64 runs its x86_64 slice under Rosetta on the arm64 image. The
+# variable routes both darwin smoke legs; unset is the hosted default.
+SMOKE_DARWIN_VAR = "SMOKE_DARWIN"
+SMOKE_DARWIN_LEGS = ("darwin-arm64", "darwin-x64")
+
 
 def class_tokens_enabled(env: dict[str, str]) -> bool:
     """True only for the exact opt-in values. Anything else is a no-op, and a
@@ -140,6 +150,31 @@ def resolve(env: dict[str, str]) -> dict[str, object]:
     return out
 
 
+def resolve_smoke(env: dict[str, str], build: dict[str, object]) -> dict[str, object]:
+    """platform -> runs-on for the smoke legs. Non-darwin legs smoke where they
+    build; darwin legs take SMOKE_DARWIN or the hosted default, never the build
+    pool's selector."""
+    out = dict(build)
+    raw = (env.get(SMOKE_DARWIN_VAR) or "").strip()
+    chosen: object = None
+    if raw:
+        try:
+            chosen = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(
+                f"{SMOKE_DARWIN_VAR} is not valid JSON: {raw!r} ({exc}). Refusing to "
+                f"guess — a smoke leg routed to a runner that does not exist queues forever."
+            )
+        if not chosen:
+            raise SystemExit(f"{SMOKE_DARWIN_VAR} resolved to an empty runs-on: {raw!r}")
+    for platform in SMOKE_DARWIN_LEGS:
+        selector = HOSTED[platform] if chosen is None else chosen
+        if class_tokens_enabled(env):
+            selector = with_class_label(selector, RELEASE_TAGGED_CLASS)
+        out[platform] = selector
+    return out
+
+
 def describe(env: dict[str, str], resolved: dict[str, object]) -> list[str]:
     """Human-readable routing summary — printed into the job log."""
     lines = []
@@ -168,16 +203,20 @@ def main(argv: list[str] | None = None) -> int:
         print(apply_class_label_raw(args.selector, args.apply_class_label, env))
         return 0
     resolved = resolve(env)
+    smoke = resolve_smoke(env, resolved)
 
     for line in describe(env, resolved):
         print(line, file=sys.stderr)
+    for platform in SMOKE_DARWIN_LEGS:
+        print(f"  smoke {platform:8} -> {smoke[platform]}", file=sys.stderr)
 
     if args.github_output:
         print("map=" + json.dumps(resolved))
+        print("smoke_map=" + json.dumps(smoke))
         # The Namespace-profile step keys off how the macOS leg resolved.
         print("runs_on_json=" + json.dumps(resolved["darwin-arm64"]))
     else:
-        print(json.dumps(resolved, indent=2))
+        print(json.dumps({"build": resolved, "smoke": smoke}, indent=2))
     return 0
 
 

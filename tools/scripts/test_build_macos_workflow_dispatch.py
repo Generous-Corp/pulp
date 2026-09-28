@@ -180,6 +180,9 @@ def _assert_trust_boundary(workflow: dict[str, object]) -> None:
         'HOME="$PULP_UNTRUSTED_HOME"',
         'TMPDIR="$PULP_UNTRUSTED_TMPDIR"',
         'PULP_UNTRUSTED_SOURCE="$PULP_UNTRUSTED_SOURCE"',
+        # The source lives under /private/tmp and `env -i` drops
+        # GITHUB_ACTIONS, so configure would refuse it without this.
+        "PULP_ALLOW_TMP_CHECKOUT=1",
     ):
         if marker not in init:
             raise AssertionError(f"untrusted account wrapper lost {marker}")

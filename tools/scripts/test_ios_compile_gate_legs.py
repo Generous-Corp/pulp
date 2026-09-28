@@ -21,6 +21,7 @@ Run:
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -182,6 +183,42 @@ class GateLegTests(unittest.TestCase):
         self.assertIn("OK: iOS GPU smoke example compiled", proc.stdout)
         builds = [c for c in harness.calls() if c.startswith("build ")]
         self.assertEqual(len(builds), 3, harness.calls())
+
+    def test_legs_report_elapsed_seconds(self) -> None:
+        """Every leg step prints its elapsed seconds, and the GPU leg's total
+        names how long the gate waited on it after the SDK legs finished, so a
+        job log attributes the gate's wall time to the leg that spent it."""
+        harness = self.harness()
+        proc = harness.run(STUB_GPU_SLEEP="2")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        done = dict(re.findall(r"^iOS compile: (.+) done \((\d+)s\)$", proc.stdout, re.M))
+        for step in (
+            "iphonesimulator Release configure (Ninja)",
+            "iphonesimulator Release target build",
+            "iphoneos Release configure (Ninja)",
+            "iphoneos Release target build",
+            "iOS simulator Skia GPU slice fetch",
+            "iphonesimulator GPU configure",
+            "iphonesimulator GPU example build",
+        ):
+            self.assertIn(step, done, proc.stdout)
+        self.assertGreaterEqual(int(done["iphonesimulator GPU example build"]), 2)
+        sdk_total = re.search(r"^iOS compile: SDK legs total \((\d+)s\)$", proc.stdout, re.M)
+        self.assertIsNotNone(sdk_total, proc.stdout)
+        gpu_total = re.search(
+            r"^iOS compile: GPU leg total \((\d+)s, waited (\d+)s after the SDK legs\)$",
+            proc.stdout, re.M)
+        self.assertIsNotNone(gpu_total, proc.stdout)
+        self.assertGreaterEqual(int(gpu_total.group(1)), 2)
+        # The stub SDK legs finish instantly, so the whole GPU sleep is wait.
+        self.assertGreaterEqual(int(gpu_total.group(2)), 1)
+        self.assertGreaterEqual(int(gpu_total.group(1)), int(sdk_total.group(1)))
+
+    def test_failed_step_reports_elapsed_seconds(self) -> None:
+        harness = self.harness()
+        proc = harness.run(STUB_FAIL="build:iphonesimulator")
+        self.assertNotEqual(proc.returncode, 0, proc.stdout)
+        self.assertRegex(proc.stderr, r"iphonesimulator Release target build failed \(status 3\) after \d+s")
 
     def test_sdk_legs_use_ninja_and_gpu_leg_uses_xcode(self) -> None:
         harness = self.harness(with_ninja=True)
