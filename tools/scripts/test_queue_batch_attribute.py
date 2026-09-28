@@ -407,7 +407,7 @@ class HeaderSuffixTests(unittest.TestCase):
             root = pathlib.Path(directory) / "inc"
             root.mkdir()
             (root / f"probe{suffix}").write_text("")
-            return consumption_census.count_headers(pathlib.Path(directory), ["inc"])
+            return len(consumption_census.header_names(pathlib.Path(directory), "inc"))
 
     def test_every_suffix_the_census_counts_is_declared_and_no_others(self) -> None:
         for suffix in (".h", ".hpp", ".hxx", ".hh", ".inc", ".cpp", ".md"):

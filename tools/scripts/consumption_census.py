@@ -353,16 +353,34 @@ def public_header_roots(target: dict, source_root: Path, binary_dir: Path) -> tu
     return sorted(dict.fromkeys(roots)), excluded
 
 
-def count_headers(source_root: Path, roots: list[str]) -> int:
-    total = 0
-    for root in roots:
-        directory = source_root / root
-        if not directory.is_dir():
-            continue
-        for path in directory.rglob("*"):
-            if path.suffix in (".h", ".hpp") and path.is_file():
-                total += 1
-    return total
+def header_names(source_root: Path, root: str) -> list[str]:
+    """The public headers under one exported include root, as sorted paths.
+
+    The census records these names rather than a count. Two pull requests that
+    each add a header under the same root then each add their own line, which
+    git merges into the true set; a count would have both write the same N+1
+    and merge cleanly into a number that is wrong for the merged tree.
+    """
+    directory = source_root / root
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.suffix in (".h", ".hpp") and path.is_file()
+    )
+
+
+def profile_roots(profile: dict) -> set[str]:
+    return {
+        root
+        for row in profile["targets"].values()
+        for root in row["public_headers"]["roots"]
+    }
+
+
+def headers_by_root(source_root: Path, roots: set[str]) -> dict[str, list[str]]:
+    return {root: header_names(source_root, root) for root in sorted(roots)}
 
 
 # ── census ──────────────────────────────────────────────────────────────────
@@ -442,7 +460,6 @@ def build_profile(build_dir: Path, source_root: Path) -> dict:
         archives = sorted(n.split(":", 1)[1] for n in closure if graph.node_kind.get(n) == "archive")
 
         roots, generated_roots = public_header_roots(target, source_root, binary_dir)
-        header_count = count_headers(source_root, roots)
 
         rows[export_name] = {
             "target": target_name,
@@ -469,7 +486,6 @@ def build_profile(build_dir: Path, source_root: Path) -> dict:
                 "system_libraries": system_libs,
             },
             "public_headers": {
-                "count": header_count,
                 "roots": roots,
                 "generated_include_roots": generated_roots,
             },
@@ -500,7 +516,6 @@ def build_profile(build_dir: Path, source_root: Path) -> dict:
                 {
                     "exported_as": row["exported_as"],
                     "closure_node_count": row["closure"]["node_count"],
-                    "public_header_count": row["public_headers"]["count"],
                 }
                 for _, row in ranked
             ],
@@ -535,8 +550,11 @@ DERIVATION = {
         "Object libraries absorbed as $<TARGET_OBJECTS:...> and build-order dependencies from "
         "add_dependencies() are deliberately not closure members: neither reaches a "
         "consumer's link line.",
-        "Public header counts come from each target's exported include directories, so "
-        "headers a target ships but does not export are not counted.",
+        "Public headers are recorded by name, once per exported include root in "
+        "public_headers_by_root, and come from each target's exported include directories, "
+        "so headers a target ships but does not export are not listed. Names rather than "
+        "counts, so parallel additions merge as separate lines instead of colliding on one "
+        "number.",
         "Include roots under the build directory (generated headers, fetched dependencies) "
         "are counted, not named, and their headers are not counted: the build directory's "
         "name is a local choice and must not reach a published file.",
@@ -544,13 +562,22 @@ DERIVATION = {
 }
 
 
-def census_document(profiles: dict[str, dict]) -> dict:
-    """Wrap one or more measured profiles in the published document."""
+def census_document(profiles: dict[str, dict], source_root: Path) -> dict:
+    """Wrap one or more measured profiles in the published document.
+
+    Header names are walked from the checkout for every root any recorded
+    profile exports, including profiles carried through from other hosts: the
+    headers under a root are a fact of the source tree, not of the platform.
+    """
+    roots: set[str] = set()
+    for profile in profiles.values():
+        roots |= profile_roots(profile)
     return {
         "$schema": "./consumption-profiles.schema.json",
         "schema": CENSUS_SCHEMA_VERSION,
         "generated_by": "tools/scripts/consumption_census.py",
         "derivation": DERIVATION,
+        "public_headers_by_root": headers_by_root(source_root, roots),
         "profiles": {key: profiles[key] for key in sorted(profiles)},
     }
 
@@ -815,7 +842,7 @@ def diffable(profile: dict) -> dict:
     }
 
 
-def report(profile: dict) -> str:
+def report(profile: dict, header_sets: dict[str, list[str]]) -> str:
     lines = [
         f"profile={profile['key']} "
         f"targets={profile['summary']['installed_target_count']}",
@@ -827,7 +854,7 @@ def report(profile: dict) -> str:
             f"{entry['exported_as']:34s} "
             f"{entry['closure_node_count']:7d} "
             f"{row['external_dependencies']['count']:9d} "
-            f"{entry['public_header_count']:7d}"
+            f"{sum(len(header_sets.get(r, [])) for r in row['public_headers']['roots']):7d}"
         )
     return "\n".join(lines)
 
@@ -858,7 +885,6 @@ SCALAR_FIELDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("source_dir",), "source directory"),
 )
 
-HEADER_COUNT_PATH = ("public_headers", "count")
 
 
 def dig(row: dict, path: tuple[str, ...]):
@@ -901,30 +927,14 @@ def describe_membership(old: object, new: object, label: str) -> list[str]:
     return lines
 
 
-def header_root_detail(row: dict) -> str:
-    """Where to look for a header-count change: the roots the target exports."""
-    roots = dig(row, ("public_headers", "roots"))
-    if not roots:
-        return ""
-    if len(roots) == 1:
-        return f", under exported include root {roots[0]}"
-    return f", across exported include roots {name_list(list(roots))}"
-
-
 def describe_target_drift(old: dict, new: dict) -> list[str]:
     """Every recorded field this target disagrees about, named.
 
-    A blanket "closure detail changed" is worse than no detail: a header added
-    under an already-exported include root changes only `public_headers.count`,
-    and calling that a closure change sends the reader to the link graph.
+    A blanket "closure detail changed" is worse than no detail: calling a
+    change a closure change when it is not sends the reader to the link graph.
+    Header names are compared separately, per root (describe_header_drift).
     """
     reasons: list[str] = []
-    old_headers = dig(old, HEADER_COUNT_PATH)
-    new_headers = dig(new, HEADER_COUNT_PATH)
-    if old_headers != new_headers:
-        reasons.append(
-            f"public header count {old_headers} -> {new_headers}{header_root_detail(new)}"
-        )
     for path, label in SCALAR_FIELDS:
         old_value = dig(old, path)
         new_value = dig(new, path)
@@ -940,24 +950,45 @@ def describe_target_drift(old: dict, new: dict) -> list[str]:
     return reasons
 
 
-def header_count_drifted(committed: dict, current: dict) -> bool:
-    """Whether any shared target's public header count moved."""
-    old_targets = committed.get("targets", {})
-    new_targets = current.get("targets", {})
-    return any(
-        dig(old_targets[name], HEADER_COUNT_PATH) != dig(new_targets[name], HEADER_COUNT_PATH)
-        for name in set(old_targets) & set(new_targets)
-    )
-
-
-# Said once when a header count moved. The census counts headers by walking the
+# Said once when a header set moved. The census lists headers by walking the
 # exported include roots, so this drift needs no target, symbol or CMake edit —
 # which is exactly why it reads as a mystery when the message does not say so.
 HEADER_DRIFT_CAUSE = (
     "a public header added, removed or renamed under an already-exported include "
-    "root moves these counts on its own: no target, symbol or CMake change is "
-    "involved, and the census records the count rather than the file names"
+    "root changes public_headers_by_root on its own: no target, symbol or CMake "
+    "change is involved"
 )
+
+
+def describe_header_drift(
+    recorded: dict[str, list[str]], live: dict[str, list[str]], profile: dict
+) -> list[str]:
+    """Every header name the census and the tree disagree about, per root.
+
+    `live` holds the roots this profile exports. A root the census does not
+    list at all is drift too: its headers are unrecorded.
+    """
+    exporters: dict[str, list[str]] = {}
+    for name, row in sorted(profile["targets"].items()):
+        for root in row["public_headers"]["roots"]:
+            exporters.setdefault(root, []).append(f"Pulp::{name}")
+    lines: list[str] = []
+    for root in sorted(live):
+        who = name_list(exporters.get(root, []))
+        if root not in recorded:
+            lines.append(f"exported include root {root} ({who}) has no header list")
+            continue
+        old, new = set(recorded[root]), set(live[root])
+        added, removed = sorted(new - old), sorted(old - new)
+        if added:
+            lines.append(f"public header added under {root} ({who}): {name_list(added)}")
+        if removed:
+            lines.append(f"public header removed under {root} ({who}): {name_list(removed)}")
+        if not added and not removed and recorded[root] != live[root]:
+            lines.append(f"header list for {root} is not sorted and de-duplicated")
+    if lines:
+        lines.append(HEADER_DRIFT_CAUSE)
+    return lines
 
 
 def describe_drift(committed: dict, current: dict) -> list[str]:
@@ -976,8 +1007,6 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
             lines.append(f"Pulp::{name}: {reason}")
     if committed.get("features") != current.get("features"):
         lines.append("the profile's feature set changed")
-    if header_count_drifted(committed, current):
-        lines.append(HEADER_DRIFT_CAUSE)
     if lines:
         return lines
 
@@ -1024,6 +1053,35 @@ def describe_drift(committed: dict, current: dict) -> list[str]:
         else:
             changed_paths(committed[key], current[key], key)
     return lines or ["the profile differs from the build tree"]
+
+
+def without_header_counts(profile: dict) -> dict:
+    """Drop the per-target header counts an older census recorded.
+
+    Profiles measured on another host are carried through a rewrite untouched;
+    this is the one change applied to them, because the header names that
+    replace the counts are recorded once per root at the top of the document.
+    """
+    profile = json.loads(json.dumps(profile))
+    for row in profile.get("targets", {}).values():
+        row.get("public_headers", {}).pop("count", None)
+    for entry in profile.get("summary", {}).get("ranked_by_closure", []):
+        entry.pop("public_header_count", None)
+    return profile
+
+
+def carried_profiles_without_counts(census_path: Path) -> dict[str, dict]:
+    """Profiles from a census that no longer validates only because it still
+    records header counts; anything else wrong starts the rewrite from scratch.
+    """
+    try:
+        document = json.loads(census_path.read_text())
+        profiles = document["profiles"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    if not isinstance(profiles, dict):
+        return {}
+    return {k: without_header_counts(v) for k, v in profiles.items() if isinstance(v, dict)}
 
 
 def load_document(census_path: Path, schema_path: Path) -> dict:
@@ -1160,12 +1218,21 @@ def check_profile_recorded(build_dir: Path, census_path: Path, schema_path: Path
     return None
 
 
-def run_check(profile: dict, census_path: Path, schema_path: Path, build_dir: Path) -> int:
+def run_check(
+    profile: dict, census_path: Path, schema_path: Path, build_dir: Path, source_root: Path
+) -> int:
     document = load_document(census_path, schema_path)
     recorded = document["profiles"][profile["key"]]
+    lines: list[str] = []
     if diffable(recorded) != diffable(profile):
+        lines.extend(describe_drift(recorded, profile))
+    live_headers = headers_by_root(source_root, profile_roots(profile))
+    lines.extend(
+        describe_header_drift(document.get("public_headers_by_root", {}), live_headers, profile)
+    )
+    if lines:
         print("consumption_census: the census no longer matches the build tree", file=sys.stderr)
-        for line in describe_drift(recorded, profile):
+        for line in lines:
             print(f"  {line}", file=sys.stderr)
         print(
             "  regenerate with: python3 tools/scripts/consumption_census.py "
@@ -1214,7 +1281,7 @@ def main(argv: list[str]) -> int:
             print(f"consumption_census_cross_check=agreed targets={len(profile['targets'])}")
 
         if args.check:
-            return run_check(profile, census_path, schema_path, build_dir)
+            return run_check(profile, census_path, schema_path, build_dir, source_root)
 
         # Profiles other than this host's are carried through untouched: a
         # macOS run must not silently delete a Linux profile it cannot measure.
@@ -1224,8 +1291,14 @@ def main(argv: list[str]) -> int:
                 profiles = dict(load_document(census_path, schema_path)["profiles"])
             except CensusError:
                 # Regenerating over a census that no longer validates is the
-                # documented repair path, so a rewrite starts from scratch.
-                profiles = {}
+                # documented repair path, so a rewrite starts from scratch --
+                # unless the only thing wrong is the header counts an older
+                # census recorded, which are dropped and the profiles kept.
+                profiles = carried_profiles_without_counts(census_path)
+                if validate_schema(census_document(profiles, source_root), schema_path):
+                    profiles = {}
+            else:
+                profiles = {k: without_header_counts(v) for k, v in profiles.items()}
 
         if args.link_probe:
             if args.sdk_prefix is None:
@@ -1237,7 +1310,7 @@ def main(argv: list[str]) -> int:
                 profile["link_probe"] = previous
 
         profiles[profile["key"]] = profile
-        document = census_document(profiles)
+        document = census_document(profiles, source_root)
 
         problems = validate_schema(document, schema_path)
         if problems:
@@ -1250,7 +1323,7 @@ def main(argv: list[str]) -> int:
             return 2
 
         if args.report:
-            print(report(profile))
+            print(report(profile, document["public_headers_by_root"]))
 
         if args.write:
             census_path.write_text(render(document))
