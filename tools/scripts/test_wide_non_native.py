@@ -366,6 +366,9 @@ REVIEWED_SCANNERS = {
     "tools/ci/test_source_selftests.py": "walks temporary trees",
     "tools/scripts/gate_python_imports_check.py":
         "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
+    "tools/scripts/script_test_inputs.py":
+        "reads the configured ctest inventory and follows each script test's imports from "
+        "there; script-test-inputs-drift runs in the pr-fast tier on the native gate",
     "tools/scripts/agent_capability_manifest.py":
         "reads core/*/include; its tools/scripts inputs route to the native "
         "build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
