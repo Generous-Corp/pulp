@@ -50,6 +50,9 @@ DEVICE_MARKERS = (
 INTENTIONALLY_PARALLEL = {
     "pulp-test-gpu-audio-transport",
     "pulp-test-flow-pans",
+    # Formats GpuSurface::AdapterInfo values into log lines; it names the type
+    # but never opens an adapter or device (render_gpu_diagnostics_tests.cmake).
+    "pulp-test-gpu-diagnostics",
 }
 
 # Explicitly invoked acceptance executables are not registered with CTest, so

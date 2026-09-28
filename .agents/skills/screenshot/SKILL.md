@@ -256,6 +256,38 @@ the app is alive, `lsof -p <pid>` must not map
 `HALC_ProxyIOContext::IOWorkLoop()`. Both appear when a device IS open, so
 their absence is a two-state result rather than a hopeful one.
 
+## Reading a headless run's GPU diagnostic lines
+
+A `PULP_HEADLESS=1 PULP_SCREENSHOT=<png> PULP_FRAMES=<n>` run of a Release
+standalone prints a fixed set of info-level lines a remote support read can grep.
+The existing ones (`GpuSurface: created Metal surface from CAMetalLayer`,
+`GpuSurface: Dawn initialized (surface: …)`, `GpuSurface: backend_type=…`,
+`SkiaSurface: Graphite initialized …`, `[gpu-host] first frame: …`) are
+unchanged; four prefixes add the adapter, the bring-up cost and the frame cost:
+
+| Prefix | When | Fields |
+|---|---|---|
+| `GpuSurface: adapter` | once, when a Dawn `GpuSurface` finishes `initialize()` (every platform) | `name` `vendor` `architecture` `description` (quoted), `type=integrated\|discrete\|cpu\|unknown`, `backend`, `null` |
+| `GpuSurface: startup_ms` | once, after the macOS GPU window host's first rendered frame | `instance` `adapter` `device` `surface` `graphite` `first_frame` (ms; `n/a` = not measured) |
+| `Standalone: frame_ms` | once, when a screenshot run captures | `frames` `p50` `p95` `max` (ms), `over16` `over33` (frames strictly over 1000/60 and 1000/30 ms) |
+| `GpuDiagnostics:` | once, right after `frame_ms` | `skia_bridge=<status>` `skia_records` `gpu_diagnostics_emitted` `truncated` `skia_text_suppressed` |
+
+- `null=true` or `type=cpu` means the editor did NOT render on a GPU, whatever
+  the rest of the log says.
+- `first_frame` runs from the start of GPU bring-up to the end of the first
+  frame's present, so it is the "window is black" interval on a slow machine.
+- `frame_ms` samples are main-thread time per dispatched host frame (idle pump +
+  layout + paint + submit + present), NOT the vsync interval; the capture frame
+  itself is excluded because readback would dominate it.
+  A tick where nothing changed skips the paint and costs microseconds, so a
+  static UI reads `p50≈0.00` with the real cost in `p95`/`max` (the first
+  frame, which builds the view tree, is usually `max`).
+- `skia_bridge=declined_not_enabled` means nothing was wired (the default);
+  `installed` with `skia_records=0` means Skia genuinely said nothing. Set
+  `PULP_GPU_LOG_BRIDGE=1` to install it; its records are then also copied to the
+  log as `skia: [<severity>] <message>` (first 50, then one
+  `skia: N more records suppressed` line at the end of the run).
+
 ## Driving the KEYBOARD in a standalone capture
 
 `PULP_TEST_KEY_SEQUENCE` presses keys in the real shipping build and
