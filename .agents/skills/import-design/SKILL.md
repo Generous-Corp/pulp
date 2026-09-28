@@ -62,7 +62,12 @@ banner from `packages/pulp-react/runtime-fingerprint.json`;
 configure time, warn-only unless `STRICT`) names each missing fix and the
 refresh command, and judges banner-less bundles by each fix's signature. Bump
 the manifest's revision and add a fix entry when a runtime change is worth a
-refresh.
+refresh. Revision 2 added the per-pass path memo, per-pass typography dedup,
+unread `data-*` attributes and reconciled captured paint as paint-only
+commits. A signature must be an identifier the SDK runtime actually emits
+(`runtime_fingerprint.test.mjs` checks each one against the generated entry
+and the @pulp/react source) and one a hand-patched vendored copy is unlikely
+to share.
 
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
@@ -7009,6 +7014,46 @@ match is deliberately never cached. The one exception is
 `__pulpMaterializedStateResolver__`: an embedder driving the state from its own
 signal is not a function of the registry, so a runtime that installs one keeps
 the unconditional refresh.
+
+**Path resolution is memoized per pass, never across passes.** The path index
+carries a children memo (each node's registry-filtered children, computed once)
+and a binding→node memo, shared by the dynamic-layout scan and the layout,
+paint and text loops. Captured paths share long prefixes, so without it a pass
+re-filtered the root and each row once per binding that crosses them: 508
+child filters on a 121-node, 170-binding panel, 121 with it. Both memos live on
+the per-pass index for the same reason the index does — a retained one
+resolves stale paths after a reparent. A Label reached by two text bindings in
+one pass gets its five typography setters once (per face), not once per
+binding.
+
+**What a commit can skip the pass for (runtime revision 2).** `@pulp/react`'s
+`isPaintOnlyUpdate` exempts, besides `PAINT_ONLY_KEYS` and handlers:
+
+- a **`data-*` attribute no selector names.** Captured bindings resolve by tag
+  and sibling index, so an attribute can reach metadata only through a
+  selector. The runtime publishes every attribute name a selector has named on
+  `__pulpMaterializedSelectorAttributes__`: all captured-state match selectors
+  up front (state resolution stops at the first match, so it never asks about
+  the rest), and any other selector on its first `__pulpFindMaterializedElement__`
+  call, recorded BEFORE the miss cache is consulted. A named attribute still
+  marks the tree and bumps the epoch. A runtime that publishes no set keeps
+  every `data-*` change geometric.
+- a **captured paint channel** — `color`/`textColor`, `opacity`, `fill`,
+  `stroke` — when the runtime installs `__pulpReconcileMaterializedPaint__`.
+  The pass records which of those channels it wrote on which node, with the
+  captured value; after React's setter runs, commitUpdate hands the node's
+  changed channels to the hook, which rewrites only the owned ones whose React
+  value differs. The end state equals what the full pass would leave (the
+  rig-based `expectFullPassAgrees` cases prove it after hover, theme switch and
+  removal). A selector naming `fill`/`stroke`/`color`/`opacity`/`style` keeps
+  that channel geometric. Ownership is rebuilt for exactly the nodes a pass
+  re-applies, so a state flip to metadata without a paint binding releases it.
+
+A button hover that recolours text/border/background and toggles a `data-*`
+marker is now its own four React setters: no pass, no `getLayoutBoxMetrics`,
+no epoch bump (so the captured-state miss cache survives). The per-commit
+counts are asserted in `packages/pulp-react/test/materialized-commit-cost.test.ts`
+over the real entry + host config (`materialized-runtime-rig.ts`).
 
 **Scoped passes publish diagnostics under a different key.** A scoped
 application legitimately touches a fraction of the document, so writing its
