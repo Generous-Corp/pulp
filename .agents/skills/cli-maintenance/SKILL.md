@@ -3352,6 +3352,13 @@ Plain `exec()` is still correct for commands whose output *is* the whole result.
   back to a temp dir when HOME is unset). They were both once named `pulp_home` with
   different contracts — a silent two-sources-of-truth for a filesystem-layout invariant.
   Pick deliberately; do not "unify" them without deciding the Windows root + fallback.
+- **Every C++ `cmake --build` goes through one wrapper chain.** `pulp build`,
+  `pulp loop`, `pulp dev` and the watch-loop rebuild in `cli_common.cpp` each run
+  `apply_build_dir_lock(apply_agent_build_watchdog(apply_agent_build_qos(cmd, qos), jobs,
+  active), project_root, build_dir)`. The lock is outermost: it runs the checkout's
+  `tools/ci/build_dir_lock.py --no-wait`, the same flock `governed-build.sh` takes, so a
+  second build into a live tree exits 75 and names the holder whichever CLI started
+  either one. A new build site that skips the chain races the others silently.
 
 ## Exit 2 means "could not measure" — keep it distinct from failure
 

@@ -58,6 +58,12 @@ def run_step(
             GITHUB_BASH + [str(step)], capture_output=True, text=True,
             env={
                 "RUNNER_OS": "macOS",
+                # When it can compute a gate digest (a local checkout can; the
+                # workflow-lint job cannot) the step writes a marker under
+                # RUNNER_TEMP and a line to GITHUB_OUTPUT. Unset, those target
+                # /ios-gate-shadow and an empty path, and the step fails there.
+                "RUNNER_TEMP": tmp,
+                "GITHUB_OUTPUT": str(Path(tmp) / "github-output"),
                 "IOS_COMPILE_REQUIRED": ios_compile_required,
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
             },

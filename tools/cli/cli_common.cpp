@@ -1071,9 +1071,9 @@ int watch_loop(const WatchOptions& opts) {
         std::string build_cmd = "cmake --build " + opts.build_dir.string();
         for (auto& arg : capped_build.args) build_cmd += " " + arg;
         build_cmd = apply_agent_build_qos(focused_build_command(build_cmd, selection), build_qos);
+        build_cmd = apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active());
         int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-            apply_agent_build_watchdog(build_cmd, build_jobs, opts.build_watchdog || loop_lease.active()),
-            "Rebuilding");
+            apply_build_dir_lock(build_cmd, opts.root, opts.build_dir), "Rebuilding");
 
         if (rc != 0) {
             std::cout << color::red() << "Build failed." << color::reset()

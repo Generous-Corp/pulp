@@ -66,6 +66,17 @@ std::string apply_agent_build_watchdog(const std::string& command,
                                        int jobs,
                                        bool lease_active);
 
+// Wrap a `cmake --build` shell command so it runs under the source checkout's
+// build-directory lock (tools/ci/build_dir_lock.py --no-wait): a second build
+// into a tree another live build holds exits 75 and names the holder instead of
+// racing it. The lock file is the one governed-build.sh takes, so this path and
+// the Rust CLI's exclude each other. Returns the command unchanged on Windows,
+// for a project without the lock script (an SDK consumer), without python3, or
+// when PULP_BUILD_DIR_LOCK=0. Apply it outermost, after QoS and the watchdog.
+std::string apply_build_dir_lock(const std::string& command,
+                                 const fs::path& project_root,
+                                 const fs::path& build_dir);
+
 class ScopedBuildParallelEnv {
 public:
     struct SavedEnv {

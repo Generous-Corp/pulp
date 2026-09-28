@@ -185,9 +185,11 @@ int cmd_dev(const std::vector<std::string>& args) {
     for (auto& arg : capped_build.args) build_cmd += " " + arg;
     build_cmd = focused_build_command(build_cmd, selection);
     int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-        apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
-                                   lease.jobs(),
-                                   lease.active()),
+        apply_build_dir_lock(
+            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+                                       lease.jobs(),
+                                       lease.active()),
+            project_root, build_dir),
         "Building");
     if (rc != 0) {
         std::cerr << "Initial build failed.\n";
