@@ -2338,7 +2338,13 @@ Audit every commit source:
 4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
    (runs twice per move);
 5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
-   through state — keep it mounted and restart the timer imperatively.
+   through state — keep it mounted and restart the timer imperatively;
+6. a projection or sync path (host automation, native state pushes) calling a
+   React setter with a value equal to the one it holds. Compare before
+   `setState`, or keep derived state in refs. In one spectrum editor an
+   unconditional `setMacroState(newArray)` / `setValue({...})` re-rendered the
+   plot on every host automation change: a viewport change fell from ~33 ms to
+   ~0.06 ms and an LFO-shape change from ~20 ms to ~0.05 ms once guarded.
 
 Quick check before a trace: wrap `__dispatch__(id, type, payload)` with a timer
 and compare `pointermove` against `mousemove` on the same element; orders of
