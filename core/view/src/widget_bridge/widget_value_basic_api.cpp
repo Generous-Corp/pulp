@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_basic_api.cpp - basic widget value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <pulp/view/ui_components.hpp>

@@ -9,6 +9,7 @@
 #include <pulp/format/headless.hpp>
 #include <pulp/format/plugin_state_io.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
