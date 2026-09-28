@@ -680,6 +680,8 @@ fn broker_downgrade_refuses_without_disturbing_service_or_state() {
     );
 }
 
+// The broker transaction is Darwin-only and returns NotPresent elsewhere.
+#[cfg(target_os = "macos")]
 #[test]
 fn staged_broker_version_mismatch_refuses_before_installed_state_is_read() {
     let (root, archive, plan, broker) = broker_lifecycle_fixture("0.794.0", "0.795.0");
