@@ -47,6 +47,22 @@ add_test(NAME ctest-unique-names-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_unique_names_check.py")
 
+# Every Python script a registered ctest runs must import only what the gate
+# VM's Python has: the standard library plus the pinned visual-analysis lock the
+# gate installs. A test importing anything else passes locally and on this tier,
+# then dies with ModuleNotFoundError in the merge group and ejects the batch.
+# Follows imports through repo helpers and into function bodies; the
+# source-selftest lane's scripts are held to the standard library alone.
+add_test(NAME gate-python-imports
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/gate_python_imports_check.py"
+        --build-dir "${CMAKE_BINARY_DIR}"
+        --ctest "${CMAKE_CTEST_COMMAND}")
+set_tests_properties(gate-python-imports PROPERTIES TIMEOUT 180)
+add_test(NAME gate-python-imports-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_python_imports_check.py")
+
 # The native-build and iOS-compile skip classifier, including the check that
 # every test/ or docs/ path non-test CMake names stays denied from the iOS skip
 # allowlist. Needs tomllib.
@@ -67,6 +83,8 @@ set(PULP_PR_FAST_TESTS
     pr-fast-tier-selftest
     ctest-unique-names
     ctest-unique-names-selftest
+    gate-python-imports
+    gate-python-imports-selftest
     advisory-macos-runner-policy
     agent-capability-manifest-check
     agent-hook-paths
