@@ -723,7 +723,12 @@ consequences worth knowing before you debug:
   that walks a directory (`rglob`, `os.walk`) is selected by any change under a
   directory its source names; that is how `wide-non-native-selftest`, which
   reads every `test/**/*.cmake` and runs only in the merge group, is picked for
-  a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
+  a `test/cmake` change. Every lane also follows repo imports: a changed
+  module selects each suite that loads it directly or through repo helpers
+  (`sys.path` siblings, `from tools.scripts import x`, relative imports), using
+  `gate_python_imports_check.local_import_closure`. Across the 338 helper
+  modules under `tools/scripts` and `tools/ci`, that reaches suites the name
+  match misses for 33 of them. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed
