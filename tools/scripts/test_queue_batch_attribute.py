@@ -1107,18 +1107,35 @@ class HistoryAttributionTests(unittest.TestCase):
             ]
         )
         self.assertIsNone(hist.culprit)
-        self.assertEqual(hist.separators, [])
+        self.assertNotIn(10, [s.pr for s in hist.separators])
 
-    def test_one_failing_group_without_the_entry_clears_it(self) -> None:
+    def test_one_failing_group_without_the_entry_while_it_was_queued_clears_it(self) -> None:
         hist = self.only(
             [
                 group("1", {10}, failed={self.T}),
-                group("2", {10}, failed={self.T}),
-                group("3", {11}, failed={self.T}),
+                group("2", {11}, failed={self.T}),
+                group("3", {10}, failed={self.T}),
             ]
         )
         self.assertIsNone(hist.culprit)
         self.assertNotIn(10, [s.pr for s in hist.separators])
+
+    def test_a_failure_before_the_entry_was_queued_is_another_episode(self) -> None:
+        # The same test red on main for hours, fixed, then broken again by an
+        # entry: the earlier failures must not clear the later culprit.
+        hist = self.only(
+            [
+                group("1", {1}, failed={self.T}),
+                group("2", {2}, failed={self.T}),
+                group("3", {3}, failed={self.T}),
+                group("4", {4}),
+                group("5", {10}, failed={self.T}),
+                group("6", {10, 11}, failed={self.T}),
+                group("7", {11}),
+            ]
+        )
+        self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
+        self.assertEqual(hist.culprit, 10)
 
     def test_a_single_failing_group_is_reported_but_never_named(self) -> None:
         hist = self.only([group("1", {10}, failed={self.T}), group("2", {11})])
@@ -1137,6 +1154,22 @@ class HistoryAttributionTests(unittest.TestCase):
         hist = self.only(together + [group("4", {11}, failed={self.T})])
         self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
         self.assertEqual(hist.culprit, 11)
+
+    def test_two_unrelated_breaks_in_one_window_each_name_their_culprit(self) -> None:
+        hist = self.only(
+            [
+                group("1", {1}, failed={self.T}),
+                group("2", {1, 2}, failed={self.T}),
+                group("3", {2}),
+                group("4", {3}),
+                group("5", {5}, failed={self.T}),
+                group("6", {5, 6}, failed={self.T}),
+                group("7", {6}),
+            ]
+        )
+        self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
+        self.assertEqual(hist.culprits, [1, 5])
+        self.assertIsNone(hist.culprit)
 
     def test_a_group_that_never_ran_the_test_is_not_a_pass(self) -> None:
         hist = self.only(
@@ -1159,14 +1192,17 @@ class HistoryAttributionTests(unittest.TestCase):
         self.assertIsNone(hist.culprit)
 
     def test_a_high_rate_failure_no_entry_separates_is_left_unattributed(self) -> None:
+        # Every entry that failed also ran it green while queued.
         hist = self.only(
             [
                 group("1", {1}, failed={self.T}),
-                group("2", {2}, failed={self.T}),
-                group("3", {3}, failed={self.T}),
-                group("4", {4}),
+                group("2", {1, 2}),
+                group("3", {2}, failed={self.T}),
+                group("4", {2, 3}),
+                group("5", {3}, failed={self.T}),
             ]
         )
+        self.assertEqual(hist.separators, [])
         self.assertEqual(hist.verdict, qba.HISTORY_UNATTRIBUTED)
 
     def test_a_failure_rescued_by_a_retry_is_a_flake(self) -> None:
@@ -1201,6 +1237,12 @@ class HistoryAttributionTests(unittest.TestCase):
         ios = "ios-compile-gate-legs"
         browser = "pulp-browser-capture-node-integration"
         runs = [
+            # The same selftest red on main for an unrelated reason the morning
+            # before; a 24-hour window holds both episodes.
+            group("36308073632", {8923}, failed={wide}),
+            group("36308074347", {8926, 8923}, failed={wide}),
+            group("36308074839", {8928, 8926, 8923}, failed={wide}),
+            group("36310000000", {8930}),
             group("36367719695", {8933}, failed={abi, wavenet}),
             group("36368234938", {8973, 8933}, failed={abi, wavenet}),
             group("36368583867", {8973}),
@@ -1220,11 +1262,16 @@ class HistoryAttributionTests(unittest.TestCase):
         by_test = {h.test: h for h in qba.history_attribution(runs)}
         self.assertEqual(by_test[abi].culprit, 8933)
         self.assertEqual(by_test[wavenet].culprit, 8933)
-        self.assertEqual(by_test[wide].culprit, 8963)
+        # Two episodes, each named: the earlier stack's first entry, and #8963.
+        self.assertIn(8963, by_test[wide].culprits)
+        self.assertEqual(by_test[wide].verdict, qba.HISTORY_CULPRIT)
         self.assertEqual(by_test[ios].culprit, 8966)
         self.assertEqual(by_test[browser].verdict, qba.HISTORY_FLAKE)
         named = qba.likely_culprits(list(by_test.values()))
-        self.assertEqual(set(named), {8933, 8963, 8966})
+        self.assertTrue({8933, 8963, 8966} <= set(named))
+        self.assertNotIn(8969, named)
+        self.assertNotIn(8973, named)
+        self.assertNotIn(8976, named)
         self.assertEqual(set(named[8933]), {abi, wavenet})
 
 
@@ -1296,6 +1343,106 @@ class GroupMembersTests(unittest.TestCase):
                 "o/r", f"gh-readonly-queue/main/pr-1-{'c' * 40}", "h2"
             )
         self.assertIsNone(members)
+
+
+class HistoryWindowTests(unittest.TestCase):
+    NOW = qba.datetime(2026, 9, 28, 6, 0, tzinfo=qba.timezone.utc)
+
+    def test_since_accepts_a_duration_or_an_instant(self) -> None:
+        self.assertEqual(qba.parse_since("24h", self.NOW), self.NOW - qba.timedelta(hours=24))
+        self.assertEqual(qba.parse_since("90m", self.NOW), self.NOW - qba.timedelta(minutes=90))
+        self.assertEqual(qba.parse_since("2d", self.NOW), self.NOW - qba.timedelta(days=2))
+        self.assertEqual(
+            qba.parse_since("2026-09-28T02:00:00Z", self.NOW),
+            qba.datetime(2026, 9, 28, 2, 0, tzinfo=qba.timezone.utc),
+        )
+
+    def test_a_chain_that_never_reaches_its_stop_is_unknown(self) -> None:
+        chain = [("h3", 3), ("h2", 2), ("h1", 0)]
+        self.assertEqual(qba.members_from_chain(chain, "h1"), {3, 2})
+        self.assertEqual(qba.members_from_chain(chain, "h3"), None)
+        self.assertIsNone(qba.members_from_chain(chain, "elsewhere"))
+
+
+class HistoryCacheTests(unittest.TestCase):
+    """A completed run never changes, so a second pass reads only new runs."""
+
+    RUNS = [
+        {"id": 2, "status": "completed", "created_at": "2026-09-28T02:00:00Z",
+         "head_branch": f"gh-readonly-queue/main/pr-20-{'a' * 40}", "head_sha": "g2"},
+        {"id": 1, "status": "completed", "created_at": "2026-09-28T01:00:00Z",
+         "head_branch": f"gh-readonly-queue/main/pr-10-{'a' * 40}", "head_sha": "g1"},
+    ]
+    LOG = "\n".join(
+        [
+            "Test  #1: abi ........***Failed  1.0 sec",
+            "The following tests FAILED:",
+            "\t  1 - abi (Failed)",
+            "Errors while running CTest",
+        ]
+    )
+
+    def run_pass(self, cache_dir, runs):
+        calls: list[str] = []
+
+        def gh(path, jq=None, **_):
+            calls.append(path)
+            if "/actions/workflows/" in path:
+                return json.dumps({"workflow_runs": runs if "page=1" in path else []})
+            if path.endswith("/jobs?per_page=100"):
+                return json.dumps({"jobs": [{
+                    "name": "macos", "conclusion": "failure", "runner_name": "m5",
+                    "steps": [{"name": "Test (non-Windows)", "conclusion": "failure"}],
+                }]})
+            if "/compare/" in path:
+                return "base"
+            if "/commits/g" in path:
+                pr = path.rsplit("g", 1)[1]
+                return f"Merge pull request #{pr}0 from a/b\tbase"
+            return None
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("2_macos.txt", self.LOG)
+        with mock.patch.object(qba, "gh", side_effect=gh), mock.patch.object(
+            qba, "run_log_zip", return_value=archive.getvalue()
+        ) as logs:
+            read = qba.observe_history(
+                "o/r", since="24h", cache_dir=cache_dir,
+                now=qba.datetime(2026, 9, 28, 6, 0, tzinfo=qba.timezone.utc),
+            )
+        return read, calls, logs.call_count
+
+    def test_a_second_pass_fetches_nothing_already_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first, _, first_logs = self.run_pass(pathlib.Path(tmp), self.RUNS)
+            second, calls, second_logs = self.run_pass(pathlib.Path(tmp), self.RUNS)
+        self.assertEqual((first.fetched, first.from_cache, first_logs), (2, 0, 2))
+        self.assertEqual((second.fetched, second.from_cache, second_logs), (0, 2, 0))
+        self.assertFalse([c for c in calls if c.endswith("/jobs?per_page=100")])
+        self.assertEqual(
+            {o.run_id: o.members for o in second.observations},
+            {"1": {10}, "2": {20}},
+        )
+        self.assertEqual({o.created for o in second.observations},
+                         {"2026-09-28T01:00:00Z", "2026-09-28T02:00:00Z"})
+
+    def test_the_window_is_a_created_filter_on_the_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _, calls, _ = self.run_pass(pathlib.Path(tmp), self.RUNS)
+        listing = [c for c in calls if "/actions/workflows/" in c]
+        self.assertTrue(listing)
+        self.assertIn("created=%3E%3D2026-09-27T06:00:00Z", listing[0])
+
+    def test_the_cap_keeps_the_newest_runs_and_says_so(self) -> None:
+        with mock.patch.object(
+            qba, "gh", return_value=json.dumps({"workflow_runs": self.RUNS})
+        ):
+            runs, capped = qba.list_group_runs("o/r", self.NOW_SINCE, 1)
+        self.assertTrue(capped)
+        self.assertEqual([r["id"] for r in runs], [2])
+
+    NOW_SINCE = qba.datetime(2026, 9, 27, 6, 0, tzinfo=qba.timezone.utc)
 
 
 if __name__ == "__main__":

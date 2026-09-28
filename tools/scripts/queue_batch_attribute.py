@@ -60,7 +60,9 @@ import re
 import subprocess
 import sys
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DEFAULT_REPO = "Generous-Corp/pulp"
@@ -966,7 +968,9 @@ def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Cer
 #
 # The rule is deliberately exact. One passing batch that contained the entry
 # clears it, and one failing batch without it clears it, because either is a
-# direct observation that the entry is neither necessary nor sufficient. A test
+# direct observation that the entry is neither necessary nor sufficient. Only
+# groups inside the span the entry was queued for count: the same test red on
+# main hours before the entry existed is a different break. A test
 # that no entry separates, failing at a low rate across unrelated memberships or
 # rescued by a retry, is a flake and is named as one rather than pinned on
 # whichever entry it happened to eject.
@@ -1008,6 +1012,7 @@ class GroupObservation:
     run_id: str
     members: frozenset[int] | None
     host: str = ""
+    created: str = ""
     failed: frozenset[str] = frozenset()
     passed: frozenset[str] | None = None
     retried: frozenset[str] = frozenset()
@@ -1023,6 +1028,7 @@ class Separator:
     with_pass: int
     without_fail: int
     alone_fail: int
+    failed_runs: frozenset[str] = frozenset()
 
     @property
     def exact(self) -> bool:
@@ -1038,7 +1044,13 @@ class TestHistory:
     unknown_membership_runs: list[str] = field(default_factory=list)
     separators: list[Separator] = field(default_factory=list)
     verdict: str = HISTORY_UNATTRIBUTED
-    culprit: int | None = None
+    # One per episode: the same test can break twice for unrelated reasons in
+    # one window, and each break has its own culprit.
+    culprits: list[int] = field(default_factory=list)
+
+    @property
+    def culprit(self) -> int | None:
+        return self.culprits[0] if len(self.culprits) == 1 else None
 
     @property
     def failure_rate(self) -> float:
@@ -1048,7 +1060,7 @@ class TestHistory:
         return {
             "test": self.test,
             "verdict": self.verdict,
-            "culprit": self.culprit,
+            "culprits": self.culprits,
             "failed_runs": self.failed_runs,
             "ran": len(self.ran_runs),
             "retried_runs": self.retried_runs,
@@ -1096,14 +1108,23 @@ def history_attribution(
                 if name not in names:
                     names.append(name)
         tests = names
+    observations = sorted(observations, key=chronological)
     candidates = sorted(
         {pr for obs in observations if obs.members for pr in obs.members}
     )
+    # An entry can only cause a failure while it is being validated, so a failure
+    # outside the span of groups it appeared in is a different episode (main red
+    # before it was queued, another entry after it left) and does not clear it.
+    span: dict[int, tuple[int, int]] = {}
+    for position, obs in enumerate(observations):
+        for pr in obs.members or ():
+            first, _ = span.get(pr, (position, position))
+            span[pr] = (first, position)
     histories: list[TestHistory] = []
     for test in tests:
         hist = TestHistory(test=test)
         known: list[GroupObservation] = []
-        for obs in observations:
+        for position, obs in enumerate(observations):
             if test in obs.retried:
                 hist.retried_runs.append(obs.run_id)
             if not obs.ran(test):
@@ -1114,14 +1135,18 @@ def history_attribution(
             if obs.members is None:
                 hist.unknown_membership_runs.append(obs.run_id)
             else:
-                known.append(obs)
+                known.append((position, obs))
         for pr in candidates:
             sep = Separator(pr=pr, with_fail=0, with_pass=0, without_fail=0, alone_fail=0)
-            for obs in known:
+            first, last = span[pr]
+            for position, obs in known:
+                if not first <= position <= last:
+                    continue
                 failed = test in obs.failed
                 present = pr in (obs.members or frozenset())
                 if present and failed:
                     sep.with_fail += 1
+                    sep.failed_runs = sep.failed_runs | {obs.run_id}
                     if obs.members == frozenset({pr}):
                         sep.alone_fail += 1
                 elif present:
@@ -1136,26 +1161,43 @@ def history_attribution(
     return histories
 
 
+def chronological(obs: GroupObservation) -> tuple[str, int]:
+    """Creation time, then run id, which GitHub assigns in increasing order."""
+    return (obs.created, int(obs.run_id) if obs.run_id.isdigit() else 0)
+
+
 def classify_history(hist: TestHistory) -> None:
     strong = [s for s in hist.separators if s.with_fail >= MIN_SEPARATING_FAILURES]
     if strong:
-        # Entries that always travelled together separate equally well, and
-        # picking one is a coin toss. A later failing group holding only one of
-        # them is the evidence that splits them.
-        if len(strong) == 1:
-            hist.verdict = HISTORY_CULPRIT
-            hist.culprit = strong[0].pr
-        else:
-            hist.verdict = HISTORY_AMBIGUOUS
+        # A separator whose failing groups another separator's strictly contain
+        # is dominated: the wider one explains everything it does and more (a
+        # later group holding only the wider entry). What remains is one set of
+        # failing groups per episode. Entries that always travelled together tie
+        # on that set and picking one is a coin toss, so a tied or overlapping
+        # episode names nobody; disjoint episodes each name their own culprit.
+        dominant = [
+            s for s in strong if not any(o.failed_runs > s.failed_runs for o in strong)
+        ]
+        episodes: dict[frozenset[str], list[int]] = {}
+        for sep in dominant:
+            episodes.setdefault(sep.failed_runs, []).append(sep.pr)
+        clean = [
+            runs
+            for runs in episodes
+            if all(other is runs or not (other & runs) for other in episodes)
+        ]
+        hist.culprits = sorted(
+            episodes[runs][0] for runs in clean if len(episodes[runs]) == 1
+        )
+        hist.verdict = HISTORY_CULPRIT if hist.culprits else HISTORY_AMBIGUOUS
         return
     if not hist.failed_runs:
         hist.verdict = HISTORY_FLAKE if hist.retried_runs else HISTORY_UNATTRIBUTED
         return
-    if hist.separators:
-        hist.verdict = HISTORY_WEAK
-        return
     if hist.retried_runs or hist.failure_rate <= FLAKE_MAX_RATE:
         hist.verdict = HISTORY_FLAKE
+    elif hist.separators:
+        hist.verdict = HISTORY_WEAK
     else:
         hist.verdict = HISTORY_UNATTRIBUTED
 
@@ -1164,8 +1206,9 @@ def likely_culprits(histories: list[TestHistory]) -> dict[int, list[str]]:
     """Pull request -> the tests the history names it the culprit for."""
     named: dict[int, list[str]] = {}
     for hist in histories:
-        if hist.verdict == HISTORY_CULPRIT and hist.culprit is not None:
-            named.setdefault(hist.culprit, []).append(hist.test)
+        if hist.verdict == HISTORY_CULPRIT:
+            for pr in hist.culprits:
+                named.setdefault(pr, []).append(hist.test)
     return named
 
 
@@ -1176,7 +1219,7 @@ def render_history(histories: list[TestHistory]) -> list[str]:
     for hist in histories:
         lines.append(
             f"{hist.test}: {hist.verdict}"
-            + (f" -> #{hist.culprit}" if hist.culprit else "")
+            + ("".join(f" -> #{pr}" for pr in hist.culprits))
             + f"  (failed {len(hist.failed_runs)} of {len(hist.ran_runs)} groups that ran it"
             + (f", retry-rescued in {len(hist.retried_runs)}" if hist.retried_runs else "")
             + ")"
@@ -1194,7 +1237,78 @@ def render_history(histories: list[TestHistory]) -> list[str]:
     return lines
 
 
-def group_members(repo: str, head_branch: str, head_sha: str, base: str = "main") -> frozenset[int] | None:
+# First-parent steps read per group: deeper than any batch the queue builds.
+CHAIN_DEPTH = 12
+
+# The default history window, and the most runs one pass reads. The cap keeps a
+# cold pass (no cache) inside the detector workflow's timeout on a busy day.
+DEFAULT_HISTORY_SINCE = "24h"
+DEFAULT_HISTORY_MAX_RUNS = 60
+HISTORY_WORKERS = 6
+CACHE_SCHEMA = 2
+
+SINCE_RE = re.compile(r"^(\d+)([mhd])$")
+
+
+def parse_since(text: str, now: datetime) -> datetime:
+    """`24h`, `90m`, `2d`, or an ISO-8601 instant, as an aware UTC datetime."""
+    match = SINCE_RE.match(text.strip())
+    if match:
+        unit = {"m": "minutes", "h": "hours", "d": "days"}[match.group(2)]
+        return now - timedelta(**{unit: int(match.group(1))})
+    moment = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def members_from_chain(chain: list[tuple[str, int]], stop: str) -> frozenset[int] | None:
+    """The entries of a first-parent chain above `stop`, or None if it never gets there.
+
+    Stopping short of `stop` (a commit that is not a queue merge, or a chain
+    read too shallow) is unknown membership, never a partial one: a partial set
+    would clear every entry it missed.
+    """
+    members: set[int] = set()
+    for sha, pr in chain:
+        if sha == stop:
+            return frozenset(members) if members else None
+        members.add(pr)
+    return None
+
+
+def group_chain(repo: str, head_sha: str, depth: int = CHAIN_DEPTH) -> list[tuple[str, int]]:
+    """(commit, pull request) by first parent from a group head, while each is a queue merge.
+
+    Immutable once read, so it is what the cache keeps; which of these entries
+    still count as the group's members depends on where main is now.
+    """
+    chain: list[tuple[str, int]] = []
+    sha = head_sha.strip()
+    for _ in range(depth):
+        raw = gh(
+            f"repos/{repo}/commits/{sha}",
+            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//"")]|@tsv',
+        )
+        if not raw or "\t" not in raw:
+            break
+        subject, parent = raw.split("\t", 1)
+        merged = MERGED_PR_RE.match(subject.strip())
+        if not merged:
+            break
+        chain.append((sha, int(merged.group(1))))
+        sha = parent.strip()
+    # The first commit below the last merge closes the chain, so a stop at it
+    # is recognised.
+    chain.append((sha, 0))
+    return chain
+
+
+def group_members(
+    repo: str,
+    head_branch: str,
+    head_sha: str,
+    base: str = "main",
+    chain: list[tuple[str, int]] | None = None,
+) -> frozenset[int] | None:
     """Every entry a merge_group batch contains, from its commit chain.
 
     The ref's embedded sha is the commit the entry was stacked on, which is the
@@ -1217,85 +1331,194 @@ def group_members(repo: str, head_branch: str, head_sha: str, base: str = "main"
         # only the entry it is named for: walk down to the commit it was
         # stacked on.
         stop = ref.group(2)
-    members: set[int] = set()
-    sha = head_sha.strip()
-    for _ in range(16):
-        if sha == stop.strip():
-            break
-        raw = gh(
-            f"repos/{repo}/commits/{sha}",
-            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//"")]|@tsv',
-        )
-        if not raw or "\t" not in raw:
-            return None
-        subject, parent = raw.split("\t", 1)
-        merged = MERGED_PR_RE.match(subject.strip())
-        if not merged:
-            return None
-        members.add(int(merged.group(1)))
-        sha = parent.strip()
-    else:
-        return None
-    return frozenset(members) if members else None
+    if chain is None:
+        chain = group_chain(repo, head_sha)
+    return members_from_chain(chain, stop.strip())
 
 
-def observe_group(repo: str, run: dict) -> GroupObservation | None:
-    """One merge_group run as an observation, or None when it proves nothing.
+def read_group(repo: str, run: dict) -> dict:
+    """The immutable facts of one completed merge_group run, as a cache record.
 
-    A run whose required job did not reach a verdict on its tests (a build error,
-    a hosted placeholder, a cancellation) is not evidence about any test.
+    `evidence` is false when the required job reached no verdict on its tests (a
+    build error, a hosted placeholder, a cancellation): that run is evidence
+    about no test.
     """
     run_id = str(run.get("id"))
+    record: dict = {
+        "schema": CACHE_SCHEMA,
+        "run_id": run_id,
+        "head_branch": str(run.get("head_branch") or ""),
+        "head_sha": str(run.get("head_sha") or ""),
+        "created": str(run.get("created_at") or ""),
+        "evidence": False,
+    }
     jobs = failing_jobs(repo, run_id)
-    if not jobs:
-        return None
+    if jobs is None:
+        # Unreadable is not "no evidence"; never cache it.
+        raise RuntimeError(f"jobs for run {run_id} could not be read")
     job = next((j for j in jobs if j.get("name") == REQUIRED_JOB), None)
     if not job:
-        return None
+        return record
+    record["host"] = str(job.get("runner_name") or "")
     test_steps = [
         s for s in (job.get("steps") or []) if test_step(str(s.get("name") or ""))
     ]
-    members = group_members(
-        repo, str(run.get("head_branch") or ""), str(run.get("head_sha") or "")
-    )
-    host = str(job.get("runner_name") or "")
     if job.get("conclusion") == "success":
         if not any(s.get("conclusion") == "success" for s in test_steps):
-            return None
-        return GroupObservation(run_id=run_id, members=members, host=host)
-    if job.get("conclusion") != "failure":
-        return None
-    archive = run_log_zip(repo, run_id)
-    log = unpack_job_logs(archive).get(REQUIRED_JOB, "") if archive else ""
-    failed, passed, retried = parse_ctest_results(log)
-    if not failed:
-        return None
+            return record
+        record.update(evidence=True, failed=[], passed=None, retried=[])
+    elif job.get("conclusion") == "failure":
+        archive = run_log_zip(repo, run_id)
+        if archive is None:
+            raise RuntimeError(f"logs for run {run_id} could not be read")
+        log = unpack_job_logs(archive).get(REQUIRED_JOB, "")
+        failed, passed, retried = parse_ctest_results(log)
+        if not failed:
+            return record
+        record.update(
+            evidence=True,
+            failed=sorted(failed),
+            passed=sorted(passed),
+            retried=sorted(retried),
+        )
+    else:
+        return record
+    record["chain"] = [list(step) for step in group_chain(repo, record["head_sha"])]
+    return record
+
+
+def observation_from_record(
+    record: dict, members: frozenset[int] | None
+) -> GroupObservation:
+    passed = record.get("passed")
     return GroupObservation(
-        run_id=run_id,
+        run_id=str(record["run_id"]),
         members=members,
-        host=host,
-        failed=failed,
-        passed=passed,
-        retried=retried,
+        host=str(record.get("host") or ""),
+        created=str(record.get("created") or ""),
+        failed=frozenset(record.get("failed") or ()),
+        passed=None if passed is None else frozenset(passed),
+        retried=frozenset(record.get("retried") or ()),
     )
 
 
-def observe_history(repo: str, limit: int = 30) -> list[GroupObservation]:
-    raw = gh(
-        f"repos/{repo}/actions/workflows/build.yml/runs?event=merge_group&per_page={min(limit, 100)}"
-    )
+def default_cache_dir(repo: str) -> Path:
+    override = (os.environ.get("PULP_QUEUE_HISTORY_CACHE") or "").strip()
+    root = Path(override) if override else Path.home() / ".cache/pulp/queue-history"
+    return root / repo.replace("/", "__")
+
+
+def load_record(cache_dir: Path | None, run_id: str) -> dict | None:
+    if cache_dir is None:
+        return None
     try:
-        runs = json.loads(raw or "{}").get("workflow_runs", [])
-    except ValueError:
-        return []
-    observations: list[GroupObservation] = []
-    for run in runs[:limit]:
-        if run.get("status") != "completed":
-            continue
-        obs = observe_group(repo, run)
-        if obs is not None:
-            observations.append(obs)
-    return observations
+        record = json.loads((cache_dir / f"{run_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if record.get("schema") == CACHE_SCHEMA else None
+
+
+def store_record(cache_dir: Path | None, record: dict) -> None:
+    if cache_dir is None:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = cache_dir / f"{record['run_id']}.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+@dataclass
+class HistoryRead:
+    """What one pass over the window saw, including what it could not read."""
+
+    observations: list[GroupObservation] = field(default_factory=list)
+    since: str = ""
+    listed: int = 0
+    from_cache: int = 0
+    fetched: int = 0
+    unreadable: list[str] = field(default_factory=list)
+    capped: bool = False
+
+
+def list_group_runs(repo: str, since: datetime, max_runs: int) -> tuple[list[dict], bool]:
+    """Completed merge_group runs created since `since`, newest first, and whether the cap cut it."""
+    stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    runs: list[dict] = []
+    page = 1
+    while True:
+        raw = gh(
+            f"repos/{repo}/actions/workflows/build.yml/runs?event=merge_group"
+            f"&status=completed&per_page=100&page={page}&created=%3E%3D{stamp}"
+        )
+        try:
+            batch = json.loads(raw or "{}").get("workflow_runs", [])
+        except ValueError:
+            batch = []
+        for run in batch:
+            if len(runs) >= max_runs:
+                return runs, True
+            runs.append(run)
+        if len(batch) < 100:
+            return runs, False
+        page += 1
+
+
+def observe_history(
+    repo: str,
+    since: str = DEFAULT_HISTORY_SINCE,
+    max_runs: int = DEFAULT_HISTORY_MAX_RUNS,
+    cache_dir: Path | None = None,
+    now: datetime | None = None,
+) -> HistoryRead:
+    """Every merge group in the window as an observation.
+
+    A completed run never changes, so its jobs, ctest results and commit chain
+    are cached per run and a repeated pass reads only new runs. Membership is
+    not cached: it depends on where main is now.
+    """
+    start = parse_since(since, now or datetime.now(timezone.utc))
+    runs, capped = list_group_runs(repo, start, max_runs)
+    read = HistoryRead(since=start.isoformat(), listed=len(runs), capped=capped)
+
+    def one(run: dict) -> tuple[dict | None, bool]:
+        run_id = str(run.get("id"))
+        cached = load_record(cache_dir, run_id)
+        if cached is not None:
+            return cached, True
+        try:
+            record = read_group(repo, run)
+        except RuntimeError:
+            return None, False
+        store_record(cache_dir, record)
+        return record, False
+
+    def members(record: dict) -> frozenset[int] | None:
+        chain = [(str(sha), int(pr)) for sha, pr in record.get("chain") or []]
+        return group_members(
+            repo, record["head_branch"], record["head_sha"], chain=chain or None
+        )
+
+    with ThreadPoolExecutor(max_workers=HISTORY_WORKERS) as pool:
+        results = list(pool.map(one, runs))
+        evidence = []
+        for run, (record, hit) in zip(runs, results):
+            if record is None:
+                read.unreadable.append(str(run.get("id")))
+                continue
+            read.from_cache += int(hit)
+            read.fetched += int(not hit)
+            if record.get("evidence"):
+                evidence.append(record)
+        memberships = list(pool.map(members, evidence))
+    read.observations = [
+        observation_from_record(record, group)
+        for record, group in zip(evidence, memberships)
+    ]
+    return read
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1333,10 +1556,22 @@ def main(argv: list[str] | None = None) -> int:
         "ones, and name flakes as flakes",
     )
     parser.add_argument(
+        "--since",
+        default=DEFAULT_HISTORY_SINCE,
+        help="--history window: 24h, 90m, 2d, or an ISO-8601 instant "
+        f"(default {DEFAULT_HISTORY_SINCE})",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
-        default=30,
-        help="merge_group runs --history reads (default 30)",
+        default=DEFAULT_HISTORY_MAX_RUNS,
+        help="most merge_group runs --history reads; a window holding more is "
+        f"cut to the newest and says so (default {DEFAULT_HISTORY_MAX_RUNS})",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="--history reads every run afresh instead of the per-run cache",
     )
     args = parser.parse_args(argv)
 
@@ -1365,7 +1600,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.history:
-        observations = observe_history(args.repo, args.limit)
+        read = observe_history(
+            args.repo,
+            since=args.since,
+            max_runs=args.limit,
+            cache_dir=None if args.no_cache else default_cache_dir(args.repo),
+        )
+        observations = read.observations
         focus = None
         if given:
             focus = sorted(
@@ -1376,6 +1617,11 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
+                        "since": read.since,
+                        "listed_groups": read.listed,
+                        "capped": read.capped,
+                        "from_cache": read.from_cache,
+                        "unreadable": read.unreadable,
                         "observed_groups": len(observations),
                         "tests": [h.as_json() for h in histories],
                         "likely_culprits": {
@@ -1388,7 +1634,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         else:
-            print(f"{len(observations)} merge group(s) observed")
+            print(
+                f"{read.listed} merge group(s) since {read.since}"
+                f" ({read.from_cache} cached), {len(observations)} with test evidence"
+            )
+            if read.capped:
+                print(f"window cut to the newest {read.listed}; raise --limit to read further back")
+            if read.unreadable:
+                print("unreadable, left out: " + ", ".join(read.unreadable))
             print("\n".join(render_history(histories)))
         return 0
 

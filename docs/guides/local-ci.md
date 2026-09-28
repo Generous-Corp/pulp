@@ -1881,7 +1881,8 @@ and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 
 `likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
 whose presence separates the merge groups that failed a test from the ones that
-ran it green, from `queue_batch_attribute.py --history`. It names a pull request
+ran it green over the last 24 hours (`--history-since`, capped at
+`--history-limit` runs), from `queue_batch_attribute.py --history`. It names a pull request
 to dequeue; `candidate_fix_pr` names one to prioritise, and the two are never
 merged.
 

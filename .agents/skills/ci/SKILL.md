@@ -164,13 +164,20 @@ a tier audit has not heard of), and file scoring is blind to it. The queue is
 not: over a few hours it runs many batches with overlapping memberships.
 
 ```bash
-python3 tools/scripts/queue_batch_attribute.py --history [--limit 30] [<run-id>]
+python3 tools/scripts/queue_batch_attribute.py --history [--since 24h] [--limit 60] [<run-id>]
 ```
 
 For each failing test it names the entry whose presence EXACTLY separates the
 failing batches from the green ones: in every failing batch, in no passing
-batch. It names a culprit only from 2 or more failing batches, and names nobody
-(`ambiguous`) while two entries have always travelled together. A test no entry separates, failing at a low rate or rescued by a
+batch, counting only the batches inside the span the entry was queued for (the
+same test red on main hours earlier is a different episode, and each episode
+names its own culprit). It names a culprit only from 2 or more failing batches,
+and names nobody (`ambiguous`) while two entries have always travelled together.
+The window is time-based (default 24 h, capped at `--limit` runs, and it says
+when the cap cut it). Completed runs are cached per run under
+`~/.cache/pulp/queue-history/` (`PULP_QUEUE_HISTORY_CACHE` overrides), so a
+repeated pass reads only new runs; membership is recomputed every pass because
+it depends on where main is now. A test no entry separates, failing at a low rate or rescued by a
 retry, is reported as `flake`. Membership comes from each group's first-parent
 chain down to its merge base with main; the `pr-N-<sha>` ref's sha is the
 previous entry's group commit, so reading members from it sees only the last

@@ -640,7 +640,7 @@ def candidate_fix_pr(repo: str, tests: tuple[str, ...]) -> int | None:
     )
 
 
-def membership_culprits(repo: str, limit: int) -> dict[int, list[str]]:
+def membership_culprits(repo: str, since: str, limit: int) -> dict[int, list[str]]:
     """Queued entries the merge-group history names as breaking a test.
 
     File ownership cannot see a change that breaks a test it never names; the
@@ -650,8 +650,15 @@ def membership_culprits(repo: str, limit: int) -> dict[int, list[str]]:
         import queue_batch_attribute as attributor
     except ImportError:
         return {}
-    observations = attributor.observe_history(repo, limit)
-    return attributor.likely_culprits(attributor.history_attribution(observations))
+    read = attributor.observe_history(
+        repo,
+        since=since,
+        max_runs=limit,
+        cache_dir=attributor.default_cache_dir(repo),
+    )
+    return attributor.likely_culprits(
+        attributor.history_attribution(read.observations)
+    )
 
 
 def _emit(payload: dict, output: str | None) -> None:
@@ -682,10 +689,15 @@ def main(argv: list[str] | None = None) -> int:
         "and for the queued entry the batch-membership history names as the culprit",
     )
     parser.add_argument(
+        "--history-since",
+        default="24h",
+        help="window --name-fix-pr reads for batch-membership culprits",
+    )
+    parser.add_argument(
         "--history-limit",
         type=int,
-        default=30,
-        help="merge_group runs --name-fix-pr reads for batch-membership culprits",
+        default=60,
+        help="most merge_group runs that window may hold",
     )
     parser.add_argument(
         "--fail-on-poisoned",
@@ -701,7 +713,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     fix = candidate_fix_pr(args.repo, verdict.tests) if args.name_fix_pr else None
     culprits = (
-        membership_culprits(args.repo, args.history_limit) if args.name_fix_pr else None
+        membership_culprits(args.repo, args.history_since, args.history_limit)
+        if args.name_fix_pr
+        else None
     )
     payload = signal(verdict, fix, culprits)
     _emit(payload, args.output or None)
