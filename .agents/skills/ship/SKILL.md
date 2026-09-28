@@ -461,6 +461,34 @@ kind. Do not derive the main executable by stripping only `.app`: doing so
 double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
 can trigger the same misleading subcomponent failure.
 
+### Every bundle carries `pulp-build-info.json` — read it before guessing
+
+`pulp_add_plugin()` writes `Contents/Resources/pulp-build-info.json`
+(`pulp.build-info.v1`) into every bundle it makes, POST_BUILD, so the record is
+sealed by `pulp ship sign` like any other resource. It names the product
+version and source commit, build type/archs/min-OS, the SDK version, and embeds
+the SDK's `share/pulp/runtime-pins.json` (Skia release + commit + asset digest,
+Dawn commit, wgpu-native version, JS engine, min-OS floors). For "what is this
+user running?" read that file from the installed bundle instead of inferring
+from Info.plist (product version only) or `strings` over the binary. Full
+schema: `docs/guides/shipping.md#build-identity-in-every-bundle`.
+
+Watch out for:
+
+- **Release builds should pass the commit explicitly** —
+  `-DPULP_PRODUCT_GIT_SHA=<sha> -DPULP_PRODUCT_GIT_DIRTY=FALSE` (or
+  `SOURCE_GIT_SHA` on `pulp_add_plugin`). The default reads git at build time,
+  which records `"unknown"` from a source archive and the wrong commit if a
+  bundle did not relink after the last commit.
+- **Never edit the file after signing** — it is a sealed resource; changing it
+  invalidates the signature exactly like editing Info.plist.
+- **`runtime_pins.skia.asset_in_manifest: false` or `null` is a real finding**:
+  the build linked a Skia other than the manifest-pinned archive (typically an
+  exported `SKIA_DIR` pointing at a stale checkout). `dawn.commit` is decoded
+  from the linked headers, so it disagrees with the pin in that case too.
+- **An SDK older than the record** yields `runtime_pins: null`; the rest of the
+  file is still produced by the consumer's own CMake helpers.
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash

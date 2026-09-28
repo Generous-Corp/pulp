@@ -49,9 +49,15 @@ pulp_patch_choc_json_number_exponent("${choc_SOURCE_DIR}")
 # FetchContent. wgpu-native doesn't publish iOS prebuilds; pulp's
 # render path is Dawn-only whenever Skia is the backend
 # anyway (pulp::render::GpuSurface uses Dawn's C++ API under PULP_HAS_SKIA).
+#
+# PULP_WGPU_NATIVE_VERSION is the single CMake-side source of truth for the
+# wgpu-native runtime: the precompiled-source registration, the universal-dylib
+# lipo, and the runtime-pins record the SDK installs (PulpRuntimePins.cmake)
+# all read it.
+set(PULP_WGPU_NATIVE_VERSION v24.0.3.1)
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
-    pulp_register_wgpu_native_precompiled_source(v24.0.3.1)
+    pulp_register_wgpu_native_precompiled_source(${PULP_WGPU_NATIVE_VERSION})
     FetchContent_Declare(
         webgpu
         GIT_REPOSITORY https://github.com/eliemichel/WebGPU-distribution.git
@@ -145,7 +151,7 @@ if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     # `webgpu` target's IMPORTED_LOCATION with a lipo'd + ad-hoc-re-signed fat
     # dylib. No-op for thin targets and non-Apple platforms.
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpWgpuUniversal.cmake)
-    pulp_make_wgpu_universal(v24.0.3.1)
+    pulp_make_wgpu_universal(${PULP_WGPU_NATIVE_VERSION})
 
     set(PULP_HAS_WEBGPU TRUE CACHE INTERNAL "Pulp feature flag (visible to embedding consumers)" FORCE)
     message(STATUS "Pulp: WebGPU (Dawn) enabled")

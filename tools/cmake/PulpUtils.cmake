@@ -49,6 +49,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMidiTuning.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPluginMetadata.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/PulpBuildInfo.cmake")
 
 # Resolve PulpUtils.cmake's sibling helper dirs without reaching into
 # CMAKE_SOURCE_DIR (which is the *consumer's* source tree when this
@@ -648,6 +649,9 @@ endfunction()
 #                                        # so hosts route inbound MIDI to the plug-in
 #       SOURCES         pulp_gain.hpp main.cpp
 #       PROCESSOR_FACTORY create_pulp_gain  # Function that returns unique_ptr<Processor>
+#       SOURCE_GIT_SHA  "${MY_SHA}"      # optional; commit recorded in each bundle's
+#       SOURCE_GIT_DIRTY FALSE           # pulp-build-info.json (default: read from git
+#                                        # at build time; see PulpBuildInfo.cmake)
 #   )
 #
 # This creates:
@@ -660,7 +664,7 @@ endfunction()
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
         "ACCEPTS_MIDI;NATIVE_UI;SHIP_INSPECTOR;SHIP_INSPECTOR_RUNTIME_EVAL;ACKNOWLEDGE_UNSAFE_RUNTIME_EVAL"
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT;ICON;ICNS;DESIGN_WIDTH;DESIGN_HEIGHT;DESIGN_MIN_WIDTH;DESIGN_MIN_HEIGHT;DESIGN_MAX_WIDTH;DESIGN_MAX_HEIGHT;CONTROL_PROFILE;SOURCE_GIT_SHA;SOURCE_GIT_DIRTY"
         "FORMATS;SOURCES;CONTENT_CAPABILITIES;CONTENT_KINDS;CONTENT_HOT_RELOAD_KINDS;CONTENT_MANUAL_RESCAN_KINDS;INSPECTOR_CAPABILITIES;CONTROL_CAPABILITIES"
         ${ARGN}
     )
@@ -817,6 +821,10 @@ function(pulp_add_plugin target)
             "The editor will fall back to AutoUi until the script exists.")
     endif()
     _pulp_configure_plugin_runtime_manifest(${target} "${PLUGIN_BUNDLE_ID}")
+    # Product source identity recorded in each bundle's pulp-build-info.json.
+    # Always refreshed so a removed argument does not leave a stale override.
+    set(PULP_${target}_SOURCE_GIT_SHA "${PLUGIN_SOURCE_GIT_SHA}" CACHE INTERNAL "")
+    set(PULP_${target}_SOURCE_GIT_DIRTY "${PLUGIN_SOURCE_GIT_DIRTY}" CACHE INTERNAL "")
 
     # ── Core library ────────────────────────────────────────────────────
     # For header-only processors (no SOURCES), create INTERFACE library.
@@ -1003,6 +1011,19 @@ function(pulp_add_plugin target)
         endforeach()
     endif()
 
+    # ── Build identity ─────────────────────────────────────────────────
+    # pulp-build-info.json in every bundle this call produced, written
+    # POST_BUILD so it is sealed by whatever signs the bundle afterwards.
+    # The AUv3 framework is skipped by the helper: it is embedded in the
+    # extension and host app, which carry their own records.
+    foreach(_pulp_build_info_format
+            VST3 CLAP AU LV2 AAX AUv3 AUv3Host Standalone)
+        _pulp_attach_build_info(${target}
+            ${target}_${_pulp_build_info_format} ${_pulp_build_info_format}
+            "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}" "${PLUGIN_VERSION}"
+            "${PLUGIN_MANUFACTURER}")
+    endforeach()
+
     # ── Install targets ────────────────────────────────────────────────
     # Platform-appropriate install locations for each format
     if(APPLE)
@@ -1097,6 +1118,13 @@ function(pulp_add_plugin target)
             DEPENDS ${_install_dependencies}
             COMMENT "Installing ${PLUGIN_PLUGIN_NAME} to system plugin folders"
         )
+        # Installed bundles must carry a current build-identity record.
+        foreach(_pulp_build_info_format VST3 CLAP AU AAX)
+            if(TARGET ${target}_${_pulp_build_info_format}_BuildInfo)
+                add_dependencies(pulp-install-${target}
+                    ${target}_${_pulp_build_info_format}_BuildInfo)
+            endif()
+        endforeach()
     endif()
 
     set(_built_formats)
@@ -1214,6 +1242,13 @@ function(pulp_add_plugin_bundle target)
         if(TARGET ${target}_${_fmt})
             list(APPEND _built_formats ${_fmt})
         endif()
+    endforeach()
+    set(PULP_${target}_SOURCE_GIT_SHA "" CACHE INTERNAL "")
+    set(PULP_${target}_SOURCE_GIT_DIRTY "" CACHE INTERNAL "")
+    foreach(_fmt IN LISTS _built_formats)
+        _pulp_attach_build_info(${target} ${target}_${_fmt} ${_fmt}
+            "${BUNDLE_BUNDLE_NAME}" "${BUNDLE_BUNDLE_ID}" "${BUNDLE_VERSION}"
+            "${BUNDLE_MANUFACTURER}")
     endforeach()
     if(_built_formats)
         list(JOIN _built_formats ";" _built_formats_display)

@@ -380,6 +380,36 @@ if(NOT _installed_utils_text MATCHES "PulpPluginMetadata\\.cmake")
         "Installed PulpUtils.cmake no longer includes PulpPluginMetadata.cmake.")
 endif()
 
+# pulp_add_plugin() writes pulp-build-info.json into every bundle through
+# PulpBuildInfo.cmake, whose build step runs PulpFinalizeBuildInfo.cmake from
+# the same directory and embeds the SDK's runtime-pins record.
+foreach(_build_info_module PulpBuildInfo.cmake PulpFinalizeBuildInfo.cmake)
+    if(NOT EXISTS "${_pulp_cmake_dir}/${_build_info_module}")
+        message(FATAL_ERROR
+            "${_build_info_module} not bundled with the installed Pulp SDK; "
+            "consumer bundles would get no pulp-build-info.json.")
+    endif()
+endforeach()
+if(NOT _installed_utils_text MATCHES "PulpBuildInfo\\.cmake")
+    message(FATAL_ERROR "Installed PulpUtils.cmake no longer includes PulpBuildInfo.cmake.")
+endif()
+set(_installed_pins "${_prefix}/share/pulp/runtime-pins.json")
+if(NOT EXISTS "${_installed_pins}")
+    message(FATAL_ERROR
+        "share/pulp/runtime-pins.json missing from the installed SDK; build the "
+        "pulp-runtime-pins target before installing.")
+endif()
+file(READ "${_installed_pins}" _installed_pins_json)
+string(JSON _installed_pins_schema ERROR_VARIABLE _installed_pins_error
+    GET "${_installed_pins_json}" schema)
+string(JSON _installed_pins_sha ERROR_VARIABLE _installed_pins_sha_error
+    GET "${_installed_pins_json}" pulp source_git_sha)
+if(_installed_pins_error OR NOT _installed_pins_schema STREQUAL "pulp.runtime-pins.v1" OR
+   _installed_pins_sha_error OR _installed_pins_sha MATCHES "__PULP")
+    message(FATAL_ERROR
+        "Installed runtime-pins.json is not a finalized pulp.runtime-pins.v1 record.")
+endif()
+
 # The encoder MUST live next to PulpUtils.cmake — this is the path
 # pulp_add_binary_data computes via CMAKE_CURRENT_FUNCTION_LIST_DIR.
 set(_installed_encoder "${_pulp_cmake_dir}/scripts/encode_binary_data.py")
