@@ -1581,8 +1581,13 @@ The build graph cannot see what a Python, Node or shell ctest reads, so the
 affected-test shadow used to count all ~400 of them affected on any script
 change (44% of gate test-seconds). `tools/scripts/script_test_inputs.py`
 generates their inputs (Chromium's `.pydeps` pattern) and the pr-fast
-`script-test-inputs-drift` check fails a PR head whose list is stale:
-regenerate with `--write` against a configured build dir and commit the file.
+`script-test-inputs-drift` check is DIFF-SCOPED: it fails a PR head only for
+drift in scripts the PR's own diff touches (entry script or a listed input;
+base = `origin/$GITHUB_BASE_REF`, or `HEAD^1` in a merge group) and reports
+drift from main's own movement as an advisory note. A generated file drifts
+every time main moves; failing every PR for someone else's script was a
+treadmill. Regenerate with `--write` against a configured build dir and
+commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
 

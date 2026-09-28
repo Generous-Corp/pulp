@@ -148,6 +148,60 @@ class CheckModeTests(unittest.TestCase):
             fewer = {"tests": [t for t in repo.inventory()["tests"] if t["name"] != "beta"]}
             self.assertEqual(self.run_tool(repo, "--check", inventory=fewer).returncode, 0)
 
+    def git_repo(self, repo: Repo) -> None:
+        env = {"PATH": "/usr/bin:/bin:/opt/homebrew/bin", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        g = lambda *a: subprocess.run(["git", "-C", str(repo.root), *a], check=True, env=env, capture_output=True)
+        g("init", "-q", "-b", "main"); g("add", "-A"); g("commit", "-q", "-m", "base")
+        g("branch", "base-ref")
+        self.g = g
+
+    def test_diff_scoped_check_ignores_drift_the_change_does_not_touch(self) -> None:
+        """Main moved a script this PR never touched: advisory note, exit 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            # Someone else's drift (simulating main): alpha_lib gains an import, but this
+            # change (HEAD vs base-ref) touches only an unrelated file.
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "main moved (already in base)")
+            self.g("branch", "-f", "base-ref", "HEAD")
+            write(repo.root, "README.md", "unrelated\n"); self.g("add", "-A"); self.g("commit", "-q", "-m", "pr")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("drifted from scripts this change does not touch", proc.stdout)
+            self.assertIn("stale entry: alpha", proc.stdout)
+            full = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(full.returncode, 1, full.stdout)
+
+    def test_diff_scoped_check_blocks_drift_in_a_script_the_change_touches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr edits a listed input")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("in scripts this change touches", proc.stdout)
+            self.assertIn("stale entry: alpha", proc.stdout)
+
+    def test_diff_scoped_check_blocks_a_new_test_whose_script_the_change_adds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/test_gamma.py", "x = 1\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr adds a test script")
+            inv = repo.inventory()
+            inv["tests"].append({"name": "gamma", "command": ["/usr/bin/python3", f"{repo.root}/tools/scripts/test_gamma.py"], "properties": []})
+            proc = self.run_tool(repo, "--check", "--base", "base-ref", inventory=inv)
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("missing from list: gamma", proc.stdout)
+
     def test_unreadable_inventory_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp))

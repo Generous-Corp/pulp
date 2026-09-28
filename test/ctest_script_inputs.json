@@ -259,6 +259,17 @@
    ],
    "kind": "python"
   },
+  "binary-identity-shadow-selftest": {
+   "entry": "tools/ci/test_binary_identity_shadow.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/binary_identity_shadow.py",
+    "tools/ci/test_binary_identity_shadow.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
+   ],
+   "kind": "python"
+  },
   "build-dir-lock-selftest": {
    "entry": "tools/ci/test_build_dir_lock.py",
    "inputs": [
@@ -494,10 +505,16 @@
     ".githooks/pre-push",
     ".github/workflows/build.yml",
     "core/audio/CMakeLists.txt",
+    "core/format/src/au_adapter.mm",
     "core/midi/CMakeLists.txt",
+    "core/midi/src/midi_file.cpp",
     "core/midi/src/mpe_voice_tracker.cpp",
+    "core/platform/platform/mac/environment_mac.mm",
+    "core/signal/include/pulp/signal/biquad.hpp",
+    "core/signal/src/fft_backend.cpp",
     "core/view/include/pulp/view/view.hpp",
     "core/view/js/web-compat-element.js",
+    "core/view/platform/ios/window_host_ios.mm",
     "docs/status/agent-capabilities.json",
     "docs/status/agent-capability-surface.schema.json",
     "docs/status/cli-commands.yaml",
@@ -509,7 +526,9 @@
     "docs/status/sequencer-exposure.json",
     "docs/status/support-matrix.yaml",
     "docs/status/tools.yaml",
+    "examples/ios-auv3-synth/src/sine_synth.cpp",
     "examples/pulp-gain/main.cpp",
+    "templates/ios-auv3/HostApp/ContentView.swift",
     "test/CMakeLists.txt",
     "test/cmake/consumption_census_tests.cmake",
     "test/cmake/quality_tests.cmake",
@@ -524,15 +543,18 @@
     "test/test_state.cpp",
     "test/test_widgets.cpp",
     "tools/agent-capabilities/contract-history.json",
+    "tools/ci/ios_gate_digest.py",
     "tools/ci/source_selftests.json",
     "tools/cli",
     "tools/cli/CMakeLists.txt",
     "tools/cli/cmd_dsp.cpp",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/gpu_probe",
+    "tools/cmake/PulpAuv3.cmake",
     "tools/cmake/PulpConfig.cmake.in",
     "tools/cmake/PulpInstallRules.cmake",
     "tools/cmake/PulpUtils.cmake",
+    "tools/deps/manifest.json",
     "tools/dsp_vocabulary.py",
     "tools/scripts/agent_capability_registry.py",
     "tools/scripts/classify_changes.py",
@@ -541,7 +563,9 @@
     "tools/scripts/source_tree_pollution_check.py",
     "tools/scripts/test_agent_capability_manifest.py",
     "tools/scripts/test_classify_changes.py",
-    "tools/scripts/test_prepush_gate_supervisor.py"
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    "tools/scripts/test_prepush_gate_supervisor.py",
+    "tools/scripts/test_release_build_matrix.py"
    ],
    "kind": "python"
   },
@@ -877,7 +901,24 @@
    "entry": "tools/scripts/test_ctest_scheduling_contract.py",
    "inputs": [
     "build-gate",
+    "tools/scripts/ctest_scheduling_policy.py",
     "tools/scripts/test_ctest_scheduling_contract.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-unique-names": {
+   "entry": "tools/scripts/ctest_unique_names_check.py",
+   "inputs": [
+    "build-gate",
+    "tools/scripts/ctest_unique_names_check.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-unique-names-selftest": {
+   "entry": "tools/scripts/test_ctest_unique_names_check.py",
+   "inputs": [
+    "tools/scripts/ctest_unique_names_check.py",
+    "tools/scripts/test_ctest_unique_names_check.py"
    ],
    "kind": "python"
   },
@@ -1056,6 +1097,24 @@
    "inputs": [
     "tools/cmake/FindSkia.cmake",
     "tools/scripts/test_findskia_arch_assert.py"
+   ],
+   "kind": "python"
+  },
+  "flake-exoneration-shadow-selftest": {
+   "entry": "tools/ci/test_flake_exoneration_shadow.py",
+   "inputs": [
+    ".github/actions",
+    ".github/workflows",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "tools/ci/base_poison_detector.py",
+    "tools/ci/flake_exoneration_shadow.py",
+    "tools/ci/test_flake_exoneration_shadow.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/gate_suite_executed.py",
+    "tools/scripts/queue_batch_attribute.py"
    ],
    "kind": "python"
   },
@@ -2448,6 +2507,14 @@
    ],
    "kind": "shell"
   },
+  "install-rpath-closure": {
+   "entry": "tools/scripts/test_check_installed_rpaths.py",
+   "inputs": [
+    "tools/scripts/check_installed_rpaths.py",
+    "tools/scripts/test_check_installed_rpaths.py"
+   ],
+   "kind": "python"
+  },
   "install-sh-platform-detect": {
    "entry": "test/test_install_platform_detect.sh",
    "inputs": [
@@ -2461,6 +2528,13 @@
     "test/test_install_sh_runs_sdk_install.sh"
    ],
    "kind": "shell"
+  },
+  "install-sha256sums-current": {
+   "entry": "tools/scripts/test_install_sha256sums.py",
+   "inputs": [
+    "tools/scripts/test_install_sha256sums.py"
+   ],
+   "kind": "python"
   },
   "interchange-capability-emit-selftest": {
    "entry": "core/interchange/tools/test_capability_emit.py",
@@ -2517,6 +2591,8 @@
     "docs/status/dsp-capabilities.json",
     "docs/status/forge-catalog.json",
     "docs/status/gpu-recipes.yaml",
+    "test/CMakeLists.txt",
+    "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/cmake/test_ios_compile_gate.sh",
@@ -2543,6 +2619,7 @@
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
@@ -2886,6 +2963,13 @@
     "tools/import-design/browser_capture/security.mjs"
    ],
    "kind": "node"
+  },
+  "pulp-cli-autoupdate-hook": {
+   "entry": "test/test_pulp_cli_autoupdate.sh",
+   "inputs": [
+    "test/test_pulp_cli_autoupdate.sh"
+   ],
+   "kind": "shell"
   },
   "pulp-fig-decode-unit": {
    "entry": "tools/import-design/fig/fig.test.mjs",
@@ -4071,6 +4155,23 @@
    ],
    "kind": "python"
   },
+  "script-test-inputs-drift": {
+   "entry": "tools/scripts/script_test_inputs.py",
+   "inputs": [
+    ".",
+    "build-gate",
+    "docs/status",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "script-test-inputs-selftest": {
+   "entry": "tools/scripts/test_script_test_inputs.py",
+   "inputs": [
+    "tools/scripts/test_script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
   "sdk-consumer-sweep-selftest": {
    "entry": "tools/scripts/test_sdk_consumer_sweep.py",
    "inputs": [
@@ -4228,19 +4329,26 @@
    "inputs": [
     "build-gate",
     "tools/ci/ctest_gate_args.py",
-    "tools/ci/source_selftests.py"
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
   },
   "source-selftest-lane-selftest": {
    "entry": "tools/ci/test_source_selftests.py",
    "inputs": [
+    ".githooks/pre-push",
     ".github/workflows/build.yml",
+    "test/cmake/design_import_tool_cli_tests.cmake",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/test_source_selftests.py",
     "tools/scripts/classify_changes.py",
-    "tools/scripts/protected_merge_receipt.py"
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_ci_throughput_workflows.py",
+    "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
   },

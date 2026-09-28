@@ -14,7 +14,8 @@ checking in `.pydeps` files (transitive Python imports) that presubmit keeps
 fresh. This tool does that for Pulp's ctest inventory:
 
   script_test_inputs.py --build-dir <dir> --write     # regenerate the list
-  script_test_inputs.py --build-dir <dir> --check     # drift check (pr-fast)
+  script_test_inputs.py --build-dir <dir> --check     # drift check (pr-fast), diff-scoped
+  script_test_inputs.py --build-dir <dir> --check --full   # every entry, no base
 
 For each script-driven test it records, relative to the repo root: the
 entry script; its transitive local imports (Python `import`/`from`, Node
@@ -24,7 +25,11 @@ whose inputs cannot be bounded this way (a cmake-driven nested build, a test
 with no command) gets NO entry, and the shadow keeps its fail-closed rule for
 it. The output is sorted and deterministic; `--check` compares only tests
 present in the current configuration, so a Linux inventory does not report
-drift against a list written on macOS.
+drift against a list written on macOS. `--check` is also DIFF-SCOPED: a
+generated file drifts whenever main moves, so it fails only for drift the
+change under test reaches (its diff touches the test's entry script or an
+old/new input); other drift is reported as advisory. `--full` compares every
+entry.
 
 Exit codes: 0 in sync (or written); 1 drift (`--check`); 2 inventory unreadable.
 """
@@ -265,16 +270,48 @@ def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | 
         return None
 
 
-def drift(current: dict, checked_in: dict) -> list[str]:
-    """Differences for tests present in the current configuration only."""
+def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
+    """(kind, test, paths involved) for tests present in the current configuration
+    whose entry is missing or stale. `paths` is the entry script plus the old and
+    new input lists: what a change has to touch to be this test's own drift."""
     problems = []
     ci = checked_in.get("tests", {})
     for name, rec in current["tests"].items():
+        paths = set(rec.get("inputs") or []) | {rec.get("entry") or ""}
         if name not in ci:
-            problems.append(f"missing from list: {name}")
+            problems.append(("missing from list", name, paths - {""}))
         elif ci[name] != rec:
-            problems.append(f"stale entry: {name}")
+            paths |= set(ci[name].get("inputs") or []) | {ci[name].get("entry") or ""}
+            problems.append(("stale entry", name, paths - {""}))
     return problems
+
+
+def touched_by(changed: set[str], paths: set[str]) -> bool:
+    return any(f == p or f.startswith(p.rstrip("/") + "/") for f in changed for p in paths)
+
+
+def resolve_base(root: Path, explicit: str | None) -> str | None:
+    """The ref this check is diff-scoped against, or None for a full compare.
+    Order: --base, PULP_SCRIPT_INPUTS_BASE, origin/<GITHUB_BASE_REF> (pull
+    request), HEAD^1 (merge group: the validated main the group is built on)."""
+    candidates = [explicit, os.environ.get("PULP_SCRIPT_INPUTS_BASE")]
+    if os.environ.get("GITHUB_BASE_REF"):
+        candidates.append("origin/" + os.environ["GITHUB_BASE_REF"])
+    if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+        candidates.append("HEAD^1")
+    for c in candidates:
+        if c and subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "--quiet", c + "^{commit}"],
+                                capture_output=True).returncode == 0:
+            return c
+    return None
+
+
+def changed_files(root: Path, base: str) -> set[str]:
+    mb = subprocess.run(["git", "-C", str(root), "merge-base", base, "HEAD"], capture_output=True, text=True)
+    anchor = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
+    out = subprocess.run(["git", "-C", str(root), "diff", "--name-only", anchor, "HEAD"],
+                         capture_output=True, text=True, check=True).stdout
+    return {f for f in out.split() if f}
 
 
 def main(argv: list[str]) -> int:
@@ -283,6 +320,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--build-dir")
     ap.add_argument("--inventory-json", help="a saved `ctest --show-only=json-v1` document (tests)")
     ap.add_argument("--list", default=None, help=f"the checked-in list (default {DEFAULT_LIST})")
+    ap.add_argument("--base", default=None, help="diff-scope --check to changes since this ref "
+                    "(default: PULP_SCRIPT_INPUTS_BASE, origin/$GITHUB_BASE_REF, or HEAD^1 in a merge group)")
+    ap.add_argument("--full", action="store_true", help="--check every entry, ignoring any base")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -311,13 +351,28 @@ def main(argv: list[str]) -> int:
     if not current["tests"]:
         print("script-test-inputs: ERROR: no script-driven test found; wrong build directory?", file=sys.stderr)
         return 2
-    if problems:
-        print(f"script-test-inputs: {len(problems)} drift problem(s); regenerate with --write:")
-        for p in problems[:40]:
-            print("  " + p)
+    # Diff-scoped: a generated file drifts every time main moves, and a check
+    # that reddens every PR for someone else's script is a treadmill. Only
+    # drift the PR's own change reaches (its diff touches the test's entry
+    # script or an old/new input) blocks; the rest is reported as advisory.
+    base = None if a.full else resolve_base(root, a.base)
+    changed = changed_files(root, base) if base else None
+    blocking = [pr for pr in problems if changed is None or touched_by(changed, pr[2])]
+    advisory = [pr for pr in problems if pr not in blocking]
+    scope = f"diff-scoped against {base}" if base else "full compare (no base resolved)"
+    if advisory:
+        print(f"script-test-inputs: note: {len(advisory)} entr{'y' if len(advisory) == 1 else 'ies'} drifted from "
+              f"scripts this change does not touch ({scope}); regenerate with --write when convenient:")
+        for kind, name, _ in advisory[:15]:
+            print(f"  {kind}: {name}")
+    if blocking:
+        print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches "
+              f"({scope}); regenerate with --write:")
+        for kind, name, _ in blocking[:40]:
+            print(f"  {kind}: {name}")
         return 1
-    print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync "
-          f"(of {total_scripts} interpreter-driven entries)")
+    print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync for this change "
+          f"({scope}; {total_scripts} interpreter-driven entries)")
     return 0
 
 
