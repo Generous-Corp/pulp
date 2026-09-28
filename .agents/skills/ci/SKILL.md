@@ -200,9 +200,18 @@ python3 tools/ci/base_poison_detector.py --name-fix-pr
 
 Read-only. It answers "is the base carrying the failure these batches keep
 dying on?" and prints a one-line `base-poison-signal/v1` JSON annotation plus a
-table. `.github/workflows/main-health-detector.yml` runs it on a schedule and on
+table. `.github/workflows/main-health-detector.yml` runs it after every failed
+merge-group `Build and Test` run (`workflow_run`), on a backstop schedule, and on
 demand; it draws no macOS gate host and **reports only** — pausing a re-forming
 batch is Shipyard's side.
+
+**Do not rely on `schedule` for anything time-critical in this repo.** GitHub
+throttles its crons to about one run every four hours whatever the expression
+says (`*/30` workflows fired at 10:27, 15:15 and 19:12 on one day), which is
+why the detector is event-triggered. When you need a read NOW, dispatch it:
+`ghapp workflow run main-health-detector.yml`. A `workflow_run` workflow runs the
+default branch's copy with base-repo permissions: never check out
+`github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
 **Where main's evidence comes from without a build.** A merge queue validates
 `main` plus its entries as one commit, and the commit that lands carries that
