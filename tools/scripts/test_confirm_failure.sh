@@ -249,6 +249,77 @@ else
     printf '  ok   the subject binary is invalidated on an INCONCLUSIVE exit\n'
 fi
 
+# ── The build dir outside --target is left as it was found ──────────────────
+#
+# A header break invalidates every object and archive, because the header's
+# dependents are unknown; the loop then rebuilds only --target. Anything outside
+# that target used to stay deleted, so the next ordinary build silently paid for
+# a rebuild the script never declared. Here `other_lib` is outside the target:
+# its object and archive must be back afterwards, and the script must say how
+# many artifacts it rebuilt and how many it put back.
+make_header_project() {
+    local root="$1"
+    mkdir -p "$root"
+    cat > "$root/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(confirm_failure_header_fixture CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(fixture_test test.cpp)
+add_library(other_lib other.cpp)
+EOF
+    cat > "$root/value.hpp" <<'EOF'
+inline int answer() { return 42; }
+EOF
+    cat > "$root/test.cpp" <<'EOF'
+#include "value.hpp"
+int main() { return answer() == 42 ? 0 : 1; }
+EOF
+    cat > "$root/other.cpp" <<'EOF'
+int other() { return 1; }
+EOF
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+    cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
+    cmake --build "$root/build" -j 2 >/dev/null 2>&1
+}
+
+make_header_project "$TMP/header"
+OTHER_OBJ="$(cd "$TMP/header/build" && find . -name 'other.cpp.o' | head -1)"
+OTHER_LIB="$(cd "$TMP/header/build" && find . -name 'libother_lib.a' | head -1)"
+if [ -z "$OTHER_OBJ" ] || [ -z "$OTHER_LIB" ]; then
+    printf '  FAIL the header fixture did not build other_lib (control)\n'
+    FAILURES=$((FAILURES + 1))
+fi
+HEADER_OUT="$(cd "$TMP/header" && "$UNDER_TEST" \
+    --file value.hpp \
+    --break "perl -pi -e 's/return 42;/return 7;/'" \
+    --build-dir build --target fixture_test --test ./build/fixture_test --jobs 2 2>&1)"
+check "a covering header test is CONFIRMED" 0 "$?"
+for artifact in "$OTHER_OBJ" "$OTHER_LIB"; do
+    if [ -n "$artifact" ] && [ -f "$TMP/header/build/$artifact" ]; then
+        printf '  ok   %s outside --target is back after the run\n' "$(basename "$artifact")"
+    else
+        printf '  FAIL %s outside --target was left deleted\n' "$(basename "${artifact:-other_lib}")"
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+if printf '%s\n' "$HEADER_OUT" | grep -qE 'build dir: [1-9][0-9]* removed artifact\(s\) rebuilt by --target, [1-9][0-9]* outside it put back'; then
+    printf '  ok   the run says what it rebuilt and what it put back\n'
+else
+    printf '  FAIL the run does not say what it did with the removed artifacts\n'
+    FAILURES=$((FAILURES + 1))
+fi
+if find "$TMP/header/build" -name '.confirm-failure-stash.*' | grep -q .; then
+    printf '  FAIL a stash directory is left in the build dir\n'
+    FAILURES=$((FAILURES + 1))
+else
+    printf '  ok   no stash directory is left behind\n'
+fi
+
 # The tree must be left exactly as it was found, whatever the verdict.
 if git -C "$TMP/uncovered" diff --quiet; then
     printf '  ok   the tree is restored after a NOT CONFIRMED run\n'

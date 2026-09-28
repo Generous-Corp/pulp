@@ -139,7 +139,43 @@ if ! git diff --quiet -- "$FILE"; then
 fi
 
 BUILD_LOG="$(mktemp)"
-trap 'rm -f "$BUILD_LOG"' EXIT
+
+# Artifacts the first invalidate() removes are moved here instead of deleted.
+# They were built from the committed source, which is what the tree holds again
+# after the restore, so any the final --target build did not recreate go back
+# where they were on exit. Without this a header run deleted every object and
+# archive in the build dir and rebuilt only --target's closure, leaving the rest
+# of the tree to rebuild on the next build with nothing saying so.
+STASH=""
+[ "$NO_BUILD" -eq 1 ] || STASH="$BUILD_DIR/.confirm-failure-stash.$$"
+STASHED=0
+
+put_back_stash() {
+    [ -n "$STASH" ] && [ -d "$STASH" ] || return 0
+    local counts
+    counts="$(python3 - "$STASH" "$BUILD_DIR" <<'PY'
+import os, sys
+stash, build = sys.argv[1], sys.argv[2]
+restored = rebuilt = 0
+for root, _, files in os.walk(stash):
+    for name in files:
+        src = os.path.join(root, name)
+        dst = os.path.join(build, os.path.relpath(src, stash))
+        if os.path.lexists(dst):
+            rebuilt += 1
+            continue
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.rename(src, dst)
+        restored += 1
+print(restored, rebuilt)
+PY
+)" || { say "could not put the removed artifacts back; they are under $STASH"; return 1; }
+    rm -rf "$STASH"
+    set -- $counts
+    say "build dir: $2 removed artifact(s) rebuilt by --target, $1 outside it put back as they were"
+}
+
+trap 'rm -f "$BUILD_LOG"; put_back_stash' EXIT
 
 # Delete the objects built from this source so the rebuild cannot be skipped on
 # a timestamp comparison. Header-only edits have no object of their own, so the
@@ -208,20 +244,36 @@ bump_mtime() {
 # comparison that has no artifact to compare against, so the archives and the
 # binary go too.
 #
-# The cost is relink time on the next build, not recompile time — deliberate,
-# and cheap against reporting a verdict about code the test never ran.
+# The first pass moves the pristine artifacts to $STASH rather than deleting
+# them, and the exit trap puts back whichever ones the --target build did not
+# recreate, so the rest of the build dir ends as it began.
 invalidate() {
     [ "$NO_BUILD" -eq 1 ] && return 0
     rm -f "$TEST_BINARY" 2>/dev/null || true
     [ -z "$SUBJECT" ] || rm -f "$SUBJECT" 2>/dev/null || true
-    find "$BUILD_DIR" \( -name '*.a' -o -name '*.dylib' -o -name '*.so' \) \
-        -delete 2>/dev/null || true
-    if [ "$IS_HEADER" -eq 1 ]; then
-        # A header's dependents are unknown here, so every object goes.
-        find "$BUILD_DIR" -name '*.o' -delete 2>/dev/null || true
-    else
-        find "$BUILD_DIR" -name "${OBJ_BASE}.o" -delete 2>/dev/null || true
+    local objects="${OBJ_BASE}.o"
+    # A header's dependents are unknown here, so every object goes.
+    [ "$IS_HEADER" -eq 1 ] && objects='*.o'
+    if [ "$STASHED" -eq 0 ]; then
+        # First pass: these were built from the committed source; keep them.
+        STASHED=1
+        find "$BUILD_DIR" -path "$STASH" -prune -o \
+            \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
+            -type f -print0 2>/dev/null |
+            python3 -c '
+import os, sys
+build, stash = sys.argv[1], sys.argv[2]
+for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
+    p = p.decode()
+    dst = os.path.join(stash, os.path.relpath(p, build))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.rename(p, dst)
+' "$BUILD_DIR" "$STASH" || true
+        return 0
     fi
+    find "$BUILD_DIR" -path "$STASH" -prune -o \
+        \( -name '*.a' -o -name '*.dylib' -o -name '*.so' -o -name "$objects" \) \
+        -type f -exec rm -f {} + 2>/dev/null || true
 }
 
 # Build, and require evidence that the edited file was actually compiled. This

@@ -369,6 +369,46 @@ class SeedBuildDirTest(unittest.TestCase):
             proc.kill()
             proc.wait()
 
+    def test_refuses_a_target_without_the_donors_dependency_links(self):
+        # A fresh worktree has no external/ links until setup runs.
+        donor = self.worktree("linked-donor")
+        # Drop the donor's build afterwards so `--from auto` in another case
+        # never picks this deliberately unusual sibling.
+        self.addCleanup(shutil.rmtree, donor / "build", True)
+        (donor / "external").mkdir()
+        (donor / "external" / "dep").symlink_to(self.tmp)
+        run([CMAKE, "-S", str(donor), "-B", str(donor / "build"), "-G", "Ninja",
+             "-DCMAKE_BUILD_TYPE=Release"])
+        run([NINJA, "-C", str(donor / "build")])
+        target = self.worktree("unlinked-target")
+        rc, out = self.seed(target, donor=str(donor))
+        self.assertEqual(rc, sbd.UNSUPPORTED, out)
+        self.assertIn("dependencies are not set up (external/dep)", out["stderr"])
+        self.assertFalse((target / "build").exists())
+        # Control: once the link exists the same donor seeds.
+        (target / "external").mkdir()
+        (target / "external" / "dep").symlink_to(self.tmp)
+        rc, receipt = self.seed(target, donor=str(donor))
+        self.assertEqual(rc, 0, receipt)
+
+    def test_a_tree_that_cannot_plan_is_a_one_line_refusal(self):
+        # The donor compiles a source the target does not have, so the seeded
+        # tree's closing dry run fails. That must refuse cleanly, not crash.
+        donor = self.worktree("extra-source-donor")
+        # Drop the donor's build afterwards so `--from auto` in another case
+        # never picks this deliberately unusual sibling.
+        self.addCleanup(shutil.rmtree, donor / "build", True)
+        (donor / "a" / "extra.cpp").write_text("int g(){return 2;}\n")
+        run([CMAKE, "-S", str(donor), "-B", str(donor / "build"), "-G", "Ninja",
+             "-DCMAKE_BUILD_TYPE=Release"])
+        run([NINJA, "-C", str(donor / "build")])
+        target = self.worktree("missing-source-target")
+        rc, out = self.seed(target, donor=str(donor))
+        self.assertEqual(rc, sbd.UNSUPPORTED, out)
+        self.assertIn("does not plan cleanly", out["stderr"])
+        self.assertNotIn("Traceback", out["stderr"])
+        self.assertFalse((target / "build").exists())
+
     def test_dry_run_creates_nothing(self):
         target = self.worktree("dry")
         rc, receipt = self.seed(target, "--dry-run")
