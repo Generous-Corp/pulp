@@ -441,7 +441,9 @@ def parse_failing_tests(log: str) -> list[str]:
         match = FAILED_TEST_LINE_RE.search(line)
         if match:
             names.append(match.group(1).strip())
-        elif "Errors while running CTest" in line:
+        elif "Errors while running CTest" in line and names:
+            # ctest writes this to stderr, so in a merged log it can land
+            # before the block's entries as well as after them.
             break
     return names
 
@@ -1022,6 +1024,13 @@ class GroupObservation:
     required_ran: frozenset[str] | None = None
     # Reds outside the required set. The queue never ejects on these.
     advisory_failed: frozenset[str] = frozenset()
+    # Pull request -> the head sha it entered this group at, when read.
+    heads: tuple[tuple[int, str], ...] = ()
+
+    def entries(self) -> frozenset[tuple[int, str]]:
+        """Each member as (pull request, head); head is "" when unread."""
+        head = dict(self.heads)
+        return frozenset((pr, head.get(pr, "")) for pr in self.members or ())
 
     def ran(self, test: str) -> bool:
         if test in self.failed:
@@ -1039,6 +1048,7 @@ class Separator:
     with_pass: int
     without_fail: int
     alone_fail: int
+    head: str = ""
     failed_runs: frozenset[str] = frozenset()
 
     @property
@@ -1120,17 +1130,17 @@ def history_attribution(
                     names.append(name)
         tests = names
     observations = sorted(observations, key=chronological)
-    candidates = sorted(
-        {pr for obs in observations if obs.members for pr in obs.members}
-    )
+    candidates = sorted({key for obs in observations for key in obs.entries()})
     # An entry can only cause a failure while it is being validated, so a failure
     # outside the span of groups it appeared in is a different episode (main red
     # before it was queued, another entry after it left) and does not clear it.
-    span: dict[int, tuple[int, int]] = {}
+    # An entry is a pull request AT ONE HEAD: the fixed head that later merges
+    # green is a different entry, and must not clear the broken one.
+    span: dict[tuple[int, str], tuple[int, int]] = {}
     for position, obs in enumerate(observations):
-        for pr in obs.members or ():
-            first, _ = span.get(pr, (position, position))
-            span[pr] = (first, position)
+        for key in obs.entries():
+            first, _ = span.get(key, (position, position))
+            span[key] = (first, position)
     histories: list[TestHistory] = []
     for test in tests:
         hist = TestHistory(test=test)
@@ -1147,18 +1157,22 @@ def history_attribution(
                 hist.unknown_membership_runs.append(obs.run_id)
             else:
                 known.append((position, obs))
-        for pr in candidates:
-            sep = Separator(pr=pr, with_fail=0, with_pass=0, without_fail=0, alone_fail=0)
-            first, last = span[pr]
+        for key in candidates:
+            pr, head = key
+            sep = Separator(
+                pr=pr, head=head, with_fail=0, with_pass=0, without_fail=0, alone_fail=0
+            )
+            first, last = span[key]
             for position, obs in known:
                 if not first <= position <= last:
                     continue
                 failed = test in obs.failed
-                present = pr in (obs.members or frozenset())
+                entries = obs.entries()
+                present = key in entries
                 if present and failed:
                     sep.with_fail += 1
                     sep.failed_runs = sep.failed_runs | {obs.run_id}
-                    if obs.members == frozenset({pr}):
+                    if entries == {key}:
                         sep.alone_fail += 1
                 elif present:
                     sep.with_pass += 1
@@ -1166,7 +1180,7 @@ def history_attribution(
                     sep.without_fail += 1
             if sep.exact:
                 hist.separators.append(sep)
-        hist.separators.sort(key=lambda s: (-s.with_fail, -s.alone_fail, s.pr))
+        hist.separators.sort(key=lambda s: (-s.with_fail, -s.alone_fail, s.pr, s.head))
         classify_history(hist)
         histories.append(hist)
     return histories
@@ -1191,14 +1205,15 @@ def classify_history(hist: TestHistory) -> None:
         ]
         episodes: dict[frozenset[str], list[int]] = {}
         for sep in dominant:
-            episodes.setdefault(sep.failed_runs, []).append(sep.pr)
+            if sep.pr not in episodes.setdefault(sep.failed_runs, []):
+                episodes[sep.failed_runs].append(sep.pr)
         clean = [
             runs
             for runs in episodes
             if all(other is runs or not (other & runs) for other in episodes)
         ]
         hist.culprits = sorted(
-            episodes[runs][0] for runs in clean if len(episodes[runs]) == 1
+            {episodes[runs][0] for runs in clean if len(episodes[runs]) == 1}
         )
         hist.verdict = HISTORY_CULPRIT if hist.culprits else HISTORY_AMBIGUOUS
         return
@@ -1256,7 +1271,7 @@ CHAIN_DEPTH = 12
 DEFAULT_HISTORY_SINCE = "24h"
 DEFAULT_HISTORY_MAX_RUNS = 60
 HISTORY_WORKERS = 6
-CACHE_SCHEMA = 3
+CACHE_SCHEMA = 4
 
 SINCE_RE = re.compile(r"^(\d+)([mhd])$")
 
@@ -1271,7 +1286,7 @@ def parse_since(text: str, now: datetime) -> datetime:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
-def members_from_chain(chain: list[tuple[str, int]], stop: str) -> frozenset[int] | None:
+def members_from_chain(chain: list[tuple], stop: str) -> frozenset[int] | None:
     """The entries of a first-parent chain above `stop`, or None if it never gets there.
 
     Stopping short of `stop` (a commit that is not a queue merge, or a chain
@@ -1279,37 +1294,46 @@ def members_from_chain(chain: list[tuple[str, int]], stop: str) -> frozenset[int
     would clear every entry it missed.
     """
     members: set[int] = set()
-    for sha, pr in chain:
+    for sha, pr, *_ in chain:
         if sha == stop:
             return frozenset(members) if members else None
         members.add(pr)
     return None
 
 
-def group_chain(repo: str, head_sha: str, depth: int = CHAIN_DEPTH) -> list[tuple[str, int]]:
-    """(commit, pull request) by first parent from a group head, while each is a queue merge.
+def chain_heads(chain: list[tuple]) -> tuple[tuple[int, str], ...]:
+    """(pull request, entry head) for every queue merge the chain read."""
+    return tuple(
+        (int(step[1]), str(step[2])) for step in chain if len(step) > 2 and step[1]
+    )
+
+
+def group_chain(repo: str, head_sha: str, depth: int = CHAIN_DEPTH) -> list[tuple[str, int, str]]:
+    """(commit, pull request, entry head) by first parent from a group head, while each is a queue merge.
 
     Immutable once read, so it is what the cache keeps; which of these entries
     still count as the group's members depends on where main is now.
     """
-    chain: list[tuple[str, int]] = []
+    chain: list[tuple[str, int, str]] = []
     sha = head_sha.strip()
     for _ in range(depth):
         raw = gh(
             f"repos/{repo}/commits/{sha}",
-            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//"")]|@tsv',
+            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//""),'
+            '(.parents[1].sha//"")]|@tsv',
         )
         if not raw or "\t" not in raw:
             break
-        subject, parent = raw.split("\t", 1)
+        subject, parent, entry_head = (raw.split("\t") + ["", ""])[:3]
         merged = MERGED_PR_RE.match(subject.strip())
         if not merged:
             break
-        chain.append((sha, int(merged.group(1))))
+        # The queue merge's second parent is the head the entry was queued at.
+        chain.append((sha, int(merged.group(1)), entry_head.strip()))
         sha = parent.strip()
     # The first commit below the last merge closes the chain, so a stop at it
     # is recognised.
-    chain.append((sha, 0))
+    chain.append((sha, 0, ""))
     return chain
 
 
@@ -1318,7 +1342,7 @@ def group_members(
     head_branch: str,
     head_sha: str,
     base: str = "main",
-    chain: list[tuple[str, int]] | None = None,
+    chain: list[tuple] | None = None,
 ) -> frozenset[int] | None:
     """Every entry a merge_group batch contains, from its commit chain.
 
@@ -1494,6 +1518,7 @@ def observation_from_record(
         retried=frozenset(record.get("retried") or ()),
         required_ran=frozenset(record.get("required_ran") or ()),
         advisory_failed=frozenset(record.get("advisory_failed") or ()),
+        heads=chain_heads(record.get("chain") or []),
     )
 
 
@@ -1603,7 +1628,7 @@ def observe_history(
         return record, False
 
     def members(record: dict) -> frozenset[int] | None:
-        chain = [(str(sha), int(pr)) for sha, pr in record.get("chain") or []]
+        chain = [tuple(step) for step in record.get("chain") or []]
         return group_members(
             repo, record["head_branch"], record["head_sha"], chain=chain or None
         )

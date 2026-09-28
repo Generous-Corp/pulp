@@ -1627,5 +1627,75 @@ class EjectionTests(unittest.TestCase):
         self.assertEqual(qba.advisory_only([obs]), [obs])
 
 
+class EntryHeadTests(unittest.TestCase):
+    T = "cmake-ios-auv3-control-shipping"
+
+    def obs(self, run_id, heads, failed=()):
+        return qba.GroupObservation(
+            run_id=run_id,
+            members=frozenset(pr for pr, _ in heads),
+            heads=tuple(heads),
+            failed=frozenset(failed),
+            passed=None if not failed else frozenset(),
+        )
+
+    def test_a_fixed_head_that_merges_green_does_not_clear_the_broken_one(self) -> None:
+        hist = qba.history_attribution(
+            [
+                self.obs("1", [(8970, "old"), (8979, "a")], {self.T}),
+                self.obs("2", [(8970, "old")], {self.T}),
+                self.obs("3", [(8979, "a")]),
+                self.obs("4", [(8970, "fixed")]),
+            ],
+            [self.T],
+        )[0]
+        self.assertEqual(hist.verdict, qba.HISTORY_CULPRIT)
+        self.assertEqual(hist.culprits, [8970])
+        self.assertEqual(hist.separators[0].head, "old")
+
+    def test_without_heads_the_same_history_clears_the_entry(self) -> None:
+        # The control: read as bare pull requests, the green fixed head clears it.
+        hist = qba.history_attribution(
+            [
+                self.obs("1", [(8970, ""), (8979, "")], {self.T}),
+                self.obs("2", [(8970, "")], {self.T}),
+                self.obs("3", [(8979, "")]),
+                self.obs("4", [(8970, "")]),
+            ],
+            [self.T],
+        )[0]
+        self.assertNotEqual(hist.verdict, qba.HISTORY_CULPRIT)
+
+    def test_the_chain_records_each_entry_head_from_the_second_parent(self) -> None:
+        def gh(path, jq=None, **_):
+            return {
+                "commits/h2": "Merge pull request #2 from a/b\th1\tpr2head",
+                "commits/h1": "Merge pull request #1 from a/c\tbase\tpr1head",
+                "commits/base": "fix: not a queue merge\tzz\t",
+            }.get(path.rsplit("/", 2)[-2] + "/" + path.rsplit("/", 1)[-1])
+
+        with mock.patch.object(qba, "gh", side_effect=gh):
+            chain = qba.group_chain("o/r", "h2")
+        self.assertEqual(qba.chain_heads(chain), ((2, "pr2head"), (1, "pr1head")))
+        self.assertEqual(qba.members_from_chain(chain, "base"), {1, 2})
+
+
+class CtestBlockOrderTests(unittest.TestCase):
+    def test_the_stderr_line_can_precede_the_entries(self) -> None:
+        log = "\n".join(
+            [
+                "2026-09-26T20:13:06.7743670Z The following tests FAILED:",
+                "2026-09-26T20:13:06.7743810Z Errors while running CTest",
+                "2026-09-26T20:13:06.7744000Z \t21357 - consumption-census-drift (Failed)   pr-fast",
+                "2026-09-26T20:13:06.7744260Z \t21359 - consumption-census-negative-contract (Failed)",
+                "2026-09-26T20:13:06.7754690Z ##[error]Process completed with exit code 8.",
+            ]
+        )
+        self.assertEqual(
+            qba.parse_failing_tests(log),
+            ["consumption-census-drift", "consumption-census-negative-contract"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
