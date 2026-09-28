@@ -2299,8 +2299,11 @@ like. None of them show in a screenshot, a pixel diff, a browser fixture or a
 unit test; they show up as a feel. One survivor keeps the stall, so apply every
 item. Proving the result — traced capture, test signal, in-window drag,
 per-phase frame gaps, validity gates, environment traps — is the `trace-analysis`
-skill ("Frame pacing of a live editor: recipe and environment traps"); the
-long-form rationale is `docs/guides/interaction-cost.md`.
+skill: its "Measurement mistakes that produce confident wrong answers" table
+first, then the copy-pasteable workflow in
+`.agents/skills/trace-analysis/references/ui_jank_playbook.md`, whose
+worst-frame table maps each trace signature back to the item below that fixes
+it. The long-form rationale is `docs/guides/interaction-cost.md`.
 
 ### 1. No framework commit on a per-move, per-frame or per-update path
 
