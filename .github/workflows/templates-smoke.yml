@@ -31,6 +31,8 @@ on:
       - 'tools/cli/cmd_create.cpp'
       - 'tools/scripts/verify_create_templates.py'
       - 'tools/scripts/test_verify_create_templates.py'
+      # The UI-script realtime scan reuses the import-design contract.
+      - 'tools/import-design/realtime_contract.py'
       - '.github/workflows/templates-smoke.yml'
   workflow_dispatch:
 

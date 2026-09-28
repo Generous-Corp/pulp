@@ -604,6 +604,16 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+# pulp_check_vendored_react_runtime(): stale vendored @pulp/react bundles warn
+# (STRICT fails) and name the missing fix; current ones are quiet.
+add_test(NAME cmake-pulp-react-runtime-check
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-pulp-react-runtime-check
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_react_runtime_check.cmake)
+set_tests_properties(cmake-pulp-react-runtime-check PROPERTIES
+    LABELS "cmake;sdk"
+    TIMEOUT 30)
 add_test(NAME cmake-pulp-git-state
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}

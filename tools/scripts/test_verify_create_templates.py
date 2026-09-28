@@ -179,5 +179,60 @@ class TestMain(unittest.TestCase):
             self.assertEqual(rc, 1)
 
 
+class TestRealtimePatterns(unittest.TestCase):
+    """Templates are copied into every new project, so a per-frame cost in one
+    is a per-frame cost everywhere. The real tree must pass, and each banned
+    shape must fail when planted in a copy of it."""
+
+    def _gain_copy(self, td: str) -> Path:
+        import shutil
+        root = Path(td) / "templates"
+        shutil.copytree(_HERE.parent / "templates" / "gain", root / "gain")
+        return root
+
+    def test_real_templates_are_clean(self) -> None:
+        root = _HERE.parent / "templates"
+        for type_dir in sorted(d for d in root.iterdir() if d.is_dir()):
+            self.assertEqual(vct.check_realtime_patterns(type_dir.name, type_dir), [])
+
+    def test_real_gain_script_is_scanned(self) -> None:
+        # Positive control: the scan must actually reach ui/main.js, or the
+        # clean result above proves nothing about the scripts.
+        with TemporaryDirectory() as td:
+            gain = self._gain_copy(td) / "gain"
+            script = gain / "ui" / "main.js"
+            script.write_text(script.read_text(encoding="utf-8") + (
+                "\nfunction Hover() {\n"
+                "  const [hover, setHover] = useState(0);\n"
+                "  return <div onPointerMove={(e) => setHover(e.x)} />;\n"
+                "}\n"), encoding="utf-8")
+            failures = vct.check_realtime_patterns("gain", gain)
+            self.assertEqual(len(failures), 1, failures)
+            self.assertIn("ui/main.js", failures[0])
+            self.assertIn("[hot-setter] setHover()", failures[0])
+            self.assertEqual(vct.main(["--templates-root", str(gain.parent)]), 1)
+
+    def test_load_script_call_is_flagged(self) -> None:
+        with TemporaryDirectory() as td:
+            gain = self._gain_copy(td) / "gain"
+            proc = gain / "processor.hpp.template"
+            proc.write_text(proc.read_text(encoding="utf-8").replace(
+                "        publish_output_level(output);",
+                "        bridge_->load_script(\"tick()\");\n"
+                "        publish_output_level(output);"), encoding="utf-8")
+            failures = vct.check_realtime_patterns("gain", gain)
+            self.assertEqual(len(failures), 1, failures)
+            self.assertIn("processor.hpp.template", failures[0])
+            self.assertIn("calls load_script", failures[0])
+
+    def test_load_script_in_a_comment_is_not_flagged(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "processor.hpp.template").write_text(
+                "// never load_script() per tick\n/* load_script(x) */\n",
+                encoding="utf-8")
+            self.assertEqual(vct.check_realtime_patterns("gain", root), [])
+
+
 if __name__ == "__main__":
     unittest.main()

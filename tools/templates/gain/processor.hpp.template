@@ -1,6 +1,9 @@
 #pragma once
 
 #include <pulp/format/processor.hpp>
+#include <pulp/view/value_channel_set.hpp>
+#include <pulp/view/value_source.hpp>
+#include <algorithm>
 #include <cmath>
 
 // {{PLUGIN_NAME}} — Stereo gain plugin with bypass
@@ -24,6 +27,15 @@ inline pulp::format::PluginDescriptor make_descriptor() {
 
 class {{CLASS_NAME}} : public pulp::format::Processor {
 public:
+    {{CLASS_NAME}}() {
+        // Live data the UI shows but a DAW should not automate is a value
+        // channel, not a parameter. ui/main.js binds it with bindMeter(), so
+        // the meter updates natively each frame with no JavaScript per tick.
+        output_meter_ = channels_.declare_meter("output");
+    }
+
+    pulp::view::ValueChannelSet* value_channels() override { return &channels_; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return make_descriptor();
     }
@@ -52,19 +64,15 @@ public:
         pulp::midi::MidiBuffer& /*midi_out*/,
         const pulp::format::ProcessContext& /*ctx*/) override
     {
-        if (state().get_value(kBypass) >= 0.5f) {
-            for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch)
-                for (std::size_t i = 0; i < output.num_samples(); ++i)
-                    output.channel(ch)[i] = input.channel(ch)[i];
-            return;
-        }
-
-        float db = state().get_value(kGain);
-        float gain = std::pow(10.0f, db / 20.0f);
+        const bool bypassed = state().get_value(kBypass) >= 0.5f;
+        const float gain = bypassed ? 1.0f
+                                    : std::pow(10.0f, state().get_value(kGain) / 20.0f);
 
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch)
             for (std::size_t i = 0; i < output.num_samples(); ++i)
                 output.channel(ch)[i] = input.channel(ch)[i] * gain;
+
+        publish_output_level(output);
     }
 
     // ── Custom editor (optional) ─────────────────────────────────────────
@@ -113,6 +121,43 @@ public:
     // void on_view_opened (pulp::view::View&)                     override {}
     // void on_view_closed (pulp::view::View&)                     override {}
     // void on_view_resized(pulp::view::View&, uint32_t, uint32_t) override {}
+    //
+    // Keep a scripted editor fast by construction (the view-bridge skill's
+    // "Realtime scripted editors" checklist has the reasons and measurements):
+    //   * meters and levels: a value channel + bindMeter(), as above;
+    //   * any other per-tick data (analyzer frames, modulation): push it with
+    //     WidgetBridge::dispatch_native_message(receiver, type, payload), never
+    //     load_script(), and have the receiver draw directly;
+    //   * a spectrum polling VisualizationBridge: set
+    //     VisualizationConfig::backlog_policy =
+    //     VisualizationBacklogPolicy::latest_window.
+
+private:
+    // Audio thread: one peak/RMS reading per block. publish() is lock-free and
+    // allocation-free.
+    void publish_output_level(const pulp::audio::BufferView<float>& output) {
+        if (output_meter_ == nullptr) return;
+        pulp::view::MeterFrame frame;
+        frame.channels = static_cast<int>(std::min<std::size_t>(
+            output.num_channels(), pulp::view::MeterFrame::kMaxChannels));
+        for (int ch = 0; ch < frame.channels; ++ch) {
+            float peak = 0.0f;
+            float sum = 0.0f;
+            const auto samples = output.channel(static_cast<std::size_t>(ch));
+            for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                peak = std::max(peak, std::abs(samples[i]));
+                sum += samples[i] * samples[i];
+            }
+            frame.peak[ch] = peak;
+            frame.rms[ch] = output.num_samples() > 0
+                ? std::sqrt(sum / static_cast<float>(output.num_samples()))
+                : 0.0f;
+        }
+        output_meter_->publish(frame);
+    }
+
+    pulp::view::ValueChannelSet channels_;
+    pulp::view::MeterSource* output_meter_ = nullptr;
 };
 
 inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {
