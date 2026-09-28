@@ -135,6 +135,21 @@ pub const fn control_standalone_runtime_basename() -> &'static str {
     "libwgpu_native.dylib"
 }
 
+/// The WebGPU runtime every release binary that renders links through
+/// `@rpath` / `$ORIGIN` (`pulp-cpp`, `pulp-mcp`, `pulp-import-design`). It
+/// ships flat beside them, and those binaries find it only there, so it is
+/// ordinary CLI payload even when the broker transaction also pins it.
+#[must_use]
+pub const fn shared_runtime_basename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "wgpu_native.dll"
+    } else if cfg!(target_os = "macos") {
+        "libwgpu_native.dylib"
+    } else {
+        "libwgpu_native.so"
+    }
+}
+
 /// Resolve the running binary's filesystem path (i.e. the file we
 /// will overwrite). Wraps `std::env::current_exe` with a friendlier
 /// error.
@@ -254,6 +269,8 @@ pub struct ExtractedArchive {
     /// Present only when the archive ships the MCP server binary.
     /// Older tarballs leave this `None`.
     pub new_mcp: Option<PathBuf>,
+    /// The shared WebGPU runtime ([`shared_runtime_basename`]), when shipped.
+    pub shared_runtime: Option<PathBuf>,
     /// Health-only local broker service shipped by Darwin release archives.
     pub new_control_broker: Option<PathBuf>,
     /// Dedicated broker-owned ordinary Standalone control host.
@@ -321,11 +338,13 @@ pub fn locate_binaries_in_archive(root: &Path) -> Result<ExtractedArchive> {
         ));
     }
     let import_design = install_import_design::locate_payload(root)?;
+    let shared_runtime_path = root.join(shared_runtime_basename());
     Ok(ExtractedArchive {
         root: root.to_owned(),
         new_pulp: pulp_path,
         new_cpp,
         new_mcp,
+        shared_runtime: shared_runtime_path.is_file().then_some(shared_runtime_path),
         new_control_broker,
         new_control_standalone_host: has_standalone_payload.then_some(standalone_host_path),
         new_control_standalone_manifest: has_standalone_payload.then_some(standalone_manifest_path),
@@ -421,7 +440,10 @@ fn backup_path(p: &Path) -> PathBuf {
 /// install layout).
 #[must_use]
 pub fn looks_like_build_artifact(p: &Path) -> bool {
-    p.components().any(|c| c.as_os_str() == "target")
+    // `cargo-target` is the CMake build's CARGO_TARGET_DIR, which is also
+    // where ctest runs the crate's integration tests from.
+    p.components()
+        .any(|c| c.as_os_str() == "target" || c.as_os_str() == "cargo-target")
 }
 
 /// Pre-flight: refuse to install if the running binary lives under a
@@ -500,6 +522,21 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
             // so the Claude Code plugin's launcher can resolve the server.
             install_new_binary(mcp_dst, new_mcp)?;
             report.mcp_created = true;
+        }
+    }
+    // The sibling binaries above link the shared runtime from their own
+    // directory. Install it here, before any broker transaction, so a broker
+    // rollback restores this release's runtime rather than leaving the new
+    // binaries beside an older one, or none.
+    if let (Some(install_dir), Some(new_runtime)) = (
+        plan.self_path.parent(),
+        archive.shared_runtime.as_deref(),
+    ) {
+        let dst = install_dir.join(shared_runtime_basename());
+        if fs::symlink_metadata(&dst).is_ok() {
+            replace_binary_atomic(&dst, new_runtime)?;
+        } else {
+            install_new_binary(&dst, new_runtime)?;
         }
     }
     if let (Some(install_dir), Some(new_import), Some(runtime)) = (

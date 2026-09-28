@@ -231,7 +231,7 @@ TEST_CASE("the float instantiation harmonizes to the same interval",
     REQUIRE(engine.latency_samples() == 2 * static_cast<int>(std::ceil(kSr / 80.0)));
 }
 
-TEST_CASE("a fresh instance survives being used before prepare",
+TEST_CASE("HarmonyEngine: a fresh instance survives being used before prepare",
           "[signal][harmony-engine]") {
     Engine engine;
     for (int n = 0; n < 256; ++n)

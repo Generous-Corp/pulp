@@ -38,6 +38,33 @@ what you justify, not the reverse.
   uncovered ones — legitimate.
 - **Fewer chances to re-conflict the version-bump line** on a busy `main`.
 
+## One PR per family per session
+
+A single agent session routinely produces a run of small, related changes to
+one manifest or branch family on the same day. Shipped one at a time, each pays
+its own PR-head gate and its own merge-group gate; the merged-change average was
+4.2 native gate runs per change when sessions did this. The rule:
+
+- **Same session + same manifest or branch family + same day ⇒ one PR per
+  family.** A session with fourteen such changes ships two to four PRs, not
+  fourteen.
+- Before running `shipyard pr` on the second change of a family, check whether
+  the first is still open. If it is, and it is not yet in the merge queue, push
+  the new commit onto that branch instead of opening a sibling PR.
+- The pre-push advisor lists the related local branches it found and records
+  each firing in `${XDG_STATE_HOME:-~/.local/state}/pulp/pr-batch-advice.jsonl`;
+  that log is how the advice is measured.
+
+**Never fold**, even inside one family:
+
+- anything likely to be ejected (a known-flaky area, a change to a test the
+  queue is currently failing on) — one ejection costs every entry of the batch;
+- anything urgent, especially a fix for a red `main` — it ships alone and jumps;
+- a docs-only PR into one that runs the native gate, since the docs PR would then
+  pay for a build it does not need;
+- unrelated subsystems, unfinished work, or a change that may need reverting
+  alone (see below).
+
 ## Keep separate when — any ONE of these
 
 - **One is urgent, the other is gated.** Never make a ready branch hostage to a

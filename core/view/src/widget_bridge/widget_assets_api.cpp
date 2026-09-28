@@ -1,6 +1,7 @@
 // widget_bridge/widget_assets_api.cpp - asset and skin registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/css_gradient.hpp>
 #include <pulp/view/sprite_strip.hpp>

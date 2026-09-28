@@ -35,6 +35,9 @@ pulp_add_test_suite(pulp-test-midi-binding GROUP pulp-test-group-view-widgets
 # direction / letter_spacing glyph counting.
 pulp_add_test_suite(pulp-test-widgets-label GROUP pulp-test-group-view-widgets
     LIBRARIES pulp::view)
+# widget_bridge.hpp must not pull the widget classes into its ~200 consumers.
+pulp_add_test_suite(pulp-test-widget-bridge-include-fanout GROUP pulp-test-group-view-widgets
+    LIBRARIES pulp::view)
 # Hot-reload tests
 # Registered twice. The `[slow]` scenarios each wait on file-watcher debounce
 # plus filesystem mtime resolution (~1-1.5 sec apiece), so they carry the

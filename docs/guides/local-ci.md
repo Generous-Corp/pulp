@@ -810,6 +810,26 @@ either side of an explicit instant instead. It reads the `metrics list` rows
 the pipeline section already fetched, because `shipyard metrics compare` splits
 only on whole days ago and cannot filter by target.
 
+On a pull-request head that ran the full suite green, the **receipt issue
+step** (`protected_merge_receipt.py issue`) now announces its result: a
+`protected receipt issued` notice and job-summary line on success, or a
+`protected receipt NOT issued` warning carrying the issuer's reason (and a
+summary line) on failure. The step stays `continue-on-error`; the merge group
+then validates in full. A missing receipt with no such line is itself a defect
+to report.
+
+The gate's Build step also runs the **iOS compile gate in shadow-identity
+mode**: `tools/ci/ios_gate_digest.py` digests every tracked file the gate's
+three iOS configures can read (product sources, examples, CMake, dependency
+pins, the gate's own scripts) plus the Apple toolchain, looks the digest up
+among passing runs (repository-wide `ios-gate-ok-<digest>` artifacts, 14-day
+retention), and annotates `pulp-ios-gate-shadow/v1` with `would_skip` or
+`run`, then `ran_ok` or `ran_failed`. The gate always runs; the annotations
+are read as two proxies — `would_skip ÷ runs` per event, and `would_skip`
+verdicts followed by `ran_failed`, which must be zero before a digest-keyed
+skip could be proposed (that switch-on is a decisions-contract amendment,
+not a workflow edit).
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate
@@ -1732,6 +1752,18 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
 
+Interactive builds take the same lock without waiting. `tools/ci/governed-build.sh`
+runs every `cmake --build <dir>` under `build_dir_lock.py --no-wait`, which refuses a
+second build into a directory another live build holds (exit 75) and prints that
+holder's pid, liveness, working directory and command. The lock is a kernel `flock`
+released when its holder exits, so a killed build leaves nothing stale; a holder
+exports `PULP_BUILD_DIR_LOCK_HELD`, so a locked stage may still call the wrapper for
+its own tree. Before any lease, the wrapper and the root CMake configure also refuse
+a source checkout under `/tmp`, `/private/tmp` or `$TMPDIR` (exit 3;
+`tools/ci/checkout_location_guard.py`), because such a tree misses the shared ccache
+on every compile. `PULP_ALLOW_TMP_CHECKOUT=1` overrides that for a deliberate
+throwaway checkout, and GitHub Actions jobs are exempt.
+
 ## Runs on `main`: cache warming and main's health
 
 `build.yml` triggers on `push: branches: [main]` in addition to
@@ -2211,7 +2243,11 @@ or a required check fails because of a stale base.
 That full run is evidence, not the pull request's gate: the step is
 `continue-on-error` on pull requests, so a failure there leaves the `macos`
 check meaning build + fast tier, and the `Surface ctest failures` step still
-reports it. When it passes, the macOS or Linux matrix child publishes a two-day
+reports it. That reporter always exits 0 (errexit off, every possibly-empty
+grep guarded): it runs whenever the Test step's outcome is failure, so a
+non-zero exit from it alone would turn the required check red for a failure
+the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`
+executes the step's script under GitHub's `bash -e -o pipefail`. When it passes, the macOS or Linux matrix child publishes a two-day
 `protected-validation-<target>-<head>-<base>` receipt. The issuer requires the
 Test step's `outcome` to be `success` (its `conclusion` is always success under
 `continue-on-error`). The receipt binds the

@@ -1,6 +1,7 @@
 // widget_bridge/dom_api.cpp - DOM mutation registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/view_lifecycle.hpp>

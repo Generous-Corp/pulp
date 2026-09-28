@@ -135,6 +135,12 @@ int ensure_repo_build_configured(const fs::path& project_root, const fs::path& b
 std::string configure_default_flags(const fs::path& build_dir, bool source_checkout,
                                     bool examples);
 using pulp::cli::build_dir_has_examples_off;
+// Whether a fresh configure may pin `-G Ninja` on this host.
+bool configure_ninja_available();
+// Moves `build_dir`'s cache aside when it is slower than the pinned defaults
+// (Makefiles, Debug, examples ON not asked for), printing one line; true when
+// the dir now needs a fresh configure. See configure_defaults.hpp.
+bool migrate_slow_build_dir(const fs::path& build_dir, bool source_checkout, bool examples);
 void append_windows_visual_studio_generator_args(std::string& cmd);
 #ifdef __APPLE__
 bool checkout_supports_au(const fs::path& repo_root);

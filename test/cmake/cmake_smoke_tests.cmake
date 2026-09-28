@@ -26,6 +26,16 @@ if(APPLE AND NOT PULP_IOS)
         set_tests_properties(ios-compile-gate-legs PROPERTIES
             LABELS "cmake;ios"
             TIMEOUT 180)
+
+        # Shadow-mode identity of an iOS gate run: the digest over the gate's
+        # input set + toolchain, the artifact lookup, and the annotation that
+        # build.yml's Build step emits. No gating depends on it.
+        add_test(NAME ios-gate-digest-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/ci/test_ios_gate_digest.py")
+        set_tests_properties(ios-gate-digest-selftest PROPERTIES
+            LABELS "cmake;ios"
+            TIMEOUT 120)
     endif()
 
     add_test(NAME cmake-ios-auv3-configure
@@ -516,6 +526,12 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-output PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        add_test(NAME pr-batch-advisor
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_batch_advisor.py)
+        set_tests_properties(pr-batch-advisor PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 60)
         # A gate that cannot run must block, never pass: the hook used to
         # print "internal error" on any exit code above 1 and continue, so a
         # gate that could not find its config reported success.
@@ -664,6 +680,17 @@ if(UNIX)
     set_tests_properties(install-control-broker-activation PROPERTIES
         LABELS "tooling;installer"
         TIMEOUT 30)
+    # The installed layout, not the archive: after install.sh (including a
+    # failed broker activation) every Mach-O binary's @rpath dependencies must
+    # resolve. Compiles its own tiny dylib + binary; skips off macOS.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME install-rpath-closure
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_check_installed_rpaths.py)
+        set_tests_properties(install-rpath-closure PROPERTIES
+            LABELS "tooling;installer"
+            TIMEOUT 120)
+    endif()
 endif()
 if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its

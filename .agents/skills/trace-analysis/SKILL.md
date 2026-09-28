@@ -153,7 +153,10 @@ SQL against the file.
 To eyeball a trace in the Perfetto timeline instead of querying it, hand it to
 the UI (browsers block `file://`, so this serves it over loopback and opens the
 UI at it): `pulp trace open /tmp/pulp-<ts>.pftrace` (`--no-browser` prints the
-URL to paste; `--json` for agents).
+URL to paste; `--json` for agents). If the UI reports a 404 for the trace on
+an older CLI, that was the loopback server reading an early connection as an
+empty request (macOS accepted sockets inherit the listener's non-blocking
+mode); rerun `pulp trace open` or update the CLI.
 
 For the bounded GPU path, start with one named question. `gpu-startup` is
 deliberately `unverified` until A3 defines a measured budget; `gpu-health` and

@@ -1,6 +1,7 @@
 // widget_bridge/widget_schema_api.cpp - widget schema and style preset registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <choc/text/choc_JSON.h>

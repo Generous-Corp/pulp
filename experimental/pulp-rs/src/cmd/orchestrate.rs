@@ -170,6 +170,9 @@ pub fn parse_build_args(args: &[String]) -> BuildArgs {
             "--check-identity" => out.check_identity = true,
             "--allow-identity-change" => out.allow_identity_change = true,
             "--examples" => out.examples = true,
+            // Consumed by the stale-CLI and SDK-compatibility guards before
+            // dispatch; it must not reach `cmake --build`.
+            "--allow-unsupported-sdk" => {}
             "--seed-build" => out.seed_build = Some(SEED_AUTO.to_owned()),
             _ if a.starts_with("--seed-build=") => {
                 out.seed_build = Some(seed_build_value(a.trim_start_matches("--seed-build=")));
@@ -512,7 +515,23 @@ fn build_with_dependency_policy<S: Spawner>(
     } else {
         proj.is_configured()
     };
-    let existing_cache = std::fs::read_to_string(build_dir.join("CMakeCache.txt")).ok();
+    let ninja_available = !cfg!(windows) && crate::proc::which("ninja").is_some();
+    let build_type_env = std::env::var("PULP_BUILD_TYPE").ok();
+    let mut existing_cache = std::fs::read_to_string(build_dir.join("CMakeCache.txt")).ok();
+    let migrated = migrate_stale_build_dir(
+        &build_dir,
+        &ConfigureDefaults {
+            existing_cache: existing_cache.as_deref(),
+            ninja_available,
+            build_type_env: build_type_env.as_deref(),
+            examples: args.examples,
+            source_checkout: !proj.standalone,
+        },
+        out,
+    )?;
+    if migrated {
+        existing_cache = None;
+    }
     let examples_requested_but_off = args.examples
         && !proj.standalone
         && existing_cache
@@ -525,7 +544,8 @@ fn build_with_dependency_policy<S: Spawner>(
         affected::ensure_query(&build_dir)?;
     }
 
-    let mut needs_configure = !configured
+    let mut needs_configure = migrated
+        || !configured
         || (!proj.standalone && !proj.checkout_dependencies_enabled())
         || examples_requested_but_off;
     if focus && !needs_configure && !affected::reply_available(&build_dir) {
@@ -569,10 +589,9 @@ fn build_with_dependency_policy<S: Spawner>(
         if let Some(ref e) = args.js_engine {
             cfg = cfg.arg(format!("-DPULP_JS_ENGINE={e}"));
         }
-        let build_type_env = std::env::var("PULP_BUILD_TYPE").ok();
         for arg in configure_default_args(&ConfigureDefaults {
             existing_cache: existing_cache.as_deref(),
-            ninja_available: !cfg!(windows) && crate::proc::which("ninja").is_some(),
+            ninja_available,
             build_type_env: build_type_env.as_deref(),
             examples: args.examples,
             source_checkout: !proj.standalone,
@@ -716,8 +735,8 @@ pub fn cmake_cache_value<'a>(cache: &'a str, name: &str) -> Option<&'a str> {
 /// Generator, build-type, and examples arguments for a `pulp build` configure.
 ///
 /// - Generator: `-G Ninja` only for a fresh build dir. `CMake` refuses to switch
-///   the generator of an existing cache, so an existing dir keeps whatever it
-///   was created with.
+///   the generator of an existing cache; [`migrate_stale_build_dir`] moves a
+///   Makefiles cache aside first so the dir configures as fresh.
 /// - Build type: an explicit `PULP_BUILD_TYPE` always applies; otherwise
 ///   [`DEFAULT_BUILD_TYPE`] fills a fresh dir or a cache whose build type is
 ///   empty, and an existing non-empty build type is left alone.
@@ -749,6 +768,109 @@ pub fn configure_default_args(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
         }
     }
     args
+}
+
+/// Opt-out that keeps an existing build dir's configuration as it is.
+pub const KEEP_BUILD_CONFIG_ENV: &str = "PULP_KEEP_BUILD_CONFIG";
+
+/// Where [`migrate_stale_build_dir`] moves an old cache and `CMakeFiles`.
+pub const PRE_MIGRATION_DIR: &str = ".pulp-pre-migration";
+
+fn is_multi_config_generator(generator: &str) -> bool {
+    generator == "Xcode"
+        || generator.starts_with("Visual Studio")
+        || generator.ends_with("Multi-Config")
+}
+
+fn cache_flag_on(value: &str) -> bool {
+    matches!(value.to_ascii_uppercase().as_str(), "ON" | "1" | "TRUE" | "YES" | "Y")
+}
+
+/// Why an existing build dir is slower than the configuration `pulp build`
+/// pins for a fresh one, as short labels (`"Unix Makefiles"`, `"Debug"`,
+/// `"examples ON"`). Empty when the dir already matches, or when the cache is
+/// not a real configure (no `CMAKE_GENERATOR`).
+///
+/// - Generator: a Makefiles generator when `ninja` is available. IDE
+///   generators (Xcode, Visual Studio) are a deliberate choice and stay.
+/// - Build type (single-config generators): an empty or `Debug` build type that
+///   `PULP_BUILD_TYPE` does not ask for.
+/// - Examples (source checkout only): examples ON without `--examples`.
+#[must_use]
+pub fn stale_build_config_reasons(inputs: &ConfigureDefaults<'_>) -> Vec<String> {
+    let Some(cache) = inputs.existing_cache else {
+        return Vec::new();
+    };
+    let Some(generator) = cmake_cache_value(cache, "CMAKE_GENERATOR") else {
+        return Vec::new();
+    };
+    let mut reasons = Vec::new();
+    if inputs.ninja_available && generator.contains("Makefiles") {
+        reasons.push(generator.to_owned());
+    }
+    if !is_multi_config_generator(generator) {
+        let cached = cmake_cache_value(cache, "CMAKE_BUILD_TYPE").unwrap_or("");
+        let explicit = inputs.build_type_env.map(str::trim).filter(|v| !v.is_empty());
+        let requested = explicit.is_some_and(|bt| bt.eq_ignore_ascii_case(cached));
+        if (cached.is_empty() || cached.eq_ignore_ascii_case("Debug")) && !requested {
+            reasons.push(if cached.is_empty() {
+                "no build type".to_owned()
+            } else {
+                cached.to_owned()
+            });
+        }
+    }
+    if inputs.source_checkout
+        && !inputs.examples
+        && cmake_cache_value(cache, "PULP_BUILD_EXAMPLES").is_some_and(cache_flag_on)
+    {
+        reasons.push("examples ON".to_owned());
+    }
+    reasons
+}
+
+/// Moves a slow build dir's `CMakeCache.txt` and `CMakeFiles` into
+/// [`PRE_MIGRATION_DIR`] so the next configure starts fresh with the pinned
+/// defaults, and prints one line naming what changed. Returns whether it moved
+/// anything. `PULP_KEEP_BUILD_CONFIG=1` keeps the old configuration.
+///
+/// An existing dir never switches generator in place (`CMake` refuses), and a
+/// dir created by an older CLI keeps Makefiles, Debug and examples forever
+/// unless something moves its cache aside.
+pub fn migrate_stale_build_dir(
+    build_dir: &Path,
+    inputs: &ConfigureDefaults<'_>,
+    out: &mut impl Write,
+) -> Result<bool> {
+    let reasons = stale_build_config_reasons(inputs);
+    if reasons.is_empty() {
+        return Ok(false);
+    }
+    let keep = std::env::var(KEEP_BUILD_CONFIG_ENV).unwrap_or_default();
+    if !keep.trim().is_empty() && keep.trim() != "0" {
+        return Ok(false);
+    }
+    let aside = build_dir.join(PRE_MIGRATION_DIR);
+    if aside.exists() {
+        std::fs::remove_dir_all(&aside).map_err(io_err)?;
+    }
+    std::fs::create_dir_all(&aside).map_err(io_err)?;
+    for name in ["CMakeCache.txt", "CMakeFiles"] {
+        let from = build_dir.join(name);
+        if from.exists() {
+            std::fs::rename(&from, aside.join(name)).map_err(io_err)?;
+        }
+    }
+    writeln!(
+        out,
+        "Reconfiguring {} with the pulp defaults (was: {}); old cache moved to {} \
+         ({KEEP_BUILD_CONFIG_ENV}=1 keeps a build dir as it is)",
+        build_dir.display(),
+        reasons.join(", "),
+        aside.display()
+    )
+    .map_err(io_err)?;
+    Ok(true)
 }
 
 /// The `pulp trace …` commands the traced-build epilogue points at, as argv
@@ -2768,6 +2890,131 @@ mod tests {
             !standalone.iter().any(|a| a.starts_with("-DPULP_BUILD_EXAMPLES")),
             "{standalone:?}"
         );
+    }
+
+    // ── migrating a slow existing build dir ─────────────────────────────
+
+    const MAKEFILES_DEBUG_EXAMPLES: &str = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\n\
+                                            CMAKE_BUILD_TYPE:STRING=Debug\n\
+                                            PULP_BUILD_EXAMPLES:BOOL=ON\n";
+
+    fn reasons(cache: &str, ninja: bool, env: Option<&str>, examples: bool) -> Vec<String> {
+        stale_build_config_reasons(&ConfigureDefaults {
+            existing_cache: Some(cache),
+            ninja_available: ninja,
+            build_type_env: env,
+            examples,
+            source_checkout: true,
+        })
+    }
+
+    #[test]
+    fn stale_reasons_name_makefiles_debug_and_examples() {
+        assert_eq!(
+            reasons(MAKEFILES_DEBUG_EXAMPLES, true, None, false),
+            ["Unix Makefiles", "Debug", "examples ON"]
+        );
+        // Without ninja the generator stays; the build type still migrates.
+        assert_eq!(
+            reasons(MAKEFILES_DEBUG_EXAMPLES, false, None, true),
+            ["Debug"]
+        );
+        let empty_type = "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nCMAKE_BUILD_TYPE:STRING=\n";
+        assert_eq!(reasons(empty_type, false, None, false), ["no build type"]);
+    }
+
+    #[test]
+    fn stale_reasons_respect_explicit_requests_and_good_dirs() {
+        // PULP_BUILD_TYPE=Debug plus --examples asks for exactly this dir.
+        assert_eq!(
+            reasons(MAKEFILES_DEBUG_EXAMPLES, false, Some("debug"), true),
+            Vec::<String>::new()
+        );
+        let good = "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n\
+                    PULP_BUILD_EXAMPLES:BOOL=OFF\n";
+        assert!(reasons(good, true, None, false).is_empty());
+        // IDE generators are a deliberate choice and carry no build type.
+        assert!(reasons("CMAKE_GENERATOR:INTERNAL=Xcode\n", true, None, false).is_empty());
+        // A cache with no generator is not a real configure.
+        assert!(reasons("CMAKE_BUILD_TYPE:STRING=Debug\n", true, None, false).is_empty());
+        // Standalone projects have no examples option to migrate.
+        let standalone = stale_build_config_reasons(&ConfigureDefaults {
+            existing_cache: Some("CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n\
+                                  PULP_BUILD_EXAMPLES:BOOL=ON\n"),
+            ninja_available: true,
+            source_checkout: false,
+            ..Default::default()
+        });
+        assert!(standalone.is_empty(), "{standalone:?}");
+    }
+
+    fn complete_checkout_with_cache(root: &Path, cache: &str) -> ActiveProject {
+        source_tree_fixture(root);
+        std::fs::create_dir_all(root.join("external/vst3sdk/pluginterfaces")).unwrap();
+        let proj = ActiveProject::new(root.to_path_buf(), false);
+        std::fs::create_dir_all(proj.build_dir.join("CMakeFiles/obj")).unwrap();
+        std::fs::write(
+            proj.build_dir.join("CMakeCache.txt"),
+            format!(
+                "{cache}PULP_REQUIRE_CHECKOUT_DEPENDENCIES:BOOL=ON\n\
+                 PULP_HAS_VST3:INTERNAL=ON\n\
+                 PULP_CHECKOUT_REQUIRES_AUSDK:INTERNAL=OFF\n\
+                 PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=fixture-contract-v1\n"
+            ),
+        )
+        .unwrap();
+        assert!(proj.checkout_dependencies_enabled(), "fixture cache must be complete");
+        proj
+    }
+
+    #[test]
+    fn build_migrates_a_debug_examples_on_build_dir() {
+        let _env = EnvVarGuard::set_many(&[
+            ("PULP_BUILD_TYPE", None),
+            (KEEP_BUILD_CONFIG_ENV, None),
+        ]);
+        let td = tempfile::tempdir().unwrap();
+        let proj = complete_checkout_with_cache(td.path(), MAKEFILES_DEBUG_EXAMPLES);
+        let spawner = RecordingSpawner::with_codes(vec![0, 0]);
+        let mut out = Vec::new();
+        build_with_dependency_policy(&proj, &BuildArgs::default(), &spawner, &mut out, true)
+            .unwrap();
+        let calls = spawner.calls.borrow();
+        let cfg = &calls[0];
+        assert!(cfg.args.iter().any(|a| a == "-B"), "configure expected: {:?}", cfg.args);
+        assert!(cfg.args.iter().any(|a| a == "-DCMAKE_BUILD_TYPE=Release"), "{:?}", cfg.args);
+        assert!(cfg.args.iter().any(|a| a == "-DPULP_BUILD_EXAMPLES=OFF"), "{:?}", cfg.args);
+        let aside = proj.build_dir.join(PRE_MIGRATION_DIR);
+        assert!(aside.join("CMakeCache.txt").is_file());
+        assert!(aside.join("CMakeFiles/obj").is_dir());
+        assert!(!proj.build_dir.join("CMakeCache.txt").exists());
+        let report = String::from_utf8(out).unwrap();
+        let lines: Vec<_> = report.lines().filter(|l| l.starts_with("Reconfiguring")).collect();
+        assert_eq!(lines.len(), 1, "{report}");
+        assert!(lines[0].contains("Debug") && lines[0].contains("examples ON"), "{report}");
+    }
+
+    #[test]
+    fn build_keeps_a_matching_or_opted_out_build_dir() {
+        let good = "CMAKE_GENERATOR:INTERNAL=Ninja\nCMAKE_BUILD_TYPE:STRING=Release\n\
+                    PULP_BUILD_EXAMPLES:BOOL=OFF\n";
+        for (cache, keep) in [(good, None), (MAKEFILES_DEBUG_EXAMPLES, Some("1"))] {
+            let _env = EnvVarGuard::set_many(&[
+                ("PULP_BUILD_TYPE", None),
+                (KEEP_BUILD_CONFIG_ENV, keep),
+            ]);
+            let td = tempfile::tempdir().unwrap();
+            let proj = complete_checkout_with_cache(td.path(), cache);
+            let spawner = RecordingSpawner::ok();
+            let mut out = Vec::new();
+            build_with_dependency_policy(&proj, &BuildArgs::default(), &spawner, &mut out, true)
+                .unwrap();
+            let calls = spawner.calls.borrow();
+            assert_eq!(calls.len(), 1, "no configure expected for {cache:?}");
+            assert!(calls[0].args.iter().any(|a| a == "--build"));
+            assert!(proj.build_dir.join("CMakeCache.txt").is_file());
+            assert!(!proj.build_dir.join(PRE_MIGRATION_DIR).exists());
+        }
     }
 
     #[test]

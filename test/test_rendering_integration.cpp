@@ -508,7 +508,7 @@ TEST_CASE("EditHistory undo redo", "[state][undo]") {
     REQUIRE(val == 42);
 }
 
-TEST_CASE("EditHistory depth limit", "[state][undo]") {
+TEST_CASE("EditHistory depth limit (rendering integration)", "[state][undo]") {
     state::EditHistory history(3);
     int v = 0;
     for (int i = 0; i < 5; ++i)

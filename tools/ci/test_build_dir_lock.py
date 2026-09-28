@@ -163,5 +163,114 @@ class BuildDirLockTest(unittest.TestCase):
                 build_dir_lock.lock_root()
 
 
+@unittest.skipIf(sys.platform == "win32", "holder probes use POSIX signals")
+class NoWaitTest(unittest.TestCase):
+    """--no-wait refuses a second build into a live tree and names its holder."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.build = self.root / "build"
+        self.env = {
+            **os.environ,
+            build_dir_lock.LOCK_ROOT_ENV: str(self.root / "state"),
+        }
+        self.env.pop(build_dir_lock.HELD_ENV, None)
+        self.wrapper = str(Path(build_dir_lock.__file__).resolve())
+        self.ready = self.root / "ready"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _holder(self) -> subprocess.Popen:
+        child = (
+            "import os,pathlib,sys,time; "
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        )
+        proc = subprocess.Popen(
+            [sys.executable, self.wrapper, "--no-wait", "--build-dir", str(self.build),
+             "--", sys.executable, "-c", child, str(self.ready)],
+            env=self.env,
+        )
+        deadline = time.monotonic() + 10
+        while not self.ready.exists():
+            self.assertLess(time.monotonic(), deadline, "holder never started")
+            time.sleep(0.02)
+        return proc
+
+    def _second(self) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, self.wrapper, "--no-wait", "--build-dir", str(self.build),
+             "--", sys.executable, "-c", "print('SECOND-RAN')"],
+            env=self.env, capture_output=True, text=True, timeout=20,
+        )
+
+    def test_second_build_is_refused_and_names_the_live_holder(self) -> None:
+        holder = self._holder()
+        try:
+            result = self._second()
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+        self.assertEqual(result.returncode, build_dir_lock.BUSY_EXIT, result.stderr)
+        self.assertNotIn("SECOND-RAN", result.stdout)
+        self.assertIn(f"holder pid={holder.pid} (alive)", result.stderr)
+        self.assertIn("command:", result.stderr)
+
+    def test_killed_holder_leaves_no_stale_lock(self) -> None:
+        holder = self._holder()
+        holder.kill()
+        holder.wait(timeout=10)
+        result = self._second()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SECOND-RAN", result.stdout)
+
+    def test_terminating_the_holder_stops_its_build(self) -> None:
+        holder = self._holder()
+        build_pid = int(self.ready.read_text())
+        holder.terminate()
+        holder.wait(timeout=10)
+        # The forwarded SIGTERM stopped the build child; it was not orphaned
+        # to keep writing into a tree whose lock had just been released.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                os.kill(build_pid, 0)
+            except ProcessLookupError:
+                break
+            self.assertLess(time.monotonic(), deadline, "build outlived its lock holder")
+            time.sleep(0.02)
+
+    def test_descendant_of_the_holder_may_build_the_same_tree(self) -> None:
+        nested = (
+            f"import subprocess,sys; sys.exit(subprocess.run([sys.executable, {self.wrapper!r}, "
+            f"'--no-wait', '--build-dir', {str(self.build)!r}, '--', sys.executable, '-c', "
+            "'print(\"NESTED-RAN\")']).returncode)"
+        )
+        result = subprocess.run(
+            [sys.executable, self.wrapper, "--no-wait", "--build-dir", str(self.build),
+             "--", sys.executable, "-c", nested],
+            env=self.env, capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("NESTED-RAN", result.stdout)
+
+    def test_in_process_no_wait_raises_with_holder(self) -> None:
+        holder = self._holder()
+        try:
+            with mock.patch.dict("os.environ", {
+                build_dir_lock.LOCK_ROOT_ENV: str(self.root / "state"),
+            }, clear=False):
+                os.environ.pop(build_dir_lock.HELD_ENV, None)
+                with self.assertRaises(build_dir_lock.BuildDirBusy) as caught:
+                    with build_dir_lock.exclusive_build_dir(self.build, wait=False):
+                        pass
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+        self.assertIsNotNone(caught.exception.holder)
+        self.assertEqual(caught.exception.holder.get("pid"), holder.pid)
+
+
 if __name__ == "__main__":
     unittest.main()
