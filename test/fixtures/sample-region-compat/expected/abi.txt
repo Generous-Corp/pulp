@@ -1,6 +1,6 @@
 processor_size=4568
 processor_align=8
-custom_node_type_size=512
+custom_node_type_size=544
 node_type_audio_input=0
 node_type_audio_output=1
 node_type_plugin=2
