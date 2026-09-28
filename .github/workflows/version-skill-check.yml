@@ -86,13 +86,20 @@ jobs:
       - name: Resolve diff base
         id: base
         run: |
-          # On pull_request events, the merge-base with origin/main is the
-          # right diff source; on workflow_dispatch, fall back to origin/main.
+          # Every gate below compares HEAD against the merge-base, not the
+          # base tip. The checked-out merge ref can lag the live base branch,
+          # and a gate that reads a file at the tip (node ABI order, the skill
+          # map, hotspot sizes) would blame the PR for whatever main changed
+          # since. Three-dot diffs and commit ranges are unchanged by this.
+          # workflow_dispatch and merge_group compare against origin/main.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+            base="origin/${{ github.base_ref }}"
           else
-            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+            base="origin/main"
           fi
+          ref=$(git merge-base "$base" HEAD)
+          echo "diff base: $ref (merge-base of $base and HEAD)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Skill-sync check
         run: |
@@ -347,3 +354,16 @@ jobs:
         timeout-minutes: 45
         run: |
           python3 tools/ci/source_selftests.py run --min-count 130
+
+      - name: Wide non-native tier (tooling checks for a skipped macOS gate)
+        # With PULP_CLASSIFY_WIDE_NON_NATIVE=1, build.yml's classify job lets a
+        # tooling-only change skip the native matrix when no test left on the
+        # macOS gate can observe it (tools/scripts/wide_non_native.py). The
+        # gate's repository scanners read tools/** without naming the files,
+        # so this required context runs them here instead. Unset: skipped.
+        if: vars.PULP_CLASSIFY_WIDE_NON_NATIVE == '1'
+        timeout-minutes: 15
+        run: |
+          python3 -m pip install --quiet 'PyYAML==6.0.2'
+          python3 tools/ci/source_selftests.py run \
+            --manifest tools/ci/wide_non_native_checks.json --min-count 7

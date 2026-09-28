@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_content_api.cpp - content value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <pulp/view/gap_widgets.hpp>

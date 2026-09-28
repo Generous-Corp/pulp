@@ -11,10 +11,6 @@
       "reason": "Dedicated adapter-cost benchmark, built only under PULP_BENCHMARK. Explicitly advisory: reports medians with no timing budget."
     },
     {
-      "target": "pulp-test-control-sample-region-e2e",
-      "reason": "QUARANTINED 2026-09-23, temporary. Blocked every merge_group batch and with it the whole repository: a batch is main plus its entries, so this one assertion failed every batch, ejected innocent PRs and re-formed. Eighteen PRs were held. It fails at test_control_sample_region_e2e.cpp:214 REQUIRE_FALSE(instance.empty()) - host-launch reports \"launched\" but no instance carrying dev.pulp.sample-region-allpass.editable appears in instances. Not a regression: the registration is gated on the sample-region control hosts, themselves gated on PULP_ENABLE_GPU, so it had never run in CI until gate VMs enabled GPU config that day, and it has never passed in this configuration. Not a security assertion either - the enrollment authorization check at line 192 passes and is unaffected. The single Catch2 case cannot be split onto a fast lane without fixing the defect, which is why the whole target is listed rather than tagged. REMOVE this entry and the validation label once line 214 is fixed."
-    },
-    {
       "target": "pulp-test-events-timer-helpers",
       "reason": "Timer hammer and destroy-while-dispatched cases exercise message-loop pacing (~0.3-1.5 s each). Splitting needs a per-case audit of which cases need real pacing."
     },

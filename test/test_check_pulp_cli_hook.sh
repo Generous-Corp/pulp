@@ -180,5 +180,65 @@ fi
 pass "case6: install banner on stderr (correct stream for Claude UI)"
 rm -rf "$case6" "$stdout_file" "$stderr_file"
 
+# ── Case 7: a `pulp` on PATH far older than the Pulp checkout → STALE CLI ────
+# Old CLIs configure a current checkout with their own defaults, so the hook
+# names the gap and the update command. `--session-start` puts the banner on
+# stdout (SessionStart output becomes agent context); the Setup call keeps it
+# on stderr.
+make_checkout() {
+    mkdir -p "$1/core" "$1/bin"
+    printf 'cmake_minimum_required(VERSION 3.24)\n# pin before project(),\nproject(Pulp\n    VERSION 0.876.1\n    LANGUAGES C CXX)\n' \
+        > "$1/CMakeLists.txt"
+}
+make_pulp() {
+    printf '#!/usr/bin/env bash\n[ "$1" = version ] && echo "pulp v%s" && echo "Claude plugin: v0.1.0"\n' "$2" \
+        > "$1/bin/pulp"
+    chmod +x "$1/bin/pulp"
+}
+
+case7=$(mktemp -d)
+make_checkout "$case7"
+make_pulp "$case7" 0.305.0
+stdout_file=$(mktemp)
+stderr_file=$(mktemp)
+status=0
+PATH="$case7/bin:/usr/bin:/bin" PULP_CHECK_CWD="$case7/core" "$HOOK" --session-start \
+    >"$stdout_file" 2>"$stderr_file" || status=$?
+[ "$status" -eq 0 ] || fail "case7: hook exited $status (expected 0)"
+grep -q "STALE CLI" "$stdout_file" || fail "case7: no STALE CLI banner on stdout: $(cat "$stdout_file")"
+grep -q "571 releases behind" "$stdout_file" || fail "case7: banner should count 571 releases: $(cat "$stdout_file")"
+grep -q "generouscorp.com/pulp/install.sh" "$stdout_file" || fail "case7: banner lacks the update command"
+grep -q "governed-build.sh cmake --build build --target pulp-rust-cli" "$stdout_file" ||
+    fail "case7: banner lacks the governed bootstrap"
+if [ -s "$stderr_file" ]; then
+    fail "case7: --session-start should keep stderr empty: $(cat "$stderr_file")"
+fi
+out=$(PATH="$case7/bin:/usr/bin:/bin" PULP_CHECK_CWD="$case7" "$HOOK" 2>&1 >/dev/null)
+grep -q "STALE CLI" <<<"$out" || fail "case7: Setup mode should print the banner on stderr"
+pass "case7: stale pulp on PATH inside a Pulp checkout → STALE CLI banner"
+rm -f "$stdout_file" "$stderr_file"
+
+# ── Case 8: the same checkout with a current CLI → silent ────────────────────
+make_pulp "$case7" 0.870.0
+out=$(PATH="$case7/bin:/usr/bin:/bin" PULP_CHECK_CWD="$case7" "$HOOK" --session-start 2>&1)
+[ -z "$out" ] || fail "case8: a CLI within the threshold should be silent, got: $out"
+pass "case8: current pulp → silent"
+
+# ── Case 9: a stale CLI outside a Pulp checkout → silent ─────────────────────
+make_pulp "$case7" 0.305.0
+printf 'project(VersionFixture VERSION 9.0.0)\n' > "$case7/CMakeLists.txt"
+out=$(PATH="$case7/bin:/usr/bin:/bin" PULP_CHECK_CWD="$case7" "$HOOK" --session-start 2>&1)
+[ -z "$out" ] || fail "case9: a non-Pulp project should be silent, got: $out"
+pass "case9: stale pulp outside a Pulp checkout → silent"
+rm -rf "$case7"
+
+# ── Case 10: --session-start with no pulp at all → silent ────────────────────
+# The install banner belongs to the Setup hook; SessionStart must not repeat it.
+case10=$(mktemp -d)
+out=$(PATH="/usr/bin:/bin" PULP_CHECK_CWD="$case10" "$HOOK" --session-start 2>&1)
+[ -z "$out" ] || fail "case10: --session-start without pulp should be silent, got: $out"
+pass "case10: --session-start without pulp → silent"
+rm -rf "$case10"
+
 echo ""
-echo "All 7 cases passed."
+echo "All 11 cases passed."

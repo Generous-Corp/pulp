@@ -351,6 +351,13 @@ fn main() -> ExitCode {
     if let Some(exit) = control_broker_reconcile_entrypoint() {
         return exit;
     }
+    // A build-family command run with a CLI far older than the project it
+    // runs in is re-run through the checkout's own CLI or refused, before
+    // any dispatch (including the C++ rollback lever) can configure it.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(rc) = pulp_rs::stale_cli::preflight_system(&argv) {
+        return ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1));
+    }
     // Rollback lever. When `$PULP_USE_CPP=1` is set, skip the Rust
     // dispatch entirely and exec the C++ binary with the user's full
     // argv unchanged.

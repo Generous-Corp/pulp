@@ -1,6 +1,7 @@
 // widget_bridge/animation_api.cpp - animation and transform registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <pulp/view/css_animation.hpp>

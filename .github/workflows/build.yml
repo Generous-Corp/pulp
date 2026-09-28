@@ -895,6 +895,11 @@ jobs:
           # synthesized refs/pull/N/merge checkout once it proves the merge's
           # parents are exactly [base.sha, head.sha] and its tree is the head's.
           BUMP_FASTPATH_PR_MERGE_REF: ${{ vars.PULP_BUMP_FASTPATH_PR_MERGE_REF }}
+          # Default OFF. When `1`, tooling files that no test left on this gate
+          # can observe skip the native matrix; the required `Enforce version &
+          # skill sync` context runs the checks that do observe them. See
+          # tools/scripts/wide_non_native.py.
+          WIDE_NON_NATIVE: ${{ vars.PULP_CLASSIFY_WIDE_NON_NATIVE }}
         run: |
           set -euo pipefail
           # LaunchAgents inherit macOS's stripped /usr/bin-only PATH. That made
@@ -922,9 +927,14 @@ jobs:
               # cannot resolve the tree and safely requests the native build.
               git fetch --no-tags --depth=1 origin "$base" || true
             fi
+            wide_args=()
+            if [ "${WIDE_NON_NATIVE:-}" = 1 ]; then
+              wide_args=(--wide-non-native)
+            fi
             classification=$(
               env GITHUB_OUTPUT='' "$ci_python" tools/scripts/classify_changes.py \
-                --mode=diff --comparison=trees --base "$base" --json
+                --mode=diff --comparison=trees --base "$base" --json \
+                ${wide_args[@]+"${wide_args[@]}"}
             )
             native_build_required=$(
               "$ci_python" -c 'import json,sys; print(str(json.load(sys.stdin)["native_build_required"]).lower())' \
@@ -1503,7 +1513,11 @@ jobs:
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
             ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-
 
+      # 0.3 min p50 / 1.1 min max on gate VMs, <= 3.5 min on hosted Linux. A
+      # hang here otherwise holds a self-hosted gate VM until the host's
+      # 2-hour job timeout instead of failing in minutes.
       - name: Bootstrap repository dependencies
+        timeout-minutes: 15
         run: ./setup.sh --ci --deps-only
         shell: bash
 
@@ -1817,9 +1831,16 @@ jobs:
 
       - name: Build
         shell: bash
+        id: build
         env:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
+          IOS_GATE_TOKEN: ${{ github.token }}
         run: |
+          # Snapshot the cumulative ccache counters so the "Ccache stats" step
+          # can print this job's own calls (see tools/ci/ccache_job_delta.py).
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --print-stats > "$RUNNER_TEMP/ccache-before.txt" || true
+          fi
           if [ "${RUNNER_OS}" = "macOS" ]; then
             # The gate reports "not applicable here" with exit 77, the autotools
             # skip convention. 77 is still nonzero and this step runs under
@@ -1834,6 +1855,35 @@ jobs:
             if [ "$IOS_COMPILE_REQUIRED" = false ]; then
               echo "::notice::iOS compile gate skipped by exact changed-surface authorization"
             else
+              # SHADOW MODE (tools/ci/ios_gate_digest.py): identify this gate run
+              # by a digest of every file the gate's configures can read plus
+              # the Apple toolchain, look the digest up among passing runs, and
+              # ANNOTATE what a digest-keyed skip would have done. The gate
+              # still runs; nothing is skipped and no gating changes. The
+              # annotations are the evidence for (or against) a later
+              # switch-on: would_skip ÷ runs, and would_skip verdicts followed
+              # by a real failure, which must stay at zero.
+              ios_digest="$(python3 tools/ci/ios_gate_digest.py compute \
+                --repo "$GITHUB_WORKSPACE" 2>/dev/null \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')" \
+                || ios_digest=""
+              ios_shadow_src=""
+              if [ -n "$ios_digest" ]; then
+                ios_lookup="$(python3 tools/ci/ios_gate_digest.py lookup \
+                  --repository "$GITHUB_REPOSITORY" --token "$IOS_GATE_TOKEN" \
+                  --digest "$ios_digest")" || ios_lookup='{"found": false}'
+                ios_shadow_src="$(printf '%s' "$ios_lookup" | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          print(d.get("source_run_id") or "") if d.get("found") else print("")')"
+                if [ -n "$ios_shadow_src" ]; then
+                  python3 tools/ci/ios_gate_digest.py note --verdict would_skip \
+                    --digest "$ios_digest" --source-run-id "$ios_shadow_src"
+                  echo "iOS compile gate shadow: would skip (digest ${ios_digest} passed in run ${ios_shadow_src}); running anyway"
+                else
+                  python3 tools/ci/ios_gate_digest.py note --verdict run --digest "$ios_digest"
+                fi
+              fi
               set +e
               bash test/cmake/test_ios_compile_gate.sh \
                 "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
@@ -1842,8 +1892,19 @@ jobs:
               if [ "$ios_gate_rc" = 77 ]; then
                 echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
               elif [ "$ios_gate_rc" != 0 ]; then
+                [ -z "$ios_digest" ] || python3 tools/ci/ios_gate_digest.py note \
+                  --verdict ran_failed --digest "$ios_digest" \
+                  ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
                 echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
                 exit "$ios_gate_rc"
+              elif [ -n "$ios_digest" ]; then
+                python3 tools/ci/ios_gate_digest.py note --verdict ran_ok \
+                  --digest "$ios_digest" ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
+                mkdir -p "$RUNNER_TEMP/ios-gate-shadow"
+                printf '{"schema":"pulp-ios-gate-shadow/v1","digest":"%s","run_id":"%s","sha":"%s","event":"%s"}\n' \
+                  "$ios_digest" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" \
+                  > "$RUNNER_TEMP/ios-gate-shadow/marker.json"
+                echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"
               fi
             fi
           fi
@@ -1881,11 +1942,35 @@ jobs:
           # Build finished cleanly → clear the in-progress sentinel (ODR guard).
           rm -f "$PULP_BUILD_DIR/.pulp-build-incomplete"
 
+      # A passing iOS gate run is recorded under its input digest so later runs
+      # (PR heads and merge groups alike: artifacts are repository-wide, not
+      # branch-scoped like the Actions cache) can find it. Shadow mode only
+      # reads these to annotate; see the Build step.
+      - name: Record iOS gate digest (shadow)
+        if: steps.build.outputs.ios_gate_digest != ''
+        uses: actions/upload-artifact@v5
+        with:
+          name: ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}
+          path: ${{ runner.temp }}/ios-gate-shadow/marker.json
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Ccache stats
         if: always()
         run: |
           if command -v ccache >/dev/null 2>&1; then
             ccache --show-stats
+            # The cumulative counters above belong to the cache directory,
+            # which on a self-hosted gate VM is a host mount shared by every
+            # VM that host boots; their denominator is the host's history, so
+            # they cannot show a cold or poisoned cache on THIS job. The
+            # per-job line is the difference against the snapshot taken just
+            # before the Build step. No snapshot (an earlier step failed) or a
+            # counter-less snapshot exits 2 and prints no per-job line, so an
+            # absent line is never read as a hit.
+            ccache --print-stats > "$RUNNER_TEMP/ccache-after.txt" || true
+            python3 tools/ci/ccache_job_delta.py \
+              "$RUNNER_TEMP/ccache-before.txt" "$RUNNER_TEMP/ccache-after.txt" || true
           else
             echo "ccache not available; skipping stats"
           fi
@@ -1906,6 +1991,31 @@ jobs:
             ~/.cache/ccache
             ~/AppData/Local/ccache
           key: ${{ steps.ccache-cache.outputs.cache-primary-key }}
+
+      - name: Decide pull-request test suite
+        # A pull-request head runs the fast tier below, and that is what its
+        # required check means. A head that is ready to land (armed for
+        # auto-merge, still the head, and merged onto the current tip of main)
+        # ALSO runs the full suite, as evidence only, so its exact-tree
+        # protected-validation receipt lets a merge group of that one pull
+        # request skip its own build and test. Every other push keeps only the
+        # fast tier. The rule and its fail-closed probe live in
+        # tools/ci/ctest_gate_args.py; an unreadable pull request means fast.
+        id: pr_suite
+        if: github.event_name == 'pull_request' && runner.os != 'Windows'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          eval "$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --pr-suite)"
+          : "${pr_suite:?pull-request suite did not resolve}"
+          echo "suite=$pr_suite" >> "$GITHUB_OUTPUT"
+          echo "::notice::pull-request suite: $pr_suite ($pr_suite_reason)"
 
       - name: Test fast deterministic tier (pull request head)
         # The full suite below runs only in the merge queue, where one failure
@@ -1948,7 +2058,19 @@ jobs:
         # anything about the change. It also returns roughly forty percent of
         # each pull-request gate run, which is the scarce resource while every
         # open pull request waits behind one.
-        if: runner.os != 'Windows' && github.event_name != 'pull_request'
+        #
+        # The exception is a pull-request head that is ready to land (see
+        # `Decide pull-request test suite`). There the suite runs once as
+        # EVIDENCE for the protected-validation receipt, never as the pull
+        # request's gate: `continue-on-error` keeps a failure here from turning
+        # the required check red, and the receipt issuer reads this step's
+        # outcome, which stays `failure`, so a failing run issues nothing and
+        # the merge group validates in full exactly as before.
+        if: >-
+          runner.os != 'Windows'
+          && (github.event_name != 'pull_request'
+              || steps.pr_suite.outputs.suite == 'full')
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         shell: bash
         # Keep one hung ctest entry from burning the full workflow timeout.
         # Long-running tests that need more time set their own CTest TIMEOUT.
@@ -2085,8 +2207,14 @@ jobs:
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
           ctest --show-only=json-v1 --test-dir "$PULP_BUILD_DIR" -C Release -LE "$label_exclude" --exclude-regex "$exclude" > "$evidence_dir/selected.json" || true
-          # Tell `shipyard landing` which tier this check's green means.
-          echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
+          # Tell `shipyard landing` which tier this check's green means. On a
+          # pull-request head the gate is still the fast tier, so the full run
+          # there reports itself as receipt evidence, not as the check's tier.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            echo "::notice::full suite ran as receipt evidence (non-gating): ctest exit $ctest_exit"
+          else
+            echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
+          fi
           exit "$ctest_exit"
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
@@ -2278,9 +2406,20 @@ jobs:
         # invisible remotely. ctest's own result logs name it: dump them into
         # the job summary so the failing
         # test(s) + assertions show in the GitHub UI without host access.
-        if: failure() && runner.os != 'Windows'
+        #
+        # This step only reports; it must never decide the job's result. On a
+        # pull-request head the full suite runs as non-gating receipt evidence
+        # (the Test step is continue-on-error), so a non-zero exit here would
+        # turn the required check red for a failure the workflow deliberately
+        # does not gate on. On other events the Test step already failed
+        # visibly as its own step. The default shell is `bash -e -o pipefail`,
+        # under which a grep that matches nothing (a failure that is a timeout
+        # or a non-Catch2 test) ends the step with exit 1, so errexit is off
+        # and every command that may legitimately return non-zero is guarded.
+        if: (failure() || steps.ctest.outcome == 'failure') && runner.os != 'Windows'
         shell: bash
         run: |
+          set +e
           tdir="$PULP_BUILD_DIR/Testing/Temporary"
           {
             echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
@@ -2289,7 +2428,7 @@ jobs:
               echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
               echo "### Failing assertions (from LastTest.log)"
               echo '```'
-              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60 || true
               echo '```'
             else
               echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
@@ -2297,6 +2436,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           # Also echo failed-test names to the (locally-readable) job log.
           { [ -f "$tdir/LastTestsFailed.log" ] && { echo "=== ctest failed tests ==="; cat "$tdir/LastTestsFailed.log"; }; } || true
+          exit 0
 
       - name: Upload ctest logs and JUnit report
         # Full Testing/Temporary/ (LastTest.log, LastTestsFailed.log, …) as an
@@ -2343,8 +2483,11 @@ jobs:
         id: protected_receipt
         # A receipt stands in for the merge group's own test run, so it is only
         # issued when this job's full ctest selection actually ran and passed.
-        # A pull-request run that skips the Test step issues no receipt, and the
-        # merge group then validates in full.
+        # That happens on a pull-request head only when it was ready to land
+        # (`Decide pull-request test suite`); a run that took the fast tier
+        # skips the Test step, issues no receipt, and the merge group then
+        # validates in full. `outcome`, not `conclusion`: the Test step is
+        # continue-on-error on pull requests, so only its outcome says it passed.
         if: >-
           success()
           && github.event_name == 'pull_request'
@@ -2366,7 +2509,16 @@ jobs:
           checkout_sha="$(git rev-parse --verify 'HEAD^{commit}')"
           receipt_dir="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}"
           mkdir -p "$receipt_dir"
-          python3 tools/scripts/protected_merge_receipt.py issue \
+          # This step is continue-on-error (a receipt is an optimization for
+          # the merge group, not a verdict on the PR), so its failure must be
+          # LOUD or it disappears: the step's conclusion reads success, the
+          # Publish step is skipped, and nothing on the PR says why. That is
+          # how a duplicated ctest name disabled every PR-head receipt for
+          # days ("CTest selection lists a test twice") with 0 annotations.
+          # Every exit path below names its reason in a warning annotation
+          # and in the job summary.
+          issue_err="$RUNNER_TEMP/protected-receipt-${{ matrix.key }}.err"
+          if python3 tools/scripts/protected_merge_receipt.py issue \
             --repository "$GITHUB_REPOSITORY" --target "${{ matrix.key }}" \
             --base-sha "$PR_BASE_SHA" --head-sha "$PR_HEAD_SHA" \
             --checkout-sha "$checkout_sha" --workflow-sha "${{ github.workflow_sha }}" \
@@ -2376,8 +2528,19 @@ jobs:
             --ctest-selection "$RUNNER_TEMP/ctest-evidence/selection.json" \
             --ctest-selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
             --ctest-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
-            --output "$receipt_dir/receipt.json"
-          echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
+            --output "$receipt_dir/receipt.json" 2> "$issue_err"; then
+            echo "::notice title=protected receipt issued (${{ matrix.key }})::exact-tree receipt for $PR_HEAD_SHA on base $PR_BASE_SHA"
+            printf '### Protected receipt (%s): issued for head %s\n\n' \
+              "${{ matrix.key }}" "$PR_HEAD_SHA" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "path=$receipt_dir" >> "$GITHUB_OUTPUT"
+          else
+            reason="$(tr '\n' ' ' < "$issue_err" | cut -c1-600)"
+            reason="${reason:-issuer exited nonzero without a reason}"
+            echo "::warning title=protected receipt NOT issued (${{ matrix.key }})::${reason} — the merge group will validate in full"
+            printf '### Protected receipt (%s): NOT issued\n\nReason: %s\n\nThe merge group for this PR cannot reuse this run and will validate in full.\n\n' \
+              "${{ matrix.key }}" "$reason" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
+          fi
 
       - name: Publish exact protected-validation receipt
         if: steps.protected_receipt.outcome == 'success'

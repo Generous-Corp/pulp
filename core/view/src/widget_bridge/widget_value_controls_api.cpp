@@ -1,6 +1,7 @@
 // widget_bridge/widget_value_controls_api.cpp - scalar control value registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/design_ir.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/gap_widgets.hpp>

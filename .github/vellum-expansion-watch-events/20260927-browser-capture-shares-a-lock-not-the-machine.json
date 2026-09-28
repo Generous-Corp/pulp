@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260927-browser-capture-shares-a-lock-not-the-machine",
+  "created_at": "2026-09-27T18:49:34Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record test-only ctest scheduling for Pulp's real-browser capture validation. pulp-browser-capture-node-integration drops RUN_SERIAL for PROCESSORS 4, a shared `browser` RESOURCE_LOCK and a COST so it starts first; run_integration.mjs caps its file concurrency at the same reservation (PULP_BROWSER_CAPTURE_RESERVED_CORES), so a 3-vCPU VM still runs one file at a time alone and larger VMs run two. The process-lifecycle suite, the [browser]-tagged import-design-tool case and the agent-panel invariants take the same lock. Every test case, per-case and outer timeout, production browser capture, design ingest, captured output, rendering, packaging, the accepted expansion boundary, and Vellum source authority are unchanged.",
+  "tests": [
+    "node --test tools/import-design/browser_capture/run_integration.test.mjs (7 cases)",
+    "ctest -R 'pulp-browser-capture-node-integration|pulp-browser-capture-process-lifecycle|generic browser HTML|ctest-scheduling-contract' -j6 (all passed)",
+    "python3 tools/scripts/test_ctest_scheduling_contract.py --build-dir build",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

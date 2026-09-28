@@ -77,17 +77,24 @@ run_logged() {
     shift 3
 
     echo "iOS compile: $label"
+    # Elapsed seconds per leg step, so a gate log attributes its wall time to
+    # the step that spent it (the GPU leg runs in the background and its log
+    # is only echoed once it has finished, so without this line its cost is
+    # invisible in the job log).
+    local started=$SECONDS
     local status=0
     if [[ ${#timeout_cmd[@]} -gt 0 ]]; then
         "${timeout_cmd[@]}" "$seconds" "$@" >"$log" 2>&1 || status=$?
     else
         "$@" >"$log" 2>&1 || status=$?
     fi
+    local elapsed=$((SECONDS - started))
     if [[ $status -ne 0 ]]; then
-        echo "ERROR: $label failed (status $status)" >&2
+        echo "ERROR: $label failed (status $status) after ${elapsed}s" >&2
         tail -n 120 "$log" >&2 || true
         return "$status"
     fi
+    echo "iOS compile: $label done (${elapsed}s)"
 }
 
 mkdir -p "$build_root"
@@ -179,6 +186,7 @@ kill_tree() {
     kill -CONT "$1" 2>/dev/null || true
 }
 
+gpu_leg_started=$SECONDS
 gpu_leg >"$build_root/gpu-leg.log" 2>&1 &
 gpu_leg_pid=$!
 # Never leave the background leg (or the cmake/xcodebuild it spawned) running
@@ -234,10 +242,14 @@ for sdk in iphonesimulator iphoneos; do
     fi
 done
 
+sdk_legs_done=$SECONDS
+echo "iOS compile: SDK legs total ($((sdk_legs_done - gpu_leg_started))s)"
 gpu_leg_status=0
 wait "$gpu_leg_pid" || gpu_leg_status=$?
 trap - EXIT
 cat "$build_root/gpu-leg.log"
+# The GPU leg is the gate's critical path whenever this wait is non-zero.
+echo "iOS compile: GPU leg total ($((SECONDS - gpu_leg_started))s, waited $((SECONDS - sdk_legs_done))s after the SDK legs)"
 if [[ $gpu_leg_status -ne 0 ]]; then
     echo "ERROR: iOS GPU leg failed (status $gpu_leg_status)" >&2
     exit "$gpu_leg_status"

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "tools/cli/cli_common.hpp"
+#include "tools/cli/shell_quote.hpp"
 #include "tools/cli/tartci_lease.hpp"
 
 #include <algorithm>
@@ -284,6 +285,86 @@ TEST_CASE("build watchdog kills sustained CPU over budget") {
 
     const auto wrapped = apply_agent_build_watchdog("python3 -c 'while True: pass'", 1, true);
     REQUIRE(run(wrapped) == 124);
+}
+#endif
+
+#ifndef _WIN32
+namespace {
+
+fs::path source_root() {
+    return fs::path(PULP_SOURCE_DIR);
+}
+
+fs::path fresh_temp_dir(const std::string& stem) {
+    auto dir = fs::temp_directory_path()
+        / (stem + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    return dir;
+}
+
+}  // namespace
+
+TEST_CASE("build-dir lock wraps a source checkout build") {
+    ScopedEnvVar lock_default("PULP_BUILD_DIR_LOCK", std::nullopt);
+    const auto root = source_root();
+    REQUIRE(fs::is_regular_file(root / "tools" / "ci" / "build_dir_lock.py"));
+
+    const auto wrapped = apply_build_dir_lock("cmake --build build", root, root / "build");
+    REQUIRE(wrapped.find("build_dir_lock.py") != std::string::npos);
+    REQUIRE(wrapped.find("--no-wait") != std::string::npos);
+    REQUIRE(wrapped.find("--build-dir") != std::string::npos);
+    REQUIRE(wrapped.find("cmake --build build") != std::string::npos);
+}
+
+TEST_CASE("build-dir lock leaves other projects and the opt-out untouched") {
+    const auto consumer = fresh_temp_dir("pulp-lock-consumer-");
+    REQUIRE(apply_build_dir_lock("cmake --build build", consumer, consumer / "build")
+            == "cmake --build build");
+    fs::remove_all(consumer);
+
+    ScopedEnvVar lock_off("PULP_BUILD_DIR_LOCK", "0");
+    REQUIRE(apply_build_dir_lock("cmake --build build", source_root(), source_root() / "build")
+            == "cmake --build build");
+}
+
+TEST_CASE("build-dir lock refuses a build while the Python lock holds the tree") {
+    ScopedEnvVar lock_default("PULP_BUILD_DIR_LOCK", std::nullopt);
+    ScopedEnvVar held("PULP_BUILD_DIR_LOCK_HELD", std::nullopt);
+    const auto scratch = fresh_temp_dir("pulp-lock-exclusion-");
+    ScopedEnvVar lock_root("PULP_BUILD_DIR_LOCK_ROOT", (scratch / "state").string());
+    const auto root = source_root();
+    const auto build = scratch / "build";
+    const auto ready = scratch / "ready";
+    const auto release = scratch / "release";
+    const auto ran = scratch / "ran";
+
+    // The holder is the exact wrapper governed-build.sh uses, so a refusal here
+    // proves both build paths take the same lock.
+    const auto holder_cmd = "python3 " + shell_quote(root / "tools" / "ci" / "build_dir_lock.py")
+        + " --no-wait --build-dir " + shell_quote(build) + " -- /bin/sh -c "
+        + shell_quote("touch " + shell_quote(ready) + "; while [ ! -f " + shell_quote(release)
+                      + " ]; do sleep 0.05; done")
+        + " >/dev/null 2>&1 &";
+    REQUIRE(run(holder_cmd) == 0);
+    for (int i = 0; i < 400 && !fs::exists(ready); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    REQUIRE(fs::exists(ready));
+
+    const auto build_cmd = "touch " + shell_quote(ran);
+    CHECK(run(apply_build_dir_lock(build_cmd, root, build) + " 2>/dev/null") == 75);
+    CHECK_FALSE(fs::exists(ran));
+
+    std::ofstream(release).put('\n');
+    int rc = -1;
+    for (int i = 0; i < 400; ++i) {
+        rc = run(apply_build_dir_lock(build_cmd, root, build) + " 2>/dev/null");
+        if (rc != 75) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+    CHECK(rc == 0);
+    CHECK(fs::exists(ran));
+    fs::remove_all(scratch);
 }
 #endif
 

@@ -6,8 +6,11 @@ node ABI version, new virtual methods must be appended at the end of the class
 vtable. Inserting, removing, reordering, or re-signaturing existing virtuals
 changes the node contract.
 
-The gate compares the current working tree against a git base and requires the
-base virtual-method declarations to remain a prefix of the current order.
+The gate compares the current working tree against the merge-base of the git
+base and HEAD, and requires the base virtual-method declarations to remain a
+prefix of the current order. Reading the base tip instead would fail a branch
+that is merely behind: a virtual appended on main after the branch point looks
+"removed" from a branch that never touched the header.
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_common import resolve_git_comparison  # noqa: E402
 
 
 SURFACES = (
@@ -47,6 +53,11 @@ def repo_root() -> Path | None:
     if result.returncode != 0:
         return None
     return Path(result.stdout.strip())
+
+
+def comparison_base(root: Path, base: str) -> str:
+    """The merge-base of ``base`` and HEAD, or ``base`` itself when unresolvable."""
+    return resolve_git_comparison(root, base).comparison_anchor or base
 
 
 def git_show(base: str, rel_path: str) -> str | None:
@@ -273,12 +284,13 @@ def main(argv: list[str] | None = None) -> int:
         print("node_abi_gate: not in a git working tree", file=sys.stderr)
         return 0 if args.mode == "hint" else 2
 
-    allowed = acknowledged_breaks(root, args.base)
+    base = comparison_base(root, args.base)
+    allowed = acknowledged_breaks(root, base)
     findings = [
         finding
         for class_name, rel_path in SURFACES
         if class_name not in allowed
-        and (finding := check_surface(root, args.base, class_name, rel_path))
+        and (finding := check_surface(root, base, class_name, rel_path))
     ]
 
     if not findings:

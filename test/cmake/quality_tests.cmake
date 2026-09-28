@@ -536,6 +536,19 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/trace_span_category_lint.py")
     add_test(NAME trace-span-category-lint-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_trace_span_category_lint.py")
+    # Status tone must not rest on hue. success and danger carry OPPOSITE
+    # meanings and are indistinguishable under protanopia in the light theme,
+    # where no token value fixes it -- the shipped pair retains ~8.3 dE00 and
+    # darkening success is worse, because protanopia darkens red until a dark
+    # green lands on top of it. Contrast checking cannot see any of this: it
+    # measures luminance, so both tones clear their bar against the surface and
+    # still read as one colour. check_palette_health judges token VALUES and
+    # never sees a widget, so without this nothing catches the next component
+    # that differentiates by hue alone.
+    add_test(NAME status-tone-signal-lint COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/status_tone_signal_lint.py")
+    add_test(NAME status-tone-signal-lint-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_status_tone_signal_lint.py")
     # macOS ObjC source lists: three hand-maintained lists (the in-tree target,
     # what the SDK installs, what a consumer recompiles per binary) must name the
     # same translation units, or the per-binary ObjC class suffix is dropped and
@@ -617,7 +630,23 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+        # The two refusals governed-build applies before a lease: a checkout in
+        # a temporary directory (it misses the shared ccache on every compile),
+        # and a second build into a tree another live build holds.
+        add_test(NAME checkout-location-guard-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_checkout_location_guard.py")
+        add_test(NAME build-dir-lock-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_build_dir_lock.py")
+        set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
+            PROPERTIES TIMEOUT 120)
     endif()
+
+    # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
+    # cumulative `ccache --show-stats` counters belong to the host-shared cache
+    # directory, so only the before/after difference describes one job.
+    add_test(NAME ccache-job-delta-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_ccache_job_delta.py")
+    set_tests_properties(ccache-job-delta-selftest PROPERTIES TIMEOUT 60)
 
     # Queue-cascade guards. A break that reaches main is amplified by the merge
     # queue: every batch inherits it, fails, ejects its innocent entries, and
@@ -650,6 +679,19 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME queue-batch-attribute-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_queue_batch_attribute.py")
     set_tests_properties(queue-batch-attribute-selftest PROPERTIES TIMEOUT 120)
+
+    # base-poison-detector-selftest pins what may and may not be called proof
+    # that `main` itself is carrying a failure. A wrong `poisoned` pauses the
+    # whole merge queue, and the two tempting rules are both unsafe: a failure
+    # shared across batches cannot distinguish a red base from one entry that
+    # breaks every batch it joins, and a failure naming no test is as easily a
+    # link error as an infrastructure fault. It also asserts a workflow actually
+    # invokes the detector, because a correct rule nothing runs reads exactly
+    # like one that works -- which is how the designated push lane went 58 runs
+    # without producing a single observation.
+    add_test(NAME base-poison-detector-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_base_poison_detector.py")
+    set_tests_properties(base-poison-detector-selftest PROPERTIES TIMEOUT 120)
 
     # ODR macro-gated-header guard. A macro-gated inline/template function in a
     # header, plus a TU that redefines that macro, is an ODR violation a Release
@@ -724,6 +766,15 @@ if(Python3_Interpreter_FOUND)
         --build-dir "${CMAKE_BINARY_DIR}")
     set_tests_properties(ctest-measured-budgets PROPERTIES TIMEOUT 120)
 
+    # Scheduling half of the same picture: the tests measured as long carry a
+    # COST so ctest starts them first, and every Chrome-launching test shares
+    # the `browser` lock instead of RUN_SERIAL, so neither shape can reappear
+    # as a serial tail at the end of the gate's test step.
+    add_test(NAME ctest-scheduling-contract COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_ctest_scheduling_contract.py"
+        --build-dir "${CMAKE_BINARY_DIR}")
+    set_tests_properties(ctest-scheduling-contract PROPERTIES TIMEOUT 120)
+
     # Live-build check: reports a governed build running in THIS checkout, which
     # Shipyard's local mac backend does by design. Its one job is to tell a live
     # marker from the one a killed build necessarily leaves behind, so the test
@@ -750,6 +801,7 @@ if(Python3_Interpreter_FOUND)
     if(APPLE)
         add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
+        set_tests_properties(combined-installer-selftest PROPERTIES COST 45)
         # Product projection over the shared recipe: a current exact Forge
         # build contributes only Modular AU/VST3/CLAP/Standalone, and the
         # expanded-package check rejects sibling Forge product bundles.
@@ -932,12 +984,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-first-visible-role-producers-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_role_producers.py")
     # Five positive roles plus thirty-nine planted negatives, each a sealed
-    # build driving its own subprocess tree. That cost is invisible to the
-    # scheduler at the default single slot, so co-scheduled heavy tests inflate
-    # each other past the suite-wide default timeout on a loaded host. Declare
-    # what the test actually consumes and give it a budget sized to the work.
+    # build driving its own subprocess tree, run one after another: user+sys
+    # time tracks wall time, so the work occupies about one core. Two slots
+    # declare that cost with room for the child tree, without holding every
+    # slot: a full-width reservation cannot start until the rest of the suite
+    # drains, which made this test run alone at the end of the gate. COST
+    # starts it early; the 300s budget covers the 80-115s seen on a loaded host.
     set_tests_properties(gpu-first-visible-role-producers-selftest PROPERTIES
-        PROCESSORS 8
+        PROCESSORS 2
+        COST 55
         TIMEOUT 300)
     add_test(NAME gpu-first-visible-trace-producer-overhead-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py")
@@ -951,6 +1006,7 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-trace-overhead-acceptance-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_trace_overhead_acceptance.py")
     set_tests_properties(gpu-trace-overhead-acceptance-selftest PROPERTIES
+        COST 55
         TIMEOUT 180)
     add_test(NAME gpu-trace-overhead-verifier-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")
@@ -1179,6 +1235,10 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_scorecard
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(build-speed-scorecard-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME build-speed-proxies-selftest
+            COMMAND ${Python3_EXECUTABLE} -m unittest test_build_speed_proxies
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
+        set_tests_properties(build-speed-proxies-selftest PROPERTIES TIMEOUT 120)
         if(APPLE)
             # host_vitals.sh reads macOS sysctls and BSD stat/date.
             add_test(NAME host-vitals-selftest

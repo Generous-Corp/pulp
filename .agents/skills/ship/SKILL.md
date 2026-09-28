@@ -940,6 +940,16 @@ on `Invalid`, so the status line is checked). Note that the packages are built
 with plain `pkgbuild` (no `--sign`); adding the secrets will surface that
 notarization rejects an unsigned installer package.
 
+With **no** signing or notary secret at all, the macOS job does not run: the
+`resolve-macos-runner` job's `preflight` step (on the control-plane Linux
+runner, which can read `secrets`) outputs `build=false` and
+`build-and-sign-macos` is skipped with a `No macOS signing configured` notice.
+It used to build the whole tree on a release macOS runner, sign nothing, and
+upload a 278-byte status file on every tag. Any single secret, or
+`PULP_RELEASE_UNSIGNED_POLICY=fail`, runs the job so the in-job detector still
+fails a partial setup loudly. A job-level `if:` cannot read `secrets`; that is
+why the decision travels as a job output.
+
 ### `check_notarization` and Gatekeeper-disabled CI environments
 
 `check_notarization(path)` runs `spctl --assess --type exec <path>`. On a stock

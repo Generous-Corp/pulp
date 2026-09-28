@@ -2719,8 +2719,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/forge-app-delivery/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "5b5c7f0c40a355e756748933458af8a25dcdb7c5",
-          "object_id": "a643a2114d5b612cd5209783ea1edd1155473d7f",
+          "revision": "41f2baf59368826798e5216099d71f41407f459a",
+          "object_id": "427f3c7b71ad9883c92c62e09a2c7ab1f4c00920",
           "object_type": "blob"
         },
         {
@@ -2759,8 +2759,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-analysis/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "380d6d608a48d423a3924ad307ec726dfa8fd4da",
-          "object_id": "eb3130d873df5a5e02f32179f660cb969792e4f9",
+          "revision": "49346911adfc7553674bffbad463b3505e368ef4",
+          "object_id": "3a4160db22708137d938e180436d84bd20f92cd9",
           "object_type": "blob"
         },
         {
@@ -2783,8 +2783,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/web-plugins/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "2a2bf299cb81d7559377ab0e1bacb5a1e798b14e",
-          "object_id": "9e5a3fdd3650293f85d91dc7c5a8b27549e22544",
+          "revision": "41f2baf59368826798e5216099d71f41407f459a",
+          "object_id": "03950caeb3d1a235de233e79a223be9e0f360015",
           "object_type": "blob"
         },
         {
@@ -3010,32 +3010,32 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "3997a1e77f73ca3d85f7b2923bff4337760b86e1",
-          "object_id": "1960299599b9012cfce785ab84cc79745d636879",
+          "revision": "b2868f158d069e240c1450a0bdea98a33d1a0189",
+          "object_id": "3b4d73e01ba0207ea278e8d90a9f5a3d0608b98c",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/cmd/upgrade.rs",
           "state": "pulp-owned-retained",
-          "revision": "146e446b99eb54f82461d5bf2777307c6bcb720a",
-          "object_id": "6d6fad7d2d297c270c2603ea1016c26558e3339f",
+          "revision": "e32bee3b45fe5c7b1ebfc42be9b442b5afcea8a6",
+          "object_id": "413d40091d0afe21039dbbdeacac21a013e56143",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install.rs",
           "state": "pulp-owned-retained",
-          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
-          "object_id": "d5a5ce15eefb5e5fe50610b5b3a492624aeedded",
+          "revision": "e32bee3b45fe5c7b1ebfc42be9b442b5afcea8a6",
+          "object_id": "89a70dbb1e20c6da8d780d6589aea09baa5c9f5d",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install/tests.rs",
           "state": "pulp-owned-retained",
-          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
-          "object_id": "18160a2f316d3ef775354548efd8626eb6350896",
+          "revision": "e32bee3b45fe5c7b1ebfc42be9b442b5afcea8a6",
+          "object_id": "1ef06d6c6bad78e24bbf818287a13e159332e872",
           "object_type": "blob"
         },
         {

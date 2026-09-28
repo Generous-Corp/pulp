@@ -266,13 +266,13 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
     // fresh block into the output ring between this call's input write and this
     // read, transiently lifting depth above steady-state with NO miss, which a
     // depth-based drain would misread as owed and discard the very block being
-    // read. Counting misses is immune to that. We only drain while a block also
-    // remains behind the dropped one (`avail_blocks > 1`), so a resync never
-    // starves the read. drain() just advances the read cursor — no copy/alloc.
+    // read. Counting misses is immune to that. Discard stale results even when
+    // that empties the ring: another fallback is preferable to delivering audio
+    // for an expired timeline slot. drain() only advances the read cursor.
     if (blocks_owed_ > 0) {
         const std::uint64_t avail_blocks = output_ring_.available_frames() / n;
-        if (avail_blocks > 1) {
-            const std::uint64_t drop = std::min<std::uint64_t>(blocks_owed_, avail_blocks - 1);
+        if (avail_blocks > 0) {
+            const std::uint64_t drop = std::min<std::uint64_t>(blocks_owed_, avail_blocks);
             output_ring_.drain(drop * n);
             blocks_owed_ -= drop;
             resynced_blocks_.fetch_add(drop, std::memory_order_relaxed);
@@ -288,7 +288,9 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
         node_->prime_fallback(input, n);
 
     // Read the latency-delayed output produced earlier by the worker.
-    if (output_ring_.read(output, n)) {
+    // If debt remains, a worker write racing the snapshot above is still stale.
+    // Leave it for the next bounded drain rather than accepting it as current.
+    if (blocks_owed_ == 0 && output_ring_.read(output, n)) {
         const auto disposition = sequence < latency_blocks_
                                      ? detail::SharedIoDeliveryDisposition::Priming
                                      : detail::SharedIoDeliveryDisposition::GpuDelivered;

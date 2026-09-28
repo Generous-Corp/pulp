@@ -55,7 +55,11 @@ impl ControlBrokerServiceConfig {
             accept_custom_root: false,
             release_version: release_version.into(),
             health_working_dir: health_working_dir.into(),
-            health_timeout: Duration::from_secs(3),
+            // Measured on m3 under load: the launchd-started broker accepts
+            // its socket 0.06-0.14 s after exec, and the probe (`pulp-cpp
+            // status --broker-only`) takes 0.02 s warm and 0.64 s on a freshly
+            // installed binary's first run. 5 s is about 6x that worst case.
+            health_timeout: Duration::from_secs(5),
             // System policy tools can briefly queue behind macOS assessment and
             // service-management work. Keep those waits bounded but tolerant of
             // ordinary host contention.
@@ -771,7 +775,7 @@ fn wait_for_health<R: CommandRunner>(
         let output = runner
             .run(&CommandRequest {
                 program: paths.cpp.clone(),
-                args: vec!["status".to_owned()],
+                args: vec!["status".to_owned(), "--broker-only".to_owned()],
                 cwd: Some(config.health_working_dir.clone()),
                 timeout: remaining.min(config.command_timeout),
             })

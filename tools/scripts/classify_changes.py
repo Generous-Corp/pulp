@@ -28,12 +28,22 @@ EVERYTHING ELSE forces the native build — including `core/**`,
 `apple/**`, `examples/**`, `test/**`, every `CMakeLists.txt`,
 `tools/cmake/**`, `.github/workflows/**` (a `build.yml` change MUST get
 a real run to validate itself), `tools/scripts/**` (some are
-build-coupled), `*.toml`/`*.json` config, this classifier itself, and
+build-coupled), `*.toml`/`*.json` config, this classifier itself, and two deny-list
+exceptions that override the `.md`/`docs/` skip-safe rules:
 `docs/migrations/*.md` (globbed with CONFIGURE_DEPENDS into the
-generated `migration_index.cpp` by `tools/cli/CMakeLists.txt` — a
-deny-list exception that overrides the `.md`/`docs/` skip-safe rules).
+generated `migration_index.cpp` by `tools/cli/CMakeLists.txt`) and
+`docs/status/consumption-profiles.*` (the published consumption census
+and its schema, whose only gates — `consumption-census-drift` and its
+siblings — live inside a configured build tree).
 That is intentional: the conservative allowlist IS the fail-closed
 mechanism — anything we did not explicitly reason about runs the build.
+
+OPT-IN WIDENING
+---------------
+`--wide-non-native` (passed by build.yml only when the repository variable
+`PULP_CLASSIFY_WIDE_NON_NATIVE` is `1`) additionally admits tooling files that
+no test left on the native gate can observe; see wide_non_native.py. Without
+the flag this module never imports it and its output is unchanged.
 
 Modes:
   --mode=diff --base <ref>   diff `<ref>...HEAD` for the changed-file set
@@ -86,11 +96,28 @@ SKIP_SAFE_EXACT = {
 
 # Paths that LOOK skip-safe (e.g. a `.md` file under `docs/`) but are in
 # fact native build inputs. Checked FIRST so they override every
-# skip-safe rule below. `docs/migrations/*.md` is globbed with
-# CONFIGURE_DEPENDS by tools/cli/CMakeLists.txt and compiled into pulp-cli
-# as `migration_index.cpp` — editing one genuinely changes compiled C++.
+# skip-safe rule below.
+#
+# `docs/migrations/*.md` is globbed with CONFIGURE_DEPENDS by
+# tools/cli/CMakeLists.txt and compiled into pulp-cli as
+# `migration_index.cpp` — editing one genuinely changes compiled C++.
+#
+# `docs/status/consumption-profiles.*` is the published consumption census and
+# its schema. Neither is compiled, but both are the SUBJECT of gates that exist
+# only inside a configured build tree: `consumption-census-drift` regenerates
+# the census from the tree's own target graph and compares, and
+# `consumption-census-schema` / `-negative-contract` read the same pair. The
+# census records counts nothing else in the repo can confirm, so a census-only
+# change that classifies skip-safe is a claim about the build graph that
+# nothing ever checks — it reaches main unmeasured and then fails every later
+# merge group, whose batches did not touch it. The prefix deliberately stops at
+# the filename stem so the document, its schema, and any future sibling are all
+# covered by one entry; tools/scripts/test_classify_changes.py re-derives the
+# pair from consumption_census.py, so a rename fails that test rather than
+# silently reopening the hole.
 FORCE_BUILD_PREFIXES = (
     "docs/migrations/",
+    "docs/status/consumption-profiles.",
 )
 
 # The installed-SDK capability proof installs Pulp, then compiles and runs one
@@ -233,6 +260,26 @@ def ios_compile_required(
         return True
 
 
+def _wide_decisions(files: list[str]) -> dict:
+    """Per-file wide-non-native decisions; any failure keeps every file native."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import wide_non_native
+
+        decisions = wide_non_native.classify(files)
+        if set(decisions) != set(files):
+            raise ValueError("wide-non-native returned an incomplete decision set")
+        return decisions
+    except Exception as exc:  # noqa: BLE001 - fail closed on any error
+        sys.stderr.write(f"[classify] wide-non-native unavailable: {exc}\n")
+
+        class _Kept:
+            admitted = False
+            reason = "wide-non-native unavailable"
+
+        return {f: _Kept() for f in files}
+
+
 def _changed_files_from_diff(
     base: str, *, comparison: str = "merge-base"
 ) -> list[str] | None:
@@ -285,6 +332,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--json", action="store_true", help="print a JSON object to stdout"
     )
+    parser.add_argument(
+        "--wide-non-native",
+        action="store_true",
+        help=(
+            "also admit tooling files that no test left on the native gate "
+            "can observe (tools/scripts/wide_non_native.py); build.yml passes "
+            "it only when PULP_CLASSIFY_WIDE_NON_NATIVE=1"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="for --mode=files, the file list")
     args = parser.parse_args(argv)
 
@@ -314,6 +370,24 @@ def main(argv: list[str]) -> int:
         # path would otherwise be skip-safe documentation.
         required = native_build_required(files) or capability_installed_required
         non_safe = [f for f in files if not is_skip_safe(f)]
+        widened: list[str] = []
+        if (
+            args.wide_non_native
+            and required
+            and not capability_installed_required
+            and non_safe
+        ):
+            wide_decisions = _wide_decisions(non_safe)
+            if all(d.admitted for d in wide_decisions.values()):
+                required = False
+                widened = sorted(wide_decisions)
+            else:
+                non_safe = [f for f in non_safe if not wide_decisions[f].admitted]
+                for path in non_safe[:8]:
+                    sys.stderr.write(
+                        f"[classify] wide-non-native keeps {path}: "
+                        f"{wide_decisions[path].reason}\n"
+                    )
         if required:
             if non_safe:
                 shown = ", ".join(non_safe[:8])
@@ -321,6 +395,12 @@ def main(argv: list[str]) -> int:
                 reason = f"native build inputs changed: {shown}{extra}"
             else:
                 reason = "installed-SDK capability proof selected"
+        elif widened:
+            reason = (
+                f"all {len(files)} changed file(s) are skip-safe; "
+                f"{len(widened)} tooling file(s) are observed only by checks on "
+                "the required hosted context (wide-non-native)"
+            )
         else:
             reason = f"all {len(files)} changed file(s) are skip-safe (docs/config only)"
 

@@ -133,6 +133,11 @@ set(PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME
     "@PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME@")
 set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE
     "@PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE@")
+# True when this SDK's Pulp::gpu-audio archive contains the Dawn shared-I/O
+# provider. This is a build-capability fact for consumers such as GPU NAM; it
+# does not promise realtime scheduling or deadline determinism.
+set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO
+    "@PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO@")
 if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
     set(_pulp_gpu_audio_vellum_runtime
         "${PULP_SDK_LIBRARY_DIR}/${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}")

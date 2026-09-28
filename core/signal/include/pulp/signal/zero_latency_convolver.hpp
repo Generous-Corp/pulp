@@ -5,6 +5,7 @@
 /// provided by zero_latency_convolver_support.hpp.
 
 #include <pulp/signal/zero_latency_convolver_support.hpp>
+#include <pulp/simd/simd.hpp>
 
 namespace pulp::signal {
 
@@ -36,6 +37,13 @@ public:
         wet_scratch_.assign(2, std::vector<SampleType>(
                                    static_cast<std::size_t>(std::max(max_block_, kHeadLenMax)),
                                    SampleType{0}));
+        // A chunk never exceeds max_block_ or the head length, so the head's
+        // linear window is at most head_len_ - 1 + max(max_block_, head_len_).
+        head_window_.assign(
+            2, std::vector<SampleType>(
+                   static_cast<std::size_t>(head_len_ - 1 + std::max(max_block_, head_len_)),
+                   SampleType{0}));
+        head_out_.assign(static_cast<std::size_t>(std::max(max_block_, head_len_)), SampleType{0});
         hp_state_.assign(2, OnePole{});
         lp_state_.assign(2, OnePole{});
         update_send_eq();
@@ -320,23 +328,38 @@ private:
         for (int c = 0; c < 2; ++c)
             std::fill_n(wet_scratch_[static_cast<std::size_t>(c)].begin(), chunk, SampleType{0});
 
-        // Direct-form head: the whole zero-latency claim lives in this loop.
-        // Every tap reads a sample at or before the current one, so the current
-        // block's near-field is complete the moment the block arrives.
+        // Direct-form head: the whole zero-latency claim lives here. Every tap
+        // reads a sample at or before the current one, so the current block's
+        // near-field is complete the moment the block arrives. The window
+        // x[n - head_len + 1 .. n] for the chunk's outputs is made linear
+        // (pointed at in place, or unwrapped once per source channel when it
+        // straddles the ring's end) so each cell is one correlate() call.
+        const std::size_t taps = static_cast<std::size_t>(head_len_);
+        const std::size_t span = taps - 1 + static_cast<std::size_t>(chunk);
         const std::size_t head_base = (history_write_ - static_cast<std::size_t>(chunk)) & mask;
+        const std::size_t window_start = (head_base - (taps - 1)) & mask;
+        const SampleType* window[2] = {nullptr, nullptr};
         for (int cell = 0; cell < cell_count_; ++cell) {
             if (!cell_active(cell)) continue;
             const Cell& k = cells_[static_cast<std::size_t>(cell)];
-            const SampleType* ring = history_[static_cast<std::size_t>(k.src)].data();
-            SampleType* wet = wet_scratch_[static_cast<std::size_t>(k.dst)].data();
-            const SampleType* taps = k.head.data();
-            for (int i = 0; i < chunk; ++i) {
-                const std::size_t n_index = head_base + static_cast<std::size_t>(i);
-                SampleType acc{0};
-                for (int t = 0; t < head_len_; ++t)
-                    acc += taps[t] * ring[(n_index - static_cast<std::size_t>(t)) & mask];
-                wet[i] += acc;
+            const auto src = static_cast<std::size_t>(k.src);
+            if (window[src] == nullptr) {
+                const SampleType* ring = history_[src].data();
+                const std::size_t ring_len = mask + 1;
+                if (window_start + span <= ring_len) {
+                    window[src] = ring + window_start;
+                } else {
+                    SampleType* linear = head_window_[src].data();
+                    const std::size_t first = ring_len - window_start;
+                    std::copy_n(ring + window_start, first, linear);
+                    std::copy_n(ring, span - first, linear + first);
+                    window[src] = linear;
+                }
             }
+            SampleType* wet = wet_scratch_[static_cast<std::size_t>(k.dst)].data();
+            pulp::simd::correlate(window[src], k.head_reversed.data(), head_out_.data(),
+                                  static_cast<std::size_t>(chunk), taps);
+            pulp::simd::add(wet, head_out_.data(), wet, static_cast<std::size_t>(chunk));
         }
         block_cost_ += static_cast<long long>(active_cells_) * head_len_ * chunk * 2;
 
@@ -756,6 +779,7 @@ private:
             for (int i = 0; i < n; ++i)
                 c.head[static_cast<std::size_t>(i)] =
                     static_cast<SampleType>(h[static_cast<std::size_t>(i)]);
+            c.head_reversed.assign(c.head.rbegin(), c.head.rend());
             cells_.push_back(std::move(c));
         };
 
@@ -886,6 +910,10 @@ private:
     int ir_channels_ = 0;
 
     std::vector<std::vector<SampleType>> wet_scratch_;
+    // Unwrapped head windows (one per source channel) and one head output
+    // block, sized in prepare() so render_chunk never allocates.
+    std::vector<std::vector<SampleType>> head_window_;
+    std::vector<SampleType> head_out_;
     std::vector<std::vector<SampleType>> predelay_;
     int predelay_len_ = 1;
     int predelay_write_ = 0;
