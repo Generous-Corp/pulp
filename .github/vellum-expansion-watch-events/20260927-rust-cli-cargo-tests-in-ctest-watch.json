@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260927-rust-cli-cargo-tests-in-ctest-watch",
+  "created_at": "2026-09-28T00:03:25Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record that registering the Rust CLI's full cargo test suite in ctest crosses the chromium-authoring-frontend and design-output-and-packaging selectors through experimental/pulp-rs. The install-time completeness list for the shipped browser_capture runtime is corrected to the 18 files its manifest and the release archive already carry (it only checks presence; the copy was already recursive), and the trace-open loopback server, upgrade test expectations, help fixture and cargo-artifact guard are fixed. No importer, DesignIR schema, browser capture behaviour, renderer, codegen output, packaging step, fixture threshold or Vellum-owned source changes. Registered as watch-only so each family's coverage stays honest about a change that crossed its selector. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "ctest -R 'pulp-rust-cli-(cargo|doc)-tests' (1164 + 6 passed)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

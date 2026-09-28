@@ -930,6 +930,10 @@ fn looks_like_build_artifact_detects_cargo_target() {
     assert!(looks_like_build_artifact(Path::new(
         "/tmp/pulp-validate/experimental/pulp-rs/target/release/deps/pulp_rs-abcd1234"
     )));
+    // The CMake build's cargo target dir, where ctest runs the tests from.
+    assert!(looks_like_build_artifact(Path::new(
+        "/w/pulp/build/experimental/pulp-rs/cargo-target/debug/pulp"
+    )));
     assert!(!looks_like_build_artifact(Path::new("/usr/local/bin/pulp")));
     assert!(!looks_like_build_artifact(Path::new(
         "/opt/pulp/bin/pulp-cpp"

@@ -421,7 +421,10 @@ fn backup_path(p: &Path) -> PathBuf {
 /// install layout).
 #[must_use]
 pub fn looks_like_build_artifact(p: &Path) -> bool {
-    p.components().any(|c| c.as_os_str() == "target")
+    // `cargo-target` is the CMake build's CARGO_TARGET_DIR, which is also
+    // where ctest runs the crate's integration tests from.
+    p.components()
+        .any(|c| c.as_os_str() == "target" || c.as_os_str() == "cargo-target")
 }
 
 /// Pre-flight: refuse to install if the running binary lives under a

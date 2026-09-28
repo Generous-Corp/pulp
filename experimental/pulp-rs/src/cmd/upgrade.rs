@@ -853,7 +853,7 @@ mod tests {
         assert_eq!(v["latest"], "0.78.3");
         assert_eq!(
             v["release_notes_url"],
-            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+            format!("https://github.com/{DEFAULT_REPO}/releases/tag/v0.78.3")
         );
         assert_eq!(v["source"], "cache");
         assert_eq!(fake.calls.get(), 0);
@@ -1013,7 +1013,7 @@ mod tests {
         assert_eq!(cache.latest_version, "0.78.3");
         assert_eq!(
             cache.release_notes_url,
-            "https://github.com/danielraffel/pulp/releases/tag/v0.78.3"
+            format!("https://github.com/{DEFAULT_REPO}/releases/tag/v0.78.3")
         );
         assert_eq!(cache.banner_shown_for_version, "0.78.3");
         assert!(cache.last_check_epoch_sec >= 1);

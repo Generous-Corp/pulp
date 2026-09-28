@@ -985,6 +985,26 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   outside this macOS preflight. Keep secrets in `~/.config/pulp/secrets/`, never
   the repo.
 
+### The Rust CLI's cargo tests run in ctest — all of them
+
+Until 2026-09-27 only two filtered slices (`trace_gpu_analysis`, `stale_cli`)
+ran anywhere in CI: 75 of the crate's 1,200 tests. Five had gone red on main
+unnoticed, and three of those were real defects: `pulp upgrade`'s
+import-design runtime completeness list was 13 of the 18 shipped files,
+`pulp trace open` answered a request that arrived a moment after the
+connection with a 404 (an accepted socket inherits the listener's
+`O_NONBLOCK` on macOS, where a read timeout does nothing), and the help banner
+fixture missed `gpu`. Running them from ctest found a sixth: the
+`pulp upgrade --install` cargo-artifact guard only recognized `target/`, not
+the CMake build's `cargo-target/`, so the guard test fell through to a live
+GitHub API call. `pulp-rust-cli-cargo-tests` now runs every unit and
+integration target (`--lib --bins` plus each globbed `tests/*.rs`), and
+`pulp-rust-cli-doc-tests` the doctests. The one exclusion is
+`trace_gpu_analysis_tool_test`, which fails closed without the SDK-matched
+`trace_processor` and is run by `pulp-rust-gpu-trace-analysis-integration`.
+A new `tests/*.rs` file is picked up at the next configure; a new exclusion
+needs a named reason in `experimental/pulp-rs/CMakeLists.txt`.
+
 ### Rust CLI cutover path convention
 
 Rust CLI commands that spawn an external analyzer over caller-supplied
