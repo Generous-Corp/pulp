@@ -244,10 +244,11 @@
     },
     "canvas2d/save": {
       "status": "supported",
-      "mapsTo": "ctx.save -> canvasSave (Skia/CG canvas state stack).",
+      "mapsTo": "ctx.save -> pending state flush + canvasSave (Skia/CG canvas state stack) + CanvasWidget replay drawing-state snapshot; the shim snapshots its drawing state and its record of sent state.",
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
+        "test/test_canvas2d_call_budget.cpp [call-budget]",
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348. Without save/restore, FilterBank's first ctx.save() threw TypeError and aborted the frame.",
@@ -255,10 +256,11 @@
     },
     "canvas2d/restore": {
       "status": "supported",
-      "mapsTo": "ctx.restore -> canvasRestore.",
+      "mapsTo": "ctx.restore -> canvasRestore; the CanvasWidget replay re-applies drawing state that differs from the matching save on every backend, and the shim restores its drawing state and record of sent state.",
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [
+        "test/test_canvas2d_call_budget.cpp [call-budget]",
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
       "notes": "PR #1348.",

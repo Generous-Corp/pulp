@@ -128,6 +128,11 @@ function CanvasRenderingContext2D(canvasEl) {
     // Sticky direction / filter state caches.
     this._sentDirection = null;
     this._sentFilter = null;
+    // Last solid fill colour, stroke colour and line width sent. A draw
+    // re-sends them only when they differ from what the native canvas holds.
+    this._sentFillColor = null;
+    this._sentStrokeColor = null;
+    this._sentLineWidth = null;
     // JS-side mirror of the current 2D affine transform, tracked by
     // translate / scale / rotate / setTransform / transform and the save /
     // restore stack. The bridge replays draw commands at paint() time, so
@@ -139,7 +144,7 @@ function CanvasRenderingContext2D(canvasEl) {
     //     | b d f |
     //     | 0 0 1 |
     this._currentTransform = [1, 0, 0, 1, 0, 0];
-    // Stack of [_currentTransform, _pathSubpaths] snapshots for save/restore.
+    // Drawing-state snapshots pushed by save() and popped by restore().
     this._stateStack = [];
     // Number of active clip intersections in the current save/restore state.
     // A full-canvas clear can replace the retained native command stream only
@@ -162,14 +167,63 @@ function CanvasRenderingContext2D(canvasEl) {
     // and canvas width/height assignments can both change it after getContext.
     this._pulpLogicalCanvasScale = globalThis.__pulpLogicalCanvasScale__ === true;
     // JS-side mirror of the current path so isPointInPath / isPointInStroke
-    // can answer synchronously via a JS hit test. Each subpath is an array
-    // of [x, y] points appended by moveTo / lineTo; cubic and quadratic
-    // curves are sampled into straight-edge approximations. Arc, arcTo,
+    // can answer synchronously via a JS hit test. Each subpath is a flat
+    // [x0, y0, x1, y1, ...] number array appended by moveTo / lineTo, so a
+    // lineTo costs two pushes rather than a point allocation; cubic and
+    // quadratic curves are sampled into straight-edge approximations. Arc, arcTo,
     // ellipse, and roundRect are bridge-only today and are not mirrored for
     // synchronous hit tests. The bridge owns the canonical SkPath used for
     // fill / stroke / clip; this JS mirror exists only for query methods.
     this._pathSubpaths = [];
 }
+
+// Every `_sent*` cache field. save() snapshots them, restore() puts them back,
+// and a native command-stream replacement clears them.
+CanvasRenderingContext2D._SENT_FIELDS = [
+    "_sentFont", "_sentTextAlign", "_sentTextBaseline",
+    "_sentLineCap", "_sentLineJoin", "_sentMiterLimit",
+    "_sentImageSmoothingEnabled", "_sentImageSmoothingQuality",
+    "_sentGlobalAlpha", "_sentGlobalCompositeOperation",
+    "_sentShadowColor", "_sentShadowBlur", "_sentShadowOffsetX", "_sentShadowOffsetY",
+    "_sentDirection", "_sentFilter",
+    "_sentFillColor", "_sentStrokeColor", "_sentLineWidth"
+];
+// The Canvas2D drawing state that save()/restore() covers (the current path
+// and the transform are handled separately).
+CanvasRenderingContext2D._STATE_FIELDS = [
+    "fillStyle", "strokeStyle", "lineWidth", "lineCap", "lineJoin", "miterLimit",
+    "_lineDash", "_lineDashOffset", "font", "textAlign", "textBaseline",
+    "direction", "globalAlpha", "globalCompositeOperation",
+    "imageSmoothingEnabled", "imageSmoothingQuality", "filter",
+    "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
+    "_activeFillKind", "_activeStrokeKind"
+];
+CanvasRenderingContext2D.prototype._clearSentState = function() {
+    var f = CanvasRenderingContext2D._SENT_FIELDS;
+    for (var i = 0; i < f.length; ++i) this[f[i]] = null;
+};
+
+// Send a solid colour / line width only when the native canvas does not
+// already hold it.
+CanvasRenderingContext2D.prototype._sendFillColor = function(color) {
+    this._fp();
+    if (this._sentFillColor === color) return;
+    if (typeof canvasSetFillColor === "function") canvasSetFillColor(this._id, color);
+    this._sentFillColor = color;
+};
+CanvasRenderingContext2D.prototype._sendStrokeColor = function(color) {
+    this._fp();
+    if (this._sentStrokeColor === color) return;
+    if (typeof canvasSetStrokeColor === "function") canvasSetStrokeColor(this._id, color);
+    this._sentStrokeColor = color;
+};
+CanvasRenderingContext2D.prototype._syncLineWidth = function() {
+    this._fp();
+    var w = this.lineWidth;
+    if (this._sentLineWidth === w) return;
+    if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, w);
+    this._sentLineWidth = w;
+};
 
 CanvasRenderingContext2D.prototype._setBridgeTransform = function(a, b, c, d, e, f) {
     this._fp();
@@ -269,7 +323,7 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         canvasClearGradient(this._id);
     }
     this._activeFillKind = "color";
-    if (typeof canvasSetFillColor === "function") canvasSetFillColor(this._id, String(fs == null ? "" : fs));
+    this._sendFillColor(String(fs == null ? "" : fs));
 };
 
 CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
@@ -280,7 +334,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
     // the solid-fallback below.
     if (ss && ss._kind === "pattern" && typeof canvasSetStrokePattern === "function") {
         canvasSetStrokePattern(this._id, ss._src, ss._tileX, ss._tileY);
-        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._syncLineWidth();
         this._activeStrokeKind = "pattern";
         return;
     }
@@ -293,7 +347,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         var largs = [this._id, lp.x0, lp.y0, lp.x1, lp.y1];
         for (var li = 0; li < ls.length; ++li) { largs.push(ls[li].color); largs.push(ls[li].offset); }
         canvasSetStrokeLinearGradient.apply(null, largs);
-        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._syncLineWidth();
         this._activeStrokeKind = "gradient";
         return;
     }
@@ -303,7 +357,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
             var rargs = [this._id, rp.x0, rp.y0, rp.r0, rp.x1, rp.y1, rp.r1];
             for (var ri = 0; ri < rs.length; ++ri) { rargs.push(rs[ri].color); rargs.push(rs[ri].offset); }
             canvasSetStrokeRadialGradientTwoCircles.apply(null, rargs);
-            if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+            this._syncLineWidth();
             this._activeStrokeKind = "gradient";
             return;
         }
@@ -311,7 +365,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
             var sargs = [this._id, rp.x1, rp.y1, rp.r1];
             for (var si = 0; si < rs.length; ++si) { sargs.push(rs[si].color); sargs.push(rs[si].offset); }
             canvasSetStrokeRadialGradient.apply(null, sargs);
-            if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+            this._syncLineWidth();
             this._activeStrokeKind = "gradient";
             return;
         }
@@ -321,7 +375,7 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         var cargs = [this._id, cp.cx, cp.cy, cp.startAngle];
         for (var ci = 0; ci < cs.length; ++ci) { cargs.push(cs[ci].color); cargs.push(cs[ci].offset); }
         canvasSetStrokeConicGradient.apply(null, cargs);
-        if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+        this._syncLineWidth();
         this._activeStrokeKind = "gradient";
         return;
     }
@@ -347,8 +401,8 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         }
         this._activeStrokeKind = "color";
     }
-    if (typeof canvasSetStrokeColor === "function") canvasSetStrokeColor(this._id, colorStr);
-    if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
+    this._sendStrokeColor(colorStr);
+    this._syncLineWidth();
 };
 
 // Parse the CSS Fonts Module Level 4 `font` shorthand:
@@ -664,7 +718,12 @@ CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
     this._syncFilterState();
     this._syncLineState();
     this._applyStrokeStyle();
-    if (typeof canvasStrokeRect === "function") canvasStrokeRect(this._id, x, y, w, h);
+    if (typeof canvasStrokeRect === "function") {
+        canvasStrokeRect(this._id, x, y, w, h);
+        // The native stroke_rect sets its own line width (1 when the call
+        // carries none), so the canvas no longer holds `lineWidth`.
+        this._sentLineWidth = 1;
+    }
 };
 
 CanvasRenderingContext2D.prototype.clearRect = function(x, y, w, h) {
@@ -701,13 +760,9 @@ CanvasRenderingContext2D.prototype.clearRect = function(x, y, w, h) {
         // Re-seed the current transform and invalidate lazy state caches so
         // subsequent draws faithfully reconstruct the live Canvas2D state.
         this._setBridgeTransform(t[0], t[1], t[2], t[3], t[4], t[5]);
-        this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
-        this._sentLineCap = this._sentLineJoin = this._sentMiterLimit = null;
-        this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
-        this._sentShadowColor = this._sentShadowBlur = null;
-        this._sentShadowOffsetX = this._sentShadowOffsetY = null;
-        this._sentDirection = this._sentFilter = null;
-        this._sentImageSmoothingEnabled = this._sentImageSmoothingQuality = null;
+        this._clearSentState();
+        // Saved snapshots describe native state that no longer exists either.
+        for (var si = 0; si < this._stateStack.length; ++si) this._stateStack[si].sent = null;
         if (typeof canvasSetLineDash === "function") {
             canvasSetLineDash(this._id, this._lineDash || [], this.lineDashOffset || 0);
         }
@@ -726,9 +781,11 @@ CanvasRenderingContext2D.prototype.beginPath = function() {
 };
 
 // A moveTo followed by a run of lineTo calls is by far the most common shape a
-// script draws, and each call was its own JS->native crossing. `moveTo` now
-// opens a pending run instead of emitting, `lineTo` appends to it, and `_fp()`
-// ships the whole run as one `canvasPathPolyline` call.
+// script draws, and each call was its own JS->native crossing. `moveTo` opens a
+// pending run instead of emitting, `lineTo` appends to it, and `_fp()` ships the
+// whole run as one `canvasPathPolyline` call. A later `moveTo` (or `rect`) does
+// not flush: it records where its subpath starts and keeps appending, so a
+// path of many disjoint segments (tick marks, grid lines) still costs one call.
 //
 // The buffer is only ever a deferral, never a reordering: every other method
 // that emits a bridge command calls `_fp()` first, so the command sequence the
@@ -739,50 +796,77 @@ CanvasRenderingContext2D.prototype.beginPath = function() {
 //
 // Only a run this shim opened is coalesced. A `lineTo` with no pending run
 // (spec: it then behaves as `moveTo`, and the C++ path may already be open from
-// `rect()` or an arc) takes the original one-call path unchanged.
+// an arc) takes the original one-call path unchanged.
+//
+// The bridge rejects a batch above 65536 coordinates as a whole, so a run is
+// flushed before it would cross that.
+CanvasRenderingContext2D._MAX_PENDING_COORDS = 65536;
+
 CanvasRenderingContext2D.prototype._fp = function() {
     const pts = this._pendPts;
     if (!pts || pts.length < 2) return;
+    const starts = this._pendStarts;
     this._pendPts = null;
-    if (pts.length === 2) {
+    this._pendStarts = null;
+    if (!starts && pts.length === 2) {
         // A lone moveTo: nothing to batch, and sending a 1-point polyline
         // would cost an array allocation to save nothing.
         if (typeof canvasMoveTo === "function") canvasMoveTo(this._id, pts[0], pts[1]);
         return;
     }
     if (typeof canvasPathPolyline === "function") {
-        canvasPathPolyline(this._id, pts);
+        if (starts) canvasPathPolyline(this._id, pts, starts);
+        else canvasPathPolyline(this._id, pts);
         return;
     }
     // Host without the batched entry point: emit the same commands one at a
     // time so an older runtime still renders correctly.
-    if (typeof canvasMoveTo === "function") canvasMoveTo(this._id, pts[0], pts[1]);
-    if (typeof canvasLineTo === "function") {
-        for (let i = 2; i + 1 < pts.length; i += 2) canvasLineTo(this._id, pts[i], pts[i + 1]);
+    let next = 0;
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+        const point = i >> 1;
+        const opens = point === 0 || (starts && next < starts.length && starts[next] === point);
+        if (opens) {
+            if (point !== 0) ++next;
+            if (typeof canvasMoveTo === "function") canvasMoveTo(this._id, pts[i], pts[i + 1]);
+        } else if (typeof canvasLineTo === "function") {
+            canvasLineTo(this._id, pts[i], pts[i + 1]);
+        }
     }
+};
+
+// Open a new subpath in the pending run, flushing first when it is full.
+// `coords` is the subpath's flat point list.
+CanvasRenderingContext2D.prototype._openPendingSubpath = function(coords) {
+    let pts = this._pendPts;
+    if (pts && pts.length + coords.length > CanvasRenderingContext2D._MAX_PENDING_COORDS) {
+        this._fp();
+        pts = null;
+    }
+    if (!pts) {
+        this._pendPts = coords;
+        return;
+    }
+    (this._pendStarts || (this._pendStarts = [])).push(pts.length >> 1);
+    for (let i = 0; i < coords.length; ++i) pts.push(coords[i]);
 };
 
 CanvasRenderingContext2D.prototype.moveTo = function(x, y) {
-    this._fp();
-    this._pendPts = [+x, +y];
+    const nx = +x, ny = +y;
+    this._openPendingSubpath([nx, ny]);
     // Open a new subpath on the JS mirror. moveTo always starts a fresh
     // subpath per the HTML5 path-construction spec.
-    this._pathSubpaths.push([[+x, +y]]);
+    this._pathSubpaths.push([nx, ny]);
 };
 
 CanvasRenderingContext2D.prototype.lineTo = function(x, y) {
-    if (this._pendPts) {
-        this._pendPts.push(+x, +y);
-    } else if (typeof canvasLineTo === "function") {
-        canvasLineTo(this._id, x, y);
-    }
-    // Append to the current subpath. Spec: if no subpath exists, lineTo
-    // behaves as moveTo.
-    if (this._pathSubpaths.length === 0) {
-        this._pathSubpaths.push([[+x, +y]]);
+    const pts = this._pendPts;
+    if (pts && pts.length < CanvasRenderingContext2D._MAX_PENDING_COORDS) {
+        pts.push(+x, +y);
     } else {
-        this._pathSubpaths[this._pathSubpaths.length - 1].push([+x, +y]);
+        if (pts) this._fp();
+        if (typeof canvasLineTo === "function") canvasLineTo(this._id, x, y);
     }
+    this._pathMirrorLineTo(x, y);
 };
 
 CanvasRenderingContext2D.prototype.closePath = function() {
@@ -794,10 +878,7 @@ CanvasRenderingContext2D.prototype.closePath = function() {
     var subs = this._pathSubpaths;
     if (subs.length > 0) {
         var last = subs[subs.length - 1];
-        if (last.length > 0) {
-            var first = last[0];
-            last.push([first[0], first[1]]);
-        }
+        if (last.length >= 2) last.push(last[0], last[1]);
     }
 };
 
@@ -823,6 +904,25 @@ CanvasRenderingContext2D.prototype.stroke = function() {
     if (typeof canvasStrokePath === "function") canvasStrokePath(this._id);
 };
 
+// Send state assigned since the last draw before a save(), so the native
+// snapshot holds it. Otherwise a value assigned ahead of a
+// save/draw/restore loop is sent inside every iteration and reverted by every
+// restore(). Only cached state is flushed: unchanged values cost nothing, and
+// gradient and pattern styles, which are never cached, stay lazy.
+CanvasRenderingContext2D.prototype._flushCachedState = function() {
+    this._syncGlobalState();
+    this._syncShadowState();
+    this._syncFilterState();
+    this._syncLineState();
+    this._syncLineWidth();
+    this._syncDirectionState();
+    this._syncTextState();
+    var fs = this.fillStyle;
+    if (!(fs && fs._kind)) this._applyFillStyle();
+    var ss = this.strokeStyle;
+    if (!(ss && ss._kind)) this._applyStrokeStyle();
+};
+
 // ── Canvas2D state-stack methods (save/restore) ───────────────────────────
 // FilterBank and most non-trivial Canvas2D code uses save()/restore() to
 // scope transforms and clip regions per draw subroutine. Without these
@@ -831,52 +931,54 @@ CanvasRenderingContext2D.prototype.stroke = function() {
 // drawing commands record to the bridge.
 CanvasRenderingContext2D.prototype.save = function() {
     this._fp();
+    this._flushCachedState();
     if (typeof canvasSave === "function") canvasSave(this._id);
-    // Push the current JS-mirrored transform + path snapshot so
-    // getTransform / isPointInPath stay correct across save/restore. The
-    // bridge's save() captures the C++-side state; we capture the JS-side
-    // mirror here. Cloning protects against later mutation of the live
-    // arrays inside `_currentTransform` and `_pathSubpaths`.
-    var clonedSubpaths = [];
-    for (var sp = 0; sp < this._pathSubpaths.length; ++sp) {
-        clonedSubpaths.push(this._pathSubpaths[sp].slice());
-    }
+    // Snapshot the drawing state, the record of what the native canvas
+    // holds, and the JS-side transform / path / clip mirrors. The native
+    // replay reverts its own drawing state on restore() on every backend, so
+    // restore() can put the `_sent*` record back instead of discarding it
+    // and re-sending every setter before the next draw.
+    var state = {}, sent = {};
+    var sf = CanvasRenderingContext2D._STATE_FIELDS;
+    for (var i = 0; i < sf.length; ++i) state[sf[i]] = this[sf[i]];
+    var cf = CanvasRenderingContext2D._SENT_FIELDS;
+    for (var k = 0; k < cf.length; ++k) sent[cf[k]] = this[cf[k]];
+    // Later path appends only ever extend the last subpath, so a shallow copy
+    // plus that subpath's length is a complete snapshot of the path mirror.
+    var subs = this._pathSubpaths;
     this._stateStack.push({
+        state: state,
+        sent: sent,
         transform: this._currentTransform.slice(),
-        subpaths: clonedSubpaths,
+        subpaths: subs.slice(),
+        lastSubpathLength: subs.length > 0 ? subs[subs.length - 1].length : 0,
         clipDepth: this._clipDepth
     });
-    // Locally invalidate the bridge-state caches that save()/restore()
-    // snapshots on the C++ side and that the JS shim cannot observe across
-    // stack boundaries. miterLimit and imageSmoothing sentinels are not
-    // reset here; callers that depend on those values across save/restore
-    // should force a setter write before the next affected draw.
-    this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
-    this._sentLineCap = this._sentLineJoin = null;
-    this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
-    this._sentShadowColor = this._sentShadowBlur = null;
-    this._sentShadowOffsetX = this._sentShadowOffsetY = null;
-    this._sentDirection = this._sentFilter = null;
 };
 
 CanvasRenderingContext2D.prototype.restore = function() {
     this._fp();
     if (typeof canvasRestore === "function") canvasRestore(this._id);
-    // Pop the JS-mirrored transform + path snapshot. Spec: restoring with
-    // no matching save is a no-op (we leave the live state intact in that
-    // case rather than clearing it).
-    if (this._stateStack.length > 0) {
-        var snap = this._stateStack.pop();
-        this._currentTransform = snap.transform;
-        this._pathSubpaths = snap.subpaths;
-        this._clipDepth = snap.clipDepth || 0;
+    // Spec: restoring with no matching save is a no-op.
+    if (this._stateStack.length === 0) return;
+    var snap = this._stateStack.pop();
+    var sf = CanvasRenderingContext2D._STATE_FIELDS;
+    for (var i = 0; i < sf.length; ++i) this[sf[i]] = snap.state[sf[i]];
+    if (snap.sent) {
+        var cf = CanvasRenderingContext2D._SENT_FIELDS;
+        for (var k = 0; k < cf.length; ++k) this[cf[k]] = snap.sent[cf[k]];
+    } else {
+        // The native command stream was replaced while this snapshot was on
+        // the stack, so nothing it recorded is still on the canvas.
+        this._clearSentState();
     }
-    this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
-    this._sentLineCap = this._sentLineJoin = null;
-    this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
-    this._sentShadowColor = this._sentShadowBlur = null;
-    this._sentShadowOffsetX = this._sentShadowOffsetY = null;
-    this._sentDirection = this._sentFilter = null;
+    this._currentTransform = snap.transform;
+    var subs = snap.subpaths;
+    if (subs.length > 0 && subs[subs.length - 1].length !== snap.lastSubpathLength) {
+        subs[subs.length - 1] = subs[subs.length - 1].slice(0, snap.lastSubpathLength);
+    }
+    this._pathSubpaths = subs;
+    this._clipDepth = snap.clipDepth || 0;
 };
 
 // ── Canvas2D transform methods ────────────────────────────────────────────
@@ -968,26 +1070,25 @@ CanvasRenderingContext2D.prototype.transform = function(a, b, c, d, e, f) {
 // arcTo, ellipse, and roundRect are recorded only in the bridge path today,
 // so synchronous hit tests for those segments remain approximate/incomplete.
 CanvasRenderingContext2D.prototype._pathMirrorMoveTo = function(x, y) {
-    this._pathSubpaths.push([[+x, +y]]);
+    this._pathSubpaths.push([+x, +y]);
 };
+// Spec: a lineTo with no subpath behaves as moveTo.
 CanvasRenderingContext2D.prototype._pathMirrorLineTo = function(x, y) {
-    if (this._pathSubpaths.length === 0) {
-        this._pathSubpaths.push([[+x, +y]]);
-    } else {
-        this._pathSubpaths[this._pathSubpaths.length - 1].push([+x, +y]);
-    }
+    var subs = this._pathSubpaths;
+    if (subs.length === 0) subs.push([+x, +y]);
+    else subs[subs.length - 1].push(+x, +y);
 };
-CanvasRenderingContext2D.prototype._pathMirrorLastPoint = function() {
+// The current subpath, or null when the path is empty.
+CanvasRenderingContext2D.prototype._pathMirrorLast = function() {
     var subs = this._pathSubpaths;
     if (subs.length === 0) return null;
     var last = subs[subs.length - 1];
-    if (last.length === 0) return null;
-    return last[last.length - 1];
+    return last.length >= 2 ? last : null;
 };
 CanvasRenderingContext2D.prototype._pathMirrorCubic = function(c1x, c1y, c2x, c2y, x, y) {
-    var p0 = this._pathMirrorLastPoint();
-    if (!p0) { this._pathMirrorMoveTo(x, y); return; }
-    var x0 = p0[0], y0 = p0[1];
+    var last = this._pathMirrorLast();
+    if (!last) { this._pathMirrorMoveTo(x, y); return; }
+    var x0 = last[last.length - 2], y0 = last[last.length - 1];
     var STEPS = 16;
     for (var i = 1; i <= STEPS; ++i) {
         var t = i / STEPS;
@@ -998,9 +1099,9 @@ CanvasRenderingContext2D.prototype._pathMirrorCubic = function(c1x, c1y, c2x, c2
     }
 };
 CanvasRenderingContext2D.prototype._pathMirrorQuad = function(cx, cy, x, y) {
-    var p0 = this._pathMirrorLastPoint();
-    if (!p0) { this._pathMirrorMoveTo(x, y); return; }
-    var x0 = p0[0], y0 = p0[1];
+    var last = this._pathMirrorLast();
+    if (!last) { this._pathMirrorMoveTo(x, y); return; }
+    var x0 = last[last.length - 2], y0 = last[last.length - 1];
     var STEPS = 16;
     for (var i = 1; i <= STEPS; ++i) {
         var t = i / STEPS;
@@ -1046,15 +1147,12 @@ CanvasRenderingContext2D.prototype.rect = function(x, y, w, h) {
     // back to the start point so the resulting subpath behaves like a
     // closed rectangle for fill()/stroke()/clip().
     if (typeof canvasMoveTo !== "function" || typeof canvasLineTo !== "function") return;
-    // Route through the pending-run buffer so the rectangle ships as one
-    // batched call, and so a following lineTo still appends to this subpath.
-    this._fp();
-    this._pendPts = [+x, +y, x + w, +y, x + w, y + h, +x, y + h, +x, +y];
-    this._pathMirrorMoveTo(x, y);
-    this._pathMirrorLineTo(x + w, y);
-    this._pathMirrorLineTo(x + w, y + h);
-    this._pathMirrorLineTo(x, y + h);
-    this._pathMirrorLineTo(x, y);
+    // Route through the pending-run buffer so the rectangle joins the
+    // current batched call, and so a following lineTo still appends to this
+    // subpath.
+    var coords = [+x, +y, x + w, +y, x + w, y + h, +x, y + h, +x, +y];
+    this._openPendingSubpath(coords);
+    this._pathSubpaths.push([+x, +y, x + w, +y, x + w, y + h, +x, y + h, +x, +y]);
 };
 
 CanvasRenderingContext2D.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, anticlockwise) {
@@ -1155,11 +1253,11 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
 // this JS approximation.
 CanvasRenderingContext2D.prototype._pointInSubpath = function(subpath, x, y) {
     var inside = false;
-    var n = subpath.length;
+    var n = subpath.length >> 1;
     if (n < 2) return false;
     for (var i = 0, j = n - 1; i < n; j = i++) {
-        var xi = subpath[i][0], yi = subpath[i][1];
-        var xj = subpath[j][0], yj = subpath[j][1];
+        var xi = subpath[2 * i], yi = subpath[2 * i + 1];
+        var xj = subpath[2 * j], yj = subpath[2 * j + 1];
         // Standard ray-cast: edge crosses horizontal ray iff yi and yj
         // straddle y, and the x-intersect is to the right of x.
         var intersect = ((yi > y) !== (yj > y))
@@ -1202,9 +1300,9 @@ CanvasRenderingContext2D.prototype.isPointInStroke = function(/* path? */ x, y) 
     var subs = this._pathSubpaths;
     for (var i = 0; i < subs.length; ++i) {
         var sp = subs[i];
-        for (var j = 1; j < sp.length; ++j) {
-            var ax = sp[j - 1][0], ay = sp[j - 1][1];
-            var bx = sp[j][0],     by = sp[j][1];
+        for (var j = 2; j + 1 < sp.length; j += 2) {
+            var ax = sp[j - 2], ay = sp[j - 1];
+            var bx = sp[j],     by = sp[j + 1];
             // Closest-point-on-segment distance.
             var dx = bx - ax, dy = by - ay;
             var len2 = dx * dx + dy * dy;
@@ -1246,6 +1344,8 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     var mw = __pulpCanvasPositiveFiniteOrZero(maxWidth);
     if (typeof canvasFillText === "function") {
         canvasFillText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color), mw);
+        // The native fill_text sets the fill colour it carries.
+        this._sentFillColor = String(color);
     }
 };
 
