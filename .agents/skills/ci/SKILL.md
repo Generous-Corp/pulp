@@ -1602,6 +1602,15 @@ downstream step is unexpectedly skipped, read the upstream step's LOG, not
 its API conclusion. The pr-fast `ctest-unique-names` guard now catches the
 original cause on the PR head.
 
+## A PR head's full-suite failure is announced, not hidden behind continue-on-error
+
+On a pull request the `Test (non-Windows)` step is continue-on-error, so a
+failed full suite showed as a green step whose only trace was a skipped
+receipt (4 of 6 full-suite PR heads on 2026-09-28). The step after it now
+emits `::warning title=PR-head full suite failed (non-gating)::<failing
+tests>` plus a job-summary line whenever `steps.ctest.outcome == 'failure'`.
+Read the OUTCOME, never the API conclusion, for any continue-on-error step.
+
 ## An App-opened PR's run has an empty `pull_requests`; receipts bind through the commit
 
 GitHub leaves `pull_requests: []` on workflow runs of App-opened pull

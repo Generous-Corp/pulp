@@ -2236,6 +2236,34 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
+      # On a pull request the Test step is continue-on-error, so a failed full
+      # suite shows as a green step whose only trace is a skipped receipt.
+      # Name it: the failing tests in a warning annotation and a job-summary
+      # line, so "why no receipt" is readable on the PR. Non-gating.
+      - name: Announce a failed PR-head full suite (non-gating)
+        if: >-
+          always() && github.event_name == 'pull_request' && runner.os != 'Windows'
+          && steps.ctest.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          names="$(python3 - "$junit" <<'PY' || true
+          import sys, xml.etree.ElementTree as ET
+          try:
+              root = ET.parse(sys.argv[1]).getroot()
+          except Exception as exc:  # unreadable report: say so, never fail the step
+              print(f"(JUnit unreadable: {exc})"); raise SystemExit
+          failed = sorted({c.get("name") or "" for c in root.iter("testcase")
+                           if any(x.tag in ("failure", "error") for x in c)} - {""})
+          head = ", ".join(failed[:12]) + (f" (+{len(failed) - 12} more)" if len(failed) > 12 else "")
+          print(f"{len(failed)} failing: {head}" if failed else "no failing testcase in the report (ctest exit was nonzero)")
+          PY
+          )"
+          echo "::warning title=PR-head full suite failed (non-gating)::${names} — no receipt will be issued; the merge group validates in full"
+          printf '### PR-head full suite: FAILED (non-gating)\n\n%s\n\nNo protected receipt is issued from this run; the merge group will validate in full.\n\n' \
+            "$names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true
