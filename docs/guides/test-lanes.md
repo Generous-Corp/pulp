@@ -78,6 +78,17 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   than the code. They still run on push, on the nightly, and on
   `cross-platform-check`. A timing test that must gate belongs in a dedicated
   cap=1 perf lane, not on the merge path.
+- **Tests the pull request reaches** — after the `pr-fast` tier, the PR-head
+  `macos` job runs the ctests `pulp affected` selects for the pull request's
+  base→head diff (`tools/ci/pr_head_affected_tests.py`), and a failure fails the
+  required check. A week of merge-group failures showed most were a PR's own
+  test, one its diff plainly reaches. It never widens to the full suite: a docs,
+  skills or workflow-only diff, or a diff the projection cannot focus, selects
+  nothing extra. `tools/cmake/**` adds the `cmake-*` fixtures, and the wide
+  non-native tier's manifest, classifier or any `test/` CMake registration adds
+  `wide-non-native-selftest`. Extra time is capped at ten minutes (batches stop
+  starting; the rest are listed as skipped), and the merge group still runs
+  everything.
 - **`pr-fast`** — additive, never exclusive: a static repository contract
   (lint, drift, registry-completeness, generated-manifest check) that also runs
   on the pull request head, where the rest of the suite does not. Members are
