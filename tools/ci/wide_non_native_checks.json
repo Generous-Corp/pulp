@@ -15,6 +15,10 @@
       "argv": ["{repo}/tools/scripts/ctest_label_exclusion_guard.py"]
     },
     {
+      "name": "install-sha256sums-current",
+      "argv": ["{repo}/tools/scripts/test_install_sha256sums.py"]
+    },
+    {
       "name": "forced-restore-lint",
       "argv": ["{repo}/tools/scripts/forced_restore_lint.py", "--root", "{repo}"]
     },
