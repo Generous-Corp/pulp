@@ -137,11 +137,34 @@ bool VisualizationBridge::poll() {
     const auto available_at_entry = capture_.available_frames();
     const auto dropped = dropped_capture_frames_.load(std::memory_order_acquire);
 
-    const auto entry_frames = config_.max_frames_per_poll > 0
+    auto entry_frames = config_.max_frames_per_poll > 0
         ? std::min<std::uint64_t>(
               available_at_entry,
               static_cast<std::uint64_t>(config_.max_frames_per_poll))
         : available_at_entry;
+
+    // Latest-window policy: a display wants the newest audio, not an old hop.
+    // A backlog beyond one analysis window is stale, so discard it and restart
+    // the STFT on the newest window; that poll publishes the current spectrum
+    // and empties the capture buffer before it can overflow. Only the final
+    // fft_size frames reach the STFT, so the restart costs one FFT per
+    // channel; extra frames kept for the waveform bypass it. A smaller backlog
+    // that still exceeds max_frames_per_poll is consumed whole, so the pacing
+    // bound never lets the consumer fall further behind.
+    std::uint64_t stft_skip_frames = 0;
+    if (config_.backlog_policy == VisualizationBacklogPolicy::latest_window) {
+        const auto window_frames = static_cast<std::uint64_t>(
+            std::max(config_.fft_size, waveform_length_));
+        if (available_at_entry > window_frames) {
+            (void)capture_.drain(available_at_entry - window_frames);
+            for (auto& stft : channel_stfts_) stft.reset();
+            entry_frames = window_frames;
+            stft_skip_frames = window_frames
+                - static_cast<std::uint64_t>(config_.fft_size);
+        } else {
+            entry_frames = available_at_entry;
+        }
+    }
 
     bool spectrum_changed = false;
     bool waveform_changed = false;
@@ -156,14 +179,20 @@ bool VisualizationBridge::poll() {
         (void)capture_.read(destination, static_cast<std::uint64_t>(chunk));
         remaining_frames -= static_cast<std::uint64_t>(chunk);
 
+        const int stft_offset = static_cast<int>(std::min<std::uint64_t>(
+            stft_skip_frames, static_cast<std::uint64_t>(chunk)));
+        stft_skip_frames -= static_cast<std::uint64_t>(stft_offset);
         for (std::size_t ch = 0; ch < channel_stfts_.size(); ++ch) {
             float* samples = consumer_channels_[ch];
             for (int i = 0; i < chunk; ++i) {
                 if (!std::isfinite(samples[i])) samples[i] = 0.0f;
                 samples[i] = std::clamp(samples[i], -1.0e6f, 1.0e6f);
             }
-            spectrum_changed = channel_stfts_[ch].push_samples(samples, chunk)
-                || spectrum_changed;
+            if (stft_offset < chunk) {
+                spectrum_changed = channel_stfts_[ch].push_samples(
+                    samples + stft_offset, chunk - stft_offset)
+                    || spectrum_changed;
+            }
         }
 
         if (config_.capture_waveform && waveform_length_ > 0) {

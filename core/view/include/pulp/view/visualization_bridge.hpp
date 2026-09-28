@@ -70,6 +70,26 @@ struct WaveformData {
     std::uint64_t dropped_frames = 0;
 };
 
+/// How poll() treats captured audio it has not analyzed yet.
+enum class VisualizationBacklogPolicy {
+    /// Analyze every captured frame in order, at most max_frames_per_poll per
+    /// call. A consumer that polls slower than audio arrives accumulates a
+    /// backlog; once the capture buffer overflows, blocks are dropped, the
+    /// next poll resets the analysis, and nothing is published until a full
+    /// fft_size of new audio arrives.
+    in_order,
+    /// Display-oriented: every poll consumes the whole backlog, treating
+    /// max_frames_per_poll as unbounded, so the published spectrum trails the
+    /// newest captured sample by less than one hop. When the backlog exceeds
+    /// one analysis window (max(fft_size, waveform_length)), the stale frames
+    /// are discarded and the STFT restarts on the newest window, which costs
+    /// one FFT per channel and publishes immediately. A skip is intentional:
+    /// it is not counted in dropped_frames and does not change the epoch.
+    /// Draining every poll also keeps the capture buffer from overflowing
+    /// unless a single poll gap exceeds its capacity.
+    latest_window,
+};
+
 /// Configuration for the visualization bridge.
 struct VisualizationConfig {
     // STFT
@@ -107,6 +127,14 @@ struct VisualizationConfig {
     // to this bound so a valid callback can always be published atomically.
     // Set this to the host's offline/variable-block maximum before configure().
     int max_callback_frames = 4096;
+
+    // Backlog handling for a consumer that polls slower than audio arrives.
+    // A spectrum display that polls from its frame tick should usually select
+    // latest_window; in_order preserves every hop for consumers that need
+    // continuous analysis history. Declared last so positional aggregate
+    // initialization of the earlier fields keeps its meaning.
+    VisualizationBacklogPolicy backlog_policy =
+        VisualizationBacklogPolicy::in_order;
 };
 
 /// Central visualization bridge: a fixed multichannel audio tap plus a

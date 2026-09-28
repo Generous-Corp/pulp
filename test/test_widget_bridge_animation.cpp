@@ -792,6 +792,78 @@ TEST_CASE("WidgetBridge frame drain resumes on the poll after a service drain",
     REQUIRE(draw_count(engine) == after_service + 1);
 }
 
+TEST_CASE("WidgetBridge load_script data pushes defer rAF to the frame once the pump is live",
+          "[view][bridge][frame-pump]") {
+    // A host that pushes data into the page with load_script several times per
+    // tick must not run the page's self-rearming render loop once per push:
+    // each extra drain is a full draw outside the frame.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    int repaint_requests = 0;
+    bridge.set_repaint_callback([&] { ++repaint_requests; });
+
+    load_self_rearming_raf(bridge);
+    REQUIRE(draw_count(engine) >= 1);
+    REQUIRE_FALSE(bridge.frame_pump_live());
+    host_idle_pump(bridge);
+    REQUIRE(bridge.frame_pump_live());
+
+    constexpr int kPushesPerTick = 4;
+    for (int tick = 0; tick < 6; ++tick) {
+        const int before = draw_count(engine);
+        const int repaints_before = repaint_requests;
+        for (int push = 0; push < kPushesPerTick; ++push)
+            bridge.load_script("var pushed_value = " + std::to_string(push) + ";");
+        // The pushes landed but drew nothing, and each one kept a frame
+        // requested so the deferred callback cannot stall.
+        REQUIRE(engine.evaluate("pushed_value").getWithDefault<int>(-1)
+                == kPushesPerTick - 1);
+        REQUIRE(draw_count(engine) == before);
+        REQUIRE(repaint_requests > repaints_before);
+
+        host_idle_pump(bridge);
+        const int drawn = draw_count(engine) - before;
+        REQUIRE(drawn >= 1);
+        REQUIRE(drawn == 1);
+    }
+
+    // A frame the pushed script itself requests runs on the next tick.
+    bridge.load_script(
+        "var pushed_frame = 0;"
+        "window.requestAnimationFrame(function () { pushed_frame += 1; });");
+    REQUIRE(engine.evaluate("pushed_frame").getWithDefault<int>(-1) == 0);
+    host_idle_pump(bridge);
+    REQUIRE(engine.evaluate("pushed_frame").getWithDefault<int>(-1) == 1);
+}
+
+TEST_CASE("WidgetBridge load_script flushes rAF before any frame pump runs",
+          "[view][bridge][frame-pump]") {
+    // Control for the deferral: headless callers and a first load with no
+    // frame pump rely on load_script materializing rAF work synchronously.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    load_self_rearming_raf(bridge);
+    REQUIRE(draw_count(engine) == 1);
+    for (int push = 0; push < 3; ++push) {
+        const int before = draw_count(engine);
+        bridge.load_script("var pushed_value = 1;");
+        REQUIRE(draw_count(engine) == before + 1);
+    }
+    // poll_async_results is not a frame pump; it leaves load_script eager.
+    bridge.poll_async_results();
+    REQUIRE_FALSE(bridge.frame_pump_live());
+    const int before = draw_count(engine);
+    bridge.load_script("var pushed_value = 2;");
+    REQUIRE(draw_count(engine) == before + 1);
+}
+
 TEST_CASE("WidgetBridge execAsync preserves JSON-heavy results", "[view][bridge][async]") {
     ScriptEngine engine;
     View root;
