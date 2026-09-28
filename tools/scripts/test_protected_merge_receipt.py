@@ -343,6 +343,8 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             base_sha=self.base,
             head_sha=self.head,
             output=Path(self.temp.name) / "downloaded.json",
+            entry_pr=None,
+            workflow_path=".github/workflows/build.yml",
         )
 
     def test_download_requires_one_authenticated_exact_run_artifact(self) -> None:
@@ -378,6 +380,87 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             authority = receipt.download(self.download_args())
         self.assertEqual(authority, {"run_id": "42", "artifact_id": "7"})
         self.assertEqual(json.loads(self.download_args().output.read_text()), issued)
+
+    def _commit_pull_fixture(self):
+        """An App-opened PR's run: `pull_requests` is empty, so the verifier must
+        bind the run to the pull request through the commit."""
+        issued = receipt.issue(self.issue_args())
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w") as bundle:
+            bundle.writestr("receipt.json", receipt.canonical_json(issued) + b"\n")
+        archive = archive_buffer.getvalue()
+        artifact = {
+            "id": 7, "name": self.download_args().artifact_name, "expired": False,
+            "digest": f"sha256:{hashlib.sha256(archive).hexdigest()}",
+            "archive_download_url": "https://objects.test/receipt.zip", "workflow_run": {"id": 42},
+        }
+        run = {
+            "name": "Build and Test", "event": "pull_request", "conclusion": "success",
+            "head_sha": self.head, "path": ".github/workflows/build.yml", "pull_requests": [],
+            "repository": {"full_name": "Generous-Corp/pulp"},
+            "head_repository": {"full_name": "Generous-Corp/pulp"},
+        }
+        pr = {
+            "number": 9001, "state": "open",
+            "head": {"sha": self.head, "repo": {"full_name": "Generous-Corp/pulp"}},
+            "base": {"sha": self.base, "repo": {"full_name": "Generous-Corp/pulp"}},
+        }
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = archive
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        return issued, artifact, run, pr, opener
+
+    def _download_by_commit(self, artifact, run, pulls, opener, entry_pr=9001):
+        args = self.download_args()
+        args.entry_pr = entry_pr
+        args.workflow_path = ".github/workflows/build.yml"
+        with mock.patch.object(receipt.urllib.request, "build_opener", return_value=opener), mock.patch.object(
+            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, run, pulls]
+        ):
+            return receipt.download(args)
+
+    def test_download_binds_an_app_opened_run_through_the_commit(self) -> None:
+        issued, artifact, run, pr, opener = self._commit_pull_fixture()
+        authority = self._download_by_commit(artifact, run, [pr], opener)
+        self.assertEqual(authority, {"run_id": "42", "artifact_id": "7"})
+        self.assertEqual(json.loads(self.download_args().output.read_text()), issued)
+
+    def test_commit_pull_lookup_refuses_every_adversarial_shape(self) -> None:
+        """Each shape must refuse with a `commit-pull lookup:` reason of its own."""
+        _, artifact, run, pr, opener = self._commit_pull_fixture()
+        fork = json.loads(json.dumps(pr)); fork["head"]["repo"]["full_name"] = "someone/pulp"
+        closed = dict(pr, state="closed")
+        moved_head = json.loads(json.dumps(pr)); moved_head["head"]["sha"] = "0" * 40
+        other_pr = dict(pr, number=9002)
+        cases = [
+            ("fork", run, [fork], 9001, "fork"),
+            ("two PRs on one sha", run, [pr, other_pr], 9001, "2 pull requests"),
+            ("no PR on the sha", run, [], 9001, "0 pull requests"),
+            ("closed PR", run, [closed], 9001, "not open"),
+            ("head_sha mismatch", run, [moved_head], 9001, "head is not the run's head"),
+            ("different workflow file", dict(run, path=".github/workflows/other.yml"), [pr], 9001, "not from .github/workflows/build.yml"),
+            ("entry mismatch", run, [pr], 9002, "not the merge-group entry"),
+            ("no entry named", run, [pr], None, "no merge-group entry named"),
+        ]
+        for label, run_variant, pulls, entry, needle in cases:
+            with self.subTest(label):
+                with self.assertRaisesRegex(receipt.ReceiptError, needle):
+                    self._download_by_commit(artifact, run_variant, pulls, opener, entry_pr=entry)
+        # A failed run never reaches the commit lookup: the shared preamble refuses first.
+        with self.subTest("failed run"):
+            with self.assertRaisesRegex(receipt.ReceiptError, "not the exact successful pull request"):
+                self._download_by_commit(artifact, dict(run, conclusion="failure"), [pr], opener)
+
+    def test_listed_pull_request_must_be_the_merge_group_entry_when_named(self) -> None:
+        issued, artifact, run, pr, opener = self._commit_pull_fixture()
+        listed = dict(run, pull_requests=[{"number": 9001, "head": {"sha": self.head}, "base": {"sha": self.base}}])
+        args = self.download_args(); args.entry_pr = 9002; args.workflow_path = ".github/workflows/build.yml"
+        with mock.patch.object(receipt.urllib.request, "build_opener", return_value=opener), mock.patch.object(
+            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, listed]
+        ):
+            with self.assertRaisesRegex(receipt.ReceiptError, "not the merge-group entry"):
+                receipt.download(args)
 
     def test_download_rejects_ambiguous_or_expired_evidence(self) -> None:
         artifact = {
