@@ -1942,6 +1942,27 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # SHADOW MEASUREMENT (tools/ci/binary_identity_shadow.py): per-binary
+      # receipt reuse needs test binaries that are byte-identical across VMs.
+      # In a merge group, hash this build's test executables and compare them
+      # with the PR head's receipt (when one exists) path by path; annotate
+      # identical/differing. Skips nothing. Read the aggregate with
+      # `binary_identity_shadow.py report`; it says "waiting on receipts" until
+      # n >= 20 tree-identical groups have been compared.
+      - name: Binary identity vs PR-head receipt (shadow, merge group)
+        if: >-
+          github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          RECEIPT_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci/binary_identity_shadow.py measure \
+            --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+            --merge-sha "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
+            --token "$RECEIPT_TOKEN" --work-dir "$RUNNER_TEMP/binary-identity" || true
+
       - name: Ccache stats
         if: always()
         run: |
@@ -2217,6 +2238,52 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
+      # SHADOW MODE (tools/ci/affected_tests_shadow.py): after the full run,
+      # compute the tests the build graph says this merge group's change could
+      # affect and annotate two counts: how many it would have selected, and
+      # how many tests FAILED outside that set. The second must read zero over
+      # a long window before selection could ever gate anything; script-driven
+      # tests (undeclared inputs) count as affected whenever any script surface
+      # changed, and a CMake change selects everything. Nothing is skipped.
+      - name: Affected tests (shadow, merge group)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        run: |
+          base="$(git rev-parse --verify 'HEAD^1' 2>/dev/null)" || base=""
+          if [ -z "$base" ]; then
+            echo "affected-tests shadow: no verdict, merge commit has no first parent"
+            exit 0
+          fi
+          python3 tools/ci/affected_tests_shadow.py \
+            --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+            --base "$base" --head HEAD \
+            --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+
+      # SHADOW MODE (tools/ci/flake_exoneration_shadow.py): when the merge
+      # group's ctest FAILED, ask whether each failing test would have been
+      # exonerated as a known flake (OCCURS_ON_OTHER_CLS: failed on >= 2 other
+      # heads in the last 24 h AND passes on main's latest validated tree) and
+      # annotate the answer. It changes no outcome; the job still fails. The
+      # annotations are the evidence a future exoneration decision would stand
+      # on: exonerated-only failures ÷ merge-group failures, with unique-cause
+      # failures > 0 and the base-red streak count unchanged as controls.
+      - name: Flake exoneration (shadow, merge group)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.ctest.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci/flake_exoneration_shadow.py \
+            --repo "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" --hours 24 \
+            --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || true
+
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true

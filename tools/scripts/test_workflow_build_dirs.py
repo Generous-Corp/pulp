@@ -384,6 +384,57 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
         self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
 
+    def test_affected_tests_shadow_runs_after_ctest_and_never_selects(self) -> None:
+        """The merge-group macOS job annotates the graph's affected-test set
+        after the full ctest run; it is advisory (continue-on-error, `|| true`)
+        and the ctest step itself takes no input from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Affected tests (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.ctest.outcome != 'skipped'"):
+            self.assertIn(needle, cond)
+        run = str(step["run"])
+        self.assertIn("affected_tests_shadow.py", run)
+        self.assertIn("--base \"$base\"", run)
+        self.assertIn("ctest-evidence/selected.json", run)
+        ctest = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
+        self.assertNotIn("affected_tests_shadow", str(ctest["run"]))
+
+    def test_flake_exoneration_shadow_runs_only_on_failed_merge_group_ctest(self) -> None:
+        """The exoneration shadow reads the failed run's JUnit and other runs'
+        artifacts, annotates, and changes nothing: it is continue-on-error,
+        gated on a failed ctest outcome in a merge group, and the ctest step
+        takes no input from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Flake exoneration (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.ctest.outcome == 'failure'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(step["env"]["PULP_GH_CLI"], "gh")
+        run = str(step["run"])
+        self.assertIn("flake_exoneration_shadow.py", run)
+        self.assertIn("--hours 24", run)
+        ctest = workflow_named_step(BUILD_WORKFLOW, "build", "Test (non-Windows)")
+        self.assertNotIn("flake_exoneration", str(ctest["run"]))
+
+    def test_binary_identity_shadow_measures_after_a_successful_merge_group_build(self) -> None:
+        """The identity measurement hashes the merge group's own build and
+        compares it with the PR head's receipt; it is advisory and neither the
+        build nor the test step reads anything from it."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Binary identity vs PR-head receipt (shadow, merge group)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.build.outcome == 'success'"):
+            self.assertIn(needle, cond)
+        run = str(step["run"])
+        self.assertIn("binary_identity_shadow.py measure", run)
+        self.assertIn('--merge-sha "$GITHUB_SHA"', run)
+        for name in ("Build", "Test (non-Windows)"):
+            self.assertNotIn("binary_identity", str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"]))
+
     def test_sanitizer_jobs_use_distinct_build_dirs(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
 
