@@ -33,7 +33,7 @@ TEST_CASE("every control clamps to its published range", "[fet-compressor][contr
                            1e-12));
 }
 
-TEST_CASE("the float and double instantiations agree", "[fet-compressor]") {
+TEST_CASE("FetCompressor: the float and double instantiations agree", "[fet-compressor]") {
     FetCompressorT<float> f;
     FetCompressorT<double> d;
     f.prepare(kSr);

@@ -737,7 +737,10 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     //   - the user lacks `actions:read` for the repo
     // because none of those mean the user did anything wrong; the
     // existing `gh` row already reports the gh tool's health.
-    {
+    // Filtered BEFORE any `gh` call: the two network round-trips cost seconds,
+    // and every `--only` caller (including `pulp status`'s broker line) would
+    // otherwise pay them for a row it discards.
+    if (doctor_check_matches_only_filter(only_filter, "RELEASE_BOT_TOKEN secret")) {
         auto repo_result = pulp::platform::exec(
             "gh", {"repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"});
         auto repo_slug = repo_result.exit_code == 0

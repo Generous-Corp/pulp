@@ -729,7 +729,7 @@ TEST_CASE("10 latency is the lookahead exactly, and the delay line owns all of i
 
 // ── float/double parity ───────────────────────────────────────────────────
 
-TEST_CASE("the float and double instantiations agree", "[vca-compressor]") {
+TEST_CASE("VcaCompressor: the float and double instantiations agree", "[vca-compressor]") {
     VcaCompressorT<float> f;
     VcaCompressorT<double> d;
     for (auto* c : {&f}) (void)c;

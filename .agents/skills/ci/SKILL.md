@@ -626,6 +626,27 @@ consequences worth knowing before you debug:
   `python3 tools/ci/source_selftests.py write --build-dir build`. The protected
   merge receipt pins the same label string as `ctest_gate_args.py`
   (`REQUIRED_LABEL_EXCLUDE`), so change both or receipts stop being reused.
+- `gates.sh` now runs this lane scoped to your diff
+  (`source_selftests.py run --changed-from "$BASE"`): an entry runs when its own
+  script changed or its source names a changed file (full path, a distinctive
+  basename, or a changed module's stem); a change to the lane itself runs all of
+  them. Before that, a `.githooks/pre-push` edit passed `gates.sh` and still
+  failed `prepush-gate-output` on the required context. Measured 2026-09-27 on m3:
+  a hook + `governed-build.sh` diff selects 9 of 140 entries (57 s); a wider
+  tools/** diff 27 (138 s); the whole lane is ~190 s. The selection is a textual
+  heuristic that over-selects rather than under-selects, and the required lane
+  still runs everything. `PULP_SKIP_SOURCE_SELFTESTS=1` skips it.
+- The same `gates.sh` block also runs every `python3 <script>` line of
+  `.github/workflows/workflow-lint.yml` (`source_selftests.py run --workflow ...
+  --changed-from "$BASE"`), read from the workflow file so the list cannot drift.
+  Those contracts (e.g. `test_ci_throughput_workflows.py`, which pins ctest
+  properties in `test/cmake/*.cmake`) ran nowhere else before merge, so a
+  ctest-property change passed `gates.sh` and turned workflow-lint red on main.
+  A checker handed directories (`shell_portability_check.py tools/ci ...`) is
+  selected by any change inside them. All 69 locally runnable suites take ~13 s;
+  `test_generated_version_bump_check.py` is listed in `WORKFLOW_LOCAL_SKIPS` and
+  printed as NOT CHECKED, because on a full-history checkout it runs past 600 s
+  (CI's shallow clone does its whole step in ~105 s).
 
 ### A green ctest job proves nothing about a label its event excludes
 
@@ -1538,6 +1559,20 @@ and after the Build step. No per-job line means the instrument failed (exit
 2), never that the cache hit; the cumulative line stays for continuity.
 Typical healthy job: misses 13–315 of ~10k calls.
 
+## A `continue-on-error` step's conclusion is not its outcome
+
+The jobs API reports `conclusion: success` for a continue-on-error step that
+FAILED; only `outcome` (visible to later steps' `if:`) says it failed. This
+is how the PR-head receipt issuer failed on every full-suite run for days
+("CTest selection lists a test twice", 21 duplicated ctest names) while the
+API read success and the Publish step was merely "skipped": 12 runs should
+have issued, 0 did, 0 annotations named why. Two rules follow. A
+continue-on-error step must announce its own failure (`::warning` with the
+reason plus a job-summary line; the receipt step now does). And when a
+downstream step is unexpectedly skipped, read the upstream step's LOG, not
+its API conclusion. The pr-fast `ctest-unique-names` guard now catches the
+original cause on the PR head.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
@@ -1808,6 +1843,17 @@ Two traps when running these by hand:
 
 `PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
 run as ctests on the required gate.
+
+## A PR you opened with `shipyard pr` already carries its title, body and attribution
+
+Shipyard 0.221.1 and later build the title and body from every non-merge
+commit in `origin/main..HEAD`, oldest first, skipping version-bump commits. The
+body is never empty, and a later `feat` outranks a `fix` in the title. Pulp's
+`.shipyard/config.toml` sets `[pr.body] attribution`, so the Claude Code line is
+appended once by Shipyard. Do not PATCH it in afterwards, or it appears twice.
+An older Shipyard took both from the tip commit only: a tip commit with no body
+gave an empty body, and a tip merge of main gave a "Merge remote-tracking branch"
+title. If you see either, check `shipyard --version` before editing the PR.
 
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 

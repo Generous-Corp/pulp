@@ -313,7 +313,7 @@ TEST_CASE("Stagger is off by default and detunes the notch set when engaged",
             Phaser::worst_case_gain() + 1e-3);
 }
 
-TEST_CASE("The float and double instantiations agree on the physics",
+TEST_CASE("Phaser: the float and double instantiations agree on the physics",
           "[signal][phaser][parity]") {
     // `PhaserStages64` exists so an analysis path can measure a 200 dB null.
     // `PhaserStages` is what ships in a plugin. They must place their notches

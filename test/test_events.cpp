@@ -1420,7 +1420,7 @@ TEST_CASE("InterprocessConnectionServer rejects malformed socket endpoints",
     REQUIRE_FALSE(server.is_running());
 }
 
-TEST_CASE("ChildProcessManager empty lifecycle operations are no-ops",
+TEST_CASE("ChildProcessManager empty lifecycle operations are no-ops (events)",
           "[events][child_process][issue-642]") {
     ChildProcessManager manager;
 

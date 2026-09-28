@@ -11,7 +11,6 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/binding_diagnostics.hpp>

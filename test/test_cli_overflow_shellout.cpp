@@ -3,7 +3,7 @@
 using namespace pulp_test_cli;
 namespace fs = std::filesystem;
 
-TEST_CASE("pulp overflow validates non-mutating operator arguments", "[cli][shellout][overflow]") {
+TEST_CASE("pulp overflow validates non-mutating operator arguments (overflow shell-out)", "[cli][shellout][overflow]") {
     if (!binary_exists()) {
         SKIP("pulp not built");
     }

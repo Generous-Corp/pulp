@@ -90,7 +90,10 @@ What to know before trusting it:
 shared ccache and starts every build cold; create it under
 `$PULP_WORKTREES_ROOT` or beside the primary checkout. A second `pulp build`
 into a tree that is still building exits 75 and names the running build:
-attach to that one instead of relaunching.
+attach to that one instead of relaunching. `pulp loop` takes the same lock for
+each rebuild, so a loop and a manual `pulp build` in one tree cannot race; a
+rebuild that finds another build holding the tree reports 75 and the loop keeps
+watching.
 
 ## Step 1 — AOT analyze the consumer's bundle
 
@@ -155,7 +158,7 @@ FOCUSED: building 3/1708 targets affected by your diff - run 'pulp build --all' 
 - **Focused green is not landing green.** Pre-push and Shipyard still build
   `all`; run `pulp build --all && pulp test --all` before `shipyard pr`.
 
-A fresh source-checkout configure leaves the example projects off (`-DPULP_BUILD_EXAMPLES=OFF`) and pins Ninja + Release, like `pulp build`. When the prototype lives under `examples/`, pass `pulp loop --examples` so the first configure (or a reconfigure of a tree that has examples off) includes it.
+A fresh source-checkout configure leaves the example projects off (`-DPULP_BUILD_EXAMPLES=OFF`) and pins Ninja + Release, like `pulp build`. When the prototype lives under `examples/`, pass `pulp loop --examples` so the first configure (or a reconfigure of a tree that has examples off) includes it. An existing tree an older CLI left on Makefiles, Debug, or examples ON is migrated on the first `pulp loop`: its cache moves to `build/.pulp-pre-migration/`, one `Reconfiguring … (was: …)` line prints, and the tree configures fresh (a one-time full rebuild). A prototype under `examples/` must therefore pass `--examples` on every run, or the migration turns examples back off; `PULP_KEEP_BUILD_CONFIG=1` keeps a tree as it is.
 
 `--no-watch` flips state and exits without entering the watch loop — this is what tests use, and it's also useful when you want the marker but plan to drive builds yourself.
 
