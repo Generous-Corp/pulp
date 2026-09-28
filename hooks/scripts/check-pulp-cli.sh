@@ -53,42 +53,47 @@ pulp_checkout_root() {
     return 0
 }
 
-# Print "MAJOR MINOR" of the first M.N.P triple in stdin, or nothing.
-major_minor() {
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | awk -F. '{print $1, $2}'
+# Print "MAJOR MINOR PATCH" of the first M.N.P triple in stdin, or nothing.
+version_triple() {
+    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | awk -F. '{print $1, $2, $3}'
 }
 
-# Case 1b: the `pulp` on PATH is far older than the checkout it runs in.
-# Its build defaults (generator, build type, examples, parallelism) are
-# baked into the binary, so it configures a current checkout the way its
-# own release did. Newer CLIs refuse this themselves; this check covers the
-# CLIs installed before that guard existed.
+# Case 1b: the `pulp` on PATH is older than the checkout it runs in, by any
+# amount. Its build defaults (generator, build type, examples, parallelism)
+# are baked into the binary, so it configures the checkout the way its own
+# release did. CLIs that carry the run-the-checkout's-CLI guard re-run
+# through ./build/pulp themselves; this banner is what a host with an older
+# CLI sees, and the auto-update below is what fixes it.
 stale_cli_banner() {
-    local root cli_path checkout_mm cli_mm limit
+    local root cli_path checkout_v cli_v
     root="$(pulp_checkout_root "$PULP_CHECK_CWD")"
     [ -n "$root" ] || return 0
-    checkout_mm="$(sed -n '/project([[:space:]]*[Pp][Uu][Ll][Pp]/,/)/p' "$root/CMakeLists.txt" 2>/dev/null |
-        grep -E 'VERSION[[:space:]]+[0-9]' | major_minor)"
-    [ -n "$checkout_mm" ] || return 0
+    checkout_v="$(sed -n '/project([[:space:]]*[Pp][Uu][Ll][Pp]/,/)/p' "$root/CMakeLists.txt" 2>/dev/null |
+        grep -E 'VERSION[[:space:]]+[0-9]' | version_triple)"
+    [ -n "$checkout_v" ] || return 0
     cli_path="$(command -v pulp)"
-    cli_mm="$(pulp version 2>/dev/null | head -n 1 | major_minor)"
-    [ -n "$cli_mm" ] || return 0
-    limit="${PULP_STALE_CLI_LIMIT:-50}"
-    case "$limit" in ''|*[!0-9]*) limit=50 ;; esac
+    cli_v="$(pulp version 2>/dev/null | head -n 1 | version_triple)"
+    [ -n "$cli_v" ] || return 0
 
-    local cmaj cmin pmaj pmin behind
-    read -r cmaj cmin <<<"$cli_mm"
-    read -r pmaj pmin <<<"$checkout_mm"
+    local cmaj cmin cpat pmaj pmin ppat behind
+    read -r cmaj cmin cpat <<<"$cli_v"
+    read -r pmaj pmin ppat <<<"$checkout_v"
     if [ "$pmaj" -gt "$cmaj" ]; then
         behind="a newer major release"
-    elif [ "$pmaj" -eq "$cmaj" ] && [ $((pmin - cmin)) -gt "$limit" ]; then
+    elif [ "$pmaj" -lt "$cmaj" ]; then
+        return 0
+    elif [ "$pmin" -gt "$cmin" ]; then
         behind="$((pmin - cmin)) releases"
+    elif [ "$pmin" -eq "$cmin" ] && [ "$ppat" -gt "$cpat" ]; then
+        behind="a patch release"
     else
         return 0
     fi
+    cmin="$cmin.$cpat"
+    pmin="$pmin.$ppat"
 
     local message
-    message="[pulp] STALE CLI: \`pulp\` on PATH ($cli_path) is v$cmaj.$cmin.x, $behind behind this checkout (v$pmaj.$pmin.x at $root).
+    message="[pulp] STALE CLI: \`pulp\` on PATH ($cli_path) is v$cmaj.$cmin, $behind behind this checkout (v$pmaj.$pmin at $root).
 It configures builds with its own old defaults (Makefiles, no build type, examples ON, a serial cmake --build), so \`pulp build\` here is slower and differently shaped than the checkout expects.
 Update it:  curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 Or build this checkout's own CLI and use ./build/pulp:
@@ -104,6 +109,10 @@ Or build this checkout's own CLI and use ./build/pulp:
 # Case 1: pulp already on PATH.
 if command -v pulp >/dev/null 2>&1; then
     stale_cli_banner || true
+    # Keep the installed CLI at the latest release (cached, backgrounded).
+    if [ "$PULP_CHECK_MODE" = "--session-start" ]; then
+        bash "$(dirname "$0")/pulp-cli-autoupdate.sh" || true
+    fi
     exit 0
 fi
 

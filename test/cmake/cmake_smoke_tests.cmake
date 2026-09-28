@@ -841,6 +841,12 @@ if(UNIX)
     add_test(NAME check-pulp-cli-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_check_pulp_cli_hook.sh)
     set_tests_properties(check-pulp-cli-hook PROPERTIES TIMEOUT 15)
+    # pulp-cli-autoupdate.sh — the SessionStart CLI auto-update. Hermetic
+    # (stub curl and installer in a throwaway HOME); includes the case that
+    # proves the session never waits on the network.
+    add_test(NAME pulp-cli-autoupdate-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_cli_autoupdate.sh)
+    set_tests_properties(pulp-cli-autoupdate-hook PROPERTIES TIMEOUT 60)
 
     # inject-claude-prefs.sh — the SessionStart hook that reads
     # claude.send_user_file from ~/.pulp/config.toml and injects the
