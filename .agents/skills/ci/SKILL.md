@@ -6141,8 +6141,10 @@ starving the RT thread.)
 starving the RT thread.)
 
 **Scheduling classes live in ONE module: `tools/scripts/ctest_scheduling_policy.py`.**
-Weighted `PROCESSORS 8` suites, `browser`-locked Chrome tests, and long tests
-that carry a `COST` and at most four slots are listed there. Two checks import
+Weighted `PROCESSORS 8` suites, serial-first tests (`RUN_SERIAL` plus a COST
+above every other test, so they run alone at the START while every slot is
+free), `browser`-locked Chrome tests, and long tests that carry a `COST` and at
+most four slots are listed there. Two checks import
 it: `test_ci_throughput_workflows.py` reads the manifests' source (runs in
 `workflow-lint`, which is NOT a required check, so a PR can merge with it red),
 and `ctest-scheduling-contract` reads a configured build on the gate. Change a
@@ -6150,8 +6152,10 @@ test's `PROCESSORS` / `RUN_SERIAL` / lock / `COST` by moving its name between
 classes in that module, never by editing only one check's expectations. Before
 landing a scheduling change, look at `workflow-lint` on the PR as well as the
 required contexts. A full-width reservation (`PROCESSORS` >= ctest `-j`, or
-`RUN_SERIAL`) can only start once every other test has finished, so on the
-gate it ran at the end, alone: keep it for suites that truly need the whole VM.
+`RUN_SERIAL`) can only start when every slot is free: without the top COST it
+waits for the parallel phase to drain and runs alone at the end. Keep isolation
+where the evidence needs it (the real-browser suite failed 4 of 20 merge groups
+when co-scheduled) and move it to the front with COST rather than removing it.
 
 The required `macos` context comes directly from the native macOS matrix child
 on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore

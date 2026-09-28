@@ -51,7 +51,6 @@ QUALITY_WEIGHTED_SUITES = frozenset({
 })
 
 BROWSER_LOCK = "browser"
-RESERVATION_ENV = "PULP_BROWSER_CAPTURE_RESERVED_CORES"
 BROWSER_SUITE = "pulp-browser-capture-node-integration"
 BROWSER_LIFECYCLE = "pulp-browser-capture-process-lifecycle"
 
@@ -64,8 +63,20 @@ def row(name, companion=None, optional=False):
     return {"name": name, "companion": companion, "optional": optional}
 
 
+# Tests that must have the VM to themselves: RUN_SERIAL, and a COST above every
+# other test so ctest starts them first, while every slot is free, rather than
+# after the parallel phase drains. Co-scheduled beside other tests the
+# real-browser suite's Chrome launches timed out or were killed before the
+# guardian took custody in 4 of 20 merge groups on 6- and 12-vCPU VMs, against
+# none in 77 runs alone; the lifecycle file also failed an attempt co-scheduled.
+SERIAL_FIRST_TESTS = (
+    row(BROWSER_SUITE, companion="pulp-browser-capture-node-unit"),
+    row(BROWSER_LIFECYCLE, companion="pulp-browser-capture-node-unit"),
+)
+
 # Tests that launch a real Chrome (directly, or through the importer), or that
-# collided with one: the `browser` RESOURCE_LOCK, never RUN_SERIAL.
+# collided with one: the `browser` RESOURCE_LOCK. Only SERIAL_FIRST_TESTS may
+# also be RUN_SERIAL.
 BROWSER_TESTS = (
     row(BROWSER_SUITE, companion="pulp-browser-capture-node-unit"),
     row(BROWSER_LIFECYCLE, companion="pulp-browser-capture-node-unit"),
@@ -82,12 +93,12 @@ BROWSER_TESTS = (
 # co-scheduled on the gate it runs 52-57 s against a 300 s budget.
 LONG_TESTS = (
     row("sample-region-compat-baseline", optional=True),
-    row(BROWSER_SUITE, companion="pulp-browser-capture-node-unit"),
     row("cmake-control-sdk-consumer", optional=True),
     row("gpu-trace-overhead-acceptance-selftest"),
     row("gpu-first-visible-role-producers-selftest"),
     row("combined-installer-selftest", optional=True),
 )
+
 
 def weighted_suites():
     """Every registration that must carry PROCESSORS 8."""
@@ -95,12 +106,22 @@ def weighted_suites():
             | QUALITY_WEIGHTED_SUITES)
 
 
-def consistency_errors(weighted=None, browser=None, long=None):
+def serial_first_names():
+    return {r["name"] for r in SERIAL_FIRST_TESTS}
+
+
+def consistency_errors(weighted=None, browser=None, long=None, serial_first=None):
     """Names that sit in two classes that cannot both hold."""
     weighted = weighted_suites() if weighted is None else set(weighted)
     browser = {r["name"] for r in BROWSER_TESTS} if browser is None else set(browser)
     long = {r["name"] for r in LONG_TESTS} if long is None else set(long)
+    serial_first = serial_first_names() if serial_first is None else set(serial_first)
     errors = []
+    for name in sorted(serial_first & long):
+        errors.append(f"{name}: RUN_SERIAL first and a long test that must share "
+                      f"the VM")
+    for name in sorted(serial_first & weighted):
+        errors.append(f"{name}: RUN_SERIAL first and weighted PROCESSORS 8")
     for name in sorted(weighted & long):
         errors.append(f"{name}: weighted PROCESSORS 8 and a long test that must "
                       f"start early with at most {MAX_LONG_TEST_PROCESSORS} slots")
