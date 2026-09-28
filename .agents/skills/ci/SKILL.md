@@ -655,7 +655,20 @@ consequences worth knowing before you debug:
   not fail. A new failing test in that suite, a suite absent on the base, a
   timeout, or output with no nameable failing tests still fails, so the label is
   never a way to hide a branch-caused red. The re-run cost ~2 min for one suite
-  on a full checkout (mostly the worktree checkout itself).
+  on a full checkout (mostly the worktree checkout itself). A suite whose
+  failures cannot be named counts as pre-existing only when it fails with the
+  same output on the base, paths and timings aside.
+- Two more lanes cover ctest-registered Python contracts. The whole `pr-fast`
+  tier runs (`--ctest-label pr-fast`): from `build/`'s registrations when it is
+  configured, otherwise parsed from `test/cmake/*.cmake` (73 of 95 members run
+  without a build; the rest need `${CMAKE_BINARY_DIR}` and print NOT CHECKED),
+  about 15 s. Every other ctest that runs a checkout Python script
+  (`--ctest-python`, 122 of them) runs when the diff can reach it. A contract
+  that walks a directory (`rglob`, `os.walk`) is selected by any change under a
+  directory its source names; that is how `wide-non-native-selftest`, which
+  reads every `test/**/*.cmake` and runs only in the merge group, is picked for
+  a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
+  `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED.
 
 ### A green ctest job proves nothing about a label its event excludes
 

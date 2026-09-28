@@ -477,7 +477,11 @@ fi
 # required `Enforce version & skill sync`) and every `python3 <script>` line in
 # .github/workflows/workflow-lint.yml. A pre-push hook edit broke
 # prepush-gate-output the first way; a ctest-property change broke
-# test_ci_throughput_workflows.py on main the second way. Run the entries the
+# test_ci_throughput_workflows.py on main the second way. Two more lanes cover
+# the ctest-registered Python contracts: the pr-fast tier runs whole (it is a
+# few seconds of static checks), and every other ctest that runs a checkout
+# Python script runs when the diff can reach it; that is the class the merge
+# group alone used to catch (wide-non-native-selftest). Run the entries the
 # diff can plausibly reach, selected by source_selftests.py; the workflow list
 # is read from the workflow file itself, so the two cannot diverge. A change to
 # a lane runs all of it. A failing suite is re-run on the merge-base; when every
@@ -485,16 +489,23 @@ fi
 # fail this script, so a red main is not chased as the branch's fault. A new
 # failing test inside that suite still fails. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
 if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
-    for src_lane in manifest workflow-lint; do
+    for src_lane in manifest workflow-lint pr-fast ctest-python; do
         echo "" >&2
         src_lane_args=()
-        if [ "$src_lane" = "workflow-lint" ]; then
-            [ -f "$ROOT/.github/workflows/workflow-lint.yml" ] || continue
-            echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
-            src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml")
-        else
-            echo "▸ source-only selftests (diff-scoped; required on Enforce version & skill sync)" >&2
-        fi
+        case "$src_lane" in
+            workflow-lint)
+                [ -f "$ROOT/.github/workflows/workflow-lint.yml" ] || continue
+                echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
+                src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml") ;;
+            pr-fast)
+                echo "▸ ctest pr-fast tier (whole tier; from build/ when configured, else the manifests)" >&2
+                src_lane_args=(--ctest-label pr-fast --build-dir "$ROOT/build") ;;
+            ctest-python)
+                echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
+                src_lane_args=(--ctest-python) ;;
+            *)
+                echo "▸ source-only selftests (diff-scoped; required on Enforce version & skill sync)" >&2 ;;
+        esac
         src_selftest_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-source-selftests.XXXXXX")"
         if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run ${src_lane_args[@]+"${src_lane_args[@]}"} \
                 --changed-from "$BASE" --label-base-failures >"$src_selftest_log" 2>&1; then
