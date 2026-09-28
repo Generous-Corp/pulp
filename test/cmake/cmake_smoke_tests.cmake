@@ -861,6 +861,13 @@ if(UNIX)
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_worktree_lineage_hook.sh)
     set_tests_properties(inject-worktree-lineage-hook PROPERTIES TIMEOUT 15)
 
+    # SessionStart warning when the injected CLAUDE.md / AGENTS.md is not
+    # origin/main's. Hermetic: builds its own upstream + clone fixtures. Every
+    # silent case is paired with a speaking case on the same fixture.
+    add_test(NAME inject-claude-md-drift-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_claude_md_drift_hook.sh)
+    set_tests_properties(inject-claude-md-drift-hook PROPERTIES TIMEOUT 30)
+
     # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
     # hand-rolling a tool the registry already lists. Hermetic (synthetic tool
     # payloads). Asserts it fires on the real incident's signature and, just as

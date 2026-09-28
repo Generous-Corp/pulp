@@ -93,6 +93,7 @@ The plugin includes hooks that run automatically:
 - **docs-reminder** — When you modify files in `core/`, `examples/`, or `tools/cli/`, reminds you to update documentation manifests
 - **cli-plugin-sync** — When you modify the CLI or MCP server, reminds you to check if the plugin commands and skills need matching updates
 - **inject-claude-prefs** (`SessionStart`) — Reads `claude.send_user_file` from `~/.pulp/config.toml` (default **on**) and, when enabled, tells the agent to surface generated image/file artifacts with the `SendUserFile` tool so they embed in the Claude app instead of being printed as a bare path. Toggle with `pulp config set claude.send_user_file off` (and `on` to re-enable).
+- **inject-claude-md-drift** (`SessionStart`, wired in the project's `.claude/settings.json` and `.codex/hooks.json`) — The `CLAUDE.md` / `AGENTS.md` in an agent's context is read from the launching checkout's working tree, so a checkout that has not moved for days hands every session a contract `main` has since rewritten. This hook compares that working-tree copy with the locally fetched `origin/main` and, only when they differ, says what the copy is (this checkout's committed copy and how far behind, a stale committed revision, or a local edit) and prints `git show origin/main:CLAUDE.md`. Silent when they match; never fetches; a no-op outside a checkout or in a clone that has never fetched `origin/main`.
 
 ### MCP server
 
