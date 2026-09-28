@@ -202,6 +202,36 @@ class CheckModeTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("missing from list: gamma", proc.stdout)
 
+    def test_only_tracked_paths_are_inputs(self) -> None:
+        """A build directory inside the checkout or an untracked file must not
+        become an input: the list would then depend on where it was generated."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.git_repo(repo)
+            inv = repo.inventory()
+            build_inside = repo.root / "build-here"; build_inside.mkdir()
+            write(repo.root, "tools/scripts/untracked_helper.py", "u = 1\n")  # exists, not committed
+            inv["tests"].append({"name": "drift-self", "command": ["/usr/bin/python3", f"{repo.root}/tools/scripts/test_mod.py",
+                                                                    "--repo-root", str(repo.root), "--build-dir", str(build_inside),
+                                                                    f"{repo.root}/tools/scripts/untracked_helper.py"], "properties": []})
+            lst = sti.build_list(inv, repo.root)
+            self.assertEqual(lst["tests"]["drift-self"]["inputs"],
+                             ["docs/status/alpha.yaml", "tools/scripts/alpha_lib.py", "tools/scripts/test_mod.py"])
+
+    def test_missing_entry_blocks_only_when_the_change_touches_its_script(self) -> None:
+        """A test present only in another platform's inventory shares directory
+        inputs with everything; touching that directory must not block."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/new_tool.py", "n = 1\n"); self.g("add", "-A"); self.g("commit", "-q", "-m", "pr touches tools/scripts")
+            inv = repo.inventory()
+            inv["tests"].append({"name": "linux-only", "command": ["/usr/bin/python3", f"{repo.root}/tools/scripts/test_alpha.py", f"{repo.root}/tools/scripts"], "properties": []})
+            proc = self.run_tool(repo, "--check", "--base", "base-ref", inventory=inv)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("missing from list: linux-only", proc.stdout)   # advisory, not blocking
+
     def test_unreadable_inventory_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp))

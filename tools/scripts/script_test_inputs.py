@@ -64,6 +64,26 @@ def _rel(path: Path, root: Path) -> str | None:
         return None
 
 
+def tracked_paths(root: Path) -> set[str]:
+    """Repo-relative paths git tracks. Only these can be inputs: an untracked
+    file (a build directory inside the checkout, a generated file) would make
+    the list depend on the environment that generated it."""
+    try:
+        out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    return {p.decode("utf-8", "replace") for p in out.split(b"\0") if p}
+
+
+def is_tracked(rel: str, tracked: set[str]) -> bool:
+    if not tracked:
+        return True  # not a git checkout (tests): keep the existence rule
+    if rel in tracked:
+        return True
+    prefix = rel.rstrip("/") + "/"
+    return rel not in (".", "") and any(t.startswith(prefix) for t in tracked)
+
+
 class Walker:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
@@ -239,7 +259,8 @@ def inputs_for(test: dict, root: Path) -> dict | None:
         for cand in (Path(a), wd / a):
             if cand.is_absolute() and w._in_repo(cand):
                 seen.add(cand)
-    rels = sorted({r for r in (_rel(p, root) for p in seen) if r})
+    tracked = tracked_paths(root)
+    rels = sorted({r for r in (_rel(p, root) for p in seen) if r and r != "." and is_tracked(r, tracked)})
     return {"kind": kind, "entry": _rel(entry, root), "inputs": rels}
 
 
@@ -357,7 +378,18 @@ def main(argv: list[str]) -> int:
     # script or an old/new input) blocks; the rest is reported as advisory.
     base = None if a.full else resolve_base(root, a.base)
     changed = changed_files(root, base) if base else None
-    blocking = [pr for pr in problems if changed is None or touched_by(changed, pr[2])]
+    # A missing entry is this change's to add only when the change touches the
+    # test's own script: a test absent from every macOS inventory (a Linux-only
+    # registration) can never be in a macOS-written list, and a shared
+    # directory input must not turn that into a red on every unrelated PR.
+    def owns(kind: str, name: str, paths: set[str]) -> bool:
+        if changed is None:
+            return True
+        if kind == "missing from list":
+            entry = current["tests"][name].get("entry") or ""
+            return bool(entry) and entry in changed
+        return touched_by(changed, paths)
+    blocking = [pr for pr in problems if owns(*pr)]
     advisory = [pr for pr in problems if pr not in blocking]
     scope = f"diff-scoped against {base}" if base else "full compare (no base resolved)"
     if advisory:
