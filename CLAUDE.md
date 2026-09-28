@@ -1090,7 +1090,7 @@ tools/scripts/confirm_failure.sh \
   --break "perl -0pi -e 's/policy\.priority/0/'" \
   --build-dir build --target pulp-test-synthesiser \
   --test ./build/test/pulp-test-synthesiser
-# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE
+# 0 CONFIRMED · 1 NOT CONFIRMED (the test does not cover it) · 2 INCONCLUSIVE; Python: --python --test "python3 …" (purges/bypasses .pyc)
 ```
 
 **Do not run it by hand with `cp`/`.bak` and `touch`.** Restoring or editing a
