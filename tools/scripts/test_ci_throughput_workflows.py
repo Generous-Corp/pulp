@@ -14,6 +14,20 @@ import tempfile
 import unittest
 
 import verify_example_validation_inventory as validator_inventory
+from ctest_scheduling_policy import (
+    BROWSER_LIFECYCLE,
+    BROWSER_LOCK,
+    BROWSER_SUITE,
+    LONG_TESTS,
+    MAX_LONG_TEST_PROCESSORS,
+    NON_DEVICE_WEIGHTED_SUITES,
+    QUALITY_WEIGHTED_SUITES,
+    RESERVATION_ENV,
+    SPLIT_CORE_AUDIO_SERIAL_SUITES,
+    WEIGHTED_CORE_AUDIO_SERIAL_SUITES,
+    consistency_errors,
+    weighted_suites,
+)
 
 try:
     import yaml
@@ -41,32 +55,6 @@ CORE_AUDIO_SERIAL_SUITES = {
         "pulp-test-standalone-audio-inspector",
     ),
 }
-WEIGHTED_CORE_AUDIO_SERIAL_SUITES = {
-    "pulp-test-audio",
-    "pulp-test-standalone-apply-config",
-    "pulp-test-standalone-audio-inspector",
-}
-SPLIT_CORE_AUDIO_SERIAL_SUITES = {
-    "pulp-test-audio",
-    "pulp-test-standalone-audio-inspector",
-}
-NON_DEVICE_WEIGHTED_SUITES = (
-    "pulp-test-standalone-editor-chrome",
-    "pulp-test-standalone-audio-capture-wav",
-    "pulp-test-standalone-audio-capture-rolling-wav",
-    "pulp-test-standalone-transport-midi",
-    "pulp-test-screenshot-capture",
-)
-QUALITY_WEIGHTED_SUITES = {
-    "agent-capability-manifest-selftest",
-    "agent-capability-rederive-selftest",
-    "gpu-dpr-v2-evidence-selftest",
-    "gpu-dpr-runner-selftest",
-    "gpu-first-visible-external-adapter-selftest",
-    "gpu-first-visible-role-producers-selftest",
-    "gpu-health-cpu-only-configure",
-}
-
 def load_workflow(path: pathlib.Path) -> dict:
     if yaml is None:
         raise unittest.SkipTest("PyYAML unavailable; workflow-lint enforces YAML contracts")
@@ -540,13 +528,16 @@ class ShipyardTopologyContractTests(unittest.TestCase):
 
 
 class CTestIsolationContractTests(unittest.TestCase):
-    def test_browser_process_lifecycle_is_split_and_run_serial(self) -> None:
+    def test_browser_suites_share_a_lock_instead_of_the_machine(self) -> None:
+        # The lifecycle file stays split out of the unit aggregate; its old
+        # failure was a collision with the real-browser suite, which the shared
+        # lock prevents without RUN_SERIAL holding every other test off the VM.
         manifest = (
             ROOT / "test" / "cmake" / "design_import_tool_cli_tests.cmake"
         ).read_text(encoding="utf-8")
         lifecycle = re.search(
-            r"add_test\(NAME pulp-browser-capture-process-lifecycle.*?"
-            r"set_tests_properties\(pulp-browser-capture-process-lifecycle "
+            rf"add_test\(NAME {BROWSER_LIFECYCLE}.*?"
+            rf"set_tests_properties\({BROWSER_LIFECYCLE} "
             r"PROPERTIES(?P<properties>.*?)\)",
             manifest,
             re.S,
@@ -558,7 +549,10 @@ class CTestIsolationContractTests(unittest.TestCase):
             r"\$\{CMAKE_SOURCE_DIR\}/tools/import-design/browser_capture/"
             r"browser_process\.test\.mjs\)",
         )
-        self.assertRegex(lifecycle.group("properties"), r"\bRUN_SERIAL\s+TRUE\b")
+        self.assertNotRegex(lifecycle.group("properties"), r"\bRUN_SERIAL\b")
+        self.assertRegex(
+            lifecycle.group("properties"), rf"\bRESOURCE_LOCK\s+{BROWSER_LOCK}\b"
+        )
         self.assertRegex(lifecycle.group("properties"), r"\bTIMEOUT\s+60\b")
 
         unit = re.search(
@@ -570,18 +564,52 @@ class CTestIsolationContractTests(unittest.TestCase):
         self.assertNotIn("browser_process.test.mjs", unit.group(0))
 
         integration = re.search(
-            r"add_test\(NAME pulp-browser-capture-node-integration.*?"
-            r"set_tests_properties\(pulp-browser-capture-node-integration "
+            rf"add_test\(NAME {BROWSER_SUITE}.*?"
+            rf"set_tests_properties\({BROWSER_SUITE} "
             r"PROPERTIES(?P<properties>.*?)\)",
             manifest,
             re.S,
         )
         self.assertIsNotNone(integration)
         self.assertIn("_PULP_BROWSER_CAPTURE_INTEGRATION_TEST", integration.group(0))
-        self.assertRegex(
-            integration.group("properties"), r"\bRUN_SERIAL\s+TRUE\b"
+        properties = integration.group("properties")
+        self.assertNotRegex(properties, r"\bRUN_SERIAL\b")
+        self.assertRegex(properties, rf"\bRESOURCE_LOCK\s+{BROWSER_LOCK}\b")
+        self.assertIn(RESERVATION_ENV, properties)
+        self.assertRegex(properties, r"\bCOST\s+\d")
+        self.assertRegex(properties, r"\bTIMEOUT\s+600\b")
+
+    def test_scheduling_policy_classes_do_not_contradict(self) -> None:
+        self.assertEqual(consistency_errors(), [])
+        self.assertTrue(
+            consistency_errors(weighted={"x"}, browser=set(), long={"x"}),
+            "negative control: a weighted long test must be rejected",
         )
-        self.assertRegex(integration.group("properties"), r"\bTIMEOUT\s+600\b")
+
+    def test_long_quality_tests_carry_cost_without_the_whole_machine(self) -> None:
+        quality = (ROOT / "test" / "cmake" / "quality_tests.cmake").read_text(
+            encoding="utf-8"
+        )
+        checked = 0
+        for entry in LONG_TESTS:
+            registration = re.search(
+                rf"set_tests_properties\({re.escape(entry['name'])}\s+"
+                r"PROPERTIES(?P<properties>[^)]*)\)",
+                quality,
+            )
+            if registration is None:
+                continue
+            checked += 1
+            with self.subTest(test=entry["name"]):
+                properties = registration.group("properties")
+                self.assertRegex(properties, r"\bCOST\s+\d")
+                self.assertNotIn("RUN_SERIAL", properties)
+                processors = re.search(r"\bPROCESSORS\s+(\d+)", properties)
+                if processors:
+                    self.assertLessEqual(
+                        int(processors.group(1)), MAX_LONG_TEST_PROCESSORS
+                    )
+        self.assertGreaterEqual(checked, 2, "control: quality_tests.cmake long rows")
 
     def test_real_dmg_creators_share_only_the_hdiutil_resource_lock(self) -> None:
         manifests = (
@@ -646,11 +674,7 @@ class CTestIsolationContractTests(unittest.TestCase):
         self.assertNotIn("[hdiutil]", parser_case.group(0))
 
     def test_every_processors_eight_registration_is_classified(self) -> None:
-        expected = (
-            WEIGHTED_CORE_AUDIO_SERIAL_SUITES
-            | set(NON_DEVICE_WEIGHTED_SUITES)
-            | QUALITY_WEIGHTED_SUITES
-        )
+        expected = weighted_suites()
         actual = set()
         for path in (ROOT / "test" / "cmake").glob("*.cmake"):
             text = path.read_text(encoding="utf-8")
