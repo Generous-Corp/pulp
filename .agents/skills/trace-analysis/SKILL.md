@@ -913,7 +913,10 @@ isolates the interaction from everything else in the process:
   `kCGEventMouseMoved` events at 60 Hz across the target while a fixed
   animation source (an LFO) runs, then compare a *during-sweep* window with a
   *same animation, mouse still* window in the same trace. The difference is
-  the interaction's cost; anything present in both is not.
+  the interaction's cost; anything present in both is not. A global `CGEvent`
+  mover moves the real cursor and drives whatever window is under it, so use
+  it only in an attended session; unattended, use `PULP_TEST_POINTER_DRAG`
+  (next section).
 - **Never capture while a scripted-scenario harness is stepping.** Its
   per-step snapshots add 100–800 ms stalls that read exactly like app jank.
 - **Size the ring and let it flush.** Use `PULP_TRACE_RING_KB=524288` for a
@@ -926,6 +929,71 @@ isolates the interaction from everything else in the process:
 
 In a captured/materialized React import, a fat `dom_event_evaluate` on
 `pointermove` is almost always a React commit per move re-applying import
-metadata; the fix and its checklist are in `docs/guides/interaction-cost.md`
-and the `import-design` skill ("App code: no React commit on a per-move or
-per-frame path").
+metadata; the fix and its checklist are in the `view-bridge` skill
+("Realtime scripted editors: the performance checklist").
+
+### Frame pacing of a live editor: recipe and environment traps
+
+For an editor that animates live audio data while the user drags or zooms —
+the design-time rules it should already follow are the checklist in the
+`view-bridge` skill ("Realtime scripted editors: the performance checklist").
+
+**Capture.** Put everything in the launched standalone's environment:
+
+```bash
+PULP_TRACE_PATH=/tmp/run.pftrace \
+PULP_TRACE_SECONDS=60 \
+PULP_TRACE_RING_KB=1048576 \
+PULP_TEST_SIGNAL=noise \
+PULP_TEST_POINTER_DRAG='rect:0.20,0.50,0.80,0.50,120,4' \
+  ./build-trace/.../YourPlugin.app/Contents/MacOS/YourPlugin
+```
+
+- **Size the ring for audio, not just script.** A 60 s run with audio playing
+  through a scripted editor writes on the order of 700 MB — nearly nine times
+  the 80 MB default. A wrapped ring drops whole sequences, often the main
+  thread's, and the file still opens; check `stats` (above) on every capture
+  and shorten `PULP_TRACE_SECONDS` rather than accept a wrap.
+- **Real audio through the plugin.** `PULP_TEST_SIGNAL=noise` (or `sine`)
+  feeds the standalone's input so meters, analyzer and signal-scaled effects
+  run at their in-use cost. An idle editor measures nothing that matters.
+- **Input inside the window.** `PULP_TEST_POINTER_DRAG` injects the gesture
+  into the window host's own mouse path on its frame schedule
+  (`rect:X0,Y0,X1,Y1,N[,R]`, normalized top-left coordinates; an unparseable
+  value disables the drive). It cannot touch other applications' windows.
+
+**Compute frame gaps per phase.** Take the interval between consecutive
+`frame` slices (`render` category) on the editor's thread and report median
+and p95 for each phase — idle with audio, mid-stroke, and **the 2 s after each
+stroke's release** — never one whole-run mean. The release window is where
+regressions hide: in one measured spectrum editor mid-stroke averaged 31 ms
+(p95 39 ms) while the 2 s after release averaged 56 ms (p95 184 ms). A commit
+at `pointerup`, a data backlog draining after the gesture, or a deferred
+relayout all land there.
+
+**Validity gates — discard any run that fails one:**
+
+- the app was frontmost for the whole capture;
+- a window screenshot taken during the run shows the editor drawing;
+- the trace is non-empty, `stats` shows no wrap or dropped sequence, and it
+  contains both editor `paint` slices and data-delivery activity (analyzer
+  frames reaching the page) — the positive control for this workload.
+
+**Environment traps that fake a regression or hide one:**
+
+- **Locked screen or sleeping display → no display-link frames.** The trace is
+  well-formed and shows an idle editor.
+- **A GUI app launched from a sandboxed agent shell may never attach to the
+  window server.** It runs and traces audio but paints nothing; the screenshot
+  gate catches it.
+- **CoreAudio itself can be degraded.** One host accumulated 4,096 duplicate
+  `com.apple.AirPlayXPCHelper` HAL plug-in objects, and every audio app — not
+  just Pulp — spent roughly 19–75 s in `HALSystem::InitializeDevices` at
+  launch. Diagnose by timing a `kAudioHardwarePropertyDevices` query and
+  counting classes among `kAudioObjectPropertyOwnedObjects` of the system
+  object; thousands of one class is the tell. The fix is
+  `sudo killall AirPlayXPCHelper` then `sudo killall -9 coreaudiod`, or a
+  reboot — a human's call, not an agent's.
+- **Shared-host load skews timings** more than most code changes do. Capture
+  baseline and candidate back to back on the same host with the same signal
+  and gesture; never compare against a number from another session.

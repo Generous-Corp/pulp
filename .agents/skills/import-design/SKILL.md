@@ -7052,45 +7052,13 @@ rather than letting it read as a verdict.
 
 ## App code: no React commit on a per-move or per-frame path
 
-**Rule.** In a materialized/captured import, a `pointermove`, a hover, an
-animation tick, or any other per-frame path must not commit React. Keep
-pointer, hover and animation state in refs; draw from those refs on the canvas
-and request a repaint; update small DOM text (a readout, a tooltip) imperatively
-through `textContent` and its position; never call a setter with the value it
-already holds; handle each event once.
-
-**Why.** Each commit runs the metadata re-apply described above. Scoping cuts
-its bridge traffic but not its per-commit document walk, and an app that
-vendors an older `runtime.js` pays the full pass. Illustration from one
-captured-import editor: an LFO over 64 bands held 60 fps with the mouse still
-and stalled 100 ms–2.5 s per frame while it moved; each `pointermove` cost
-~42 ms (a `mousemove` on the same element ~0.2 ms), with ~150
-`getLayoutBoxMetrics`, ~160 `setFlex`, ~195 `setFontFamily` and ~12 layout
-passes per event. Paint (~2.5 ms) and `gpu_acquire` (~1–4 ms) were cheap. With
-the rule applied `pointermove` fell to ~0.6 ms and no >100 ms stall remained.
-None of this shows in a screenshot, pixel diff or browser fixture.
-
-**Audit every commit source — one survivor keeps the stall:**
-
-1. hover/pointer state in React state — including "only when the target
-   changes", which on dense targets still commits nearly every move;
-2. a status/readout effect publishing through the root's (or an ancestor's)
-   state;
-3. same-value setter calls — a same-value `setCursor(...)` still committed in
-   this runtime, so compare before calling;
-4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
-   (runs twice per move);
-5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
-   through state — keep it mounted and restart the timer imperatively.
-
-**Measuring it.** Wrap `__dispatch__(id, type, payload)` with a timer and
-compare `pointermove` against `mousemove` on the same element, then confirm in
-a Perfetto capture driven by a real 60 Hz `CGEvent` mouse sweep plus a
-deterministic animation, comparing the sweep window with a no-input window of
-the same animation. Never measure while a scripted-scenario harness steps (its
-snapshots add 100–800 ms stalls), size `PULP_TRACE_RING_KB` large (`524288`),
-and let `PULP_TRACE_SECONDS` plus the flush elapse before ending the process.
-Full recipe: `docs/guides/interaction-cost.md` and the `trace-analysis` skill.
+In a materialized/captured import every React commit runs the metadata
+re-apply described above, so a commit per `pointermove`, hover, animation tick
+or data update turns a drag into one document walk per sample (measured: 100
+ms–2.5 s stalls on a 64-band editor, ~42 ms per `pointermove`). The rule, the
+five commit sources to audit and the evidence live in one place: the
+`view-bridge` skill, "Realtime scripted editors: the performance checklist";
+the capture recipe is in `trace-analysis`.
 
 ## A `vm` sandbox is a second realm, and the entry notices
 
