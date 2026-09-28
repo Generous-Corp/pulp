@@ -2411,6 +2411,32 @@ not inside `deserialize_plugin_state()`.
 `Processor::suspend()` / `resume()` remain opt-in and are still not called
 automatically by the adapters; the gate is what actually protects the restore.
 
+## A CanvasWidget's offscreen layer is paid only by backdrop-reading streams
+
+Canvas2D gives every canvas its own backing store. `CanvasWidget::paint`
+provides it with a full-bounds `save_layer` — at 2x a full-window canvas is a
+multi-megabyte offscreen allocated, cleared and composited every paint, and a
+materialized editor stacks two. That is only observable for commands whose
+result depends on the pixels under them: `clearRect`, `putImageData`, and any
+composite operation other than source-over. `add_command` flags those
+(`CanvasWidget::reads_backdrop`), and a stream without one paints straight onto
+the parent under a plain `save()` + bounds clip — source-over is associative, so
+the pixels are the same (pinned on Skia and CoreGraphics by
+`test_canvas_widget_backdrop.cpp`).
+
+- **A single `globalCompositeOperation = 'lighter'` anywhere in the retained
+  stream puts the layer back** for every paint of that stream. The flag resets
+  only when the stream is replaced (`clear_commands`, i.e. a retained-frame
+  full clear), so on a canvas that is cleared with `clearRect` every frame
+  *without* the retained-frame opt-in the `clear_rect` itself keeps the layer.
+- **Measure GPU time, not guesses**: the `[bench]` case of
+  `pulp-test-canvas-widget-layer-gpu` (ctest label `bench`) renders two full-window 2x canvases on an offscreen
+  Dawn/Graphite surface with timestamp queries and prints the median GPU ms per
+  frame with and without the layers.
+- A new command that composites against existing pixels must be added to
+  `reads_backdrop`, or it will read the parent's pixels instead of the
+  canvas's own.
+
 ## Note names are a Processor hook, not a view concern
 
 `Processor::note_names()` lets a plug-in label individual keys — a drum kit's
