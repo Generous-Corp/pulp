@@ -641,6 +641,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The one merge-group step that runs all three shadow instruments.
+        add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
+        set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.
