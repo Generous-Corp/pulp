@@ -1169,7 +1169,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     }
     if (inspector_cursor >= 0)
         return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
-    if (auto* target = self.rootView->hit_test(pt)) return target->cursor();
+    if (auto* target = pulp::view::hover_target_at(*self.rootView, pt))
+        return target->cursor();
     return std::nullopt;
 }
 

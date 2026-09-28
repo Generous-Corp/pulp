@@ -22,6 +22,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/canvas/recording_canvas.hpp>
+#include <pulp/view/hover_cursor.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
@@ -1791,4 +1792,161 @@ TEST_CASE("a real child of a lifted submenu still stacks by descent",
     submenu->dismiss_claimed_overlay();
     REQUIRE(root.interaction().active_overlay == menu);
     menu->release_overlay();
+}
+
+namespace {
+
+// A plot that owns a crosshair and fills the editor, a bottom rail, and a menu
+// that opens UPWARD from a trigger on that rail. The menu reaches far above the
+// rail -- further than the tree hit test's overflow allowance -- so the top of
+// the menu is painted over the plot while the ordinary hit test cannot reach it.
+struct UpwardMenuScene {
+    TestView root;
+    View* plot = nullptr;
+    View* menu = nullptr;
+    View* top_row = nullptr;
+    View* top_label = nullptr;
+    View* bottom_row = nullptr;
+
+    // Root coordinates of a point on the top row and one on the bottom row.
+    static constexpr Point kTopRow{150.0f, 130.0f};
+    static constexpr Point kBottomRow{150.0f, 760.0f};
+
+    UpwardMenuScene() {
+        root.set_bounds({0.0f, 0.0f, 800.0f, 860.0f});
+        plot = add_child_at(root, std::make_unique<TestView>(),
+                            {0.0f, 0.0f, 800.0f, 800.0f});
+        plot->set_cursor(View::CursorStyle::crosshair);
+        View* rail = add_child_at(root, std::make_unique<TestView>(),
+                                  {0.0f, 800.0f, 800.0f, 60.0f});
+        rail->set_overflow(View::Overflow::visible);
+        View* trigger = add_child_at(*rail, std::make_unique<TestView>(),
+                                     {100.0f, 10.0f, 100.0f, 30.0f});
+        trigger->set_overflow(View::Overflow::visible);
+        // Root y 110..800: 690 tall, opening upward from the trigger at 810.
+        menu = add_child_at(*trigger, std::make_unique<TestView>(),
+                            {0.0f, -700.0f, 200.0f, 690.0f});
+        menu->set_overflow(View::Overflow::visible);
+        top_row = add_child_at(*menu, std::make_unique<TestView>(),
+                               {0.0f, 10.0f, 200.0f, 30.0f});
+        top_row->set_cursor(View::CursorStyle::pointer);
+        top_label = add_child_at(*top_row, std::make_unique<TestView>(),
+                                 {12.0f, 6.0f, 120.0f, 18.0f});
+        bottom_row = add_child_at(*menu, std::make_unique<TestView>(),
+                                  {0.0f, 640.0f, 200.0f, 30.0f});
+        bottom_row->set_cursor(View::CursorStyle::pointer);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("a hover over an open overlay resolves inside it like a press does",
+          "[view][overlay][hover][cursor]") {
+    OverlayGuard g;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+
+    // Controls on the same instrument, before anything is claimed. The bottom
+    // row is within the tree hit test's reach and answers with its own cursor,
+    // so the menu's rows are hittable at all; the top row is beyond that reach
+    // and the plot beneath it answers. That second reading is the defect's
+    // precondition: without a claim there is nothing to say the menu is on top.
+    REQUIRE(pulp::view::hover_cursor_at(root, UpwardMenuScene::kBottomRow)
+            == View::CursorStyle::pointer);
+    REQUIRE(root.hit_test(UpwardMenuScene::kTopRow) == scene.plot);
+    REQUIRE(pulp::view::hover_cursor_at(root, UpwardMenuScene::kTopRow)
+            == View::CursorStyle::crosshair);
+
+    scene.menu->claim_overlay();
+
+    // The open menu paints over the plot and a press on the top row is routed
+    // into it. The hover target and the cursor must agree with the press.
+    const View* hovered = pulp::view::hover_target_at(root, UpwardMenuScene::kTopRow);
+    REQUIRE(hovered == scene.top_label);
+    const auto press =
+        pulp::view::route_press_to_active_overlay(root, UpwardMenuScene::kTopRow);
+    REQUIRE(press.routing == pulp::view::OverlayPressRouting::routed);
+    REQUIRE(press.target == hovered);
+    REQUIRE(pulp::view::hover_cursor_at(root, {240.0f, 125.0f})
+            == View::CursorStyle::pointer);
+    REQUIRE(pulp::view::hover_cursor_at(root, UpwardMenuScene::kTopRow)
+            != View::CursorStyle::crosshair);
+
+    // Outside the menu the plot still owns the pointer.
+    REQUIRE(pulp::view::hover_target_at(root, {600.0f, 400.0f}) == scene.plot);
+    REQUIRE(pulp::view::hover_cursor_at(root, {600.0f, 400.0f})
+            == View::CursorStyle::crosshair);
+
+    // A hover never dismisses: the menu is still open after all of the above.
+    REQUIRE(root.interaction().active_overlay == scene.menu);
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("a hover over an open overlay moves and highlights its row, not the view beneath",
+          "[view][overlay][hover][pointer]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+
+    int plot_moves = 0;
+    int row_moves = 0;
+    scene.plot->on_pointer_event = [&plot_moves](const pulp::view::MouseEvent& e) {
+        if (e.phase == pulp::view::MousePhase::hover) ++plot_moves;
+    };
+    scene.top_label->on_pointer_event = [&row_moves](const pulp::view::MouseEvent& e) {
+        if (e.phase == pulp::view::MousePhase::hover) ++row_moves;
+    };
+
+    // Control: with nothing claimed the move reaches the plot, so a zero below
+    // means the move went elsewhere rather than that it was never delivered.
+    pulp::view::deliver_hover_move(root, UpwardMenuScene::kTopRow);
+    REQUIRE(plot_moves == 1);
+    REQUIRE(row_moves == 0);
+
+    scene.menu->claim_overlay();
+    pulp::view::deliver_hover_move(root, UpwardMenuScene::kTopRow);
+    CHECK(plot_moves == 1);
+    CHECK(row_moves == 1);
+    CHECK(scene.top_row->is_hovered());
+    CHECK_FALSE(scene.plot->is_hovered());
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("the topmost open overlay answers a hover, and one that refuses the point defers",
+          "[view][overlay][hover][stack]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+
+    // A submenu stacked on the menu, overlapping the menu's top row.
+    View* submenu = add_child_at(root, std::make_unique<TestView>(),
+                                 {120.0f, 100.0f, 200.0f, 100.0f});
+    submenu->set_cursor(View::CursorStyle::text);
+    scene.menu->claim_overlay();
+    submenu->claim_overlay(scene.menu);
+    REQUIRE(root.overlay_depth() == 2);
+
+    REQUIRE(pulp::view::hover_target_at(root, UpwardMenuScene::kTopRow) == submenu);
+    REQUIRE(pulp::view::hover_cursor_at(root, UpwardMenuScene::kTopRow)
+            == View::CursorStyle::text);
+
+    // An overlay whose own guards reject the point is not a hover target; the
+    // overlay beneath it answers, as a press would find no row there either.
+    submenu->set_pointer_events(View::PointerEvents::none);
+    REQUIRE(pulp::view::hover_target_at(root, UpwardMenuScene::kTopRow)
+            == scene.top_label);
+
+    submenu->dismiss_claimed_overlay();
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("a hidden overlay is not a hover target", "[view][overlay][hover]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    scene.menu->claim_overlay();
+    scene.menu->set_visible(false);
+    REQUIRE(pulp::view::hover_target_at(root, UpwardMenuScene::kTopRow) == scene.plot);
+    scene.menu->release_overlay();
 }

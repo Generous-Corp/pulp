@@ -6,6 +6,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
@@ -2432,7 +2433,9 @@ bool View::start_file_drag(const FileDragRequest& request) {
 }
 
 void View::simulate_hover(Point root_pos) {
-    auto* target = hit_test(root_pos);
+    // An open overlay owns the pixels it paints over, so it takes the hover
+    // before the ordinary tree does -- the same order a press is routed in.
+    auto* target = hover_target_at(*this, root_pos);
     std::vector<View*> hover_path;
     for (auto* view = target; view; view = view->parent()) {
         hover_path.push_back(view);
