@@ -1,5 +1,6 @@
 #include "test_design_import_shared.hpp"
 #include <pulp/canvas/font_resolver.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 
 // Yoga-constrained audio widgets, container padding, multi-line text and font
