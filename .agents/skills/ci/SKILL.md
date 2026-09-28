@@ -1602,6 +1602,22 @@ downstream step is unexpectedly skipped, read the upstream step's LOG, not
 its API conclusion. The pr-fast `ctest-unique-names` guard now catches the
 original cause on the PR head.
 
+## An App-opened PR's run has an empty `pull_requests`; receipts bind through the commit
+
+GitHub leaves `pull_requests: []` on workflow runs of App-opened pull
+requests, which is most of this repository's, so `protected_merge_receipt.py
+download` could never match "exactly one pull request" and every receipt was
+refused ("artifact workflow run is not the exact successful pull request";
+PR 9001, 0 of 49 reuse). When the list is empty the verifier now re-derives
+the binding from `commits/{head_sha}/pulls` and accepts only: exactly one
+PR, open, head sha equal to the run's, head and base repos this repository
+(never a fork), base sha the protected base, run from `build.yml` with
+conclusion success, and the PR number equal to the merge-group entry parsed
+from the queue ref (`--entry-pr`). Every refusal is prefixed `commit-pull
+lookup:` so it is countable in `shipyard-receipt-decision` reasons. The
+reuse step runs the verifier from the PROTECTED BASE, so a change here takes
+effect only after it lands on main.
+
 ## A test that "fails" on the required gate may only have run out of clock
 
 Before debugging what a failing gate test *does*, check whether it failed on
