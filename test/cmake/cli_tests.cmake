@@ -596,3 +596,15 @@ target_link_libraries(pulp-test-cli-package-commands PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-commands)
+
+# `pulp create` template tree: every placeholder is in the substitution map,
+# each type ships its required files, and no template carries a per-frame UI
+# cost (a load_script call, or a UI script failing the realtime contract).
+if(Python3_Interpreter_FOUND)
+    add_test(NAME create-templates-verify
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_create_templates.py)
+    set_tests_properties(create-templates-verify PROPERTIES
+        LABELS "cli;templates"
+        TIMEOUT 60)
+endif()

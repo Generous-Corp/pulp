@@ -99,18 +99,39 @@ tools:
 - name: check-contracts
   path: tools/import-design/check_contracts.py
   category: design-import
-  use_when: Check agent-authored panel HTML before importing it — the one entry point that runs all three
-    contract gates.
-  invocation: python3 tools/import-design/check_contracts.py <panel.html> --system <design-system-dir>
-    [--macros <macros.json>]
-  inputs: A panel HTML document, the design system directory supplying components.css and tokens.css,
-    and optionally a JSON file of the macros the DSP pass produced, keyed "param" and "meter".
-  outputs: Per-gate pass/fail lines naming the offending class or literal; non-zero exit on any violation.
+  use_when: Check agent-authored panel HTML/JSX before importing it — the one entry point that runs the
+    component, token, macro and realtime-performance contract gates.
+  invocation: python3 tools/import-design/check_contracts.py <panel.html> [<script.jsx> ...] [--system
+    <design-system-dir>] [--macros <macros.json>]
+  inputs: A panel HTML document and any JS/JSX/TSX it runs, optionally the design system directory supplying
+    components.css and tokens.css, and optionally a JSON file of the macros the DSP pass produced, keyed
+    "param" and "meter".
+  outputs: Per-gate pass/fail/SKIPPED lines naming the offending class, literal or file:line with the fix;
+    non-zero exit on any violation.
   caveat: 'Static text analysis, so it proves the markup keeps its side of the contract — never that the
-    panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented
-    children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100%
-    identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and
-    says so) — a green run that checked two gates of three.'
+    panel renders well or holds its frame rate. It is deliberately the check a pixel diff CANNOT make:
+    a meter authored with invented children draws the same empty box in the browser and in Skia, and a
+    React setter inside onPointerMove renders identically while costing ~40 ms per move. The realtime gate
+    recognizes setters from a local useState/useReducer (and setState) reached directly or through local
+    functions a few calls deep; setters behind props, context, imports or custom hooks, and fresh values
+    built in a variable first, are invisible to it. Without --system the component and token contracts
+    are SKIPPED, and without --macros the macro contract is (each says so).'
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
+- name: check-vendored-runtime
+  path: tools/import-validation/check_vendored_runtime.py
+  category: design-import
+  use_when: An app vendors a materialized/JSX import's runtime.js and you need to know whether it predates
+    @pulp/react fixes in the SDK it now builds against.
+  invocation: python3 tools/import-validation/check_vendored_runtime.py <runtime.js|app-dir> [--strict]
+  inputs: A vendored @pulp/react bundle or an app directory to scan, and the SDK's packages/pulp-react/runtime-fingerprint.json
+    (default) or --fingerprint.
+  outputs: OK / STALE / NONE per bundle, naming each missing fix and the command to refresh; exit 1 only
+    under --strict. The same rules run at configure time via pulp_check_vendored_react_runtime().
+  caveat: 'A fix is present if the bundle''s revision banner reaches it or its signature identifier appears;
+    a banner-less bundle is judged stale for any fix without a signature, and a bundle minified after emission
+    can lose a signature. It says nothing about whether the app exercises the fixed path.'
   availability: always
   skill: import-design
   docs: guides/importing-designs.md

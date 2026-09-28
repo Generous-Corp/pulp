@@ -28,6 +28,7 @@ import { resolve, dirname, basename, extname } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+import { runtimeFingerprintBanner } from './runtime_fingerprint.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -327,7 +328,8 @@ async function main() {
             // where the sandbox shims must live so they run before any
             // ESM import (esp. react-dom/client's DevTools UA sniff).
             banner: {
-                js: `/* pulp import-design --from jsx | component=${componentName} | esbuild bundle */\n${PRE_SHIMS}`,
+                js: `/* pulp import-design --from jsx | component=${componentName} | esbuild bundle */\n` +
+                    `${runtimeFingerprintBanner()}\n${PRE_SHIMS}`,
             },
         });
 

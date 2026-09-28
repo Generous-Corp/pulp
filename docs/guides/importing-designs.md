@@ -615,6 +615,27 @@ The rule, the five usual commit sources, and a measurement recipe are in
 [Keeping a drag interaction cheap](interaction-cost.md); agents also get them
 from the `import-design` and `trace-analysis` skills.
 
+Check the authored source before importing it:
+
+```bash
+python3 tools/import-design/check_contracts.py panel.html app.jsx
+```
+
+Its `realtime` gate reports, with file and line, a React state setter inside a
+pointer-move, mouse-move or wheel handler, a `requestAnimationFrame` callback
+or a repeating timer; a setter called with a fresh object or array in an effect
+that re-runs on updates; and one handler registered for both the capture and
+bubble phase. It reads the source statically, so it follows local functions but
+not props, context or imports, and a clean result is not a frame-rate
+measurement.
+
+An app that checks in the compiled runtime (`runtime.js`) keeps the runtime it
+was imported with until the import transform is re-run. Bundles carry a
+`@pulp/react runtime revision` banner; compare one against the SDK with
+`python3 tools/import-validation/check_vendored_runtime.py <runtime.js>` or at
+configure time with `pulp_check_vendored_react_runtime(<bundle>)`. Both name
+each fix the bundle lacks and how to refresh it.
+
 ## Acquisition vs Import
 
 MCP connectors are acquisition helpers unless a source contract says otherwise. They can read a live tool, capture screenshots, or gather metadata, then an agent writes a supported file for `pulp import-design`.

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "revision": 1,
+  "fixes": [
+    {
+      "revision": 1,
+      "id": "scoped-materialized-reapply",
+      "summary": "a React commit re-applies captured import metadata only for the subtree it changed, instead of walking the whole captured document (~44 ms per commit on a large materialized editor)",
+      "signature": "materializedDirtyIds"
+    }
+  ]
+}
