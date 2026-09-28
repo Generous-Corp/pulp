@@ -482,8 +482,9 @@ mod tests {
     }
 }
 
-/// Process-wide lock serializing tests that mutate `$PULP_HOME` /
-/// `$PULP_TRACE_PROCESSOR` (env is global; concurrent mutation would race the
-/// resolution tiers). Shared across `trace.rs` and `trace_fetch.rs` tests.
+/// Tests here mutate `$PULP_HOME` / `$PULP_TRACE_PROCESSOR`, which other
+/// modules' tests also set, so they must hold the crate-wide env lock rather
+/// than one of their own: two locks guarding the same variables serialize
+/// nothing between them.
 #[cfg(test)]
-pub(crate) static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) use crate::test_support::ENV_LOCK as ENV_MUTEX;
