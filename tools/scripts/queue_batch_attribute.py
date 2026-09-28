@@ -13,7 +13,7 @@ pull request that adds or touches that file owns the failure.
 which maps to the one pull request adding it.
 
 That signal is blind to a gate that reports a COUNT rather than a file, and the
-consumption census is exactly one: `public_headers.count` is walked live from
+consumption census is exactly one: its public header lists are walked live from
 each target's exported include roots, so one header added under a root a target
 already exports drifts the census while sharing no token with the gate's name.
 The header's own pull request then scores zero everywhere and the batch reads as
