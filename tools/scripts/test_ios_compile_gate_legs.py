@@ -290,40 +290,47 @@ class NightlyGateWiringTests(unittest.TestCase):
     """Per-PR gates run this gate only for iOS-only surfaces, so the nightly on
     main is what catches an iOS break that landed through shared-looking code.
     A nightly that never runs, runs something else, or reads a skip as a pass
-    would leave that class unguarded while every check stays green."""
+    would leave that class unguarded while every check stays green.
+
+    Read as text, not YAML: this suite runs on the gate VMs, whose Python has
+    no PyYAML."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        import yaml
+        cls.text = NIGHTLY.read_text(encoding="utf-8")
 
-        cls.doc = yaml.safe_load(NIGHTLY.read_text(encoding="utf-8"))
-        cls.job = cls.doc["jobs"]["ios-compile-gate"]
-        cls.gate_script = "\n".join(step.get("run", "") for step in cls.job["steps"])
+    def _step(self, name: str) -> str:
+        """One step's block: from its `- name:` line to the next step."""
+        match = re.search(
+            r"^      - name: " + re.escape(name) + r"\n((?:(?!      - ).*\n?)*)",
+            self.text, re.MULTILINE)
+        self.assertIsNotNone(match, f"no step named {name!r}")
+        return match.group(1)
 
     def test_runs_daily_and_on_demand_on_the_primary_repo_only(self) -> None:
-        on = self.doc.get("on", self.doc.get(True))  # YAML 1.1 reads `on` as True
-        self.assertIn("workflow_dispatch", on)
-        self.assertRegex(on["schedule"][0]["cron"], r"^\d+ \d+ \* \* \*$")
-        self.assertIn("github.repository == vars.PULP_PRIMARY_REPO", self.job["if"])
+        self.assertRegex(self.text, r"(?m)^  schedule:\n(?:\s*#.*\n)*\s*- cron: '\d+ \d+ \* \* \*'$")
+        self.assertRegex(self.text, r"(?m)^  workflow_dispatch:\s*$")
+        self.assertIn("if: github.event_name != 'schedule' || "
+                      "github.repository == vars.PULP_PRIMARY_REPO", self.text)
 
     def test_runs_the_same_gate_on_local_gate_hardware(self) -> None:
         self.assertIn('bash test/cmake/test_ios_compile_gate.sh \\\n'
-                      '            "$GITHUB_WORKSPACE"', NIGHTLY.read_text(encoding="utf-8"))
-        self.assertIn("vars.PULP_RELEASE_MACOS_RUNS_ON_JSON", self.job["runs-on"])
-        self.assertEqual(self.job["env"]["CCACHE_COMPILERCHECK"], "content")
+                      '            "$GITHUB_WORKSPACE"', self.text)
+        self.assertRegex(self.text, r"(?m)^    runs-on: .*vars\.PULP_RELEASE_MACOS_RUNS_ON_JSON")
+        self.assertIn("CCACHE_COMPILERCHECK: content", self.text)
 
     def test_a_skip_is_not_a_pass_and_a_failure_opens_the_tracker(self) -> None:
-        self.assertIn("77) result=skipped ;;", self.gate_script)
-        self.assertIn("0) result=success ;;", self.gate_script)
-        tracker = next(s for s in self.job["steps"] if s.get("name") == "Maintain tracking issue")
-        self.assertEqual(tracker["if"], "always()")
-        self.assertIn('if [ "$RESULT" = "success" ]; then', tracker["run"])
-        self.assertIn("gh issue create", tracker["run"])
-        final = self.job["steps"][-1]
-        self.assertEqual(final["if"], "always()")
-        self.assertIn('!= "success" ]; then', final["run"])
-        self.assertEqual(self.doc["permissions"], {"contents": "read", "issues": "write"})
-
+        gate = self._step("iOS compile gate")
+        self.assertIn("77) result=skipped ;;", gate)
+        self.assertIn("0) result=success ;;", gate)
+        tracker = self._step("Maintain tracking issue")
+        self.assertRegex(tracker, r"(?m)^        if: always\(\)$")
+        self.assertIn('if [ "$RESULT" = "success" ]; then', tracker)
+        self.assertIn("gh issue create", tracker)
+        final = self._step("Fail the run when the gate did not pass")
+        self.assertRegex(final, r"(?m)^        if: always\(\)$")
+        self.assertIn('!= "success" ]; then', final)
+        self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n  issues: write\n\n")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
