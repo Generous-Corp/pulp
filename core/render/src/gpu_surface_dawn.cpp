@@ -1,6 +1,9 @@
 #include <array>
+#include <chrono>
 #include <pulp/render/gpu_render_time.hpp>
+#include <pulp/render/gpu_startup_report.hpp>
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/runtime/log.hpp>
 #include <string>
 #include <vector>
 
@@ -22,6 +25,12 @@
 namespace pulp::render {
 
 namespace {
+
+double elapsed_ms(std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - since)
+        .count();
+}
 
 const char* dawn_present_mode_name(wgpu::PresentMode m) {
     switch (m) {
@@ -109,6 +118,8 @@ public:
     bool initialize(const Config& config) override {
         width_ = config.width;
         height_ = config.height;
+        timings_ = {};
+        auto stage_start = std::chrono::steady_clock::now();
 
         // Install Dawn native procs
         const DawnProcTable& procs = dawn::native::GetProcs();
@@ -133,11 +144,16 @@ public:
             runtime::log_error("GpuSurface: failed to create Dawn instance");
             return false;
         }
+        timings_.instance_ms = elapsed_ms(stage_start);
 
         // Create native surface from platform layer (if provided)
+        double surface_ms = 0.0;
         if (config.native_surface_handle) {
+            stage_start = std::chrono::steady_clock::now();
             create_native_surface(config.native_surface_handle);
+            surface_ms += elapsed_ms(stage_start);
         }
+        stage_start = std::chrono::steady_clock::now();
 
         // Request adapter (compatible with surface if we have one). The
         // software proof lane selects a concrete backend and enumerates CPU
@@ -187,6 +203,8 @@ public:
             runtime::log_error("GpuSurface: no suitable GPU adapter found");
             return false;
         }
+        timings_.adapter_ms = elapsed_ms(stage_start);
+        stage_start = std::chrono::steady_clock::now();
 
         // Request device
         wgpu::DeviceDescriptor device_desc{};
@@ -322,11 +340,15 @@ public:
         }
 
         queue_ = device_.GetQueue();
+        timings_.device_ms = elapsed_ms(stage_start);
 
         // Configure the surface for presentation
         if (surface_) {
+            stage_start = std::chrono::steady_clock::now();
             configure_surface(config);
+            surface_ms += elapsed_ms(stage_start);
         }
+        timings_.surface_ms = surface_ms;
 
         initialized_ = true;
         runtime::log_info("GpuSurface: Dawn initialized (surface: {})",
@@ -347,8 +369,13 @@ public:
             runtime::log_warn(
                 "GpuSurface: backend_type=unknown (adapter unset after init)");
         }
+        // The adapter identity a remote support read needs: which GPU, which
+        // driver, and whether this is real hardware or the Null backend.
+        runtime::log_info("{}", format_gpu_adapter_line(adapter_info()));
         return true;
     }
+
+    StartupTimings startup_timings() const override { return timings_; }
 
     void resize(uint32_t width, uint32_t height) override {
         reconfigure(width, height);
@@ -443,7 +470,8 @@ public:
         info.adapter_type = dawn_adapter_type(dawn_info.adapterType);
         info.null_backend = dawn_info.backendType == wgpu::BackendType::Null;
         info.backend_type = dawn_backend_type_name(dawn_info.backendType);
-        info.architecture = info.backend_type;
+        const auto architecture = dawn_string_view_to_string(dawn_info.architecture);
+        info.architecture = architecture.empty() ? info.backend_type : architecture;
         // Report the driver's own identity. Android's Vulkan driver blocklist
         // matches on these strings, so a synthesized placeholder would make
         // every entry in it unmatchable. Each field falls back to a generic
@@ -647,6 +675,7 @@ private:
     wgpu::PresentMode preferred_mode_ = wgpu::PresentMode::Fifo;
     uint32_t width_ = 0, height_ = 0;
     bool initialized_ = false;
+    StartupTimings timings_{};
 };
 
 std::unique_ptr<GpuSurface> GpuSurface::create_dawn() {
@@ -765,6 +794,7 @@ public:
         if (!device_) return false;
 
         initialized_ = true;
+        runtime::log_info("{}", format_gpu_adapter_line(adapter_info()));
         return true;
     }
 

@@ -1,5 +1,6 @@
 #include <pulp/render/gpu_diagnostics.hpp>
 
+#include <pulp/runtime/log.hpp>
 #include <pulp/runtime/trace.hpp>
 
 #include <algorithm>
@@ -34,6 +35,7 @@ std::atomic<std::uint64_t> g_truncated{0};
 
 std::atomic<SkiaLogBridgeStatus> g_bridge_status{SkiaLogBridgeStatus::not_attempted};
 std::atomic<std::uint64_t> g_bridge_records{0};
+LogTextBudget g_bridge_text_budget{kSkiaLogTextLimit};
 std::mutex g_bridge_mutex;
 
 bool env_flag(const char* name, bool& value) noexcept {
@@ -138,6 +140,8 @@ SkiaLogBridgeState skia_log_bridge_state() noexcept {
     SkiaLogBridgeState state;
     state.status = g_bridge_status.load(std::memory_order_relaxed);
     state.records_forwarded = g_bridge_records.load(std::memory_order_relaxed);
+    state.text_logged = g_bridge_text_budget.admitted();
+    state.text_suppressed = g_bridge_text_budget.suppressed();
     return state;
 }
 
@@ -159,8 +163,8 @@ GpuDiagnosticSeverity severity_of(SkLogPriority priority) noexcept {
     return GpuDiagnosticSeverity::info;
 }
 
-// Skia may log from any thread, so this holds no mutable state beyond the two
-// relaxed counters the sink already owns.
+// Skia may log from any thread, so this holds no mutable state beyond the
+// relaxed counters the sink already owns and the atomic text budget.
 class TraceLogHandler final : public SkLogHandler {
   public:
     void onLog(SkLogPriority priority, const char format[], va_list args) override {
@@ -175,8 +179,32 @@ class TraceLogHandler final : public SkLogHandler {
             std::min(static_cast<std::size_t>(written), kGpuDiagnosticMessageLimit);
 
         g_bridge_records.fetch_add(1, std::memory_order_relaxed);
-        emit_gpu_diagnostic(severity_of(priority), "skia.log",
-                            std::string_view(buffer.data(), length));
+        const std::string_view message(buffer.data(), length);
+        emit_gpu_diagnostic(severity_of(priority), "skia.log", message);
+
+        // The sink above is a trace signal, which a PULP_TRACING=OFF release
+        // build compiles out. Copy the record into the text log too — the one
+        // thing a user can send — within a fixed budget so a chatty Skia
+        // cannot flood it.
+        if (g_bridge_text_budget.admit())
+            log_skia_text(priority, message);
+    }
+
+  private:
+    static void log_skia_text(SkLogPriority priority, std::string_view message) {
+        while (!message.empty() && (message.back() == '\n' || message.back() == '\r'))
+            message.remove_suffix(1);
+        const char* const label = to_string(severity_of(priority));
+        switch (priority) {
+        case SkLogPriority::kError:
+        case SkLogPriority::kWarning:
+            runtime::log_warn("skia: [{}] {}", label, message);
+            break;
+        case SkLogPriority::kInfo:
+        case SkLogPriority::kDebug:
+            runtime::log_info("skia: [{}] {}", label, message);
+            break;
+        }
     }
 };
 

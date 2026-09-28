@@ -31,6 +31,8 @@ pulp_add_plugin(<target>
     CONTENT_KINDS   <presets|themes|samples|sample-banks|wavetables...>
     CONTENT_HOT_RELOAD_KINDS <presets|themes|samples|sample-banks|wavetables...>
     CONTENT_MANUAL_RESCAN_KINDS <presets|themes|samples|sample-banks|wavetables...>
+    SOURCE_GIT_SHA  <commit>
+    SOURCE_GIT_DIRTY <TRUE|FALSE>
 )
 ```
 
@@ -59,6 +61,8 @@ pulp_add_plugin(<target>
 | `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `sample-banks`, `wavetables`. Use capability `content.sample-banks.v1` for the generic `pulp.sample-bank.v1` contract. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
 | `CONTENT_HOT_RELOAD_KINDS` | No | -- | Accepted content kinds the plugin can refresh immediately after install/update. Each value must also appear in `CONTENT_KINDS`. |
 | `CONTENT_MANUAL_RESCAN_KINDS` | No | -- | Accepted content kinds that require an in-app rescan action but not a full restart. Each value must also appear in `CONTENT_KINDS`. |
+| `SOURCE_GIT_SHA` | No | git `HEAD` at build time | Product source commit recorded in every bundle's [`pulp-build-info.json`](../guides/shipping.md#build-identity-in-every-bundle). Overrides the project-wide `PULP_PRODUCT_GIT_SHA`; without either, the commit of the git checkout containing the calling `CMakeLists.txt` is read when the bundle is built, and `"unknown"` is recorded outside a checkout. Pass it explicitly for release builds from a source archive or a CI checkout without history. |
+| `SOURCE_GIT_DIRTY` | No | git status at build time | Whether the product source had uncommitted tracked changes. Overrides `PULP_PRODUCT_GIT_DIRTY`; recorded as `null` when unknown. |
 
 When `CONTENT_CAPABILITIES` and `CONTENT_KINDS` are present,
 `pulp_add_plugin()` generates a `pulp.plugin-runtime.json` resource containing
@@ -71,6 +75,13 @@ preview/install UX. VST3/AU-style desktop bundles receive the manifest under
 LV2 bundles receive it at the `.lv2` bundle root; single file non-bundle formats
 receive a sibling `<plugin-stem>.pulp.plugin-runtime.json` sidecar. Validate the emitted artifact with
 `ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+Every bundle `pulp_add_plugin()` and `pulp_add_plugin_bundle()` create — VST3,
+AU, CLAP, LV2, AAX, the AUv3 extension and its host app, and the Standalone
+app — also carries a `pulp-build-info.json` build-identity record
+(`pulp.build-info.v1`). Its layout, schema, and the SDK's
+`share/pulp/runtime-pins.json` it embeds are documented in the
+[shipping guide](../guides/shipping.md#build-identity-in-every-bundle).
 
 Reviewed UI kits are consumed explicitly after `pulp kit apply` has generated
 `cmake/pulp-kits.cmake`. Include that file, declare the plugin, then attach the

@@ -461,6 +461,34 @@ kind. Do not derive the main executable by stripping only `.app`: doing so
 double-signs the main binary in `.component`, `.vst3`, and `.clap` bundles and
 can trigger the same misleading subcomponent failure.
 
+### Every bundle carries `pulp-build-info.json` — read it before guessing
+
+`pulp_add_plugin()` writes `Contents/Resources/pulp-build-info.json`
+(`pulp.build-info.v1`) into every bundle it makes, POST_BUILD, so the record is
+sealed by `pulp ship sign` like any other resource. It names the product
+version and source commit, build type/archs/min-OS, the SDK version, and embeds
+the SDK's `share/pulp/runtime-pins.json` (Skia release + commit + asset digest,
+Dawn commit, wgpu-native version, JS engine, min-OS floors). For "what is this
+user running?" read that file from the installed bundle instead of inferring
+from Info.plist (product version only) or `strings` over the binary. Full
+schema: `docs/guides/shipping.md#build-identity-in-every-bundle`.
+
+Watch out for:
+
+- **Release builds should pass the commit explicitly** —
+  `-DPULP_PRODUCT_GIT_SHA=<sha> -DPULP_PRODUCT_GIT_DIRTY=FALSE` (or
+  `SOURCE_GIT_SHA` on `pulp_add_plugin`). The default reads git at build time,
+  which records `"unknown"` from a source archive and the wrong commit if a
+  bundle did not relink after the last commit.
+- **Never edit the file after signing** — it is a sealed resource; changing it
+  invalidates the signature exactly like editing Info.plist.
+- **`runtime_pins.skia.asset_in_manifest: false` or `null` is a real finding**:
+  the build linked a Skia other than the manifest-pinned archive (typically an
+  exported `SKIA_DIR` pointing at a stale checkout). `dawn.commit` is decoded
+  from the linked headers, so it disagrees with the pin in that case too.
+- **An SDK older than the record** yields `runtime_pins: null`; the rest of the
+  file is still produced by the consumer's own CMake helpers.
+
 ### macOS one-command pipeline: `pulp ship release`
 
 ```bash
@@ -825,6 +853,18 @@ store_pass = "@env:ANDROID_STORE_PASS"
 
 ## Common Issues
 
+### A tag did not publish and `ios-compile-gate` is red
+
+`release-cli.yml` runs the full iOS compile gate
+(`test/cmake/test_ios_compile_gate.sh`) on the tag, on the darwin-arm64 leg's
+runner, and the `release` publish job requires it. Per-PR gates run the iOS gate
+only for iOS-only surfaces, so a tag can be the first place an iOS break in
+shared-looking code shows (the nightly `ios-compile-gate-nightly.yml` normally
+catches it first and opens a tracking issue). A 77 exit (iOS SDKs absent on the
+runner) is a failure here, not a skip. Fix forward and cut a new tag; re-running
+the job only helps for an environment failure such as a configure timeout.
+
+
 ### `hdiutil: create failed - Resource busy` — a process is vetoing unmounts
 
 `hdiutil create -srcfolder` builds a DMG by attaching a temporary volume, copying
@@ -1036,6 +1076,17 @@ The portable-binary smoke gate in `release-cli.yml` runs the produced
 artifact on a *clean* runner that did not build it, catching the bug
 class before tagging. If you change rpath logic, run the smoke job
 locally first or it will fail in CI for everyone else.
+
+A flat unpack is not the installed layout. v0.876.1's archive was correct
+and passed the flat smoke, yet `install.sh` left `libwgpu_native.dylib` out
+of `~/.pulp/bin` whenever the optional broker failed, and `pulp-cpp` died in
+dyld on every host. The Unix smoke legs therefore also install the artifact
+through the default branch's `install.sh` (`PULP_INSTALL_ARCHIVE`, no
+download, a scratch `HOME` and install root where the broker is refused) and
+run `tools/scripts/check_installed_rpaths.py` on the installed tree. To
+reproduce locally: `PULP_INSTALL_ARCHIVE=pulp-darwin-arm64.tar.gz
+PULP_INSTALL_DIR=/tmp/i/bin PULP_NO_MODIFY_PATH=1 PULP_SKIP_SDK_INSTALL=1
+bash tools/install/install.sh && python3 tools/scripts/check_installed_rpaths.py /tmp/i/bin`.
 
 ### Phase 8 CLI release artifacts are dual-binary
 

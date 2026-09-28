@@ -3914,22 +3914,23 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   second candidate list, and remember that on a host with no system Chrome the
   cost of getting this wrong is a silent skip rather than a failure.
 - **Real-browser cases live in `*.integration.test.mjs` files, and they run
-  concurrently.** The ctest `pulp-browser-capture-node-integration` reserves
-  `PROCESSORS 4` and holds the `browser` RESOURCE_LOCK (a CDP screenshot once
-  crossed its 20 s deadline while unrelated ctest work shared the VM). It is
-  NOT `RUN_SERIAL`: that held every slot and made it run alone at the end of
-  the gate's test step; `COST` now starts it first. It runs every
-  `*.integration.test.mjs` file through `browser_capture/run_integration.mjs`,
-  which calls `node --test` with a file concurrency of one Chrome per two cores
-  and per 2 GiB of a declared memory lease, capped by the file count and by the
-  slots ctest reserved (`PULP_BROWSER_CAPTURE_RESERVED_CORES`, set from the
-  same value as `PROCESSORS`): 1 on m1's 3-vCPU VM (ctest clamps the
-  reservation to `-j3`, so it runs alone there), 2 on m5 and the Studio. Any
-  other test that launches a real Chrome must take the same `browser` lock;
-  `ctest-scheduling-contract` (`tools/scripts/test_ctest_scheduling_contract.py`)
-  lists them and fails if one loses it or gains `RUN_SERIAL`. Node runs the cases *within* one file in
+  concurrently.** The ctest `pulp-browser-capture-node-integration` is
+  `RUN_SERIAL` with the `browser` RESOURCE_LOCK and the suite's highest `COST`,
+  so ctest starts it first, alone, while every slot is free, instead of at the
+  end of the gate's test step. Do not trade that isolation for a partial slot
+  reservation: run two Chromes beside other tests (`PROCESSORS 4`) and browser
+  launches timed out or were killed before the guardian took custody
+  (`browser child exited (SIGTERM)`) in 4 of 20 merge groups on 6- and 12-vCPU
+  VMs, against none in 77 runs alone. The scheduling class lives in
+  `tools/scripts/ctest_scheduling_policy.py` (`SERIAL_FIRST_TESTS`); any other
+  test that launches a real Chrome must take the same `browser` lock. It runs
+  every `*.integration.test.mjs` file through
+  `browser_capture/run_integration.mjs`, which calls `node --test` with a file
+  concurrency of one Chrome per two cores and per 2 GiB of a declared memory
+  lease, capped by the file count: 1 on m1's 3-vCPU VM, 3 on m5's 6-vCPU VM,
+  6 on the Studio's 12-vCPU VM. Node runs the cases *within* one file in
   sequence, so the files are the unit of parallelism: each case mostly waits on
-  a cold Chrome launch, so files overlap well inside the reserved slots on a large
+  a cold Chrome launch, so files overlap well inside the serial slot on a large
   VM. On m1 a fixed width of 3 made every capture time out
   (`stalled=Page.captureScreenshot`) and failed every merge group that landed
   there, while m3 and m5 passed. The width is read when the suite runs
@@ -7048,6 +7049,48 @@ pass. Patching a name that does not exist leaves the count at zero on both
 sides, the test passes, and that reads as "the test does not cover this" — a
 dead instrument reported as a finding. The script refuses that case outright
 rather than letting it read as a verdict.
+
+## App code: no React commit on a per-move or per-frame path
+
+**Rule.** In a materialized/captured import, a `pointermove`, a hover, an
+animation tick, or any other per-frame path must not commit React. Keep
+pointer, hover and animation state in refs; draw from those refs on the canvas
+and request a repaint; update small DOM text (a readout, a tooltip) imperatively
+through `textContent` and its position; never call a setter with the value it
+already holds; handle each event once.
+
+**Why.** Each commit runs the metadata re-apply described above. Scoping cuts
+its bridge traffic but not its per-commit document walk, and an app that
+vendors an older `runtime.js` pays the full pass. Illustration from one
+captured-import editor: an LFO over 64 bands held 60 fps with the mouse still
+and stalled 100 ms–2.5 s per frame while it moved; each `pointermove` cost
+~42 ms (a `mousemove` on the same element ~0.2 ms), with ~150
+`getLayoutBoxMetrics`, ~160 `setFlex`, ~195 `setFontFamily` and ~12 layout
+passes per event. Paint (~2.5 ms) and `gpu_acquire` (~1–4 ms) were cheap. With
+the rule applied `pointermove` fell to ~0.6 ms and no >100 ms stall remained.
+None of this shows in a screenshot, pixel diff or browser fixture.
+
+**Audit every commit source — one survivor keeps the stall:**
+
+1. hover/pointer state in React state — including "only when the target
+   changes", which on dense targets still commits nearly every move;
+2. a status/readout effect publishing through the root's (or an ancestor's)
+   state;
+3. same-value setter calls — a same-value `setCursor(...)` still committed in
+   this runtime, so compare before calling;
+4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
+   (runs twice per move);
+5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
+   through state — keep it mounted and restart the timer imperatively.
+
+**Measuring it.** Wrap `__dispatch__(id, type, payload)` with a timer and
+compare `pointermove` against `mousemove` on the same element, then confirm in
+a Perfetto capture driven by a real 60 Hz `CGEvent` mouse sweep plus a
+deterministic animation, comparing the sweep window with a no-input window of
+the same animation. Never measure while a scripted-scenario harness steps (its
+snapshots add 100–800 ms stalls), size `PULP_TRACE_RING_KB` large (`524288`),
+and let `PULP_TRACE_SECONDS` plus the flush elapse before ending the process.
+Full recipe: `docs/guides/interaction-cost.md` and the `trace-analysis` skill.
 
 ## A `vm` sandbox is a second realm, and the entry notices
 

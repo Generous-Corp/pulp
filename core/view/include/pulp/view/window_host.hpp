@@ -637,6 +637,19 @@ public:
         return false;
     }
 
+    /// Main-thread milliseconds spent on each host frame dispatched so far
+    /// (idle pump + layout + paint + submit + present), oldest first and
+    /// bounded, so a finite run (a headless screenshot) can report how its
+    /// frames performed. Hosts that do not measure return an empty vector.
+    /// Appended at the public vtable tail for downstream WindowHost ABI safety.
+    virtual std::vector<double> frame_time_samples_ms() const { return {}; }
+
+    /// Log this host's GPU-diagnostics summary line(s) — whether the Skia log
+    /// bridge is wired and what reached it — at info level. For the end of a
+    /// bounded run, never per frame. No-op for hosts without a GPU stack.
+    /// Appended at the public vtable tail for downstream WindowHost ABI safety.
+    virtual void log_gpu_diagnostics_summary() {}
+
     /// True once `note_unsupported_feature(method)` has fired for `method` on
     /// this host — i.e. a window feature was requested that this host silently
     /// no-ops (the base-class default ran because the host did not override it).

@@ -1495,7 +1495,40 @@ class SingleOwnerReleasePublication(unittest.TestCase):
             "required darwin-x64 legs for the hosted macOS pool.",
         )
         needs = self.workflow["jobs"]["release"]["needs"]
-        self.assertEqual(sorted(needs), ["build-cli", "smoke-cli"])
+        self.assertEqual(sorted(needs), ["build-cli", "ios-compile-gate", "smoke-cli"])
+
+    def test_no_tag_publishes_without_a_green_ios_compile_gate(self) -> None:
+        """Per-PR gates run the iOS compile gate only for iOS-only surfaces, so
+        the tag itself must compile for iOS before it publishes.
+
+        Required, not advisory: it is in `needs` AND the publish `if` demands
+        its success (`always()` alone would let a failed dependency through).
+        It rides the darwin-arm64 leg's resolved runner, never a hosted pool the
+        release's own legs wait on, and a 77 skip (SDKs absent) fails it.
+        """
+        job = self.workflow["jobs"]["ios-compile-gate"]
+        self.assertEqual(job["needs"], "resolve-macos-runner")
+        self.assertEqual(
+            job["runs-on"],
+            "${{ fromJSON(needs.resolve-macos-runner.outputs.map)['darwin-arm64'] }}",
+        )
+        self.assertNotIn("continue-on-error", job)
+        run = "\n".join(step.get("run", "") for step in job["steps"])
+        self.assertIn('bash test/cmake/test_ios_compile_gate.sh "$GITHUB_WORKSPACE"', run)
+        self.assertIn('if [ "$rc" = 77 ]; then', run)
+        self.assertIn("exit 1", run)
+        checkout = job["steps"][0]
+        self.assertEqual(
+            checkout["with"]["ref"],
+            self.workflow["jobs"]["build-cli"]["steps"][
+                next(i for i, st in enumerate(self.workflow["jobs"]["build-cli"]["steps"])
+                     if str(st.get("uses", "")).startswith("actions/checkout"))
+            ]["with"]["ref"],
+            "the gate must compile the same ref the CLI legs build",
+        )
+        self.assertIn("ios-compile-gate", self.workflow["jobs"]["release"]["needs"])
+        self.assertIn("needs.ios-compile-gate.result == 'success'",
+                      self.workflow["jobs"]["release"]["if"])
 
     def test_release_job_checksums_and_publishes_in_one_job(self) -> None:
         generate = "release_checksum_manifest.py generate"

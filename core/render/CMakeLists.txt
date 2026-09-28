@@ -9,6 +9,7 @@ target_include_directories(pulp-render
 
 target_sources(pulp-render PRIVATE
     src/gpu_diagnostics.cpp
+    src/gpu_startup_report.cpp
     src/gpu_surface_dawn.cpp
     src/gpu_compute.cpp
     src/headless_surface.cpp

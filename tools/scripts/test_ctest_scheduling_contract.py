@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""The longest tests start first, and no Chrome-launching test holds the machine.
+"""The longest tests start first, and tests that need the VM alone run first.
 
-ctest's parallel phase ends when its last long test finishes, and anything that
-reserves every slot can only start once the rest of the suite has drained. Both
-shapes turned into a serial tail at the end of the required gate's test step: a
-full-width reservation and a RUN_SERIAL browser suite ran alone, one after the
-other, for minutes after every other test had finished, while the suite's
-longest test started minutes in because nothing told ctest it was long.
+ctest's parallel phase ends when its last long test finishes, and a test that
+needs every slot can only start when all of them are free. Left to registration
+order, both shapes became a serial tail at the end of the required gate's test
+step: the RUN_SERIAL browser suites and a full-width reservation ran alone for
+minutes after every other test had finished, while the suite's longest test
+started minutes in because nothing told ctest it was long.
 
 The rows and classes live in ctest_scheduling_policy.py, which the source-level
 contract in test_ci_throughput_workflows.py imports too. The contract, read
 from an already-configured build:
 
   * Every test that launches a real Chrome holds the `browser` RESOURCE_LOCK,
-    so two captures never share a VM's cores, and none is RUN_SERIAL: the lock
-    is the isolation it needs, and RUN_SERIAL excludes every other test too.
-  * The real-browser suite's PROCESSORS equals the reservation it hands its
-    launcher (PULP_BROWSER_CAPTURE_RESERVED_CORES), so the browsers it starts
-    fit the slots ctest set aside for them.
-  * Each test measured as long carries a COST, so ctest starts it first, and
+    so two captures never share a VM's cores. Only the serial-first tests may
+    also be RUN_SERIAL.
+  * Each serial-first test is RUN_SERIAL and carries a COST above every other
+    registered test, so ctest starts it while every slot is free instead of
+    after the parallel phase drains.
+  * Each test measured as long carries a COST, so ctest starts it early, and
     reserves few enough slots to start while other tests are running.
 
 Absence is handled the way the measured-budget guard handles it. A row that
@@ -39,11 +39,10 @@ import sys
 
 from ctest_scheduling_policy import (
     BROWSER_LOCK,
-    BROWSER_SUITE,
     BROWSER_TESTS,
     LONG_TESTS,
     MAX_LONG_TEST_PROCESSORS,
-    RESERVATION_ENV,
+    SERIAL_FIRST_TESTS,
     consistency_errors,
     row,
 )
@@ -79,9 +78,10 @@ def resolve(registered, entry, failures, skipped):
     return None
 
 
-def audit(tests, browser_rows, long_rows):
+def audit(tests, browser_rows, long_rows, serial_first_rows=()):
     """Return (failures, skipped, checked) for the rows against registrations."""
     registered = {test["name"]: test for test in tests}
+    serial_first = {entry["name"] for entry in serial_first_rows}
     failures, skipped = [], []
     checked = 0
     for entry in browser_rows:
@@ -90,29 +90,40 @@ def audit(tests, browser_rows, long_rows):
             continue
         checked += 1
         props = properties(test)
-        if props.get("RUN_SERIAL"):
+        if props.get("RUN_SERIAL") and entry["name"] not in serial_first:
             failures.append(
                 f"{entry['name']}: RUN_SERIAL holds the whole machine; the "
-                f"`{BROWSER_LOCK}` lock is the isolation a Chrome-launching test needs"
+                f"`{BROWSER_LOCK}` lock is the isolation it needs unless the "
+                f"policy lists it as serial-first"
             )
         if BROWSER_LOCK not in (props.get("RESOURCE_LOCK") or []):
             failures.append(
                 f"{entry['name']}: launches Chrome without RESOURCE_LOCK "
                 f"{BROWSER_LOCK!r}, so it can overlap another capture"
             )
-        if entry["name"] == BROWSER_SUITE:
-            reserved = None
-            for assignment in props.get("ENVIRONMENT") or []:
-                key, _, value = assignment.partition("=")
-                if key == RESERVATION_ENV:
-                    reserved = value
-            processors = props.get("PROCESSORS")
-            if reserved is None or processors is None or str(processors) != reserved:
-                failures.append(
-                    f"{entry['name']}: PROCESSORS={processors} and "
-                    f"{RESERVATION_ENV}={reserved} must be set and equal, or the "
-                    f"launcher starts browsers on slots ctest gave other tests"
-                )
+    others = [
+        properties(test).get("COST") or 0
+        for test in tests if test["name"] not in serial_first
+    ]
+    ceiling = max(others, default=0)
+    for entry in serial_first_rows:
+        test = resolve(registered, entry, failures, skipped)
+        if test is None:
+            continue
+        checked += 1
+        props = properties(test)
+        if not props.get("RUN_SERIAL"):
+            failures.append(
+                f"{entry['name']}: serial-first but not RUN_SERIAL, so it shares "
+                f"the VM with other tests"
+            )
+        cost = props.get("COST") or 0
+        if cost <= ceiling:
+            failures.append(
+                f"{entry['name']}: COST={cost:g} is not above every other test's "
+                f"(highest {ceiling:g}), so it can wait for all slots until the "
+                f"parallel phase drains and run alone at the end"
+            )
     for entry in long_rows:
         test = resolve(registered, entry, failures, skipped)
         if test is None:
@@ -139,15 +150,17 @@ def self_check():
     policy = consistency_errors()
     if policy:
         raise SystemExit("scheduling policy contradicts itself:\n  " + "\n  ".join(policy))
-    if len(consistency_errors(weighted={"x"}, browser=set(), long={"x"})) != 1:
+    if len(consistency_errors(weighted={"x"}, browser=set(), long={"x"},
+                              serial_first=set())) != 1:
         raise SystemExit("detector self-check failed: a weighted long test was not rejected")
     browser_rows = [
         row("serial-browser"),
         row("unlocked-browser"),
-        row(BROWSER_SUITE),
+        row("first-browser"),
         row("gone", companion="present-friend"),
         row("gone-elsewhere", companion="absent-friend"),
     ]
+    serial_rows = [row("first-browser"), row("first-cheap"), row("first-shared")]
     long_rows = [row("no-cost"), row("full-width"), row("good-long"), row("gated", optional=True)]
     planted = [
         {"name": "serial-browser", "properties": [
@@ -155,10 +168,17 @@ def self_check():
             {"name": "RESOURCE_LOCK", "value": [BROWSER_LOCK]}]},
         {"name": "unlocked-browser", "properties": [
             {"name": "RESOURCE_LOCK", "value": ["pulp_gpu"]}]},
-        {"name": BROWSER_SUITE, "properties": [
+        # Serial-first and correct: RUN_SERIAL, locked, the highest COST.
+        {"name": "first-browser", "properties": [
+            {"name": "RUN_SERIAL", "value": True},
             {"name": "RESOURCE_LOCK", "value": [BROWSER_LOCK]},
-            {"name": "PROCESSORS", "value": 4},
-            {"name": "ENVIRONMENT", "value": [f"{RESERVATION_ENV}=3"]}]},
+            {"name": "COST", "value": 1000.0}]},
+        # Serial-first with a COST a long test outranks.
+        {"name": "first-cheap", "properties": [
+            {"name": "RUN_SERIAL", "value": True},
+            {"name": "COST", "value": 40.0}]},
+        # Serial-first without RUN_SERIAL.
+        {"name": "first-shared", "properties": [{"name": "COST", "value": 900.0}]},
         {"name": "present-friend", "properties": []},
         {"name": "no-cost", "properties": [{"name": "PROCESSORS", "value": 2}]},
         {"name": "full-width", "properties": [
@@ -166,17 +186,18 @@ def self_check():
         {"name": "good-long", "properties": [
             {"name": "COST", "value": 50.0}, {"name": "PROCESSORS", "value": 2}]},
     ]
-    failures, skipped, checked = audit(planted, browser_rows, long_rows)
+    failures, skipped, checked = audit(planted, browser_rows, long_rows, serial_rows)
     flagged = sorted(line.split(":")[0] for line in failures)
     expected = sorted([
-        "serial-browser", "unlocked-browser", BROWSER_SUITE, "gone", "no-cost", "full-width",
+        "serial-browser", "unlocked-browser", "gone", "first-cheap", "first-shared",
+        "no-cost", "full-width",
     ])
     if flagged != expected:
         raise SystemExit(f"detector self-check failed: expected {expected}, got {flagged}")
     if sorted(line.split(":")[0] for line in skipped) != ["gated", "gone-elsewhere"]:
         raise SystemExit(f"detector self-check failed: unexpected skips {skipped}")
-    if checked != 6:
-        raise SystemExit(f"detector self-check failed: checked {checked} rows, expected 6")
+    if checked != 9:
+        raise SystemExit(f"detector self-check failed: checked {checked} rows, expected 9")
 
 
 def main():
@@ -200,7 +221,8 @@ def main():
               f"report a clean result from a build this empty.", file=sys.stderr)
         return 1
 
-    failures, skipped, checked = audit(tests, BROWSER_TESTS, LONG_TESTS)
+    failures, skipped, checked = audit(
+        tests, BROWSER_TESTS, LONG_TESTS, SERIAL_FIRST_TESTS)
     for line in skipped:
         print(f"skipped {line}")
     if failures:

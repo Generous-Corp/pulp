@@ -480,7 +480,10 @@ fi
 # test_ci_throughput_workflows.py on main the second way. Run the entries the
 # diff can plausibly reach, selected by source_selftests.py; the workflow list
 # is read from the workflow file itself, so the two cannot diverge. A change to
-# a lane runs all of it. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
+# a lane runs all of it. A failing suite is re-run on the merge-base; when every
+# test it fails also fails there, it prints PRE-EXISTING ON BASE and does not
+# fail this script, so a red main is not chased as the branch's fault. A new
+# failing test inside that suite still fails. PULP_SKIP_SOURCE_SELFTESTS=1 skips both.
 if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTESTS:-0}" != "1" ]; then
     for src_lane in manifest workflow-lint; do
         echo "" >&2
@@ -494,7 +497,7 @@ if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTEST
         fi
         src_selftest_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-source-selftests.XXXXXX")"
         if "$PYTHON" "$ROOT/tools/ci/source_selftests.py" run ${src_lane_args[@]+"${src_lane_args[@]}"} \
-                --changed-from "$BASE" >"$src_selftest_log" 2>&1; then
+                --changed-from "$BASE" --label-base-failures >"$src_selftest_log" 2>&1; then
             sed -n 's/^source-selftests: /  source-selftests: /p' "$src_selftest_log" >&2
         else
             tail -n 40 "$src_selftest_log" >&2

@@ -402,7 +402,8 @@
         "el.showModal() (degrades to show() + _dialogModal flag \u2014 no native modal trap layer yet, tracked separately)",
         "el.close(returnValue) + 'close' event dispatch",
         "el.open getter / setter (reflects + drives `open` attribute)",
-        "el.returnValue round-trip"
+        "el.returnValue round-trip",
+        "show() / showModal() focus the first autofocus descendant, else the first text field (data-pulp-autofocus=\"off\" opts out)"
       ],
       "unsupportedValues": [],
       "tests": [
@@ -633,17 +634,17 @@
     },
     "html/label": {
       "status": "supported",
-      "mapsTo": "createLabel + lazy `_installLabelForRouting` in web-compat-element.js \u2014 clicking the label inspects the `for` attribute and, if it matches an Element id, routes activation to that target (focus via setFocus when wired; checkbox/radio toggle plus dispatched 'input' event always).",
+      "mapsTo": "createLabel + lazy `_installLabelForRouting` in web-compat-element.js \u2014 clicking the label inspects the `for` attribute and, if it matches an Element id, routes activation to that target (Element.focus(), which moves native keyboard focus via the setFocus bridge function; checkbox/radio toggle plus dispatched 'input' event always).",
       "supportedValues": [
         "createLabel rendering",
-        "for attribute \u2192 click activation routing (toggle on checkbox/radio; setFocus when bridge fn available)"
+        "for attribute \u2192 click activation routing (toggle on checkbox/radio; native keyboard focus via Element.focus())"
       ],
       "unsupportedValues": [],
       "tests": [
         "test/test_widget_bridge.cpp::\"<label for=...> click toggles labeled checkbox\"",
         "test/test_widget_bridge_wave5_css.cpp [issue-1711][evidence-backfill]"
       ],
-      "notes": "DIVERGE\u2192PASS sweep \u2014 `for` attribute click-routing wired in JS. Full focus-pull (currently bridge has no setFocus) remains a roadmap follow-up; the harness gap was about the wired vs. silently-dropped distinction.",
+      "notes": "DIVERGE\u2192PASS sweep \u2014 `for` attribute click-routing wired in JS; the focus pull goes through Element.focus(), which gives the labeled field native keyboard focus.",
       "issue": ""
     },
     "html/main": {

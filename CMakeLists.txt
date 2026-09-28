@@ -546,6 +546,11 @@ endif()
 
 # ── CMake Module Path (for pulp_add_plugin, pulp_add_app) ──────────────────
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
+# Runtime pins (Skia/Dawn/wgpu-native/JS engine/min-OS) recorded into the SDK
+# and every bundle's pulp-build-info.json. After the dependency and JS-engine
+# setup that resolves them, before the plugin helpers that embed them.
+include(PulpRuntimePins)
+pulp_configure_runtime_pins()
 include(PulpUtils)
 
 # One fixed, installed control host gives the production broker a usable

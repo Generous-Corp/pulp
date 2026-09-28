@@ -8,8 +8,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/format/detail/delayed_action.hpp>
+#include <pulp/format/detail/frame_time_summary.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -322,4 +324,52 @@ TEST_CASE("DelayedAction closes even when no action is installed",
     action();
     REQUIRE(closes == 1);
     REQUIRE(*action.captured);
+}
+
+// ── Frame-time summary for the headless screenshot run ──────────────────────
+
+using pulp::format::detail::format_frame_time_summary;
+using pulp::format::detail::summarize_frame_times;
+
+TEST_CASE("Frame-time summary uses nearest-rank percentiles and strict budgets",
+          "[screenshot][frame-time]") {
+    // 1..100 ms: nearest-rank p50 is the 50th sample, p95 the 95th.
+    std::vector<double> samples;
+    for (int i = 100; i >= 1; --i)  // unsorted input on purpose
+        samples.push_back(static_cast<double>(i));
+    const auto s = summarize_frame_times(samples);
+    REQUIRE(s.frames == 100);
+    REQUIRE(s.p50_ms == 50.0);
+    REQUIRE(s.p95_ms == 95.0);
+    REQUIRE(s.max_ms == 100.0);
+    // Strictly over 16.67 ms: 17..100; strictly over 33.33 ms: 34..100.
+    REQUIRE(s.over_16ms == 84);
+    REQUIRE(s.over_33ms == 67);
+}
+
+TEST_CASE("Frame-time summary counts a frame exactly on budget as within it",
+          "[screenshot][frame-time]") {
+    const auto s = summarize_frame_times({1000.0 / 60.0, 1000.0 / 30.0, 16.8, 33.4});
+    REQUIRE(s.over_16ms == 3);  // 33.33, 16.8, 33.4
+    REQUIRE(s.over_33ms == 1);  // 33.4
+}
+
+TEST_CASE("Frame-time summary drops unusable samples and handles no frames",
+          "[screenshot][frame-time]") {
+    const auto empty = summarize_frame_times({});
+    REQUIRE(empty.frames == 0);
+    REQUIRE(format_frame_time_summary(empty) ==
+            "frame_ms frames=0 p50=0.00 p95=0.00 max=0.00 over16=0 over33=0");
+
+    const auto s = summarize_frame_times({-1.0, std::nan(""), 4.0, INFINITY});
+    REQUIRE(s.frames == 1);
+    REQUIRE(s.max_ms == 4.0);
+}
+
+TEST_CASE("Frame-time summary line keeps its greppable shape",
+          "[screenshot][frame-time]") {
+    std::vector<double> samples(59, 2.04);
+    samples.push_back(40.0);
+    const auto line = format_frame_time_summary(summarize_frame_times(samples));
+    REQUIRE(line == "frame_ms frames=60 p50=2.04 p95=2.04 max=40.00 over16=1 over33=1");
 }

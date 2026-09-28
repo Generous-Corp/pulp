@@ -226,6 +226,17 @@ retain those fields in the PR/landing evidence.
   milestone branch, preserve its raw Skia SHA, and separately prove the release's
   validated `built_skia`/`built_dawn` pair equals Pulp's active provider.
 - Skia's Dawn pin and Chromium's Dawn pin are separate dependency surfaces.
+- The SDK's `share/pulp/runtime-pins.json` (embedded in every bundle's
+  `pulp-build-info.json`) is DERIVED, not edited: `PulpRuntimePins.cmake` parses
+  `**Release:**`, the "Skia branch tip is `<sha>`" sentence, and
+  `**skia-builder ref:**` out of `VERSION.md`, decodes `kDawnVersion` from the
+  linked `dawn/dawn_version.h`, and takes wgpu-native from the single
+  `PULP_WGPU_NATIVE_VERSION` in `PulpDependencies.cmake`. Rewording those
+  VERSION.md lines turns the pins into `null`; the
+  `cmake-bundle-build-info-contract` ctest compares them with the manifest's
+  Skia version and Dawn notes (`DEPS file at <sha>`, `Dawn SHA1 <sha>`), so keep
+  those phrasings too. A wgpu-native bump now edits that one variable plus
+  `PulpWgpuUniversal.cmake`'s slice digests and `shared-source-contract.txt`.
 - `PulpDependencies.cmake` sets `CMAKE_DISABLE_PRECOMPILE_HEADERS ON` around
   SDL3's `FetchContent_MakeAvailable` only. SDL3 precompiles `src/SDL_internal.h`
   into every object, and ccache refuses to cache a TU compiled against a PCH

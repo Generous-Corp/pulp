@@ -11,6 +11,8 @@
 #   PULP_INSTALL_DIR  — install directory (default: ~/.pulp/bin)
 #   PULP_VERSION      — version to install (default: latest)
 #   PULP_NO_MODIFY_PATH — set to 1 to skip shell-profile modification
+#   PULP_INSTALL_ARCHIVE — install this local release archive instead of
+#     downloading one (used by the release smoke)
 #   PULP_ACCEPT_CONTROL_BROKER_CUSTOM_INSTALL_ROOT — set to 1 to allow the
 #     macOS health-only broker LaunchAgent when using a custom install root
 #
@@ -104,44 +106,58 @@ echo "Installing Pulp CLI for $PLATFORM..."
 
 # ── Download ─────────────────────────────────────────────────────────────────
 
-if [ "$VERSION" = "latest" ]; then
-    RELEASE_URL="https://api.github.com/repos/$REPO/releases/latest"
-    echo "Fetching latest release..."
-    DOWNLOAD_URL=$(curl -fsSL "$RELEASE_URL" | grep "browser_download_url.*pulp-$PLATFORM" | head -1 | cut -d '"' -f 4)
+# PULP_INSTALL_ARCHIVE installs an archive that is already on disk, with no
+# network: the release smoke uses it to install the artifact it is about to
+# publish through this same script, before any download URL exists.
+if [ -n "${PULP_INSTALL_ARCHIVE:-}" ]; then
+    if [ ! -f "$PULP_INSTALL_ARCHIVE" ]; then
+        echo "Error: PULP_INSTALL_ARCHIVE is not a file: $PULP_INSTALL_ARCHIVE"
+        exit 1
+    fi
+    TMP_DIR=$(mktemp -d)
+    trap "rm -rf $TMP_DIR" EXIT
+    echo "Using local archive $PULP_INSTALL_ARCHIVE"
+    cp "$PULP_INSTALL_ARCHIVE" "$TMP_DIR/pulp.tar.gz"
 else
-    DOWNLOAD_URL="https://github.com/$REPO/releases/download/v$VERSION/pulp-$PLATFORM.tar.gz"
-fi
+    if [ "$VERSION" = "latest" ]; then
+        RELEASE_URL="https://api.github.com/repos/$REPO/releases/latest"
+        echo "Fetching latest release..."
+        DOWNLOAD_URL=$(curl -fsSL "$RELEASE_URL" | grep "browser_download_url.*pulp-$PLATFORM" | head -1 | cut -d '"' -f 4)
+    else
+        DOWNLOAD_URL="https://github.com/$REPO/releases/download/v$VERSION/pulp-$PLATFORM.tar.gz"
+    fi
 
-if [ -z "$DOWNLOAD_URL" ]; then
-    echo "Error: could not find release for $PLATFORM"
-    echo ""
-    echo "Pre-built binaries may not be available yet."
-    echo "To build from source instead:"
-    echo "  git clone https://github.com/$REPO.git && cd pulp && ./setup.sh"
-    exit 1
-fi
+    if [ -z "$DOWNLOAD_URL" ]; then
+        echo "Error: could not find release for $PLATFORM"
+        echo ""
+        echo "Pre-built binaries may not be available yet."
+        echo "To build from source instead:"
+        echo "  git clone https://github.com/$REPO.git && cd pulp && ./setup.sh"
+        exit 1
+    fi
 
-# Create temp directory
-TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+    # Create temp directory
+    TMP_DIR=$(mktemp -d)
+    trap "rm -rf $TMP_DIR" EXIT
 
-echo "Downloading $DOWNLOAD_URL..."
-if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/pulp.tar.gz"; then
-    echo ""
-    echo "Error: could not download pulp-$PLATFORM for this version."
-    case "$PLATFORM" in
-        darwin-x64)
-            echo "The Intel (x86_64) macOS build ships in current releases, but"
-            echo "older releases predate Intel support and won't have it. Try the"
-            echo "latest release (omit --version), or build from source:"
-            ;;
-        *)
-            echo "Pre-built binaries may not be available for this version."
-            echo "To build from source instead:"
-            ;;
-    esac
-    echo "  git clone https://github.com/$REPO.git && cd pulp && ./setup.sh"
-    exit 1
+    echo "Downloading $DOWNLOAD_URL..."
+    if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/pulp.tar.gz"; then
+        echo ""
+        echo "Error: could not download pulp-$PLATFORM for this version."
+        case "$PLATFORM" in
+            darwin-x64)
+                echo "The Intel (x86_64) macOS build ships in current releases, but"
+                echo "older releases predate Intel support and won't have it. Try the"
+                echo "latest release (omit --version), or build from source:"
+                ;;
+            *)
+                echo "Pre-built binaries may not be available for this version."
+                echo "To build from source instead:"
+                ;;
+        esac
+        echo "  git clone https://github.com/$REPO.git && cd pulp && ./setup.sh"
+        exit 1
+    fi
 fi
 
 # ── Install ──────────────────────────────────────────────────────────────────

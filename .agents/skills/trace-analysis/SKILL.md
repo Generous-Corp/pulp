@@ -316,7 +316,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | QuickJS bridge dispatch cost, a JS callback invalidating layout | `references/hints_js.md` |
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
 | Shared-I/O GPU audio admission, terminal/delivery correlation, and quiescent recovery | `references/hints_gpu_audio.md` |
-| a drag/scroll that feels sluggish while frame medians look fine; huge bridge-call counts over one interaction | `docs/guides/interaction-cost.md` |
+| a drag/scroll/hover that feels sluggish while frame medians look fine; frames stall only while the mouse moves; huge bridge-call counts over one interaction | `docs/guides/interaction-cost.md` |
 | standalone vs plugin-in-DAW vs iOS/iPadOS AUv3 vs Android/Oboe vs Simulator; sample-position args, thread naming, atrace interleave | `references/hints_crossplatform.md` |
 
 ### 8. Answer in plain English (L1) — never surface SQL
@@ -627,6 +627,12 @@ owns Skia's process-global handler. A capture with Dawn diagnostics but no Skia
 ones is therefore an ordinary outcome (a host already held the slot), not a
 dropped event. `skia_log_bridge_state()` reports which it was.
 
+The log copy of a Skia record is capped (`kSkiaLogTextLimit`, 50 per process)
+while the trace event is not, so past that cap a trace legitimately holds Skia
+records the log does not — the `GpuDiagnostics: … skia_text_suppressed=N` line
+a headless screenshot run prints says how many. Compare `skia_records` on that
+line against your `gpu.diagnostic` count before calling the two out of sync.
+
 ## DPR experiment traces reuse A2T
 
 A4 DPR trials do not introduce a second profiler or a new ad-hoc SQL report.
@@ -876,11 +882,14 @@ SELECT name, value FROM stats WHERE name IN (
   'traced_buf_bytes_written',
   'traced_buf_bytes_overwritten',
   'traced_buf_buffer_size',
+  'traced_buf_incremental_sequences_dropped',
   'packet_skipped_seq_needs_incremental_state_invalid')
   AND value != 0;
 ```
 
-`traced_buf_write_wrap_count > 0` or any
+`traced_buf_write_wrap_count > 0`, any
+`traced_buf_incremental_sequences_dropped` (a whole sequence — often the main
+thread's — was discarded), or any
 `packet_skipped_seq_needs_incremental_state_invalid` means the capture is
 truncated — re-capture with a bigger ring, do not analyse it. Pair it with a
 positive control that must be non-zero for a capture of that workload (for a UI
@@ -894,3 +903,29 @@ capture. **A script-heavy UI capture with `js_native:*` spans enabled will
 overrun it** — one 6-second Spectr band drag wrote 100.4 MB into the 80 MB ring
 and produced a zero-slice file. Budget ≥ 256 MB (`PULP_TRACE_RING_KB=262144`)
 for that shape of capture.
+
+### Capturing jank that appears only during interaction
+
+Frames that stall only while the user moves the mouse need a capture that
+isolates the interaction from everything else in the process:
+
+- **Drive a real mouse and a deterministic animation together.** Post
+  `kCGEventMouseMoved` events at 60 Hz across the target while a fixed
+  animation source (an LFO) runs, then compare a *during-sweep* window with a
+  *same animation, mouse still* window in the same trace. The difference is
+  the interaction's cost; anything present in both is not.
+- **Never capture while a scripted-scenario harness is stepping.** Its
+  per-step snapshots add 100–800 ms stalls that read exactly like app jank.
+- **Size the ring and let it flush.** Use `PULP_TRACE_RING_KB=524288` for a
+  script-heavy UI, and let `PULP_TRACE_SECONDS` plus the flush elapse before
+  ending the process — an earlier kill writes no file.
+- **Read the slices by side.** `dom_event_dispatch`, `dom_event_evaluate` and
+  `__flushTimers__` name the JS-side cost; `gpu_acquire` the GPU wait; `paint`
+  the drawing. Steady-state `gpu_acquire` of a few ms with ~2 ms `paint` and a
+  `dom_event_evaluate` of tens of ms points at the script, not the renderer.
+
+In a captured/materialized React import, a fat `dom_event_evaluate` on
+`pointermove` is almost always a React commit per move re-applying import
+metadata; the fix and its checklist are in `docs/guides/interaction-cost.md`
+and the `import-design` skill ("App code: no React commit on a per-move or
+per-frame path").

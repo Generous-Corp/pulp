@@ -1525,6 +1525,46 @@ jobs:
           Expand-Archive -Force -Path artifact-in\pulp-${{ matrix.platform }}.zip -DestinationPath $env:TEMP\pulp-smoke
           Get-ChildItem $env:TEMP\pulp-smoke
 
+      # The flat unpack above cannot see an installer that leaves a member out
+      # or puts it where the binaries do not look (v0.876.1 shipped a correct
+      # archive whose install stranded pulp-cpp without libwgpu_native). So
+      # also install the artifact through the real install.sh, the way users
+      # do, and check the INSTALLED tree. The installer comes from the default
+      # branch, which is the copy users download. The broker is refused here
+      # (custom root, no opt-in); that must be a warning, not a failed install.
+      - name: Check out the installer and install-layout checker
+        if: runner.os != 'Windows'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: installer-src
+          lfs: false
+          sparse-checkout: |
+            tools/install/install.sh
+            tools/scripts/check_installed_rpaths.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install through install.sh and check the installed layout (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          INSTALL_ROOT="$RUNNER_TEMP/pulp-installed"
+          mkdir -p "$INSTALL_ROOT/home"
+          HOME="$INSTALL_ROOT/home" \
+          PULP_INSTALL_ARCHIVE="$PWD/artifact-in/pulp-${{ matrix.platform }}.tar.gz" \
+          PULP_INSTALL_DIR="$INSTALL_ROOT/bin" \
+          PULP_NO_MODIFY_PATH=1 \
+          PULP_SKIP_SDK_INSTALL=1 \
+            bash installer-src/tools/install/install.sh
+          ls -la "$INSTALL_ROOT/bin"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            python3 installer-src/tools/scripts/check_installed_rpaths.py "$INSTALL_ROOT/bin"
+          fi
+          # Loading proves the shared runtime resolved (dyld / ld.so fail first).
+          "$INSTALL_ROOT/bin/pulp-cpp" version
+          "$INSTALL_ROOT/bin/pulp-mcp" --version
+
       # Smoke test — the binary must run portably.
       #
       # If `pulp help` exits non-zero or produces dyld/ld.so/DLL
@@ -1759,6 +1799,44 @@ jobs:
   # first — never put an advisory check in front of the release on a pool the
   # release itself is competing for.
 
+  ios-compile-gate:
+    # Per-PR and merge-group gates run the iOS compile gate only for changes to
+    # iOS-only surfaces (IOS_SURFACE_PATTERNS in classify_changes.py); the full
+    # gate runs nightly on main and here, on the exact tag, before it
+    # publishes. `release` needs it, so no tag ships without a green iOS
+    # compile. Same runner as the darwin-arm64 CLI leg, in parallel with it.
+    name: iOS compile gate — ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+    needs: resolve-macos-runner
+    runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.map)['darwin-arm64'] }}
+    timeout-minutes: 90
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_NODEPEND: "true"
+      CCACHE_SLOPPINESS: time_macros
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.source_ref != '' && inputs.source_ref || inputs.version) || '' }}
+
+      - name: Bootstrap dependencies
+        timeout-minutes: 15
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: iOS compile gate
+        shell: bash
+        run: |
+          set -uo pipefail
+          bash test/cmake/test_ios_compile_gate.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/build-ios"
+          rc=$?
+          # 77 means the runner lacks the iOS SDKs: no evidence, so no publish.
+          if [ "$rc" = 77 ]; then
+            echo "::error::iOS compile gate could not run (exit 77, iOS SDKs absent on this runner)"
+            exit 1
+          fi
+          exit "$rc"
+
   release:
     # THIS JOB IS THE SOLE OWNER OF THE RELEASE, end to end: it collects the
     # build artifacts, writes the Sparkle appcast, creates the release, attaches
@@ -1781,7 +1859,7 @@ jobs:
     # graph — the release job still WAITS for it, and that gate runs on the
     # GitHub-hosted macos-15 pool where queue times of 2–7 hours are routine.
     # An advisory gate must not be able to hold the release hostage.
-    needs: [build-cli, smoke-cli]
+    needs: [build-cli, smoke-cli, ios-compile-gate]
     runs-on: ubuntu-latest
     # ONE release may be in its publish transaction at a time, repo-wide.
     #
@@ -1805,6 +1883,7 @@ jobs:
       && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
       && needs.build-cli.result == 'success'
       && needs.smoke-cli.result == 'success'
+      && needs.ios-compile-gate.result == 'success'
     permissions:
       contents: write
       issues: read
