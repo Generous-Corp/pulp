@@ -670,6 +670,23 @@ consequences worth knowing before you debug:
   a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED.
 
+### A Python test that imports what the gate VM lacks fails only in the merge group
+
+The gate VM's Python has the standard library plus exactly
+`tools/motion/visual/requirements.lock` (build.yml's visual-analysis step). A
+test that imports anything else, often `yaml` inside a helper or a function the
+full suite reaches, passes locally and on the PR-head fast tier, then dies with
+`ModuleNotFoundError` in the merge group and ejects the batch. The pr-fast
+`gate-python-imports` ctest (`tools/scripts/gate_python_imports_check.py
+--build-dir`) reads every Python script the configured ctest inventory runs and
+follows every import statement through repo helpers; the allowlist is derived
+from that lock, and the check refuses to run if build.yml stops installing it.
+The source-selftest lane installs nothing, so its scripts are held to the
+standard library. An import under `try/except ImportError`, in an `except
+ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
+branch is allowed. Needing a new third-party package means adding it to the lock
+(and the wheelhouse), not to the check.
+
 ### A green ctest job proves nothing about a label its event excludes
 
 `build.yml` computes `label_exclude` from the event, and the two values are far
