@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260928-script-focus-autofocus-watch",
+  "created_at": "2026-09-28T06:31:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a web-compat focus change that crosses two families only through their broad core/view/** and test/** selectors. Script-side element.focus() now also requests native keyboard focus for the backing widget, and the autofocus attribute is honoured when an element mounts, through the web-compat element/event JS (core/view/js/web-compat-*.js), two widget-bridge functions (core/view/src/widget_bridge/dom_api.cpp, event_api.cpp) with their generated manifest and React typings, and the @pulp/react host config. test/web-compat/test_events_focus.cpp (pulp-test-web-compat-events) and packages/pulp-react/test/host-config-autofocus.test.ts cover the new behaviour; compat.json rows for focus and autofocus are updated. No importer, DesignIR, capture path, renderer, render asset, codegen output, visual fixture, threshold or Vellum-owned source changes, and no existing visual verdict changes. Registered as watch-only so the families' coverage stays honest about a change that crossed their selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "pulp-test-web-compat-events",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

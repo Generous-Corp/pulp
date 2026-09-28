@@ -557,6 +557,14 @@ void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
                 v->set_id(childId);
                 child = std::move(v);
             }
+        } else if (tag == "textarea") {
+            // Mirror `_ensureNative`: a multi-line TextEditor. Without this
+            // branch an appended <textarea> became a plain View that could
+            // neither take keyboard focus nor accept text.
+            auto te = std::make_unique<TextEditor>();
+            te->set_id(childId);
+            te->multi_line = true;
+            child = std::move(te);
         } else if (auto widget_for_tag = self.make_widget_for_tag(tag, childId)) {
             // Route lowercase `@pulp/react` widget intrinsics
             // (knob/fader/toggle/combo/

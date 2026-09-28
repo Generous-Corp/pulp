@@ -73,6 +73,8 @@ setOverlayTrigger	events	function	core/view/src/widget_bridge/event_api.cpp
 releaseOverlay	events	function	core/view/src/widget_bridge/event_api.cpp
 claimDocumentNavigationFocus	events	function	core/view/src/widget_bridge/event_api.cpp
 releaseDocumentNavigationFocus	events	function	core/view/src/widget_bridge/event_api.cpp
+setFocus	events	function	core/view/src/widget_bridge/event_api.cpp
+clearFocus	events	function	core/view/src/widget_bridge/event_api.cpp
 registerPointer	events	function	core/view/src/widget_bridge/event_api.cpp
 registerGesture	events	function	core/view/src/widget_bridge/event_api.cpp
 registerTapGesture	events	function	core/view/src/widget_bridge/event_api.cpp
