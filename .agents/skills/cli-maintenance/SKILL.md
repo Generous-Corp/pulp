@@ -862,7 +862,7 @@ There is no tolerance for drift, in three layers:
   `~/.pulp/state/cli-autoupdate.log` that the next session reports. It refuses
   an installer that still excludes `libwgpu_native.dylib` (it would strand
   `pulp-cpp`). Opt out with `PULP_AUTO_UPDATE_CLI=0`; CI never runs it.
-- **The session banner** (same hook): prints `STALE CLI` for a CLI far behind
+- **The session banner** (same hook): prints `STALE CLI` for a CLI any amount behind
   the checkout, which is what a host with a CLI older than the guard sees.
 
 Traps:
