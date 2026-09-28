@@ -234,6 +234,39 @@ HOME="$BHOME" PULP_VITALS_BUILD=0 PULP_VITALS_STATE_DIR="$SDIR" PULP_VITALS_SYSC
   PULP_VITALS_REPORTS_DIR="$WORK/empty" bash "${SCRIPT_DIR}/host_vitals_sensor.sh" >/dev/null 2>&1
 jcheck "sensor: PULP_VITALS_BUILD=0 omits the snapshot" "$(cat "$SDIR/host_vitals.json")" '"build" not in d'
 
+# fseventsd RSS/CPU: reported in --json, warn above the threshold, and never
+# moves the level (it is surfaced for a person, not turned into back-off).
+PSSTUB="$WORK/ps-stub"
+cat > "$PSSTUB" <<'EOF2'
+#!/usr/bin/env bash
+printf '  812 0.0 /usr/libexec/logd\n'
+[ -n "${STUB_FSEV_RSS_KB:-}" ] && printf '%s %s /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd\n' "$STUB_FSEV_RSS_KB" "${STUB_FSEV_CPU:-1.0}"
+printf ' 4096 2.0 /usr/sbin/notfseventsd-helper\n'
+EOF2
+chmod +x "$PSSTUB"
+fsev_json() {  # fsev_json <rss_kb or empty> [extra env...]
+  local rss="$1"; shift
+  env PULP_VITALS_SYSCTL="$STUB" PULP_VITALS_REPORTS_DIR="$WORK/empty" \
+    PULP_VITALS_NOW="$NOW" PULP_VITALS_UNAME=Darwin PULP_VITALS_PS="$PSSTUB" \
+    STUB_PRESSURE=1 STUB_LOAD1="1.00" STUB_FSEV_RSS_KB="$rss" STUB_FSEV_CPU="107.5" "$@" \
+    bash "$VITALS" --json 2>/dev/null
+}
+jcheck "fseventsd: a 10.6 GB daemon warns and keeps the level green" "$(fsev_json 11114905)" \
+  'd["fseventsd"] == {"rss_mb": 10854, "cpu_pct": 107.5, "warn": True, "warn_mb": 1024} and d["level"] == "green" and d["code"] == 0'
+jcheck "fseventsd: a 20 MB daemon does not warn" "$(fsev_json 20480)" \
+  'd["fseventsd"]["rss_mb"] == 20 and d["fseventsd"]["warn"] is False'
+jcheck "fseventsd: the threshold is configurable" "$(fsev_json 20480 PULP_VITALS_FSEVENTSD_WARN_MB=10)" \
+  'd["fseventsd"]["warn"] is True and d["fseventsd"]["warn_mb"] == 10'
+jcheck "fseventsd: not running reads as null, never 0" "$(fsev_json '')" 'd["fseventsd"] is None'
+jcheck "fseventsd: not probed off macOS" "$(fsev_json 11114905 PULP_VITALS_UNAME=Linux)" 'd["fseventsd"] is None'
+human="$(PULP_VITALS_SYSCTL="$STUB" PULP_VITALS_REPORTS_DIR="$WORK/empty" PULP_VITALS_NOW="$NOW" \
+  PULP_VITALS_UNAME=Darwin PULP_VITALS_PS="$PSSTUB" STUB_PRESSURE=1 STUB_LOAD1="1.00" \
+  STUB_FSEV_RSS_KB=11114905 bash "$VITALS" 2>/dev/null)"
+case "$human" in
+  *"GREEN"*"fseventsd=10854MB/"*"WARN(>1024MB"*) PASS=$((PASS+1)); printf '  [PASS] fseventsd: human line names the warning\n' ;;
+  *) FAIL=$((FAIL+1)); printf '  [FAIL] fseventsd: human line: %s\n' "$human" ;;
+esac
+
 echo ""
 echo "host_vitals: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ] || exit 1

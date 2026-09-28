@@ -48,6 +48,14 @@
 #     PULP_VITALS_NOW          epoch seconds treated as "now" for report ages
 #     PULP_VITALS_UNAME        override the OS name (default `uname -s`)
 #     PULP_VITALS_TOOL_PATH    dirs searched for ccache/tartci by --build-json
+#     PULP_VITALS_PS           path to a stub replacing `ps`
+#
+# fseventsd (macOS) is reported in --json as {rss_mb, cpu_pct, warn, warn_mb},
+# warn when its RSS exceeds PULP_VITALS_FSEVENTSD_WARN_MB (default 1024). It is
+# advisory and never changes the level: a bloated fseventsd (several GB after
+# weeks of build-tree churn) wastes memory the pressure level already
+# accounts for, and it needs a sudo restart that no consumer can perform, so it
+# is surfaced for a person rather than turned into automatic back-off.
 #
 # Thresholds (deliberately conservative to avoid false CRITICALs that would
 # stall a required CI gate):
@@ -62,6 +70,8 @@ CRIT_JETSAM_SECS=300      # 5 min: a jetsam this fresh means "shedding load NOW"
 WARN_JETSAM_SECS=900      # 15 min: recent enough to still be recovering
 WARN_WINSERVER_SECS=900   # 15 min: a fresh WindowServer crash precedes reboot
 WARN_LOAD_CORES_MULT=3    # load1 above 3x cores corroborates a warn
+WARN_FSEVENTSD_MB="${PULP_VITALS_FSEVENTSD_WARN_MB:-1024}"
+case "$WARN_FSEVENTSD_MB" in ''|*[!0-9]*) WARN_FSEVENTSD_MB=1024 ;; esac
 
 _os() { printf '%s' "${PULP_VITALS_UNAME:-$(uname -s)}"; }
 
@@ -71,6 +81,22 @@ _sysctl() {
   else
     sysctl "$@"
   fi
+}
+
+_ps() {
+  if [ -n "${PULP_VITALS_PS:-}" ]; then
+    "${PULP_VITALS_PS}" "$@"
+  else
+    ps "$@"
+  fi
+}
+
+# fseventsd as "<rss_mb> <cpu_pct>", or nothing when it is not running. ps can
+# read a root process's rss and %cpu without sudo. awk reads all of its input
+# so ps never takes SIGPIPE under pipefail.
+_fseventsd() {
+  _ps -axo rss=,pcpu=,comm= 2>/dev/null | awk '
+    !found && $3 ~ /(^|\/)fseventsd$/ { printf "%d %s\n", $1 / 1024, $2; found = 1 }'
 }
 
 _now() { printf '%s' "${PULP_VITALS_NOW:-$(date +%s)}"; }
@@ -310,8 +336,22 @@ main() {
   [ -n "$load1" ] || load1="0.0"
 
   local level="green" reason="healthy"
+  local fsev_json="null" fsev_note=""
 
   if [ "$os" = "Darwin" ]; then
+    local fsev fsev_mb fsev_cpu fsev_warn=false
+    fsev="$(_fseventsd || true)"
+    if [ -n "$fsev" ]; then
+      fsev_mb="${fsev%% *}"; fsev_cpu="${fsev#* }"
+      if [ "$fsev_mb" -gt "$WARN_FSEVENTSD_MB" ]; then
+        fsev_warn=true
+        fsev_note=" fseventsd=${fsev_mb}MB/${fsev_cpu}%cpu WARN(>${WARN_FSEVENTSD_MB}MB, needs sudo killall fseventsd)"
+      else
+        fsev_note=" fseventsd=${fsev_mb}MB"
+      fi
+      fsev_json="{\"rss_mb\":${fsev_mb},\"cpu_pct\":$(_num_or_null "$fsev_cpu"),\"warn\":${fsev_warn},\"warn_mb\":${WARN_FSEVENTSD_MB}}"
+    fi
+
     pressure="$(_pressure_level)"
     jetsam_age="$(_newest_report_age 'JetsamEvent-*')"
     winserver_age="$(_newest_report_age 'WindowServer-*.ips')"
@@ -351,14 +391,14 @@ main() {
       # `sampled_at` is the epoch used to compute the ages above, so a consumer
       # can reconstruct an incident's absolute time as `sampled_at - age_s`
       # without trusting the file mtime (which a touch/copy could drift).
-      printf '{"level":"%s","code":%d,"reason":"%s","os":"%s","ncpu":%s,"load1":"%s","pressure_level":"%s","jetsam_age_s":%s,"windowserver_age_s":%s,"sampled_at":%s}\n' \
+      printf '{"level":"%s","code":%d,"reason":"%s","os":"%s","ncpu":%s,"load1":"%s","pressure_level":"%s","jetsam_age_s":%s,"windowserver_age_s":%s,"fseventsd":%s,"sampled_at":%s}\n' \
         "$level" "$code" "$reason" "$os" "$ncpu" "$load1" "$pressure" \
-        "${jetsam_age:-null}" "${winserver_age:-null}" "$(_now)"
+        "${jetsam_age:-null}" "${winserver_age:-null}" "$fsev_json" "$(_now)"
       ;;
     human)
-      printf 'host_vitals: %s — %s (host=%s load1=%s cores=%s pressure=%s)\n' \
+      printf 'host_vitals: %s — %s (host=%s load1=%s cores=%s pressure=%s%s)\n' \
         "$(printf '%s' "$level" | tr '[:lower:]' '[:upper:]')" \
-        "$reason" "$(hostname -s 2>/dev/null || hostname)" "$load1" "$ncpu" "$pressure"
+        "$reason" "$(hostname -s 2>/dev/null || hostname)" "$load1" "$ncpu" "$pressure" "$fsev_note"
       ;;
   esac
 

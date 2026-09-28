@@ -2715,6 +2715,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   process — so it is safe to run on the required-gate host. Installed on the m3/m5
   /m1 pool. `install_host_vitals_sensor.sh --status` shows the launchd + latest
   reading; `--uninstall` removes the agent.
+- **fseventsd is in the health reading** (`--json` key `fseventsd`: `rss_mb`,
+  `cpu_pct`, `warn`, `warn_mb`; the human line appends `fseventsd=NMB`). It warns
+  above `PULP_VITALS_FSEVENTSD_WARN_MB` (1024) but never moves the level: a
+  runaway fseventsd (m5 reached 10.6 GB RSS at 107% CPU after 15 days of uptime;
+  a restart dropped it to 12 MB) needs `sudo killall fseventsd`, which no
+  consumer can run, so it is an alert for a person, not back-off. Because it is
+  in the health reading it lands in `host_vitals.log` every 60 s, which is the
+  growth-rate record: `grep -o '"rss_mb":[0-9]*' ~/.local/state/pulp/host_vitals.log`.
+  `null` means the process was not found (or not macOS), never 0.
 - **The published reading also carries a `build` snapshot** (`host_vitals.sh
   --build-json`: host and gate ccache hit/fill/cleanups, gate-VM count and RSS,
   tartci executing generation vs `~/Code/tartci` checkout, lease usage, wheelhouse
