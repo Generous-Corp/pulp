@@ -964,7 +964,7 @@ fn install_extracted_refuses_target_dir_without_live_override() {
         is_zip: false,
     };
     // Make sure the override env var isn't set from a parallel test.
-    std::env::remove_var("PULP_UPGRADE_INSTALL_LIVE");
+    let _env = crate::test_support::EnvVarGuard::unset("PULP_UPGRADE_INSTALL_LIVE");
     let err = install_extracted(&plan, &archive).unwrap_err();
     assert!(
         err.to_string().contains("cargo build artifact"),
