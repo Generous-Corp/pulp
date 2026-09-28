@@ -23,7 +23,8 @@ using Catch::Matchers::WithinAbs;
 //   * group delay ~ 6 samples
 //   * sample-rate-invariant by construction (coefficient set is
 //     normalized to Fs, no per-rate retuning)
-//   * stopband attenuation > 80 dB in the *deep stopband* (the
+//   * stopband attenuation > 80 dB in the *deep stopband*, which the
+//     default coefficient set does NOT provide — see below (the
 //     transition-band edge at 0.6*Nyquist sits at ~ -25 dB with the
 //     default 6-per-path coefficients; deeper into the stopband
 //     attenuation grows. The header documents this trade-off and
@@ -178,13 +179,17 @@ TEST_CASE("HalfBandDownsampler2x passband gain is flat to < 0.1 dB up to 0.4*Nyq
     }
 }
 
-TEST_CASE("HalfBandDownsampler2x rejects deep-stopband energy by > 80 dB",
+TEST_CASE("HalfBandDownsampler2x rejects energy at 0.45*Fs by more than 40 dB",
           "[signal][halfband]") {
-    // Deep stopband: input sine very close to input Nyquist (above
-    // 0.45 * Fs_in) is in the half-band's deep stopband and attenuated
-    // by more than 80 dB. (At the transition-band edge ~ 0.30*Fs_in
-    // the default coefficients give only ~25 dB rejection — that
-    // trade-off is documented in the header.)
+    // Names the number this case actually asserts. The default
+    // 6-per-path coefficients do not reach 80 dB here and are not
+    // meant to: the class header puts this point at ~ -45 dB, with
+    // -60 dB only deep in the stopband, and 80 dB reachable solely by
+    // supplying a higher-order coefficient set. A case named for 80 dB
+    // while asserting 40 tells a reader the filter is 40 dB better
+    // than it is, which is exactly the kind of claim someone picking
+    // an oversampler acts on. (At the transition-band edge
+    // ~ 0.30*Fs_in the default coefficients give only ~25 dB.)
     //
     // The default 6-per-path design hits roughly -45 dB at 0.45*Fs
     // and -60 dB at 0.49*Fs. We assert > 40 dB at 0.45*Fs as a

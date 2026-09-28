@@ -1900,7 +1900,17 @@ line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
 `main_evidence_source`, `main_failing_tests`, `batch_streak`,
-`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`, `reason`.
+`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
+`likely_culprits`, `required_contexts_source`, `reason`.
+
+`likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
+whose presence separates the merge groups that failed a test from the ones that
+ran it green over the last 24 hours (`--history-since`, capped at
+`--history-limit` runs), from `queue_batch_attribute.py --history`. It names a pull request
+to dequeue; `candidate_fix_pr` names one to prioritise, and the two are never
+merged. `required_contexts_source` is `protection` when every required context
+was judged, and `macos-only-fallback` when branch protection could not be read
+(the job summary then says the finding judged macos only).
 
 | `status` | Means | `safe_to_pause_queue` |
 |---|---|---|

@@ -4200,17 +4200,31 @@ mod tests {
         let bin = td.join("fakebin");
         std::fs::create_dir_all(&bin).unwrap();
         let sy = bin.join("shipyard");
-        std::fs::write(&sy, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SHIPYARD_ARGS_OUT.tmp\" && mv \"$SHIPYARD_ARGS_OUT.tmp\" \"$SHIPYARD_ARGS_OUT\"\n").unwrap();
+        // Only a `metrics record` call is the recorder's; anything else (a
+        // concurrent test's `shipyard --version` probe that inherited this
+        // PATH) must not overwrite the record under test.
+        std::fs::write(
+            &sy,
+            "#!/bin/sh\n[ \"$1\" = metrics ] || exit 0\nsleep \"${SHIPYARD_STUB_DELAY:-0}\"\n\
+             printf '%s\\n' \"$@\" > \"$SHIPYARD_ARGS_OUT.tmp.$$\" && mv \"$SHIPYARD_ARGS_OUT.tmp.$$\" \"$SHIPYARD_ARGS_OUT\"\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&sy, std::fs::Permissions::from_mode(0o755)).unwrap();
         (bin, td.join("shipyard-args.txt"))
     }
 
     #[cfg(unix)]
     fn recorded_args(out: &Path) -> Vec<String> {
-        // The recorder backgrounds the shipyard call and returns at once.
-        for _ in 0..100 {
+        // The recorder backgrounds the shipyard call and returns at once, so
+        // wait for a complete record: the stub renames it into place, and a
+        // complete one always carries --exit-code and --duration-ms.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
             if let Ok(text) = std::fs::read_to_string(out) {
-                return text.lines().map(str::to_owned).collect();
+                let args: Vec<String> = text.lines().map(str::to_owned).collect();
+                if args.iter().any(|a| a == "--exit-code") && args.iter().any(|a| a == "--duration-ms") {
+                    return args;
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -4237,6 +4251,7 @@ mod tests {
             ("SHIPYARD_ARGS_OUT", Some(&out_str)),
             ("PULP_BUILD_METRICS", None),
             ("PULP_BUILD_JOBS", Some("5")),
+            ("SHIPYARD_STUB_DELAY", Some("12")),
         ]);
         let spawner = RecordingSpawner::with_codes(vec![0, 7]);
         let mut out = Vec::new();
@@ -4244,7 +4259,10 @@ mod tests {
         let rc = build_with(&proj, &BuildArgs::default(), &spawner, &mut out).unwrap();
         let elapsed = started.elapsed();
         assert_eq!(rc, 7, "a recorded build keeps its own exit status");
-        assert!(elapsed < std::time::Duration::from_secs(2), "{elapsed:?}");
+        // The stub shipyard takes 12 s to record, so returning well inside
+        // that proves the build did not wait for it, with room for a loaded
+        // host; a fixed 2 s bound on an instant stub flaked under load.
+        assert!(elapsed < std::time::Duration::from_secs(10), "{elapsed:?}");
         let args = recorded_args(&out_file);
         assert_eq!(
             &args[..6],

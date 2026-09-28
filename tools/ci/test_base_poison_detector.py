@@ -203,6 +203,61 @@ class SignalTests(unittest.TestCase):
         for key in ("status", "proof", "tests", "reason", "min_streak"):
             self.assertIn(key, payload)
 
+    def test_membership_culprits_are_carried_apart_from_the_fix_pr(self) -> None:
+        payload = bp.signal(
+            bp.detect(None, LIVE_STREAK),
+            None,
+            {8933: ["wavenet", "abi-baseline"]},
+        )
+        self.assertIsNone(payload["candidate_fix_pr"])
+        self.assertEqual(
+            payload["likely_culprits"],
+            [{"pr": 8933, "tests": ["abi-baseline", "wavenet"]}],
+        )
+        lines, markdown = bp.render(payload)
+        self.assertIn("| likely culprit PR | #8933 (abi-baseline, wavenet) |", markdown)
+        self.assertEqual(json.loads(lines[0].split("::", 2)[2])["likely_culprits"][0]["pr"], 8933)
+
+    def test_no_membership_finding_is_an_empty_list_and_a_dash(self) -> None:
+        payload = bp.signal(bp.detect(None, LIVE_STREAK))
+        self.assertEqual(payload["likely_culprits"], [])
+        self.assertIn("| likely culprit PR | — |", bp.render(payload)[1])
+
+    def test_a_macos_only_fallback_is_announced_not_passed_off_as_complete(self) -> None:
+        payload = bp.signal(
+            bp.detect(None, LIVE_STREAK), None, {}, bp.REQUIRED_SOURCE_FALLBACK
+        )
+        self.assertEqual(payload["required_contexts_source"], "macos-only-fallback")
+        lines, markdown = bp.render(payload)
+        self.assertIn("**macos only**", markdown)
+        self.assertEqual(
+            json.loads(lines[0].split("::", 2)[2])["required_contexts_source"],
+            "macos-only-fallback",
+        )
+
+    def test_a_full_required_set_says_where_it_came_from(self) -> None:
+        payload = bp.signal(
+            bp.detect(None, LIVE_STREAK), None, {}, bp.REQUIRED_SOURCE_PROTECTION
+        )
+        self.assertIn("every required context", bp.render(payload)[1])
+        self.assertNotIn("macos only", bp.render(payload)[1])
+
+    def test_the_fallback_reaches_the_signal_from_an_unreadable_protection(self) -> None:
+        from unittest import mock
+
+        import queue_batch_attribute as attributor
+
+        read = mock.Mock(observations=[], required_unread=True)
+        with mock.patch.object(attributor, "observe_history", return_value=read):
+            culprits, source = bp.membership_culprits("o/r", "24h", 60)
+        self.assertEqual((culprits, source), ({}, bp.REQUIRED_SOURCE_FALLBACK))
+        read.required_unread = False
+        with mock.patch.object(attributor, "observe_history", return_value=read):
+            self.assertEqual(
+                bp.membership_culprits("o/r", "24h", 60)[1],
+                bp.REQUIRED_SOURCE_PROTECTION,
+            )
+
     def test_annotation_is_one_line_and_titled_for_its_reader(self) -> None:
         lines, markdown = bp.render(bp.signal(bp.detect(None, LIVE_STREAK)))
         self.assertEqual(len(lines), 1)

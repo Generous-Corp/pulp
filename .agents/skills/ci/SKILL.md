@@ -169,6 +169,42 @@ read that as "go ask the base health detector", never as "no culprit exists". A
 batch whose macos gate never ran the suite yields nothing, which is the previous
 section's problem wearing a different hat.
 
+**When file ownership names nobody, ask the queue's history.** A change can
+break a test it never names (an ABI size moved by a node header, a new test file
+a tier audit has not heard of), and file scoring is blind to it. The queue is
+not: over a few hours it runs many batches with overlapping memberships.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --history [--since 24h] [--limit 60] [<run-id>]
+```
+
+For each failing test it names the entry whose presence EXACTLY separates the
+failing batches from the green ones: in every failing batch, in no passing
+batch, counting only the batches inside the span the entry was queued for (the
+same test red on main hours earlier is a different episode, and each episode
+names its own culprit). It names a culprit only from 2 or more failing batches,
+and names nobody (`ambiguous`) while two entries have always travelled together.
+The window is time-based (default 24 h, capped at `--limit` runs, and it says
+when the cap cut it). Completed runs are cached per run under
+`~/.cache/pulp/queue-history/` (`PULP_QUEUE_HISTORY_CACHE` overrides), so a
+repeated pass reads only new runs; membership is recomputed every pass because
+it depends on where main is now.
+
+It judges every REQUIRED context, read from branch protection and rulesets
+(never a hard-coded list): `macos` failures by ctest name, any other required
+failure as `[<context>] <failing step>`. A red outside the required set (the
+hosted Linux job, coverage, CodeQL) is listed as advisory and never counted:
+the queue does not eject on it. Add `--pr <n>` to explain each of that PR's
+`failed_checks` ejections from the exact group that caused it (the removal
+event's `beforeCommit` is that group's head sha, so the run is found by
+identity, not time). A group whose `build.yml` run shows only a Linux red did
+not eject anyone; look for the entry's own group instead. A test no entry separates, failing at a low rate or rescued by a
+retry, is reported as `flake`. Membership comes from each group's first-parent
+chain down to its merge base with main; the `pr-N-<sha>` ref's sha is the
+previous entry's group commit, so reading members from it sees only the last
+entry. `base_poison_detector.py --name-fix-pr` carries the same finding as
+`likely_culprits` (a PR to dequeue, never a fix to jump).
+
 **Read logs from the RUN, never the job.** `ghapp api
 repos/<o>/<r>/actions/jobs/<id>/logs` withholds any response carrying terminal
 escape sequences and returns a short refusal instead of the log, so a reader
@@ -675,7 +711,42 @@ consequences worth knowing before you debug:
   not fail. A new failing test in that suite, a suite absent on the base, a
   timeout, or output with no nameable failing tests still fails, so the label is
   never a way to hide a branch-caused red. The re-run cost ~2 min for one suite
-  on a full checkout (mostly the worktree checkout itself).
+  on a full checkout (mostly the worktree checkout itself). A suite whose
+  failures cannot be named counts as pre-existing only when it fails with the
+  same output on the base, paths and timings aside.
+- Two more lanes cover ctest-registered Python contracts. The whole `pr-fast`
+  tier runs (`--ctest-label pr-fast`): from `build/`'s registrations when it is
+  configured, otherwise parsed from `test/cmake/*.cmake` (73 of 95 members run
+  without a build; the rest need `${CMAKE_BINARY_DIR}` and print NOT CHECKED),
+  about 15 s. Every other ctest that runs a checkout Python script
+  (`--ctest-python`, 122 of them) runs when the diff can reach it. A contract
+  that walks a directory (`rglob`, `os.walk`) is selected by any change under a
+  directory its source names; that is how `wide-non-native-selftest`, which
+  reads every `test/**/*.cmake` and runs only in the merge group, is picked for
+  a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
+  `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
+  the test manifests last changed is treated as stale and the tier is read from
+  the manifests instead, and a merge-base re-run keeps build-tree paths pointed
+  at the branch's build (the base checkout has none), so an inventory check that
+  fails on a local build's options (examples ON duplicates `ctest-unique-names`)
+  is labelled pre-existing rather than blamed on the branch.
+
+### A Python test that imports what the gate VM lacks fails only in the merge group
+
+The gate VM's Python has the standard library plus exactly
+`tools/motion/visual/requirements.lock` (build.yml's visual-analysis step). A
+test that imports anything else, often `yaml` inside a helper or a function the
+full suite reaches, passes locally and on the PR-head fast tier, then dies with
+`ModuleNotFoundError` in the merge group and ejects the batch. The pr-fast
+`gate-python-imports` ctest (`tools/scripts/gate_python_imports_check.py
+--build-dir`) reads every Python script the configured ctest inventory runs and
+follows every import statement through repo helpers; the allowlist is derived
+from that lock, and the check refuses to run if build.yml stops installing it.
+The source-selftest lane installs nothing, so its scripts are held to the
+standard library. An import under `try/except ImportError`, in an `except
+ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
+branch is allowed. Needing a new third-party package means adding it to the lock
+(and the wheelhouse), not to the check.
 
 ### A green ctest job proves nothing about a label its event excludes
 

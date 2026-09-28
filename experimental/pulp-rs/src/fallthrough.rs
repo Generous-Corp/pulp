@@ -287,16 +287,15 @@ fn delegate_with_debug<R: BinaryResolver, S: Spawner>(
     // Recursion guard propagates to the child so a misconfigured
     // install that symlinks `pulp-cpp` back to the Rust binary dies
     // fast with a clear error instead of spinning.
-    let mut inv = Invocation::new(cpp_path.to_string_lossy().into_owned());
+    // The marker goes to the child only. Setting it on this process would
+    // be a process-wide side effect: every later delegation in the same
+    // process (and every test sharing it) would silently report Disabled.
+    let mut inv = Invocation::new(cpp_path.to_string_lossy().into_owned())
+        .env(RECURSION_GUARD_ENV, "1");
     for a in argv {
         inv = inv.arg(a.clone());
     }
-    std::env::set_var(RECURSION_GUARD_ENV, "1");
-    let rc = spawner.run(&inv);
-    // Leave the marker in place for the rest of this process lifetime
-    // so any additional fallthrough calls also short-circuit. The
-    // OS-level env cleanup happens at process exit.
-    rc.map(Outcome::Delegated)
+    spawner.run(&inv).map(Outcome::Delegated)
 }
 
 /// Helper for the "stubbed" branches in `cmd::*`: try to fall through
@@ -421,6 +420,12 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].program, "/usr/local/bin/pulp-cpp");
         assert_eq!(calls[0].args, argv);
+        // The recursion marker reaches the child, never this process.
+        assert!(calls[0]
+            .envs
+            .iter()
+            .any(|(k, v)| k == RECURSION_GUARD_ENV && v == "1"));
+        assert!(std::env::var_os(RECURSION_GUARD_ENV).is_none());
     }
 
     #[test]
