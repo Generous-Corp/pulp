@@ -667,6 +667,15 @@ consequences worth knowing before you debug:
   `test_generated_version_bump_check.py` is listed in `WORKFLOW_LOCAL_SKIPS` and
   printed as NOT CHECKED, because on a full-history checkout it runs past 600 s
   (CI's shallow clone does its whole step in ~105 s).
+- A failing suite in either lane is re-run on the merge-base, in a detached
+  worktree created beside the checkout (never under `$TMPDIR`, where
+  governed-build and configure refuse it) and removed afterwards. When every
+  failing test it names also fails there, `gates.sh` prints `PRE-EXISTING ON
+  BASE: <suite> fails on origin/main too — not caused by this branch` and does
+  not fail. A new failing test in that suite, a suite absent on the base, a
+  timeout, or output with no nameable failing tests still fails, so the label is
+  never a way to hide a branch-caused red. The re-run cost ~2 min for one suite
+  on a full checkout (mostly the worktree checkout itself).
 
 ### A green ctest job proves nothing about a label its event excludes
 
