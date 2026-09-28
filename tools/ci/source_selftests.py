@@ -303,6 +303,125 @@ def run(
 
 
 # --------------------------------------------------------------------------
+# diff-scoped selection (local only; the required lane always runs everything)
+
+# Changing either of these changes how every entry runs.
+LANE_FILES = ("tools/ci/source_selftests.py", "tools/ci/source_selftests.json")
+# Basenames too common to say which test reads them; only their full path counts.
+GENERIC_BASENAMES = frozenset({
+    "SKILL.md", "CMakeLists.txt", "README.md", "__init__.py", "config.toml",
+    "package.json", "manifest.json", "pyproject.toml", "setup.py",
+})
+
+
+def changed_paths(base: str, repo: pathlib.Path = REPO_ROOT) -> list[str]:
+    """Paths changed since the merge-base with ``base``, committed or not."""
+    merge_base = subprocess.run(
+        ["git", "merge-base", base, "HEAD"], cwd=repo,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", merge_base], cwd=repo,
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return [line for line in diff.splitlines() if line]
+
+
+def change_tokens(path: str) -> set[str]:
+    """Strings whose presence in a test's source ties it to ``path``."""
+    tokens = {path}
+    name = pathlib.PurePosixPath(path)
+    if name.name not in GENERIC_BASENAMES:
+        tokens.add(name.name)
+    if name.suffix == ".py" and name.stem != "__init__":
+        # A test that imports a changed module names it only by its stem.
+        tokens.add(name.stem)
+    return tokens
+
+
+WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
+# Workflow suites that cannot run in bounded time on a developer checkout. Each
+# is reported as NOT CHECKED, never as a pass; the workflow still runs it.
+WORKFLOW_LOCAL_SKIPS = {
+    "tools/scripts/test_generated_version_bump_check.py": (
+        "replays generators that walk full git history per file: ~105 s for its "
+        "whole step on CI's shallow clone, over 600 s on a full-history checkout"
+    ),
+}
+WORKFLOW_TIMEOUT = 600.0
+_WORKFLOW_PYTHON = re.compile(r"^\s+python3\s+((?:tools|scripts|test)/[\w./-]+\.py)((?:\s+[\w./-]+)*)\s*$")
+
+
+def workflow_entries(
+    workflow: pathlib.Path = WORKFLOW_LINT, repo: pathlib.Path = REPO_ROOT
+) -> list[dict[str, Any]]:
+    """Every ``python3 <repo script> [args]`` line a workflow runs, as entries.
+
+    Read from the workflow file itself so the local list and the workflow can
+    never diverge. Entries run from the checkout root, as the workflow's steps
+    do, with a timeout sized for a whole contract suite rather than one test.
+    """
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        match = _WORKFLOW_PYTHON.match(line)
+        if not match:
+            continue
+        script, args = match.group(1), match.group(2).split()
+        name = " ".join([script, *args])
+        if name in seen or not (repo / script).is_file():
+            continue
+        seen.add(name)
+        entries.append({
+            "name": name,
+            "argv": ["{repo}/" + script, *args],
+            "cwd": "{repo}",
+            "timeout": WORKFLOW_TIMEOUT,
+        })
+    return entries
+
+
+def select_for_changes(
+    entries: list[dict[str, Any]],
+    changed: list[str],
+    repo: pathlib.Path = REPO_ROOT,
+    lane_files: tuple[str, ...] = LANE_FILES,
+) -> list[dict[str, Any]]:
+    """Entries a diff can plausibly break: every entry when the lane itself
+    changed, otherwise each entry whose own script changed or whose source
+    names a changed file. A textual reference is a heuristic that
+    over-selects rather than under-selects; the required lane still runs all.
+    """
+    if any(path in lane_files for path in changed):
+        return list(entries)
+    changed_abs = {(repo / path).resolve() for path in changed}
+    tokens = set().union(*(change_tokens(path) for path in changed)) if changed else set()
+    word = {t: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])")
+            for t in tokens}
+    selected = []
+    for entry in entries:
+        sources = entry_sources(entry, repo)
+        if any(src.resolve() in changed_abs for src in sources):
+            selected.append(entry)
+            continue
+        # A checker handed directories scans whatever is in them.
+        scanned = [arg.rstrip("/") + "/" for arg in entry["argv"][1:]
+                   if not arg.startswith("-") and (repo / arg).is_dir()]
+        if any(path.startswith(tuple(scanned)) for path in changed) if scanned else False:
+            selected.append(entry)
+            continue
+        text = ""
+        for src in sources:
+            try:
+                text += src.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        if any(pattern.search(text) for pattern in word.values()):
+            selected.append(entry)
+    return selected
+
+
+# --------------------------------------------------------------------------
 # check
 
 
@@ -487,6 +606,18 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         help="fail when the manifest lists fewer entries (a shrunken lane)",
     )
+    p_run.add_argument(
+        "--workflow",
+        type=pathlib.Path,
+        help="run the repo Python scripts a workflow file invokes instead of the "
+        "manifest (e.g. .github/workflows/workflow-lint.yml)",
+    )
+    p_run.add_argument(
+        "--changed-from",
+        metavar="BASE",
+        help="run only entries a diff against BASE can plausibly break (local "
+        "pre-push use; the required lane runs every entry)",
+    )
     p_check = sub.add_parser("check", help="verify manifest, labels and wiring")
     p_check.add_argument("--manifest", type=pathlib.Path, default=MANIFEST)
     p_check.add_argument("--build-dir", type=pathlib.Path, required=True)
@@ -502,7 +633,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "run":
-        entries = load_manifest(args.manifest)
+        entries = (workflow_entries(args.workflow.resolve()) if args.workflow
+                   else load_manifest(args.manifest))
         if len(entries) < args.min_count:
             print(
                 f"source-selftests: manifest lists {len(entries)} entries, "
@@ -510,6 +642,27 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        if args.workflow:
+            for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
+                entries.remove(entry)
+                if not args.changed_from or entry in select_for_changes(
+                        [entry], changed_paths(args.changed_from)):
+                    print(f"source-selftests: NOT CHECKED locally: {entry['name']} "
+                          f"({WORKFLOW_LOCAL_SKIPS[entry['name']]}); CI runs it", flush=True)
+        if args.changed_from:
+            total = len(entries)
+            lane_files = LANE_FILES
+            if args.workflow:
+                lane_files += (args.workflow.resolve().relative_to(REPO_ROOT).as_posix(),)
+            entries = select_for_changes(
+                entries, changed_paths(args.changed_from), lane_files=lane_files)
+            print(
+                f"source-selftests: {len(entries)} of {total} entries selected "
+                f"by the diff against {args.changed_from}",
+                flush=True,
+            )
+            if not entries:
+                return 0
         start = time.monotonic()
         results = run(entries, jobs=args.jobs)
         failed = [r for r in results if r["returncode"] != 0]

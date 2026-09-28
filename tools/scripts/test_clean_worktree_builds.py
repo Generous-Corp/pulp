@@ -59,7 +59,11 @@ class Fixture:
     def __init__(self, tmp: pathlib.Path) -> None:
         # Match Git's physical spelling on macOS (/private/var, not /var).
         self.tmp = tmp.resolve()
-        self.origin = self.tmp / "origin.git"
+        # Spelled so the reconciler can derive OWNER/REPO from the origin URL:
+        # it matches `github.com/<owner>/<name>` at the end of the URL, so a
+        # purely local path satisfies it with no network and no production change.
+        self.origin = self.tmp / "github.com" / "acme" / "widget.git"
+        self.origin.parent.mkdir(parents=True, exist_ok=True)
         self.main = self.tmp / "main-checkout"
         self.wts = self.tmp / "wts"
         self.wts.mkdir()
@@ -86,6 +90,12 @@ class Fixture:
         scripts = self.main / "tools" / "scripts"
         scripts.mkdir(parents=True)
         (scripts / "clean_worktree_builds.sh").write_text(SCRIPT.read_text())
+        # The reaper reconciles lineage before deciding, so the fixture carries
+        # the reconciler too. Without it the reconcile step is a silent no-op and
+        # the squash assertion below would pass for the wrong reason.
+        _lin = scripts / "worktree_lineage.sh"
+        _lin.write_text((REPO_ROOT / "tools" / "scripts" / "worktree_lineage.sh").read_text())
+        _lin.chmod(0o755)
         ci = self.main / "tools" / "ci"
         ci.mkdir(parents=True)
         (ci / "build_dir_lock.py").write_text(
@@ -463,6 +473,94 @@ class GateTests(FixtureTestCase):
         self.assertIn("records it active", r.stdout)
         self.assertTrue((wt / "build").is_dir())
 
+    def test_unmarked_merged_head_is_reaped_with_no_lineage_row_at_all(self) -> None:
+        # The case the fleet actually produces. Closing a worktree out is a step
+        # someone has to take and most agent sessions end without it, so the
+        # common shape is not a stale row — it is NO row. "Absence of a record is
+        # not evidence of non-merge": git can answer this on demand, and nobody
+        # should have to run worktree_lineage.sh by hand first.
+        #
+        # Measured 2026-09-25: a host running a build of this script from before
+        # the ancestry relaxation reported 0 of 54 build dirs reapable and held
+        # ~192 GB, because every candidate was waiting on bookkeeping.
+        wt = self.fx.add_worktree("wt-unmarked")
+        branch = git(wt, "branch", "--show-current").strip()
+        git(self.fx.main, "merge", "--ff-only", branch)
+        git(self.fx.main, "push")
+        self.fx.advance_main("after-unmarked.txt")
+        # No mark_lineage() anywhere, and assert that rather than trusting it:
+        # a fixture that quietly wrote a row would make this pass for the wrong
+        # reason and the break-confirm below would still look correct.
+        for field in ("Status", "DurableSha", "Pr"):
+            self.assertEqual(
+                git(self.fx.main, "config", "--local", "--default", "", "--get",
+                    f"branch.{branch}.pulpWorktree{field}").strip(), "",
+                f"fixture must leave branch.{branch}.pulpWorktree{field} unset")
+        r = run_script(self.fx, "--verbose", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("git-ancestry-proven", r.stdout)
+        self.assertFalse(
+            (wt / "build").exists(),
+            "an unmarked worktree whose head landed must be reapable without a "
+            "manual reconcile:\n" + r.stdout + r.stderr)
+        # Only build/ goes; the checkout and its committed work stay.
+        self.assertTrue((wt / "wt-unmarked.txt").is_file())
+
+    def _squash_landed(self, name: str) -> pathlib.Path:
+        """A worktree whose branch landed as a SQUASH commit on main.
+
+        A squash rewrites history, so the head is deliberately NOT an ancestor of
+        main and no merge commit names it as a second parent. Git ancestry cannot
+        prove it and neither can the merge-commit reconcile; before
+        --squash-patch-id these build dirs were kept forever.
+        """
+        wt = self.fx.add_worktree(name, build=False)
+        branch = git(wt, "branch", "--show-current").strip()
+        # Squash the branch onto main the way GitHub does: one commit carrying
+        # the branch's whole diff, subject ending in `(#N)`.
+        git(self.fx.main, "merge", "--squash", branch)
+        git(self.fx.main, "commit", "-m", f"{name}: squashed (#4242)")
+        git(self.fx.main, "push")
+        self.fx.advance_main(f"after-{name}.txt")
+        head = git(wt, "rev-parse", "HEAD").strip()
+        tip = git(self.fx.main, "rev-parse", "origin/main").strip()
+        self.assertNotEqual(head, tip)
+        # The premise: ancestry genuinely cannot prove this one.
+        anc = subprocess.run(["git", "-C", str(wt), "merge-base",
+                              "--is-ancestor", head, tip], capture_output=True)
+        self.assertNotEqual(anc.returncode, 0,
+                            "fixture must produce a head that is NOT an ancestor")
+        for field in ("Status", "DurableSha", "Pr"):
+            self.assertEqual(
+                git(self.fx.main, "config", "--local", "--default", "", "--get",
+                    f"branch.{branch}.pulpWorktree{field}").strip(), "",
+                f"fixture must leave pulpWorktree{field} unset")
+        Fixture.make_build(wt, stale=True)
+        return wt
+
+    def test_squash_landed_worktree_is_reaped_without_a_manual_reconcile(self) -> None:
+        wt = self._squash_landed("wt-squashed")
+        r = run_script(self.fx, "--verbose", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("lineage reconciled", r.stdout)
+        self.assertFalse(
+            (wt / "build").exists(),
+            "a squash-landed worktree must be reapable without anyone running "
+            "worktree_lineage.sh by hand:\n" + r.stdout + r.stderr)
+        self.assertTrue((wt / "wt-squashed.txt").is_file())
+
+    def test_without_the_reconcile_the_squash_landed_worktree_is_kept(self) -> None:
+        # The control. Same fixture, same gates, one variable. If this also
+        # reaped, the test above would prove nothing about the reconcile.
+        wt = self._squash_landed("wt-squashed")
+        r = run_script(self.fx, "--verbose", "--yes",
+                       env_extra={"PULP_REAP_SKIP_RECONCILE": "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(
+            (wt / "build").is_dir(),
+            "with the reconcile skipped nothing can prove a squash landing, so "
+            "the build dir must be kept:\n" + r.stdout + r.stderr)
+
     def test_stale_lineage_head_is_reaped_on_git_ancestry(self) -> None:
         # The row records `merged` against a sha that is not this head, so the
         # registry proves nothing. It is a bookkeeping gap, not a claim that
@@ -643,7 +741,7 @@ class DeletionTests(FixtureTestCase):
     def test_apply_removes_the_build_and_preserves_everything_else(self) -> None:
         wt = self.fx.add_worktree("wt-apply")
         self.fx.merge_and_mark(wt)
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("removed", r.stdout)
         self.assertFalse((wt / "build").exists(), "build/ survived --yes")
@@ -675,9 +773,15 @@ class DeletionTests(FixtureTestCase):
             while time.time() < deadline and not ready.exists():
                 time.sleep(0.01)
             self.assertTrue(ready.exists(), "fixture never acquired the build lock")
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertIn("kept 1 of 1", r.stdout)
             self.assertTrue((wt / "build").is_dir())
         finally:
@@ -692,9 +796,15 @@ class DeletionTests(FixtureTestCase):
             "  time.sleep(10)\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertTrue((wt / "build" / "CMakeCache.txt").exists())
         finally:
             watcher.terminate()
@@ -707,13 +817,19 @@ class DeletionTests(FixtureTestCase):
             "  pathlib.Path(p[0], 'late-object.o').write_text('new')\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             # The watcher exits the moment it acts, so this only has to
             # outlast the script itself -- which on a core-starved host
             # runs far longer than it does on an idle one.
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertEqual((wt / "build" / "late-object.o").read_text(), "new")
         finally:
             if watcher.poll() is None:
@@ -735,10 +851,16 @@ class DeletionTests(FixtureTestCase):
             "  (root/'precious-source').rename(q)\n"
         ))
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             quarantines = list(wt.glob(".pulp-reap-build-*"))
             self.assertEqual(len(quarantines), 1)
             self.assertEqual((quarantines[0] / "unique.txt").read_text(), "keep")
@@ -758,10 +880,16 @@ class DeletionTests(FixtureTestCase):
         ), env_extra={"MAIN_ROOT": str(self.fx.main),
                       "KEY": f"branch.{branch}.pulpWorktreeStatus"})
         try:
-            r = run_script(self.fx, "--yes")
+            r = run_script(self.fx, "--yes", "--verbose")
             watcher.wait(timeout=120)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("FAILED to remove", r.stdout)
+            self.assertIn(
+                "FAILED to remove", r.stdout,
+                "the reaper never reported a restore. With --verbose its keep\n"
+                "reason is in the output above: if it says the dir was kept,\n"
+                "the quarantine window never opened and this test's writer\n"
+                "never ran -- that is a gate upstream of the restore logic,\n"
+                "not the restore logic failing.\n\nscript output:\n" + r.stdout + r.stderr)
             self.assertTrue((wt / "build" / "CMakeCache.txt").exists())
         finally:
             if watcher.poll() is None:
@@ -780,7 +908,7 @@ class DeletionTests(FixtureTestCase):
         (stray / "build").mkdir(parents=True)
         (stray / "build" / "f").write_text("stray")
 
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse((wt / "build").exists())
         for name in ("build2", "buildx", "build-cov", "prebuild"):
@@ -790,7 +918,7 @@ class DeletionTests(FixtureTestCase):
 
     def test_a_worktree_with_no_build_is_left_alone(self) -> None:
         wt = self.fx.add_worktree("wt-nobuild", build=False)
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue(wt.is_dir())
 
@@ -839,7 +967,7 @@ class FailureModeTests(FixtureTestCase):
         wt = self.fx.add_worktree("wt-offline")
         git(self.fx.main, "remote", "set-url", "origin",
             str(self.root / "no-such-repo.git"))
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("could not refresh origin/main", r.stderr)
         self.assertIn("Nothing removed", r.stderr)
@@ -852,7 +980,7 @@ class FailureModeTests(FixtureTestCase):
         subprocess.run(["git", "init", "--bare", "-b", "main", str(empty)],
                        check=True, capture_output=True)
         git(self.fx.main, "remote", "set-url", "origin", str(empty))
-        r = run_script(self.fx, "--yes")
+        r = run_script(self.fx, "--yes", "--verbose")
         self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
         self.assertIn("could not refresh origin/main", r.stderr)
         self.assertTrue((wt / "build").is_dir())

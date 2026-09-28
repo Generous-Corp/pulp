@@ -114,6 +114,16 @@ tools:
   availability: always
   skill: import-design
   docs: guides/importing-designs.md
+- name: browser-capture-integration
+  path: tools/import-design/browser_capture/run_integration.mjs
+  category: design-import
+  use_when: Run the browser capture integration harness against an imported panel.
+  invocation: node tools/import-design/browser_capture/run_integration.mjs --help
+  inputs: A browser-capture integration scenario and its panel/runtime fixtures.
+  outputs: Integration capture results and diagnostics for the browser import lane.
+  availability: always
+  skill: import-design
+  docs: guides/importing-designs.md
 - name: check-palette-health
   path: tools/import-validation/check_palette_health.py
   category: design-import
@@ -492,8 +502,16 @@ tools:
   inputs: Shipyard metrics (filled by `build_speed_scorecard.py ingest --since 14d` from the GitHub API), each
     host's published host_vitals.json over ssh, and optionally a Ninja build dir.
   outputs: Markdown scorecard (local build, PR pipeline, fleet) or `--json`; `--baseline` renders the before/after
-    delta through bench_diff.py; `--split` adds gate job and step p50/p90 either side of one instant.
-  caveat: Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own
+    delta through bench_diff.py; `--split` adds gate job and step p50/p90 either side of one instant,
+    and time to merge (open→merged, enqueue→merged), gate-minutes per merged PR, cancelled gate-minutes,
+    receipt reuse, merge_group failure and ejection rates, gate starvation and release-lane competition.
+    `proxies --since … --split …` is the before/after VERDICT, one load-independent count or ratio per
+    mechanism (release placement, unserved label sets, idle-with-demand per host from tartci events,
+    VM discard and unminted boots, PR-head no-runner cancels, wait per job ahead, refresh cancels per
+    merged PR, merge-queue attempts and ejection causes, gate runs per merged PR), each with a control
+    that must be non-zero, and wall time beside them as context only.
+  caveat: Pipeline numbers are only as fresh as the last `ingest`. Wall-clock waits track load; judge a change
+    by `proxies`, where a zero control reads INSTRUMENT BLIND and a small side reads "insufficient sample". The iOS compile gate has no step of its own
     (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build
     snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
   availability: always
@@ -538,6 +556,7 @@ tools:
   use_when: A merge_group batch failed and you need the PR that actually owns the failing tests — the
     batch's own branch name is NOT the culprit, because a batch contains every entry ahead of it.
   invocation: python3 tools/scripts/queue_batch_attribute.py [<failed-merge-group-run-id>] [--format json]
+    [--certify --pr <n> --run-id <id>]
   inputs: A failed merge_group run id (defaults to the most recent one) and the open-PR file lists, read
     live through `ghapp`.
   outputs: Each failing ctest mapped to the PR whose files own it with a match strength, and a named

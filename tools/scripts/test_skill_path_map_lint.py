@@ -13,8 +13,10 @@ its success case can be satisfied by a check that does nothing.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -346,6 +348,72 @@ class CoClaimRuleTests(unittest.TestCase):
     def test_no_base_map_disables_the_rule_rather_than_guessing(self) -> None:
         head = _map(alpha=_entry("core/shared/**"), beta=_entry("core/shared/**"))
         self.assertEqual(lint.check_co_claim(None, head), [])
+
+
+class CoClaimBaseResolutionTests(unittest.TestCase):
+    """The base map is read at the merge-base, not at the base tip."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="pulp-skill-map-lint-"))
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "test@example.com")
+        self.git("config", "user.name", "Test")
+        self.git("config", "commit.gpgsign", "false")
+        (self.tmp / "core" / "shared").mkdir(parents=True)
+        (self.tmp / "core" / "shared" / "a.cpp").write_text("")
+        # A co-claim that predates the branch point: grandfathered.
+        self.write_map(alpha=_entry("core/shared/**"), beta=_entry("core/shared/**"))
+        self.git("add", ".")
+        self.git("commit", "-q", "-m", "initial")
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.tmp), *args],
+            check=True, capture_output=True, text=True,
+        )
+
+    def write_map(self, **skills: object) -> None:
+        path = self.tmp / lint.MAP_RELPATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(_map(**skills)))
+
+    def lint_co_claim(self) -> int:
+        return lint.main([
+            "--repo-root", str(self.tmp), "--base", "origin/main",
+            "--rules", "co-claim",
+        ])
+
+    def test_branch_behind_main_is_not_blamed_for_a_claim_main_changed(self) -> None:
+        # The branch touches an unrelated file; main then drops beta's claim.
+        # The branch's map still carries the grandfathered claim it branched
+        # with, so it added no claim of its own.
+        self.git("checkout", "-q", "-b", "feature")
+        (self.tmp / "notes.txt").write_text("unrelated\n")
+        self.git("add", "notes.txt")
+        self.git("commit", "-q", "-m", "unrelated change")
+        self.git("checkout", "-q", "main")
+        self.write_map(alpha=_entry("core/shared/**"), beta=_entry())
+        self.git("commit", "-q", "-am", "narrow beta on main")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "feature")
+        self.assertEqual(self.lint_co_claim(), 0)
+
+    def test_branch_behind_main_still_fails_its_own_new_co_claim(self) -> None:
+        self.write_map(alpha=_entry("core/shared/**"), beta=_entry())
+        self.git("commit", "-q", "-am", "beta owns nothing")
+        self.git("checkout", "-q", "-b", "feature")
+        self.write_map(alpha=_entry("core/shared/**"), beta=_entry("core/shared/**"))
+        self.git("commit", "-q", "-am", "beta co-claims the subsystem")
+        self.git("checkout", "-q", "main")
+        (self.tmp / "notes.txt").write_text("main moved\n")
+        self.git("add", "notes.txt")
+        self.git("commit", "-q", "-m", "main moves on")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("checkout", "-q", "feature")
+        self.assertEqual(self.lint_co_claim(), 1)
 
 
 class RealSkillPathMapLintTests(unittest.TestCase):

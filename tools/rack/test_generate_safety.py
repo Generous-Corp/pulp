@@ -1496,7 +1496,7 @@ class BundledToolchainSafety(SdkIsolatedTestCase):
             (modules / "_plugin.json").write_text("{}\n")
             (modules / "sample.json").write_text("{}\n")
             (source / "examples/forge-modular/src").mkdir()
-            for component in ("signal", "format", "audio", "state",
+            for component in ("signal", "simd", "format", "audio", "state",
                               "platform", "runtime", "timebase"):
                 include = source / f"core/{component}/include"
                 include.mkdir(parents=True)

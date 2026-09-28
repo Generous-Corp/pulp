@@ -100,6 +100,36 @@ private:
     int value_ = -1;
 };
 
+// Reads the channel count the AU actually negotiated on a given scope, straight
+// off the hosted AudioUnit via the public escape hatch. This is the value that
+// decides whether a render of a given width is accepted: AUEffectBase rejects a
+// buffer whose shape disagrees with the negotiated stream format, zeroes the
+// output and reports success -- a SILENT render with noErr.
+class StreamFormatChannelReader final : public host::NativeHandleVisitor {
+  public:
+    explicit StreamFormatChannelReader(AudioUnitScope scope) : scope_(scope) {}
+    void visit_audio_unit(const host::PluginSlot&,
+                          const host::AudioUnitNativeHandle& handle) override {
+        auto au = static_cast<AudioUnit>(handle.component_instance);
+        if (!au)
+            return;
+        AudioStreamBasicDescription asbd{};
+        UInt32 size = sizeof(asbd);
+        if (AudioUnitGetProperty(au, kAudioUnitProperty_StreamFormat, scope_, 0, &asbd, &size) ==
+            noErr) {
+            channels_ = static_cast<int>(asbd.mChannelsPerFrame);
+        }
+    }
+    // -1 when the unit never answered, which no assertion may read as a width.
+    int channels() const {
+        return channels_;
+    }
+
+  private:
+    AudioUnitScope scope_;
+    int channels_ = -1;
+};
+
 // Apple's stock multi-band EQ. Ships with macOS, implements
 // kAudioUnitProperty_BypassEffect, and publishes eight per-band parameters
 // named exactly "Bypass".
@@ -450,3 +480,51 @@ TEST_CASE("AU host slot bypass passes input through unchanged",
 }
 
 #endif  // __APPLE__
+
+// A host that renders mono must get a mono-negotiated AU. The AU fixes its
+// stream shape at initialize time and cannot adapt to a differently shaped
+// buffer later, so if the slot ignores the caller's requested width the unit
+// initializes at its default (2) and every mono render is rejected as a
+// malformed shape: output zeroed, kAudioUnitRenderAction_OutputIsSilence set,
+// status noErr. That failure is silent in both senses -- no error, no audio.
+TEST_CASE("AU host negotiates the caller's requested channel width", "[host][au][channels]") {
+    const auto uid = apple_nband_eq_unique_id();
+    if (uid.empty()) {
+        SKIP("Apple AUNBandEQ is not registered in this environment");
+    }
+
+    host::PluginInfo info;
+    info.name = "AppleNBandEQ";
+    info.unique_id = uid;
+    info.format = host::PluginFormat::AudioUnit;
+    info.is_instrument = false;
+    info.is_effect = true;
+    // Declare STEREO deliberately: the descriptor must not be what decides the
+    // negotiated width, or this test would pass for the wrong reason.
+    info.num_inputs = 2;
+    info.num_outputs = 2;
+
+    auto slot = host::PluginSlot::load(info);
+    if (!slot) {
+        SKIP("system AU '" + uid + "' did not load in this environment");
+    }
+
+    // Ask for mono explicitly, BEFORE prepare() -- the only point an AU can
+    // negotiate its stream shape.
+    slot->set_preferred_channel_layout(1, 1);
+    REQUIRE(slot->prepare(48000.0, 512));
+
+    StreamFormatChannelReader out_reader(kAudioUnitScope_Output);
+    slot->accept(out_reader);
+    StreamFormatChannelReader in_reader(kAudioUnitScope_Input);
+    slot->accept(in_reader);
+
+    // -1 would mean the unit never answered; assert a real width was read.
+    REQUIRE(out_reader.channels() > 0);
+    CHECK(out_reader.channels() == 1);
+    if (in_reader.channels() > 0) {
+        CHECK(in_reader.channels() == 1);
+    }
+
+    slot->release();
+}

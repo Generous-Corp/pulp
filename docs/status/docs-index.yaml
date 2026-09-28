@@ -229,6 +229,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
 
+  - slug: dsp-throughput-benchmark
+    path: guides/dsp-throughput-benchmark.md
+    kind: guide
+    summary: Advisory per-frame cost benchmark for heavy DSP processors and pulp::simd kernels — running it, reading mean vs worst-block, diffing runs with bench_diff.py
+
   - slug: filter-morph
     path: guides/filter-morph.md
     kind: guide
@@ -251,10 +256,13 @@ docs:
 
   - slug: character-delay
     path: guides/character-delay.md
+    kind: guide
+    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
+
   - slug: sample-granular-graphs
     path: guides/sample-granular-graphs.md
     kind: guide
-    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
+    summary: Bounded scalar DSP inside an ordinary SignalGraph — declaring sample regions, UnitDelay causality, promoted parameters, and lowering to one prepared Processor
 
   - slug: dsp-dynamics
     path: guides/dsp-dynamics.md

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260925-browser-capture-concurrent-integration-files",
+  "created_at": "2026-09-25T17:42:09Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record test-only restructuring of Pulp's real-browser capture validation. The 26 existing real-browser cases move unchanged from one file into three themed *.integration.test.mjs files over a shared support module and run under node --test --test-concurrency=3 inside the same RUN_SERIAL ctest entry, so isolation from other CTest work and every per-case and outer timeout are unchanged. The test-only browser resolver now refuses the runner image's system Chrome under GitHub Actions and requires the pinned PULP_DESIGN_BROWSER, and one case covers that rule. Production browser capture, design ingest, captured output, rendering, packaging, the accepted expansion boundary, and Vellum source authority are unchanged.",
+  "tests": [
+    "python3 tools/scripts/test_ci_throughput_workflows.py (33 cases)",
+    "node --test --test-concurrency=3 tools/import-design/browser_capture/*.integration.test.mjs (27 cases)",
+    "GITHUB_ACTIONS=true node --test --test-concurrency=3 tools/import-design/browser_capture/*.integration.test.mjs without PULP_DESIGN_BROWSER (23 real-browser cases skipped, 4 passed)",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base origin/main --head HEAD",
+    "python3 tools/scripts/test_vellum_expansion_watch_check.py"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

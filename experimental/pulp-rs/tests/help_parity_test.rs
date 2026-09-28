@@ -43,6 +43,10 @@ fn expected_installed_banner() -> String {
             "  inspect        Connect to an explicitly hosted inspector fixture\n  trace          Canonical trace capture + offline Perfetto analysis\n",
         )
         .replace(
+            "  doctor         Diagnose environment issues\n",
+            "  doctor         Diagnose environment issues\n  gpu            Run deterministic GPU evidence probes\n",
+        )
+        .replace(
             "  import         Detect a framework project and emit a Pulp migration scaffold\n",
             "  import         Detect a framework project and emit a Pulp migration scaffold\n  identity       Manage the .pulp/identity.lock contract\n",
         )

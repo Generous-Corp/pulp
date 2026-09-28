@@ -38,25 +38,79 @@ jobs:
     runs-on: ${{ fromJSON(vars.PULP_RELEASE_CONTROL_LINUX_RUNS_ON_JSON || vars.PULP_LOCAL_LINUX_RUNS_ON_JSON || '"ubuntu-latest"') }}
     outputs:
       runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+      build: ${{ steps.preflight.outputs.build }}
     steps:
+      # Only the resolver is needed; it owns the opt-in class-label rewrite so
+      # the three release workflows share one tested implementation.
+      - uses: actions/checkout@v5
+        with:
+          # Resolver policy comes from the default branch, like release-cli.yml.
+          ref: ${{ github.event.repository.default_branch }}
+          lfs: false
+          sparse-checkout: tools/scripts/resolve_release_runners.py
+          sparse-checkout-cone-mode: false
       - id: resolve
         env:
           RELEASE_JSON: ${{ vars.PULP_RELEASE_MACOS_RUNS_ON_JSON }}
           NAMESPACE_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+          # Opt-in (exactly `1`/`true`): append `pulp-release-tagged` to a
+          # self-hosted selector. Unset = the selector below, verbatim.
+          PULP_RELEASE_CLASS_TOKENS: ${{ vars.PULP_RELEASE_CLASS_TOKENS }}
         run: |
+          set -euo pipefail
           if [ -n "${RELEASE_JSON:-}" ]; then
-            echo "runs_on_json=${RELEASE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${RELEASE_JSON}"
             echo "Routing macOS sign-and-release via PULP_RELEASE_MACOS_RUNS_ON_JSON: ${RELEASE_JSON}"
           elif [ -n "${NAMESPACE_JSON:-}" ]; then
-            echo "runs_on_json=${NAMESPACE_JSON}" >> "$GITHUB_OUTPUT"
+            selector="${NAMESPACE_JSON}"
             echo "Routing macOS sign-and-release through Namespace: ${NAMESPACE_JSON}"
           else
-            echo 'runs_on_json=["macos-15"]' >> "$GITHUB_OUTPUT"
+            selector='["macos-15"]'
             echo "Routing macOS sign-and-release through GitHub-hosted macos-15"
+          fi
+          selector="$(python3 tools/scripts/resolve_release_runners.py \
+            --apply-class-label pulp-release-tagged --selector "$selector")"
+          echo "runs_on_json=${selector}" >> "$GITHUB_OUTPUT"
+
+      # The macOS job exists to sign and notarize. With no signing or notary
+      # secret configured it signs nothing, uploads only a status file, and
+      # holds a release macOS runner for the whole build while doing so —
+      # release-cli.yml publishes every artifact on its own. Decide here, on the
+      # cheap control-plane runner, whether that job has anything to do.
+      # A job-level `if:` cannot read `secrets`, so the decision is an output.
+      # Any secret present (a partial configuration included) or the `fail`
+      # unsigned policy runs the job, so "Detect signing inputs" still names a
+      # partial setup or refuses an unsigned release loudly.
+      - id: preflight
+        name: Decide whether there is anything to sign
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          UNSIGNED_POLICY: ${{ vars.PULP_RELEASE_UNSIGNED_POLICY || 'mark' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          present=""
+          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PWD KEYCHAIN_PASSWORD \
+                      SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD; do
+            if [ -n "${!name:-}" ]; then present="$present $name"; fi
+          done
+          if [ -n "$present" ] || [ "$UNSIGNED_POLICY" != "mark" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Signing inputs present or policy '$UNSIGNED_POLICY'; running the macOS signing job."
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No macOS signing configured::No signing or notarization secret is set, so the macOS signing job is skipped. release-cli.yml publishes this release's artifacts."
           fi
 
   build-and-sign-macos:
     needs: resolve-macos-runner
+    if: needs.resolve-macos-runner.outputs.build == 'true'
     runs-on: ${{ fromJSON(needs.resolve-macos-runner.outputs.runs_on_json) }}
     name: Build, Sign, Notarize (macOS)
     # READ-ONLY on contents, deliberately. This workflow no longer writes to the

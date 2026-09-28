@@ -335,6 +335,33 @@ class NodeAbiGateTests(unittest.TestCase):
         code, out = self.gate()
         self.assertEqual(code, 0, out)
 
+    def branch_behind_main(self) -> None:
+        """Main appends a PluginSlot virtual after the branch point; the branch
+        commits an unrelated file and never touches either header."""
+        git(self.tmp, "checkout", "-q", "-b", "feature")
+        (self.tmp / "notes.txt").write_text("unrelated\n")
+        git(self.tmp, "add", "notes.txt")
+        git(self.tmp, "commit", "-q", "-m", "unrelated change")
+        git(self.tmp, "checkout", "-q", "main")
+        self.write_headers(["~Processor", "descriptor", "prepare"],
+                           ["~PluginSlot", "info", "process", "newer_on_main"])
+        git(self.tmp, "commit", "-q", "-am", "append a virtual on main")
+        git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.tmp, "checkout", "-q", "feature")
+
+    def test_branch_behind_main_passes_when_it_does_not_touch_the_header(self) -> None:
+        self.branch_behind_main()
+        code, out = self.gate()
+        self.assertEqual(code, 0, out)
+
+    def test_branch_behind_main_still_fails_its_own_removal(self) -> None:
+        self.branch_behind_main()
+        self.write_headers(["~Processor", "descriptor", "prepare"],
+                           ["~PluginSlot", "process"])
+        code, out = self.gate()
+        self.assertEqual(code, 1, out)
+        self.assertIn("PluginSlot: virtual order is not additive-only", out)
+
 
 if __name__ == "__main__":
     unittest.main()

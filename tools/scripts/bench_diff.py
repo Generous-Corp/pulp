@@ -128,7 +128,14 @@ def _fmt_value(v: Any, unit: str) -> str:
     if v is None:
         return "—"
     if isinstance(v, (int, float)) and not isinstance(v, bool):
-        text = f"{v:,.0f}" if float(v).is_integer() else f"{v:,.1f}"
+        # Sub-10 values keep three significant figures: a 0.13 ns/frame kernel
+        # and a 0.028 ns/element one must not both render as "0.1".
+        if float(v).is_integer():
+            text = f"{v:,.0f}"
+        elif abs(v) < 10:
+            text = f"{v:.3g}"
+        else:
+            text = f"{v:,.1f}"
     else:
         return str(v)
     return f"{text} {unit}" if unit and unit != "count" else text

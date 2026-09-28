@@ -646,6 +646,35 @@ shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
 shipyard update --check --json            # report installed vs latest
 ```
 
+### A local main-refresh push honours `refresh_branch`
+
+`[merge] refresh_branch = "only-if-conflicting"` in `.shipyard/config.toml`
+governs Shipyard's own `ghapp` update-branch calls. A local
+`git merge origin/main && git push` moves the PR head the same way, cancelling
+the in-flight required `macos` run (`build.yml` cancels superseded PR runs),
+while the merge queue re-tests the merge result anyway. The pre-push hook runs
+`tools/scripts/refresh_push_check.py` before every other gate, including under
+`PULP_SKIP_PREPUSH=1`, so those pushes are visible:
+
+| Setting | Effect |
+|---------|--------|
+| `PULP_REFRESH_PUSH_POLICY=warn` (default) | warn on a pure refresh of an open PR with no reason to refresh |
+| `PULP_REFRESH_PUSH_POLICY=refuse` | fail the push instead; `PULP_ALLOW_REFRESH_PUSH=1` allows one |
+| `PULP_REFRESH_PUSH_POLICY=off` | log only |
+| `PULP_REFRESH_PUSH_LOG` | log path (default `~/.local/state/pulp/refresh-pushes.jsonl`) |
+
+A refresh is justified, and never warned about, when the PR is `CONFLICTING`, a
+required check on its head is failing, or the queue removed it at its current
+head. A push counts as a pure refresh only when every new branch commit is a
+merge with a parent on `origin/main` whose tree equals Git's clean automatic
+merge; a conflict-resolution merge is logged but never warned about. Pushes
+with no merge from main cost two `git rev-list` calls and write nothing. The
+GitHub lookup (one query, plus a required-ness query only when a check has
+failed) shares a 5 s budget and fails open. Each log line is one JSON object:
+`ts, repo, branch, pr, head_before, head_after, main_merges, other_commits,
+pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
+lookup, policy, mode, decision, via`.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
@@ -709,9 +738,9 @@ projects so they never inflate `pulp`'s worker-minute totals:
 
 | Project | Targets |
 |---|---|
-| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` |
-| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,Fast tier,SDK contract}` |
-| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `merge-group-run` |
+| `pulp` | `macos-gate/<event>`, `macos-gate/merge_group/receipt-reused` (hosted placeholder), `macos-gate/merge_group/placeholder/{receipt-reused,skip-safe,unknown}` (what the placeholder's annotation says it stood for), `macos-gate/<event>/no-runner-cancel` (cancelled before any runner took it; duration = the wait), `release/<workflow>` (release-lane jobs that ran on a gate runner) |
+| `pulp-gate-steps` | `macos-gate/<event>/{queue,Configure,Build,Test,Fast tier,SDK contract}`, `release/<workflow>/queue` |
+| `pulp-merge-queue` | `pr/enqueue-to-merged`, `pr/last-enqueue-to-merged`, `pr/open-to-merged`, `pr/gate-minutes` (self-hosted gate minutes one merged PR cost, PR heads + merge groups, every conclusion), `pr/ejected/<reason>` (one removal from the queue before merging; duration = queue time it threw away), `merge-group-run` |
 
 Ingest is idempotent (rows already in the store are skipped by external id),
 so it can run on a schedule. "Is this build slower than usual on this host?"
@@ -732,10 +761,48 @@ python3 tools/scripts/build_speed_scorecard.py report --since 7d \
 python3 tools/scripts/build_speed_scorecard.py report --build-dir build --runs last
 
 # Gate job and step p50/p90 either side of one instant (a merge, an incident's
-# end), within the --since window.
+# end), within the --since window, plus time to merge and gate cost.
 python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17 \
   --split 2026-09-24T13:12Z --no-local --no-fleet
+
+# A clean after-window that skips a rollout and stops at a fixed end.
+python3 tools/scripts/build_speed_scorecard.py report --since 2026-09-17T13:12Z \
+  --split 2026-09-24T13:12Z --after-from 2026-09-27T12:00Z --until 2026-09-29T12:00Z \
+  --no-local --no-fleet
 ```
+
+Wall-clock waits mostly track load, so they cannot say whether a change worked.
+`proxies` is the before/after verdict instead: for each mechanism a change
+targets it counts that mechanism directly from job labels and runner names,
+run cancellations and head-SHA changes, PR timelines, failed-job logs, and each
+host's tartci supervisor events (`~/.tartci/state/macos-fleet/<lane>/events.jsonl`,
+read over ssh with `ls`/`cat` only). Every row names its source and n, carries a
+control on the same instrument that must be non-zero (a zero control prints
+INSTRUMENT BLIND and exits 3), and says "insufficient sample" below 20 units a
+side instead of a percentage. Wall time is printed beside the rows as context.
+`--exclude START/END` drops an infrastructure incident from both sides; a link
+error inside it is classified `infra_host_cache`. Raw inputs are cached
+(`~/.cache/pulp/build-speed/proxies.json`), so `--no-collect` re-renders with
+other windows without another sweep.
+
+```bash
+python3 tools/scripts/build_speed_scorecard.py proxies --since 2026-09-17T13:12Z \
+  --split 2026-09-22T00:00Z --after-from 2026-09-27T12:00Z --until 2026-09-29T12:00Z \
+  --exclude 2026-09-26T08:23Z/2026-09-27T01:12Z
+```
+
+`--split` also renders a "Time to merge and gate cost" table: PR open→merged and
+first/last enqueue→merged p50/p90, merged PRs per day and hour, PRs per
+merge-queue push, gate-minutes per merged PR, cancelled gate-minutes (per day
+and per merged PR), receipt reuse rate, merge_group run failure rate,
+ejections per 100 merged PRs (with reasons), gate jobs cancelled before any
+runner took them, release-lane queue and gate-runner minutes, and gate queue
+p50 per host. Everything is normalised per day or per merged PR so windows of
+different length compare. Receipt reuse counts only placeholders whose
+annotation says a receipt was reused: a skip-safe merge group never needed the
+native gate and is reported separately. `shipyard metrics compare` is not a
+substitute here: it ignores `--before` and compares against all history before
+the split (Shipyard#618).
 
 The drift section comes from `shipyard metrics watch`, which halves a fixed
 window, so a window that spans a change mixes both regimes. `--split` compares
@@ -743,10 +810,35 @@ either side of an explicit instant instead. It reads the `metrics list` rows
 the pipeline section already fetched, because `shipyard metrics compare` splits
 only on whole days ago and cannot filter by target.
 
+On a pull-request head that ran the full suite green, the **receipt issue
+step** (`protected_merge_receipt.py issue`) now announces its result: a
+`protected receipt issued` notice and job-summary line on success, or a
+`protected receipt NOT issued` warning carrying the issuer's reason (and a
+summary line) on failure. The step stays `continue-on-error`; the merge group
+then validates in full. A missing receipt with no such line is itself a defect
+to report.
+
+The gate's Build step also runs the **iOS compile gate in shadow-identity
+mode**: `tools/ci/ios_gate_digest.py` digests every tracked file the gate's
+three iOS configures can read (product sources, examples, CMake, dependency
+pins, the gate's own scripts) plus the Apple toolchain, looks the digest up
+among passing runs (repository-wide `ios-gate-ok-<digest>` artifacts, 14-day
+retention), and annotates `pulp-ios-gate-shadow/v1` with `would_skip` or
+`run`, then `ran_ok` or `ran_failed`. The gate always runs; the annotations
+are read as two proxies — `would_skip ÷ runs` per event, and `would_skip`
+verdicts followed by `ran_failed`, which must be zero before a digest-keyed
+skip could be proposed (that switch-on is a decisions-contract amendment,
+not a workflow edit).
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate
-cache, gate-VM count and memory, tartci's installed commit (the sealed
+cache (cumulative for the cache directory; the per-job figure for one gate
+run is the `ccache per-job:` line that `build.yml`'s "Ccache stats" step
+prints from `tools/ci/ccache_job_delta.py`, the difference between the
+`--print-stats` snapshots taken before and after the Build step — the
+cumulative "Hits" line a job prints is the host's history and cannot show a
+cold or poisoned cache on that job), gate-VM count and memory, tartci's installed commit (the sealed
 launcher bundle's `source_commit`, else the fleet install record, as
 `tartci fleet-macos self-update` reports it), executing generation and
 checkout, lease usage and host profile, wheelhouse contents. Each probe runs
@@ -832,26 +924,36 @@ and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
 
 ### The macOS release VM lane and cross-lane priority
 
-Release builds (`release-cli.yml`) route to a dedicated ephemeral label,
-`pulp-build-vm-release`, via `PULP_RELEASE_MACOS_RUNS_ON_JSON`. Like the gate
-VM lane, it is JIT: a runner registers only while serving a job and deregisters
-after, so an idle release lane shows **zero** runners in the GitHub inventory.
-That is its healthy state, not an outage — judge the lane on service history
-(`runner_topology.json`'s `service_evidence`), never on a point-in-time runner
-census.
+Release macOS legs (`release-cli.yml`, `sign-and-release.yml`, and
+`release-path-pr-gate.yml`'s legacy fallback) route through
+`PULP_RELEASE_MACOS_RUNS_ON_JSON`, which is deliberately **set to the base gate
+label set** (`self-hosted, macOS, ARM64, pulp-build, pulp-build-vm`). TartCI's
+event-class-v2 gate slots mint runners only for `Build and Test` jobs that
+carry a class label, so no slot boots *for* a release job. GitHub, however,
+hands a queued job to any idle registered runner whose labels are a superset,
+so release jobs run on whichever gate runner comes free. Service is
+**opportunistic**: it has served every release since the variable was set, but
+it depends on concurrent gate demand and competes with PRs for the same slots.
+The contract records this as `opportunistic_service`, and static mode reports
+those rows `OPPORTUNISTIC` rather than `REACHABLE` (not blocking; the row goes
+`UNSERVED` and fails if no gate registration carries the labels):
+
+```text
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required expect    Release CLI  OPPORTUNISTIC  no registration mints for 'Release CLI'; idle runners minted for ['Build and Test'] carry the labels (...)
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required fallback  Release CLI  UNSERVED       no Generous-Corp/pulp registration advertises ['pulp-gate-fast']
+PULP_RELEASE_MACOS_RUNS_ON_JSON  required rollback  -            HOSTED         GitHub-hosted allowlist
+```
+
+The dedicated `pulp-build-vm-release` lane (m5's legacy `pulp-release` slot,
+which yields to `Build and Test`) still exists but nothing routes to it, pending
+a redesign that folds the release classes into the v2 gate lane.
 
 **Unsetting the variable is not a rollback.** The resolver chain
 (`resolve_release_runners.py`, and `release-path-pr-gate.yml`) falls through to
 `PULP_LOCAL_MACOS_RUNS_ON_JSON`, whose label set carries `pulp-gate-fast`. No
 registration advertises that label (`build.yml` rewrites it per event; the
-release workflows do not), and the gate slots mint only `Build and Test`
-anyway, so a release darwin-arm64 leg routed there queues forever.
-`runner_topology_check.py --mode=static` shows it:
-
-```text
-PULP_RELEASE_MACOS_RUNS_ON_JSON  required fallback  Release CLI  UNSERVED  no Generous-Corp/pulp registration advertises ['pulp-gate-fast']
-PULP_RELEASE_MACOS_RUNS_ON_JSON  required rollback  -            HOSTED    GitHub-hosted allowlist
-```
+release workflows do not), so a release darwin-arm64 leg routed there queues
+forever.
 
 The served break-glass rollback is to **set** the variable to the lane's
 `break_glass_rollback`, GitHub-hosted `["macos-15"]`
@@ -859,7 +961,8 @@ The served break-glass rollback is to **set** the variable to the lane's
 It schedules slower when the hosted pool is congested, but it always
 dispatches. Static mode fails when a required lane's unset fallback is
 UNSERVED and its contract names no served `break_glass_rollback`, so a
-rollback that cannot run cannot be documented as one.
+rollback that cannot run cannot be documented as one. An
+`opportunistic_service` declaration never rescues a fallback or rollback row.
 
 A release slot admits a job only when **three independent gates** all pass;
 labels are necessary but not sufficient:
@@ -1383,6 +1486,16 @@ optional and is not part of the checked set.
 
 ## Lane timeouts — and why a timeout looks like a broken PR
 
+**Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
+the host's tartci `job_timeout` (2 h) is what finally ends a hung job, and it
+ends as `failure`, not `timed_out`, because the VM is torn down under the
+runner. A hung step therefore holds a gate VM for two hours unless the step
+carries its own bound. `build.yml` bounds "Bootstrap repository dependencies"
+at 15 minutes (it takes 0.3 min p50 and at most ~1 min on gate VMs): one such
+hang on 2026-09-26 held an m3 gate slot for 2 h 11 min. When a gate job ends in
+`failure` near the 2-hour mark, read its steps list: the last `in_progress`
+step is the one that hung.
+
 `[targets.<name>] timeout_secs` in `.shipyard/config.toml` bounds how long a
 validation lane may run. The mac lane is **14400s (4h)** as of 2026-08-20,
 raised from 7200s after the earlier 3600s ceiling also proved too short.
@@ -1639,6 +1752,18 @@ unlock so queued waiters keep one inode. Tests may set the trusted, absolute
 application state with owner-only permissions (or the user's inherited profile
 ACL on Windows), rather than an OS-purgeable cache or runtime directory.
 
+Interactive builds take the same lock without waiting. `tools/ci/governed-build.sh`
+runs every `cmake --build <dir>` under `build_dir_lock.py --no-wait`, which refuses a
+second build into a directory another live build holds (exit 75) and prints that
+holder's pid, liveness, working directory and command. The lock is a kernel `flock`
+released when its holder exits, so a killed build leaves nothing stale; a holder
+exports `PULP_BUILD_DIR_LOCK_HELD`, so a locked stage may still call the wrapper for
+its own tree. Before any lease, the wrapper and the root CMake configure also refuse
+a source checkout under `/tmp`, `/private/tmp` or `$TMPDIR` (exit 3;
+`tools/ci/checkout_location_guard.py`), because such a tree misses the shared ccache
+on every compile. `PULP_ALLOW_TMP_CHECKOUT=1` overrides that for a deliberate
+throwaway checkout, and GitHub Actions jobs are exempt.
+
 ## Runs on `main`: cache warming and main's health
 
 `build.yml` triggers on `push: branches: [main]` in addition to
@@ -1680,12 +1805,27 @@ same break and pays the same forty minutes.
 Running it on push moves that detection onto the merge commit that caused it,
 where attribution is free.
 
-The cost is bounded rather than unlimited. Push runs share the
-`refs/heads/main` concurrency group, so consecutive merges serialize and at
-most one push macOS leg is ever in flight: the steady-state draw on the
-self-hosted Macs is one lane. The leg also keeps its descriptive matrix name on
-push instead of claiming the required `macos` context, so it detects without
-gating. Caches are still saved only from GitHub-hosted Linux and Windows: the
+The leg keeps its descriptive matrix name on push instead of claiming the
+required `macos` context, so it detects without gating.
+
+**In practice this lane observes nothing, and the bound it was given is why.**
+Push runs share the `refs/heads/main` concurrency group with
+`cancel-in-progress` false, which was intended to serialize consecutive merges
+to at most one macOS leg in flight. GitHub holds at most **one** run pending per
+concurrency group and cancels the previously pending one when another arrives,
+so on a main that merges faster than the macOS suite takes, "serialize" becomes
+"cancel all but the one already running" — and that one's self-hosted macOS leg
+is still queued for a runner when the next merge cancels it too. Over the 60
+most recent pushes to main: 58 completed, 55 dispatched no job at all, and **0**
+executed the macOS suite. The same query over `merge_group` returned 31 of 55
+executed, so the instrument reads a real lane when there is one to read.
+
+Because a cancelled push run's observation is tied to a sha that never comes
+again, the observation is lost rather than deferred. Widening the group to
+per-sha would fix the supersession and hand the shared Studios one ~40-minute
+macOS leg per merge — on the hosts that serve the required `macos` gate. The
+base health detector below takes the other route: it derives main's health from
+evidence that already exists, and costs no gate lane. Caches are still saved only from GitHub-hosted Linux and Windows: the
 two `Save …` steps stay scoped
 `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which is
 narrower than the restore side on purpose, because the self-hosted Macs keep
@@ -1695,6 +1835,85 @@ ccache and FetchContent on local disk between jobs.
 this: it asserts over the parsed syntax tree that the macOS matrix entry is
 appended unconditionally, so re-gating it on the event name fails a test rather
 than quietly restoring the blind spot.
+
+### Base health detector (`main-health-detector.yml`)
+
+A broken `main` is amplified rather than caught by a merge queue: every batch is
+`main` plus its entries, so every batch inherits the break, fails after a full
+gate, ejects its innocent entries, re-forms, and pays again. Nothing in a
+batch's own report says the base is the cause, so each batch reads as a new
+culprit in turn.
+
+`.github/workflows/main-health-detector.yml` runs `tools/ci/base_poison_detector.py`
+on a schedule and on demand. It is read-only, runs on the preamble Linux runner,
+draws no macOS gate host, and **reports only** — pausing a re-forming batch or
+prioritising the fix is Shipyard's side and is not wired here. One detector runs
+at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
+superseded tick loses nothing, because the next one reads main's *current* head,
+which is strictly more relevant than the head the cancelled tick would have
+reported on. That is exactly the property the push lane lacks.
+
+**Where main's evidence comes from without a build.** A merge queue validates
+`main` plus its entries as one commit, and the commit that lands carries that
+commit's tree. So when main's head tree equals the head tree of a run whose
+macOS leg genuinely executed the suite, that run built and tested main's exact
+tree — the same sources, the same binaries, the same result. A failure there is
+a failure observed on main itself, for two commit reads instead of a gate lane.
+Tree identity rather than sha identity, because the queue's merge method can
+produce a landing commit whose sha differs while the tree is the same, and it is
+the tree that determines what was built. The detector prefers a genuine
+push-lane observation when one exists and falls back to tree identity, and the
+signal says which it used.
+
+Failing test names are read from the `ctest-logs-macos` **artifact**
+(`Testing/Temporary/LastTestsFailed.log`), never from a job log:
+`ghapp api .../actions/jobs/<id>/logs` refuses any response carrying terminal
+escape sequences and returns a short refusal instead, so a log scrape silently
+yields no failing tests — which reads as "the failure was not a test failure".
+
+**The signal.** A `::notice title=base-poison-signal::` annotation carrying one
+line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
+and a `base-poison-signal` artifact. Fields: `status`, `proof`,
+`safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
+`main_evidence_source`, `main_failing_tests`, `batch_streak`,
+`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`, `reason`.
+
+| `status` | Means | `safe_to_pause_queue` |
+|---|---|---|
+| `healthy` | a job that genuinely ran the suite on main's tree passed | false |
+| `unproven` | no such job exists — main's health is unmeasured | false |
+| `suspected` | a streak, or a main failure naming no test | false |
+| `poisoned` | main's own suite failed a test that a streak of consecutive executed batches also failed | **true** |
+
+`safe_to_pause_queue` is the only field a consumer should act on. It is true for
+`poisoned` and for nothing else.
+
+**Two rules it deliberately refuses**, because both are measured unsafe and both
+look convincing:
+
+1. *Cross-batch corroboration of an identical failure.* Batches with disjoint
+   single-entry memberships have failed with a byte-identical error at different
+   bases while one of those entries was genuinely broken. That rule is
+   structurally indistinguishable from the innocent case, so a streak alone is
+   `suspected` with `proof: batch-streak-only` — a prioritisation hint, never
+   proof, and it never pauses anything.
+2. *"No ctest block, therefore infrastructure."* A compile or link error
+   produces no ctest block either. A failure naming no test contributes an empty
+   set and so cannot carry any verdict that names one.
+
+It fails closed in every direction. A receipt-reuse green (three steps, no
+build, no test) is not evidence and reads as `unproven` rather than `healthy`; a
+cancelled run is not evidence, so cancelling doomed batches cannot turn a red
+base green; and absence of evidence is never health. A fix PR is named only on
+the attributor's decisive weight — an exact test-name to file-stem match with a
+single contender — because prioritising the wrong branch is worse than
+prioritising none.
+
+`tools/ci/test_base_poison_detector.py` (ctest `base-poison-detector-selftest`)
+pins each of those refusals, and also asserts that a workflow actually invokes
+the detector: a correct rule nothing runs reads exactly like one that works,
+which is how the designated push lane went 58 runs without producing a single
+observation.
 
 Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
@@ -1732,6 +1951,25 @@ preamble indefinitely. On a push, `origin/main` resolves to HEAD itself and the
 diff is always empty — so a docs-only merge is otherwise indistinguishable from
 a core merge, and the run never skips. A docs-only merge to main now correctly
 skips the whole matrix.
+
+**Wide non-native classification (opt-in, default off).** With the repository
+variable `PULP_CLASSIFY_WIDE_NON_NATIVE` unset, `classify` behaves exactly as
+above. Set to `1`, it passes `--wide-non-native` to `classify_changes.py`, which
+consults `tools/scripts/wide_non_native.py` for the files the base allowlist
+kept native. A file under `tools/scripts/`, `tools/testing/` or
+`tools/import-validation/` is admitted only when every tracked file naming its
+stem is inert (Markdown, `docs/`, `planning/`, `.agents/`, a workflow other than
+`build.yml` / `build-macos.yml` / `.github/actions/**`), a script run by
+`tools/ci/source_selftests.json` or `tools/ci/wide_non_native_checks.json`, the
+CMake registration of one of those tests, or another admitted file. Anything
+else keeps the native build: a gate-side ctest registration, `tools/ci/**`,
+`tools/cmake/**`, C++ or test sources, the classifier's own files, a failed or
+over-budget reference search. The gate's repository scanners that walk `tools/`
+without naming files run from `tools/ci/wide_non_native_checks.json` on the
+required `Enforce version & skill sync` context whenever the variable is `1`.
+`.github/workflows/**` and `tools/ci/**` are never widened. Over the 177 PRs
+merged 2026-09-21..27 the widening admits 9 more (19 skip-native instead of
+10); `tools/scripts/test_wide_non_native.py` replays that window.
 
 The classifier also establishes its interpreter explicitly. A macOS
 LaunchAgent normally sees only `/usr/bin:/bin:/usr/sbin:/sbin`; on M5 that made
@@ -1886,11 +2124,125 @@ while the real break stays on main, failing every batch that forms. When it
 reports that, check main's own health first, which is what the push macOS leg
 above exists to tell you.
 
+### Letting an un-implicated head back into the queue
+
+`queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
+ejection, and `branch-refresh-guard` refuses the `update-branch` that would
+otherwise dodge it. Both are right on their own: re-queueing a head that broke a
+batch ejects its innocent batch-mates all over again, and a refresh buys nothing
+while cancelling and restarting a 40-minute required gate. Together they trap a
+pull request ejected by a defect that was never its own.
+
+`.shipyard/config.toml` declares the way out:
+
+```toml
+[queue.attribution]
+command = ["python3", "tools/scripts/queue_batch_attribute.py", "--certify"]
+```
+
+The guard runs that argv with `--repo <owner/name> --pr <n> --run-id <ejecting
+run>` appended, from the repository root, and allows the re-enqueue only when it
+exits 0 and prints a JSON object whose `implicates_head` is exactly `false`
+beside a verdict that positively names why — `infrastructure` or
+`other_pull_request`. A verdict recording what was *not* found certifies
+nothing, and neither does a missing or null `implicates_head`.
+
+```bash
+python3 tools/scripts/queue_batch_attribute.py --certify \
+  --repo Generous-Corp/pulp --pr 8773 --run-id 35973715485
+```
+
+Certification is per failing step and exhaustive: every failing step of every
+failing job must be positively accounted for, and one unaccounted step refuses
+the whole verdict. Two accounts qualify.
+
+- **The step is a package-manager fetch, an artifact move, a cache warm, or
+  runner-generated** — and the head changes nothing that step reads. Both halves
+  are required. A step name alone proves nothing, because a workflow step *is*
+  repository content and a head can rewrite the step that failed; and the
+  surface is scoped per step class, because a blanket one including
+  `CMakeLists.txt` would refuse every version bump while a `curl` of a pinned
+  wasi-sdk release plainly cannot fail because a version string moved.
+- **The failing step ran the suite and the ctest failures are owned by a
+  different batch member** — the attribution above, at its confidence threshold,
+  naming exactly one culprit that is not this head.
+
+Everything else refuses, including the case that looks most like a free pass: a
+batch that failed with **no ctest block at all**. "No test failure, therefore
+infrastructure" is the tempting rule and the wrong one — a compile or link error
+is the most common way a head breaks a batch and it produces no ctest block.
+pulp#8811 was ejected exactly that way, with its own required checks green, and
+its own later commit admits the head was broken.
+
+Two candidate signals were evaluated against live runs and are deliberately
+**not** implemented, because each one certified a head that was at fault:
+
+- *The identical failure reproduces in a batch that does not contain this head.*
+  Disproven. Three batches with disjoint single-entry memberships (#8803, #8807,
+  #8811) failed with a byte-identical CMake test-discovery error, which would
+  have certified #8811 — the head that was broken. The structure is
+  indistinguishable from the genuinely-innocent case, where four batches
+  (#8891, #8892, #8896, and #8888's) shared one `write_scenario_wav` link error.
+- *The failure is present on main at the batch's base.* Sound in principle — a
+  `main`-branch run at the base contains no queue entry, so anything it fails is
+  the base's — but **not observable here**, which is the more useful finding.
+  `build.yml`'s own push run at a queue base is cancelled by its concurrency
+  group with **zero jobs**, so the one lane whose configuration matches the
+  batch never reports on the base. The main-branch runs that do carry jobs at
+  that sha are other workflows with other build configurations, and a failure
+  matched across configurations does not transfer.
+
+  Measured on the case that motivated this: four batches with disjoint
+  single-entry memberships, on two different bases and two different gate hosts,
+  all failed to link `pulp::test::audio::write_scenario_wav`. The bases did not
+  contain `f4ee4ac3cc` ("keep grouped wav bridge link self-contained"), a
+  four-line `test/cmake/app_audio_host_tests.cmake` fix — so the base really was
+  red, and none of the four heads was at fault. Main's Debug and sanitizer runs
+  at that base linked both affected targets cleanly (585 and 1758 link lines, so
+  the reading is not blindness), because they do not group that target the way
+  the gate does.
+
+  So the obstacle to certifying this whole class is a CI-topology fact, not a
+  missing rule: nothing publishes a same-configuration verdict on a queue base.
+  Give `build.yml`'s main push lane a run that survives to dispatch jobs at each
+  base and the rule becomes checkable and would have cleared all four.
+
 
 ## Exact PR receipts on an unchanged merge-group candidate
 
-A successful pull-request macOS or Linux matrix child publishes a two-day
-`protected-validation-<target>-<head>-<base>` receipt. The receipt binds the
+A pull-request head normally runs only the build and the `pr-fast` tier, which
+is what its required `macos` check means, and that issues no receipt. A head
+that is **ready to land** also runs the full suite: the `Decide pull-request
+test suite` step (`tools/ci/ctest_gate_args.py --pr-suite`) reads the live pull
+request just before testing and chooses the full suite only when it is armed
+for auto-merge, is still the pull request's head, and was merged onto the
+current tip of `main`. Anything else, including an unreadable pull request,
+keeps the fast tier. Each clause drops a run whose receipt could never be
+consumed, because the receipt names the exact head and base. A push after
+arming re-decides on its own run, so a new head gets its own full run and the
+old receipt simply never matches. Arming a pull request whose checks are
+already green enqueues it immediately and starts no new run, so it validates in
+full in the merge group as before. REST `auto_merge` reads null once the queue
+holds a pull request (decisions contract row 11); that only ever yields the
+fast tier.
+
+Do not push a merge of `main` into a pull request to make it eligible. A head
+whose base has moved is still validated in full by the merge group, and a
+refresh push cancels and restarts the running `macos` gate, so it costs more
+than the receipt could save. Merge `main` only when the pull request is DIRTY
+or a required check fails because of a stale base.
+
+That full run is evidence, not the pull request's gate: the step is
+`continue-on-error` on pull requests, so a failure there leaves the `macos`
+check meaning build + fast tier, and the `Surface ctest failures` step still
+reports it. That reporter always exits 0 (errexit off, every possibly-empty
+grep guarded): it runs whenever the Test step's outcome is failure, so a
+non-zero exit from it alone would turn the required check red for a failure
+the workflow deliberately does not gate on. `tools/ci/test_build_matrix_contract.py`
+executes the step's script under GitHub's `bash -e -o pipefail`. When it passes, the macOS or Linux matrix child publishes a two-day
+`protected-validation-<target>-<head>-<base>` receipt. The issuer requires the
+Test step's `outcome` to be `success` (its `conclusion` is always success under
+`continue-on-error`). The receipt binds the
 exact synthetic merge tree and parents, protected workflow/policy blobs,
 observed platform/toolchain identity, and SHA-256 identities for every CTest
 executable that was actually exercised. Receipt publication is an optimization
@@ -2077,6 +2429,36 @@ on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
 as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
+
+## The PR gate settle window is default off
+
+`PULP_PR_GATE_SETTLE_SECONDS` (repo variable, unset by default) holds the
+native `build` matrix on a pull request behind the `pr-gate-settle` job, which
+sleeps that many seconds on the hosted preamble lane. A push that arrives
+during the wait cancels the superseded run through the `build-<ref>`
+concurrency group before its macOS leg claims a self-hosted gate VM, so the
+cancellation costs a hosted sleep instead of VM time.
+
+- Unset, empty, or `0`: the job is skipped at the job level and `build`
+  evaluates exactly as before. `build` gates on `!cancelled()` and never reads
+  the settle result, so a skipped, failed, or timed-out settle can neither skip
+  nor fail the required `macos` context.
+- `1`–`900`: sleep that long, in parallel with `resolve-provider`, `classify`,
+  and `protected-receipt-reuse`. The added latency is the value minus the
+  preamble time (median about 30 s), paid by every native PR run.
+- Anything else (non-integer, negative, above the 900 s cap): a
+  `PR gate settle ignored` notice and no wait.
+- Only `pull_request` waits. `merge_group`, `push`, and `workflow_dispatch`
+  (including Shipyard's PR validation dispatch) never do, and neither
+  skip-safe `macos` bootstrap depends on the job, so a PR with no native work
+  is never delayed.
+
+The window only catches a superseding push that lands before the VM would have
+been claimed. Measure the gap between consecutive pushes on the same PR before
+choosing a value: most pushes that cancel a gate VM arrive many minutes apart,
+which no reasonable settle window catches.
+`tools/scripts/test_build_workflow.py` (`PrGateSettleWorkflowTest`) pins the
+event gating, the unread dependency, and the value validation.
 
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 
@@ -2522,7 +2904,7 @@ unset variable is frequently a deliberate state rather than a stalled lane, and
 the fallback is not always hosted. `release-cli.yml` resolves
 `PULP_RELEASE_MACOS_RUNS_ON_JSON` through `PULP_LOCAL_MACOS_RUNS_ON_JSON`
 before it ever reaches `macos-15`, so leaving it unset routes releases to the
-self-hosted pool. Reading only the last element of such a chain produces a
+gate's pre-dispatch label set, which no registration serves. Reading only the last element of such a chain produces a
 confident and wrong conclusion in both directions. Record the real terminus as
 `unset_fallback` so the report keeps naming only the lanes that would genuinely
 have nowhere to run.
@@ -2693,13 +3075,12 @@ Four lanes read as broken in the contract while behaving exactly as intended,
 because "unset" and "hosted" each mean something specific per lane. Read the
 consuming workflow before calling one of these a black hole:
 
-- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is deliberately unset, and that is the
-  local-first state.** `release-cli.yml` resolves it, then
-  `PULP_LOCAL_MACOS_RUNS_ON_JSON`, then Namespace (off for cost), then
-  `macos-15`. Leaving it unset therefore routes releases onto the self-hosted
-  pool that already backs the required gate — which is why hosted starvation
-  (2026-05-18, 2026-06-09) no longer blocks publishing. Setting it *overrides*
-  that chain, so it is only correct for a proven dedicated release lane.
+- **`PULP_RELEASE_MACOS_RUNS_ON_JSON` is set to the gate's base labels, not
+  unset.** Unsetting it falls through to `PULP_LOCAL_MACOS_RUNS_ON_JSON`, whose
+  `pulp-gate-fast` label no registration advertises, so releases would queue
+  forever. The set value routes releases onto idle gate runners, which is why
+  hosted starvation (2026-05-18, 2026-06-09) no longer blocks publishing; see
+  "The macOS release VM lane and cross-lane priority" above.
 - **`PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is currently OFF, by contract.**
   The lane is designed to be hosted — overflow exists to add capacity when the
   local pool is saturated, so pointing it at the same local labels is a no-op
@@ -5297,6 +5678,20 @@ You don't need the same VM setup as the original developer. Options:
 - **Physical machines**: A spare Linux box or Windows machine on your network works fine.
 
 Local CI config is intentionally gitignored. Keep your host topology local, and prefer the machine-global config path so every worktree uses the same host map by default.
+
+## Branch refreshes are refused unless they fix something
+
+`.shipyard/config.toml` sets `[merge] refresh_branch = "only-if-conflicting"`.
+`main` lands through a merge queue that builds and validates the merge result
+itself, and `build.yml` cancels an in-flight run whenever the PR ref moves, so
+refreshing a merely `BEHIND` PR (`update-branch`, or merging `origin/main` into
+it) restarts the ~25-40 minute required `macos` gate for nothing. With this
+policy Shipyard's `ghapp` branch-refresh guard refuses an App-authenticated
+refresh when the PR is mergeable and no required check is failing; a
+conflicting PR, a red required check, or any state it cannot read is still
+refreshed. The guard only takes effect on hosts where `shipyard guards status`
+shows `branch-refresh-guard` current. A local `git merge origin/main && git
+push` bypasses it, so do not merge `main` into a PR unless it conflicts.
 
 ## Steward auto-handoff is PAUSED (2026-09-07)
 

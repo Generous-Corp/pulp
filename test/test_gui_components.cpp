@@ -1228,7 +1228,7 @@ TEST_CASE("LassoComponent callback fires", "[gui][lasso]") {
     REQUIRE(last_rect.height == 100.0f);
 }
 
-TEST_CASE("SelectionRect contains and intersects use half-open bounds",
+TEST_CASE("SelectionRect contains and intersects use half-open bounds (gui components)",
           "[gui][lasso]") {
     SelectionRect rect{10.0f, 20.0f, 40.0f, 30.0f};
 

@@ -15,6 +15,13 @@
 # tier-0 bound. Usage:
 #
 #   tools/ci/governed-build.sh cmake --build build [--target ...]
+#   tools/ci/governed-build.sh --probe-jobs   # print the share a build would get
+#
+# Before any lease is requested it refuses two things that waste a shared host:
+# a source checkout in a temporary directory (checkout_location_guard.py; the
+# same rule the root CMake configure applies), and a second `cmake --build`
+# into a build directory another live build already holds
+# (build_dir_lock.py --no-wait, which names the holder).
 #
 # The build command MUST NOT carry its own --parallel/-j (a bare flag is
 # rejected by build_parallelism_guard.py anyway); CMAKE_BUILD_PARALLEL_LEVEL
@@ -27,6 +34,51 @@ if [ "$#" -eq 0 ]; then
 fi
 
 log() { echo "[governed-build] $*" >&2; }
+
+GOVERNED_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+GOVERNED_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# --- Pre-lease refusals ---------------------------------------------------------
+# Both run before a lease is requested, so a refused build never holds cores.
+# The build-dir lock re-executes this script as the child of the lock holder;
+# that child is marked with a private variable (unset at once, so it never leaks
+# to a nested build) and skips straight to lease admission.
+#
+# Both are POSIX-only, like the CMake-side check. Under Git Bash on Windows a
+# native python3 cannot re-execute this script: its `bash` can resolve to WSL,
+# and the POSIX paths this script sees mean nothing to it.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) GOVERNED_POSIX_HOST=0 ;;
+  *) GOVERNED_POSIX_HOST=1 ;;
+esac
+if [ "${_PULP_GOVERNED_BUILD_LOCKED:-}" = "1" ]; then
+  unset _PULP_GOVERNED_BUILD_LOCKED
+elif [ "${1:-}" != "--probe-jobs" ] && [ "$GOVERNED_POSIX_HOST" = "1" ]; then
+  guard_py="$GOVERNED_REPO_ROOT/tools/ci/checkout_location_guard.py"
+  lock_py="$GOVERNED_REPO_ROOT/tools/ci/build_dir_lock.py"
+  if ! command -v python3 >/dev/null 2>&1; then
+    log "python3 not found: skipping the checkout-location and build-dir lock checks"
+  else
+    # A checkout in /tmp, /private/tmp or $TMPDIR misses the shared ccache on
+    # every compile. Exit 3 is the guard's refusal; anything else it prints is
+    # a warning and the build proceeds.
+    guard_rc=0
+    if [ -f "$guard_py" ]; then
+      python3 "$guard_py" --context governed-build "$GOVERNED_REPO_ROOT" || guard_rc=$?
+    fi
+    if [ "$guard_rc" -eq 3 ]; then exit 3; fi
+
+    # Hold the build directory for the life of this build, or refuse and name
+    # whoever already holds it. A holder's own descendants inherit the lock
+    # (PULP_BUILD_DIR_LOCK_HELD), so a locked validation stage can still call
+    # this wrapper for the same tree. Exit 75 is the refusal.
+    if [ -f "$lock_py" ] && [ "$(basename "${1:-}")" = "cmake" ] && [ "${2:-}" = "--build" ] \
+        && [ -n "${3:-}" ] && [ "${PULP_BUILD_DIR_LOCK:-1}" != "0" ]; then
+      exec env _PULP_GOVERNED_BUILD_LOCKED=1 python3 "$lock_py" --no-wait --build-dir "$3" \
+        -- bash "$GOVERNED_SCRIPT" "$@"
+    fi
+  fi
+fi
 
 # --- Tier-0 bound: min(cores, RAM_budget / 1.5 GiB), always >= 1 ---------------
 # This is the no-tartci bound: it keeps a build from exhausting RAM, but on a
@@ -192,6 +244,62 @@ find_tartci() {
   command -v tartci 2>/dev/null || true
 }
 
+# Named capacity field from `tartci leases status --json`, or "" if unknown.
+status_field() {
+  printf '%s' "$1" \
+    | grep -o "\"$2\"[[:space:]]*:[[:space:]]*[0-9][0-9]*" \
+    | grep -o '[0-9][0-9]*$' | head -n 1 || true
+}
+
+# Print the parallelism a build started now would most likely run at, without
+# acquiring anything: `jobs=<N> grant=<lease|partial-lease|agent-floor|floor|tier0>`.
+# It is a snapshot, so a caller may use it to decide whether a build is worth
+# starting (the pre-push coverage build skips itself when this says the floor),
+# never to size one. Always exits 0.
+probe_jobs() {
+  local profile status jobs avail floor_avail best grant partial fl
+  local requested="${PULP_BUILD_JOBS:-}"
+  if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
+    TARTCI_BIN="$(find_tartci)"
+  fi
+  if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; then
+    jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
+    positive_int "$jobs" || jobs="$(tier0_jobs)"
+    if positive_int "$requested" && [ "$requested" -lt "$jobs" ]; then jobs="$requested"; fi
+    status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || status=""
+    avail="$(status_field "$status" non_gate_available_cores)"
+    floor_avail="$(status_field "$status" floor_available_cores)"
+    if positive_int "$avail" && [ "$avail" -ge "$jobs" ]; then
+      best="$jobs"; grant="lease"
+    else
+      partial=0; fl=0
+      if positive_int "$avail"; then partial="$avail"; fi
+      if positive_int "$floor_avail"; then
+        fl="$floor_avail"
+        if [ "$fl" -gt "$jobs" ]; then fl="$jobs"; fi
+      fi
+      if [ "$partial" -ge "$fl" ] && [ "$partial" -ge 1 ]; then
+        best="$partial"; grant="partial-lease"
+      elif [ "$fl" -ge 1 ]; then
+        best="$fl"; grant="agent-floor"
+      else
+        best="$(min_jobs)"; grant="floor"
+      fi
+    fi
+  else
+    compute_tier0
+    best="$TIER0_JOBS"; grant="tier0"
+    if positive_int "$requested" && [ "$requested" -lt "$best" ]; then best="$requested"; fi
+  fi
+  echo "jobs=$best grant=$grant"
+}
+
+TARTCI_BIN=""
+if [ "${1:-}" = "--probe-jobs" ]; then
+  probe_jobs
+  exit 0
+fi
+
 LEASE_ID=""
 TARTCI_BIN=""
 HEARTBEAT_PID=""
@@ -328,8 +436,68 @@ acquire_lease() {
     --job-id "${GITHUB_RUN_ID:-}" --json >/dev/null 2>&1
 }
 
+# Ask for an agent-floor lease after an ordinary denial. tartci (with
+# `agent_floor_cores` set in the host's fleet profile) answers a starved,
+# non-gate build with a small lease that runs at background QoS and is not
+# charged against any other lease's admission. The grant may be smaller than
+# the request, so the build must use the size tartci reports, and it must run
+# at background QoS: that is the condition under which the host agreed to
+# oversubscribe cores.
+#
+# Returns 0 and sets FLOOR_CORES / FLOOR_QOS only for a well-formed grant.
+# Everything else is a denial: a host with the knob off (rc 75), a tartci too
+# old to know the flag (argparse rc 2), or output this cannot parse. The caller
+# then falls back exactly as it did before the floor existed.
+FLOOR_CORES=""
+FLOOR_QOS=""
+acquire_floor_lease() {
+  local out size
+  FLOOR_CORES=""
+  FLOOR_QOS=""
+  out="$("$TARTCI_BIN" leases acquire \
+    --id "$LEASE_ID" --cores "$1" --priority build --allow-floor \
+    --kind shipyard-local --owner "governed-build" --pid "$$" \
+    --job-id "${GITHUB_RUN_ID:-}" --json 2>/dev/null)" || return 1
+  printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || return 1
+  size="$(printf '%s' "$out" \
+    | grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
+    | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
+  if ! positive_int "$size" || [ "$size" -gt "$1" ]; then
+    # A grant this script cannot size must not run unbounded, and it must not
+    # stay held either: hand it back and treat the attempt as a denial.
+    "$TARTCI_BIN" leases release --id "$LEASE_ID" --json >/dev/null 2>&1 || true
+    return 1
+  fi
+  FLOOR_CORES="$size"
+  if printf '%s' "$out" | grep -q '"floor"[[:space:]]*:[[:space:]]*true'; then
+    FLOOR_QOS="background"
+  fi
+  return 0
+}
+
+# Final attempt before a leaseless floor build. Sets jobs/qos on success and
+# leaves LEASE_ID set; on failure clears LEASE_ID so no id is ever released or
+# heartbeated that this process does not hold.
+try_floor_lease() {
+  if acquire_floor_lease "$1"; then
+    jobs="$FLOOR_CORES"
+    if [ "$FLOOR_QOS" = "background" ]; then
+      qos="background"
+      FLOOR_GRANTED=1
+      log "lease denied — acquired agent-floor lease id=$LEASE_ID cores=$jobs (background QoS)"
+    else
+      log "lease denied — acquired id=$LEASE_ID cores=$jobs on the allow-floor retry"
+    fi
+    start_heartbeat
+    return 0
+  fi
+  LEASE_ID=""
+  return 1
+}
+
 jobs=""
 qos=""
+FLOOR_GRANTED=0
 # A caller may request a lower cap (for example, `pulp build -j2`).  Apply it
 # only after lease admission: it can reduce the granted share, never enlarge
 # it.  The value is deliberately read before this script exports its own
@@ -357,6 +525,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
     log "applying requested lower parallelism cap before lease admission -j$jobs"
   fi
   LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
+  admission_jobs="$jobs"
   if acquire_lease "$jobs"; then
     log "lease acquired id=$LEASE_ID cores=$jobs (host profile)"
     start_heartbeat
@@ -371,17 +540,19 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
       if acquire_lease "$jobs"; then
         log "lease denied at profile size — acquired id=$LEASE_ID cores=$jobs (available capacity)"
         start_heartbeat
+      elif try_floor_lease "$admission_jobs"; then
+        :
       else
         # Lost a race for the remaining cores.
-        LEASE_ID=""
         jobs="$(min_jobs)"
         log "lease denied at available capacity — proceeding leaseless at -j$jobs (floor)"
         log_lease_holders
       fi
+    elif try_floor_lease "$admission_jobs"; then
+      :
     else
       # Zero free cores, or the store did not report capacity. Either way this
       # host is not offering any, so take the floor and nothing more.
-      LEASE_ID=""
       jobs="$(min_jobs)"
       log "lease denied, no capacity reported — proceeding leaseless at -j$jobs (floor)"
       log_lease_holders
@@ -485,7 +656,8 @@ record_build_metric() {
     if [ "$prev" = "--target" ] || [ "$prev" = "-t" ]; then fields+=(--target "$arg"); fi
     prev="$arg"
   done
-  if [ -n "$LEASE_ID" ]; then grant="lease"
+  if [ "$FLOOR_GRANTED" = "1" ]; then grant="agent-floor"
+  elif [ -n "$LEASE_ID" ]; then grant="lease"
   elif [ -n "$TARTCI_BIN" ]; then grant="floor"
   else grant="tier0"; fi
   bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/record_build_metric.sh" --provider governed-build \
@@ -497,7 +669,11 @@ record_build_metric() {
 write_build_marker "$@"
 
 rc=0
-if [ "$qos" = "background" ] && command -v taskpolicy >/dev/null 2>&1 \
+# An agent-floor lease is granted ON CONDITION of background QoS, so it ignores
+# the PULP_TARTCI_TASKPOLICY=0 opt-out that applies to an ordinary lease.
+if [ "$FLOOR_GRANTED" = "1" ] && command -v taskpolicy >/dev/null 2>&1; then
+  taskpolicy -b "$@" || rc=$?
+elif [ "$qos" = "background" ] && command -v taskpolicy >/dev/null 2>&1 \
     && [ "${PULP_TARTCI_TASKPOLICY:-}" != "0" ]; then
   taskpolicy -b "$@" || rc=$?
 else

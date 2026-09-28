@@ -15,6 +15,8 @@ namespace pulp::render {
 enum class Renderer3DAdapterBackendPreference {
     default_backend,
     null_backend,
+    vulkan,
+    d3d12,
 };
 
 struct HardcodedCubeRenderConfig {
@@ -116,6 +118,10 @@ struct Scene3DRenderResult {
     uint32_t non_transparent_pixel_count = 0;
     std::string adapter_backend;
     std::string adapter_backend_type;
+    /// Dawn's adapter class: "integrated-gpu", "discrete-gpu", "cpu", or
+    /// "unknown". This is kept beside backend_type so software-renderer
+    /// receipts can distinguish WARP/lavapipe from native hardware.
+    std::string adapter_type;
     std::string adapter_name;
     std::string adapter_vendor;
     std::string adapter_architecture;

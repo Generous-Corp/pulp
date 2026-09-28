@@ -32,17 +32,34 @@ still touch the same surface -- so scoring the whole open list lets an innocent
 branch outrank the real owner. Membership is read from the queue ref the run was
 built on; when it cannot be read, that is said out loud rather than assumed.
 
+A second consumer reads the same evidence as a machine: Shipyard's
+`queue-arm-guard` refuses a same-head re-enqueue after a `failed_checks`
+ejection, because re-queueing a head that broke a batch ejects its innocent
+batch-mates all over again. `--certify` answers the narrower question the guard
+asks -- did THIS batch's failure implicate this head -- and certifies only on
+POSITIVE evidence that it did not.
+
+"No test failure was found, therefore infrastructure" is NOT that evidence, and
+is the rule to resist: a compile or link error is the most common way a head
+breaks a batch and it produces no ctest block at all. So certification is
+per-failing-step and exhaustive. Every failing step of every failing job must be
+positively explained by something that cannot be this head; one unexplained step
+refuses the whole verdict.
+
 Read-only. Prints findings; mutates nothing.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import os
 import posixpath
 import re
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,7 +123,9 @@ def gh(
     repo_cwd: str | None = None,
     paginate: bool = False,
 ) -> str | None:
-    cmd = ["ghapp", "api", path]
+    # `ghapp` locally; `gh` on a GitHub runner, where no App wrapper exists.
+    # PULP_GH_CLI is the single override every CI helper reads.
+    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", path]
     if paginate:
         cmd.append("--paginate")
     cmd += ["--jq", jq] if jq else []
@@ -341,17 +360,70 @@ def batch_members(repo: str, run_id: str) -> frozenset[int] | None:
     return parse_batch_members(head_branch, (subjects or "").splitlines())
 
 
-def failing_tests(repo: str, run_id: str) -> list[str]:
-    """ctest names that failed in a run's macos job."""
-    jid = gh(
-        f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=50",
-        '.jobs[]|select(.name=="macos")|.id',
+def run_log_zip(repo: str, run_id: str) -> bytes | None:
+    """A run's logs as the zip GitHub serves, or None.
+
+    The RUN-level endpoint, never the per-job one: `ghapp` withholds any response
+    carrying terminal escape sequences, and a job log is full of them, so
+    `actions/jobs/<id>/logs` returns zero bytes and every reader built on it sees
+    an empty log rather than an error. The run endpoint serves a zip, which is
+    binary and passes through.
+    """
+    proc = subprocess.run(
+        [
+            (os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp",
+            "api",
+            f"repos/{repo}/actions/runs/{run_id}/logs",
+        ],
+        capture_output=True,
     )
-    if not jid:
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    return proc.stdout
+
+
+def unpack_job_logs(archive: bytes) -> dict[str, str]:
+    """Job name -> log text, from a run-log zip.
+
+    Entries are named `<ordinal>_<job name>.txt`, and the ordinal is the job's
+    position in THIS run, not a stable id: the same job is `2_macos.txt` in one
+    run and `3_macos.txt` in the next. Keyed by the job name so a caller can ask
+    for the job the jobs API named.
+    """
+    logs: dict[str, str] = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            for entry in bundle.namelist():
+                match = JOB_LOG_RE.match(entry)
+                if not match:
+                    continue
+                try:
+                    logs[match.group(1)] = bundle.read(entry).decode(
+                        "utf-8", errors="replace"
+                    )
+                except (KeyError, OSError):
+                    continue
+    except (zipfile.BadZipFile, OSError):
+        return {}
+    return logs
+
+
+def failing_tests(repo: str, run_id: str) -> list[str]:
+    """Every ctest name that failed in a run, across all of its jobs."""
+    archive = run_log_zip(repo, run_id)
+    if not archive:
         return []
-    jid = jid.splitlines()[0]
-    log = gh(f"repos/{repo}/actions/jobs/{jid}/logs")
-    return parse_failing_tests(log or "")
+    names: list[str] = []
+    for text in unpack_job_logs(archive).values():
+        for name in parse_failing_tests(text):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+# One entry of ctest's "The following tests FAILED:" block. A test name may
+# contain spaces, so the name is everything up to the parenthesised result.
+FAILED_TEST_LINE_RE = re.compile(r"\d+\s+-\s+(.+?)\s+\((Failed|Timeout|Subprocess aborted)\)")
 
 
 def parse_failing_tests(log: str) -> list[str]:
@@ -364,9 +436,7 @@ def parse_failing_tests(log: str) -> list[str]:
             continue
         if not seen:
             continue
-        match = re.search(
-            r"\d+\s+-\s+(.+?)\s+\((Failed|Timeout|Subprocess aborted)\)", line
-        )
+        match = FAILED_TEST_LINE_RE.search(line)
         if match:
             names.append(match.group(1).strip())
         elif "Errors while running CTest" in line:
@@ -506,10 +576,403 @@ def render(result: Attribution, run_id: str) -> list[str]:
     return out + batch_notes(result) + census_notes(result)
 
 
+# ---------------------------------------------------------------------------
+# Certification: the narrow question Shipyard's queue-arm-guard asks.
+#
+# The guard invokes this with `--certify --repo <o/n> --pr <n> --run-id <id>`
+# and reads one JSON object off stdout. It treats the head as un-implicated only
+# when `implicates_head` is exactly false AND `verdict` positively names why --
+# `infrastructure` or `other_pull_request`. A verdict recording what was *not*
+# found certifies nothing, by the guard's design and this module's.
+# ---------------------------------------------------------------------------
+
+# Certifying (a positive account of a cause that cannot be this head).
+VERDICT_INFRASTRUCTURE = "infrastructure"
+VERDICT_OTHER_PR = "other_pull_request"
+# Non-certifying. `implicated` is positive evidence the head IS at fault;
+# `unexplained` is the fail-closed default and the verdict most runs get.
+VERDICT_IMPLICATED = "implicates_head"
+VERDICT_UNEXPLAINED = "unexplained"
+
+JOB_LOG_RE = re.compile(r"^\d+_(.+)\.txt$")
+
+# A failing step is a candidate for "not this head" only when its ACTION is a
+# package-manager fetch, an artifact move, a cache warm, or a runner-generated
+# step. Every pattern is anchored and grounded in a step observed failing on a
+# real ejecting batch -- `Install ccache (macOS)` (a `brew install`), `Install
+# visual-analysis Python dependencies` (a PyPI 403 through the relay), `Upload
+# exact GPU-audio SDK (macOS ARM64)` (`actions/upload-artifact`).
+#
+# Anchoring is the safety property, not decoration. An unanchored "install"
+# would swallow a step that runs `cmake --install` over the tree, which builds
+# and installs repository content and can fail because of the head. Anything
+# unrecognised is content, so a new step name fails closed rather than opening a
+# hole nobody reviewed.
+#
+# `Hydrate bounded GPU provenance commits` is deliberately ABSENT even though it
+# is one of the observed failures. It runs `python3
+# tools/scripts/hydrate_gpu_provenance_commits.py`: a repository script, over
+# inputs this module cannot enumerate, so a head can break it and no pattern
+# here could tell. Matching a name is never the whole test -- see
+# `touches_runnable_ci_surface`, which every match is also conditioned on.
+NON_CONTENT_STEP_PATTERNS = (
+    re.compile(r"^install\s+ccache\b", re.I),
+    re.compile(r"^install\b.*\bdependenc(?:y|ies)\b", re.I),
+    re.compile(r"^(?:upload|download)\b", re.I),
+    re.compile(r"^(?:restore|save)\b.*\bcache\b", re.I),
+    re.compile(r"^checkout\b", re.I),
+    re.compile(r"^set\s*up\s+job$", re.I),
+    # `Set up wasi-sdk (pinned)`: a curl of a pinned external release plus a tar
+    # extract, which ejected a pull request from the WebCLAP gate.
+    re.compile(r"^set\s*up\b.*\b(?:sdk|toolchain)\b", re.I),
+    re.compile(r"^complete\s+job$", re.I),
+    re.compile(r"^post\s+run\b", re.I),
+    re.compile(r"^free\s+disk\s+space\b", re.I),
+)
+
+# Nothing in a Pulp CI step is unconditionally beyond the reach of a diff: a
+# workflow step IS repository content, and a head can rewrite the step that
+# failed. So a step name is only half the test. The other half is per step class:
+# which paths, if the head changed them, could have made THAT step fail.
+#
+# Scoped per class rather than globally, because a global surface is how this
+# rule becomes decoration. A blanket list including `CMakeLists.txt` refuses
+# every pull request that bumps a version -- while a `curl` of a pinned wasi-sdk
+# release plainly cannot fail because a version string moved. The bound has to be
+# what the step actually reads.
+#
+# Every allowlisted step is a step the workflow declares, so rewriting the
+# workflow or a local composite action can break any of them.
+WORKFLOW_SURFACE_DIRS = (".github/workflows/", ".github/actions/")
+
+# A dependency install additionally reads the configured build tree: `Install
+# visual-analysis Python dependencies` resolves its interpreter out of
+# `$PULP_BUILD_DIR/CMakeCache.txt` and exits non-zero when the entry is missing,
+# which a build-system change can cause.
+BUILD_SURFACE_FILES = ("CMakeLists.txt",)
+BUILD_SURFACE_SUFFIXES = (".cmake",)
+BUILD_SENSITIVE_STEP_PATTERNS = (
+    re.compile(r"^install\b.*\bdependenc(?:y|ies)\b", re.I),
+)
+
+
+def head_reaches_step(step: str, changes: list[ChangedFile]) -> str | None:
+    """The first changed path that could have made `step` fail, or None.
+
+    None is the only answer that lets a non-content step explain anything, so an
+    unreadable diff must never reach here -- the caller refuses that case before
+    asking, because "no paths were read" would otherwise look exactly like "no
+    path can reach it".
+    """
+    build_sensitive = any(p.search(step.strip()) for p in BUILD_SENSITIVE_STEP_PATTERNS)
+    for change in changes:
+        path = posixpath.normpath(change.path)
+        if path.startswith(WORKFLOW_SURFACE_DIRS):
+            return change.path
+        if not build_sensitive:
+            continue
+        if path.rsplit("/", 1)[-1] in BUILD_SURFACE_FILES:
+            return change.path
+        if path.endswith(BUILD_SURFACE_SUFFIXES):
+            return change.path
+    return None
+
+
+# Steps that RUN the suite, so a ctest failure block in their job's log is the
+# account of what broke. A reporting step that only surfaces an already-recorded
+# failure counts too: it fails as a consequence of the same block.
+TEST_STEP_PATTERNS = (
+    re.compile(r"^test\b", re.I),
+    re.compile(r"^(?:run\s+)?ctest\b", re.I),
+    re.compile(r"^surface\s+ctest\s+failures\b", re.I),
+)
+
+
+def non_content_step(step: str) -> bool:
+    """Can this step fail for a reason repository content cannot cause?"""
+    name = step.strip()
+    return bool(name) and any(p.search(name) for p in NON_CONTENT_STEP_PATTERNS)
+
+
+def test_step(step: str) -> bool:
+    """Does this step run or report the ctest suite?"""
+    name = step.strip()
+    return bool(name) and any(p.search(name) for p in TEST_STEP_PATTERNS)
+
+
+@dataclass(frozen=True)
+class StepFailure:
+    """One failing step of one failing job.
+
+    `step` is empty when the job failed with no step recorded as failing -- a
+    lost runner, a mid-flight cancellation, or simply step data the API did not
+    return. That is an absence, not a cause, so it is never an explanation.
+    """
+
+    job: str
+    step: str = ""
+
+
+def parse_failing_steps(jobs: list[dict]) -> list[StepFailure]:
+    """Every failing step of every FAILING job.
+
+    Scoped to `conclusion == "failure"`: a merge_group run is mostly `skipped`
+    jobs whose conclusion is merely not "success", and reading those as failures
+    would manufacture unexplained steps for every run.
+    """
+    failures: list[StepFailure] = []
+    for job in jobs:
+        if not isinstance(job, dict) or job.get("conclusion") != "failure":
+            continue
+        name = str(job.get("name") or "")
+        steps = [
+            str(step.get("name") or "")
+            for step in (job.get("steps") or [])
+            if isinstance(step, dict) and step.get("conclusion") == "failure"
+        ]
+        if not steps:
+            failures.append(StepFailure(job=name))
+            continue
+        failures += [StepFailure(job=name, step=step) for step in steps]
+    return failures
+
+
+def failing_jobs(repo: str, run_id: str) -> list[dict] | None:
+    """A run's jobs, or None when they could not be read.
+
+    None and [] must stay distinguishable: an unreadable jobs list scored as an
+    empty one would report "nothing failed" for a run that ejected a pull
+    request, which certifies a head on a measurement that never happened.
+    """
+    raw = gh(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100")
+    if raw is None:
+        return None
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    jobs = payload.get("jobs") if isinstance(payload, dict) else None
+    return jobs if isinstance(jobs, list) else None
+
+
+@dataclass
+class Explanation:
+    """Why each failing step cannot be the head's -- or that it could be."""
+
+    reasons: list[str] = field(default_factory=list)
+    unexplained: list[StepFailure] = field(default_factory=list)
+    implicated_pr: int | None = None
+    head_owns_a_test: bool = False
+    # Why the head's content is within reach of a CI step, when it is. None means
+    # it is out of reach, which is what the non-content-step rule needs.
+    reachable: str | None = None
+
+
+def explain_failures(
+    pr: int,
+    failures: list[StepFailure],
+    ctest: Attribution | None,
+    head_changes: list[ChangedFile] | None = None,
+) -> Explanation:
+    """Account for every failing step, or record that one is unaccounted for.
+
+    Exhaustive on purpose. Explaining the steps that happen to be explainable
+    and staying quiet about the rest is how "no test failure was found" becomes
+    "infrastructure" -- the reading that re-queues a head whose own compile
+    error ejected the batch.
+    """
+    out = Explanation()
+    # An unreadable or empty diff is not an innocent diff. A queued pull request
+    # always changes something, so an empty list means the read failed, and
+    # scoring it as "reaches nothing" would certify on a measurement that never
+    # happened.
+    if not head_changes:
+        out.reachable = "the head's own diff could not be read"
+    if not failures:
+        # Nothing observed is not the same as nothing wrong. A run that ejected a
+        # pull request failed; a reading that finds no failing step measured the
+        # wrong thing, so it must not become a certification.
+        out.unexplained.append(StepFailure(job="<no failing job was read>"))
+        return out
+
+    owner: int | None = None
+    if ctest is not None:
+        if pr in ctest.scores:
+            out.head_owns_a_test = True
+        elif (
+            ctest.verdict == VERDICT_CULPRIT
+            and len(ctest.contenders) == 1
+            and ctest.culprit is not None
+            and ctest.culprit != pr
+        ):
+            owner = ctest.culprit
+
+    for failure in failures:
+        if non_content_step(failure.step) and head_changes:
+            within = head_reaches_step(failure.step, head_changes)
+            if within is None:
+                out.reasons.append(
+                    f"{failure.job}/{failure.step} fetches a tool, moves an "
+                    f"artifact, or is runner-generated, and #{pr} changes nothing "
+                    "that step reads"
+                )
+                continue
+            out.reachable = (
+                f"#{pr} changes {within}, which {failure.step} reads"
+            )
+        if test_step(failure.step) and owner is not None and not out.head_owns_a_test:
+            out.reasons.append(
+                f"{failure.job}/{failure.step} failed on ctest cases owned by "
+                f"#{owner}: {', '.join(sorted(ctest.scores[owner]))}"
+            )
+            out.implicated_pr = owner
+            continue
+        out.unexplained.append(failure)
+    return out
+
+
+@dataclass
+class Certification:
+    """The guard's contract, as data."""
+
+    run_id: int
+    pr: int
+    verdict: str
+    implicates_head: bool | None
+    evidence: str
+    implicated_pr: int | None = None
+
+    def as_json(self) -> dict:
+        payload: dict = {
+            "run_id": self.run_id,
+            "pr": self.pr,
+            "verdict": self.verdict,
+            "implicates_head": self.implicates_head,
+            "evidence": self.evidence,
+        }
+        if self.implicated_pr is not None:
+            payload["implicated_pr"] = self.implicated_pr
+        return payload
+
+
+def certify(run_id: int, pr: int, explanation: Explanation) -> Certification:
+    """Turn an accounting of failing steps into the guard's verdict.
+
+    `implicates_head` is `false` only when every failing step was accounted for.
+    It is `true` only on positive evidence the head is at fault, and `null`
+    otherwise -- because "we could not tell" is neither, and the guard refuses a
+    null exactly as it refuses a true.
+    """
+    if explanation.head_owns_a_test:
+        return Certification(
+            run_id=run_id,
+            pr=pr,
+            verdict=VERDICT_IMPLICATED,
+            implicates_head=True,
+            evidence=(
+                f"#{pr}'s own diff owns failing ctest cases in this batch, so the "
+                "batch implicates it."
+            ),
+        )
+    if explanation.unexplained:
+        unaccounted = ", ".join(
+            f"{f.job}/{f.step}" if f.step else f"{f.job} (no failing step recorded)"
+            for f in explanation.unexplained
+        )
+        return Certification(
+            run_id=run_id,
+            pr=pr,
+            verdict=VERDICT_UNEXPLAINED,
+            implicates_head=None,
+            evidence=(
+                f"{len(explanation.unexplained)} failing step(s) are unaccounted "
+                f"for, so nothing rules #{pr} out: {unaccounted}."
+                + (
+                    f" Also {explanation.reachable}."
+                    if explanation.reachable
+                    else ""
+                )
+                + " A step that compiles or runs repository content can fail "
+                "because of this head, and no evidence here says it did not."
+            ),
+        )
+    accounted = "; ".join(explanation.reasons)
+    if explanation.implicated_pr is not None:
+        return Certification(
+            run_id=run_id,
+            pr=pr,
+            verdict=VERDICT_OTHER_PR,
+            implicates_head=False,
+            evidence=(
+                f"Every failing step is accounted for and none by #{pr}: {accounted}."
+            ),
+            implicated_pr=explanation.implicated_pr,
+        )
+    return Certification(
+        run_id=run_id,
+        pr=pr,
+        verdict=VERDICT_INFRASTRUCTURE,
+        implicates_head=False,
+        evidence=f"Every failing step is accounted for and none by #{pr}: {accounted}.",
+    )
+
+
+def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Certification:
+    """Read a failed batch and rule on whether it implicates `pr`."""
+    jobs = failing_jobs(repo, run_id)
+    if jobs is None:
+        return Certification(
+            run_id=int(run_id),
+            pr=pr,
+            verdict=VERDICT_UNEXPLAINED,
+            implicates_head=None,
+            evidence=(
+                f"the jobs of run {run_id} could not be read, so no failing step "
+                "was measured at all."
+            ),
+        )
+    failures = parse_failing_steps(jobs)
+    ctest: Attribution | None = None
+    if any(test_step(failure.step) for failure in failures):
+        tests = failing_tests(repo, run_id)
+        if tests:
+            members = batch_members(repo, run_id)
+            opened = open_prs(repo)
+            in_batch = opened if members is None else [n for n in opened if n in members]
+            ctest = attribute(
+                tests,
+                {n: pr_files(repo, n) for n in in_batch},
+                census_roots=census_include_roots(source_root),
+                batch_members=members,
+            )
+    return certify(
+        int(run_id),
+        pr,
+        explain_failures(pr, failures, ctest, pr_files(repo, pr)),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", nargs="?", help="failed merge_group run id")
     parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument(
+        "--run-id",
+        dest="run_id_flag",
+        help="the same run id as a flag, which is how Shipyard's queue-arm-guard "
+        "passes it",
+    )
+    parser.add_argument(
+        "--pr",
+        type=int,
+        help="the pull request to rule on, required by --certify",
+    )
+    parser.add_argument(
+        "--certify",
+        action="store_true",
+        help="emit Shipyard's queue-attribution verdict for --pr as one JSON "
+        "object on stdout, and nothing else",
+    )
     parser.add_argument(
         "--source-root",
         default=str(Path(__file__).resolve().parents[2]),
@@ -518,7 +981,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--format", choices=("text", "json"), default="text")
     args = parser.parse_args(argv)
 
-    run_id = args.run_id or latest_failed_merge_group(args.repo)
+    if args.run_id and args.run_id_flag and args.run_id != args.run_id_flag:
+        parser.error(
+            f"run id given twice and they disagree: {args.run_id} and "
+            f"{args.run_id_flag}"
+        )
+    given = args.run_id or args.run_id_flag
+
+    if args.certify:
+        # The guard reads stdout as JSON, so nothing else may go there, and it
+        # reads a non-zero exit as "did not rule" -- which loses the evidence a
+        # refusal should carry. So a verdict it can read, even a refusing one, is
+        # printed and exits 0; only an unusable invocation exits non-zero.
+        if args.pr is None or not given:
+            print("--certify needs --pr and a run id", file=sys.stderr)
+            return 2
+        if not given.isdigit():
+            print(f"run id {given!r} is not a number", file=sys.stderr)
+            return 2
+        verdict = certification_for(
+            args.repo, given, args.pr, Path(args.source_root)
+        )
+        print(json.dumps(verdict.as_json(), indent=2, sort_keys=True))
+        return 0
+
+    run_id = given or latest_failed_merge_group(args.repo)
     if not run_id:
         print("no failed merge_group batch found")
         return 0

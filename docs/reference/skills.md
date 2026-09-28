@@ -10,7 +10,7 @@ source of truth — there is no separate per-agent copy.
 You rarely invoke a skill by name. Each one activates automatically when
 your request matches what it covers (its `description` lists the triggers),
 and many also have a matching `/slash-command`. The table below is the full
-catalog of the 67 skills Pulp ships; open a skill's `SKILL.md`
+catalog of the 69 skills Pulp ships; open a skill's `SKILL.md`
 for its complete, authoritative guidance.
 
 | Skill | What it does |
@@ -58,6 +58,7 @@ for its complete, authoritative guidance.
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
 | `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
+| `proxy-first-eval` | Judge whether a change made things better with demonstrable proxy measures tied to the mechanism it targets, not wall-clock time. |
 | `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
@@ -69,6 +70,7 @@ for its complete, authoritative guidance.
 | `streams` | Pick the right Pulp Stream for a given I/O task, wire async callbacks correctly without deadlocking the worker, and avoid the backpressure / cancellation footguns in `pulp::runtime::AsyncStream`. |
 | `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
+| `test-audit` | Decide whether a Pulp test earns its place — before writing it, when reviewing one, or when sweeping a subsystem for low-value, duplicated, or mis-routed tests. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
 | `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |

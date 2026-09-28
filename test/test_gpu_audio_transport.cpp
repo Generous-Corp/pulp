@@ -760,6 +760,42 @@ TEST_CASE("GpuAudioTransport resyncs the wet timeline after a miss", "[gpu_audio
     REQUIRE(t.stats().resynced_blocks == 1); // exactly the one late wet block dropped
 }
 
+TEST_CASE("GpuAudioTransport rejects the sole stale result after deadline misses",
+          "[gpu_audio][transport]") {
+    for (const uint32_t misses : {1u, 3u}) {
+        INFO("prior misses=" << misses);
+        constexpr uint32_t BS = 32;
+        GainNode node(1, BS, 2.0f, MissPolicy::PassthroughDry, 1);
+        REQUIRE(node.prepare());
+        GpuAudioTransport transport;
+        REQUIRE(transport.prepare(&node, {16}));
+        Block in(1, BS), out(1, BS);
+        auto callback = [&](float value) {
+            in.fill(value);
+            auto iv = in.cview();
+            auto ov = out.view();
+            transport.process(iv, ov, BS);
+            return out.storage[0][0];
+        };
+        REQUIRE(callback(1.0f) == 0.0f);
+        for (uint32_t i = 0; i < misses; ++i)
+            REQUIRE(callback(static_cast<float>(i + 2)) == static_cast<float>(i + 2));
+
+        // Only input 1 completes. Its deadline already passed, so the callback
+        // must substitute again, even though discarding it empties the ring.
+        transport.pump(1);
+        const float current = static_cast<float>(misses + 2);
+        CHECK(callback(current) == current);
+        CHECK(transport.stats().resynced_blocks == 1);
+        CHECK(transport.stats().miss_blocks == misses + 1);
+
+        // Complete the backlog; precisely the previous callback's input is due.
+        transport.pump();
+        CHECK(callback(current + 1.0f) == 2.0f * current);
+        CHECK(transport.stats().resynced_blocks == misses + 1);
+    }
+}
+
 TEST_CASE("GpuAudioTransport wake-on-write worker drains the pipeline", "[gpu_audio][transport]") {
     // Same whole-block conservation invariant as the polling worker, but with the
     // opt-in wake-on-write path: process() posts a semaphore the worker waits on.

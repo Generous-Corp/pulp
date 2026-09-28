@@ -346,6 +346,19 @@ public:
     /// reports `none` rather than guessing; a wrapper slot reports what it wraps.
     /// Appended last to preserve the existing PluginSlot virtual ordering.
     virtual BypassSurface bypass_surface() const { return BypassSurface::none; }
+
+    // Optional: the channel widths the caller will actually render, supplied
+    // before prepare(). Keep appended to preserve the existing PluginSlot
+    // virtual ordering.
+    //
+    // A format that negotiates its stream shape at initialize time (AU) cannot
+    // infer the width from buffers handed to it later. Without this the AU is
+    // initialized at its descriptor/default width and a render at any other
+    // width is rejected as a malformed shape: output zeroed,
+    // kAudioUnitRenderAction_OutputIsSilence set, status noErr -- a SILENT
+    // render reported as success. Slots that take their width from the
+    // per-block buffers (VST3, CLAP, LV2) need nothing and do not override it.
+    virtual void set_preferred_channel_layout(int /*inputs*/, int /*outputs*/) {}
 };
 
 } // namespace pulp::host

@@ -17,7 +17,7 @@
 # Usage:
 #   record_build_metric.sh --provider <governed-build|pulp-cli> \
 #     --start <epoch-s> --end <epoch-s> --exit-code <rc> \
-#     --jobs <n> --grant <lease|floor|tier0|host-profile|user|inherited> \
+#     --jobs <n> --grant <lease|agent-floor|floor|tier0|host-profile|user|inherited> \
 #     [--duration-ms <ms>] [--target <name>]... [--total-targets <n>]
 #
 # `--target` names each target the build was restricted to; none means `all`.

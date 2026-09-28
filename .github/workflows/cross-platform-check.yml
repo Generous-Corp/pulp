@@ -53,7 +53,7 @@ jobs:
     name: Linux build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       PULP_BUILD_DIR: build-linux
     steps:
@@ -68,11 +68,34 @@ jobs:
       - name: Install Linux dependencies
         uses: ./.github/actions/install-linux-build-deps
         with:
-          extra-packages: ccache
+          # lavapipe is the software Vulkan adapter used by the advisory GPU
+          # proof. It is deliberately installed beside the ordinary build
+          # dependencies; this lane never claims native GPU coverage.
+          extra-packages: ccache mesa-vulkan-drivers libvulkan1 vulkan-tools
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
+
+      - name: Fetch pinned Skia/Dawn (Linux software-GPU proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py linux-x64 \
+            --dest external/skia-build \
+            --cache-lock-timeout 300
+          test -s external/skia-build/build/linux-gpu/lib/Release/libskia.a
+          test -s external/skia-build/build/linux-gpu/lib/Release/libdawn_combined.a
+
+      - name: Select lavapipe (software Vulkan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          icd=$(find /usr/share/vulkan -type f \( -name 'lvp_icd*.json' -o -name '*lavapipe*.json' \) | head -1)
+          test -n "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+          echo "Selected software Vulkan ICD: $icd"
 
       - name: Configure
         shell: bash
@@ -84,7 +107,9 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
+            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
 
       - name: Build
         shell: bash
@@ -103,6 +128,16 @@ jobs:
             --exclude-regex 'STFT|VisualizationBridge|Clipboard|Toolbar add items' \
             2>&1 | tee test-linux.log
 
+      - name: Software-GPU render proof + break-confirm (advisory)
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(find "$PULP_BUILD_DIR" -type f -name pulp-cpp -perm -111 | head -1)
+          test -n "$binary"
+          python3 tools/scripts/run_software_gpu_break_confirm.py \
+            --binary "$binary" --platform linux \
+            --artifacts "$RUNNER_TEMP/software-gpu-linux"
+
       - name: Upload Linux build + test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,6 +146,7 @@ jobs:
           path: |
             build-linux.log
             test-linux.log
+            ${{ runner.temp }}/software-gpu-linux/**
           retention-days: 14
           if-no-files-found: ignore
 
@@ -192,7 +228,7 @@ jobs:
     name: Windows build + test
     if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       PULP_BUILD_DIR: build-windows
     steps:
@@ -212,6 +248,16 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
+      - name: Fetch pinned Skia/Dawn (Windows software-GPU proof)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/fetch_skia_for_release.py windows-x64 \
+            --dest external/skia-build \
+            --cache-lock-timeout 300
+          test -s external/skia-build/build/win-gpu/lib/Release/skia.lib
+          test -s external/skia-build/build/win-gpu/lib/Release/dawn_combined.lib
+
       - name: Configure
         shell: bash
         run: |
@@ -222,7 +268,9 @@ jobs:
           # cancelled build instead of the cross-platform signal it exists to
           # provide. Example compile coverage stays with nightly-full-build
           # (macOS, examples ON) and examples-validation.
-          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=ON \
+            -DPULP_ENABLE_SCENE3D=ON -DSKIA_DIR="$GITHUB_WORKSPACE/external/skia-build"
 
       - name: Build
         shell: bash
@@ -255,6 +303,16 @@ jobs:
           echo ctest exit code: %CTEST_RC%
           exit /b %CTEST_RC%
 
+      - name: Software-GPU render proof + break-confirm (advisory)
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(find "$PULP_BUILD_DIR" -type f \( -iname pulp-cpp.exe -o -iname pulp-cpp \) | head -1)
+          test -n "$binary"
+          python3 tools/scripts/run_software_gpu_break_confirm.py \
+            --binary "$binary" --platform windows \
+            --artifacts "$RUNNER_TEMP/software-gpu-windows"
+
       - name: Upload Windows build + test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -263,6 +321,7 @@ jobs:
           path: |
             build-windows.log
             test-windows.log
+            ${{ runner.temp }}/software-gpu-windows/**
           retention-days: 14
           if-no-files-found: ignore
 

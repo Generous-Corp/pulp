@@ -130,9 +130,14 @@ PR merge to main
 │   - Holds `contents: read`. It CANNOT write to a         │
 │     release. That is the point: it may fail, hang, or be │
 │     cancelled without affecting whether the SDK ships.   │
-│   - With no signing secrets configured it reports        │
-│     `unsigned` loudly (warning, job summary, an          │
-│     `-UNSIGNED` artifact) instead of skipping silently.  │
+│   - With no signing or notary secret configured, its     │
+│     control-plane preflight skips the macOS job with a   │
+│     `No macOS signing configured` notice, so no release  │
+│     macOS runner is held for a build that signs nothing. │
+│     Any secret present (partial setups included) or      │
+│     `PULP_RELEASE_UNSIGNED_POLICY=fail` runs the job,    │
+│     which still names a partial setup or refuses an      │
+│     unsigned release loudly.                             │
 │     `vars.PULP_RELEASE_UNSIGNED_POLICY=fail` fails it.   │
 └─────────────────────────────────────────────────────────┘
      │
@@ -196,6 +201,37 @@ pool, the legacy `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` override, then hosted
 `macos-15`. The x64 row still cross-compiles on ARM and smokes under Rosetta;
 the native Intel Mac Mini remains a separate advisory/nightly portability lane.
 
+The two **darwin smoke** legs do not follow the build legs. They default to
+GitHub-hosted `macos-15` (the x86_64 slice runs under Rosetta there), because
+the check needs a machine other than the builder, not a build slot: on the gate
+pool they waited 16 / 29 min p50 (max 115, v0.872.0-v0.876.1) for under
+1.5 minutes of work. `PULP_RELEASE_SMOKE_DARWIN_RUNS_ON_JSON` routes both
+smoke legs elsewhere; unset is the hosted default. The resolver emits them as a
+separate `smoke_map` output.
+
+### Release class labels (opt-in)
+
+tartci's event-class-v2 gate supervisors boot a slot only for jobs carrying their
+class label, so an unlabelled release job can only ride whichever gate runner
+happens to be idle. Setting the repo variable `PULP_RELEASE_CLASS_TOKENS` to
+exactly `1` or `true` makes each release macOS job carry its class, the same way
+`build.yml` adds `pulp-build-pr-head` / `pulp-build-merge-group`:
+
+| workflow | class label |
+|---|---|
+| `release-cli.yml` (darwin-arm64, darwin-x64) | `pulp-release-tagged` |
+| `sign-and-release.yml` | `pulp-release-tagged` |
+| `release-path-pr-gate.yml` | `pulp-release-pr-gate` |
+
+The label is appended only to a **self-hosted** list selector, `pulp-gate-fast`
+is dropped (v2 registrations do not advertise it), and an existing class is never
+duplicated. Hosted selectors such as `["macos-15"]` pass through. Unset (or
+empty), every workflow dispatches today's selector byte-for-byte; any other
+value is ignored with a `::notice::`. The one implementation lives in
+`resolve_release_runners.py` (`--apply-class-label` for the two shell resolvers).
+Enable it only after the hosts serve these classes: a class-labelled job on hosts
+without that class queues forever. Unsetting the variable is the rollback.
+
 ### What can and cannot go local
 
 | leg | local? | why |
@@ -220,14 +256,21 @@ labelset gives you no M3-then-M5-then-M1 ordering; tartci's supervisor-side
 `priority_demand` / yield knobs are where real ordering would live. Until then,
 `pin` is the deterministic lever.
 
-### Still on the table
+### Compiler cache
 
-- **ccache is not enabled for release builds.** The VM mounts the host ccache and
-  release-cli never uses it, so every release build is a cold compile — and on
-  Linux/Windows the tree is compiled TWICE (CLI with WebView=OFF, then the SDK with
-  WebView=ON; macOS symlinks `build-sdk -> build` and avoids it). This is the
-  largest remaining win and is tracked separately, because a change that could
-  affect a shipped binary deserves its own measured PR.
+Every `build-cli` leg sets the required gate's ccache correctness settings
+(`CCACHE_COMPILERCHECK=content`, `CCACHE_NODEPEND=true`,
+`CCACHE_SLOPPINESS=time_macros`, copied from `build.yml`'s `macos` job) and ends
+with an always-run **Ccache stats** step that prints the effective config and
+this job's hit counts from `CCACHE_STATSLOG`. The self-hosted darwin VMs mount
+the host-shared cache, so a release reuses objects the gate compiled, and the
+host cache's own totals span every job on the host; the per-job log is the only
+number that describes one release build.
+
+Still on the table (deferred while the focus is macOS): a Windows compiler cache
+(the Visual Studio generator ignores compiler launchers, and an `actions/cache`
+entry written on one tag is invisible to the next), and ccache on the Linux legs,
+which compile the tree twice (CLI with WebView OFF, then the SDK with it ON).
 
 ## Why publication lives in one job
 

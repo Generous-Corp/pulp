@@ -26,6 +26,16 @@ if(APPLE AND NOT PULP_IOS)
         set_tests_properties(ios-compile-gate-legs PROPERTIES
             LABELS "cmake;ios"
             TIMEOUT 180)
+
+        # Shadow-mode identity of an iOS gate run: the digest over the gate's
+        # input set + toolchain, the artifact lookup, and the annotation that
+        # build.yml's Build step emits. No gating depends on it.
+        add_test(NAME ios-gate-digest-selftest
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/ci/test_ios_gate_digest.py")
+        set_tests_properties(ios-gate-digest-selftest PROPERTIES
+            LABELS "cmake;ios"
+            TIMEOUT 120)
     endif()
 
     add_test(NAME cmake-ios-auv3-configure
@@ -406,6 +416,7 @@ if(PULP_ENABLE_INSPECTOR)
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_control_sdk_consumer.cmake)
         set_tests_properties(cmake-control-sdk-consumer PROPERTIES
             LABELS "cmake;sdk;inspect;control;headless"
+            COST 60
             TIMEOUT 300)
     endif()
 
@@ -515,6 +526,12 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-output PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        add_test(NAME pr-batch-advisor
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_pr_batch_advisor.py)
+        set_tests_properties(pr-batch-advisor PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 60)
         # A gate that cannot run must block, never pass: the hook used to
         # print "internal error" on any exit code above 1 and continue, so a
         # gate that could not find its config reported success.
@@ -530,6 +547,18 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-gate-supervisor PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 30)
+        # A local push of a merge from origin/main is logged and, per
+        # PULP_REFRESH_PUSH_POLICY, warned about or refused when it is a pure
+        # refresh of a PR with no reason to refresh. Fixture repositories and a
+        # fake gh cover pure / conflict-resolution / normal pushes, refuse and
+        # override, and fail-open on a failing or hanging lookup. Not pr-fast:
+        # it builds real repositories and asserts the lookup time budget.
+        add_test(NAME prepush-refresh-push
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_refresh_push_check.py)
+        set_tests_properties(prepush-refresh-push PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 180)
         # The advisory diff-scoped clang-format gate must never report a missing
         # binary as a formatting failure. Asserts the pre-push, gates.sh and CI
         # wiring keep exit 3 (infrastructure) apart from exit 1 (verdict) and pin
@@ -651,6 +680,17 @@ if(UNIX)
     set_tests_properties(install-control-broker-activation PROPERTIES
         LABELS "tooling;installer"
         TIMEOUT 30)
+    # The installed layout, not the archive: after install.sh (including a
+    # failed broker activation) every Mach-O binary's @rpath dependencies must
+    # resolve. Compiles its own tiny dylib + binary; skips off macOS.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME install-rpath-closure
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_check_installed_rpaths.py)
+        set_tests_properties(install-rpath-closure PROPERTIES
+            LABELS "tooling;installer"
+            TIMEOUT 120)
+    endif()
 endif()
 if(Python3_Interpreter_FOUND)
     # The frozen C0 ABI receipt was captured on darwin-arm64. Register its
@@ -663,8 +703,11 @@ if(Python3_Interpreter_FOUND)
                 --repo "${CMAKE_SOURCE_DIR}"
                 --build-dir "${CMAKE_BINARY_DIR}/sample-region-compat-baseline-build"
                 --negative-controls)
+        # The longest test in the suite (70-270s on the gate). With no COST it
+        # starts minutes in and finishes last; highest cost starts it first.
         set_tests_properties(sample-region-compat-baseline PROPERTIES
             LABELS "compatibility;sample-region"
+            COST 150
             TIMEOUT 3600)
     endif()
     add_test(NAME sample-region-compat-baseline-selftest

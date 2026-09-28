@@ -138,16 +138,32 @@ class RealConfig(unittest.TestCase):
         self.assertEqual(verdict, st.UNSERVED)
         self.assertIn("pulp-gate-fast", detail)
 
-    def test_release_lane_is_reachable_on_declared_supply(self):
+    def test_release_lane_rides_gate_runners_opportunistically(self):
+        # Releases deliberately request the gate's dispatched base labels. No
+        # registration mints for a release workflow on them, so the honest
+        # verdict is OPPORTUNISTIC: served by whichever gate runner is idle.
+        raw = _raw()
+        spec = raw["event_class_v2"]
+        gate_base = [label for label in self._lane(raw, GATE)["expect"]
+                     if label not in spec["omit_labels"]]
+        self.assertEqual(self._lane(raw, RELEASE)["expect"], gate_base)
         rows = _for(_rows(), RELEASE)
         self.assertTrue(rows)
         snapshot = st.load_snapshot(SNAPSHOT)
+        riders = set(self._lane(raw, RELEASE)["opportunistic_service"]["minted_for"])
         for row in rows:
-            self.assertEqual(row.verdict, st.REACHABLE, row.detail)
-            minting = sorted({reg.host_id for reg in snapshot.registrations
-                              if reg.repo == REPO and row.workflow in reg.workflows
-                              and set(row.labels) <= set(reg.labels)})
-            self.assertEqual(row.served_by, minting)
+            self.assertEqual(row.verdict, st.OPPORTUNISTIC, row.detail)
+            self.assertFalse(row.blocking)
+            self.assertNotIn(row.workflow, riders)
+            carriers = sorted({reg.host_id for reg in snapshot.registrations
+                               if reg.repo == REPO and riders & set(reg.workflows)
+                               and set(row.labels) <= set(reg.labels)})
+            self.assertTrue(carriers)
+            self.assertEqual(row.served_by, carriers)
+
+    @staticmethod
+    def _lane(raw, variable):
+        return next(l for l in raw["lanes"] if l["variable"] == variable)
 
     def test_release_unset_fallback_is_reported_unserved_but_not_blocking(self):
         rows = _for(_rows(), RELEASE, source="unset_fallback")
@@ -271,6 +287,53 @@ class BreakGlassRollback(unittest.TestCase):
         lane["severity"] = "advisory"
         rows = _rows(raw)
         self.assertEqual(_for(rows, RELEASE, source=st.ROLLBACK_SOURCE), [])
+
+
+class Opportunistic(unittest.TestCase):
+    """A declared-opportunistic lane is reported honestly, never faked green."""
+
+    def _release(self, raw):
+        return next(l for l in raw["lanes"] if l["variable"] == RELEASE)
+
+    def test_without_the_declaration_the_release_lane_is_unserved_and_blocks(self):
+        raw = _raw()
+        self._release(raw).pop("opportunistic_service")
+        rows = _for(_rows(raw), RELEASE)
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(row.verdict, st.UNSERVED)
+            self.assertIn("is not one they mint for", row.detail)
+            self.assertTrue(row.blocking)
+        self.assertEqual(st.exit_code(_rows(raw), []), 1)
+
+    def test_a_declaration_naming_no_carrier_workflow_stays_unserved(self):
+        raw = _raw()
+        self._release(raw)["opportunistic_service"]["minted_for"] = ["No Such Workflow"]
+        rows = _for(_rows(raw), RELEASE)
+        self.assertTrue(rows)
+        self.assertTrue(all(r.verdict == st.UNSERVED and r.blocking for r in rows))
+
+    def test_losing_every_gate_registration_fails_the_release_lane(self):
+        classes = {row["label"] for row in _raw()["event_class_v2"]["classes"]}
+        snap = copy.deepcopy(st.load_snapshot(SNAPSHOT))
+        snap.registrations = [r for r in snap.registrations if r.class_label not in classes]
+        rows = _for(_rows(snapshot=snap), RELEASE)
+        self.assertTrue(rows)
+        self.assertTrue(all(r.verdict == st.UNSERVED and r.blocking for r in rows))
+
+    def test_the_declaration_never_rescues_a_fallback(self):
+        rows = _for(_rows(), RELEASE, source="unset_fallback")
+        self.assertTrue(rows)
+        self.assertTrue(all(r.verdict == st.UNSERVED for r in rows))
+
+    def test_cli_names_the_verdict(self):
+        proc = subprocess.run(
+            [sys.executable, str(CHECKER), "--mode=static",
+             "--today", _pinned_today(_raw()).isoformat()],
+            capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("OPPORTUNISTIC", proc.stdout)
+        self.assertIn("OPPORTUNISTIC by contract", proc.stdout)
 
 
 class Reachability(unittest.TestCase):

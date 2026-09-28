@@ -325,6 +325,9 @@ target_include_directories(pulp-test-cli-tartci-lease PRIVATE
 target_link_libraries(pulp-test-cli-tartci-lease PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
+# The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py.
+target_compile_definitions(pulp-test-cli-tartci-lease PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-tartci-lease)
 
 # Stale git lock detection behind the `pulp doctor` "git locks" check.

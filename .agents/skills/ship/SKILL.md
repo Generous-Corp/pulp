@@ -940,6 +940,16 @@ on `Invalid`, so the status line is checked). Note that the packages are built
 with plain `pkgbuild` (no `--sign`); adding the secrets will surface that
 notarization rejects an unsigned installer package.
 
+With **no** signing or notary secret at all, the macOS job does not run: the
+`resolve-macos-runner` job's `preflight` step (on the control-plane Linux
+runner, which can read `secrets`) outputs `build=false` and
+`build-and-sign-macos` is skipped with a `No macOS signing configured` notice.
+It used to build the whole tree on a release macOS runner, sign nothing, and
+upload a 278-byte status file on every tag. Any single secret, or
+`PULP_RELEASE_UNSIGNED_POLICY=fail`, runs the job so the in-job detector still
+fails a partial setup loudly. A job-level `if:` cannot read `secrets`; that is
+why the decision travels as a job output.
+
 ### `check_notarization` and Gatekeeper-disabled CI environments
 
 `check_notarization(path)` runs `spctl --assess --type exec <path>`. On a stock
@@ -1642,6 +1652,18 @@ without moving artifact builds or publication there. Their selector priority is
 to tag-push or maintainer-dispatch workflows, and keep resolver policy checkouts
 pinned to the repository default branch; never expose the persistent pool to
 `pull_request` or `merge_group` code through this fallback.
+
+**Release class labels are opt-in (`PULP_RELEASE_CLASS_TOKENS`).** Exactly `1` or
+`true` appends `pulp-release-tagged` (release-cli darwin legs, sign-and-release)
+or `pulp-release-pr-gate` (release-path-pr-gate) to a self-hosted selector,
+dropping `pulp-gate-fast` exactly as `build.yml` does for its event classes; any
+other value is ignored with a `::notice::`, and unset is byte-identical routing.
+One implementation, `resolve_release_runners.py --apply-class-label`, serves all
+three workflows. Gotcha: never enable it before tartci's hosts advertise these
+classes, because GitHub matches only runners carrying EVERY label, so a
+class-labelled job with no serving registration queues forever. Unsetting is the
+rollback. The two shell resolvers sparse-checkout that script, so they fail
+at once if it is renamed.
 
 Facts worth keeping (measured):
 

@@ -23,9 +23,8 @@ target_sources(pulp-test-character-delay PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
     $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
 
-pulp_add_test_suite(pulp-test-character-delay-catalog
-    SOURCES test_forge_character_delay_catalog.cpp
-    LIBRARIES pulp::host pulp::signal)
-target_sources(pulp-test-character-delay-catalog PRIVATE
-    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
-    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+# test_forge_character_delay_catalog.cpp is registered once, as
+# pulp-test-forge-character-delay-catalog in dsp_series_modules.cmake with the
+# rest of the DSP series. A second suite over the same source registers every
+# case twice under the same ctest name, and protected_merge_receipt.py refuses
+# an inventory with a duplicated name, which silently disabled receipt reuse.

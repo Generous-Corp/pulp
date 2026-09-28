@@ -6325,6 +6325,12 @@
             "ContextMenu last row of a capped menu is reachable and selects",
             "ContextMenu clips its rows to the panel"
           ]
+        },
+        {
+          "path": "core/view/src/widget_bridge.cpp",
+          "needles": [
+            "#include <pulp/view/widgets.hpp>"
+          ]
         }
       ],
       "surfaces": {

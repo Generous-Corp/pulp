@@ -288,9 +288,17 @@ catch_discover_tests(pulp-test-audio-doctor)
 # argv surface the Quality Lab shells out to.
 pulp_add_test_group(pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
+# Keep the bridge source directly on the grouped executable as well. The
+# shared archive can otherwise retain an unextractable member on warm Apple
+# linker invocations, even though the grouped tests reference it.
+target_sources(pulp-test-group-app-audio-support PRIVATE support/wav_bridge.cpp)
 pulp_add_test_suite(pulp-test-wav-bridge GROUP pulp-test-group-app-audio-support
     LIBRARIES pulp-audio-test-support)
-add_executable(pulp-osc-render-wav osc_render_wav.cpp)
+# Keep the bridge source on the executable as well as the shared support
+# archive. Some Apple linker invocations do not extract this archive member
+# when the grouped test target is present, leaving the standalone tool's
+# required writer unresolved.
+add_executable(pulp-osc-render-wav osc_render_wav.cpp support/wav_bridge.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
 # CLI argv smoke for the tool above: shells out per --engine and for --seed,
 # asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.

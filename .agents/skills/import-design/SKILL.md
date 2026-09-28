@@ -3897,9 +3897,11 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `managed-browser-unavailable` fires only when `managed` is selected
   explicitly and nothing is installed.
 - **The Node capture tests do NOT share the C++ discovery order above.**
-  `browser_capture/capture.integration.test.mjs` carries its own
+  `browser_capture/capture_integration_support.mjs` carries their own
   `installedBrowser()` resolver, and it is the only browser resolution in the
-  repository written in JavaScript. Whatever the C++ probe learns about managed
+  repository written in JavaScript. Under GitHub Actions it accepts only
+  `PULP_DESIGN_BROWSER`: a lane that did not provision the pinned build skips
+  the real-browser cases instead of launching the runner image's Chrome. Whatever the C++ probe learns about managed
   browsers, `current.json`, or config modes is invisible to it, so a provisioned
   browser reaches the Node suite only through the environment. Hand it
   `PULP_DESIGN_BROWSER`, the same variable `collect_browser_candidates` reads.
@@ -3911,6 +3913,41 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   add a browser-driven `.mjs` test, read that variable rather than growing a
   second candidate list, and remember that on a host with no system Chrome the
   cost of getting this wrong is a silent skip rather than a failure.
+- **Real-browser cases live in `*.integration.test.mjs` files, and they run
+  concurrently.** The ctest `pulp-browser-capture-node-integration` reserves
+  `PROCESSORS 4` and holds the `browser` RESOURCE_LOCK (a CDP screenshot once
+  crossed its 20 s deadline while unrelated ctest work shared the VM). It is
+  NOT `RUN_SERIAL`: that held every slot and made it run alone at the end of
+  the gate's test step; `COST` now starts it first. It runs every
+  `*.integration.test.mjs` file through `browser_capture/run_integration.mjs`,
+  which calls `node --test` with a file concurrency of one Chrome per two cores
+  and per 2 GiB of a declared memory lease, capped by the file count and by the
+  slots ctest reserved (`PULP_BROWSER_CAPTURE_RESERVED_CORES`, set from the
+  same value as `PROCESSORS`): 1 on m1's 3-vCPU VM (ctest clamps the
+  reservation to `-j3`, so it runs alone there), 2 on m5 and the Studio. Any
+  other test that launches a real Chrome must take the same `browser` lock;
+  `ctest-scheduling-contract` (`tools/scripts/test_ctest_scheduling_contract.py`)
+  lists them and fails if one loses it or gains `RUN_SERIAL`. Node runs the cases *within* one file in
+  sequence, so the files are the unit of parallelism: each case mostly waits on
+  a cold Chrome launch, so files overlap well inside the reserved slots on a large
+  VM. On m1 a fixed width of 3 made every capture time out
+  (`stalled=Page.captureScreenshot`) and failed every merge group that landed
+  there, while m3 and m5 passed. The width is read when the suite runs
+  (`TARTCI_GUEST_CORES` / `TARTCI_GUEST_MEM_MB`, else
+  `os.availableParallelism()`), never at configure time. The six files are
+  split by theme (capture, paint, interactions, interaction guards, geometry,
+  frame fitting) and balanced near a minute each serially; the slowest file
+  bounds the wide run, so add a new case to a short file of the same theme
+  rather than to the longest. A new integration file is picked up by the glob
+  and excluded from the unit aggregate automatically.
+- **The per-case cost is the capture's own fidelity work, not test overhead.**
+  A trivial page takes ~12 s: `captureStableScreenshot` always observes its full
+  32-frame horizon (an early A,A plateau must not hide a later B,B
+  presentation) at ~50 ms per frame of headless software-compositing pacing,
+  once per pixel artifact, plus settle, launch and shutdown.
+  `--disable-frame-rate-limit --disable-gpu-vsync` cut frames to ~5 ms but only
+  ~15% of suite time, raised CPU ~60%, and would shrink the horizon's wall-clock
+  span for every real import, so it is not used.
 - **"Could not read the version" is not "wrong version".** Reading `--version`
   has been observed to fail once and then succeed moments later on the same
   browser, and it used to surface as "too old or incompatible" — a message that

@@ -110,7 +110,8 @@
         "test/support/audio_doctor.*",
         "test/support/README.md",
         "tools/audio/analysis/**",
-        "tools/audio/quality-lab/**"
+        "tools/audio/quality-lab/**",
+        "core/simd/**"
       ]
     },
     "audio-headless-debug": {
@@ -567,6 +568,12 @@
         ".agents/skills/pulp-web-demo/**"
       ]
     },
+    "proxy-first-eval": {
+      "_doc": {
+        "empty-ok": "proxy-first-eval is evaluation guidance for any before/after claim (CI, fleet, build, DSP, render). It owns no source path, so no code change can make it stale."
+      },
+      "paths": []
+    },
     "pulp-vellum-change-routing": {
       "paths": [
         ".agents/skills/pulp-vellum-change-routing/**",
@@ -768,6 +775,12 @@
         "tools/launchd/pulp-tart-runner-linux.plist.template",
         "tools/launchd/pulp-qemu-runner-windows.plist.template"
       ]
+    },
+    "test-audit": {
+      "_doc": {
+        "empty-ok": "Process/guidance skill (whether a test earns its place: authoring gate, junk patterns, retention bar, lane routing) — applies whenever a test is written or reviewed anywhere, so mapping it to test/** would demand a SKILL.md edit on every test change. The entry exists to satisfy the self-check that every .agents/skills/ subdir is mapped."
+      },
+      "paths": []
     },
     "text-metrics": {
       "paths": [

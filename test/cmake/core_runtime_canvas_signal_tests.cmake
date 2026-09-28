@@ -219,6 +219,36 @@ pulp_add_test_suite(pulp-test-xml-zip GROUP pulp-test-group-core-runtime
 # SIMD operations and aligned buffer tests
 pulp_add_test_suite(pulp-test-simd LIBRARIES pulp::runtime pulp::signal)
 
+# The DSP layer's kernel library must stay reachable from pulp::signal without
+# pulp-runtime, whose archive carries the HTTP/TLS stack. The binary proves the
+# symbols resolve; a closure walk proves nothing heavier came with them.
+pulp_add_test_suite(pulp-test-simd-signal-link LIBRARIES pulp::signal)
+# The closure assertion runs from the root CMakeLists.txt, after
+# PulpLinkFloor is loaded.
+
+# Every pulp::simd kernel on every compiled backend against the scalar
+# reference (bit-exact where one rounding is involved, a derived bound where
+# the accumulation order differs), flush-to-zero on and off, plus a
+# zero-allocation check.
+pulp_add_test_suite(pulp-test-simd-parity
+    SOURCES test_simd_parity.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio pulp::audio-analysis)
+
+# The header's inline scalar fallback for builds that list sources by hand:
+# only the include directory, deliberately no pulp::simd link.
+add_executable(pulp-test-simd-header-fallback test_simd_header_fallback.cpp)
+target_include_directories(pulp-test-simd-header-fallback PRIVATE
+    "${PULP_ROOT_DIR}/core/simd/include")
+target_compile_features(pulp-test-simd-header-fallback PRIVATE cxx_std_20)
+target_link_libraries(pulp-test-simd-header-fallback PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-simd-header-fallback)
+
+# FirFilterT on a linear history over pulp::simd::correlate/dot, against a
+# sequential reference across compactions and block sizes.
+pulp_add_test_suite(pulp-test-fir-filter
+    SOURCES test_fir_filter.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal pulp::audio pulp::audio-analysis)
+
 # Drag-and-drop tests
 pulp_add_test_suite(pulp-test-dnd GROUP pulp-test-group-core-view
     SOURCES test_drag_drop.cpp test_drag_session_lifetime.cpp
@@ -562,6 +592,37 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     SOURCES test_gpu_audio_execution_contract.cpp
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# Public, backend-neutral WaveNet adapter boundary. This is deliberately a
+# shape/fallback contract; provider handles remain private until an execution
+# owner can be safely attached to GpuAudioNode.
+pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
+    SOURCES test_gpu_wavenet_descriptor.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+
+# Public one-stream WaveNet session boundary. The test exercises descriptor
+# and weight ownership on every platform; when Dawn is available it also
+# drives one authenticated shared block through the opaque SDK session.
+pulp_add_test_suite(pulp-test-gpu-wavenet-session
+    SOURCES test_gpu_wavenet_session.cpp
+    LIBRARIES pulp::gpu-audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_compile_definitions(pulp-test-gpu-wavenet-session
+        PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
+
+# Dawn-free shape contract for the future provider-owned WaveNet program. This
+# validates model metadata before any provider resource or handle is created.
+pulp_add_test_suite(pulp-test-gpu-shared-io-wavenet-spec
+    SOURCES test_gpu_shared_io_wavenet_spec.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    target_link_libraries(pulp-test-gpu-shared-io-wavenet-spec PRIVATE pulp::gpu-audio)
+    target_compile_definitions(pulp-test-gpu-shared-io-wavenet-spec
+        PRIVATE PULP_GPU_AUDIO_WAVENET_RUNTIME=1)
+endif()
 
 # Dawn-free private reducer for exact lead-delivery and typed miss handling.
 # prepare() owns the only allocation; callback delivery is bounded and atomic.

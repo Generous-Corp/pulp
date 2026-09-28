@@ -34,6 +34,7 @@ add_test(
         --pack-fonts "${PULP_DESIGN_PANEL_PACK_FONTS}")
 set_tests_properties(agent-panel-native-invariants PROPERTIES
     LABELS "parser-import;browser-capture"
+    RESOURCE_LOCK browser
     TIMEOUT 600
     SKIP_RETURN_CODE 77)
 
@@ -56,5 +57,6 @@ add_test(
         --expect-reject "capture-control-clipped")
 set_tests_properties(agent-panel-clipped-is-rejected PROPERTIES
     LABELS "parser-import;browser-capture"
+    RESOURCE_LOCK browser
     TIMEOUT 600
     SKIP_RETURN_CODE 77)

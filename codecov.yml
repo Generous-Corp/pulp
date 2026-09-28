@@ -330,6 +330,9 @@ component_management:
     - component_id: signal
       name: signal
       paths: ["core/signal/**"]
+    - component_id: simd
+      name: simd
+      paths: ["core/simd/**"]
     - component_id: smf
       name: smf
       paths: ["core/smf/**"]

@@ -43,6 +43,10 @@ if(NOT DEFINED PULP_LINK_FLOOR_ROOT)
 endif()
 
 # ── Tiers ────────────────────────────────────────────────────────────────────
+# `simd` rides with `runtime` in every tier: pulp-runtime links the pulp-simd
+# kernel library PUBLIC (its <pulp/runtime/simd.hpp> forwards there), so no
+# closure that reaches runtime can avoid it.
+#
 # A tier is the bound a consumer claims, named centrally so two targets claiming
 # the same tier are held to the same closure and neither can widen it alone. The
 # names follow the module directories under core/, which is also the vocabulary
@@ -63,7 +67,7 @@ endif()
 # consumer should pair it with REQUIRE timeline timeline_editor — a tier alone
 # cannot say the editor arrived.
 set(PULP_LINK_FLOOR_TIER_sequencer-editor
-    platform runtime music timebase timeline timeline_editor)
+    platform simd runtime music timebase timeline timeline_editor)
 
 # A loadable plugin binary: the format adapter it is packaged as, and the
 # audio/MIDI types that adapter and the engine both speak.
@@ -74,14 +78,14 @@ set(PULP_LINK_FLOOR_TIER_sequencer-editor
 # `timeline` nor `timeline_editor`; a plugin that genuinely carries the editor
 # states so with REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin
-    platform runtime music timebase audio midi format)
+    platform simd runtime music timebase audio midi format)
 
 # A loadable sequencer plugin that owns the document, editor kernel, and concrete
 # piano-roll view. `timeline_view` intentionally brings the base view and canvas
 # rungs, so they belong in this bound rather than in its claimant's debt. A
 # plugin claiming the tier still names all three feature modules in REQUIRE.
 set(PULP_LINK_FLOOR_TIER_sequencer-plugin-editor
-    platform runtime music timebase timeline timeline_editor timeline_view
+    platform simd runtime music timebase timeline timeline_editor timeline_view
     canvas view audio midi format)
 
 # ── Debt ─────────────────────────────────────────────────────────────────────

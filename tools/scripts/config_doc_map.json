@@ -135,6 +135,16 @@
     "docs/guides/local-ci.md"
    ],
    "why": "Codex skips automatic review on App-authored PRs, so the request workflow and its signal check are the only thing standing between an agent-opened PR and merging unreviewed; local-ci.md documents which identity is used and what counts as proof a review happened. Changing either without the guide drifts the documented review coverage."
+  },
+  {
+   "paths": [
+    ".github/workflows/main-health-detector.yml",
+    "tools/ci/base_poison_detector.py"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The base health detector's cadence, evidence sources and signal schema are what an operator or Shipyard reads. Changing the lane or the decision rules without the guide drifts the documented meaning of `safe_to_pause_queue`, which is the one field a consumer acts on, and a wrong pause stops the whole merge queue."
   }
  ]
 }

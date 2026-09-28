@@ -44,6 +44,15 @@ static_assert(!std::is_move_constructible_v<InspectorAuthVerifier>);
 
 namespace {
 
+// Timeout for cases whose operation must START before the caller gives up.
+// The operation only starts once a test thread is spawned and scheduled to run
+// the posted task; if the caller's timeout expires first, the RPC cancels the
+// work before start and the case never reaches the state it is testing. 5 ms is
+// shorter than a thread-start stall on a loaded CI runner, so these cases use a
+// budget well above that. The operation blocks until the test releases it, so
+// the caller still times out while the work is running.
+constexpr auto kStartedWorkTimeout = 250ms;
+
 std::vector<InspectorCapability> fixture_capabilities() {
     return {
         InspectorCapability::SessionDescribe,
@@ -976,7 +985,7 @@ TEST_CASE("timed-out started main-thread work returns while retaining its slot",
     bool operation_started = false;
     bool release_operation = false;
     InspectorMainThreadRpc rpc(
-        {5ms, 1},
+        {kStartedWorkTimeout, 1},
         [&](auto task) {
             queued = std::move(task);
             cv.notify_all();
@@ -1044,7 +1053,7 @@ TEST_CASE("started main-thread mutation retains its controller lease until apply
     bool release_operation = false;
     std::atomic<std::int64_t> elapsed_ms{0};
     auto rpc = std::make_shared<InspectorMainThreadRpc>(
-        InspectorMainThreadRpc::Config{5ms, 2},
+        InspectorMainThreadRpc::Config{kStartedWorkTimeout, 2},
         [&](auto task) {
             {
                 std::lock_guard lock(mutex);
@@ -1127,7 +1136,7 @@ TEST_CASE("timed-out started work does not block RPC destruction",
     bool operation_started = false;
     bool release_operation = false;
     auto rpc = std::make_unique<InspectorMainThreadRpc>(
-        InspectorMainThreadRpc::Config{5ms, 1},
+        InspectorMainThreadRpc::Config{kStartedWorkTimeout, 1},
         [&](auto task) {
             queued = std::move(task);
             cv.notify_all();
@@ -1335,7 +1344,7 @@ TEST_CASE("main-thread RPC completion runs exactly once at actual terminal state
         std::function<void()> started_task;
         std::atomic<int> started_completions{0};
         InspectorMainThreadRpc started_rpc(
-            {5ms, 1},
+            {kStartedWorkTimeout, 1},
             [&](auto task) {
                 {
                     std::lock_guard lock(mutex);
@@ -1530,7 +1539,7 @@ TEST_CASE("draining main-thread RPC waits only for work that started",
         bool started = false;
         bool release = false;
         InspectorMainThreadRpc rpc(
-            {5ms, 1},
+            {kStartedWorkTimeout, 1},
             [&](auto task) {
                 {
                     std::lock_guard lock(mutex);

@@ -973,6 +973,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Compares the emitted artifact to the importer's DesignIR render, not to a browser capture; it does not prove browser fidelity, and --skip-colour-check deliberately omits palette enforcement.
 
 **design-import** — get a design into Pulp
+- Run the browser capture integration harness against an imported panel. → `tools/import-design/browser_capture/run_integration.mjs`
 - Check agent-authored panel HTML before importing it — the one entry point that runs all three contract gates. → `tools/import-design/check_contracts.py`
   - ⚠ **Cannot see:** Static text analysis, so it proves the markup keeps its side of the contract — never that the panel renders well. It is deliberately the check a pixel diff CANNOT make: a meter authored with invented children draws the same empty box in the browser and in Skia, so an A/B comparison scores it 100% identical and PASS while the control is dead. Without --macros the macro contract is SKIPPED (and says so) — a green run that checked two gates of three.
 - A render matches its reference pixel for pixel and still reads wrong — a screaming accent, a label you cannot read. Pixel comparison scores agreement with the source, so a palette defect the source already had survives every visual gate. → `tools/import-validation/check_palette_health.py (--tokens`
@@ -1030,7 +1031,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 
 **build-speed** — measure build, gate and merge-queue speed
 - Asking whether builds, the required macos gate or the merge queue got faster or slower — per host, per gate step, against the recorded baseline — or what the fleet's ccache, gate VMs and leases look like right now. → `tools/scripts/build_speed_scorecard.py report`
-  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
+  - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. Wall-clock waits track load; judge a change by `proxies`, where a zero control reads INSTRUMENT BLIND and a small side reads "insufficient sample". The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
 - Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before and after a build-system change. → `tools/scripts/build_time_report.py blast-radius`
   - ⚠ **Cannot see:** Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not counted) and says so. It touches each file and restores its mtime, so do not run it against a tree another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
 
@@ -1924,6 +1925,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `pr-review-sweep` | Sweep a PR's automated + human review comments and act on them — especially for material (large / logic-bearing) PRs. |
 | `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`) — focus marker plus normal watch/rebuild loop, with AOT analyzer guidance and deferred ar-swap/PR-monitor playbook. |
 | `prove-before-showing` | Prove a UI or generation feature actually works before asking a human to look at it. |
+| `proxy-first-eval` | Judge whether a change made things better with demonstrable proxy measures tied to the mechanism it targets, not wall-clock time. |
 | `pulp-vellum-change-routing` | Route repository-qualified changes across Pulp and Vellum using Pulp's exact ownership projection. |
 | `pulp-web-demo` | Generate and maintain browser demos of Pulp audio plugins (both web ABIs — WAM and WCLAP) from one declarative config, so every demo mounts the SAME shared player and the two ABIs stay in lockstep. |
 | `render-toolchain-update` | Update Pulp's pinned Skia, Dawn, and optional V8 prebuilts as one milestone-matched render-toolchain release. |
@@ -1935,6 +1937,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `streams` | Pick the right Pulp Stream for a given I/O task, wire async callbacks correctly without deadlocking the worker, and avoid the backpressure / cancellation footguns in `pulp::runtime::AsyncStream`. |
 | `stretch` | Offline time-stretch / pitch / varispeed — character modes, fine-tune presets, A/B toolkit, and the honest quality state, so an agent can pick a mode, dial it in, and ship a plugin with it. |
 | `tart-ci` | Stand up a fast, cached, isolated, disposable macOS CI lane on Tart — layered golden VM images, ephemeral per-job GitHub Actions runners, host-mounted caches, and a reusable per-repo vm-image manifest. |
+| `test-audit` | Decide whether a Pulp test earns its place — before writing it, when reviewing one, or when sweeping a subsystem for low-value, duplicated, or mis-routed tests. |
 | `text-metrics` | Baseline, half-leading, and font-face resolution for Label and captured (browser-imported) text — the arithmetic that decides where a glyph lands and how wide the box must be, plus the measure-vs-paint divergences that make text clip or sit low without any test going red. |
 | `threejs-bridge` | Build or iterate on Pulp's native Dawn-backed Three.js workflow using the real three.webgpu.js renderer, focused bridge tests, and native demo capture. |
 | `timebase` | Pulp musical/media time primitives, exact beat divisions, tempo and meter maps, transport-range grid projection, inline and order-preserving groove projection, coordinate randomness, streaming cursors, and quantization arithmetic. |
@@ -1949,7 +1952,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |
 
-This table of 67 skills is GENERATED from each
+This table of 69 skills is GENERATED from each
 `.agents/skills/<name>/SKILL.md` frontmatter by
 `tools/scripts/skills_doc_check.py --write`. Do not edit it by hand.
 <!-- generated:end id=skills-digest -->
@@ -2076,7 +2079,7 @@ Required routing lanes on DECLARED supply (`tools/scripts/fleet_advertised_label
 - `PULP_ALIAS_RUNS_ON_JSON`: HOSTED
 - `PULP_PREAMBLE_RUNS_ON_JSON`: HOSTED
 - `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`: SENTINEL `local-only`; override `macos-overflow-local-only`
-- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m5; its unset fallback's labels are advertised by no registration
+- `PULP_RELEASE_MACOS_RUNS_ON_JSON`: labels advertised by m1, m5, studio; its unset fallback's labels are advertised by no registration
 - `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON`: HOSTED
 - `PULP_VELLUM_TRUSTED_RUNS_ON_JSON`: UNKNOWN (supervisor `proxmox-systemd` is outside the snapshot)
 

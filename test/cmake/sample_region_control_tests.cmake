@@ -10,20 +10,44 @@ function(_pulp_register_sample_region_control_e2e)
        NOT TARGET pulp-mcp)
         return()
     endif()
+    add_executable(pulp-control-sample-region-proof-host
+        "${CMAKE_SOURCE_DIR}/test/test_control_sample_region_e2e.cpp")
+    target_compile_definitions(pulp-control-sample-region-proof-host PRIVATE
+        PULP_SAMPLE_REGION_BROKER_PROOF_HOST=1)
+    target_link_libraries(pulp-control-sample-region-proof-host PRIVATE
+        sample-region-allpass-core pulp::inspect-standalone-runtime pulp::standalone pulp::format)
+    _pulp_cache_control_declarations(pulp-control-sample-region-proof-host developer-local
+        "dev.pulp.instance/read@1;dev.pulp.session/control@1;dev.pulp.state/read@1;dev.pulp.state/parameter-gesture@1;dev.pulp.graph/sample-region.read@1;dev.pulp.graph/sample-region.edit@1"
+        FALSE)
+    _pulp_configure_control_shipping(pulp-control-sample-region-proof-host
+        "dev.pulp.sample-region-allpass.proof" "Sample Region Broker Proof")
+    _pulp_attach_control_shipping(pulp-control-sample-region-proof-host
+        pulp-control-sample-region-proof-host Standalone)
+    target_link_options(pulp-control-sample-region-proof-host PRIVATE LINKER:-dead_strip_dylibs)
+    find_program(_sample_region_test_codesign codesign REQUIRED)
+    add_custom_command(TARGET pulp-control-sample-region-proof-host POST_BUILD
+        COMMAND "${_sample_region_test_codesign}" --force --sign - --options library
+            "$<TARGET_FILE:pulp-control-sample-region-proof-host>"
+        COMMAND chmod 0700 "$<TARGET_FILE:pulp-control-sample-region-proof-host>"
+        COMMAND chmod 0600
+            "$<TARGET_FILE:pulp-control-sample-region-proof-host>.inspector-capabilities.json"
+        VERBATIM)
     add_executable(pulp-test-control-sample-region-e2e
         "${CMAKE_SOURCE_DIR}/test/test_control_sample_region_e2e.cpp"
         "${CMAKE_SOURCE_DIR}/inspect/src/control_broker_daemon.cpp")
     target_include_directories(pulp-test-control-sample-region-e2e PRIVATE
         "${CMAKE_SOURCE_DIR}/inspect/src" "${CMAKE_SOURCE_DIR}/test")
     target_link_libraries(pulp-test-control-sample-region-e2e PRIVATE
-        pulp::inspect-client Catch2::Catch2WithMain)
+        pulp::inspect-client pulp::audio Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-control-sample-region-e2e PRIVATE
         PULP_SAMPLE_REGION_EDITABLE_STANDALONE="$<TARGET_FILE:sample-region-allpass-control-editable>"
-        PULP_SAMPLE_REGION_FROZEN_STANDALONE="$<TARGET_FILE:sample-region-allpass-control-frozen>")
+        PULP_SAMPLE_REGION_FROZEN_STANDALONE="$<TARGET_FILE:sample-region-allpass-control-frozen>"
+        PULP_SAMPLE_REGION_PROOF_HOST="$<TARGET_FILE:pulp-control-sample-region-proof-host>")
     set_target_properties(pulp-test-control-sample-region-e2e PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/sample-region-control")
     add_dependencies(pulp-test-control-sample-region-e2e
         sample-region-allpass-control-editable sample-region-allpass-control-frozen
+        pulp-control-sample-region-proof-host
         pulp-cli pulp-mcp)
     find_program(_sample_region_test_codesign codesign REQUIRED)
     add_custom_command(TARGET pulp-test-control-sample-region-e2e POST_BUILD
@@ -45,11 +69,9 @@ function(_pulp_register_sample_region_control_e2e)
         # executable, so the search is anchored on this directory and cannot be
         # redirected.
         #
-        # The alias goes to the `<bin>/../tools/cli/pulp-cpp` candidate, NOT to a
-        # sibling of the staged CLI: the Rust CLI resolves its C++ delegate via
-        # current_exe().parent(), so a `pulp-cpp` beside the staged `pulp` would
-        # shadow the real delegate and break the `control` subcommands this test
-        # drives. Nothing probes this nested path except the broker.
+        # The staged `pulp` is the production C++ `pulp-cli` target. Keep the
+        # management-client alias at `<bin>/../tools/cli/pulp-cpp` so the broker
+        # can trust the enrolling test executable without replacing that CLI.
         #
         # Copied, never re-signed: ad-hoc signing derives the identifier from the
         # basename, so re-signing under another name would change the very
@@ -61,30 +83,9 @@ function(_pulp_register_sample_region_control_e2e)
         COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:pulp-test-control-sample-region-e2e>"
             "$<TARGET_FILE_DIR:pulp-test-control-sample-region-e2e>/../tools/cli/pulp-cpp"
         VERBATIM)
-    # Carries `validation`, which the required gate excludes and the nightly
-    # still runs. The test keeps running; it just stops gating every merge.
-    #
-    # It reaches test_control_sample_region_e2e.cpp:214,
-    # `REQUIRE_FALSE(instance.empty())`, and fails: `host-launch` reports
-    # "launched" but no instance carrying dev.pulp.sample-region-allpass.editable
-    # appears in `instances`.
-    #
-    # This is neither a regression nor a security assertion. The authorization
-    # check earlier in the same test (line 192, enrollment) passes. The
-    # registration is gated on the sample-region control hosts, themselves gated
-    # on PULP_ENABLE_GPU, so it had never run in CI until gate VMs enabled GPU
-    # config on 2026-09-23 - it has never passed in this configuration and
-    # guards no behaviour that previously worked.
-    #
-    # Left on the required gate it failed every merge_group batch, and a batch is
-    # main plus its entries, so one failing test ejects innocent PRs and re-forms
-    # forever. Eighteen PRs were held by this single assertion.
-    #
-    # Drop `validation` once line 214 is fixed. Do not delete the test and do not
-    # weaken the assertion.
     pulp_scaled_test_timeout(_pulp_sample_region_e2e_timeout 180)
     catch_discover_tests(pulp-test-control-sample-region-e2e
         PROPERTIES TIMEOUT "${_pulp_sample_region_e2e_timeout}"
-        LABELS "inspect;control;sample-region;e2e;validation")
+        LABELS "inspect;control;sample-region;e2e")
 endfunction()
 cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_register_sample_region_control_e2e)

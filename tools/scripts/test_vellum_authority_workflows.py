@@ -145,6 +145,19 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
             r'(?m)^\s*(?:bash|sh|python3)\s+"?\$proposed_tree(?:/|\")',
         )
 
+    def test_pull_request_freeze_compares_from_proposed_merge_base(self) -> None:
+        value = workflow("vellum-freeze-check.yml")
+        job = value["jobs"]["freeze-check"]
+        comparison_step = step_named(job, "Resolve exact comparison")
+        comparison = comparison_step["run"]
+        self.assertIn('protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"', comparison)
+        self.assertIn('git fetch --no-tags origin refs/heads/main', comparison)
+        self.assertIn('live_base="$(git rev-parse --verify FETCH_HEAD)"', comparison)
+        self.assertIn('[[ "$protected_base" != "$live_base" ]]', comparison)
+        self.assertIn('echo "base=$protected_base"', comparison)
+        self.assertNotIn("PR_BASE", comparison_step.get("env", {}))
+        self.assertNotIn('git fetch --no-tags origin "$PR_BASE"', comparison)
+
     def test_merge_result_is_bound_to_resolved_base_and_source_head(self) -> None:
         value = workflow("vellum-trusted-gate.yml")
         validation = step_named(
@@ -210,6 +223,55 @@ class VellumAuthorityWorkflowTests(unittest.TestCase):
                     validation["env"]["VELLUM_READER_APP_JWT"],
                     "${{ steps.vellum-reader-jwt.outputs.app_jwt }}",
                 )
+
+    def test_recovery_binds_current_main_and_exact_pr_head(self) -> None:
+        value = workflow("vellum-freeze-recovery.yml")
+        job = value["jobs"]["rerun-pr-context"]
+        checkout = step_named(job, "Check out trusted protected main")
+        self.assertEqual(checkout["uses"], PINNED_CHECKOUT_ACTION)
+        self.assertEqual(
+            checkout["with"],
+            {"ref": "main", "fetch-depth": 0, "persist-credentials": False},
+        )
+        resolve = step_named(job, "Resolve live pull request")["run"]
+        self.assertIn('jq -r .base.sha', resolve)
+        self.assertIn('echo "historical_base=$historical_base"', resolve)
+        self.assertIn('echo "source_head=$source_head"', resolve)
+        self.assertIn('base_ref" != "main"', resolve)
+
+        bind = step_named(job, "Bind checked-out protected main")["run"]
+        self.assertIn('base="$(git rev-parse --verify HEAD^{commit})"', bind)
+        validation = step_named(
+            job, "Validate current protected-main candidate and publish head status"
+        )
+        script = validation["run"]
+        self.assertIn('refs/pull/$PR_NUMBER/head:refs/vellum/pr-head', script)
+        self.assertIn('fetched_head="$(git rev-parse refs/vellum/pr-head)"', script)
+        self.assertIn('"$trusted_root/tools/scripts/vellum_trusted_merge.py"', script)
+        self.assertIn('"$trusted_root/tools/scripts/vellum_freeze_check.py"', script)
+        self.assertIn('"$trusted_root/tools/scripts/vellum_expansion_watch_check.py"', script)
+        self.assertNotIn('actions/runs/$run_id/rerun', script)
+        self.assertNotIn('refs/pull/$PR_NUMBER/merge', script)
+        merge = script.index("vellum_trusted_merge.py")
+        pending = script.index("post_status pending")
+        validator = script.index("run_validator python3")
+        self.assertLess(merge, pending)
+        self.assertLess(pending, validator)
+
+    def test_recovery_status_is_exact_context_and_rechecks_live_head(self) -> None:
+        value = workflow("vellum-freeze-recovery.yml")
+        script = step_named(
+            value["jobs"]["rerun-pr-context"],
+            "Validate current protected-main candidate and publish head status",
+        )["run"]
+        self.assertIn("statuses/$PR_HEAD", script)
+        self.assertIn("-f context='Vellum freeze'", script)
+        self.assertIn('live_state="$(printf', script)
+        self.assertIn('live_head="$(printf', script)
+        self.assertIn('[ "$live_state" != "open" ] || [ "$live_head" != "$PR_HEAD" ]', script)
+        self.assertIn("suppressing stale", script)
+        self.assertIn("post_status failure", script)
+        self.assertIn("post_status success", script)
 
     def test_dispatcher_has_no_checkout_and_only_one_repo_write_token(self) -> None:
         value = workflow("vellum-observatory-dispatch.yml")
