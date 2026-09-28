@@ -8,7 +8,9 @@ full-width reservation and a RUN_SERIAL browser suite ran alone, one after the
 other, for minutes after every other test had finished, while the suite's
 longest test started minutes in because nothing told ctest it was long.
 
-The contract, read from an already-configured build:
+The rows and classes live in ctest_scheduling_policy.py, which the source-level
+contract in test_ci_throughput_workflows.py imports too. The contract, read
+from an already-configured build:
 
   * Every test that launches a real Chrome holds the `browser` RESOURCE_LOCK,
     so two captures never share a VM's cores, and none is RUN_SERIAL: the lock
@@ -35,44 +37,21 @@ import json
 import subprocess
 import sys
 
+from ctest_scheduling_policy import (
+    BROWSER_LOCK,
+    BROWSER_SUITE,
+    BROWSER_TESTS,
+    LONG_TESTS,
+    MAX_LONG_TEST_PROCESSORS,
+    RESERVATION_ENV,
+    consistency_errors,
+    row,
+)
+
 MINIMUM_EXPECTED_TESTS = 100
 
 # A row set that checks almost nothing reads as clean; demand real coverage.
 MINIMUM_CHECKED_ROWS = 3
-
-BROWSER_LOCK = "browser"
-RESERVATION_ENV = "PULP_BROWSER_CAPTURE_RESERVED_CORES"
-BROWSER_SUITE = "pulp-browser-capture-node-integration"
-
-# The smallest gate VM runs ctest at -j3. A long test reserving more than this
-# many slots cannot start until most of the suite is idle on any host.
-MAX_LONG_TEST_PROCESSORS = 4
-
-
-def row(name, companion=None, optional=False):
-    return {"name": name, "companion": companion, "optional": optional}
-
-
-# Tests that launch a real Chrome (directly, or through the importer).
-BROWSER_TESTS = (
-    row(BROWSER_SUITE, companion="pulp-browser-capture-node-unit"),
-    row("pulp-browser-capture-process-lifecycle", companion="pulp-browser-capture-node-unit"),
-    row("generic browser HTML supplies the reference for --fail-below",
-        companion="pulp-import-design reports help and argument diagnostics"),
-    row("agent-panel-native-invariants"),
-    row("agent-panel-clipped-is-rejected"),
-)
-
-# Tests over 40s on the required gate's merge-group runs (2026-09-27, studio and
-# m5 hosts), longest first.
-LONG_TESTS = (
-    row("sample-region-compat-baseline", optional=True),
-    row(BROWSER_SUITE, companion="pulp-browser-capture-node-unit"),
-    row("cmake-control-sdk-consumer", optional=True),
-    row("gpu-trace-overhead-acceptance-selftest"),
-    row("gpu-first-visible-role-producers-selftest"),
-    row("combined-installer-selftest", optional=True),
-)
 
 
 def properties(test):
@@ -157,6 +136,11 @@ def audit(tests, browser_rows, long_rows):
 
 def self_check():
     """Prove each rule can fail before trusting a pass."""
+    policy = consistency_errors()
+    if policy:
+        raise SystemExit("scheduling policy contradicts itself:\n  " + "\n  ".join(policy))
+    if len(consistency_errors(weighted={"x"}, browser=set(), long={"x"})) != 1:
+        raise SystemExit("detector self-check failed: a weighted long test was not rejected")
     browser_rows = [
         row("serial-browser"),
         row("unlocked-browser"),

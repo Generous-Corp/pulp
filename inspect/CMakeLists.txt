@@ -24,6 +24,7 @@ add_library(pulp-inspect-protocol
     src/control_protocol.cpp
     src/control_protocol_codec.cpp
     src/control_protocol_fields.cpp
+    src/main_thread_rpc.cpp
     src/protocol.cpp
     src/session.cpp
     src/test_input.cpp)
@@ -36,7 +37,7 @@ target_include_directories(pulp-inspect-protocol
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}
 )
-target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime)
+target_link_libraries(pulp-inspect-protocol PUBLIC pulp::runtime PRIVATE pulp::events)
 
 if(NOT PULP_ENABLE_INSPECTOR)
     return()
@@ -136,7 +137,6 @@ add_library(pulp-inspect-runtime
     src/control_main_thread_executor.cpp
     src/control_sequencer_transport_executor.cpp
     src/control_trace_session_executor.cpp
-    src/main_thread_rpc.cpp
     src/trace_inspector.cpp)
 add_library(pulp::inspect-runtime ALIAS pulp-inspect-runtime)
 target_include_directories(pulp-inspect-runtime

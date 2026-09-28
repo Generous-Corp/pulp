@@ -1,6 +1,7 @@
 // widget_bridge/style_visibility_api.cpp - visibility and interaction style registrations for WidgetBridge.
 
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include "api_registry.hpp"
 
 #include <string>

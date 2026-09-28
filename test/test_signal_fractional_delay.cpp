@@ -334,7 +334,7 @@ TEST_CASE("derived overflow injects zero and recovers without poisoning history"
     }
 }
 
-TEST_CASE("prepare is transactional and processing allocates nothing",
+TEST_CASE("FractionalDelay: prepare is transactional and processing allocates nothing",
           "[signal][fractional-delay]") {
     FractionalDelayLineT<double> line;
     CHECK_FALSE(line.prepared());

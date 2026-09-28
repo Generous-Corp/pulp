@@ -90,6 +90,17 @@ class SetupBootstrapPlanGuardTest(unittest.TestCase):
             "sets its own parallelism",
         )
 
+    def test_configure_dropping_the_generator_is_rejected(self) -> None:
+        self._assert_rejects(
+            'cmake ${GENERATOR:+-G "$GENERATOR"} -S',
+            "cmake -S",
+            "configure does not pass",
+        )
+
+    @unittest.skipUnless(shutil.which("ninja"), "ninja is not on PATH")
+    def test_makefiles_default_with_ninja_available_is_rejected(self) -> None:
+        self._assert_rejects("    GENERATOR=Ninja\n", "    :\n", "fresh build dir generator")
+
     def test_broken_debug_override_is_rejected(self) -> None:
         self._assert_rejects(
             "        --debug)   BUILD_TYPE=Debug ;;\n",

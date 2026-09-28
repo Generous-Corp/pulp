@@ -61,6 +61,21 @@ the Rust crate would ship a check nobody reaches. Verify the split rather than
 assuming it: run the built `./build/pulp doctor` and confirm the C++ check names
 appear in its output.
 
+### `--only` must filter BEFORE the work, not after
+
+`run_doctor_checks(root, standalone, only)` is also how `pulp status` gets its
+`Control broker:` line, and the installer's broker health probe runs that
+line. The `RELEASE_BOT_TOKEN secret` row used to make two `gh` network calls
+before looking at the filter, so every `--only` caller paid about 3.7 s for a
+row it discarded, longer than the installer's 3 s health deadline, and the
+broker was never installed anywhere. The probe also ran plain `pulp-cpp status`,
+which refuses outside a Pulp project, so a `curl | sh` from `~` could not pass
+it either. Now the `gh` block sits inside its filter check, the probe runs
+`pulp-cpp status --broker-only` (no project needed), and its deadline (5 s) is
+set from measured startup times, not a guess. A new doctor row with a
+subprocess or network call goes INSIDE its `doctor_check_matches_only_filter`
+block.
+
 ### A doctor check that cannot be wrong is worse than no check
 
 `pulp doctor`'s value rests on people believing a failing row. A check that
@@ -821,11 +836,51 @@ must agree, and each has its own tests (`orchestrate.rs` unit tests plus the
   change. The functions only emit `-G` when there is no `CMakeCache.txt`, and
   only fill an *empty* cached build type — an explicit `PULP_BUILD_TYPE` is the
   one way to change a non-empty one.
+- **A slow existing dir is migrated, not kept.** Build dirs an older CLI
+  created stay Makefiles + Debug + examples ON forever otherwise (on m3,
+  2026-09-27: 33 of 43 agent `build/` dirs). `stale_build_config_reasons` /
+  `migrate_stale_build_dir` (both languages, same rules) move `CMakeCache.txt`
+  and `CMakeFiles` into `build/.pulp-pre-migration/` and print one
+  `Reconfiguring … (was: Unix Makefiles, Debug, examples ON)` line when the
+  cache has a Makefiles generator and ninja is available, an empty or `Debug`
+  build type `PULP_BUILD_TYPE` did not ask for, or examples ON without
+  `--examples`. Xcode / Visual Studio caches are left alone. Rust calls it in
+  `build_with_dependency_policy`; C++ in `cmd_build`, and dev/loop call it
+  before their "is it configured?" check so their `cmd_build` bootstrap runs.
+  `PULP_KEEP_BUILD_CONFIG=1` is the opt-out. A cache without
+  `CMAKE_GENERATOR` is a test fixture, not a real configure, and never
+  migrates — keep fixtures that way unless the test is about migration.
 - **A command that needs an example target must ask for it.** Examples are off
   in a fresh dev tree, so anything that builds `pulp-design-tool` (or another
   `examples/` target) passes `examples=true` / `--examples`; `pulp design` and
   `pulp dev --design` do. Forgetting it reads as "unknown target", not as a
   configure problem.
+
+### The shared WebGPU runtime is CLI payload, not only broker payload
+
+`pulp-cpp`, `pulp-mcp` and `pulp-import-design` link
+`@rpath/libwgpu_native.dylib` with `LC_RPATH @loader_path` (Linux: `$ORIGIN`,
+`libwgpu_native.so`), so the runtime must sit in the install directory beside
+them. The release archive ships it flat there, and a flat unpack always
+works, which is why the release smoke never saw the break. `install.sh` used to
+exclude it from the ordinary extraction and hand it only to the control-broker
+transaction, which copies it after activation succeeds and rolls it back when
+activation fails or is refused. Any broker failure (a stale LaunchAgent plist,
+a custom root) left v0.876.1's `pulp-cpp` dying in dyld, and every command that
+delegates to it (`pulp doctor`, `pulp loop`, `build --watch/--validate`) died
+with it. `pulp upgrade` never installed the runtime at all.
+
+Now both paths install it as ordinary payload first (`install.sh`'s tar
+extraction; `install_extracted()` via `shared_runtime_basename()`), and the
+broker transaction backs up and restores that copy. Guard:
+`tools/scripts/check_installed_rpaths.py <install-dir>` resolves every Mach-O
+dependency against the INSTALLED tree; the `install-rpath-closure` ctest runs
+`install.sh` on real compiled fixtures with a failing broker and requires a
+clean result, and it also checks that a stale runtime already in the install
+directory is replaced. The broker is optional, so `install.sh` reports a
+failed activation as a warning and exits 0. Never "fix" a missing runtime
+with a symlink to `~/.pulp/lib`: that directory is an old SDK install prefix holding an unrelated wgpu build,
+and the broker transaction refuses a symlink at the runtime path.
 
 ### A stale installed CLI applies ITS defaults — the stale-CLI guard
 
@@ -984,6 +1039,26 @@ place (relaunching would kill the plugin + lose audio/UI state). Gotchas:
   real timestamped probe against the dedicated keychain. Android signing stays
   outside this macOS preflight. Keep secrets in `~/.config/pulp/secrets/`, never
   the repo.
+
+### The Rust CLI's cargo tests run in ctest — all of them
+
+Until 2026-09-27 only two filtered slices (`trace_gpu_analysis`, `stale_cli`)
+ran anywhere in CI: 75 of the crate's 1,200 tests. Five had gone red on main
+unnoticed, and three of those were real defects: `pulp upgrade`'s
+import-design runtime completeness list was 13 of the 18 shipped files,
+`pulp trace open` answered a request that arrived a moment after the
+connection with a 404 (an accepted socket inherits the listener's
+`O_NONBLOCK` on macOS, where a read timeout does nothing), and the help banner
+fixture missed `gpu`. Running them from ctest found a sixth: the
+`pulp upgrade --install` cargo-artifact guard only recognized `target/`, not
+the CMake build's `cargo-target/`, so the guard test fell through to a live
+GitHub API call. `pulp-rust-cli-cargo-tests` now runs every unit and
+integration target (`--lib --bins` plus each globbed `tests/*.rs`), and
+`pulp-rust-cli-doc-tests` the doctests. The one exclusion is
+`trace_gpu_analysis_tool_test`, which fails closed without the SDK-matched
+`trace_processor` and is run by `pulp-rust-gpu-trace-analysis-integration`.
+A new `tests/*.rs` file is picked up at the next configure; a new exclusion
+needs a named reason in `experimental/pulp-rs/CMakeLists.txt`.
 
 ### Rust CLI cutover path convention
 
@@ -3326,6 +3401,13 @@ Plain `exec()` is still correct for commands whose output *is* the whole result.
   back to a temp dir when HOME is unset). They were both once named `pulp_home` with
   different contracts — a silent two-sources-of-truth for a filesystem-layout invariant.
   Pick deliberately; do not "unify" them without deciding the Windows root + fallback.
+- **Every C++ `cmake --build` goes through one wrapper chain.** `pulp build`,
+  `pulp loop`, `pulp dev` and the watch-loop rebuild in `cli_common.cpp` each run
+  `apply_build_dir_lock(apply_agent_build_watchdog(apply_agent_build_qos(cmd, qos), jobs,
+  active), project_root, build_dir)`. The lock is outermost: it runs the checkout's
+  `tools/ci/build_dir_lock.py --no-wait`, the same flock `governed-build.sh` takes, so a
+  second build into a live tree exits 75 and names the holder whichever CLI started
+  either one. A new build site that skips the chain races the others silently.
 
 ## Exit 2 means "could not measure" — keep it distinct from failure
 
@@ -3518,3 +3600,44 @@ a success status — a valid-looking WAV of zeros, no error.
 If you add a command that hosts a plugin at a caller-chosen width, plumb the widths through the
 same way `cmd_audio_render.cpp` does, and sanity-check the AU slot's
 `initialized with N channels` log against the width you asked for.
+## A caller and its definition must share an archive, or Apple `ld` drops it
+
+Apple's linker scans a static archive **once**. A member that becomes newly
+needed *after* the scan has passed it is not revisited, so the CLI can fail with
+an undefined symbol even though every object that defines it was built. The CLI
+therefore force-loads its own implementation archives on Apple —
+`pulp-view-core`, `pulp-view-script`, `pulp-canvas`, `pulp-runtime`,
+`pulp-inspect-protocol` — in `tools/cli/CMakeLists.txt`, guarded by `if(APPLE)`
+and `if(TARGET ...)` so plugin consumers are unaffected.
+
+Force-loading only helps if the definition is actually *in* the archive being
+force-loaded. The sharper rule is about placement: **when a TU compiled into
+archive A calls a symbol, the definition belongs in A**, not in a sibling target
+the CLI does not link. `session.cpp` is compiled into `pulp-inspect-protocol`
+and calls `InspectorMainThreadRpc::call` in every configuration, while
+`main_thread_rpc.cpp` sat in `pulp-inspect-runtime`; with the inspector enabled
+— the default — the CLI linked the protocol archive, never the runtime one, and
+the symbol had no definition to find. Adding the TU to the protocol archive only
+under `if(NOT PULP_ENABLE_INSPECTOR)` fixes the stripped build and leaves the
+default one broken. Put it in unconditionally and remove it from the other
+target, so the symbol is defined exactly once rather than duplicated across two
+archives that link together.
+
+Two traps when verifying a link repair:
+
+- **Read the build's own status, not a wrapper's.** A backgrounded
+  `governed-build.sh … > log` reports the *wrapper's* exit; the build's result is
+  whatever you echoed into the log. `BUILD_RC=2` with a trailing
+  `[exited with code 0]` is a failed build, and `ls` on the expected binary is
+  the independent check.
+- **`governed-build.sh` blames host contention generically.** Its verdict
+  ("pinned at the parallelism floor … this signature has passed on re-run with no
+  code change") is about flaky *timing*. An undefined symbol is deterministic:
+  re-running on a quiet host reproduces it exactly, so do not spend another full
+  build on that advice.
+
+Prove the repair with `nm -C` rather than a successful exit: the symbol should
+appear as `T` (defined) with **zero** `U` entries, and the binary should run —
+`pulp-cpp version` and `pulp-cpp sdk` are the cheapest live checks. Note the
+argument form: it is `pulp-cpp version`, not `pulp-cpp pulp version`, and
+`pulp-cpp sdk` rather than `sdk --help`.

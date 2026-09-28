@@ -810,6 +810,14 @@ either side of an explicit instant instead. It reads the `metrics list` rows
 the pipeline section already fetched, because `shipyard metrics compare` splits
 only on whole days ago and cannot filter by target.
 
+On a pull-request head that ran the full suite green, the **receipt issue
+step** (`protected_merge_receipt.py issue`) now announces its result: a
+`protected receipt issued` notice and job-summary line on success, or a
+`protected receipt NOT issued` warning carrying the issuer's reason (and a
+summary line) on failure. The step stays `continue-on-error`; the merge group
+then validates in full. A missing receipt with no such line is itself a defect
+to report.
+
 The gate's Build step also runs the **iOS compile gate in shadow-identity
 mode**: `tools/ci/ios_gate_digest.py` digests every tracked file the gate's
 three iOS configures can read (product sources, examples, CMake, dependency
@@ -1851,7 +1859,15 @@ batch's own report says the base is the cause, so each batch reads as a new
 culprit in turn.
 
 `.github/workflows/main-health-detector.yml` runs `tools/ci/base_poison_detector.py`
-on a schedule and on demand. It is read-only, runs on the preamble Linux runner,
+right after every failed merge-group `Build and Test` run (`workflow_run`,
+`completed`, gated to `event == 'merge_group'` and `conclusion == 'failure'`),
+on a schedule as a backstop, and on demand. The event trigger is the one that
+matters: GitHub throttles this repository's schedules to roughly one run every
+four hours whatever the cron says, longer than a batch's lifetime. A
+`workflow_run` job runs the default branch's copy of the workflow with
+base-repository permissions, so the detector checks out only the default branch
+(never the triggering run's head) and its token is read-only (`actions`,
+`contents`, `pull-requests`). It runs on the preamble Linux runner,
 draws no macOS gate host, and **reports only** — pausing a re-forming batch or
 prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
