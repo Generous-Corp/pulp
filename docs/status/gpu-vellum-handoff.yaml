@@ -3026,16 +3026,16 @@
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install.rs",
           "state": "pulp-owned-retained",
-          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
-          "object_id": "d5a5ce15eefb5e5fe50610b5b3a492624aeedded",
+          "revision": "781b98b967cb334bcf1a6f4a06602aa4e6ec3329",
+          "object_id": "748443786609100b06a97aafb513c330778916c4",
           "object_type": "blob"
         },
         {
           "repo": "Generous-Corp/pulp",
           "path": "experimental/pulp-rs/src/install/tests.rs",
           "state": "pulp-owned-retained",
-          "revision": "07b3b15d22b41512661e447b5aaaa4c0fad923f0",
-          "object_id": "18160a2f316d3ef775354548efd8626eb6350896",
+          "revision": "781b98b967cb334bcf1a6f4a06602aa4e6ec3329",
+          "object_id": "4b65cb3a19c68d2a23f0b03312311e054e133755",
           "object_type": "blob"
         },
         {
