@@ -1181,18 +1181,19 @@ This workflow requests reviews; it does not audit whether older PRs got one.
 `.github/workflows/post-merge-review-sweep.yml` remains the separate, scheduled
 sweep that collects bot review comments on already-merged PRs.
 
-## Keeping fleet Macs on the Shipyard pin (optional)
+## Keeping fleet Macs on current Shipyard
 
-`tools/shipyard.toml` pins the Shipyard version every checkout uses, and
-`tools/install-shipyard.sh` installs exactly that pin. On a machine that ships
-PRs every day the pin moves underneath you, and a machine that quietly falls
-behind — or, worse, drifts *ahead* after a stray `shipyard update` — runs a
-Shipyard that was never validated against Pulp's CI matrix and that disagrees
-with the `SHIPYARD_VERSION` every workflow declares.
-
-`tools/scripts/shipyard_autoupdate.py` converges one machine onto the pin.
-Nothing about it is required: a public cloner runs `install-shipyard.sh` once
-and never thinks about this again. It exists for the local Macs.
+`tools/shipyard.toml` pins the Shipyard version `tools/install-shipyard.sh` and
+the workflows install; a public cloner runs `install-shipyard.sh` once and never
+thinks about this again. The local fleet Macs run Shipyard's latest release
+instead, and tartci keeps them there: `tartci fleet-macos tool-freshness`
+(refreshed by tartci's launchd watchdog every 30 minutes) compares the installed
+version with the latest release, applies `shipyard update --to <tag>
+--refresh-daemon` once a release is 30 minutes old, verifies the re-read
+version, and reports a tool behind for more than 12 hours as STALE in `tartci
+pool status` and `tartci doctor fleet`. Opt a host out with `auto_apply = false`
+under `[tools.shipyard]` in `~/.config/tartci/tool-freshness.toml`. See
+tartci's runbook, "Shipyard and pulp CLI freshness".
 
 v0.81.0 also gives the fleet watchdog an expected-host inventory independent of
 ephemeral runner names. Pulp declares the MacPro and Mac Mini active in
@@ -1241,44 +1242,6 @@ workflow or script consumes it, so a declaration here pages nobody on its own.
 Detecting a partially degraded gate pool needs capacity measured against demand —
 a busy pool and a pool at a third of capacity look alike from host presence — and
 nothing implements that today.
-
-```bash
-# What would happen, without touching anything:
-python3 tools/scripts/shipyard_autoupdate.py --check --json
-
-# Converge now (no-op and silent if already at the pin):
-python3 tools/scripts/shipyard_autoupdate.py
-
-# Run it hourly, in the background, per machine:
-tools/scripts/install_shipyard_autoupdate.sh
-tools/scripts/install_shipyard_autoupdate.sh --status
-tools/scripts/install_shipyard_autoupdate.sh --uninstall
-```
-
-**Kill switch.** Auto-update is on once installed, and off everywhere it is
-not installed. To stop it without uninstalling:
-
-```bash
-echo off > ~/.config/pulp/shipyard-autoupdate    # `on` resumes
-```
-
-`PULP_SHIPYARD_AUTOUPDATE=0` does the same for a shell or a one-off run, and
-overrides the file. The **file** is the one that matters for the background
-agent: a launchd agent inherits no shell environment, so an env-only kill
-switch could not reach the thing it is meant to kill.
-
-What it guarantees, and why each one is there:
-
-| Behaviour | Why |
-|---|---|
-| Converges to the pin, **never to `latest`** | The pin is the source of truth; a bare `shipyard update` tracks `latest` and strands the machine ahead of the pin (7 minors ahead on 2026-07-16). |
-| Handles **both** directions | `shipyard update` refuses to go backwards — it reports `update_available: false` and exits 0 — so coming back from ahead of the pin goes through `install-shipyard.sh`. |
-| Reads the pin from **`origin/main`** | A dev checkout is usually parked on a feature branch, which may carry an experimental pin. `PULP_SHIPYARD_AUTOUPDATE_PIN_REF=worktree` overrides. |
-| **Never updates mid-job** | Swapping the binary under an in-flight ship could corrupt a run. It defers while a Pulp `Runner.Worker` or a validating `shipyard` subcommand is alive. The always-on `shipyard daemon` does not count as busy. |
-| **Fails closed** | Any probe that cannot answer (`ps` fails, version unreadable, host offline) means "do not update". The working binary is left in place and the machine converges on a later tick — which is also how an intermittently-offline laptop is meant to behave. |
-| **Verifies the outcome** | Exit 0 is not proof. The installed version is re-read and must equal the pin, so a declined update or a swallowed checksum failure reports as a failure instead of a false success. |
-| **One installer at a time** | A hand-run converger and a background tick both writing `~/.local/bin/shipyard` is exactly the half-installed binary to avoid; the install step is held under a machine-wide lock. |
-| **Silent when nothing changed** | The steady state prints nothing. Every decision is still published to `~/.local/state/pulp/shipyard_autoupdate.json`. |
 
 ## Host resource governance
 
