@@ -51,6 +51,18 @@
 # --no-build is mutually exclusive with --build-dir/--target/--jobs/--object:
 # a caller must not be able to think a build happened when none did.
 #
+#   confirm_failure.sh --file <path.py> --break <sed/perl cmd> \
+#                      --python --test "python3 tools/scripts/test_foo.py"
+#
+# --python is the --no-build lane for Python, which is NOT free of the stale
+# artifact trap: importlib accepts a cached .pyc whose header matches the
+# source's mtime (one-second granularity) and size, never its content. A
+# length-preserving break restored within the same second therefore leaves the
+# broken bytecode running against a clean tree. So every run in this mode first
+# deletes __pycache__ under the edited file's directory and then runs with
+# PYTHONDONTWRITEBYTECODE=1 and a fresh, empty PYTHONPYCACHEPREFIX, so no cached
+# bytecode from before, or from the previous run, can be imported.
+#
 # --object names the source whose object file carries the edited file, for a
 # source the compiler never sees directly. A JS prelude under core/view/js is
 # embedded into web_compat_preludes_gen.cpp at build time, so there is no
@@ -78,6 +90,7 @@ SUBJECT=""
 JOBS=""
 OBJECT=""
 NO_BUILD=0
+PYTHON_MODE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -90,6 +103,7 @@ while [ $# -gt 0 ]; do
         --jobs)      JOBS="$2"; shift 2 ;;
         --object)    OBJECT="$2"; shift 2 ;;
         --no-build)  NO_BUILD=1; shift ;;
+        --python)    NO_BUILD=1; PYTHON_MODE=1; shift ;;
         -h|--help)   sed -n '3,40p' "$0"; exit 0 ;;
         *) echo "confirm-failure: unknown argument '$1'" >&2; exit 2 ;;
     esac
@@ -281,7 +295,11 @@ for p in filter(None, sys.stdin.buffer.read().split(b"\0")):
 build_and_verify_recompile() {
     local phase="$1"
     if [ "$NO_BUILD" -eq 1 ]; then
-        say "$phase: no build step -- the test re-reads $BASE from disk"
+        if [ "$PYTHON_MODE" -eq 1 ]; then
+            say "$phase: no build step -- __pycache__ purged and bytecode caching bypassed, so the test re-reads $BASE"
+        else
+            say "$phase: no build step -- the test re-reads $BASE from disk"
+        fi
         return 0
     fi
     if ! cmake --build "$BUILD_DIR" --target "$TARGET" -j "$JOBS" > "$BUILD_LOG" 2>&1; then
@@ -316,12 +334,29 @@ build_and_verify_recompile() {
     return 2
 }
 
+# Remove every bytecode cache under the edited file's directory.
+purge_pycache() {
+    find "$(dirname "$FILE")" -type d -name __pycache__ -prune \
+        -exec rm -rf {} + 2>/dev/null || true
+}
+
 run_test() {
+    if [ "$PYTHON_MODE" -eq 1 ]; then
+        purge_pycache
+        local prefix rc
+        prefix="$(mktemp -d)"
+        ( export PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="$prefix"
+          eval "$TEST_CMD" ) > /dev/null 2>&1
+        rc=$?
+        rm -rf "$prefix"
+        return "$rc"
+    fi
     ( eval "$TEST_CMD" ) > /dev/null 2>&1
 }
 
 restore() {
     git checkout -- "$FILE" || return 1
+    [ "$PYTHON_MODE" -eq 0 ] || purge_pycache
     bump_mtime
     invalidate
 }

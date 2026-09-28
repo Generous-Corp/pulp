@@ -168,6 +168,91 @@ else
     printf '  SKIP script-test lane (no node on PATH)\n'
 fi
 
+# ── The --python lane, for a Python test ─────────────────────────────────────
+#
+# Python caches bytecode and accepts a .pyc whose header matches the source's
+# mtime (to the second) and size, whatever the content. A stale .pyc compiled
+# from different source therefore runs silently against a clean tree. The
+# poisoned case plants exactly that: bytecode for `return 41` carrying the
+# committed file's own mtime and size. Plain --no-build runs it and cannot even
+# get a green baseline (the control); --python must purge and bypass it.
+make_python_project() {
+    local root="$1" meaningful="$2"
+    mkdir -p "$root"
+    printf 'def answer():\n    return 42\n' > "$root/value.py"
+    if [ "$meaningful" = "meaningful" ]; then
+        cat > "$root/test_value.py" <<'EOF'
+import sys
+from value import answer
+sys.exit(0 if answer() == 42 else 1)
+EOF
+    else
+        cat > "$root/test_value.py" <<'EOF'
+from value import answer
+answer()
+EOF
+    fi
+    ( cd "$root" \
+      && git init -q . \
+      && git config user.email t@example.com \
+      && git config user.name test \
+      && git add -A \
+      && git commit -qm fixture ) >/dev/null 2>&1
+}
+
+poison_pycache() {
+    ( cd "$1" && python3 - <<'EOF'
+import importlib.util, os, py_compile, struct, tempfile
+st = os.stat("value.py")
+broken = open("value.py").read().replace("return 42", "return 41")
+with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+    f.write(broken)
+target = importlib.util.cache_from_source(os.path.abspath("value.py"))
+os.makedirs(os.path.dirname(target), exist_ok=True)
+py_compile.compile(f.name, cfile=target, doraise=True)
+os.unlink(f.name)
+raw = bytearray(open(target, "rb").read())
+raw[4:16] = struct.pack("<III", 0, int(st.st_mtime), st.st_size & 0xFFFFFFFF)
+open(target, "wb").write(bytes(raw))
+EOF
+    )
+}
+
+run_python_under_test() {
+    local root="$1" mode="$2"
+    ( cd "$root" && "$UNDER_TEST" \
+        --file value.py \
+        --break "perl -pi -e 's/return 42/return 41/'" \
+        "$mode" \
+        --test "python3 test_value.py" ) >/dev/null 2>&1
+    echo $?
+}
+
+make_python_project "$TMP/py-covered" meaningful
+check "a covering Python test is CONFIRMED" 0 \
+    "$(run_python_under_test "$TMP/py-covered" --python)"
+
+make_python_project "$TMP/py-vacuous" vacuous
+check "a vacuous Python test is NOT CONFIRMED" 1 \
+    "$(run_python_under_test "$TMP/py-vacuous" --python)"
+
+make_python_project "$TMP/py-poison-control" meaningful
+poison_pycache "$TMP/py-poison-control"
+check "a planted stale .pyc defeats the plain --no-build lane (control)" 2 \
+    "$(run_python_under_test "$TMP/py-poison-control" --no-build)"
+
+make_python_project "$TMP/py-poison" meaningful
+poison_pycache "$TMP/py-poison"
+check "--python purges and bypasses a planted stale .pyc" 0 \
+    "$(run_python_under_test "$TMP/py-poison" --python)"
+
+make_python_project "$TMP/py-conflict" meaningful
+PYCONFLICT=$( ( cd "$TMP/py-conflict" && "$UNDER_TEST" \
+    --file value.py --break "perl -pi -e 's/42/41/'" \
+    --python --build-dir build --test "python3 test_value.py" \
+  ) >/dev/null 2>&1; echo $? )
+check "--python with --build-dir is rejected" 2 "$PYCONFLICT"
+
 # A test that drives another binary: the fingerprint must follow the edit,
 # not the test's own executable. Here the "test" is a shell script that runs
 # the compiled subject, the shape of every CLI shell-out suite (the suite is
