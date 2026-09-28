@@ -296,17 +296,24 @@ def detect(
     return verdict
 
 
+REQUIRED_SOURCE_PROTECTION = "protection"
+REQUIRED_SOURCE_FALLBACK = "macos-only-fallback"
+
+
 def signal(
     verdict: Verdict,
     candidate_fix_pr: int | None = None,
     likely_culprits: dict[int, list[str]] | None = None,
+    required_contexts_source: str | None = None,
 ) -> dict:
     """The machine-readable record. Every consumer reads `safe_to_pause_queue`.
 
     `likely_culprits` is the batch-membership finding: the queued entry whose
     presence separates the batches that failed a test from the ones that ran it
     green. It names a PR to dequeue, never a fix to prioritise, so it is kept
-    apart from `candidate_fix_pr`.
+    apart from `candidate_fix_pr`. `required_contexts_source` says which
+    required set that finding judged: `macos-only-fallback` means branch
+    protection could not be read and every other required context went unseen.
     """
     return {
         "schema": SIGNAL_SCHEMA,
@@ -330,6 +337,7 @@ def signal(
             {"pr": pr, "tests": sorted(tests)}
             for pr, tests in sorted((likely_culprits or {}).items())
         ],
+        "required_contexts_source": required_contexts_source,
         "reason": " ".join(verdict.reason.split()),
     }
 
@@ -351,6 +359,13 @@ def render(payload: dict) -> tuple[list[str], str]:
         )
         or "—"
     ).replace("|", chr(92) + "|")
+    source = payload.get("required_contexts_source")
+    required_row = {
+        None: "—",
+        REQUIRED_SOURCE_PROTECTION: "every required context (from branch protection)",
+        REQUIRED_SOURCE_FALLBACK: "**macos only**: branch protection was unreadable, "
+        "so every other required context went unjudged",
+    }.get(source, str(source))
     md = [
         "### Base health",
         "",
@@ -366,6 +381,7 @@ def render(payload: dict) -> tuple[list[str], str]:
         f"| batch streak | {payload['batch_streak']} (min {payload['min_streak']}) |",
         f"| candidate fix PR | {('#%d' % fix) if fix else '—'} |",
         f"| likely culprit PR | {culprits} |",
+        f"| required contexts judged | {required_row} |",
         f"| reason | {payload['reason'].replace('|', chr(92) + '|')} |",
         "",
     ]
@@ -640,24 +656,29 @@ def candidate_fix_pr(repo: str, tests: tuple[str, ...]) -> int | None:
     )
 
 
-def membership_culprits(repo: str, since: str, limit: int) -> dict[int, list[str]]:
+def membership_culprits(
+    repo: str, since: str, limit: int
+) -> tuple[dict[int, list[str]], str | None]:
     """Queued entries the merge-group history names as breaking a test.
 
     File ownership cannot see a change that breaks a test it never names; the
     queue's overlapping batch memberships can. Reuses the attributor's rule.
+    Returns the culprits and which required set they were judged against.
     """
     try:
         import queue_batch_attribute as attributor
     except ImportError:
-        return {}
+        return {}, None
     read = attributor.observe_history(
         repo,
         since=since,
         max_runs=limit,
         cache_dir=attributor.default_cache_dir(repo),
     )
-    return attributor.likely_culprits(
-        attributor.history_attribution(read.observations)
+    source = REQUIRED_SOURCE_FALLBACK if read.required_unread else REQUIRED_SOURCE_PROTECTION
+    return (
+        attributor.likely_culprits(attributor.history_attribution(read.observations)),
+        source,
     )
 
 
@@ -712,12 +733,12 @@ def main(argv: list[str] | None = None) -> int:
         min_streak=args.min_streak,
     )
     fix = candidate_fix_pr(args.repo, verdict.tests) if args.name_fix_pr else None
-    culprits = (
+    culprits, source = (
         membership_culprits(args.repo, args.history_since, args.history_limit)
         if args.name_fix_pr
-        else None
+        else (None, None)
     )
-    payload = signal(verdict, fix, culprits)
+    payload = signal(verdict, fix, culprits, source)
     _emit(payload, args.output or None)
     if args.fail_on_poisoned and payload["safe_to_pause_queue"]:
         return 1
