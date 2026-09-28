@@ -553,6 +553,11 @@ class BaseFailureTests(unittest.TestCase):
         other = self._r(1, "[Errno 2] No such file: /work/base/planning/other.md (0.11s)")
         self.assertFalse(lane.base_verdict(branch, other, "/work/branch", "/work/base")[0])
 
+    def test_a_shared_build_path_in_the_base_output_still_matches(self) -> None:
+        out = "ERROR: 2 duplicates\n  /work/branch/build/test/a x\n"
+        branch, base = self._r(1, out), self._r(1, out)
+        self.assertTrue(lane.base_verdict(branch, base, "/work/branch", "/work/base")[0])
+
     def _git(self, repo: pathlib.Path, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
                               text=True).stdout.strip()
@@ -608,6 +613,40 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 1, ""), 0)
         self.assertEqual(lane.ctest_verdict({"will_fail": True}, 0, ""), 1)
         self.assertEqual(lane.ctest_verdict({}, 2, ""), 2)
+
+    def test_build_paths_stay_absolute_for_a_base_rerun(self) -> None:
+        repo = pathlib.Path("/work/branch")
+        build = repo / "build"
+        entry = lane._entry_from_command(
+            "inv", ["/usr/bin/python3", "/work/branch/tools/inv.py", "--build-dir",
+                    "/work/branch/build"], {"WORKING_DIRECTORY": "/work/branch/build/test"},
+            repo, build)
+        # Checkout paths follow the run to the base; the build tree does not.
+        self.assertEqual(entry["argv"][1:], ["{repo}/tools/inv.py", "--build-dir", "/work/branch/build"])
+        self.assertEqual(entry["cwd"], "/work/branch/build/test")
+
+    def test_a_build_older_than_the_manifests_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "test" / "cmake").mkdir(parents=True)
+            (root / "build").mkdir()
+            manifest = root / "test" / "cmake" / "x_tests.cmake"
+            stamp = root / "build" / "CTestTestfile.cmake"
+            manifest.write_text("")
+            stamp.write_text("")
+            os.utime(manifest, (1000, 1000))
+            os.utime(stamp, (2000, 2000))
+            self.assertFalse(lane.build_is_stale(root / "build", root))
+            os.utime(manifest, (3000, 3000))
+            self.assertTrue(lane.build_is_stale(root / "build", root))
+
+    def test_a_missing_working_directory_is_a_failure_not_a_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = lane.run([{"name": "x", "raw": True, "argv": ["true"],
+                                 "cwd": "{repo}/absent"}],
+                               repo=pathlib.Path(tmp), stream=io.StringIO())
+        self.assertEqual(results[0]["returncode"], 1)
+        self.assertIn("working directory does not exist", results[0]["output"])
 
     def _tree(self, root: pathlib.Path) -> None:
         (root / "test" / "cmake").mkdir(parents=True)

@@ -247,6 +247,10 @@ def _run_one(
             if entry.get("cwd"):
                 cwd = expand(entry["cwd"], repo)
                 scratch = None
+                if not pathlib.Path(cwd).is_dir():
+                    result.update(returncode=1, seconds=0.0,
+                                  output=f"working directory does not exist: {cwd}\n")
+                    break
             else:
                 # ctest runs these from a directory of the build tree; the lane
                 # has none, so each attempt gets an empty directory rather than
@@ -475,17 +479,35 @@ _CMAKE_SOURCE_VARS = ("CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR", "PULP_ROOT_DIR")
 _CMAKE_ARG = re.compile(r'"((?:[^"\\]|\\.)*)"|([^\s()"]+)')
 
 
+def _pin_build(value: str, build: pathlib.Path | None) -> str:
+    """Keep build-tree paths absolute, so a merge-base re-run reads the same build.
+
+    The base checkout has no build of its own; a registration that reads the
+    configured inventory must see the one the branch run saw, or every such
+    failure would differ on the base for a reason the branch does not share.
+    """
+    if build is None:
+        return value
+    return value.replace(str(build), "\0BUILD\0")
+
+
+def _unpin_build(value: str, build: pathlib.Path | None) -> str:
+    return value.replace("\0BUILD\0", str(build)) if build is not None else value
+
+
 def _to_repo(value: str, repo: pathlib.Path) -> str:
     root = str(repo)
     return value.replace(root, "{repo}") if root in value else value
 
 
 def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
-                        repo: pathlib.Path) -> dict[str, Any]:
-    entry: dict[str, Any] = {"name": name, "raw": True,
-                             "argv": [_to_repo(a, repo) for a in argv]}
+                        repo: pathlib.Path, build: pathlib.Path | None = None) -> dict[str, Any]:
+    def portable(value: str) -> str:
+        return _unpin_build(_to_repo(_pin_build(value, build), repo), build)
+
+    entry: dict[str, Any] = {"name": name, "raw": True, "argv": [portable(a) for a in argv]}
     if props.get("WORKING_DIRECTORY"):
-        entry["cwd"] = _to_repo(str(props["WORKING_DIRECTORY"]), repo)
+        entry["cwd"] = portable(str(props["WORKING_DIRECTORY"]))
     if props.get("TIMEOUT"):
         entry["timeout"] = float(props["TIMEOUT"])
     if props.get("PASS_REGULAR_EXPRESSION"):
@@ -505,6 +527,16 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
     return entry
 
 
+def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
+    """A configured build older than any test manifest registers an old tier."""
+    stamp = build / "CTestTestfile.cmake"
+    if not stamp.is_file():
+        return False
+    configured = stamp.stat().st_mtime
+    manifests = [repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
+    return any(m.is_file() and m.stat().st_mtime > configured for m in manifests)
+
+
 def ctest_label_entries_from_build(
     label: str, build_dir: pathlib.Path, repo: pathlib.Path = REPO_ROOT, ctest: str = "ctest",
 ) -> list[dict[str, Any]]:
@@ -518,7 +550,7 @@ def ctest_label_entries_from_build(
         props = {p["name"]: p["value"] for p in test.get("properties", [])}
         if label not in (props.get("LABELS") or []) or not test.get("command"):
             continue
-        entries.append(_entry_from_command(test["name"], test["command"], props, repo))
+        entries.append(_entry_from_command(test["name"], test["command"], props, repo, build_dir))
     return entries
 
 
@@ -684,8 +716,11 @@ def failing_test_names(output: str) -> set[str]:
 _TIMINGS = re.compile(r"\d+(?:\.\d+)?\s*(?:s|sec|seconds|ms)\b")
 
 
-def _normalized_failure(output: str, root: str) -> str:
-    text = (output or "").replace(root, "<repo>") if root else (output or "")
+def _normalized_failure(output: str, *roots: str) -> str:
+    text = output or ""
+    for root in roots:
+        if root:
+            text = text.replace(root, "<repo>")
     return _TIMINGS.sub("<t>", text).strip()
 
 
@@ -710,8 +745,9 @@ def base_verdict(branch: dict[str, Any], base: dict[str, Any] | None,
     if not branch_names:
         if base_names or not branch.get("output"):
             return False, "its failing tests could not be named, so they cannot be compared"
+        # The base run can print the branch's root too: a build tree is shared.
         if (_normalized_failure(branch["output"], branch_root)
-                == _normalized_failure(base.get("output", ""), base_root)):
+                == _normalized_failure(base.get("output", ""), base_root, branch_root)):
             return True, "fails with the same output on the base"
         return False, "its failing tests could not be named and its output differs on the base"
     new = sorted(branch_names - base_names)
@@ -1029,12 +1065,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         if args.ctest_label:
             build = args.build_dir
-            if build and (build / "CTestTestfile.cmake").is_file():
+            stale = build is not None and build_is_stale(build)
+            if stale:
+                print(f"source-selftests: {build} was configured before the test manifests "
+                      "last changed; reading the members from the manifests instead", flush=True)
+            if build and not stale and (build / "CTestTestfile.cmake").is_file():
                 entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())
                 origin = f"the configured build {build}"
             else:
                 entries, not_checked = ctest_label_entries_from_source(args.ctest_label)
-                origin = "the CMake manifests (no configured build)"
+                origin = "the CMake manifests"
                 for name, why in sorted(not_checked.items()):
                     print(f"source-selftests: NOT CHECKED locally: {name} ({why})", flush=True)
             print(f"source-selftests: {len(entries)} {args.ctest_label} member(s) from {origin}",

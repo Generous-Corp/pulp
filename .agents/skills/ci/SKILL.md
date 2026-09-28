@@ -668,7 +668,12 @@ consequences worth knowing before you debug:
   directory its source names; that is how `wide-non-native-selftest`, which
   reads every `test/**/*.cmake` and runs only in the merge group, is picked for
   a `test/cmake` change. Host-specific suites (`rack-plugin-loads`) are in
-  `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED.
+  `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
+  the test manifests last changed is treated as stale and the tier is read from
+  the manifests instead, and a merge-base re-run keeps build-tree paths pointed
+  at the branch's build (the base checkout has none), so an inventory check that
+  fails on a local build's options (examples ON duplicates `ctest-unique-names`)
+  is labelled pre-existing rather than blamed on the branch.
 
 ### A Python test that imports what the gate VM lacks fails only in the merge group
 
