@@ -20,21 +20,14 @@ import { fileURLToPath } from "node:url";
 export const CORES_PER_BROWSER = 2;
 export const MEMORY_MB_PER_BROWSER = 2048;
 
-function positiveInteger(value) {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 // The cores the suite may use: the tartci guest's lease when it publishes one,
-// otherwise what Node reports for this process. Under ctest the suite shares
-// the machine with other tests and holds only the slots its registration
-// reserves (PULP_BROWSER_CAPTURE_RESERVED_CORES), so that reservation caps the
-// machine's count: sizing to the whole VM would start browsers on cores other
-// tests are using.
+// otherwise what Node reports for this process.
 export function availableCores(env = process.env, available = os.availableParallelism()) {
-  const machine = positiveInteger(env.TARTCI_GUEST_CORES) ?? available;
-  const reserved = positiveInteger(env.PULP_BROWSER_CAPTURE_RESERVED_CORES);
-  return reserved === undefined ? machine : Math.min(machine, reserved);
+  const guest = Number.parseInt(env.TARTCI_GUEST_CORES ?? "", 10);
+  if (Number.isInteger(guest) && guest > 0) {
+    return guest;
+  }
+  return available;
 }
 
 // The guest's declared memory lease, or undefined when none is declared.
