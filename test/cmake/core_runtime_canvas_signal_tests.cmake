@@ -586,6 +586,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Dawn-free configuration/lifecycle coverage for the public convolution route.
+# These cases stop before provider creation, so malformed configuration and
+# fail-closed behavior remain testable on every CPU-only builder.
+pulp_add_test_suite(pulp-test-gpu-convolution-reverb-contract
+    SOURCES test_gpu_convolution_reverb_contract.cpp
+    GROUP pulp-test-group-core-gpu-audio-private)
+
 # Dawn-free private contract for P2's explicit algorithmic lead, typed
 # fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
 # does not expose or link raw provider handles.
