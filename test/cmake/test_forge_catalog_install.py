@@ -2,10 +2,12 @@
 """Exercise the real catalog install graph with a small controlled exporter."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 parser = argparse.ArgumentParser()
@@ -140,6 +142,17 @@ add_subdirectory(embedded-pulp)
         # A changed producer executable must invalidate its generated catalog.
         with (self.source / 'exporter.cpp').open('a') as f:
             f.write('\n// revised producer\n')
+        # CMake's file-level dependency checks use filesystem mtimes.  The
+        # exporter rebuild and the generated catalog can otherwise land in the
+        # same timestamp tick on fast filesystems, making this invalidation
+        # assertion flaky.  Move the producer into the future instead of
+        # sleeping and make the dependency edge unambiguous.
+        future_mtime = time.time() + 2.0
+        os.utime(self.source / 'exporter.cpp', (future_mtime, future_mtime))
+        # Keep the installed destination older than the regenerated output so
+        # CMake's install step cannot retain the previous JSON on a filesystem
+        # with coarse timestamp ordering.
+        os.utime(self.installed, (0, 0))
         self.install()
         self.assertEqual(json.loads(self.installed.read_text()), updated)
         self.command(ctest)
