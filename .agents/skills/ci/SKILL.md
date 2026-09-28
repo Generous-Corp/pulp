@@ -608,6 +608,24 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+### A PR head also runs the tests its own diff reaches, and that step gates
+
+Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate
+minutes plus every batch-mate they ejected) were a PR's OWN test failing in the
+queue instead of on its head: `pulp-browser-capture-node-unit` (#8912),
+`ios-compile-gate-legs` (#8966), `wide-non-native-selftest` (#8963) and others.
+`Test what this pull request reaches` (build.yml, after the fast tier) runs
+`tools/ci/pr_head_affected_tests.py`: `pulp affected`'s projection of the
+base→head diff, never its `all` fallback, nothing for a docs/skills/workflow-only
+diff, plus two path families the build graph cannot see (`tools/cmake/**` → the
+`cmake-*` fixtures; the wide tier's manifest, classifier or any `test/` CMake
+registration → `wide-non-native-selftest`). Budget: ten minutes of batches, the
+rest listed as skipped. Replayed on 20 clean PRs it selected a median of 1.5
+tests (max ~155 test-seconds); a red here is the PR's own test, so fix it on the
+branch. The selection needs `Configure` to write the codemodel query; if a
+future configure loses it, the step reports `no CMake codemodel reply` and
+selects nothing, so check the annotation's `mode` before trusting a green.
+
 ### Only a ready-to-land PR head issues a receipt
 
 A pull-request head's gate is build + `pr-fast`. The full suite also runs on
