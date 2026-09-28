@@ -1844,6 +1844,17 @@ Two traps when running these by hand:
 `PULP_SKIP_PREQUEUE_GUARDS=1` demotes the pair. A skip is not a pass: both still
 run as ctests on the required gate.
 
+## A PR you opened with `shipyard pr` already carries its title, body and attribution
+
+Shipyard 0.221.1 and later build the title and body from every non-merge
+commit in `origin/main..HEAD`, oldest first, skipping version-bump commits. The
+body is never empty, and a later `feat` outranks a `fix` in the title. Pulp's
+`.shipyard/config.toml` sets `[pr.body] attribution`, so the Claude Code line is
+appended once by Shipyard. Do not PATCH it in afterwards, or it appears twice.
+An older Shipyard took both from the tip commit only: a tip commit with no body
+gave an empty body, and a tip merge of main gave a "Merge remote-tracking branch"
+title. If you see either, check `shipyard --version` before editing the PR.
+
 ## A PR you opened with `shipyard pr` is not automatically code-reviewed
 
 Codex's automatic review fires on PR open only for PRs whose author is a GitHub
