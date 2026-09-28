@@ -206,3 +206,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_mac_native_child_cursor.mm
         LIBRARIES pulp::view)
 endif()
+
+if(APPLE AND NOT PULP_IOS)
+    # AppKit sends no -mouseMoved: while a right or middle button is held, so a
+    # host that re-resolves the cursor only there freezes it for the whole
+    # press. These pin that the held-button drag and release re-resolve the
+    # cursor under the pointer, and dispatch nothing else, in every host class.
+    pulp_add_test_suite(pulp-test-mac-held-button-cursor GROUP pulp-test-group-mac-view
+        SOURCES test_mac_held_button_cursor.mm
+        LIBRARIES pulp::view)
+endif()

@@ -1165,14 +1165,12 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
         pulp::view::MouseEvent cme;
         cme.position = {pt.x, pt.y};
         cme.is_down = false;
-        // Gate to this window's root so the canvas overlay's cursor affordance
-        // is not driven by moves inside a secondary window.
-        inspector_cursor =
-            pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
+        // Gated to this window's root: a secondary window's moves never drive it.
+        inspector_cursor = pulp::view::View::call_inspector_cursor_hook(cme, self.rootView);
     }
     if (inspector_cursor >= 0)
         return static_cast<pulp::view::View::CursorStyle>(inspector_cursor);
-    if (auto* target = self.rootView->hit_test(pt)) return target->cursor();
+    if (auto* target = pulp::view::hover_target_at(*self.rootView, pt)) return target->cursor();
     return std::nullopt;
 }
 
@@ -1183,12 +1181,9 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 // hover-set cursor used to survive only while a button was held.
 // An attached native child (a WKWebView, a hosted editor) is not in the Pulp
 // View tree and picks its own cursor, but this view's tracking area is not
-// occluded by subviews — so -mouseMoved:/-cursorUpdate: still arrive over it.
-// Publishing a Pulp-tree answer there would set the arrow on every button-less
-// move and wipe the child's choice; the cursor would then appear to change only
-// once a button went down, because the drag path publishes the captured cursor
-// and no -mouseMoved: arrives mid-drag. Record ownership and leave the cursor
-// to AppKit.
+// occluded by subviews, so -mouseMoved:/-cursorUpdate: still arrive over it.
+// Publishing a Pulp-tree answer there would wipe the child's choice on every
+// button-less move. Record ownership and leave the cursor to AppKit.
 - (BOOL)noteNativeChildOwnsEvent:(NSEvent*)event {
     _pointerOverNativeChild = pulp::view::mac_geometry::native_child_owns_window_point(
         self, event.locationInWindow) ? YES : NO;
@@ -1206,11 +1201,16 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
     _hoverCursor.note_published(*style);
 }
 
+// A held right or middle button suppresses -mouseMoved:, so resolve like the cursor
+// pass: a context menu that press opened shows its own cursor. Dispatches nothing.
+- (void)rightMouseDragged:(NSEvent*)e { [self cursorUpdate:e]; [super rightMouseDragged:e]; }
+- (void)rightMouseUp:(NSEvent*)e { [self cursorUpdate:e]; [super rightMouseUp:e]; }
+- (void)otherMouseDragged:(NSEvent*)e { [self cursorUpdate:e]; [super otherMouseDragged:e]; }
+- (void)otherMouseUp:(NSEvent*)e { [self cursorUpdate:e]; [super otherMouseUp:e]; }
+
 // Re-resolve the cursor at the LAST KNOWN pointer position and push it only
-// when it changed. Driven from the frame path, so a layout pass that slides a
-// different view under a pointer that never moved still updates the cursor —
-// AppKit re-asks on pointer motion only and would otherwise show the stale one
-// until the next move or click.
+// when it changed, from the frame path: AppKit re-asks on pointer motion only,
+// so content sliding under a still pointer would otherwise keep a stale cursor.
 - (void)refreshHoverCursor {
     if (!self.rootView || !_hoverCursor.has_pointer()) return;
     if (_pointerOverNativeChild) return;

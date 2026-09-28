@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260928-hover-resolves-inside-open-overlay",
+  "kind": "change",
+  "created_at": "2026-09-28T11:50:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A pointer hover now resolves through the root's open overlay stack in the same top-down order a press already does, so an open popover that reaches outside the view it is mounted in shows its own cursor, receives the pointermove, and takes the hover state instead of the content it paints over. The retained-ui-kernel touch is confined to deliver_hover_move in pointer_dispatch.cpp, which asks the new read-only hover_target_at verb (declared beside route_press_to_active_overlay in overlay_dismissal.hpp) for its target and falls back to the unchanged tree hit test when no open overlay contains the point. A hover never dismisses; press routing, dismissal, paint, and layout are unchanged. The overlay stack and its routing verbs are Pulp's own popover/dropdown model with no counterpart framework behavior to backport, so this is recorded pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-overlay-routing"
+  ],
+  "disposition": "pulp-only"
+}

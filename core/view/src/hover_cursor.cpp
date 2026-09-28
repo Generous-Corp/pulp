@@ -1,9 +1,11 @@
 #include <pulp/view/hover_cursor.hpp>
 
+#include <pulp/view/overlay_dismissal.hpp>
+
 namespace pulp::view {
 
 View::CursorStyle hover_cursor_at(View& root, Point p) {
-    View* target = root.hit_test(p);
+    View* target = hover_target_at(root, p);
     return target ? target->cursor() : View::CursorStyle::default_;
 }
 
