@@ -6212,6 +6212,20 @@ or add it to unrelated tests. Prefer this over an exclude — it keeps the test
 enabled everywhere. (Adding a shared `RESOURCE_LOCK` does NOT fix it:
 serializing the audio tests among themselves still leaves unrelated tests
 starving the RT thread.)
+starving the RT thread.)
+
+**Scheduling classes live in ONE module: `tools/scripts/ctest_scheduling_policy.py`.**
+Weighted `PROCESSORS 8` suites, `browser`-locked Chrome tests, and long tests
+that carry a `COST` and at most four slots are listed there. Two checks import
+it: `test_ci_throughput_workflows.py` reads the manifests' source (runs in
+`workflow-lint`, which is NOT a required check, so a PR can merge with it red),
+and `ctest-scheduling-contract` reads a configured build on the gate. Change a
+test's `PROCESSORS` / `RUN_SERIAL` / lock / `COST` by moving its name between
+classes in that module, never by editing only one check's expectations. Before
+landing a scheduling change, look at `workflow-lint` on the PR as well as the
+required contexts. A full-width reservation (`PROCESSORS` >= ctest `-j`, or
+`RUN_SERIAL`) can only start once every other test has finished, so on the
+gate it ran at the end, alone: keep it for suites that truly need the whole VM.
 
 The required `macos` context comes directly from the native macOS matrix child
 on pull-request, Shipyard workflow-dispatch, and merge-group runs. It therefore
