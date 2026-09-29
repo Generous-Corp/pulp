@@ -1,0 +1,105 @@
+{
+  "id": "signal-freeze-hold-recall-and-mask-source-stages",
+  "title": "Spectral freeze recall and source stages ahead of the spectral mask",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "56ec7b90-d998-41df-b438-b2d3bb2725d2",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+    "core/signal/include/pulp/signal/freeze_hold.hpp",
+    "test/test_spectral_mask_processor.cpp",
+    "test/test_freeze_hold.cpp",
+    "docs/status/sequencer-exposure/rows/signal-freeze-hold-recall-and-mask-source-stages.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+      "needles": [
+        "void set_pre_mask_stage(PreMaskStage* stage) noexcept",
+        "void set_wet_source_stage(WetSourceStage* stage) noexcept"
+      ]
+    },
+    {
+      "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
+      "needles": [
+        "bool stage_restore(const Snapshot& in,",
+        "void clear_history() {",
+        "void set_capture_seconds(double seconds) {"
+      ]
+    },
+    {
+      "path": "test/test_spectral_mask_processor.cpp",
+      "needles": [
+        "SpectralMaskProcessor applies the live mask after a held pre-mask source",
+        "SpectralMaskProcessor wet-source stage feeds the wet path only"
+      ]
+    },
+    {
+      "path": "test/test_freeze_hold.cpp",
+      "needles": [
+        "FreezeHold re-freeze after release holds only post-release frames",
+        "FreezeHold snapshot restores the same held output"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "Pulp::signal installs both headers. SpectralMaskProcessor accepts non-owning time-domain wet-source and frame-domain pre-mask stages, and FreezeHold adds the fresh-capture release rule, clear_history, seconds-based timing with a runtime hold length, the held-state pipeline, and snapshot/stage_restore recall. All are in-process audio-owner primitives with allocation-free audio paths.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+          "needles": [
+            "void set_pre_mask_stage(PreMaskStage* stage) noexcept"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
+          "needles": [
+            "bool stage_restore(const Snapshot& in,"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "Freeze and mask source stages are streaming audio-owner primitives composed inside a processor; they add no offline Timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The primitives are consumed by processors and add no MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No Product A control surface is added; a product exposes its own Freeze and hold-length parameters and drives these primitives from its audio thread."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The installed capability manifest describes signal.spectral-mask-processor with its optional source stages; freeze_hold.hpp is recorded in the public-surface ledger as reviewed infrastructure with no capability key of its own.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "signal.spectral-mask-processor",
+            "frame-domain pre-mask source stages"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
