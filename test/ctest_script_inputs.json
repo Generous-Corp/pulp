@@ -1273,6 +1273,13 @@
    ],
    "kind": "python"
   },
+  "git-stdin-pipe-deadlock-selftest": {
+   "entry": "tools/scripts/test_git_stdin_pipe_deadlock.py",
+   "inputs": [
+    "tools/scripts/test_git_stdin_pipe_deadlock.py"
+   ],
+   "kind": "python"
+  },
   "golden-regression-selftest": {
    "entry": "tools/import-validation/golden_regression.py",
    "inputs": [
@@ -2879,6 +2886,8 @@
    "entry": "tools/ci/test_pr_head_affected_tests.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
@@ -2894,7 +2903,9 @@
     "tools/scripts/affected_targets.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
@@ -4371,12 +4382,16 @@
    "entry": "tools/ci/source_selftests.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/motion/visual/requirements.lock",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
@@ -4386,6 +4401,8 @@
    "inputs": [
     ".githooks/pre-push",
     ".github/workflows/build.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/cmake/design_import_tool_cli_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
@@ -4394,7 +4411,9 @@
     "tools/ci/test_source_selftests.py",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/test_ci_throughput_workflows.py",
     "tools/scripts/test_generated_version_bump_check.py"
