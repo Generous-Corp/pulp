@@ -190,16 +190,28 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // another sibling just painted.
     //
     // HTML <canvas> semantics give every canvas its own backing store,
-    // so clearRect on canvas A cannot affect canvas B. To match that,
-    // wrap each CanvasWidget's replay in `save_layer()` covering the
-    // local bounds. Inside the layer, kClear zeros only the layer's
-    // texels; the matching `restore()` blends the layer back into the
-    // parent surface using the default SrcOver, which is what the HTML
-    // spec demands. Skip the layer when bounds are degenerate so we
-    // don't open a zero-sized offscreen.
+    // so clearRect on canvas A cannot affect canvas B, and a non-source-over
+    // composite operation (lighter, multiply, destination-out, ...) blends
+    // against this canvas's own pixels, never the parent's. When the stream
+    // contains such a command (needs_backdrop_isolation()), wrap the replay
+    // in `save_layer()` over the local bounds: inside the layer those
+    // commands see only this canvas, and the matching `restore()` blends the
+    // layer back with SrcOver, as the spec demands.
+    //
+    // Every other stream is source-over throughout, and source-over is
+    // associative: drawing it straight onto the parent gives the same pixels
+    // as drawing it into a transparent layer and compositing that. The layer
+    // is then pure cost - a full-bounds offscreen allocated, cleared and
+    // composited every paint, per canvas - so those streams get a plain
+    // save() plus the same bounds clip the layer would have imposed. Native
+    // painters, native GPU textures and shader effects keep the layer; their
+    // content is not visible to the scan.
+    //
+    // Skip both when bounds are degenerate so we don't open a zero-sized
+    // offscreen.
     const int saved_depth = canvas.save_count();
     const auto& widget_bounds = bounds();
-    const bool open_layer = (widget_bounds.width > 0.0f && widget_bounds.height > 0.0f);
+    const bool has_extent = (widget_bounds.width > 0.0f && widget_bounds.height > 0.0f);
     // Curated named GPU post-effect (Forge scripted UIs): when an effect is
     // active, open the SAME per-canvas layer through the shader-effect path so
     // the whole canvas content is post-processed at restore — no extra layer,
@@ -208,14 +220,21 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // skipped and save/restore stays balanced.
     const bool has_shader_effect =
         !shader_effect_name_.empty() && shader_effect_name_ != "none";
-    if (open_layer) {
+    const bool needs_layer = has_shader_effect ||
+                             commands->needs_backdrop_isolation ||
+                             content_mode_ == ContentMode::native_painter ||
+                             static_cast<bool>(native_gpu_texture_provider_);
+    if (has_extent) {
         if (has_shader_effect) {
             canvas.save_layer_with_shader_effect(
                 0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
                 shader_effect_name_, shader_effect_intensity_);
-        } else {
+        } else if (needs_layer) {
             canvas.save_layer(0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
                               /*opacity=*/1.0f, /*blur_radius=*/0.0f);
+        } else {
+            canvas.save();
+            canvas.clip_rect(0.0f, 0.0f, widget_bounds.width, widget_bounds.height);
         }
     }
 

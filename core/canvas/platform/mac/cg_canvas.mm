@@ -68,15 +68,20 @@ void CoreGraphicsCanvas::release_path() {
 
 void CoreGraphicsCanvas::save() {
     CGContextSaveGState(ctx_);
+    save_is_layer_.push_back(false);
     ++save_depth_;
 }
+// A transparency layer is ended by the restore() that matches its
+// save_layer(), never by an inner plain save's restore. Ending it early
+// composites a partial layer and leaves the remaining draws outside it.
 void CoreGraphicsCanvas::restore() {
-    if (in_transparency_layer_ > 0) {
-        CGContextEndTransparencyLayer(ctx_);
-        --in_transparency_layer_;
+    if (save_depth_ <= 0) return;
+    if (!save_is_layer_.empty()) {
+        if (save_is_layer_.back()) CGContextEndTransparencyLayer(ctx_);
+        save_is_layer_.pop_back();
     }
     CGContextRestoreGState(ctx_);
-    if (save_depth_ > 0) --save_depth_;
+    --save_depth_;
 }
 
 // Pop GState frames repeatedly until depth matches `target`.
@@ -87,14 +92,7 @@ void CoreGraphicsCanvas::restore() {
 // paint scope where it would silently corrupt subsequent siblings.
 void CoreGraphicsCanvas::restore_to_count(int target) {
     if (target < 0) target = 0;
-    while (save_depth_ > target) {
-        if (in_transparency_layer_ > 0) {
-            CGContextEndTransparencyLayer(ctx_);
-            --in_transparency_layer_;
-        }
-        CGContextRestoreGState(ctx_);
-        --save_depth_;
-    }
+    while (save_depth_ > target) restore();
 }
 
 void CoreGraphicsCanvas::translate(float x, float y) {
@@ -567,7 +565,8 @@ void CoreGraphicsCanvas::save_layer(float x, float y, float w, float h,
     CGContextSaveGState(ctx_);
     CGContextSetAlpha(ctx_, opacity);
     CGContextBeginTransparencyLayer(ctx_, nullptr);
-    ++in_transparency_layer_;
+    save_is_layer_.push_back(true);
+    ++save_depth_;
 }
 
 void CoreGraphicsCanvas::set_font(const std::string& family, float size) {
