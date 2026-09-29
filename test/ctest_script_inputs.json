@@ -258,6 +258,7 @@
   "binary-identity-shadow-selftest": {
    "entry": "tools/ci/test_binary_identity_shadow.py",
    "inputs": [
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "tools/ci/binary_identity_shadow.py",
     "tools/ci/test_binary_identity_shadow.py",
@@ -2964,12 +2965,12 @@
    "kind": "python"
   },
   "prepush-queue-rebase-hint": {
-   "kind": "python",
    "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
    "inputs": [
     "tools/scripts/prepush_queue_rebase_hint.py",
     "tools/scripts/test_prepush_queue_rebase_hint.py"
-   ]
+   ],
+   "kind": "python"
   },
   "prepush-refresh-push": {
    "entry": "tools/scripts/test_refresh_push_check.py",
@@ -4426,6 +4427,7 @@
    "entry": "tools/ci/test_source_selftests.py",
    "inputs": [
     ".githooks/pre-push",
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
