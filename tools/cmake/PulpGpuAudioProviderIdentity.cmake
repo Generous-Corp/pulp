@@ -42,10 +42,10 @@ function(pulp_gpu_audio_configure_provider_identity target)
             _pulp_gpu_audio_asset_sha256)
     endif()
 
-    # Unknown preserves the provider header/proc agreement check without
-    # claiming manifest authentication. A concrete revision enables the exact
-    # manifest-bound comparison.
-    set(_pulp_gpu_audio_expected_dawn_sha "unknown")
+    # Non-exact builds deliberately carry no expected Dawn revision. A
+    # concrete revision is emitted only after the manifest-bound exact-provider
+    # comparison succeeds.
+    set(_pulp_gpu_audio_expected_dawn_sha "")
     if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         list(GET SKIA_INCLUDE_DIRS 0 _pulp_gpu_audio_skia_include_root)
         set(_pulp_gpu_audio_dawn_header
