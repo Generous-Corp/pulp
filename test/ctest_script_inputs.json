@@ -997,6 +997,14 @@
    ],
    "kind": "python"
   },
+  "drift-fast-selftest": {
+   "entry": "tools/ci/test_drift_fast.py",
+   "inputs": [
+    "tools/ci/drift_fast.py",
+    "tools/ci/test_drift_fast.py"
+   ],
+   "kind": "python"
+  },
   "dsp-provenance-audit": {
    "entry": "tools/scripts/dsp_provenance_audit.py",
    "inputs": [
@@ -4908,6 +4916,7 @@
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
     "tools/ci/source_selftests.py",
+    "tools/ci/test_drift_fast.py",
     "tools/ci/test_source_selftests.py",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",
