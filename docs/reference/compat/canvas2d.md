@@ -126,6 +126,27 @@ would land ahead of the buffered points and silently reorder the path.
 `tools/scripts/check_canvas_path_flush.py` (ctest `canvas-path-flush-lint`)
 enforces that for every bridge-emitting method in the shim.
 
+## Cached groups (Pulp extension)
+
+`ctx.pulpCachedGroup(key, drawFn)` is not part of Canvas2D; the `pulp` prefix
+marks it as an extension. It draws static content once and replays it by
+reference: while `key` stays valid the call is a single
+`canvasReplayGroup(canvasId, key)` bridge call and `drawFn` does not run.
+`ctx.pulpInvalidateGroup(key)` drops one group, and `ctx.pulpInvalidateGroup()`
+drops every group on the canvas; resizing the canvas and creating its context
+drop them too.
+
+The native side stores the group's commands, not its pixels, and replays them
+in place, inside an implicit `save()`/`restore()` and under the transform in
+effect at the replay. Output is therefore identical to calling `drawFn`
+directly, including composite operations inside the group and after it, on
+the Skia and CoreGraphics backends. Nothing the group sets leaks out: a
+`restore()` inside the group cannot pop state saved outside it, and saves it
+leaves open close with it. The cached content is a function of the key, so a
+group must set every style it depends on inside `drawFn` or be invalidated
+when its inputs change. A group inside a group that is being recorded is drawn
+directly into the outer one.
+
 ## Drawing state across save() and restore()
 
 `restore()` reverts the whole Canvas2D drawing state — fill and stroke style,
