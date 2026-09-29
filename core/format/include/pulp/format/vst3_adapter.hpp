@@ -578,9 +578,10 @@ private:
     // be called from process(), and neither may be called from inside a
     // host-initiated call (setActive / getLatencySamples / getTailSamples /
     // getState): hosts invoke those while holding their own processing lock,
-    // and a host that services restartComponent synchronously (JUCE resets the
-    // component on kReloadComponent, retaking that same non-recursive lock)
-    // deadlocks if the plug-in calls back into it re-entrantly.
+    // and a host that services restartComponent synchronously (deactivating
+    // and reactivating the component on kReloadComponent, retaking that same
+    // non-recursive lock) deadlocks if the plug-in calls back into it
+    // re-entrantly.
     //
     // Delivery therefore only happens at a main-thread safe point outside any
     // host call: (a) the paced self-rescheduling poll tick while active, and

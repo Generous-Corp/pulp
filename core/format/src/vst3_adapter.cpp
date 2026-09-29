@@ -1446,9 +1446,10 @@ void PulpVst3Processor::deliver_pending_dirty() {
 }
 
 void PulpVst3Processor::deliver_pending_host_notifications() {
-    // A host may call back into the plug-in from inside restartComponent (JUCE
-    // resets the component on kReloadComponent, re-querying latency on
-    // kLatencyChanged). Those nested entrypoints must not deliver again.
+    // A host may call back into the plug-in from inside restartComponent (a
+    // synchronous deactivate/reactivate on kReloadComponent, a latency
+    // re-query on kLatencyChanged). Those nested entrypoints must not deliver
+    // again.
     if (delivering_host_notifications_)
         return;
     delivering_host_notifications_ = true;
