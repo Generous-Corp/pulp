@@ -345,7 +345,27 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             output=Path(self.temp.name) / "downloaded.json",
             entry_pr=None,
             workflow_path=".github/workflows/build.yml",
+            ruleset=str(self.ruleset_path()),
         )
+
+    def ruleset_path(self, contexts=("macos", "Enforce version & skill sync")) -> Path:
+        path = Path(self.temp.name) / "main-protection.json"
+        path.write_text(json.dumps({"rules": [{"type": "required_status_checks", "parameters": {
+            "required_status_checks": [{"context": c} for c in contexts]}}]}), encoding="utf-8")
+        return path
+
+    def green_jobs(self, extra=()):
+        """The artifact run's jobs: a green macos job that issued and published,
+        plus whatever advisory jobs a test adds."""
+        macos = {"name": "macos", "conclusion": "success", "steps": [
+            {"name": receipt.ISSUE_STEP, "conclusion": "success"},
+            {"name": receipt.PUBLISH_STEP, "conclusion": "success"}]}
+        return {"jobs": [macos, *extra]}
+
+    def green_checks(self, overrides=None):
+        runs = {"macos": "success", "Enforce version & skill sync": "success"}
+        runs.update(overrides or {})
+        return {"check_runs": [{"name": n, "conclusion": c, "completed_at": "2026-09-28T00:00:00Z"} for n, c in runs.items()]}
 
     def test_download_requires_one_authenticated_exact_run_artifact(self) -> None:
         issued = receipt.issue(self.issue_args())
@@ -375,7 +395,7 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         opener = mock.MagicMock()
         opener.open.return_value = response
         with mock.patch.object(receipt.urllib.request, "build_opener", return_value=opener), mock.patch.object(
-            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, run]
+            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, run, self.green_jobs(), self.green_checks()]
         ):
             authority = receipt.download(self.download_args())
         self.assertEqual(authority, {"run_id": "42", "artifact_id": "7"})
@@ -411,12 +431,14 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         opener.open.return_value = response
         return issued, artifact, run, pr, opener
 
-    def _download_by_commit(self, artifact, run, pulls, opener, entry_pr=9001):
+    def _download_by_commit(self, artifact, run, pulls, opener, entry_pr=9001, jobs=None, checks=None):
         args = self.download_args()
         args.entry_pr = entry_pr
         args.workflow_path = ".github/workflows/build.yml"
         with mock.patch.object(receipt.urllib.request, "build_opener", return_value=opener), mock.patch.object(
-            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, run, pulls]
+            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, run,
+                                               jobs if jobs is not None else self.green_jobs(),
+                                               checks if checks is not None else self.green_checks(), pulls]
         ):
             return receipt.download(args)
 
@@ -439,7 +461,7 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             ("no PR on the sha", run, [], 9001, "0 pull requests"),
             ("closed PR", run, [closed], 9001, "not open"),
             ("head_sha mismatch", run, [moved_head], 9001, "head is not the run's head"),
-            ("different workflow file", dict(run, path=".github/workflows/other.yml"), [pr], 9001, "not from .github/workflows/build.yml"),
+            ("different workflow file", dict(run, path=".github/workflows/other.yml"), [pr], 9001, "workflow path is '.github/workflows/other.yml'"),
             ("entry mismatch", run, [pr], 9002, "not the merge-group entry"),
             ("no entry named", run, [pr], None, "no merge-group entry named"),
         ]
@@ -447,17 +469,53 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             with self.subTest(label):
                 with self.assertRaisesRegex(receipt.ReceiptError, needle):
                     self._download_by_commit(artifact, run_variant, pulls, opener, entry_pr=entry)
-        # A failed run never reaches the commit lookup: the shared preamble refuses first.
-        with self.subTest("failed run"):
-            with self.assertRaisesRegex(receipt.ReceiptError, "not the exact successful pull request"):
-                self._download_by_commit(artifact, dict(run, conclusion="failure"), [pr], opener)
+        # A red macos JOB refuses before the commit lookup, whatever the run-level conclusion says.
+        with self.subTest("failed macos job"):
+            red = self.green_jobs(); red["jobs"][0]["conclusion"] = "failure"
+            with self.assertRaisesRegex(receipt.ReceiptError, "job 'macos' concluded 'failure'"):
+                self._download_by_commit(artifact, dict(run, conclusion="failure"), [pr], opener, jobs=red)
+
+    def test_job_level_verdict_and_required_contexts(self) -> None:
+        """The receipt certifies the target's job, not the run: an advisory
+        Linux red is accepted; a red REQUIRED context refuses and is named; a
+        red or step-less macos job refuses; per-field preamble reasons name
+        the field."""
+        issued, artifact, run, pr, opener = self._commit_pull_fixture()
+        linux_red = self.green_jobs(extra=[{"name": "Linux (x64) [github-hosted]", "conclusion": "failure", "steps": []}])
+        with self.subTest("advisory Linux red, run-level failure: accepted"):
+            authority = self._download_by_commit(artifact, dict(run, conclusion="failure"), [pr], opener, jobs=linux_red)
+            self.assertEqual(authority["run_id"], "42")
+        with self.subTest("red required non-macos context refuses and names it"):
+            _, artifact2, run2, pr2, opener2 = self._commit_pull_fixture()
+            with self.assertRaisesRegex(receipt.ReceiptError, r"required context 'Enforce version & skill sync' concluded 'failure'"):
+                self._download_by_commit(artifact2, run2, [pr2], opener2,
+                                         checks=self.green_checks({"Enforce version & skill sync": "failure"}))
+        with self.subTest("required context with no check-run refuses"):
+            _, artifact3, run3, pr3, opener3 = self._commit_pull_fixture()
+            with self.assertRaisesRegex(receipt.ReceiptError, r"required context 'Enforce version & skill sync' has no check-run"):
+                self._download_by_commit(artifact3, run3, [pr3], opener3, checks={"check_runs": [{"name": "macos", "conclusion": "success"}]})
+        with self.subTest("missing issue step refuses"):
+            _, artifact4, run4, pr4, opener4 = self._commit_pull_fixture()
+            no_issue = self.green_jobs(); no_issue["jobs"][0]["steps"] = [{"name": receipt.PUBLISH_STEP, "conclusion": "success"}]
+            with self.assertRaisesRegex(receipt.ReceiptError, r"step 'Issue exact protected-validation receipt' concluded None"):
+                self._download_by_commit(artifact4, run4, [pr4], opener4, jobs=no_issue)
+        with self.subTest("per-field preamble reasons"):
+            for field, variant, needle in (
+                ("name", dict(run, name="Other"), "workflow name is 'Other'"),
+                ("event", dict(run, event="push"), "event is 'push'"),
+                ("head", dict(run, head_sha="0" * 40), "head_sha is not the merge-group head"),
+                ("path", dict(run, path=".github/workflows/other.yml"), "workflow path is"),
+            ):
+                _, a5, _r, p5, o5 = self._commit_pull_fixture()
+                with self.assertRaisesRegex(receipt.ReceiptError, needle, msg=field):
+                    self._download_by_commit(a5, variant, [p5], o5)
 
     def test_listed_pull_request_must_be_the_merge_group_entry_when_named(self) -> None:
         issued, artifact, run, pr, opener = self._commit_pull_fixture()
         listed = dict(run, pull_requests=[{"number": 9001, "head": {"sha": self.head}, "base": {"sha": self.base}}])
         args = self.download_args(); args.entry_pr = 9002; args.workflow_path = ".github/workflows/build.yml"
         with mock.patch.object(receipt.urllib.request, "build_opener", return_value=opener), mock.patch.object(
-            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, listed]
+            receipt, "_api_json", side_effect=[{"artifacts": [artifact]}, listed, self.green_jobs(), self.green_checks()]
         ):
             with self.assertRaisesRegex(receipt.ReceiptError, "not the merge-group entry"):
                 receipt.download(args)

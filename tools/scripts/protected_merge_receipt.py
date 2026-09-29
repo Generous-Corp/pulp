@@ -593,6 +593,66 @@ def _api_json(opener, url: str, token: str) -> dict[str, Any]:
         return json.load(response)
 
 
+ISSUE_STEP = "Issue exact protected-validation receipt"
+PUBLISH_STEP = "Publish exact protected-validation receipt"
+GREEN_CONCLUSIONS = ("success", "skipped", "neutral")
+
+
+def _verify_issuing_job(opener, root: str, args: argparse.Namespace, run_id: str) -> None:
+    listing = _api_json(opener, f"{root}/repos/{args.repository}/actions/runs/{run_id}/jobs?per_page=100", args.token)
+    jobs = [j for j in listing.get("jobs", []) if j.get("name") == args.target]
+    if len(jobs) != 1:
+        raise ReceiptError(f"artifact run: {len(jobs)} jobs named {args.target!r}; need exactly one")
+    job = jobs[0]
+    if job.get("conclusion") != "success":
+        raise ReceiptError(f"artifact run: job {args.target!r} concluded {job.get('conclusion')!r}, not success")
+    steps = {s.get("name"): s.get("conclusion") for s in job.get("steps", [])}
+    for step in (ISSUE_STEP, PUBLISH_STEP):
+        if steps.get(step) != "success":
+            raise ReceiptError(f"artifact run: step {step!r} concluded {steps.get(step)!r} in job {args.target!r}")
+
+
+def required_contexts_from_ruleset(path: Path) -> tuple[str, ...]:
+    """Required status-check contexts, read the way required_gate_liveness.py does."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    contexts: list[str] = []
+    for rule in doc.get("rules", []):
+        if rule.get("type") != "required_status_checks":
+            continue
+        for check in rule.get("parameters", {}).get("required_status_checks", []):
+            context = check.get("context")
+            if context and context not in contexts:
+                contexts.append(context)
+    if not contexts:
+        raise ReceiptError(f"{path}: required-check contract is empty")
+    return tuple(contexts)
+
+
+def _verify_required_contexts(opener, root: str, args: argparse.Namespace) -> None:
+    """Every required context other than the receipt's own target must be green
+    on the head (latest check-run per context; skipped and neutral count as
+    green the way branch protection counts them). A red required context, or
+    one with no check-run at all, refuses and names the context."""
+    try:
+        required = required_contexts_from_ruleset(Path(args.ruleset))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReceiptError(f"required-check contract unreadable: {args.ruleset}") from error
+    listing = _api_json(opener, f"{root}/repos/{args.repository}/commits/{args.head_sha}/check-runs?per_page=100", args.token)
+    latest: dict[str, dict[str, Any]] = {}
+    for cr in listing.get("check_runs", []):
+        name = cr.get("name")
+        if name and (name not in latest or str(cr.get("completed_at") or "") >= str(latest[name].get("completed_at") or "")):
+            latest[name] = cr
+    for context in required:
+        if context == args.target:
+            continue
+        cr = latest.get(context)
+        if cr is None:
+            raise ReceiptError(f"required context {context!r} has no check-run on the head")
+        if cr.get("conclusion") not in GREEN_CONCLUSIONS:
+            raise ReceiptError(f"required context {context!r} concluded {cr.get('conclusion')!r} on the head")
+
+
 def _verify_run_by_commit_pull(opener, root: str, args: argparse.Namespace, run: dict[str, Any]) -> None:
     """Bind a run whose `pull_requests` is empty to exactly one pull request.
 
@@ -654,13 +714,23 @@ def download(args: argparse.Namespace) -> dict[str, Any]:
         args.token,
     )
     pulls = run.get("pull_requests")
-    if (
-        run.get("name") != args.workflow
-        or run.get("event") != "pull_request"
-        or run.get("conclusion") != "success"
-        or run.get("head_sha") != args.head_sha
-    ):
-        raise ReceiptError("artifact workflow run is not the exact successful pull request")
+    # Per-field reasons: a refusal must name the field that refused it, or the
+    # log cannot say why a receipt that exists was not reused.
+    if run.get("name") != args.workflow:
+        raise ReceiptError(f"artifact run: workflow name is {run.get('name')!r}, expected {args.workflow!r}")
+    if run.get("event") != "pull_request":
+        raise ReceiptError(f"artifact run: event is {run.get('event')!r}, expected 'pull_request'")
+    if run.get("head_sha") != args.head_sha:
+        raise ReceiptError("artifact run: head_sha is not the merge-group head")
+    if run.get("path") not in (None, args.workflow_path):
+        raise ReceiptError(f"artifact run: workflow path is {run.get('path')!r}, expected {args.workflow_path!r}")
+    # The receipt certifies ONE target's suite on this head, so it is that
+    # target's job that has to have passed and published, not the whole run:
+    # an advisory job (hosted Linux) turns the run-level conclusion red while
+    # the receipt is sound. Every REQUIRED context on the head must still be
+    # green, named individually, so a red required check never reuses.
+    _verify_issuing_job(opener, root, args, run_id)
+    _verify_required_contexts(opener, root, args)
     if isinstance(pulls, list) and pulls:
         if (
             len(pulls) != 1
@@ -759,6 +829,8 @@ def _parser() -> argparse.ArgumentParser:
                             "run whose pull_requests is empty (App-opened pull requests)")
     fetch.add_argument("--workflow-path", default=".github/workflows/build.yml",
                        help="workflow file the artifact's run must come from")
+    fetch.add_argument("--ruleset", default=".github/rulesets/main-protection.json",
+                       help="checked-in ruleset naming the required status-check contexts")
     return parser
 
 

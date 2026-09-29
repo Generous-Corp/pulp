@@ -1202,6 +1202,7 @@ jobs:
                     --token "$RECEIPT_TOKEN" --artifact-name "$artifact_name" \
                     --base-sha "$base" --head-sha "$head" \
                     ${entry_pr:+--entry-pr "$entry_pr"} \
+                    --ruleset "$GITHUB_WORKSPACE/.github/rulesets/main-protection.json" \
                     --output "$receipt_path" 2> "$verify_err"; then
                   cat "$verify_err" >&2
                   echo "::notice::receipt reuse unavailable for ${target}; full validation retained"

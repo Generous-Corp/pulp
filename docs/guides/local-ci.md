@@ -910,7 +910,12 @@ carries that head, its base is the protected base, the run is a successful
 `pull_request` run of `build.yml`, and the pull request number equals the
 merge-group entry parsed from the queue ref. Any other shape refuses with a
 `commit-pull lookup:` reason that the `shipyard-receipt-decision` annotation
-carries, so refusals caused by the binding are countable.
+carries, so refusals caused by the binding are countable. The verdict is
+per target: the receipt's own job (`macos`) must have concluded success with
+its issue and publish steps green, and every required context in
+`.github/rulesets/main-protection.json` must be green on the head; an
+advisory job's red (hosted Linux) does not refuse, a red required context
+does and is named.
 
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
