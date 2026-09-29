@@ -40,7 +40,7 @@ TRACKED_FILES = ("CLAUDE.md", "AGENTS.md")
 # headroom for the JSON envelope.
 CONTEXT_CAP_CHARS = 9000
 GIT_TIMEOUT_S = 2.0
-PULP_REMOTE = re.compile(r"(?:Generous-Corp|danielraffel)/pulp(?:\.git)?/?$")
+PULP_REMOTE = re.compile(r"(?:Generous-Corp|danielraffel)/pulp(?:\.git)?/?$", re.IGNORECASE)
 HEADING = re.compile(r"^(#{1,4})\s+(.*\S)\s*$")
 MAIN_REF = "refs/remotes/origin/main"
 

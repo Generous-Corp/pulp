@@ -24,15 +24,22 @@ with the Shipyard changed-surface families), plus these rules:
   * the extra time is capped: tests run in batches, no batch starts once the
     budget is spent, and every test that did not run is listed as skipped.
 
+A failing script-driven test is re-run from a checkout of the base; when every
+test it fails also fails there, main was already red and the failure is
+reported as PRE-EXISTING ON BASE instead of failing this pull request.
+Compiled tests are never exempted (their binary is this pull request's).
+
 Output: one `::notice title=pr-head-affected-tests::` JSON line
 (`pulp-pr-head-affected-tests/v1`) with the counts and minutes, then any
-failures. Exit 1 when a selected test failed, 0 otherwise (including when
-nothing was selected), 2 when an input could not be read.
+failures. Exit 1 when a selected test failed because of this pull request, 0
+otherwise (including when nothing was selected), 2 when an input could not be
+read.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -205,6 +212,53 @@ def run_budgeted(build: Path, tests: list[str], budget: float, jobs: int,
     return results
 
 
+def label_base_failures(build: Path, failed: list[str], base_ref: str) -> dict[str, tuple[bool, str]]:
+    """Which failures main already had: test name → (pre-existing, why).
+
+    Only a script-driven test can be judged: its script is re-run from a
+    checkout of the base, against the same build, with the source_selftests
+    lane's base re-run and verdict. A compiled test's binary comes from this
+    pull request's build, so running it "on the base" would compare the pull
+    request with itself; it stays a failure. So does a script test that passes
+    when re-run here (a flake is not evidence about the base).
+    """
+    sys.path.insert(0, str(REPO_ROOT / "tools" / "ci"))
+    try:
+        import source_selftests as lane
+    finally:
+        sys.path.pop(0)
+    out = subprocess.run(["ctest", "--test-dir", str(build), "-N", "--show-only=json-v1"],
+                         capture_output=True, text=True, check=True).stdout
+    entries = {}
+    for test in json.loads(out).get("tests", []):
+        if test.get("name") in failed and test.get("command"):
+            props = {p["name"]: p["value"] for p in test.get("properties", [])}
+            entries[test["name"]] = lane._entry_from_command(
+                test["name"], test["command"], props, REPO_ROOT, build)
+    verdicts: dict[str, tuple[bool, str]] = {}
+    scripts = []
+    for name in failed:
+        entry = entries.get(name)
+        executable = Path(entry["argv"][0]) if entry else None
+        if entry is None:
+            verdicts[name] = (False, "not in the ctest inventory")
+        elif executable is not None and executable.resolve().is_relative_to(build.resolve()):
+            verdicts[name] = (False, "a compiled test; its binary comes from this build")
+        elif not any("{repo}" in arg for arg in entry["argv"][1:]):
+            verdicts[name] = (False, "its command names no checkout file to take from the base")
+        else:
+            scripts.append(entry)
+    if scripts:
+        again = lane.run(scripts, stream=io.StringIO())
+        still = [r for r in again if r["returncode"] != 0]
+        for r in again:
+            if r["returncode"] == 0:
+                verdicts[r["name"]] = (False, "passed when re-run here; a flake, not the base")
+        if still:
+            verdicts.update(lane.rerun_on_base(still, scripts, base_ref))
+    return verdicts
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--build-dir", type=Path, required=True)
@@ -243,11 +297,29 @@ def main(argv: list[str] | None = None) -> int:
         chunk = args.chunk or max(8 * args.jobs, 16)
         results = run_budgeted(build, plan["tests"], args.budget_secs, args.jobs,
                                args.label_exclude, junit_dir, chunk)
+    pre_existing: list[str] = []
+    if results["failed"]:
+        try:
+            verdicts = label_base_failures(build, results["failed"], args.base)
+        except (subprocess.CalledProcessError, OSError, json.JSONDecodeError) as exc:
+            print(f"pr-head-affected-tests: could not re-run failures on the base ({exc}); "
+                  "they stay failures")
+            verdicts = {}
+        for test in results["failed"]:
+            on_base, why = verdicts.get(test, (False, "not re-run on the base"))
+            if on_base:
+                pre_existing.append(test)
+                print(f"::warning title=pr-head-affected-tests::PRE-EXISTING ON BASE: {test} fails "
+                      f"on the base too — not caused by this pull request ({why})")
+            else:
+                print(f"pr-head-affected-tests: {test}: {why}")
+        results["failed"] = [t for t in results["failed"] if t not in pre_existing]
     summary = {
         "schema": SCHEMA, "mode": plan["mode"], "reason": plan["reason"],
         "changed_files": plan["changed"], "families": plan["families"],
         "selected": len(plan["tests"]), "passed": len(results["passed"]),
-        "failed": len(results["failed"]), "skipped_for_budget": len(results["skipped"]),
+        "failed": len(results["failed"]), "pre_existing_on_base": len(pre_existing),
+        "skipped_for_budget": len(results["skipped"]),
         "excluded_or_absent": len(results["excluded_or_absent"]),
         "minutes": round(results["seconds"] / 60, 2), "budget_minutes": args.budget_secs / 60,
     }
