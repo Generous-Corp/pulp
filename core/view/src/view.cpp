@@ -307,6 +307,59 @@ void set_tracing_badge_visible(bool visible) {
     tracing_badge_visible_flag().store(visible, std::memory_order_relaxed);
 }
 
+namespace {
+// Each field is its own atomic so the paint path reads the placement without a
+// lock; a placement written mid-frame can mix old and new fields for that one
+// frame, which only moves a diagnostic pill.
+struct TracingBadgePlacementStore {
+    std::atomic<float> right{8.0f};
+    std::atomic<float> top{8.0f};
+    std::atomic<float> height{0.0f};
+    std::atomic<float> font_px{11.0f};
+};
+TracingBadgePlacementStore& tracing_badge_placement_store() {
+    static TracingBadgePlacementStore store;
+    return store;
+}
+}  // namespace
+
+void set_tracing_badge_placement(const TracingBadgePlacement& placement) {
+    auto& store = tracing_badge_placement_store();
+    store.right.store(placement.right, std::memory_order_relaxed);
+    store.top.store(placement.top, std::memory_order_relaxed);
+    store.height.store(placement.height, std::memory_order_relaxed);
+    store.font_px.store(placement.font_px, std::memory_order_relaxed);
+}
+
+TracingBadgePlacement tracing_badge_placement() {
+    auto& store = tracing_badge_placement_store();
+    TracingBadgePlacement placement;
+    placement.right = store.right.load(std::memory_order_relaxed);
+    placement.top = store.top.load(std::memory_order_relaxed);
+    placement.height = store.height.load(std::memory_order_relaxed);
+    placement.font_px = store.font_px.load(std::memory_order_relaxed);
+    return placement;
+}
+
+TracingBadgeLayout tracing_badge_layout(float root_width, float text_width,
+                                        float ascent, float descent,
+                                        const TracingBadgePlacement& placement) {
+    constexpr float kPadX = 8.0f;
+    constexpr float kPadY = 4.0f;
+    TracingBadgeLayout layout;
+    layout.pill_width = text_width + 2.0f * kPadX;
+    layout.pill_height = placement.height > 0.0f
+        ? placement.height : placement.font_px + 2.0f * kPadY;
+    layout.pill_x = root_width - layout.pill_width - placement.right;
+    layout.pill_y = placement.top;
+    layout.text_x = layout.pill_x + kPadX;
+    // Centre the ink: the line's ascent + descent sits in the middle of the
+    // pill, so the space above the ascent equals the space below the descent.
+    layout.baseline_y = layout.pill_y
+        + (layout.pill_height - (ascent + descent)) * 0.5f + ascent;
+    return layout;
+}
+
 // ── Subtree scene cache (FU-3) ───────────────────────────────────────────
 void View::set_subtree_cached(bool v) {
     if (subtree_cached_ == v) return;
