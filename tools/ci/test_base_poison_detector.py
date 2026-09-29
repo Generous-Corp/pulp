@@ -340,6 +340,198 @@ class BatchBaseShaTests(unittest.TestCase):
         self.assertEqual(bp._base_sha(run), "abc")
 
 
+EXECUTED_STEPS = [
+    {"name": "Set up job", "conclusion": "success"},
+    {"name": "Build", "conclusion": "success"},
+    {"name": "Test (non-Windows)", "conclusion": "success"},
+]
+FAILED_TEST_STEPS = [
+    {"name": "Set up job", "conclusion": "success"},
+    {"name": "Build", "conclusion": "success"},
+    {"name": "Test (non-Windows)", "conclusion": "failure"},
+]
+REQUIRED = ("macos", "Enforce version & skill sync")
+TIP = "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1"
+
+
+def job(name: str, conclusion: str, steps: list[dict] | None = None) -> dict:
+    return {"name": name, "conclusion": conclusion, "steps": steps or EXECUTED_STEPS}
+
+
+# The shape of merge_group run 36523704313 (main 6e95d5ca, 2026-09-29): the
+# required `macos` job passed, advisory hosted Linux failed, and the RUN
+# concluded failure because of Linux.
+GREEN_GATE_RED_ADVISORY = [
+    job("macos", "success"),
+    job("Linux (x64) [github-hosted]", "failure"),
+    job("macos-pr-unused", "skipped", []),
+]
+
+
+class RequiredGateTests(unittest.TestCase):
+    def test_advisory_red_does_not_redden_a_green_gate(self) -> None:
+        self.assertEqual(
+            bp.judge_gate(GREEN_GATE_RED_ADVISORY, REQUIRED), (bp.EXECUTED, "success")
+        )
+
+    def test_a_red_gate_is_red(self) -> None:
+        jobs = [job("macos", "failure", FAILED_TEST_STEPS), job("Linux (x64) [github-hosted]", "success")]
+        self.assertEqual(bp.judge_gate(jobs, REQUIRED), (bp.EXECUTED, "failure"))
+
+    def test_a_running_gate_is_not_evidence(self) -> None:
+        """The queue lands on the required gate alone, so the tip's run is often
+        still in progress; a job with no conclusion yet is pending, not green."""
+        execution, conclusion = bp.judge_gate([job("macos", "")], REQUIRED)
+        self.assertEqual(conclusion, "")
+
+    def test_advisory_legs_are_never_gate_jobs(self) -> None:
+        names = [j["name"] for j in bp.gate_jobs(GREEN_GATE_RED_ADVISORY, REQUIRED)]
+        self.assertEqual(names, ["macos"])
+
+    def test_the_descriptive_macos_leg_is_the_fallback_gate(self) -> None:
+        jobs = [job("macOS (ARM64) [local]", "failure", FAILED_TEST_STEPS), job("Linux (x64) [github-hosted]", "success")]
+        self.assertEqual(bp.judge_gate(jobs, REQUIRED), (bp.EXECUTED, "failure"))
+
+    def test_required_contexts_come_from_the_shipyard_config(self) -> None:
+        self.assertIn("macos", bp.required_contexts())
+        self.assertNotIn("linux", bp.required_contexts())
+
+    def test_an_unreadable_config_falls_back_to_macos(self) -> None:
+        missing = pathlib.Path(__file__).with_name("no-such-config.toml")
+        self.assertEqual(bp.required_contexts(missing), bp.FALLBACK_REQUIRED_CONTEXTS)
+
+
+class FakeGitHub:
+    """Serves `gh api` reads from fixtures keyed by path prefix."""
+
+    def __init__(self, tip_runs: list[dict], jobs: dict[str, list[dict]],
+                 failing: tuple[str, ...] = ()) -> None:
+        self.tip_runs = tip_runs
+        self.jobs = jobs
+        self.failing = failing
+        self.paths: list[str] = []
+
+    def gh(self, path: str, jq: str | None = None) -> str | None:
+        self.paths.append(path)
+        if path.endswith("/commits/main"):
+            return f"{TIP}\ttree-{TIP}"
+        if "/actions/workflows/build.yml/runs?" in path:
+            if f"head_sha={TIP}" in path:
+                return json.dumps({"workflow_runs": self.tip_runs})
+            return json.dumps({"workflow_runs": []})
+        match = re.search(r"/actions/runs/(\d+)/jobs", path)
+        if match:
+            return json.dumps({"jobs": self.jobs.get(match.group(1), [])})
+        return None
+
+
+def tip_run(run_id: str, conclusion: str = "failure", status: str = "completed") -> dict:
+    return {
+        "id": int(run_id),
+        "head_sha": TIP,
+        "head_branch": f"gh-readonly-queue/main/pr-9039-{'1' * 40}",
+        "status": status,
+        "conclusion": conclusion,
+        "created_at": "2026-09-29T04:59:00Z",
+    }
+
+
+class MainTipObservationTests(unittest.TestCase):
+    """main's tip is judged by its own merge_group run's required gate."""
+
+    def _verdict(self, fake: FakeGitHub) -> bp.Verdict:
+        from unittest import mock
+
+        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
+            bp, "artifact_failing_tests", return_value=fake.failing
+        ):
+            main, tip = bp.observe_main("o/r", required=REQUIRED)
+            return bp.detect(main, [], tip_sha=tip)
+
+    def test_green_gate_with_red_advisory_is_healthy(self) -> None:
+        fake = FakeGitHub([tip_run("36523704313")],
+                          {"36523704313": GREEN_GATE_RED_ADVISORY})
+        verdict = self._verdict(fake)
+        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
+        self.assertEqual(verdict.main_run_id, "36523704313")
+        self.assertEqual(verdict.main_head_sha, TIP)
+        self.assertEqual(verdict.main_evidence_source, bp.SOURCE_HEAD_SHA)
+        self.assertIn(TIP[:12], verdict.reason)
+
+    def test_green_gate_reads_healthy_while_the_run_is_still_in_progress(self) -> None:
+        fake = FakeGitHub([tip_run("7", conclusion=None, status="in_progress")],
+                          {"7": [job("macos", "success"), job("Linux (x64) [github-hosted]", None)]})
+        self.assertEqual(self._verdict(fake).status, bp.STATUS_HEALTHY)
+
+    def test_red_gate_is_red_and_names_its_tests(self) -> None:
+        fake = FakeGitHub([tip_run("8")],
+                          {"8": [job("macos", "failure", FAILED_TEST_STEPS),
+                                 job("Linux (x64) [github-hosted]", "success")]},
+                          failing=("rack-generator-safety",))
+        verdict = self._verdict(fake)
+        self.assertEqual(verdict.status, bp.STATUS_SUSPECTED)
+        self.assertEqual(verdict.proof, bp.PROOF_MAIN_ONLY)
+        self.assertTrue(verdict.main_observed)
+        self.assertEqual(verdict.main_conclusion, "failure")
+        self.assertEqual(verdict.tests, ("rack-generator-safety",))
+
+    def test_red_gate_plus_a_streak_is_poisoned(self) -> None:
+        from unittest import mock
+
+        fake = FakeGitHub([tip_run("8")], {"8": [job("macos", "failure", FAILED_TEST_STEPS)]},
+                          failing=SHARED)
+        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
+            bp, "artifact_failing_tests", return_value=fake.failing
+        ):
+            main, tip = bp.observe_main("o/r", required=REQUIRED)
+        verdict = bp.detect(main, LIVE_STREAK, tip_sha=tip)
+        self.assertEqual(verdict.status, bp.STATUS_POISONED)
+        self.assertEqual(verdict.tests, tuple(sorted(SHARED)))
+
+    def test_no_merge_group_run_for_the_tip_is_unproven(self) -> None:
+        """An admin or direct push lands no merge group: nothing tested the tip."""
+        verdict = self._verdict(FakeGitHub([], {}))
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
+        self.assertFalse(verdict.main_observed)
+        self.assertEqual(verdict.main_head_sha, TIP)
+        self.assertIn(TIP[:12], verdict.reason)
+        self.assertIn("no merge_group run", verdict.reason)
+
+    def test_a_receipt_reuse_green_on_the_tip_is_unproven(self) -> None:
+        fake = FakeGitHub([tip_run("9", conclusion="success")],
+                          {"9": [job("macos", "success", RECEIPT_REUSE_JOB)]})
+        verdict = self._verdict(fake)
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
+        self.assertEqual(verdict.main_run_id, "9")
+
+    def test_the_tip_is_looked_up_by_sha_on_merge_group(self) -> None:
+        fake = FakeGitHub([tip_run("10")], {"10": GREEN_GATE_RED_ADVISORY})
+        self._verdict(fake)
+        lookups = [p for p in fake.paths if f"head_sha={TIP}" in p]
+        self.assertTrue(lookups, fake.paths)
+        self.assertIn("event=merge_group", lookups[0])
+
+    def test_the_signal_carries_the_tip_sha(self) -> None:
+        fake = FakeGitHub([tip_run("11")], {"11": GREEN_GATE_RED_ADVISORY})
+        payload = bp.signal(self._verdict(fake))
+        self.assertEqual(payload["main_head_sha"], TIP)
+        self.assertEqual(payload["status"], bp.STATUS_HEALTHY)
+        self.assertEqual(payload["main_run_id"], "11")
+
+
+class BatchStreakGateTests(unittest.TestCase):
+    def test_a_batch_with_a_green_gate_breaks_the_streak(self) -> None:
+        """The old run-conclusion reading made every batch a failure because
+        advisory Linux failed, so the "streak" was a Linux artifact."""
+        from unittest import mock
+
+        with mock.patch.object(
+            bp, "_jobs", return_value=GREEN_GATE_RED_ADVISORY
+        ), mock.patch.object(bp, "artifact_failing_tests", return_value=()):
+            seen = bp.observe("o/r", tip_run("12", conclusion="failure"), "batch", REQUIRED)
+        self.assertTrue(seen.passed)
+
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 
 import queue_batch_attribute as attributor  # noqa: E402
@@ -429,11 +621,12 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("schedule:", self.detector_code)
         self.assertIn("cron:", self.detector_code)
 
-    def test_a_failed_merge_group_run_triggers_the_detector(self) -> None:
+    def test_every_completed_merge_group_run_triggers_the_detector(self) -> None:
         """The schedule is throttled to about one run in four hours, so the read
-        that catches a red base within a batch's lifetime is the one a failed
-        merge group triggers. The workflow name must be build.yml's own, or the
-        trigger silently never fires."""
+        that catches a red base within a batch's lifetime is the one a merge
+        group triggers -- and a GREEN one too, or a healthy tip is never
+        recorded and the last published verdict goes stale. The workflow name
+        must be build.yml's own, or the trigger silently never fires."""
         build_name = re.search(r"^name:\s*(.+?)\s*$", self.build, re.MULTILINE)
         self.assertIsNotNone(build_name)
         on = re.search(r"^on:\n((?:[ \t]+\S.*\n|[ \t]*\n)+)", self.detector_code,
@@ -447,7 +640,8 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIsNotNone(job_if, "the triage job has no folded if: guard")
         guard = job_if.group(1)
         self.assertIn("github.event.workflow_run.event == 'merge_group'", guard)
-        self.assertIn("github.event.workflow_run.conclusion == 'failure'", guard)
+        self.assertNotIn("workflow_run.conclusion", guard,
+                         "a green merge group must also record the tip's health")
         self.assertIn("github.event_name == 'workflow_run' &&", guard)
 
     def test_a_workflow_run_read_never_runs_the_triggering_code(self) -> None:
@@ -470,9 +664,9 @@ class WorkflowWiringTests(unittest.TestCase):
     def test_the_detector_group_is_shared_and_never_cancels_in_progress(self) -> None:
         """One at a time, and a superseded tick must lose nothing.
 
-        A per-sha group would let every merge start its own detector; keying on
-        the sha is exactly what makes build.yml's push lane lose an observation
-        when it is superseded, because the sha it pinned never comes again.
+        A per-sha group would let every merge start its own detector, and a
+        superseded read pinned to a sha loses its observation for good, because
+        that sha never comes again.
         """
         self.assertIn("group: main-health-detector", self.detector_code)
         self.assertIn("cancel-in-progress: false", self.detector_code)
@@ -497,15 +691,16 @@ class WorkflowWiringTests(unittest.TestCase):
                 self.assertNotIn(token, joined, joined)
 
     def test_build_yml_push_still_shares_one_concurrency_domain(self) -> None:
-        """Pins the fact the detector's design is a response to.
+        """Pins why no push-run job may wait on a self-hosted runner.
 
         Scoped to the top-level `concurrency:` block, not the file: the tokens
         it checks appear six other times in build.yml, so a whole-file scan
         stayed green when the block's own push exemption was deleted.
 
-        If this stops holding, re-measure whether the push lane now carries an
-        observation and update the detector's docstring: the tree-identity route
-        would become a fallback rather than the primary source.
+        One push run holds main's group with cancel-in-progress false, so a job
+        queued for a runner nobody serves gets every later push run cancelled
+        while pending. If this stops holding, revisit the push-lane routing
+        test in tools/scripts/test_fork_pr_runner_routing.py.
         """
         match = re.search(
             r"^concurrency:\n((?:[ \t]+\S.*\n|[ \t]*\n)+)",
@@ -518,10 +713,14 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn("github.ref", block, block)
         self.assertIn("github.event_name != 'push'", block, block)
 
-    def test_observe_main_falls_back_past_the_push_lane(self) -> None:
-        """The detector must not depend on the lane measured to report nothing."""
-        source = pathlib.Path(bp.__file__).read_text(encoding="utf-8")
-        self.assertIn("observe_main_push_lane(repo, limit) or observe_main_by_tree", source)
+    def test_build_yml_push_carries_no_macos_leg_to_read(self) -> None:
+        """The detector reads the merge group on main's tip, not a push run.
+
+        If build.yml's push matrix gains a macOS leg again, re-decide whether
+        that lane is an observation this detector should read.
+        """
+        self.assertIn('if EVENT_NAME != "push":\n              include.append({\n'
+                      '                  "key": "macos"', self.build)
 
     def test_the_failing_test_source_is_the_artifact_not_the_job_log(self) -> None:
         """`ghapp api .../jobs/<id>/logs` refuses escape sequences and returns
