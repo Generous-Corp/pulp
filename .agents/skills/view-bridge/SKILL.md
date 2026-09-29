@@ -2444,6 +2444,67 @@ trace-analysis skill. `PULP_GPU_TIMING=1` turns on GPU render timing for a
 standalone window (it relaxes Dawn validation, so it is never on by default),
 and `PULP_AUDIO_DEVICE=null` lets that session run without an audio device.
 
+## Scripted Canvas2D editors: the frame cost is the bridge-call count
+
+A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→native
+`canvas*` call (measured on a 64-band analyzer editor: ~2.7 µs per call, and
+1,700–2,400 calls a frame). Cut calls, not pixels. Checklist:
+
+- **Measure by counting crossings from JS**, not from the recorded command
+  stream: wrap every `globalThis.canvas*` function with a counter (see
+  `test/test_canvas2d_call_budget.cpp`). `canvasPathPolyline` expands back into
+  `move_to`/`line_to` natively, so the stream cannot tell one batched call from
+  hundreds of per-point ones. `PULP_LOG_CANVAS_PAINT=1` gives the per-paint
+  command mix.
+- **`save()`/`restore()` are cheap now; do not avoid them.** The shim keeps its
+  record of what the native canvas holds (`_sent*`) across them — save()
+  snapshots it with the JS state and restore() puts both back — so unchanged
+  state is not re-sent after every restore. This is sound only because
+  `CanvasWidget`'s replay reverts the Canvas2D drawing state on restore() itself
+  (`core/view/src/canvas_replay_state.hpp`): SkiaCanvas's restore() reverts only
+  matrix and clip, and CoreGraphicsCanvas's reverts the gstate but keeps fill
+  and stroke colours in members, so no backend's own restore() gives Canvas2D
+  semantics. If you add a sticky setter command, give it a
+  `CanvasReplayState::slot_for` slot and a `_sent*` entry in
+  `_SENT_FIELDS`, or restore() will leak it on Skia.
+- **A draw command that sets state implicitly must update the record.**
+  `fill_text` sets the fill colour it carries and `stroke_rect` sets its own
+  line width (1 when the call carries none); the shim writes those values into
+  `_sentFillColor` / `_sentLineWidth`, and the replay notes them. A new such
+  command that skips either side draws with a stale colour after the next
+  cache hit.
+- **Many disjoint segments are one call.** Tick marks and grid lines drawn as
+  `moveTo`/`lineTo` pairs inside one `beginPath()` batch into a single
+  `canvasPathPolyline(id, coords, starts)`; the batch only flushes when another
+  method emits (every emitting method calls `_fp()` first — enforced by
+  `check_canvas_path_flush.py`) or at the 65536-coordinate cap. Stroking each
+  segment separately defeats this.
+- **A full-frame `clearRect` on a retained-frame canvas replaces the native
+  stream**, so it clears the `_sent*` record — including the copies held by
+  open save() snapshots.
+
+## Hover and colour commits in a materialized React editor are paint-only
+
+A materialized (captured-import) React editor re-applies Chromium-captured
+metadata after any commit that could move a captured box, and each such pass
+reads layout metrics that force a root layout. From @pulp/react runtime
+revision 2 (`packages/pulp-react/runtime-fingerprint.json`) a commit that only
+changes paint skips that pass and does not bump the mutation epoch:
+`PAINT_ONLY_KEYS` (background, border colours, shadows, cursor, ...), `onX`
+handlers, a `data-*` attribute no captured-state or runtime selector names, and
+`color`/`textColor`/`opacity`/`fill`/`stroke`. For those last five the importer
+runtime puts the captured value back on just that node and property where the
+capture owns the channel, so the end state matches a full pass. A typical
+button hover is then its own few React setters.
+
+What still costs a pass: any size/position/typography/text change, className
+or id changes, structural mutations, and an attribute or colour a selector
+names (`[data-open]`, `path[fill]`). Hover styling written as a `data-*`
+marker plus colour props is cheap; hover styling that swaps a className or
+nudges a padding is not. An editor built from a vendored runtime older than
+revision 2 gets none of this until its bundle is regenerated
+(`tools/import-validation/check_vendored_runtime.py` names what it lacks).
+
 ## Editor-INITIATED host resize (`Processor::request_editor_resize`)
 
 `on_view_resized` is the host→plugin direction (the DAW dragged the window,

@@ -939,6 +939,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
 
+    # The GPU acceptance verifiers' blob lookups feed `git hash-object
+    # --stdin-paths` from a file; a pipe-fed request can deadlock against git
+    # under macOS pipe-memory pressure. Driven against a git that answers
+    # before it reads, with the degraded pipe's polling behaviour.
+    add_test(NAME git-stdin-pipe-deadlock-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_git_stdin_pipe_deadlock.py")
+
     # The handoff ledger pins a revision, blob, and tree per referenced path, so
     # any commit touching a pinned path stales rows far from the edit. This
     # covers the generator that owns those identities and the drift check that

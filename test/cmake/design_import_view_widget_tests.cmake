@@ -106,6 +106,12 @@ pulp_add_test_suite(pulp-test-canvas2d-dommatrix GROUP pulp-test-group-design-im
 pulp_add_test_suite(pulp-test-canvas2d-shim-late GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
 
+# Canvas2D shim bridge-call budget: save/restore keeps the record of sent
+# state (with the replay reverting drawing state on Skia and CoreGraphics),
+# disjoint subpaths batch into one call, and the compact path mirror.
+pulp_add_test_suite(pulp-test-canvas2d-call-budget GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
+
 # SvgPathWidget tests
 pulp_add_test_suite(pulp-test-svg-path-widget GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)

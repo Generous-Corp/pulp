@@ -22,14 +22,16 @@ const BRIDGE_STUBS = ['createCol', 'setPosition', 'setLeft', 'setTop', 'setFlex'
 // execute verbatim in a sandbox, so these cases exercise the shipped source
 // rather than a re-implementation of it. Evaluating it (instead of parsing it)
 // is deliberate: a declaration placed in the wrong function body still parses.
-function evaluateEntry({ layoutBindings = [], registryNodes = [] }) {
+function evaluateEntry({ layoutBindings = [], registryNodes = [],
+                         textBindings = [], paintBindings = [], stateAtlas = [],
+                         bridge = {} }) {
   const source = buildMaterializedRuntimeEntry({
     capturedCssVariables: {}, presentationTime: 0, requestedState: '',
-    textBindings: [], layoutBindings, paintBindings: [],
+    textBindings, layoutBindings, paintBindings,
     runtimeDocumentAsset: null, sidecar: null, productPrelude: '',
     surfaceBackground: null, authoredLeft: 0, authoredTop: 0,
     authoredWidth: 100, authoredHeight: 100, authoredTransform: null,
-    visualAuthority: null, stateAtlas: [], visualWidth: 100, visualHeight: 100,
+    visualAuthority: null, stateAtlas, visualWidth: 100, visualHeight: 100,
     canvasBindings: [], behaviorCanvasAnchors: [],
     capturedPaintAuthorityAnchors: [],
   }).replace(/^import .*$/gm, '');
@@ -41,6 +43,7 @@ function evaluateEntry({ layoutBindings = [], registryNodes = [] }) {
     getLayoutBoxMetrics: () => null,
   };
   for (const name of BRIDGE_STUBS) sandbox[name] = () => {};
+  Object.assign(sandbox, bridge);
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(
@@ -456,4 +459,191 @@ test('a scoped pass does not overwrite the full-application diagnostics', () => 
   assert.equal(scoped.scoped, true);
   assert.equal(scoped.layout_applied, 3);
   assert.equal(scoped.layout_out_of_scope, 4);
+});
+
+// ── Per-pass path memo ──────────────────────────────────────────────────
+// Captured paths share prefixes: every control in a row walks through the
+// row. Counting reads of `_children` measures how often the pass filters a
+// node's children against the registry.
+function rowDocument(rows, onChildrenRead) {
+  const make = (tag, id, parent) => {
+    const kids = [];
+    const node = { tagName: tag.toUpperCase(), __pulpId: id, id,
+      parentElement: parent, textContent: '' };
+    Object.defineProperty(node, '_children', {
+      get() { onChildrenRead(); return kids; },
+    });
+    if (parent) parent.__kids.push(node);
+    Object.defineProperty(node, '__kids', { value: kids });
+    return node;
+  };
+  const root = make('div', 'root', null);
+  const nodes = [root];
+  const layout = [{ index: 0, tag: 'div', path: [{ index: 0, tag: 'div' }],
+    box: { left: 0, top: 0, width: 10, height: 10 } }];
+  for (let r = 0; r < rows; ++r) {
+    const row = make('div', `row${r}`, root);
+    nodes.push(row);
+    for (let c = 0; c < 4; ++c) {
+      nodes.push(make('span', `cell${r}-${c}`, row));
+      layout.push({ index: layout.length, tag: 'span',
+        path: [{ index: 0, tag: 'div' }, { index: r, tag: 'div' },
+          { index: c, tag: 'span' }],
+        box: { left: 0, top: 0, width: 10, height: 10 } });
+    }
+  }
+  return { nodes, layout };
+}
+
+test('a pass filters each node\'s children once, however many paths cross it',
+  () => {
+    let reads = 0;
+    const rows = 10;
+    const { nodes, layout } = rowDocument(rows, () => { ++reads; });
+    const sandbox = evaluateEntry({ registryNodes: nodes, layoutBindings: layout });
+    reads = 0;
+    const applied = sandbox.__pulpApplyMaterializedImportMetadata__();
+    // CONTROL: resolution still works, or zero reads would mean nothing ran.
+    assert.equal(applied, layout.length);
+    // root + 10 rows + 40 cells: each read once. Walking every path from the
+    // root re-filters the root and a row for each of the 41 bindings (~123).
+    assert.equal(reads, 1 + rows + rows * 4);
+  });
+
+test('the path memo lives for one pass, so a reparent resolves freshly', () => {
+  const { nodes, layout } = rowDocument(2, () => {});
+  const sandbox = evaluateEntry({ registryNodes: nodes, layoutBindings: layout });
+  const positions = [];
+  sandbox.setLeft = (id) => positions.push(id);
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  // Swap the two rows: paths now resolve to the other row's cells.
+  const root = nodes[0];
+  root.__kids.reverse();
+  positions.length = 0;
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  assert.equal(positions[1], 'cell1-0');
+  assert.equal(positions[5], 'cell0-0');
+});
+
+// ── Typography once per Label per pass ─────────────────────────────────
+function textDocument(duplicates) {
+  const root = { tagName: 'DIV', __pulpId: 'root', id: 'root', parentElement: null,
+    textContent: '' };
+  const label = { tagName: 'SPAN', __pulpId: 'l', id: 'l', parentElement: root,
+    textContent: 'Theme', _children: [] };
+  root._children = [label];
+  const binding = { text: 'Theme', path: [{ index: 0, tag: 'div' },
+    { index: 0, tag: 'span' }], boxes: [{ left: 0, top: 0, width: 5, height: 5 }],
+    basis: { width: 5, resolved_face: 'Mono', requested: { font_family: 'Mono',
+      font_size: 11, font_weight: 400, font_slant: 0, letter_spacing: 0 } } };
+  return { nodes: [root, label],
+    text: Array.from({ length: 1 + duplicates }, () => ({ ...binding })) };
+}
+
+test('applies a Label\'s face once per pass however many bindings reach it', () => {
+  const { nodes, text } = textDocument(56);
+  const fonts = [];
+  const lineBoxes = [];
+  const sandbox = evaluateEntry({ registryNodes: nodes, textBindings: text,
+    bridge: {
+      setCapturedLineBoxes: (id) => lineBoxes.push(id),
+      setFontFamily: (id, face) => fonts.push([id, face]),
+      setFontSize: () => {}, setFontWeight: () => {}, setFontStyle: () => {},
+      setLetterSpacing: () => {},
+    } });
+  fonts.length = 0;
+  lineBoxes.length = 0;
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  // CONTROL: every binding was still applied (57 line-box writes).
+  assert.equal(lineBoxes.length, 57);
+  assert.deepEqual(fonts, [['l', 'Mono']]);
+  // A second pass applies it again: the dedup is per pass, not forever.
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  assert.equal(fonts.length, 2);
+});
+
+test('a different face for the same Label in one pass is still applied', () => {
+  const { nodes, text } = textDocument(1);
+  text[1] = { ...text[1], basis: { ...text[1].basis,
+    requested: { ...text[1].basis.requested, font_size: 14 } } };
+  const sizes = [];
+  const sandbox = evaluateEntry({ registryNodes: nodes, textBindings: text,
+    bridge: { setCapturedLineBoxes: () => {}, setFontFamily: () => {},
+      setFontSize: (id, size) => sizes.push(size) } });
+  sizes.length = 0;
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  assert.deepEqual(sizes, [11, 14]);
+});
+
+// ── Captured paint ownership and per-node reconcile ─────────────────────
+function paintDocument() {
+  const root = { tagName: 'DIV', __pulpId: 'root', id: 'root', parentElement: null };
+  const icon = { tagName: 'PATH', __pulpId: 'icon', id: 'icon', parentElement: root,
+    _children: [] };
+  const plain = { tagName: 'PATH', __pulpId: 'plain', id: 'plain',
+    parentElement: root, _children: [] };
+  root._children = [icon, plain];
+  const paint = [{ index: 0, tag: 'path', path: [{ index: 0, tag: 'div' },
+    { index: 0, tag: 'path' }], paint: { opacity: 0.5, color: 'rgb(1, 1, 1)',
+    fill: 'rgb(2, 2, 2)', stroke: 'none', stroke_width: 1,
+    stroke_dasharray: 'none' } }];
+  return { nodes: [root, icon, plain], paint };
+}
+
+function paintRecorder() {
+  const writes = [];
+  const bridge = {};
+  for (const verb of ['setOpacity', 'setTextColor', 'setSvgFill', 'setSvgStroke',
+    'setSvgStrokeWidth']) bridge[verb] = (id, value) => writes.push([verb, id, value]);
+  return { writes, bridge };
+}
+
+test('reconciles only a captured channel whose React value differs', () => {
+  const { nodes, paint } = paintDocument();
+  const { writes, bridge } = paintRecorder();
+  const sandbox = evaluateEntry({ registryNodes: nodes, paintBindings: paint, bridge });
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  writes.length = 0;
+  const reconcile = sandbox.__pulpReconcileMaterializedPaint__;
+  assert.equal(reconcile('icon', { fill: '#fff', color: 'rgb(1, 1, 1)' }), 1);
+  assert.deepEqual(writes, [['setSvgFill', 'icon', 'rgb(2, 2, 2)']]);
+  // textColor and color land on one channel: written once.
+  writes.length = 0;
+  assert.equal(reconcile('icon', { color: '#f00', textColor: '#f00' }), 1);
+  // A node the capture does not own is left to React.
+  assert.equal(reconcile('plain', { fill: '#fff', opacity: 0 }), 0);
+  assert.equal(writes.length, 1);
+});
+
+test('a full pass forgets ownership the new metadata no longer carries', () => {
+  const { nodes, paint } = paintDocument();
+  const { writes, bridge } = paintRecorder();
+  const state = { id: 'bare', match: { selector: '[data-bare]' },
+    metadata: { layout_bindings: [], text_bindings: [], paint_bindings: [] } };
+  const sandbox = evaluateEntry({ registryNodes: nodes, paintBindings: paint,
+    stateAtlas: [state], bridge });
+  sandbox.__pulpApplyMaterializedImportMetadata__();
+  const reconcile = sandbox.__pulpReconcileMaterializedPaint__;
+  assert.equal(reconcile('icon', { fill: '#fff' }), 1);
+  nodes[1].getAttribute = (name) => name === 'data-bare' ? '' : null;
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 'bare');
+  writes.length = 0;
+  assert.equal(reconcile('icon', { fill: '#fff' }), 0);
+  assert.deepEqual(writes, []);
+});
+
+test('publishes every attribute a captured-state selector names up front', () => {
+  const states = ['[data-a="1"]', 'div[ data-b ] span', '#x.y'].map((selector, i) =>
+    ({ id: `s${i}`, match: { selector, ancestor: i === 0 ? '[aria-expanded]' : '' },
+      metadata: { layout_bindings: [], text_bindings: [], paint_bindings: [] } }));
+  // The last state matches, so resolution never asks about the others: their
+  // attributes are published only because they are recorded up front.
+  const matched = { tagName: 'DIV', __pulpId: 'x', id: 'x', className: 'y',
+    parentElement: null, _children: [], getAttribute: () => null };
+  const sandbox = evaluateEntry({ stateAtlas: states, registryNodes: [matched] });
+  assert.equal(sandbox.__pulpRefreshMaterializedState__(), 's2');
+  assert.deepEqual([...sandbox.__pulpMaterializedSelectorAttributes__].sort(),
+    ['aria-expanded', 'data-a', 'data-b']);
+  sandbox.__pulpFindMaterializedElement__('[data-late]');
+  assert.ok(sandbox.__pulpMaterializedSelectorAttributes__.has('data-late'));
 });

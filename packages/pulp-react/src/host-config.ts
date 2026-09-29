@@ -146,11 +146,13 @@ function markMaterializedTreeDirty(scopeId?: string | null): void {
     //
     // Every structural mutation and every non-paint-only prop change marks the
     // tree, and a captured-state selector matches on tag, id, class and
-    // attributes -- all of which are prop changes that land here. So a selector
-    // that found nothing at epoch N still finds nothing at epoch N, and the
-    // importer can skip re-scanning the whole registry for it. A paint-only
-    // commit, which is what a pointer drag emits by the hundred, does not bump
-    // the epoch and therefore does not invalidate that answer.
+    // attributes -- all of which are prop changes that land here. An attribute
+    // change is exempt only when no selector names that attribute (see
+    // isUnreadDataAttribute), which cannot alter any selector's answer. So a
+    // selector that found nothing at epoch N still finds nothing at epoch N,
+    // and the importer can skip re-scanning the whole registry for it. A
+    // paint-only commit, which is what a pointer drag emits by the hundred,
+    // does not bump the epoch and therefore does not invalidate that answer.
     materializedTreeEpoch += 1;
     (globalThis as unknown as Record<string, unknown>)
         .__pulpMaterializedTreeEpoch__ = materializedTreeEpoch;
@@ -726,11 +728,9 @@ function isFixedTextOnlyUpdate(type: Type, oldProps: Props, newProps: Props): bo
 ///
 /// A key qualifies only when BOTH hold: the native setter repaints without
 /// invalidating Yoga, AND no captured-import binding writes the same channel.
-/// `opacity` and `color` fail the second test — the metadata pass drives
-/// `setOpacity` and `setTextColor` itself, so suppressing the re-apply would
-/// leave React's value standing until some later structural commit put the
-/// captured one back. When in doubt, leave it out: the cost of omission is
-/// the status quo, the cost of a wrong entry is a stale layout or a flicker.
+/// Channels the metadata pass does write are CAPTURED_PAINT_CHANNEL_KEYS,
+/// handled separately below. When in doubt, leave it out: the cost of omission
+/// is the status quo, the cost of a wrong entry is a stale layout or a flicker.
 const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
     // Fill and background (never a border width, never a box size)
     'background', 'backgroundColor', 'backgroundGradient', 'backgroundImage',
@@ -748,6 +748,70 @@ const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
     'cursor', 'userSelect', 'pointerEvents',
 ]);
 
+/// Keys that repaint without moving a box but that the captured-metadata pass
+/// also writes (as `setOpacity`, `setTextColor`, `setSvgFill`, `setSvgStroke`)
+/// on the nodes whose paint the capture owns.
+///
+/// A change to one of these is paint-only when the importer runtime can put
+/// the captured value back for just that node and property
+/// (`__pulpReconcileMaterializedPaint__`, called from commitUpdate), and no
+/// captured-state selector names the matching attribute. Re-running the pass
+/// over the node's whole subtree to rewrite one colour -- and bumping the
+/// mutation epoch, which empties the importer's selector miss cache -- is what
+/// every hover that recoloured text used to cost.
+const CAPTURED_PAINT_CHANNEL_KEYS: ReadonlyMap<string, string> = new Map([
+    ['color', 'color'], ['textColor', 'color'], ['opacity', 'opacity'],
+    ['fill', 'fill'], ['stroke', 'stroke'],
+]);
+
+/// What a materialized importer runtime tells the host config about which
+/// prop changes it can observe. `selectorAttributes` is null when the runtime
+/// publishes no selector vocabulary.
+interface MaterializedReaders {
+    /// A metadata or captured-state hook is installed.
+    hooked: boolean;
+    /// Attribute names any captured-state or runtime selector has named.
+    selectorAttributes: ReadonlySet<string> | null;
+    /// The runtime can restore one captured paint property on one node.
+    reconcilesPaint: boolean;
+}
+
+function materializedReaders(): MaterializedReaders {
+    const host = globalThis as unknown as Record<string, unknown>;
+    const attributes = host.__pulpMaterializedSelectorAttributes__;
+    return {
+        hooked: typeof host.__pulpApplyMaterializedImportMetadata__ === 'function'
+            || typeof host.__pulpRefreshMaterializedState__ === 'function',
+        selectorAttributes: attributes instanceof Set
+            ? attributes as ReadonlySet<string> : null,
+        reconcilesPaint:
+            typeof host.__pulpReconcileMaterializedPaint__ === 'function',
+    };
+}
+
+/// A `data-*` attribute can reach captured metadata only through a selector:
+/// captured bindings resolve by tag and sibling index, never by attribute. So
+/// a change to one no selector names cannot move a binding or change which
+/// captured state matches. Without an importer runtime nothing can read it at
+/// all; with one that does not publish its selector vocabulary, assume it can.
+function isUnreadDataAttribute(key: string, readers: MaterializedReaders): boolean {
+    if (!key.startsWith('data-') || key.length <= 5) return false;
+    if (!readers.hooked) return true;
+    return readers.selectorAttributes !== null
+        && !readers.selectorAttributes.has(key);
+}
+
+/// See CAPTURED_PAINT_CHANNEL_KEYS. Without an importer runtime nothing owns
+/// these channels, so they are plain paint.
+function isReconcilablePaintChannel(key: string, readers: MaterializedReaders): boolean {
+    const attribute = CAPTURED_PAINT_CHANNEL_KEYS.get(key);
+    if (attribute === undefined) return false;
+    if (!readers.hooked) return true;
+    return readers.reconcilesPaint && readers.selectorAttributes !== null
+        && !readers.selectorAttributes.has(attribute)
+        && !readers.selectorAttributes.has('style');
+}
+
 /// True when every key a React commit changed is provably non-geometric.
 ///
 /// A pointer moving across a hover target rewrites a tint and a cursor, and
@@ -758,7 +822,9 @@ const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
 ///
 /// Whitelist, not blacklist: an unrecognised key means "assume geometric" and
 /// the caller falls through to the full re-apply. A key is only skipped when
-/// it appears in PAINT_ONLY_KEYS or is an `onX` event handler.
+/// it appears in PAINT_ONLY_KEYS, is an `onX` event handler, is a `data-*`
+/// attribute no selector reads, or is a captured paint channel the importer
+/// runtime can reconcile per node.
 ///
 /// Handlers are exempt because their payload is a function identity. React
 /// recreates every inline closure on each render, so a component that renders
@@ -768,15 +834,32 @@ const PAINT_ONLY_KEYS: ReadonlySet<string> = new Set([
 /// bridge; only the dirty mark is suppressed.
 function isPaintOnlyUpdate(oldProps: Props, newProps: Props): boolean {
     let changed = 0;
+    let readers: MaterializedReaders | null = null;
     const keys = new Set([...Object.keys(oldProps), ...Object.keys(newProps)]);
     for (const key of keys) {
         if (Object.is(oldProps[key], newProps[key])) continue;
-        if (!PAINT_ONLY_KEYS.has(key) && !isEventHandler(key)) return false;
+        if (!PAINT_ONLY_KEYS.has(key) && !isEventHandler(key)) {
+            readers ??= materializedReaders();
+            if (!isUnreadDataAttribute(key, readers)
+                && !isReconcilablePaintChannel(key, readers)) return false;
+        }
         changed += 1;
     }
     // A commit that changed nothing is not evidence that a repaint is safe;
     // let it take the ordinary path rather than silently suppressing work.
     return changed > 0;
+}
+
+function reconcileCapturedPaint(id: string, oldProps: Props, newProps: Props): void {
+    const reconcile = (globalThis as unknown as Record<string, unknown>)
+        .__pulpReconcileMaterializedPaint__;
+    if (typeof reconcile !== 'function') return;
+    let changes: Record<string, unknown> | null = null;
+    for (const key of CAPTURED_PAINT_CHANNEL_KEYS.keys()) {
+        if (Object.is(oldProps[key], newProps[key])) continue;
+        (changes ??= {})[key] = newProps[key];
+    }
+    if (changes) (reconcile as (id: string, c: unknown) => unknown)(id, changes);
 }
 
 // ── HostConfig ──────────────────────────────────────────────────────
@@ -1037,11 +1120,14 @@ export const PulpHostConfig: HostConfig<
     commitUpdate(instance, _updatePayload, type, oldProps, newProps, _internalHandle) {
         const oldN = normalizeHostProps(type, oldProps as Record<string, unknown>);
         const newN = normalizeHostProps(type, newProps as Record<string, unknown>);
-        if (!isFixedTextOnlyUpdate(type, oldN, newN)
-            && !isPaintOnlyUpdate(oldN, newN)) {
-            markMaterializedTreeDirty(instance.id);
-        }
+        const reapplies = !isFixedTextOnlyUpdate(type, oldN, newN)
+            && !isPaintOnlyUpdate(oldN, newN);
+        if (reapplies) markMaterializedTreeDirty(instance.id);
         applyChangedProps(instance, oldN, newN);
+        // A paint-only commit skipped the metadata pass. Where it overwrote a
+        // paint channel the capture owns on this node, let the importer put
+        // that one property back (after React's setter, as the pass would).
+        if (!reapplies) reconcileCapturedPaint(instance.id, oldN, newN);
         instance.props = { ...newN };
         if (instance._dom && typeof instance._dom === 'object') {
             syncDomSemanticProps(
