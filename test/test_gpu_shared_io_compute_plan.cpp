@@ -310,9 +310,8 @@ TEST_CASE("shared IO arena rejects invalid backing lifecycle facts",
         FakeProvider provider;
         provider.invalid_lifecycle = true;
         SharedIoArena arena;
-        CHECK_FALSE(arena.prepare(provider, {.slots = 1,
-                                             .input_bytes_per_slot = 16,
-                                             .output_bytes_per_slot = 16}));
+        CHECK_FALSE(arena.prepare(
+            provider, {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
     }
     {
         FakeProvider provider;
@@ -327,8 +326,7 @@ TEST_CASE("shared IO arena rejects invalid backing lifecycle facts",
     }
     {
         FakeProvider provider;
-        provider.storage_kind =
-            static_cast<SharedIoArenaProvider::StorageKind>(0xff);
+        provider.storage_kind = static_cast<SharedIoArenaProvider::StorageKind>(0xff);
         SharedIoArena arena;
         CHECK_FALSE(arena.prepare(provider, {.slots = 1,
                                              .input_bytes_per_slot = 16,
@@ -434,8 +432,7 @@ TEST_CASE("spectral result rejects short output and quarantines undersized provi
     std::uint64_t copied = 0;
     std::array<float, 5> short_output{};
     CHECK_FALSE(receive_shared_spectral_result(session, 2, failed,
-                                               std::span<float>(short_output).first(3), 4,
-                                               copied));
+                                               std::span<float>(short_output).first(3), 4, copied));
     CHECK_FALSE(failed);
     auto result = receive_shared_spectral_result(session, 2, failed, short_output, 5, copied);
     REQUIRE(result);
@@ -497,8 +494,7 @@ TEST_CASE("shared IO session retains ownership when release barrier fails",
     program->allow_release = true;
     SharedIoProgramSession session;
     REQUIRE(session.prepare({std::move(provider), std::move(program)},
-                            {.slots = 1, .input_bytes_per_slot = 16,
-                             .output_bytes_per_slot = 16}));
+                            {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
     control->allow_drain = false;
     CHECK_FALSE(session.release_to_owner());
     CHECK(session.prepared());

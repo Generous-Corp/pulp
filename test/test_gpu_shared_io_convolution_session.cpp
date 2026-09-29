@@ -274,8 +274,7 @@ TEST_CASE("shared convolution session trace captures admission and terminal iden
     auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
     REQUIRE(fixture.session.prepare(
         {std::move(owner), std::move(program)},
-        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2,
-                      .ir_length = 1},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2, .ir_length = 1},
          .slots = 2,
          .sample_rate = 48'000,
          .trace = {.success_stride = 1, .capture_admissions = true, .enabled = true}}));
