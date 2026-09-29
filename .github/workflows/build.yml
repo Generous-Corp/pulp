@@ -2435,7 +2435,14 @@ jobs:
           tar -czf "$SDK_ARTIFACT_TAR" -C "$SDK_ARTIFACT_DIR" .
           test -s "$SDK_ARTIFACT_TAR"
 
+      # The artifact service has reset the upload connection (ECONNRESET) on a
+      # gate VM after every test passed, failing the required check on a green
+      # build. The action's own retries all land inside the same outage, so a
+      # failed first attempt is retried once more after a pause. The retry
+      # carries no continue-on-error: downstream consumers rely on this exact
+      # artifact existing, so a job that could not publish it still fails.
       - name: Upload exact GPU-audio SDK (macOS ARM64)
+        id: gpu_audio_sdk_upload
         if: >-
           runner.os == 'macOS'
           && matrix.key == 'macos'
@@ -2443,6 +2450,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
@@ -2452,6 +2460,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+      - name: Wait before retrying the GPU-audio SDK upload
+        if: steps.gpu_audio_sdk_upload.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::GPU-audio SDK upload failed; retrying once in 90s"
+          sleep 90
+
+      - name: Upload exact GPU-audio SDK (macOS ARM64, retry)
+        if: steps.gpu_audio_sdk_upload.outcome == 'failure'
+        uses: actions/upload-artifact@v5
+        with:
+          name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
+          path: |
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          # A reset can land after the artifact record was created; replace
+          # that partial record rather than failing on the name conflict.
+          overwrite: true
 
       - name: Test A2T structural receipt issuer
         if: runner.os == 'macOS' && matrix.key == 'macos'
@@ -2540,7 +2570,10 @@ jobs:
         # because ctest.junit.xml is the machine-readable record of which tests
         # did NOT run, and a run where everything skipped is green: the report
         # is most needed on exactly the runs a failure-only upload discards.
+        # Diagnostics only: an artifact-service reset (ECONNRESET) here after
+        # every test passed must never turn a green gate red.
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: ctest-logs-${{ matrix.key }}
