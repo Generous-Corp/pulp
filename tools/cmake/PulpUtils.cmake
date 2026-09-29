@@ -1108,8 +1108,11 @@ function(pulp_add_plugin target)
                 "${_auv3_install_dir}/${PLUGIN_PLUGIN_NAME}.app"
             COMMAND /usr/bin/pluginkit -a
                 "${_auv3_install_dir}/${PLUGIN_PLUGIN_NAME}.app/Contents/PlugIns/${PLUGIN_PLUGIN_NAME}.appex"
-            COMMAND /usr/bin/killall -9 AudioComponentRegistrar
-                || ${CMAKE_COMMAND} -E echo "AudioComponentRegistrar not running; AU host launch will refresh the cache"
+            # The one step that needs shell syntax gets its own fixed `sh -c`
+            # string, so the install target can pass VERBATIM for the bundle
+            # paths above, which carry the plug-in name unescaped.
+            COMMAND /bin/sh -c
+                "/usr/bin/killall -9 AudioComponentRegistrar || echo 'AudioComponentRegistrar not running; AU host launch will refresh the cache'"
         )
     endif()
 
@@ -1118,6 +1121,7 @@ function(pulp_add_plugin target)
             ${_install_commands}
             DEPENDS ${_install_dependencies}
             COMMENT "Installing ${PLUGIN_PLUGIN_NAME} to system plugin folders"
+            VERBATIM
         )
         # Installed bundles must carry a current build-identity record.
         foreach(_pulp_build_info_format VST3 CLAP AU AAX)
@@ -1366,7 +1370,8 @@ function(pulp_add_reload_logic target)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "$<TARGET_FILE:${target}>"
                     "${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}"
-            COMMENT "Publishing reload logic to ${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}")
+            COMMENT "Publishing reload logic to ${RL_PUBLISH_DIR}/${RL_OUTPUT_NAME}${_rl_suffix}"
+            VERBATIM)
     endif()
 endfunction()
 

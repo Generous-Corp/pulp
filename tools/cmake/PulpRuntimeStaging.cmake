@@ -22,9 +22,10 @@
 #      which is exactly how the two ended up describable only by reading two
 #      files in the right order.
 #
-# So: `pulp_stage_runtime_dependencies()` is the entry point, it DELEGATES the
-# wgpu copy to whichever `target_copy_webgpu_binaries` is in scope, and it owns
-# everything else. It never redefines or shadows upstream's function.
+# So: `pulp_stage_runtime_dependencies()` is the entry point, it takes the wgpu
+# runtime location from whichever package resolved it (upstream's
+# WEBGPU_RUNTIME_LIB, or the `target_copy_webgpu_binaries` in scope), and it
+# owns everything else. It never redefines or shadows upstream's function.
 
 if(COMMAND pulp_stage_runtime_dependencies)
     return()
@@ -155,11 +156,23 @@ function(pulp_stage_runtime_dependencies target)
             "pulp_stage_runtime_dependencies(${target}): not a target")
     endif()
 
-    # The wgpu runtime copy. Delegated, never reimplemented: in a source build
-    # this is the upstream FetchContent package's function, and duplicating its
-    # WEBGPU_RUNTIME_LIB logic here would be a second source of truth that
-    # drifts on the next dependency bump.
-    if(COMMAND target_copy_webgpu_binaries)
+    # The wgpu runtime copy. The runtime's location is never re-derived here:
+    # in a source build the upstream FetchContent package resolves it and
+    # publishes it as the WEBGPU_RUNTIME_LIB cache entry, and its
+    # target_copy_webgpu_binaries() copies that file beside the target. That
+    # upstream copy is not VERBATIM, though, so a bundle directory carrying a
+    # parenthesis ("Spectr Freeze (dev).vst3") reaches the shell unescaped and
+    # fails the link step it is appended to. When upstream has published the
+    # path, issue the same copy with VERBATIM; otherwise (the installed SDK's
+    # own helper, or a static runtime whose helper is a no-op) delegate.
+    if(DEFINED CACHE{WEBGPU_RUNTIME_LIB} AND EXISTS "${WEBGPU_RUNTIME_LIB}")
+        add_custom_command(
+            TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${WEBGPU_RUNTIME_LIB}" "$<TARGET_FILE_DIR:${target}>"
+            COMMENT "Copying WebGPU runtime next to ${target}"
+            VERBATIM)
+    elseif(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target})
     endif()
 
@@ -237,7 +250,8 @@ function(pulp_stage_runtime_dependencies target)
             TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${_icudtl}" $<TARGET_FILE_DIR:${target}>
-            COMMENT "Staging Skia ICU runtime data next to ${target}")
+            COMMENT "Staging Skia ICU runtime data next to ${target}"
+            VERBATIM)
     endif()
 
     set_property(TARGET ${target} PROPERTY PULP_RUNTIME_DEPENDENCIES_STAGED TRUE)
