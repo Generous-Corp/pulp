@@ -2878,17 +2878,25 @@
   "pr-head-affected-tests-selftest": {
    "entry": "tools/ci/test_pr_head_affected_tests.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
+    "test/cmake/pr_fast_tests.cmake",
     "tools/ci/build_dir_lock.py",
+    "tools/ci/ctest_gate_args.py",
     "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/motion/visual/requirements.lock",
     "tools/scripts/affected_targets.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
-    "tools/scripts/run_changed_surface_tests.py"
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
   },
