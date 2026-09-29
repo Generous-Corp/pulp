@@ -208,6 +208,54 @@ the host never sees it either and the spacebar dies with no visible cause.
 Pinned headlessly by `test/test_plugin_key_routing.cpp`, where every case that
 asserts consumption has a sibling asserting the key it must hand back.
 
+### Plain-key global shortcuts: standalone only by default
+
+A script `keydown` listener that calls `preventDefault()` has CONSUMED the key:
+the plug-in view reports it handled and the DAW never sees it. Keys it leaves
+alone go back to the host (pinned by `test_plugin_view_host_script_keys.mm`).
+The framework therefore cannot rescue a host whose keys an editor claims — the
+policy has to be the editor's, and it needs one fact to decide: where it lives.
+
+- **Ask `hostKind()`.** Scripts get `"plugin"`, `"standalone"`, or `"unknown"`
+  (a preview or a bridge nothing configured). `ViewBridge` sets it from
+  `Processor::editor_host_kind()`, which `StandaloneApp` marks `standalone` and
+  every plug-in adapter leaves `plugin`. The session keeps it across hot
+  reloads (`ScriptedUiSession::set_host_kind`). ViewBridge declares it when the
+  editor opens, which is after a processor-owned session's first render, so an
+  editor that builds its own `ScriptedUiSession` inside `create_view()` should
+  call `session->set_host_kind(...)` before `load()`, or read `hostKind()` at
+  keydown/render time rather than caching it at load.
+- **Plain-key global shortcuts (a bare letter or digit that changes editor
+  state) are standalone-only by default.** A DAW owns its plain keys — Logic's
+  Musical Typing plays notes on A S D F G H J K L ; ' and W E T Y U O P, digits
+  pick octave/velocity — and no host lets a plug-in ask whether that is open.
+  In `"plugin"`, return from the listener WITHOUT `preventDefault()`; offer a
+  user setting to opt back in.
+- **Keyboard inside something the user explicitly opened stays the editor's**:
+  arrows/Enter/Escape in an open menu or dialog, typing in a focused field.
+- **Modifier chords are different.** Cmd/Ctrl chords reach the editor through
+  `-performKeyEquivalent:` / `on_global_key` before the host's menus; claiming
+  one (Cmd+Z) takes it from the host for as long as the editor window is key.
+  Claim only chords the editor genuinely owns.
+- **Every hint that names a key shows only while that key is live** — a badge
+  or "A to cycle" in a DAW where A plays a note is a lie.
+
+### Wheel, pinch and rotate resolve through open overlays
+
+`deliver_mouse_wheel` and the macOS magnify/rotate handlers ask
+`route_passive_pointer(root, pt)` before the tree hit test, the way presses
+(`route_press_to_active_overlay`) and hovers (`hover_target_at`) already do. An
+overlay that escapes its ancestors' bounds — a full-editor scrim mounted inside
+a toolbar button — paints over the content, but the tree hit test cannot descend
+into it there and lands on whatever it covers, so a scroll over a dialog's
+backdrop used to zoom the plot behind it. Inside a shown overlay the input goes
+to the overlay's own subtree; outside every overlay while a MODAL one is open
+(`ModalOverlay`, or an overlay with `AccessRole::dialog`) it is dropped;
+otherwise the tree answers as before. Hidden overlays count for nothing — and
+`root_overlay_owns_keyboard` likewise ignores a claimed popover that is not on
+screen, so a dialog that stays mounted while closed cannot hold the DAW's
+keyboard.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.

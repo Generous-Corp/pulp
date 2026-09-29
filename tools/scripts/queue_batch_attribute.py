@@ -39,6 +39,11 @@ batch-mates all over again. `--certify` answers the narrower question the guard
 asks -- did THIS batch's failure implicate this head -- and certifies only on
 POSITIVE evidence that it did not.
 
+The strongest such evidence is the batch's chain ancestry: the queue ref names
+the commit the entry was stacked on, so a parent that passed makes the head the
+culprit, and a parent that failed every test this batch failed makes the head a
+neighbour of the entry that broke it. See "Chain ancestry" below.
+
 "No test failure was found, therefore infrastructure" is NOT that evidence, and
 is the rule to resist: a compile or link error is the most common way a head
 breaks a batch and it produces no ctest block at all. So certification is
@@ -57,6 +62,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -120,19 +126,59 @@ WEIGHT_CENSUS_HEADER = 100
 WEIGHT_CENSUS_ARTIFACT = 50
 
 
+def gh_cli() -> str:
+    """The GitHub CLI every API read goes through.
+
+    `PULP_GH_CLI` wins: it is the single override every CI helper reads, and a
+    GitHub runner sets it to `gh`, where no App wrapper exists. Otherwise
+    `ghapp`, when PATH resolves it.
+
+    Shipyard's queue-arm guard runs `--certify` with PATH reduced to the system
+    directories, so the `ghapp` installed under ~/.local/bin is not on it. The
+    wrapper that runs the guard exports `GHAPP_REAL_GH`, the real `gh` binary,
+    and `GH_TOKEN`, the App token it minted for this command, so that binary
+    answers the same reads under the same identity.
+    """
+    override = (os.environ.get("PULP_GH_CLI") or "").strip()
+    if override:
+        return override
+    if shutil.which("ghapp"):
+        return "ghapp"
+    real = (os.environ.get("GHAPP_REAL_GH") or "").strip()
+    if real and os.environ.get("GH_TOKEN") and os.access(real, os.X_OK):
+        return real
+    return "ghapp"
+
+
+def run_gh(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run the GitHub CLI; a CLI that cannot be found is an unusable invocation.
+
+    Exits 2 with a message rather than a traceback, so a caller that reads only
+    the exit status and stderr (the queue-arm guard) sees why nothing ruled.
+    """
+    cli = gh_cli()
+    try:
+        return subprocess.run([cli, *args], **kwargs)
+    except FileNotFoundError:
+        print(
+            f"queue_batch_attribute: GitHub CLI {cli!r} is not on PATH "
+            f"({os.environ.get('PATH', '')}); set PULP_GH_CLI to a gh-compatible CLI",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from None
+
+
 def gh(
     path: str,
     jq: str | None = None,
     repo_cwd: str | None = None,
     paginate: bool = False,
 ) -> str | None:
-    # `ghapp` locally; `gh` on a GitHub runner, where no App wrapper exists.
-    # PULP_GH_CLI is the single override every CI helper reads.
-    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", path]
+    args = ["api", path]
     if paginate:
-        cmd.append("--paginate")
-    cmd += ["--jq", jq] if jq else []
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_cwd)
+        args.append("--paginate")
+    args += ["--jq", jq] if jq else []
+    proc = run_gh(args, capture_output=True, text=True, cwd=repo_cwd)
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -372,12 +418,8 @@ def run_log_zip(repo: str, run_id: str) -> bytes | None:
     an empty log rather than an error. The run endpoint serves a zip, which is
     binary and passes through.
     """
-    proc = subprocess.run(
-        [
-            (os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp",
-            "api",
-            f"repos/{repo}/actions/runs/{run_id}/logs",
-        ],
+    proc = run_gh(
+        ["api", f"repos/{repo}/actions/runs/{run_id}/logs"],
         capture_output=True,
     )
     if proc.returncode != 0 or not proc.stdout:
@@ -846,6 +888,9 @@ class Certification:
     implicates_head: bool | None
     evidence: str
     implicated_pr: int | None = None
+    # The chain rule's reading of the batch (`ChainVerdict.as_json`), when one
+    # was made. Additive: the guard reads only the fields above.
+    chain: dict | None = None
 
     def as_json(self) -> dict:
         payload: dict = {
@@ -857,6 +902,8 @@ class Certification:
         }
         if self.implicated_pr is not None:
             payload["implicated_pr"] = self.implicated_pr
+        if self.chain is not None:
+            payload["chain"] = self.chain
         return payload
 
 
@@ -922,9 +969,126 @@ def certify(run_id: int, pr: int, explanation: Explanation) -> Certification:
     )
 
 
+def chain_blocker(
+    pr: int,
+    chain: ChainVerdict,
+    jobs: list[dict] | None,
+    required: frozenset[str] | None,
+    head_changes: list[ChangedFile] | None,
+) -> str | None:
+    """Why a chain verdict that clears the head must not certify it, or None.
+
+    The chain rule compares only the `macos` gate, so another failing REQUIRED
+    job is outside what it measured. And a head whose own diff owns one of the
+    failing tests is not cleared by its parent having failed the same test: both
+    can break it.
+    """
+    if jobs is None:
+        return "the run's jobs could not be read"
+    if not head_changes:
+        return f"#{pr}'s own diff could not be read"
+    for failure in parse_failing_steps(jobs):
+        if failure.job == REQUIRED_JOB:
+            continue
+        if required is None or failure.job in required:
+            return (
+                f"required job {failure.job!r} also failed, which the chain rule "
+                "does not compare"
+                if required is not None
+                else "the required contexts could not be read and "
+                f"{failure.job!r} also failed"
+            )
+    for test in chain.failed:
+        for change in head_changes:
+            if score_match(test, change.path) >= CONFIDENT:
+                return f"#{pr}'s own diff owns failing test {test} ({change.path})"
+    return None
+
+
+def certify_with_chain(
+    base: Certification,
+    chain: ChainVerdict | None,
+    jobs: list[dict] | None,
+    required: frozenset[str] | None,
+    head_changes: list[ChangedFile] | None,
+) -> Certification:
+    """Let the chain rule decide when it can, else keep the step-level verdict.
+
+    The chain rule only speaks about the entry the group is named for; for any
+    other pull request the step-level accounting stands.
+    """
+    if chain is None:
+        return base
+    base.chain = chain.as_json()
+    if chain.pr != base.pr or chain.implicates_head is None:
+        return base
+    if base.implicates_head is False:
+        # Every failing step was already positively accounted for (a tool
+        # fetch, an artifact move): that is stronger than any ancestry reading.
+        return base
+    if chain.implicates_head:
+        return Certification(
+            run_id=base.run_id,
+            pr=base.pr,
+            verdict=VERDICT_IMPLICATED,
+            implicates_head=True,
+            evidence=f"Chain rule: {chain.evidence}.",
+            chain=base.chain,
+        )
+    blocker = chain_blocker(base.pr, chain, jobs, required, head_changes)
+    if blocker is None and chain.classification == CHAIN_NEIGHBOUR:
+        if chain.implicated_pr is None or chain.implicated_pr == base.pr:
+            blocker = "the chain names no other pull request that owns the break"
+    if blocker is not None:
+        base.evidence = (
+            f"{base.evidence} The chain rule read {chain.classification} "
+            f"({chain.evidence}), but {blocker}."
+        )
+        return base
+    if chain.classification == CHAIN_NEIGHBOUR:
+        return Certification(
+            run_id=base.run_id,
+            pr=base.pr,
+            verdict=VERDICT_OTHER_PR,
+            implicates_head=False,
+            evidence=f"Chain rule: {chain.evidence}.",
+            implicated_pr=chain.implicated_pr,
+            chain=base.chain,
+        )
+    return Certification(
+        run_id=base.run_id,
+        pr=base.pr,
+        verdict=VERDICT_INFRASTRUCTURE,
+        implicates_head=False,
+        evidence=f"Chain rule ({chain.classification}): {chain.evidence}.",
+        chain=base.chain,
+    )
+
+
 def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Certification:
     """Read a failed batch and rule on whether it implicates `pr`."""
+    chain = chain_verdict_for(repo, run_id)
     jobs = failing_jobs(repo, run_id)
+    head_changes = pr_files(repo, pr)
+    required = required_contexts(repo) if chain is not None else None
+    return certify_with_chain(
+        step_certification(repo, run_id, pr, source_root, jobs, head_changes),
+        chain,
+        jobs,
+        required,
+        head_changes,
+    )
+
+
+def step_certification(
+    repo: str,
+    run_id: str,
+    pr: int,
+    source_root: Path,
+    jobs: list[dict] | None,
+    head_changes: list[ChangedFile] | None,
+) -> Certification:
+    """The per-failing-step accounting, which rules whenever the chain rule cannot."""
     if jobs is None:
         return Certification(
             run_id=int(run_id),
@@ -953,7 +1117,7 @@ def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Cer
     return certify(
         int(run_id),
         pr,
-        explain_failures(pr, failures, ctest, pr_files(repo, pr)),
+        explain_failures(pr, failures, ctest, head_changes),
     )
 
 
@@ -1735,6 +1899,392 @@ def render_advisory(observations: list[GroupObservation]) -> list[str]:
     return lines
 
 
+# --------------------------------------------------------------------------
+# Chain ancestry: culprit, neighbour, known flake, or a red main.
+# --------------------------------------------------------------------------
+#
+# A merge_group ref is `gh-readonly-queue/main/pr-<N>-<parent>`, where <parent>
+# is the commit the entry was stacked on: main's tip, or the previous entry's
+# group commit. That makes each batch a one-entry experiment against its
+# parent, which answers the question file ownership cannot:
+#
+#   * parent passed (it is on main, or its own group's `macos` went green) and
+#     this group's `macos` failed -- the one entry this group adds broke it, so
+#     the head is the culprit, whatever its diff looks like;
+#   * parent failed and every test this group failed, the parent failed too --
+#     this group inherited the break, the head is a neighbour, and the owner is
+#     the ancestor whose own parent passed;
+#   * parent failed but this group failed something the parent did not -- the
+#     head added a failure of its own, so it is a culprit again.
+#
+# Tests on the known-flake list are set aside before any comparison: a flake
+# landing in a child but not its parent is not a failure the head added. A
+# group whose only failures are known flakes is named as a flake. A group whose
+# failures main's own tip also fails is pre-existing on main.
+#
+# Only the required `macos` gate is compared -- the queue ejects on required
+# contexts, and the hosted Linux leg fails on an unrelated census often enough
+# that reading it would make every group look like its own culprit.
+
+CHAIN_CULPRIT = "culprit"
+CHAIN_NEIGHBOUR = "neighbour"
+CHAIN_KNOWN_FLAKE = "known-flake"
+CHAIN_PRE_EXISTING = "pre-existing-on-main"
+CHAIN_UNKNOWN = "unknown"
+
+KNOWN_FLAKES_PATH = Path(__file__).resolve().parents[2] / "tools/scripts/queue_known_flakes.json"
+KNOWN_FLAKES_SCHEMA = "pulp-queue-known-flakes/v1"
+
+
+def load_known_flakes(path: Path = KNOWN_FLAKES_PATH) -> frozenset[str]:
+    """The ctest names treated as known flakes, from the committed list.
+
+    An unreadable or malformed list is an empty one: it can only cost a flake
+    certification, never grant one.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    if not isinstance(payload, dict) or payload.get("schema") != KNOWN_FLAKES_SCHEMA:
+        return frozenset()
+    names = {
+        str(entry.get("test") or "").strip()
+        for entry in payload.get("flakes") or ()
+        if isinstance(entry, dict)
+    }
+    return frozenset(name for name in names if name)
+
+
+@dataclass(frozen=True)
+class GateFacts:
+    """The required gate's result on one commit (a group head or a main commit).
+
+    `failed` is the gate's failure signature: its ctest failure names, or, when
+    it failed before ctest ran, its failing step names as `[macos] <step>`.
+    None means the signature could not be read, which is never an empty one.
+    """
+
+    sha: str
+    pr: int | None = None
+    first_parent: str = ""
+    conclusion: str | None = None
+    failed: frozenset[str] | None = None
+    run_id: str = ""
+
+
+@dataclass
+class ChainVerdict:
+    classification: str
+    pr: int
+    evidence: str
+    parent_sha: str = ""
+    parent_pr: int | None = None
+    parent_state: str = ""
+    implicated_pr: int | None = None
+    failed: list[str] = field(default_factory=list)
+    parent_failed: list[str] = field(default_factory=list)
+    flakes: list[str] = field(default_factory=list)
+
+    @property
+    def implicates_head(self) -> bool | None:
+        if self.classification == CHAIN_CULPRIT:
+            return True
+        if self.classification in (CHAIN_NEIGHBOUR, CHAIN_KNOWN_FLAKE, CHAIN_PRE_EXISTING):
+            return False
+        return None
+
+    def as_json(self) -> dict:
+        payload: dict = {
+            "classification": self.classification,
+            "implicates_head": self.implicates_head,
+            "evidence": self.evidence,
+            "parent_sha": self.parent_sha,
+            "parent_state": self.parent_state,
+            "failed_tests": self.failed,
+            "parent_failed_tests": self.parent_failed,
+            "known_flakes": self.flakes,
+        }
+        if self.parent_pr is not None:
+            payload["parent_pr"] = self.parent_pr
+        if self.implicated_pr is not None:
+            payload["implicated_pr"] = self.implicated_pr
+        return payload
+
+
+class ChainSource:
+    """What the chain rule reads. The live source asks GitHub; tests hand in facts."""
+
+    def gate(self, sha: str) -> GateFacts:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def on_main(self, sha: str) -> bool | None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def main_tip(self) -> str | None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+PARENT_PASSED = "passed"
+PARENT_FAILED = "failed"
+
+
+def parent_state(source: ChainSource, parent: str) -> tuple[str, GateFacts | None]:
+    """passed / failed / why it is unknown, plus the parent's gate facts."""
+    on_main = source.on_main(parent)
+    facts = source.gate(parent)
+    if on_main:
+        return PARENT_PASSED, facts
+    if facts.conclusion == "success":
+        return PARENT_PASSED, facts
+    if facts.conclusion == "failure":
+        return PARENT_FAILED, facts
+    if on_main is None:
+        return "unreadable", facts
+    return f"not on main, gate {facts.conclusion or 'absent'}", facts
+
+
+def suite_tests(signature: frozenset[str]) -> frozenset[str]:
+    """The ctest names in a failure signature, without its `[macos] <step>` entries."""
+    return frozenset(name for name in signature if item_context(name) != REQUIRED_JOB)
+
+
+def classify_chain(
+    pr: int,
+    head_sha: str,
+    parent_sha: str,
+    source: ChainSource,
+    flakes: frozenset[str],
+    depth: int = CHAIN_DEPTH,
+) -> ChainVerdict:
+    """Rule on one failed group from its parent's result and failing tests."""
+    head = source.gate(head_sha)
+    verdict = ChainVerdict(
+        classification=CHAIN_UNKNOWN, pr=pr, evidence="", parent_sha=parent_sha
+    )
+    if head.conclusion != "failure":
+        verdict.evidence = (
+            f"the group's {REQUIRED_JOB} gate did not fail "
+            f"({head.conclusion or 'no result'}), so the chain rule has nothing to rule on"
+        )
+        return verdict
+    if head.failed is None:
+        verdict.evidence = f"the group's {REQUIRED_JOB} failures could not be read"
+        return verdict
+    verdict.failed = sorted(head.failed)
+    verdict.flakes = sorted(head.failed & flakes)
+    own = head.failed - flakes
+    if head.failed and not own:
+        verdict.classification = CHAIN_KNOWN_FLAKE
+        verdict.evidence = (
+            "every failing test is a known flake: " + ", ".join(verdict.flakes)
+        )
+        return verdict
+
+    tip = source.main_tip()
+    if tip and own:
+        tip_gate = source.gate(tip)
+        if (
+            tip_gate.conclusion == "failure"
+            and tip_gate.failed is not None
+            and own <= tip_gate.failed
+        ):
+            verdict.classification = CHAIN_PRE_EXISTING
+            verdict.evidence = (
+                f"main's tip {tip[:12]} fails the same {REQUIRED_JOB} tests: "
+                + ", ".join(sorted(own))
+            )
+            return verdict
+
+    state, parent = parent_state(source, parent_sha)
+    verdict.parent_state = state
+    verdict.parent_pr = parent.pr if parent else None
+    if state == PARENT_PASSED:
+        verdict.classification = CHAIN_CULPRIT
+        verdict.evidence = (
+            f"the parent {parent_sha[:12]} passed, and this group adds only #{pr}, "
+            f"whose group failed: " + (", ".join(sorted(own)) or "no failure named")
+        )
+        return verdict
+    if not own:
+        verdict.evidence = (
+            f"the parent {parent_sha[:12]} is {state}, and this group's failure "
+            "names nothing to compare against it"
+        )
+        return verdict
+
+    # A parent that failed before its suite ran (a compile error, a lost step)
+    # observed none of the tests this group failed, so it can neither clear nor
+    # convict the head. Look through it to the nearest ancestor whose suite
+    # ran -- but only for a group that failed tests: a group that itself failed
+    # at `Build` compares directly with a parent that failed at `Build`.
+    skipped: list[GateFacts] = []
+    ancestor = parent
+    budget = depth
+    while (
+        state == PARENT_FAILED
+        and ancestor is not None
+        and ancestor.failed is not None
+        and not suite_tests(ancestor.failed)
+        and suite_tests(own)
+        and ancestor.first_parent
+        and budget > 1
+    ):
+        skipped.append(ancestor)
+        budget -= 1
+        state, ancestor = parent_state(source, ancestor.first_parent)
+    unobserved = ", ".join(f"#{g.pr}" for g in skipped)
+    if skipped and state == PARENT_PASSED:
+        verdict.evidence = (
+            f"the parent {parent_sha[:12]} failed before its suite ran and the "
+            f"first ancestor past {unobserved} passed, so the tests this group "
+            f"failed ({', '.join(sorted(own))}) may belong to {unobserved} or to #{pr}"
+        )
+        return verdict
+    if state != PARENT_FAILED or ancestor is None:
+        verdict.evidence = f"the parent {parent_sha[:12]}'s result is {state}"
+        return verdict
+    if ancestor.failed is None:
+        verdict.evidence = f"the ancestor {ancestor.sha[:12]}'s failures could not be read"
+        return verdict
+    ancestor_own = ancestor.failed - flakes
+    verdict.parent_failed = sorted(ancestor.failed)
+    extra = own - ancestor_own
+    if extra:
+        if skipped:
+            verdict.evidence = (
+                f"the tests {', '.join(sorted(extra))} fail here but not in "
+                f"{ancestor.sha[:12]}, and {unobserved} in between never ran its "
+                f"suite, so they may belong to {unobserved} or to #{pr}"
+            )
+            return verdict
+        verdict.classification = CHAIN_CULPRIT
+        verdict.evidence = (
+            f"the parent {parent_sha[:12]} failed too, but not on "
+            + ", ".join(sorted(extra))
+            + f", which #{pr} added"
+        )
+        return verdict
+
+    verdict.classification = CHAIN_NEIGHBOUR
+    origin = ancestor.pr
+    if budget > 1 and ancestor.first_parent and ancestor.pr is not None:
+        above = classify_chain(
+            ancestor.pr, ancestor.sha, ancestor.first_parent, source, flakes, budget - 1
+        )
+        if above.classification == CHAIN_NEIGHBOUR and above.implicated_pr:
+            origin = above.implicated_pr
+    if origin == pr:
+        origin = None
+    verdict.implicated_pr = origin
+    through = f" (looking through {unobserved}, which never ran its suite)" if skipped else ""
+    verdict.evidence = (
+        f"the ancestor {ancestor.sha[:12]} (#{ancestor.pr}) failed every test this "
+        f"group failed ({', '.join(sorted(own))}){through}, so #{pr} inherited "
+        "the break" + (f" from #{origin}" if origin else "")
+    )
+    return verdict
+
+
+class LiveChainSource(ChainSource):
+    """The chain rule's reads against GitHub, each commit read at most once."""
+
+    def __init__(self, repo: str, base: str = "main") -> None:
+        self.repo = repo
+        self.base = base
+        self._gates: dict[str, GateFacts] = {}
+        self._tip: str | None = None
+        self._tip_read = False
+
+    def gate(self, sha: str) -> GateFacts:
+        if sha not in self._gates:
+            self._gates[sha] = self._read_gate(sha)
+        return self._gates[sha]
+
+    def _read_gate(self, sha: str) -> GateFacts:
+        raw = gh(
+            f"repos/{self.repo}/commits/{sha}",
+            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//"")]|@tsv',
+        )
+        pr: int | None = None
+        first_parent = ""
+        if raw and "\t" in raw:
+            subject, first_parent = raw.split("\t", 1)
+            merged = MERGED_PR_RE.match(subject.strip())
+            pr = int(merged.group(1)) if merged else None
+            first_parent = first_parent.strip()
+        try:
+            check = latest_check_runs(self.repo, sha).get(REQUIRED_JOB)
+        except RuntimeError:
+            return GateFacts(sha=sha, pr=pr, first_parent=first_parent)
+        if not check:
+            return GateFacts(sha=sha, pr=pr, first_parent=first_parent)
+        conclusion = check.get("conclusion")
+        job = JOB_URL_RE.search(str(check.get("details_url") or ""))
+        facts = GateFacts(
+            sha=sha,
+            pr=pr,
+            first_parent=first_parent,
+            conclusion=conclusion,
+            failed=frozenset(),
+            run_id=job.group(1) if job else "",
+        )
+        if conclusion != "failure":
+            return facts
+        if not job:
+            return GateFacts(sha=sha, pr=pr, first_parent=first_parent, conclusion=conclusion)
+        archive = run_log_zip(self.repo, job.group(1))
+        tests = (
+            parse_failing_tests(unpack_job_logs(archive).get(REQUIRED_JOB, ""))
+            if archive
+            else []
+        )
+        if tests:
+            return GateFacts(**{**facts.__dict__, "failed": frozenset(tests)})
+        steps = failing_step_names(self.repo, job.group(2))
+        if archive is None and not steps:
+            return GateFacts(sha=sha, pr=pr, first_parent=first_parent, conclusion=conclusion)
+        return GateFacts(
+            **{
+                **facts.__dict__,
+                "failed": frozenset(context_item(REQUIRED_JOB, s) for s in steps),
+            }
+        )
+
+    def on_main(self, sha: str) -> bool | None:
+        status = gh(f"repos/{self.repo}/compare/{sha}...{self.base}", ".status")
+        if status is None:
+            return None
+        return status.strip() in ("ahead", "identical")
+
+    def main_tip(self) -> str | None:
+        if not self._tip_read:
+            self._tip_read = True
+            tip = gh(f"repos/{self.repo}/commits/{self.base}", ".sha")
+            self._tip = tip.strip() if tip else None
+        return self._tip
+
+
+def chain_verdict_for(
+    repo: str, run_id: str, source: ChainSource | None = None
+) -> ChainVerdict | None:
+    """The chain rule for one merge_group run, or None when it is not a queue run."""
+    raw = gh(f"repos/{repo}/actions/runs/{run_id}", "[.head_branch,.head_sha]|@tsv")
+    if not raw or "\t" not in raw:
+        return None
+    head_branch, head_sha = (part.strip() for part in raw.split("\t", 1))
+    ref = BATCH_BRANCH_RE.match(head_branch)
+    if not ref:
+        return None
+    return classify_chain(
+        int(ref.group(1)),
+        head_sha,
+        ref.group(2),
+        source or LiveChainSource(repo),
+        load_known_flakes(),
+    )
+
+
 @dataclass
 class Ejection:
     """One failed_checks removal of a pull request, and the group that caused it."""
@@ -1746,11 +2296,11 @@ class Ejection:
 
 
 def graphql(query: str, **variables: str) -> dict | None:
-    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", "graphql"]
+    args = ["api", "graphql"]
     for key, value in variables.items():
-        cmd += ["-F", f"{key}={value}"]
-    cmd += ["-f", f"query={query}"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+        args += ["-F", f"{key}={value}"]
+    args += ["-f", f"query={query}"]
+    proc = run_gh(args, capture_output=True, text=True)
     if proc.returncode != 0:
         return None
     try:

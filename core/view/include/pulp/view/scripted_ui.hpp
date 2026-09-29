@@ -87,6 +87,13 @@ public:
     bool reload_from(std::filesystem::path script_path, std::string* error = nullptr);
 
     void set_repaint_callback(std::function<void()> cb);
+    /// Declare where this editor lives, as its scripts read it through
+    /// `hostKind()` ("plugin", "standalone", or the default "unknown"). Kept
+    /// by the session and re-applied to every realm a reload builds, so a hot
+    /// reload never forgets it. Set it before load() and the first render
+    /// already knows. See WidgetBridge::set_host_kind.
+    void set_host_kind(std::string kind);
+    const std::string& host_kind() const { return host_kind_; }
     /// Install the host-owned rebind run after a successful deferred
     /// Runtime.evaluate realm reset. The callback runs from poll(), after the
     /// replacement bridge is live and before that bridge pumps a frame. Hosts
@@ -231,6 +238,7 @@ private:
     ScriptInspectorBridge inspector_bridge_;
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
+    std::string host_kind_ = "unknown";
     std::function<void()> post_evaluation_reset_callback_;
     bool post_evaluation_reset_callback_pending_ = false;
     LogCallback log_callback_;

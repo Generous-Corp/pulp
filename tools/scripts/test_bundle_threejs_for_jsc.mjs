@@ -22,8 +22,11 @@
 //      sibling module (this is the regression class the regex bundler
 //      could not handle and esbuild fixes).
 //   5. PULP_THREEJS log marker is emitted when `print()` is defined.
+//   6-8. The esbuild auto-install retries a transient network failure
+//      (ENOTFOUND), never retries any other npm failure, and stops after
+//      its attempt budget.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -191,6 +194,86 @@ withTmpDir((dir) => {
     assert(printedLines.some((line) => line.startsWith("PULP_THREEJS:")),
         "Case 5: bundler did not emit PULP_THREEJS marker via print()");
     console.log("PASS: Case 5 — PULP_THREEJS log marker emitted");
+});
+
+// Cases 6-8: the esbuild auto-install retries a transient network error
+// and only that. A copy of the bundler in a scratch directory has no
+// node_modules, so it must install; PULP_BUNDLE_THREEJS_NPM_JS swaps npm
+// for a fake that fails a scripted number of times, then provisions a stub
+// esbuild. No network and no real npm are involved.
+const FAKE_NPM = `
+const fs = require("node:fs");
+const path = require("node:path");
+const counter = path.join(process.cwd(), "npm-calls.txt");
+const calls = (fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0) + 1;
+fs.writeFileSync(counter, String(calls));
+const failures = Number(process.env.FAKE_NPM_FAILURES || "0");
+if (calls <= failures) {
+    if (process.env.FAKE_NPM_ERROR === "network") {
+        console.error("npm error code ENOTFOUND");
+        console.error("npm error network request to https://registry.npmjs.org/esbuild/-/esbuild-0.25.10.tgz failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org");
+    } else {
+        console.error("npm error code E404");
+        console.error("npm error 404 Not Found - GET https://registry.npmjs.org/esbuild-typo");
+    }
+    process.exit(1);
+}
+const pkg = path.join(process.cwd(), "node_modules", "esbuild");
+fs.mkdirSync(path.join(pkg, "lib"), { recursive: true });
+fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "esbuild", main: "lib/main.js" }));
+fs.writeFileSync(path.join(pkg, "lib", "main.js"),
+    "exports.build = async () => ({ outputFiles: [{ text: 'var __pulp_three_iife_namespace__ = { Stub: 1 };' }] });");
+`;
+
+function runInstallScenario(dir, env) {
+    fs.copyFileSync(BUNDLER, path.join(dir, "bundle_threejs_for_jsc.mjs"));
+    const fakeNpm = path.join(dir, "fake-npm.cjs");
+    fs.writeFileSync(fakeNpm, FAKE_NPM, "utf8");
+    const inputPath = mkFixture(dir, "export class Solo { }");
+    const outputPath = path.join(dir, "out.js");
+    const result = spawnSync(process.execPath,
+        [path.join(dir, "bundle_threejs_for_jsc.mjs"), "--input", inputPath, "--output", outputPath], {
+            encoding: "utf8",
+            env: {
+                ...process.env,
+                PULP_BUNDLE_THREEJS_NPM_JS: fakeNpm,
+                PULP_BUNDLE_THREEJS_NPM_ATTEMPTS: "3",
+                PULP_BUNDLE_THREEJS_NPM_BACKOFF_MS: "0",
+                ...env,
+            },
+        });
+    const counter = path.join(dir, "npm-calls.txt");
+    return {
+        status: result.status,
+        stderr: result.stderr,
+        calls: fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0,
+        wroteOutput: fs.existsSync(outputPath),
+    };
+}
+
+withTmpDir((dir) => {
+    const r = runInstallScenario(dir, { FAKE_NPM_FAILURES: "2", FAKE_NPM_ERROR: "network" });
+    assert(r.status === 0, `Case 6: bundler failed after transient ENOTFOUND (exit ${r.status}):\n${r.stderr}`);
+    assert(r.calls === 3, `Case 6: expected 3 npm attempts (2 transient failures + success), saw ${r.calls}`);
+    assert(r.wroteOutput, "Case 6: no bundle written after the retried install succeeded");
+    console.log("PASS: Case 6 — transient ENOTFOUND during npm install is retried");
+});
+
+withTmpDir((dir) => {
+    const r = runInstallScenario(dir, { FAKE_NPM_FAILURES: "1", FAKE_NPM_ERROR: "not-found" });
+    assert(r.status !== 0, "Case 7: a non-network npm failure should fail the bundler");
+    assert(r.calls === 1, `Case 7: a non-network npm failure must not be retried, saw ${r.calls} attempts`);
+    assert(r.stderr.includes("not retried"), `Case 7: failure message does not say it was not retried:\n${r.stderr}`);
+    console.log("PASS: Case 7 — non-network npm failure fails once, without retry");
+});
+
+withTmpDir((dir) => {
+    const r = runInstallScenario(dir, { FAKE_NPM_FAILURES: "99", FAKE_NPM_ERROR: "network" });
+    assert(r.status !== 0, "Case 8: a persistent network failure should fail the bundler");
+    assert(r.calls === 3, `Case 8: expected exactly PULP_BUNDLE_THREEJS_NPM_ATTEMPTS=3 attempts, saw ${r.calls}`);
+    assert(r.stderr.includes("persisted through 3 attempts"),
+        `Case 8: failure message does not report the exhausted retries:\n${r.stderr}`);
+    console.log("PASS: Case 8 — persistent network failure stops after the attempt budget");
 });
 
 console.log("\nAll bundle_threejs_for_jsc tests passed.");

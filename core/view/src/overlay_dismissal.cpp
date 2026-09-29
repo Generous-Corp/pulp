@@ -172,6 +172,46 @@ View* hover_target_at(View& root, Point root_pt) {
     return root.hit_test(root_pt);
 }
 
+namespace {
+
+// Whether `open` is on screen in `root`: every ancestor visible, and the chain
+// ends at `root` itself. The walk is the overlay's depth, not the tree's size.
+bool overlay_shown_in(View* open, View& root) {
+    if (open == nullptr) return false;
+    View* top = open;
+    for (View* v = open; v != nullptr; v = v->parent()) {
+        if (!v->visible()) return false;
+        top = v;
+    }
+    return top == &root;
+}
+
+bool overlay_is_modal(View* open) {
+    return open->access_role() == View::AccessRole::dialog ||
+           dynamic_cast<ModalOverlay*>(open) != nullptr;
+}
+
+}  // namespace
+
+PassivePointerRoute route_passive_pointer(View& root, Point root_pt) {
+    bool modal_open = false;
+    if (auto* state = root.existing_interaction()) {
+        const auto& stack = state->overlay_stack;
+        for (std::size_t i = stack.size(); i > 0; --i) {
+            View* open = stack[i - 1];
+            if (!overlay_shown_in(open, root)) continue;
+            modal_open = modal_open || overlay_is_modal(open);
+            if (!open->overlay_contains(root_pt)) continue;
+            if (auto* hit = open->hit_test(point_to_local(root_pt, open, &root)))
+                return {hit, false};
+        }
+    }
+    // A visible ModalOverlay widget is modal whether or not it ever claimed
+    // the overlay slot; it covers its root, so the tree hit test lands in it.
+    if (modal_open) return {nullptr, true};
+    return {root.hit_test(root_pt), false};
+}
+
 ContextPressResult route_context_press(View& root, Point root_pt) {
     const auto overlay_press = route_press_to_active_overlay(root, root_pt);
     if (overlay_press.consume_press) {
@@ -226,7 +266,13 @@ bool root_overlay_owns_keyboard(View& root) {
     // reason to pay it when a cheaper answer already said yes.
     auto* state = root.existing_interaction();
     auto* overlay = state ? state->active_overlay : nullptr;
-    if (overlay != nullptr && overlay->overlay_consumes_outside_click())
+    // Only an overlay that is ON SCREEN may hold the DAW keyboard. A popover
+    // that stays mounted while closed (display:none) keeps its claim, and
+    // honoring that claim made the editor first responder for as long as it
+    // stayed mounted: every Musical Typing key then had to survive a forward
+    // through the editor instead of reaching the DAW directly.
+    if (overlay != nullptr && overlay->overlay_consumes_outside_click() &&
+        overlay_shown_in(overlay, root))
         return true;
     if (ComboBox::active_popup_in(root)) return true;
     return topmost_modal(&root) != nullptr;

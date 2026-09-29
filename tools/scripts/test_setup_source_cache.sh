@@ -434,11 +434,11 @@ echo "== all shared FetchContent registrations seeded by setup agree with CMake"
 
     seeded_names="$(grep -oE 'fetchcontent_cache_dir_name "[^"]+"' "$repo_root/setup.sh" \
         | cut -d'"' -f2 | grep -v '^\$' | sort -fu | tr '\n' ' ' | sed 's/ $//')"
-    check "$seeded_names" "AudioUnitSDK catch2 choc clap lv2 sdl3 threejs vst3sdk webgpu yoga" \
+    check "$seeded_names" "AudioUnitSDK brotli catch2 choc clap highway lv2 mbedtls sdl3 sheenbidi threejs vst3sdk webgpu woff2 yaml-cpp yoga" \
         "pin guard enumerates every statically named setup source seed"
     contract_names="$(tr ';' '\n' < "$contract" | sed -n 's/^\([^=]*\)=.*/\1/p' \
         | sort -fu | tr '\n' ' ' | sed 's/ $//')"
-    check "$contract_names" "ausdk catch2 choc clap lv2 sdl3 threejs vst3 webgpu wgpu-native yoga" \
+    check "$contract_names" "ausdk brotli catch2 choc clap highway lv2 mbedtls sdl3 sheenbidi threejs vst3 webgpu wgpu-native woff2 yaml-cpp yoga" \
         "dependency contract enumerates every provisioned source and runtime"
 
     # These two previously drifted while the three.js-only contract remained
@@ -492,6 +492,130 @@ echo "== all shared FetchContent registrations seeded by setup agree with CMake"
     check "$(contract_ref ausdk)" "$(grep '^    AU_SDK_REF=' "$repo_root/setup.sh" | head -1 | cut -d'"' -f2)" \
         "dependency contract records AudioUnitSDK pin"
 
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== configure-time dependencies are primed at CMake's exact GIT_TAG and cache directory"
+(
+    load_setup_lib
+    repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+    deps="$repo_root/tools/cmake/PulpDependencies.cmake"
+    contract="$repo_root/tools/deps/shared-source-contract.txt"
+
+    # These dependencies register a REF (which names the cache directory) that
+    # can differ from the GIT_TAG CMake actually checks out. A primed cache is
+    # used only if the directory matches the REF, and it is only correct if its
+    # checkout matches the GIT_TAG — so pin both, from the files themselves.
+    for spec in \
+        'highway|google/highway\.git' \
+        'mbedtls|Mbed-TLS/mbedtls\.git' \
+        'SheenBidi|Tehreer/SheenBidi\.git' \
+        'brotli|google/brotli\.git' \
+        'woff2|google/woff2\.git' \
+        'yaml-cpp|jbeder/yaml-cpp\.git'; do
+        IFS='|' read -r name url <<< "$spec"
+        lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+        cmake_ref="$(sed -n "s/^pulp_register_fetchcontent_source(${name} REF \([^)]*\)).*/\1/p" "$deps" | head -1)"
+        cmake_tag="$(awk -v url="$url" '
+            $0 ~ "GIT_REPOSITORY https://github.com/" url { found = 1; next }
+            found && /GIT_TAG/ { print $2; exit }' "$deps")"
+        call="$(grep -A1 "\"https://github.com/${url//\\/}\"" "$repo_root/setup.sh" | tr '\n' ' ')"
+        setup_ref="$(printf '%s' "$call" | sed -n 's/.*\\ *"\([^"]*\)" "$(fetchcontent_cache_dir_name.*/\1/p')"
+        setup_dir_args="$(printf '%s' "$call" | sed -n 's/.*fetchcontent_cache_dir_name "\([^"]*\)" "\([^"]*\)").*/\1 \2/p')"
+
+        check "$(test -n "$cmake_ref" && test -n "$cmake_tag" && echo found || echo missing)" "found" \
+            "$name is registered for the shared cache and has a GIT_TAG"
+        check "$setup_ref" "$cmake_tag" "$name is primed at CMake's GIT_TAG"
+        # shellcheck disable=SC2086
+        check "$(fetchcontent_cache_dir_name $setup_dir_args)" \
+            "$(fetchcontent_cache_dir_name "$lower" "$cmake_ref")" \
+            "$name is primed into the directory its registration resolves to"
+        check "$(tr ';' '\n' < "$contract" | sed -n "s/^${lower}=//p" | head -1)" "$cmake_tag" \
+            "$name pin is recorded in the dependency contract"
+    done
+
+    # Every dependency fetched unconditionally must be registered, or setup can
+    # never make its configure network-free. Opt-in ones sit inside if() blocks.
+    unregistered="$(awk '
+        /^if\(|^    if\(/ { depth++ } /^endif\(|^    endif\(/ { depth-- }
+        depth == 0 && /^pulp_register_fetchcontent_source\(/ {
+            split($0, a, /[( ]/); reg[tolower(a[2])] = 1 }
+        depth == 0 && /^FetchContent_Declare\(/ { getline; gsub(/ /, ""); decl[tolower($0)] = 1 }
+        END { for (d in decl) if (!(d in reg)) print d }' "$deps" | sort | tr '\n' ' ' | sed 's/ $//')"
+    check "$unregistered" "" \
+        "every unconditional FetchContent dependency is registered for the shared cache"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== no-submodules priming never initializes submodules"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$FETCHCONTENT_CACHE_ROOT"
+    git init -q "$tmp/sub"
+    git -C "$tmp/sub" -c user.email=t@t.t -c user.name=t commit -q --allow-empty -m sub
+    git init -q "$tmp/upstream"
+    git -C "$tmp/upstream" config uploadpack.allowFilter true
+    git -C "$tmp/upstream" -c protocol.file.allow=always submodule -q add "file://$tmp/sub" nested 2>/dev/null
+    git -C "$tmp/upstream" -c user.email=t@t.t -c user.name=t commit -qm with-submodule
+    sha="$(git -C "$tmp/upstream" rev-parse HEAD)"
+
+    ensure_shared_git_source "Control" "file://$tmp/upstream" "$sha" "control" >/dev/null 2>&1
+    # The control proves the fixture really has a submodule setup.sh would
+    # initialize; without it an empty path below would prove nothing.
+    check "$([ -e "$FETCHCONTENT_CACHE_ROOT/control/nested/.git" ] && echo yes || echo no)" "yes" \
+        "control: a default priming initializes the submodule"
+
+    ensure_shared_git_source "Bare" "file://$tmp/upstream" "$sha" "bare" "no-submodules" >/dev/null 2>&1
+    check "$?" "0" "no-submodules priming succeeds"
+    check "$([ -f "$FETCHCONTENT_CACHE_ROOT/bare/.gitmodules" ] && echo yes || echo no)" "yes" \
+        "no-submodules priming checked out the superproject"
+    check "$(ls -A "$FETCHCONTENT_CACHE_ROOT/bare/nested" 2>/dev/null | wc -l | tr -d ' ')" "0" \
+        "no-submodules priming leaves the submodule path empty"
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== archive downloads retry every transient failure"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    export FETCHCONTENT_CACHE_ROOT="$tmp/cache"
+    mkdir -p "$tmp/bin"
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").writestr("lib/runtime.txt", "ok\n")' \
+        "$tmp/fixture.zip"
+    # A stub curl records the arguments the real function passes and serves the
+    # fixture archive, so the flags are checked where they are used rather than
+    # restated from the source text.
+    cat > "$tmp/bin/curl" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$tmp/curl.args"
+out=""
+while [ \$# -gt 0 ]; do [ "\$1" = "-o" ] && out="\$2"; shift; done
+cp "$tmp/fixture.zip" "\$out"
+STUB
+    chmod +x "$tmp/bin/curl"
+    PATH="$tmp/bin:$PATH" ensure_shared_archive_source "Runtime" "https://example.invalid/r.zip" \
+        "runtime-v1" "$tmp/no-seed" >/dev/null 2>&1
+    check "$?" "0" "archive priming succeeds through the stub"
+    check "$(cat "$FETCHCONTENT_CACHE_ROOT/runtime-v1/lib/runtime.txt" 2>/dev/null)" "ok" \
+        "control: the stub's archive was downloaded and unpacked"
+    args="$(tr '\n' ' ' < "$tmp/curl.args" 2>/dev/null)"
+    # A 5xx, a DNS failure and a connection reset each failed a release or the
+    # required bootstrap; plain --retry treats none of them as transient.
+    for flag in "--fail" "--retry-all-errors" "--connect-timeout"; do
+        check "$(printf '%s' "$args" | grep -c -- "$flag ")" "1" "the archive curl passes $flag"
+    done
+    retries="$(printf '%s' "$args" | sed -n 's/.*--retry \([0-9][0-9]*\) .*/\1/p')"
+    check "$([ "${retries:-0}" -ge 5 ] && echo yes || echo no)" "yes" \
+        "the archive curl retries at least five times (got '${retries}')"
+
+    # Every curl in setup.sh, not only this one, must survive the same blips.
+    unretried="$(sed -e ':a' -e '/\\$/N; s/\\\n//; ta' "$SETUP_SH" \
+        | grep -E '(^|[[:space:]"(])curl[[:space:]]' | grep -v '^[[:space:]]*#' \
+        | grep -v -- '--retry-all-errors' | grep -v 'command -v curl' || true)"
+    check "$unretried" "" "every curl invocation in setup.sh names --retry-all-errors"
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 

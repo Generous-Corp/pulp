@@ -449,7 +449,16 @@ class _FakeGh:
                  list_rc: int = 0, list_rc_seq: list[int] | None = None,
                  create_rc: int = 0, create_stderr: str = "",
                  merge_rc: int = 0, draft_pr: bool = False,
-                 covers: bool = True) -> None:
+                 covers: bool = True, armed: bool = True,
+                 in_queue: bool = False, graphql_rc: int = 0,
+                 close_rc: int = 0) -> None:
+        # In-flight state of the open bump PR, read by the stale-PR heal. The
+        # default (armed) is a PR still on its way to landing; an ejection from
+        # the merge queue leaves armed=False, in_queue=False.
+        self.armed = armed
+        self.in_queue = in_queue
+        self.graphql_rc = graphql_rc
+        self.close_rc = close_rc
         # Does the open bump PR's branch already contain the merge being
         # deferred for? Default True so existing deferral tests keep expressing
         # the SAFE case; the stale-defer regression sets it False.
@@ -504,6 +513,20 @@ class _FakeGh:
         if head == ("pr", "merge"):
             return subprocess.CompletedProcess(
                 args, self.merge_rc, stdout="", stderr="")
+        if head == ("api", "graphql"):
+            if self.graphql_rc != 0:
+                return subprocess.CompletedProcess(
+                    args, self.graphql_rc, stdout="", stderr="gh: API error")
+            pr = {"state": "OPEN", "isDraft": self.draft_pr,
+                  "isInMergeQueue": self.in_queue,
+                  "autoMergeRequest": ({"enabledAt": "2026-09-26T01:26:01Z"}
+                                       if self.armed else None)}
+            return subprocess.CompletedProcess(
+                args, 0, stderr="",
+                stdout=json.dumps({"data": {"repository": {"pullRequest": pr}}}))
+        if head == ("pr", "close"):
+            return subprocess.CompletedProcess(
+                args, self.close_rc, stdout="", stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     def did(self, *prefix: str) -> bool:
@@ -652,6 +675,131 @@ class PrRouteTest(unittest.TestCase):
             "unknown coverage must fail closed: a red run retries, a green "
             "defer loses the intent permanently",
         )
+
+    def _push_stale_bump_branch(self) -> str:
+        """Leave an older bump commit on the bump branch, as a PR cut before the
+        latest merge would, and return its SHA."""
+        _git(self.clone, "checkout", "-q", "-b", "stale-bump", "HEAD~1")
+        (self.clone / "STALE_BUMP.txt").write_text("ejected bump PR head\n")
+        _git(self.clone, "add", "--", "STALE_BUMP.txt")
+        _git(self.clone, "commit", "--no-verify", "-q", "-m", "stale bump")
+        _git(self.clone, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        sha = _git(self.clone, "rev-parse", "HEAD").strip()
+        _git(self.clone, "switch", "-q", "main")
+        return sha
+
+    def test_heal_replaces_a_stale_bump_pr_ejected_from_the_queue(self) -> None:
+        """A merge-queue ejection leaves the bump PR open, unarmed and unqueued.
+
+        Without the heal every drain stale-defers against it forever, because
+        the only exit ("once that PR lands") never happens: on 2026-09-26 #8874
+        sat ejected for ~17.6h and on 2026-09-27 #8925 for ~14h until a human
+        closed each one. With the heal the drain closes it and opens a fresh
+        bump that carries the whole range.
+        """
+        stale_sha = self._push_stale_bump_branch()
+        # Top lock check sees the stale PR; after it is closed, the reclaim
+        # lookup confirms no open PR.
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False)
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
+        self.assertEqual(len(close), 1)
+        self.assertEqual(close[0][2], "1")
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertIn("--merge", fake.calls[-1])
+        # The branch was reclaimed onto a bump that covers the latest merge.
+        tip = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertNotEqual(tip, stale_sha)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+        main_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "main"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(subprocess.run(
+            ["git", "-C", str(self.origin), "merge-base", "--is-ancestor",
+             main_sha, tip]).returncode, 0)
+
+    def test_heal_is_off_by_default(self) -> None:
+        """Without the opt-in the ejected PR is left alone (stale-defer)."""
+        fake = _FakeGh(open_prs=1, covers=False, armed=False)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "stale-defer")
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+
+    def test_heal_replaces_an_armed_stale_bump_pr_that_is_not_queued(self) -> None:
+        """Armed is not a reason to keep a stale bump PR.
+
+        An armed PR whose required checks failed never enqueues, so it never
+        lands: #9038 on 2026-09-29 was stale, armed, not queued, with red
+        required checks, and every drain stale-deferred against it. A stale
+        generated bump is always safely regenerable; closing drops auto-merge.
+        """
+        stale_sha = self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True)
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        self.assertEqual([c[2] for c in fake.calls if c[:2] == ("pr", "close")],
+                         ["1"])
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertIn("--merge", fake.calls[-1])
+        tip = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertNotEqual(tip, stale_sha)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+    def test_heal_leaves_an_armed_covering_bump_pr_alone(self) -> None:
+        """A bump PR that already covers the merge is deferred to and re-armed."""
+        fake = _FakeGh(open_prs=1, covers=True, armed=True)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pending")
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertTrue(fake.did("pr", "merge"))
+
+    def test_heal_never_closes_a_queued_or_draft_or_unknown_pr(self) -> None:
+        """In the merge queue, a draft, or unreadable: the stale PR is held."""
+        for kwargs in ({"armed": True, "in_queue": True},
+                       {"armed": False, "in_queue": True},
+                       {"armed": False, "draft_pr": True},
+                       {"armed": True, "draft_pr": True},
+                       {"armed": False, "graphql_rc": 1}):
+            with self.subTest(**kwargs):
+                fake = _FakeGh(open_prs=1, covers=False, **kwargs)
+                val._gh = fake
+                status, _ = val.apply_via_pr(self.clone, self._cfg(),
+                                             heal_stale=True)
+                self.assertEqual(status, "stale-defer")
+                self.assertFalse(fake.did("pr", "close"))
+                self.assertFalse(fake.did("pr", "create"))
+
+    def test_heal_needs_confirmed_staleness(self) -> None:
+        """Unknown coverage is not proof the PR is stale; never close on it."""
+        fake = _FakeGh(open_prs=1, armed=False)
+        val._gh = fake
+        original = val._bump_pr_covers
+        val._bump_pr_covers = lambda repo, number, head: None
+        try:
+            status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        finally:
+            val._bump_pr_covers = original
+        self.assertEqual(status, "stale-defer")
+        self.assertFalse(fake.did("pr", "close"))
+
+    def test_heal_close_failure_stays_red_and_opens_nothing(self) -> None:
+        fake = _FakeGh(open_prs=1, covers=False, armed=False, close_rc=1)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "stale-defer")
+        self.assertTrue(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
 
     def test_pr_route_defers_when_create_races(self) -> None:
         # Lock check passes but `pr create` loses the race → GitHub rejects the

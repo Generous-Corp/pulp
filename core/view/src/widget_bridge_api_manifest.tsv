@@ -381,6 +381,7 @@ __scheduleTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __cancelTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __flushTimers__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __performanceNow__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
+hostKind	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __traceBegin__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __traceEnd__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __traceStats__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp

@@ -250,7 +250,8 @@
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
@@ -996,6 +997,14 @@
    ],
    "kind": "python"
   },
+  "drift-fast-selftest": {
+   "entry": "tools/ci/test_drift_fast.py",
+   "inputs": [
+    "tools/ci/drift_fast.py",
+    "tools/ci/test_drift_fast.py"
+   ],
+   "kind": "python"
+  },
   "dsp-provenance-audit": {
    "entry": "tools/scripts/dsp_provenance_audit.py",
    "inputs": [
@@ -1102,7 +1111,8 @@
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
@@ -1270,6 +1280,13 @@
    "inputs": [
     "tools/scripts/gate_suite_executed.py",
     "tools/scripts/test_gate_suite_executed.py"
+   ],
+   "kind": "python"
+  },
+  "git-stdin-pipe-deadlock-selftest": {
+   "entry": "tools/scripts/test_git_stdin_pipe_deadlock.py",
+   "inputs": [
+    "tools/scripts/test_git_stdin_pipe_deadlock.py"
    ],
    "kind": "python"
   },
@@ -2879,10 +2896,15 @@
    "entry": "tools/ci/test_pr_head_affected_tests.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "core/gpu_audio/CMakeLists.txt",
+    "docs/status",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/build_dir_lock.py",
+    "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
@@ -2890,12 +2912,17 @@
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/deps/manifest.json",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/affected_targets.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/gpu_audio_provider_identity.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/test_build_time_report.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
@@ -2935,6 +2962,14 @@
     "tools/scripts/test_prepush_gate_supervisor.py"
    ],
    "kind": "python"
+  },
+  "prepush-queue-rebase-hint": {
+   "kind": "python",
+   "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
+   "inputs": [
+    "tools/scripts/prepush_queue_rebase_hint.py",
+    "tools/scripts/test_prepush_queue_rebase_hint.py"
+   ]
   },
   "prepush-refresh-push": {
    "entry": "tools/scripts/test_refresh_push_check.py",
@@ -3132,8 +3167,10 @@
     "test/test_canvas_path_measure.cpp",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/fixtures/queue_chain_rule.json",
     "tools/scripts/queue_admission_guard.py",
     "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
    ],
@@ -4371,12 +4408,16 @@
    "entry": "tools/ci/source_selftests.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/motion/visual/requirements.lock",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
@@ -4386,6 +4427,8 @@
    "inputs": [
     ".githooks/pre-push",
     ".github/workflows/build.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
     "test/cmake/design_import_tool_cli_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
@@ -4394,7 +4437,9 @@
     "tools/ci/test_source_selftests.py",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/json_schema_lite.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/test_ci_throughput_workflows.py",
     "tools/scripts/test_generated_version_bump_check.py"
@@ -4877,6 +4922,7 @@
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
     "tools/ci/source_selftests.py",
+    "tools/ci/test_drift_fast.py",
     "tools/ci/test_source_selftests.py",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",

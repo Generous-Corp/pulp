@@ -3,7 +3,7 @@
 // concurrency sized to the machine that runs them.
 //
 // Every concurrent file drives its own Chrome, and each capture needs about two
-// cores to stay inside its 20-second CDP deadline: three captures at once on a
+// cores to stay inside its capture deadline: three captures at once on a
 // 3-vCPU gate VM starved each other (`browser-capture-timeout ...
 // stalled=Page.captureScreenshot`), while three on a 6-vCPU VM do not. So the
 // width is one file per CORES_PER_BROWSER cores, at least one and at most the

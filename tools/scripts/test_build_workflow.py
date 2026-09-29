@@ -506,5 +506,58 @@ class CtestParallelismTest(unittest.TestCase):
         self.assertIn('-j"$ctest_jobs" --timeout 120', WORKFLOW)
 
 
+
+class ArtifactUploadResilienceTest(unittest.TestCase):
+    """An artifact-service reset after green tests must not red the gate."""
+
+    SDK = "Upload exact GPU-audio SDK (macOS ARM64)"
+    WAIT = "Wait before retrying the GPU-audio SDK upload"
+    SDK_RETRY = "Upload exact GPU-audio SDK (macOS ARM64, retry)"
+    CTEST_LOGS = "Upload ctest logs and JUnit report"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.steps = _build_steps()
+        cls.order = [step.get("name") for step in _workflow()["jobs"]["build"]["steps"]]
+
+    def test_ctest_log_upload_is_diagnostic_only(self) -> None:
+        step = self.steps[self.CTEST_LOGS]
+        self.assertIs(step.get("continue-on-error"), True)
+        self.assertIn("always()", str(step["if"]))
+
+    def test_sdk_upload_failure_is_retried_after_a_pause(self) -> None:
+        first = self.steps[self.SDK]
+        step_id = first.get("id")
+        self.assertTrue(step_id, "the first SDK upload needs an id the retry can read")
+        # Without continue-on-error a failed first attempt fails the job and the
+        # retry, which runs only on success(), would never start.
+        self.assertIs(first.get("continue-on-error"), True)
+        for name in (self.WAIT, self.SDK_RETRY):
+            with self.subTest(step=name):
+                condition = self.steps[name]["if"]
+                self.assertEqual(condition, f"steps.{step_id}.outcome == 'failure'")
+                self.assertTrue(_evaluate_if(condition, {f"steps.{step_id}.outcome": "failure"}))
+                for outcome in ("success", "skipped", ""):
+                    self.assertFalse(
+                        _evaluate_if(condition, {f"steps.{step_id}.outcome": outcome}))
+        self.assertEqual(
+            self.order.index(self.SDK) + 2, self.order.index(self.SDK_RETRY))
+        self.assertEqual(self.order.index(self.SDK) + 1, self.order.index(self.WAIT))
+        self.assertRegex(self.steps[self.WAIT]["run"], r"sleep [1-9][0-9]+")
+
+    def test_sdk_retry_keeps_the_published_artifact_contract(self) -> None:
+        first = self.steps[self.SDK]["with"]
+        retry_step = self.steps[self.SDK_RETRY]
+        retry = retry_step["with"]
+        self.assertEqual(retry_step["uses"], self.steps[self.SDK]["uses"])
+        for key in ("name", "path", "if-no-files-found", "retention-days", "compression-level"):
+            with self.subTest(key=key):
+                self.assertEqual(retry.get(key), first.get(key))
+        self.assertIn("pulp-gpu-audio-sdk-${{ github.sha }}-", retry["name"])
+        # A reset can land after the artifact record exists.
+        self.assertIs(retry.get("overwrite"), True)
+        # Consumers rely on the artifact: a job that never published it fails.
+        self.assertNotIn("continue-on-error", retry_step)
+
 if __name__ == "__main__":
     unittest.main()

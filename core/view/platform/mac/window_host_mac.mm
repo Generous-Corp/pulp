@@ -1314,7 +1314,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)magnifyWithEvent:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
-    auto* target = self.rootView->hit_test(pt);
+    auto* target = pulp::view::route_passive_pointer(*self.rootView, pt).target;  // null when blocked
     if (!target) return;
 
     pulp::view::GestureEvent ge;
@@ -1333,7 +1333,7 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)rotateWithEvent:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
-    auto* target = self.rootView->hit_test(pt);
+    auto* target = pulp::view::route_passive_pointer(*self.rootView, pt).target;  // null when blocked
     if (!target) return;
 
     pulp::view::GestureEvent ge;

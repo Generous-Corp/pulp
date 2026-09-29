@@ -1058,13 +1058,13 @@ hidden graph ownership or Forge integration claim.
 | Processor | Header | Description |
 |-----------|--------|-------------|
 | Spectral Frame Engine | `spectral_frame_engine.hpp` | Streaming STFT analysis + overlap-add synthesis with coherent multichannel frame groups and variable synthesis hop |
-| Spectral Mask Processor | `spectral_mask_processor.hpp` | Zoomable 1–64-band streaming isolation with exact categorical mute, race-free frame-boundary publication, gain interpolation, exact latency reporting, and a latency-aligned dry path |
+| Spectral Mask Processor | `spectral_mask_processor.hpp` | Zoomable 1–64-band streaming isolation with exact categorical mute, race-free frame-boundary publication, gain interpolation, exact latency reporting, a latency-aligned dry path, and optional time-domain wet-source and frame-domain pre-mask stages for freeze/hold sources |
 | Realtime Pitch/Time | `realtime_pitch_time_processor.hpp` | Phase-vocoder pitch shifting (fixed duration, exact reported latency) and independent time stretching, with transient preservation, formant follow/preserve, and freeze |
 | Phase Coordinator | `multichannel_phase_coordinator.hpp` | Laroche-Dolson phase propagation with identity peak locking, applied as one rotation per bin across a channel group — preserves inter-channel phase exactly |
 | Source-filter Analysis | `source_filter_analysis.hpp` | Prepared cepstral and true-envelope analysis plus safely scaled autocorrelation LPC, reflection coefficients, Schur stability, and all-pole response; formant extraction remains explicitly unsupported |
 | Envelope Shifter | `spectral_envelope_shifter.hpp` | Cepstral spectral-envelope estimation (true-envelope refinement) and formant warping with exact unity bypass |
 | Transient Policy | `transient_phase_policy.hpp` | Spectral-flux transient detection (median + energy-relative gates) driving phase reset at onsets |
-| Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, and a no-mute latch policy |
+| Freeze Hold | `freeze_hold.hpp` | Spectral freeze / infinite hold with de-looped phase evolution, click-free engage/release, a no-mute latch policy, fresh capture after every release, seconds-based timing with a runtime hold length, a public held-state pipeline, and versioned snapshot/restore |
 | Pitched Feedback Delay | `pitched_feedback_delay.hpp` | Delay with a latency-bearing processor inside the feedback loop, tempo sync, freeze-aware feedback gating, and a computed minimum delay |
 | Control Smoother | `latency_aware_control_smoother.hpp` | Closed-form one-pole smoothing with attack/release asymmetry, semitone/ratio domains, block-size-independent trajectories |
 | Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Blackman-Harris, Blackman-Nuttall, flat-top, and Kaiser windows for FFT analysis |

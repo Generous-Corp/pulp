@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/spectral_mask_processor.hpp>
 
 #include <algorithm>
@@ -283,6 +284,234 @@ TEST_CASE("SpectralMaskProcessor publication and process are allocation-free",
     REQUIRE(processor.publish_table(table));
     REQUIRE(processor.process(in, out, static_cast<int>(input.size())));
     REQUIRE(g_alloc_count.load() == before);
+}
+
+namespace {
+
+// Pre-mask stage that records every call and optionally zeros bins at and
+// above `zero_from`.
+struct RecordingStage final : pulp::signal::SpectralPreMaskStage {
+    int calls = 0;
+    int last_channels = 0;
+    int last_bins = 0;
+    int zero_from = -1;
+
+    void process_frames(std::complex<float>* const* frames, int channels,
+                        int num_bins) noexcept override {
+        ++calls;
+        last_channels = channels;
+        last_bins = num_bins;
+        if (zero_from < 0) return;
+        for (int ch = 0; ch < channels; ++ch)
+            for (int k = zero_from; k < num_bins; ++k)
+                frames[ch][k] = {};
+    }
+};
+
+struct HoldStage final : pulp::signal::SpectralPreMaskStage {
+    pulp::signal::FreezeHold hold;
+    void process_frames(std::complex<float>* const* frames, int channels,
+                        int num_bins) noexcept override {
+        hold.process_group(frames, channels, num_bins);
+    }
+};
+
+std::vector<float> tone(double hz, std::size_t count) {
+    std::vector<float> result(count);
+    for (std::size_t i = 0; i < count; ++i)
+        result[i] = static_cast<float>(
+            0.2 * std::sin(2.0 * kPi * hz * static_cast<double>(i) / kSampleRate));
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("SpectralMaskProcessor pass-through pre-mask stage is bit-identical",
+          "[signal][spectral-mask-processor][pre-mask-stage]") {
+    const auto input = signal(8192);
+    SpectralMaskProcessor plain;
+    REQUIRE(plain.prepare(config()));
+    REQUIRE(plain.pre_mask_stage() == nullptr);
+    const auto expected = render(plain, input, {64, 7, 511});
+
+    RecordingStage stage;
+    SpectralMaskProcessor staged;
+    staged.set_pre_mask_stage(&stage);
+    REQUIRE(staged.prepare(config())); // the stage survives prepare()
+    REQUIRE(staged.pre_mask_stage() == &stage);
+    const auto actual = render(staged, input, {64, 7, 511});
+
+    REQUIRE(actual == expected);
+    // One call per analysis frame: frames complete at kFftSize + f * kHopSize.
+    REQUIRE(stage.calls == (8192 - kFftSize) / kHopSize + 1);
+    REQUIRE(stage.last_channels == 1);
+    REQUIRE(stage.last_bins == kFftSize / 2 + 1);
+
+    // process_frame() is the supplied-frame seam: it never runs the stage.
+    std::array<std::complex<float>, kFftSize / 2 + 1> frame{};
+    std::complex<float>* frames[] = {frame.data()};
+    const int calls = stage.calls;
+    REQUIRE(staged.process_frame(frames, static_cast<int>(frame.size())));
+    REQUIRE(stage.calls == calls);
+
+    // Clearing the stage restores the plain path.
+    staged.set_pre_mask_stage(nullptr);
+    staged.reset();
+    plain.reset();
+    REQUIRE(render(staged, input, {512}) == render(plain, input, {512}));
+}
+
+TEST_CASE("SpectralMaskProcessor masks the frames a pre-mask stage rewrote",
+          "[signal][spectral-mask-processor][pre-mask-stage]") {
+    // signal() holds 997 Hz (bin ~21) and 3125 Hz (bin ~67). A stage that
+    // zeros bins from 44 up removes the 3125 Hz part before the mask.
+    RecordingStage stage;
+    stage.zero_from = 44;
+    SpectralMaskProcessor staged;
+    REQUIRE(staged.prepare(config()));
+    staged.set_pre_mask_stage(&stage);
+    const auto output = render(staged, signal(16384), {512});
+
+    std::vector<float> low_only(16384);
+    for (std::size_t i = 0; i < low_only.size(); ++i)
+        low_only[i] = static_cast<float>(
+            0.2 * std::sin(2.0 * kPi * 997.0 * static_cast<double>(i) / kSampleRate));
+    SpectralMaskProcessor reference;
+    REQUIRE(reference.prepare(config()));
+    const auto expected = render(reference, low_only, {512});
+    float worst = 0.0f;
+    for (std::size_t i = kLatency + kFftSize; i < output.size(); ++i)
+        worst = std::max(worst, std::abs(output[i] - expected[i]));
+    INFO("worst deviation from the 997 Hz-only render " << worst);
+    REQUIRE(worst < 1.0e-3f);
+    // Control: without the stage the 3125 Hz part is present.
+    SpectralMaskProcessor plain;
+    REQUIRE(plain.prepare(config()));
+    const auto unstaged = render(plain, signal(16384), {512});
+    float control = 0.0f;
+    for (std::size_t i = kLatency + kFftSize; i < unstaged.size(); ++i)
+        control = std::max(control, std::abs(unstaged[i] - expected[i]));
+    REQUIRE(control > 0.05f);
+}
+
+TEST_CASE("SpectralMaskProcessor applies the live mask after a held pre-mask source",
+          "[signal][spectral-mask-processor][pre-mask-stage][freeze]") {
+    HoldStage stage;
+    pulp::signal::FreezeHold::Config hold_config;
+    hold_config.fft_size = kFftSize;
+    hold_config.analysis_hop = kHopSize;
+    hold_config.channels = 1;
+    stage.hold.prepare(hold_config);
+    stage.hold.set_frozen(true); // latches once the capture window fills
+
+    SpectralMaskProcessor processor;
+    REQUIRE(processor.prepare(config()));
+    processor.set_pre_mask_stage(&stage);
+    render(processor, tone(997.0, 8192), {512});
+    REQUIRE(stage.hold.engage_progress() == 1.0f);
+
+    // Input goes silent from here on: everything audible is the hold.
+    const std::vector<float> silence(8192, 0.0f);
+    const auto flushed = [](const std::vector<float>& x) {
+        return std::vector<float>(x.begin() + kLatency + kFftSize, x.end());
+    };
+
+    // Muting every band silences the held content exactly: the mask acts
+    // on the stage's output, not the other way round.
+    auto mute = layout();
+    for (auto& band : mute.bands) band.muted = true;
+    REQUIRE(processor.publish_layout(mute));
+    const auto muted = flushed(render(processor, silence, {512}));
+    REQUIRE(std::all_of(muted.begin(), muted.end(),
+                        [](float v) { return v == 0.0f; }));
+
+    // Unmuting brings the held tone back: the capture was taken before the
+    // mask, so muting did not erase it.
+    REQUIRE(processor.publish_layout(layout()));
+    const auto restored = flushed(render(processor, silence, {512}));
+    double energy = 0.0;
+    for (const float v : restored) energy += static_cast<double>(v) * v;
+    const double rms = std::sqrt(energy / static_cast<double>(restored.size()));
+    INFO("held RMS after unmute " << rms);
+    REQUIRE(rms > 0.05);
+}
+
+namespace {
+
+struct CopyWetSource final : pulp::signal::SpectralWetSourceStage {
+    int calls = 0;
+    void process_block(const float* const* input, float* const* wet, int channels,
+                       int num_samples) noexcept override {
+        ++calls;
+        for (int ch = 0; ch < channels; ++ch)
+            std::copy_n(input[ch], num_samples, wet[ch]);
+    }
+};
+
+struct SilentWetSource final : pulp::signal::SpectralWetSourceStage {
+    void process_block(const float* const*, float* const* wet, int channels,
+                       int num_samples) noexcept override {
+        for (int ch = 0; ch < channels; ++ch) std::fill_n(wet[ch], num_samples, 0.0f);
+    }
+};
+
+} // namespace
+
+TEST_CASE("SpectralMaskProcessor pass-through wet-source stage is bit-identical",
+          "[signal][spectral-mask-processor][wet-source-stage]") {
+    const auto input = signal(8192);
+    auto cfg = config(1);
+    cfg.initial_mix = 0.5f;
+    SpectralMaskProcessor plain;
+    REQUIRE(plain.prepare(cfg));
+    REQUIRE(plain.wet_source_stage() == nullptr);
+    const auto expected = render(plain, input, {64, 7, 511});
+
+    CopyWetSource stage;
+    SpectralMaskProcessor staged;
+    staged.set_wet_source_stage(&stage);
+    REQUIRE(staged.prepare(cfg)); // the stage survives prepare()
+    REQUIRE(staged.wet_source_stage() == &stage);
+    const auto actual = render(staged, input, {64, 7, 511});
+    REQUIRE(actual == expected);
+    REQUIRE(stage.calls > 0);
+
+    const auto before = g_alloc_count.load();
+    std::array<float, 64> block{};
+    const float* in[] = {block.data()};
+    float* out[] = {block.data()};
+    REQUIRE(staged.process(in, out, 64));
+    REQUIRE(g_alloc_count.load() == before);
+}
+
+TEST_CASE("SpectralMaskProcessor wet-source stage feeds the wet path only",
+          "[signal][spectral-mask-processor][wet-source-stage]") {
+    const auto input = signal(8192);
+    SilentWetSource stage;
+
+    // Fully wet: the wet path analyzes the stage's silence.
+    SpectralMaskProcessor wet_only;
+    REQUIRE(wet_only.prepare(config()));
+    wet_only.set_wet_source_stage(&stage);
+    const auto silent = render(wet_only, input, {512});
+    REQUIRE(std::all_of(silent.begin(), silent.end(),
+                        [](float v) { return v == 0.0f; }));
+    // Control: the same processor without the stage is not silent.
+    wet_only.set_wet_source_stage(nullptr);
+    wet_only.reset();
+    const auto live = render(wet_only, input, {512});
+    REQUIRE(std::any_of(live.begin(), live.end(),
+                        [](float v) { return std::abs(v) > 0.05f; }));
+
+    // Fully dry: the dry path still carries the live input, latency-aligned.
+    auto dry_cfg = config();
+    dry_cfg.initial_mix = 0.0f;
+    SpectralMaskProcessor dry_only;
+    REQUIRE(dry_only.prepare(dry_cfg));
+    dry_only.set_wet_source_stage(&stage);
+    const auto dry = render(dry_only, input, {512});
+    for (std::size_t i = kLatency; i < dry.size(); ++i)
+        REQUIRE(dry[i] == input[i - kLatency]);
 }
 
 TEST_CASE("SpectralMaskProcessor rejects bad preparation and tables atomically",
