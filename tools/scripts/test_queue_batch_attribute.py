@@ -1704,6 +1704,71 @@ class CtestBlockOrderTests(unittest.TestCase):
         )
 
 
+class InputAttributionTests(unittest.TestCase):
+    """A test whose failing groups all hold an entry touching its inputs is not a flake."""
+
+    DRIFT = qba.DRIFT_TEST
+    DOC = {"tests": {
+        "own-contract": {"entry": "tools/scripts/test_a.py",
+                         "inputs": ["tools/scripts/test_a.py", "docs/status"]},
+        "other": {"entry": "tools/scripts/test_b.py", "inputs": ["tools/scripts/b.py"]},
+    }}
+    FILES = {
+        1: ["tools/scripts/b.py"],           # a listed script's input
+        2: ["core/x.cpp"],
+        3: ["docs/status/census.json"],      # own-contract's input directory
+        4: ["test/ctest_script_inputs.json"],
+        5: ["README.md"],
+        6: ["docs/status/other.json"],
+    }
+
+    def _hist(self, test, observations):
+        [hist] = qba.history_attribution(observations, [test])
+        qba.attribute_by_inputs([hist], observations, self.DOC, lambda pr: self.FILES[pr])
+        return hist
+
+    def test_different_touching_entries_in_each_failing_group_are_all_named(self) -> None:
+        # Three failing groups with no common member: the separator rule sees a
+        # 3-of-11 flake. Each holds an entry that touched a listed input.
+        observations = [group("1", [1, 2], failed=[self.DRIFT]),
+                        group("2", [4, 5], failed=[self.DRIFT]),
+                        group("3", [1], failed=[self.DRIFT])]
+        observations += [group(str(i), [2], passed=[self.DRIFT]) for i in range(4, 12)]
+        hist = self._hist(self.DRIFT, observations)
+        self.assertEqual(hist.verdict, qba.HISTORY_INPUTS)
+        self.assertEqual(hist.culprits, [1, 4])
+
+    def test_a_directory_input_matches_files_under_it(self) -> None:
+        # No member is common to both failing groups, so only the inputs explain them.
+        observations = [group("1", [3, 2], failed=["own-contract"]),
+                        group("2", [6], failed=["own-contract"])]
+        observations += [group(str(i), [5], passed=["own-contract"]) for i in range(3, 10)]
+        hist = self._hist("own-contract", observations)
+        self.assertEqual((hist.verdict, hist.culprits), (qba.HISTORY_INPUTS, [3, 6]))
+
+    def test_control_a_failing_group_without_a_touching_entry_keeps_the_flake(self) -> None:
+        observations = [group("1", [1], failed=[self.DRIFT]),
+                        group("2", [2, 5], failed=[self.DRIFT])]
+        observations += [group(str(i), [5], passed=[self.DRIFT]) for i in range(3, 12)]
+        hist = self._hist(self.DRIFT, observations)
+        self.assertEqual(hist.verdict, qba.HISTORY_FLAKE)
+        self.assertEqual(hist.culprits, [])
+
+    def test_an_unknown_membership_cannot_be_explained(self) -> None:
+        observations = [group("1", [1], failed=[self.DRIFT]),
+                        group("2", None, failed=[self.DRIFT])]
+        observations += [group(str(i), [5], passed=[self.DRIFT]) for i in range(3, 12)]
+        self.assertNotEqual(self._hist(self.DRIFT, observations).verdict, qba.HISTORY_INPUTS)
+
+    def test_the_drift_check_reads_every_listed_input_and_the_list(self) -> None:
+        inputs = qba.declared_inputs(self.DRIFT, self.DOC)
+        self.assertIn("tools/scripts/b.py", inputs)
+        self.assertIn("docs/status", inputs)
+        self.assertIn(qba.SCRIPT_INPUTS_LIST, inputs)
+        self.assertEqual(qba.declared_inputs("other", self.DOC), ("tools/scripts/b.py",))
+        self.assertIsNone(qba.declared_inputs("unlisted", self.DOC))
+
+
 CHAIN_FIXTURE = (
     pathlib.Path(__file__).resolve().parents[2] / "tools/scripts/fixtures/queue_chain_rule.json"
 )
