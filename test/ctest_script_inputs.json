@@ -564,6 +564,14 @@
    ],
    "kind": "python"
   },
+  "claude-md-sync-hook": {
+   "entry": "test/test_claude_md_sync_hook.sh",
+   "inputs": [
+    "hooks/scripts/claude_md_sync.py",
+    "test/test_claude_md_sync_hook.sh"
+   ],
+   "kind": "shell"
+  },
   "clean-build-cov-selftest": {
    "entry": "tools/scripts/test_clean_build_cov.py",
    "inputs": [
@@ -821,6 +829,14 @@
    "entry": "tools/scripts/test_control_profile_downgrade_is_announced.py",
    "inputs": [
     "tools/scripts/test_control_profile_downgrade_is_announced.py"
+   ],
+   "kind": "python"
+  },
+  "create-templates-verify": {
+   "entry": "tools/scripts/test_verify_create_templates.py",
+   "inputs": [
+    "tools/scripts/test_verify_create_templates.py",
+    "tools/scripts/verify_create_templates.py"
    ],
    "kind": "python"
   },
@@ -2412,6 +2428,22 @@
    ],
    "kind": "python"
   },
+  "import-realtime-contract": {
+   "entry": "tools/import-design/test_realtime_contract.py",
+   "inputs": [
+    "tools/import-design/realtime_contract.py",
+    "tools/import-design/test_realtime_contract.py"
+   ],
+   "kind": "python"
+  },
+  "import-vendored-runtime-staleness": {
+   "entry": "tools/import-validation/test_check_vendored_runtime.py",
+   "inputs": [
+    "tools/import-validation/check_vendored_runtime.py",
+    "tools/import-validation/test_check_vendored_runtime.py"
+   ],
+   "kind": "python"
+  },
   "importer-differential-lab": {
    "entry": "test/test_importer_differential_lab.py",
    "inputs": [
@@ -2843,6 +2875,23 @@
    ],
    "kind": "python"
   },
+  "pr-head-affected-tests-selftest": {
+   "entry": "tools/ci/test_pr_head_affected_tests.py",
+   "inputs": [
+    "test/CMakeLists.txt",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/test_pr_head_affected_tests.py",
+    "tools/ci/wide_non_native_checks.json",
+    "tools/cmake/PulpPlugin.cmake",
+    "tools/scripts/affected_targets.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/run_changed_surface_tests.py"
+   ],
+   "kind": "python"
+  },
   "prepush-cannot-measure": {
    "entry": "tools/scripts/test_prepush_cannot_measure.py",
    "inputs": [
@@ -2944,7 +2993,8 @@
     "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
     "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
     "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
-    "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs"
+    "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
+    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs"
    ],
    "kind": "node"
   },
@@ -4312,10 +4362,13 @@
   "source-selftest-lane-contract": {
    "entry": "tools/ci/source_selftests.py",
    "inputs": [
+    ".github/workflows/build.yml",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
@@ -4331,7 +4384,9 @@
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
     "tools/ci/test_source_selftests.py",
+    "tools/motion/visual/requirements.lock",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/test_ci_throughput_workflows.py",
     "tools/scripts/test_generated_version_bump_check.py"
