@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <functional>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -101,9 +103,13 @@ private:
 // reports true (the test thread acts as the main thread here).
 class ScopedMainThreadBackend {
 public:
-    ScopedMainThreadBackend() {
+    // `accept_posts == false` models a platform whose dispatcher cannot take
+    // work (Windows / Linux hosts with no registered backend): every post is
+    // rejected, so callers must take their no-dispatcher fallback.
+    explicit ScopedMainThreadBackend(bool accept_posts = true) {
         pulp::events::MainThreadDispatcher::Backend backend;
-        backend.post = [this](pulp::events::Task task) {
+        backend.post = [this, accept_posts](pulp::events::Task task) {
+            if (!accept_posts) return false;
             immediate_.push_back(std::move(task));
             return true;
         };
@@ -1495,9 +1501,12 @@ TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
         REQUIRE(handler.restart_calls == 1);
     }
 
-    SECTION("a main-thread host entrypoint drains the pending restart") {
+    SECTION("a main-thread host entrypoint schedules the pending restart") {
         // getLatencySamples() runs on the main thread; a host re-queries it
-        // after a latency change. It must flush the pending restartComponent.
+        // after a latency change. It must not call back into the host from
+        // inside the query, but it must schedule the pending restartComponent
+        // for the main thread's next turn.
+        ScopedMainThreadBackend backend;
         std::atomic<bool> process_ok{false};
         std::thread audio_thread([&] {
             process_ok.store(processor.process(data) == Steinberg::kResultOk,
@@ -1508,6 +1517,12 @@ TEST_CASE("VST3 restartComponent is marshaled off the audio thread",
         REQUIRE(handler.restart_calls == 0);
 
         (void)processor.getLatencySamples();
+        (void)processor.getTailSamples();
+        REQUIRE(handler.restart_calls == 0);
+        // Both queries coalesce into one queued post.
+        REQUIRE(backend.immediate_pending() == 1);
+
+        REQUIRE(backend.run_immediate() == 1);
         REQUIRE(handler.restart_calls == 1);
         REQUIRE(handler.last_flags == (kLatencyChanged | kReloadComponent));
         REQUIRE(handler.last_thread == main_thread_id);
@@ -1685,8 +1700,8 @@ TEST_CASE("VST3 a restart callback queued past terminate() is a safe no-op",
         REQUIRE(processor->process(data) == Steinberg::kResultOk);
         REQUIRE(processor->restart_dispatch_armed_for_test());
 
-        // terminate() directly (no setActive(false), which would drain
-        // synchronously on this main thread). The pending poll tick survives.
+        // terminate() directly with the restart still armed. The pending poll
+        // tick survives.
         REQUIRE(processor->terminate() == Steinberg::kResultOk);
         // processor destroyed here.
     }
@@ -1696,6 +1711,260 @@ TEST_CASE("VST3 a restart callback queued past terminate() is a safe no-op",
     backend->run_delayed();
     backend->run_immediate();
     REQUIRE(handler.restart_calls == 0);
+}
+
+// Host mock modeled on a host that serializes activation behind ONE
+// non-recursive processing lock and services restartComponent synchronously on
+// its message thread: kReloadComponent retakes the lock to deactivate and
+// reactivate the component, kLatencyChanged re-queries latency. A plug-in that
+// calls restartComponent from inside setActive / getLatencySamples while the
+// host holds the lock deadlocks such a host. The lock here gives up after a
+// bounded wait and records the timeout instead of hanging the test.
+class LockingResetHost final : public Steinberg::Vst::IComponentHandler {
+public:
+    explicit LockingResetHost(pulp::format::vst3::PulpVst3Processor& plugin) : plugin_(plugin) {}
+
+    // Host-side deactivate: lock, stop processing, deactivate.
+    bool release_resources() {
+        if (!acquire_lock()) return false;
+        inside_host_call_ = true;
+        plugin_.setProcessing(false);
+        plugin_.setActive(false);
+        inside_host_call_ = false;
+        release_lock();
+        return true;
+    }
+
+    // Host-side prepare: lock, query latency, activate, start processing.
+    bool prepare_to_play() {
+        if (!acquire_lock()) return false;
+        inside_host_call_ = true;
+        (void)plugin_.getLatencySamples();
+        plugin_.setActive(true);
+        plugin_.setProcessing(true);
+        inside_host_call_ = false;
+        release_lock();
+        return true;
+    }
+
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
+        ++restart_calls;
+        accumulated_flags |= flags;
+        if (inside_host_call_ || inside_restart_) reentered = true;
+        inside_restart_ = true;
+        if (on_restart) on_restart();
+        if (flags & Steinberg::Vst::kReloadComponent) {
+            if (!acquire_lock()) return Steinberg::kResultFalse;
+            inside_host_call_ = true;
+            plugin_.setProcessing(false);
+            plugin_.setActive(false);
+            plugin_.setActive(true);
+            plugin_.setProcessing(true);
+            inside_host_call_ = false;
+            release_lock();
+        }
+        if (flags & Steinberg::Vst::kLatencyChanged) (void)plugin_.getLatencySamples();
+        inside_restart_ = false;
+        return Steinberg::kResultOk;
+    }
+
+    // Runs inside restartComponent before the host services the flags.
+    std::function<void()> on_restart;
+
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID,
+                                              Steinberg::Vst::ParamValue) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                 void** obj) override {
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = static_cast<Steinberg::Vst::IComponentHandler*>(this);
+            return Steinberg::kResultTrue;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+
+    int restart_calls = 0;
+    Steinberg::int32 accumulated_flags = 0;
+    bool reentered = false;
+    bool lock_timed_out = false;
+
+private:
+    // Non-recursive: a second acquire on the thread that holds it spins until
+    // the deadline, exactly like a spin lock retaken re-entrantly.
+    bool acquire_lock() {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+        while (held_.exchange(true, std::memory_order_acquire)) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                lock_timed_out = true;
+                return false;
+            }
+            std::this_thread::yield();
+        }
+        return true;
+    }
+    void release_lock() { held_.store(false, std::memory_order_release); }
+
+    pulp::format::vst3::PulpVst3Processor& plugin_;
+    std::atomic<bool> held_{false};
+    bool inside_host_call_ = false;
+    bool inside_restart_ = false;
+};
+
+TEST_CASE("VST3 never calls restartComponent from inside a host-initiated call",
+          "[vst3][latency][lifecycle][threading]") {
+    // A tail change flagged on the audio thread becomes kReloadComponent. The
+    // host deactivates (holding its processing lock) before the paced poll has
+    // delivered it. Delivering from inside setActive(false) re-enters the host,
+    // which retakes its own lock: a deadlock. The restart must instead reach
+    // the host exactly once, after the host call has returned.
+    using Steinberg::Vst::kReloadComponent;
+
+    TestVst3Config config;
+    config.flag_tail_in_process = true;
+    reset_test_processor(config);
+
+    HostApp host_app;
+    pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+    REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    LockingResetHost host(processor);
+    REQUIRE(processor.setComponentHandler(&host) == Steinberg::kResultOk);
+
+    Steinberg::Vst::ProcessSetup setup{};
+    setup.processMode = Steinberg::Vst::kRealtime;
+    setup.symbolicSampleSize = Steinberg::Vst::kSample32;
+    setup.maxSamplesPerBlock = 8;
+    setup.sampleRate = 48000.0;
+    REQUIRE(processor.setupProcessing(setup) == Steinberg::kResultOk);
+
+    std::array<float, 8> in_l{}, in_r{}, out_l{}, out_r{};
+    float* ins[2] = {in_l.data(), in_r.data()};
+    float* outs[2] = {out_l.data(), out_r.data()};
+    Steinberg::Vst::AudioBusBuffers ab_in[1]{};
+    ab_in[0].numChannels = 2;
+    ab_in[0].channelBuffers32 = ins;
+    Steinberg::Vst::AudioBusBuffers ab_out[1]{};
+    ab_out[0].numChannels = 2;
+    ab_out[0].channelBuffers32 = outs;
+    Steinberg::Vst::ProcessData data{};
+    data.numSamples = 8;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = ab_in;
+    data.outputs = ab_out;
+
+    SECTION("deactivation defers the restart to the main thread's next turn") {
+        ScopedMainThreadBackend backend;
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        REQUIRE(processor.restart_dispatch_armed_for_test());
+
+        REQUIRE(host.release_resources());
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE_FALSE(host.reentered);
+        REQUIRE(host.restart_calls == 0);
+
+        // The host call has returned; its run loop now delivers the restart.
+        REQUIRE(backend.run_immediate() == 1);
+        REQUIRE(host.restart_calls == 1);
+        REQUIRE(host.accumulated_flags == kReloadComponent);
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE_FALSE(host.reentered);
+
+        // Exactly once: nothing further is queued or delivered.
+        backend.run_immediate();
+        backend.run_delayed();
+        backend.run_delayed();
+        REQUIRE(host.restart_calls == 1);
+    }
+
+    SECTION("a latency query under the host lock defers the restart") {
+        ScopedMainThreadBackend backend;
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        REQUIRE(host.release_resources());
+        REQUIRE(host.restart_calls == 0);
+
+        // Re-prepare queries latency while holding the lock; the one queued
+        // post already covers the pending restart.
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(host.restart_calls == 0);
+        REQUIRE(backend.immediate_pending() == 1);
+
+        backend.run_immediate();
+        REQUIRE(host.restart_calls == 1);
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE_FALSE(host.reentered);
+        REQUIRE(host.release_resources());
+    }
+
+    SECTION("without a dispatcher, deactivation keeps the restart latched") {
+        ScopedMainThreadBackend backend(/*accept_posts=*/false);
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+
+        REQUIRE(host.release_resources());
+        REQUIRE(host.restart_calls == 0);
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE(processor.restart_dispatch_armed_for_test());
+
+        // A later query outside any host lock delivers it inline, once, and
+        // the host's synchronous reset does not trigger a nested delivery.
+        (void)processor.getTailSamples();
+        REQUIRE(host.restart_calls == 1);
+        REQUIRE(host.accumulated_flags == kReloadComponent);
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE_FALSE(host.reentered);
+        (void)processor.getTailSamples();
+        REQUIRE(host.restart_calls == 1);
+        REQUIRE(host.release_resources());
+    }
+
+    SECTION("a restart flagged while the host handles one is not delivered nested") {
+        // The audio thread can flag again while the host is still inside
+        // restartComponent, and the host may query the plug-in from there.
+        // That query must not start a second, nested delivery.
+        ScopedMainThreadBackend backend(/*accept_posts=*/false);
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(processor.process(data) == Steinberg::kResultOk);
+        REQUIRE(host.release_resources());
+
+        auto* tp = TestVst3Processor::g_last_processor;
+        REQUIRE(tp != nullptr);
+        bool reflagged = false;
+        host.on_restart = [&] {
+            if (reflagged) return;
+            reflagged = true;
+            tp->flagged_restart_in_process_ = false;
+            (void)processor.process(data);
+            (void)processor.getTailSamples();
+        };
+
+        (void)processor.getTailSamples();
+        REQUIRE(reflagged);
+        REQUIRE(host.restart_calls == 1);
+        REQUIRE_FALSE(host.reentered);
+        REQUIRE(processor.restart_dispatch_armed_for_test());
+
+        // The second restart arrives afterwards, on its own.
+        (void)processor.getTailSamples();
+        REQUIRE(host.restart_calls == 2);
+        REQUIRE_FALSE(host.reentered);
+        REQUIRE_FALSE(host.lock_timed_out);
+        REQUIRE(host.release_resources());
+    }
+
+    REQUIRE(processor.terminate() == Steinberg::kResultOk);
 }
 
 TEST_CASE("VST3 transport jumps request processor reset through ProcessContext",
@@ -6025,19 +6294,24 @@ TEST_CASE("VST3 marks the host project dirty for non-parameter state changes",
     test_processor->flag_state_dirty();
     REQUIRE(test_processor->state_dirty_pending());
 
-    // Any main-thread host entrypoint drains it.
+    // Any main-thread host entrypoint schedules it; it is delivered on the
+    // main thread's next turn, never from inside the host's call.
     REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(handler.set_dirty_calls == 0);
+    backend.run_immediate();
     REQUIRE(handler.set_dirty_calls == 1);
     REQUIRE(handler.last_dirty_state);
 
     // The edge is consumed, not latched: a second drain is silent.
     REQUIRE_FALSE(test_processor->state_dirty_pending());
     REQUIRE(processor.getLatencySamples() >= 0);
+    REQUIRE(backend.immediate_pending() == 0);
     REQUIRE(handler.set_dirty_calls == 1);
 
     // Raising it again delivers again.
     test_processor->flag_state_dirty();
     REQUIRE(processor.getLatencySamples() >= 0);
+    backend.run_immediate();
     REQUIRE(handler.set_dirty_calls == 2);
 
     REQUIRE(processor.terminate() == Steinberg::kResultOk);
@@ -6063,6 +6337,7 @@ TEST_CASE("VST3 consumes a state-dirty edge a v1-only host cannot receive",
 
     test_processor->flag_state_dirty();
     REQUIRE(processor.getLatencySamples() >= 0);
+    backend.run_immediate();
     REQUIRE_FALSE(test_processor->state_dirty_pending());
     REQUIRE(v1_only.restart_calls == 0);
 
