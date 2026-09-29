@@ -423,6 +423,37 @@ def workflow_entries(
     return entries
 
 
+class _ImportClosure:
+    """Repo files each script loads, through repo helpers (cached per run)."""
+
+    def __init__(self, repo: pathlib.Path) -> None:
+        self.repo = repo
+        self._cache: dict[pathlib.Path, set[pathlib.Path]] = {}
+        self._modules = None
+        try:
+            sys.path.insert(0, str(repo / "tools" / "scripts"))
+            import gate_python_imports_check as imports
+            self._imports = imports
+        except ImportError:
+            self._imports = None
+        finally:
+            sys.path.pop(0)
+
+    def of(self, script: pathlib.Path) -> set[pathlib.Path]:
+        if self._imports is None:
+            return set()
+        script = script.resolve()
+        if script not in self._cache:
+            if self._modules is None:
+                try:
+                    self._modules = self._imports.tracked_python(self.repo)
+                except (OSError, subprocess.SubprocessError):
+                    self._modules = {}
+            self._cache[script] = self._imports.local_import_closure(
+                script, self.repo, self._modules)
+        return self._cache[script]
+
+
 def select_for_changes(
     entries: list[dict[str, Any]],
     changed: list[str],
@@ -430,9 +461,10 @@ def select_for_changes(
     lane_files: tuple[str, ...] = LANE_FILES,
 ) -> list[dict[str, Any]]:
     """Entries a diff can plausibly break: every entry when the lane itself
-    changed, otherwise each entry whose own script changed or whose source
-    names a changed file. A textual reference is a heuristic that
-    over-selects rather than under-selects; the required lane still runs all.
+    changed, otherwise each entry whose own script changed, that loads a
+    changed module through its repo imports, or whose source names a changed
+    file. A textual reference is a heuristic that over-selects rather than
+    under-selects; the required lane still runs all.
     """
     if any(path in lane_files for path in changed):
         return list(entries)
@@ -440,10 +472,18 @@ def select_for_changes(
     tokens = set().union(*(change_tokens(path) for path in changed)) if changed else set()
     word = {t: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])")
             for t in tokens}
+    changed_py = {p for p in changed_abs if p.suffix == ".py"}
+    closure = _ImportClosure(repo) if changed_py else None
     selected = []
     for entry in entries:
         sources = entry_sources(entry, repo)
         if any(src.resolve() in changed_abs for src in sources):
+            selected.append(entry)
+            continue
+        # A changed module reaches every script that loads it, directly or
+        # through a repo helper that imports it in turn.
+        if closure is not None and any(closure.of(src) & changed_py for src in sources
+                                       if src.suffix == ".py"):
             selected.append(entry)
             continue
         # A checker handed directories scans whatever is in them.

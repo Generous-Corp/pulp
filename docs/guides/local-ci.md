@@ -2268,6 +2268,21 @@ Two candidate signals were evaluated against live runs and are deliberately
   base and the rule becomes checkable and would have cleared all four.
 
 
+## Pull-request heads also run the tests their diff reaches
+
+After the `pr-fast` tier, the `Test what this pull request reaches` step runs
+`tools/ci/pr_head_affected_tests.py` against the configured PR-head build: the
+diff is the merge ref's first parent to its head, the selection is `pulp
+affected`'s projection (`changed_surface_inventory.project_affected` plus the
+Shipyard changed-surface families), and `Configure` writes the CMake codemodel
+query it reads. It is gating. It never takes the projection's `all` fallback,
+skips docs/skills/workflow-only diffs, adds the `cmake-*` fixtures for
+`tools/cmake/**` and `wide-non-native-selftest` for the wide tier's inputs or a
+`test/` CMake registration, drops `pr-fast` members, and stops starting batches
+after ten minutes, listing the rest as skipped. Its annotation is
+`pr-head-affected-tests` (`pulp-pr-head-affected-tests/v1`): selected, passed,
+failed, skipped-for-budget and minutes, which is the per-PR extra cost to watch.
+
 ## Exact PR receipts on an unchanged merge-group candidate
 
 A pull-request head normally runs only the build and the `pr-fast` tier, which

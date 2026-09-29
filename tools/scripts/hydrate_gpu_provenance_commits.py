@@ -9,6 +9,7 @@ import pathlib
 import re
 import os
 import subprocess
+import tempfile
 import sys
 from typing import Any
 
@@ -111,14 +112,26 @@ def present_commits(root: pathlib.Path, revisions: list[str]) -> set[str]:
 
     One batch call for the whole set: a spawn per revision buys the same answer
     for tens of times the cost, and this runs on every push.
+
+    The revisions reach git from a file, not a pipe. `cat-file --batch-check`
+    answers each line before reading the next, so feeding stdin through a pipe
+    while reading its stdout depends on neither pipe filling. On macOS a pipe
+    can start with a few hundred bytes of buffer and still poll as writable
+    when full, so subprocess's blocking write of the next input chunk waited
+    on git while git waited on its full stdout: the push hung with both
+    processes idle. A file gives git all its input without Python writing
+    anything, and the only pipe left is drained by communicate().
     """
     if not revisions:
         return set()
-    completed = subprocess.run(
-        ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],
-        cwd=root, input="\n".join(revisions) + "\n",
-        text=True, capture_output=True, check=False, env=offline_git_env(),
-    )
+    with tempfile.TemporaryFile(mode="w+") as request:
+        request.write("\n".join(revisions) + "\n")
+        request.seek(0)
+        completed = subprocess.run(
+            ["git", "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+            cwd=root, stdin=request,
+            text=True, capture_output=True, check=False, env=offline_git_env(),
+        )
     present = set()
     for line in completed.stdout.splitlines():
         parts = line.split()

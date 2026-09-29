@@ -704,5 +704,41 @@ class CtestLaneTests(unittest.TestCase):
         self.assertEqual([e["name"] for e in picked], ["walker"])
 
 
+class ImportClosureSelectionTests(unittest.TestCase):
+    """A changed module selects every suite that loads it through repo imports."""
+
+    def _repo(self, root: pathlib.Path) -> list[dict]:
+        scripts = root / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "census.py").write_text("def header_names(): return []\n")
+        (scripts / "batch_attr.py").write_text("import census\n")
+        (scripts / "test_batch.py").write_text(
+            "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
+            "import batch_attr\n")
+        (scripts / "test_ns.py").write_text("from tools.scripts import batch_attr\n")
+        (scripts / "test_other.py").write_text("import json\n")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        return [entry("batch", ["{repo}/tools/scripts/test_batch.py"]),
+                entry("ns", ["{repo}/tools/scripts/test_ns.py"]),
+                entry("other", ["{repo}/tools/scripts/test_other.py"])]
+
+    def test_a_module_two_imports_away_selects_its_suites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            picked = lane.select_for_changes(entries, ["tools/scripts/census.py"], root)
+        # Neither suite names census; each loads it through batch_attr, one by a
+        # sys.path sibling import, one through the repo-root namespace.
+        self.assertEqual([e["name"] for e in picked], ["batch", "ns"])
+
+    def test_control_an_unimported_module_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            (root / "tools" / "scripts" / "unused.py").write_text("x = 1\n")
+            picked = lane.select_for_changes(entries, ["tools/scripts/unused.py"], root)
+        self.assertEqual(picked, [])
+
+
 if __name__ == "__main__":
     unittest.main()

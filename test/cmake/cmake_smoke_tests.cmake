@@ -604,6 +604,16 @@ add_test(NAME cmake-sdk-provenance-contract
 set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
     LABELS "cmake;sdk;provenance"
     TIMEOUT 30)
+# pulp_check_vendored_react_runtime(): stale vendored @pulp/react bundles warn
+# (STRICT fails) and name the missing fix; current ones are quiet.
+add_test(NAME cmake-pulp-react-runtime-check
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-pulp-react-runtime-check
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_react_runtime_check.cmake)
+set_tests_properties(cmake-pulp-react-runtime-check PROPERTIES
+    LABELS "cmake;sdk"
+    TIMEOUT 30)
 add_test(NAME cmake-pulp-git-state
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
@@ -860,6 +870,14 @@ if(UNIX)
     add_test(NAME inject-worktree-lineage-hook
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_inject_worktree_lineage_hook.sh)
     set_tests_properties(inject-worktree-lineage-hook PROPERTIES TIMEOUT 15)
+
+    # claude_md_sync.py — injects origin/main's CLAUDE.md/AGENTS.md when a
+    # checkout on an old branch would otherwise serve stale instructions.
+    # Hermetic temp repos; also proves the user-level launcher refuses to run
+    # a non-Pulp repository's script and that git status/index are untouched.
+    add_test(NAME claude-md-sync-hook
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_claude_md_sync_hook.sh)
+    set_tests_properties(claude-md-sync-hook PROPERTIES TIMEOUT 60)
 
     # tool-registry-reminder.sh — the PostToolUse hook that catches an agent
     # hand-rolling a tool the registry already lists. Hermetic (synthetic tool

@@ -1728,6 +1728,10 @@ jobs:
           # it `render_to_rgba` returns an empty buffer, so capture-based view
           # tests fail for the configuration rather than for the change.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          # Ask CMake for its codemodel: the pull-request step that runs the
+          # tests a diff reaches maps changed files to targets through it.
+          mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
+          : > "$PULP_BUILD_DIR/.cmake/api/v1/query/codemodel-v2"
           cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
@@ -2053,6 +2057,38 @@ jobs:
           # A green check here means the fast tier passed, not the suite. Say
           # so where `shipyard landing` reads it (a check-run annotation).
           echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
+
+      - name: Test what this pull request reaches (pull request head)
+        # Most merge-group macOS failures in a week were a pull request's OWN
+        # test, one its diff plainly reaches, failing in a batch it then
+        # ejected instead of on its head. This runs, after the fast tier, the
+        # ctests `pulp affected` selects for the pull request's base→head diff
+        # (the merge ref's first parent is the base), and a failure fails the
+        # required check here. It never widens to the full suite: a diff of
+        # docs, skills or workflows, or one the projection cannot focus,
+        # selects nothing extra. The extra time is capped at ten minutes;
+        # tests left over are listed as skipped, and the merge group still
+        # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
+        id: pr_affected_tests
+        if: runner.os != 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          rc=0
+          python3 tools/ci/pr_head_affected_tests.py \
+            --build-dir "$PULP_BUILD_DIR" --base HEAD^1 --head HEAD \
+            --budget-secs 600 --jobs 4 --label-exclude "$label_exclude" \
+            --junit-dir "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-junit" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) exit 1 ;;  # a test this diff reaches failed on its own head
+            2) echo "::warning title=pr-head-affected-tests::could not read the diff or the ctest inventory, so nothing was selected; this is not a verdict on the pull request" ;;
+            *) echo "::error title=pr-head-affected-tests::selector exited $rc"; exit "$rc" ;;
+          esac
 
       - name: Test (non-Windows)
         id: ctest

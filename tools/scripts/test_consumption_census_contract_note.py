@@ -36,13 +36,12 @@ DRIFT_TEST_NAME = "consumption-census-drift"
 
 
 def drift_one_header(document: dict) -> dict:
-    """Exactly what a new header under an already-exported root does."""
-    for profile in document["profiles"].values():
-        name = sorted(profile["targets"])[0]
-        profile["targets"][name]["public_headers"]["count"] += 1
-        for row in profile["summary"]["ranked_by_closure"]:
-            if row["exported_as"] == f"Pulp::{name}":
-                row["public_header_count"] += 1
+    """Exactly what a new header under an already-exported root does: the tree
+    holds a header the committed census does not list. Dropping one recorded
+    name is the same disagreement seen from the census's side."""
+    roots = document["public_headers_by_root"]
+    root = next(r for r in sorted(roots) if roots[r])
+    roots[root] = roots[root][1:]
     return document
 
 

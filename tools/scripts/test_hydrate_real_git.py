@@ -316,5 +316,73 @@ class OrphanedPinTest(unittest.TestCase):
         self.assertIn("will not exist on the remote", output)
 
 
+
+# A `git` that answers before it reads: it writes far more than a pipe holds
+# to stdout, then reads its stdin and marks every revision a commit.
+FAKE_GIT = r"""#!/usr/bin/env python3
+import sys
+out = sys.stdout
+line = "0" * 40 + " missing\n"
+for _ in range(64):
+    out.write(line * 5000)
+out.flush()
+for request in sys.stdin:
+    sha = request.strip()
+    if sha:
+        out.write(sha + " commit\n")
+out.flush()
+"""
+
+# Runs present_commits in a child so a deadlock is a timeout, not a hung suite.
+#
+# The hang it guards was seen under kernel pipe-memory pressure, when macOS
+# hands out pipes with a few hundred bytes of buffer that still poll as
+# writable while full. subprocess then issues a blocking write into git's full
+# stdin and stops draining git's stdout, and git, blocked on that stdout, never
+# reads again. An ordinary 64 KiB pipe polls unwritable when full, so the probe
+# installs a selector that reports every registered writer as writable - the
+# degraded pipe's polling behaviour - which makes the hazard deterministic:
+# any version that writes the request into a pipe blocks forever against the
+# git above, and a version that hands git a file registers no writer at all.
+PROBE = r"""
+import pathlib, selectors, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import hydrate_gpu_provenance_commits as hydration
+
+class DegradedPipeSelector(selectors.PollSelector):
+    def select(self, timeout=None):
+        writers = [key for key in self.get_map().values()
+                   if key.events & selectors.EVENT_WRITE]
+        ready = super().select(0 if writers else timeout)
+        seen = {key.fd for key, _ in ready}
+        return ready + [(key, selectors.EVENT_WRITE)
+                        for key in writers if key.fd not in seen]
+
+subprocess._PopenSelector = DegradedPipeSelector
+revisions = ["%040x" % i for i in range(1, 20001)]
+present = hydration.present_commits(pathlib.Path("."), revisions)
+print("OK" if present == set(revisions) else "WRONG %d" % len(present))
+"""
+
+
+class BatchCheckPipeDeadlockTest(unittest.TestCase):
+    def test_a_git_that_answers_before_reading_cannot_wedge_the_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = pathlib.Path(tmp)
+            fake = bin_dir / "git"
+            fake.write_text(FAKE_GIT)
+            fake.chmod(0o755)
+            env = dict(os.environ)
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-c", PROBE, str(pathlib.Path(__file__).parent)],
+                    cwd=tmp, env=env, text=True, capture_output=True, timeout=90,
+                )
+            except subprocess.TimeoutExpired:
+                self.fail("present_commits deadlocked against git cat-file's pipes")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout.strip(), "OK")
+
 if __name__ == "__main__":
     unittest.main()
