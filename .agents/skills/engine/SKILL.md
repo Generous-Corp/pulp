@@ -728,6 +728,18 @@ bridge-emitting methods is treated as an error, not a clean result. `moveTo`,
 `lineTo`, `rect` and `_fp` are the only exemptions, because they own the
 buffer.
 
+The run survives a `moveTo`: a later subpath appends its points and records its
+start index in `this._pendStarts`, and `_fp()` sends
+`canvasPathPolyline(id, coords, starts)`, so a row of 63 tick marks is one
+crossing instead of 63. `_openPendingSubpath` flushes first when a run would
+pass the bridge's 65536-coordinate cap — over the cap the bridge rejects the
+whole batch and the path silently vanishes.
+
+The same "the crossing is the cost" logic is why `save()`/`restore()` keep the
+shim's `_sent*` record of native state instead of clearing it: see the
+`view-bridge` skill's scripted-editor call-budget checklist for the replay-side
+contract that makes that safe.
+
 ### CSS-shim gap fills — translator vs. bridge contract
 
 Four classes of "silent drop" recur in `web-compat-style-decl.js`. When

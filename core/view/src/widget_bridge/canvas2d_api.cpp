@@ -389,47 +389,47 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // Batched moveTo + lineTo run. Args: (id, coords) where `coords` is a flat
-    // array [x0,y0, x1,y1, ...]; the first pair is a move_to and every later
-    // pair a line_to. This exists purely to collapse bridge crossings: a band
-    // curve is emitted as one moveTo followed by a long lineTo run, and each of
-    // those was its own JS->native call. The expansion below produces exactly
-    // the CanvasDrawCmd sequence the unbatched calls produce, in the same
-    // order, so nothing downstream (replay, Skia/CG paint, recorded output) can
-    // observe whether a path arrived batched or one point at a time.
-    //
-    // Rejection is all-or-nothing, matching `setCapturedLineBoxes`: a partially
-    // applied polyline would draw a truncated path, which is a corrupted frame
-    // rather than a missing one, and is harder to notice than nothing at all.
+    // Batched moveTo + lineTo runs, (id, coords, starts?): flat [x0,y0, ...];
+    // point 0 and each point index in the optional, strictly increasing
+    // `starts` become a move_to, all others a line_to -- exactly the commands
+    // the per-point calls produce, in one crossing. Rejection is all-or-nothing
+    // (as in `setCapturedLineBoxes`): a truncated path is a corrupted frame,
+    // harder to notice than a missing one.
     register_bridge_function(api, "canvasPathPolyline", [&self](choc::javascript::ArgumentList args) {
         auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")));
         if (!c || args.numArgs < 2 || !args[1] || !args[1]->isArray())
             return choc::value::Value();
-
         const auto& coords = *args[1];
         const uint32_t count = coords.size();
-        // Even (x,y) pairs, at least one point, and a bound so a runaway script
-        // cannot make one call allocate without limit.
+        // Even pairs, at least one point, and a bound on one call's allocation.
         constexpr uint32_t max_coords = 65536;
         if (count < 2 || (count % 2) != 0 || count > max_coords)
             return choc::value::Value();
-
-        // Validate every coordinate before emitting any command, so a bad value
-        // late in the array cannot leave a half-built path behind.
+        // Validate everything before emitting anything.
         std::vector<float> points;
         points.reserve(count);
         for (uint32_t i = 0; i < count; ++i) {
             const double v = coords[static_cast<int>(i)].getWithDefault<double>(
                 std::numeric_limits<double>::quiet_NaN());
-            if (!std::isfinite(v))
-                return choc::value::Value();
+            if (!std::isfinite(v)) return choc::value::Value();
             points.push_back(static_cast<float>(v));
         }
-
+        std::vector<bool> opens(count / 2, false);
+        opens[0] = true;
+        if (args.numArgs >= 3 && args[2] && !args[2]->isVoid()) {
+            if (!args[2]->isArray()) return choc::value::Value();
+            double prev = 0.0;
+            for (uint32_t i = 0; i < args[2]->size(); ++i) {
+                const double v = (*args[2])[static_cast<int>(i)].getWithDefault<double>(-1.0);
+                if (!(v > prev) || v >= count / 2 || v != std::floor(v))
+                    return choc::value::Value();
+                opens[static_cast<size_t>(v)] = true;
+                prev = v;
+            }
+        }
         for (uint32_t i = 0; i + 1 < count; i += 2) {
             CanvasDrawCmd cmd;
-            cmd.type = (i == 0) ? CanvasDrawCmd::Type::move_to
-                                : CanvasDrawCmd::Type::line_to;
+            cmd.type = opens[i / 2] ? CanvasDrawCmd::Type::move_to : CanvasDrawCmd::Type::line_to;
             cmd.x = points[i];
             cmd.y = points[i + 1];
             c->add_command(cmd);
