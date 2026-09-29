@@ -612,8 +612,9 @@ event once. A commit per `pointermove` renders identically and passes every
 visual check, then stalls frames only while the mouse moves.
 
 The rule, the five usual commit sources, and a measurement recipe are in
-[Keeping a drag interaction cheap](interaction-cost.md); agents also get them
-from the `import-design` and `trace-analysis` skills.
+[Keeping a drag interaction cheap](interaction-cost.md); agents get the
+checklist from the `view-bridge` skill and the capture recipe from
+`trace-analysis`.
 
 Check the authored source before importing it:
 
