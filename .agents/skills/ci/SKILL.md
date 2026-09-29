@@ -659,10 +659,23 @@ queue instead of on its head: `pulp-browser-capture-node-unit` (#8912),
 base→head diff, never its `all` fallback, nothing for a docs/skills/workflow-only
 diff, plus two path families the build graph cannot see (`tools/cmake/**` → the
 `cmake-*` fixtures; the wide tier's manifest, classifier or any `test/` CMake
-registration → `wide-non-native-selftest`). Budget: ten minutes of batches, the
-rest listed as skipped. Replayed on 20 clean PRs it selected a median of 1.5
-tests (max ~155 test-seconds); a red here is the PR's own test, so fix it on the
-branch. The selection needs `Configure` to write the codemodel query; if a
+registration → `wide-non-native-selftest`; any source-selftest lane entry
+script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
+producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
+identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
+compiled-in Dawn identity no source edge reaches). Direct edges are added even when
+the projection is too wide or the diff is docs-only: tests whose declared inputs
+(`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
+rules select, the tests running a program whose own source changed, and the
+registrations a `test/` CMake hunk reaches (`cmake_registration_impact.py`: the
+touched call's test/target, a touched block, and the readers of any variable a
+changed or removed line writes, including `prefix_${key}` templates; only
+within that manifest). Budget: ten minutes of batches, the rest listed as
+skipped. Replayed on 20 clean PRs it selected a median of 8.5 tests (max ~217
+test-seconds); on 16 known PR-culprit ejections it catches every one that is
+neither a `pr-fast` member (already run on the head) nor source-selftest
+labelled (run on the head by `Enforce version & skill sync`). A red here is the
+PR's own test, so fix it on the branch. The selection needs `Configure` to write the codemodel query; if a
 future configure loses it, the step reports `no CMake codemodel reply` and
 selects nothing, so check the annotation's `mode` before trusting a green.
 While main is red the step would block every PR whose diff reaches the red
