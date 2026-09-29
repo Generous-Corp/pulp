@@ -1500,6 +1500,24 @@ and per-file hashes. Downstream validation must use that exact prefix and the
 receipt's `source_sha`; a build-tree target check or an unbound SDK directory is
 not installed-SDK evidence.
 
+**An upload reset after green tests is not a test failure.** `ECONNRESET` from
+`actions/upload-artifact` has failed the required gate on m5 after every test
+passed. The `ctest-logs-<key>` upload is now `continue-on-error` (a missing
+log artifact on a green run means the upload failed); the SDK upload retries
+once after 90 s with `overwrite: true` and only then fails the job, because a
+green job must imply the artifact exists.
+
+**Configure should not clone.** `setup.sh` primes every dependency
+`PulpDependencies.cmake` fetches unconditionally into the shared FetchContent
+cache, at CMake's exact `GIT_TAG` and in the directory its
+`pulp_register_fetchcontent_source` REF names. Configure-time clones have no
+retry, so a `Failed to clone repository` / `Could not resolve host` in a
+configure log (often the iOS-simulator configure, which resolves dependencies
+a second time) means a new unconditional `FetchContent_Declare` was added
+without a registration and a `setup.sh` priming call.
+`test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
+that lacks `--retry-all-errors`.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not

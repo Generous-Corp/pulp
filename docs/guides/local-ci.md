@@ -6413,3 +6413,13 @@ created by `cmake --install` from the Release build after the installed-SDK
 contract passes and includes a source-bound JSON file manifest. Downstream
 consumer validation must use that prefix and its `source_sha`; the build tree
 or an unrelated SDK directory is not equivalent evidence.
+
+Artifact uploads cross the network after the tests have passed, and the
+artifact service has reset that connection (`ECONNRESET`) on gate VMs. The two
+build-job uploads are therefore treated differently. The `ctest-logs-<key>`
+upload is diagnostic and is `continue-on-error`, so it can never turn a green
+gate red; its absence on such a run means the upload failed, not that the
+tests did. The GPU-audio SDK upload is a contract downstream consumers rely
+on, so a failed first attempt is retried once after a 90-second pause with
+`overwrite: true` (the reset can land after the artifact record exists), and
+the job still fails if that retry fails.
