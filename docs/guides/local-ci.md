@@ -2358,6 +2358,44 @@ Two candidate signals were evaluated against live runs and are deliberately
   A same-configuration verdict on each base would make the rule checkable and
   would have cleared all four.
 
+### One same-head retry after a network ejection
+
+`.shipyard/config.toml` also opts Pulp into Shipyard's environment re-enqueue:
+
+```toml
+[queue.environment_requeue]
+enabled = true
+```
+
+When the attributor above does not certify a same-head `failed_checks`
+ejection, Shipyard itself allows **one** re-enqueue of that head, with no new
+push, when every failing required check on the removal's merge-group commit is
+an Actions job whose every failing step printed a network signature (`Could not
+resolve host`, `ENOTFOUND`, `ECONNRESET`, `Tunnel connection failed`, `Proxy
+CONNECT aborted`, `curl: (6)` / `(56)`, ...) within 60 output lines of that
+step's first `##[error]`. A second ejection of the same head is refused as
+before. `shipyard landing --pr <n>` prints the verdict and each step's matching
+log line under `ENVIRONMENT RE-ENQUEUE`; read it before pushing a no-op commit.
+
+This is the pip relay 403, pinned-Chrome `curl: (56)`, cargo DNS and upload
+`ECONNRESET` class: over 2026-09-15..29 it caused 15 ejections, and 12 of them
+were followed by a push that changed nothing but paid a full `macos` gate. The
+chain rule above cannot clear them and actively implicates them: it compares
+outcomes, not causes, so a batch whose parent passed on a host that could reach
+PyPI and which then failed on an m5 VM that could not reads as `culprit`
+(`--certify` on #8678's first ejection, run 35815699794, and on #8911's cargo
+DNS ejection, run 36315085363, both return `implicates_head: true`). An
+attributor verdict that does not certify therefore does not veto the network
+retry; the retry rests on the failing step's own output. Two log
+details the reader handles: the `Install visual-analysis Python dependencies`
+step's own script comment quotes `Tunnel connection failed: 403 Forbidden`, and
+GitHub echoes that script into every job log, so script lines are never read as
+output; and the `if: always()` ctest steps after a failure print their own
+`##[error]`, so the failing step is located from the jobs API, not from the
+first error in the log. The rules and their rationale are in Shipyard's
+`docs/ghapp-guards.md` ("Environment re-enqueue"). The key takes effect once the
+fleet runs a Shipyard release that reads it; older releases ignore it.
+
 
 ## Pull-request heads also run the tests their diff reaches
 

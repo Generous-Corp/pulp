@@ -595,6 +595,17 @@ auto_handoff = false
 [queue.attribution]
 command = ["python3", "tools/scripts/queue_batch_attribute.py", "--certify"]
 
+# One same-head re-enqueue after an ENVIRONMENT ejection. When the attributor
+# above does not certify, Shipyard allows exactly one retry of the unchanged
+# head if every failing required check on the ejecting merge-group commit
+# failed a step whose output (not its echoed script) printed a network
+# signature near its first ##[error]: the pip relay 403, pinned-Chrome
+# `curl: (56)`, cargo DNS, upload ECONNRESET. A second ejection of the same
+# head is refused. See docs/guides/local-ci.md ("One same-head retry after a
+# network ejection").
+[queue.environment_requeue]
+enabled = true
+
 # ── Governance (required-check contract) ───────────────────────────────────
 # The GitHub checks that must be green before `main` accepts a merge. This
 # mirrors the LIVE branch-protection ruleset, NOT the full ship platform set:
