@@ -850,5 +850,90 @@ class GatesVerdictTests(unittest.TestCase):
         self.assertIn("one or more gates failed", r.stderr)
 
 
+class CensusProfileTests(unittest.TestCase):
+    """Census checks run only against a build of the scope the census measured."""
+
+    FEATURES = {"PULP_HAS_SKIA": "ON", "PULP_ENABLE_JS": "ON"}
+
+    def _repo(self, root: pathlib.Path) -> None:
+        scripts = root / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        for name in ("consumption_census.py", "json_schema_lite.py"):
+            (scripts / name).write_text((HERE.parent / "scripts" / name).read_text())
+        (root / "docs" / "status").mkdir(parents=True)
+        key = "darwin-arm64-js+skia"
+        (root / lane.CENSUS_FILE).write_text(json.dumps({"profiles": {key: {
+            "features": self.FEATURES,
+            "build_scope": {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "OFF"}}}}))
+        (root / "test" / "cmake").mkdir(parents=True)
+        manifest = root / "test" / "cmake" / "x_tests.cmake"
+        manifest.write_text("")
+        os.utime(manifest, (1000, 1000))
+
+    def _build(self, root: pathlib.Path, name: str, examples: str, mtime: float,
+               system: str = "Darwin") -> pathlib.Path:
+        build = root / name
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Ninja\n")
+        stamp = build / "CTestTestfile.cmake"
+        stamp.write_text("")
+        os.utime(stamp, (mtime, mtime))
+        (build / lane.CENSUS_FACTS).write_text(json.dumps({
+            "system_name": system, "system_processor": "arm64",
+            "features": {**self.FEATURES, "PULP_BUILD_TESTS": "ON",
+                         "PULP_BUILD_EXAMPLES": examples}}))
+        return build
+
+    def test_examples_on_is_named_as_the_difference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._repo(root)
+            build = self._build(root, "build-gate", "ON", 2000)
+            profile, diffs = lane.census_mismatch(build, root)
+        self.assertEqual(profile, "darwin-arm64-js+skia")
+        self.assertEqual(diffs, ["PULP_BUILD_EXAMPLES=ON (profile OFF)"])
+
+    def test_control_a_profile_build_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._repo(root)
+            self.assertIsNone(lane.census_mismatch(self._build(root, "b", "OFF", 2000), root))
+
+    def test_an_unrecorded_profile_is_left_to_the_census(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._repo(root)
+            build = self._build(root, "b", "ON", 2000, system="Linux")
+            self.assertIsNone(lane.census_mismatch(build, root))
+
+    def test_census_tests_are_set_aside_and_the_rest_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._repo(root)
+            build = self._build(root, "b", "ON", 2000)
+            entries = [
+                {"name": "consumption-census-drift", "argv": [
+                    "py", "{repo}/tools/scripts/consumption_census.py", "--check",
+                    "--build-dir", str(build)]},
+                {"name": "consumption-census-schema", "argv": [
+                    "py", "{repo}/tools/scripts/consumption_census.py", "--validate-only"]},
+                {"name": "other", "argv": ["py", "{repo}/x.py", "--build-dir", str(build)]},
+            ]
+            aside = lane.set_aside_census_tests(entries, build, root)
+        self.assertEqual(list(aside), ["consumption-census-drift"])
+        self.assertIn("PULP_BUILD_EXAMPLES=ON (profile OFF)", aside["consumption-census-drift"])
+        self.assertEqual([e["name"] for e in entries], ["consumption-census-schema", "other"])
+
+    def test_auto_prefers_the_build_the_census_measured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._repo(root)
+            gate = self._build(root, "build-gate", "OFF", 2000)
+            self._build(root, "build-examples", "ON", 3000)
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertEqual(chosen, gate)
+        self.assertIn("matches the census profile", why)
+
+
 if __name__ == "__main__":
     unittest.main()

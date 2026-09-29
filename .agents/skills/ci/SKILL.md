@@ -764,7 +764,17 @@ consequences worth knowing before you debug:
   `build*/` whose test manifests are current, printed as `build dir: <path>`.
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
-  and the branch was pushed red three times. Host-specific suites (`rack-plugin-loads`) are in
+  and the branch was pushed red three times.
+- The consumption-census checks (`consumption-census-drift` and the others that
+  pass `--build-dir`) only mean something against a build of the scope the
+  census measured. Each profile in `docs/status/consumption-profiles.json`
+  records a `build_scope` (tests ON, examples OFF); a local build with the same
+  feature switches but examples ON gets the same profile key and a bigger link
+  closure (`Pulp::inspect-protocol` went 19→23 nodes on a pristine main). The
+  pr-fast lane now reads the build's `consumption-census-facts.json`, and when
+  its scope differs it sets those tests aside as `NOT CHECKED (build config ≠
+  census profile <key>: PULP_BUILD_EXAMPLES=ON (profile OFF))`; `--build-dir
+  auto` prefers a build that matches the profile. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed
