@@ -498,8 +498,11 @@ if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTEST
                 echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
                 src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml") ;;
             pr-fast)
-                echo "▸ ctest pr-fast tier (whole tier; from build/ when configured, else the manifests)" >&2
-                src_lane_args=(--ctest-label pr-fast --build-dir "$ROOT/build") ;;
+                # A worktree may configure somewhere other than build/ (build-gate,
+                # build-macos); PULP_GATES_BUILD_DIR points the tier at it, so
+                # the build-needing members run instead of being skipped loudly.
+                echo "▸ ctest pr-fast tier (whole tier; from ${PULP_GATES_BUILD_DIR:-build/} when configured, else the manifests)" >&2
+                src_lane_args=(--ctest-label pr-fast --build-dir "${PULP_GATES_BUILD_DIR:-$ROOT/build}") ;;
             ctest-python)
                 echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
                 src_lane_args=(--ctest-python) ;;
