@@ -2259,6 +2259,31 @@ jobs:
           fi
           exit "$ctest_exit"
 
+      # SHADOW instruments for the merge group, one step (tools/ci/
+      # merge_group_shadows.py): binary identity vs the PR head's receipt,
+      # the graph's affected-test set, and flake exoneration of a failed
+      # ctest. Each annotates and changes no outcome; the runner isolates
+      # every instrument and always exits 0. What each measures, and the
+      # proxies read from its annotation, are documented in
+      # docs/guides/local-ci.md and the `ci` skill.
+      - name: Merge-group shadow instruments
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci/merge_group_shadows.py run \
+            --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --token "$GH_TOKEN" \
+            --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+            --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 \
+            --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
+
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
       # that runs and passes every time. This records the non-runs — names,
