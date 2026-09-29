@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   execute,
   installedBrowser,
   rgbaPixel,
@@ -23,7 +25,7 @@ test("real browser wait-for visible rejects invisible ancestors and overlays",
   // font/layout evidence makes each capture more expensive than the original
   // screenshot-only probe, so bound the individual interaction at 4 seconds
   // while allowing the three cold Chrome processes to finish.
-  { timeout: 60000 }, async (context) => {
+  { timeout: captureCaseTimeout(3) }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -112,7 +114,7 @@ ${scenario.target}
           "--initial-width", "160",
           "--initial-height", "120",
           "--dpr", "2",
-          "--timeout-ms", "15000",
+          "--timeout-ms", String(CAPTURE_DEADLINE_MS),
         ], { maxBuffer: 1024 * 1024 });
 
         const screenshot = await readFile(path.join(output, "browser.png"));
@@ -127,7 +129,7 @@ ${scenario.target}
   });
 
 test("real browser interactions reject main-frame navigation",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -162,7 +164,7 @@ test("real browser interactions reject main-frame navigation",
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("browser-interaction-navigation-rejected"));
       const diagnostic = JSON.parse(
@@ -177,7 +179,7 @@ test("real browser interactions reject main-frame navigation",
   });
 
 test("real browser interactions reject and close popup pages",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -212,7 +214,7 @@ test("real browser interactions reject and close popup pages",
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("browser-interaction-navigation-rejected"));
       const diagnostic = JSON.parse(
