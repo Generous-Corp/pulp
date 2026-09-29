@@ -420,6 +420,11 @@ void ScriptedUiSession::set_repaint_callback(std::function<void()> cb) {
     }
 }
 
+void ScriptedUiSession::set_host_kind(std::string kind) {
+    host_kind_ = std::move(kind);
+    if (bridge_) bridge_->set_host_kind(host_kind_);
+}
+
 void ScriptedUiSession::set_post_evaluation_reset_callback(
     std::function<void()> cb) {
     post_evaluation_reset_callback_ = std::move(cb);
@@ -581,6 +586,7 @@ bool ScriptedUiSession::rebuild_from_code(
             probe_bridge->install_runtime_import_handlers();
         probe_bridge->set_asset_roots(asset_roots_);
         probe_bridge->set_script_base_dir(source_path.parent_path());
+        probe_bridge->set_host_kind(host_kind_);
         load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         const auto t_probe = clock::now();
 
@@ -646,6 +652,7 @@ bool ScriptedUiSession::rebuild_from_code(
         next_bridge->set_value_channel_access(value_channel_access_);
         next_bridge->set_asset_roots(asset_roots_);
         next_bridge->set_script_base_dir(source_path.parent_path());
+        next_bridge->set_host_kind(host_kind_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }

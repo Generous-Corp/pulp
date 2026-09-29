@@ -37,6 +37,16 @@
   },
   {
    "paths": [
+    ".github/workflows/drift-fast.yml",
+    "tools/ci/drift_fast.json"
+   ],
+   "docs": [
+    "docs/guides/local-ci.md"
+   ],
+   "why": "The advisory drift-fast lane (what it runs, what it cannot check on a Linux configure, and the ruleset change that would make it required) is documented in local-ci.md; changing its selection or triggers without a doc edit drifts that description."
+  },
+  {
+   "paths": [
     "tools/scripts/runner_topology.json",
     ".github/workflows/runner-topology-check.yml"
    ],

@@ -13,12 +13,14 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   execute,
   installedBrowser,
 } from "./capture_integration_support.mjs";
 
 test("a pointer drawn straight up survives the capture",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -84,7 +86,7 @@ test("a pointer drawn straight up survives the capture",
         "--initial-width", "320",
         "--initial-height", "160",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const report = JSON.parse(
@@ -123,7 +125,7 @@ test("a pointer drawn straight up survives the capture",
   });
 
 test("a rotated pointer is described in its own space, from either source",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -206,7 +208,7 @@ test("a rotated pointer is described in its own space, from either source",
         "--initial-width", "648",
         "--initial-height", "160",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const report = JSON.parse(
@@ -312,7 +314,7 @@ test("a rotated pointer is described in its own space, from either source",
 // The uncorrected run is the control: without it a passing pinned run proves
 // only that the page captures, not that pinning decided anything.
 test("an explicit --width resolves a layout the bounded correction cannot",
-  { timeout: 60000 }, async (context) => {
+  { timeout: captureCaseTimeout(2) }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -343,7 +345,7 @@ test("an explicit --width resolves a layout the bounded correction cannot",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "30000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-negative-overflow"));
 
@@ -358,7 +360,7 @@ test("an explicit --width resolves a layout the bounded correction cannot",
         "--width", "2600",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "30000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const envelope = JSON.parse(
@@ -377,7 +379,7 @@ test("an explicit --width resolves a layout the bounded correction cannot",
 // caller round a loop that cannot terminate. The refusal must describe what
 // was measured and both layouts that produce it.
 test("an unreachable left overflow names its cause, not a phantom flag",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -408,7 +410,7 @@ test("an unreachable left overflow names its cause, not a phantom flag",
         "--width", "900",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 }), (error) => {
         assert.ok(error.stderr.includes("capture-negative-overflow"));
         assert.ok(error.stderr.includes("x=-40px"));

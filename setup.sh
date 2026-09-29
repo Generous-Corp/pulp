@@ -454,14 +454,19 @@ ensure_shared_archive_source() {
         fi
 
         info "Downloading shared $label source cache..."
-        if dry "curl -L --fail $url -o $target.zip && unzip -q $target.zip -d $target"; then
+        if dry "curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 $url -o $target.zip && unzip -q $target.zip -d $target"; then
             return 0
         fi
 
         local tmpdir
         tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/pulp-${dir_name}.XXXXXX")"
         trap 'rm -rf "$tmpdir" >/dev/null 2>&1 || true; rmdir "$lockdir" >/dev/null 2>&1 || true' EXIT
-        curl -L --fail "$url" -o "$tmpdir/archive.zip"
+        # Release-asset hosts return transient 5xx and drop connections; one
+        # such blip used to fail the whole bootstrap. --retry-all-errors also
+        # retries HTTP errors that --fail turns into a non-zero exit, and each
+        # attempt rewrites the same output file from the start.
+        curl -L --fail --retry 5 --retry-all-errors --retry-delay 10 --connect-timeout 30 \
+            "$url" -o "$tmpdir/archive.zip"
         mkdir -p "$target"
         unzip -q "$tmpdir/archive.zip" -d "$target"
         rm -rf "$tmpdir"
@@ -551,7 +556,7 @@ ensure_shared_git_source_with_retry() {
     local repo="$2"
     local ref="$3"
     local dir_name="$4"
-    local verbatim_eol="${5:-}"
+    local source_options="${5:-}"
     local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
     local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
     local attempts="${PULP_PRIMING_RETRY_ATTEMPTS:-3}"
@@ -560,7 +565,7 @@ ensure_shared_git_source_with_retry() {
 
     for i in $(seq 1 "$attempts"); do
         rc=0
-        ensure_shared_git_source "$label" "$repo" "$ref" "$dir_name" "$verbatim_eol" || rc=$?
+        ensure_shared_git_source "$label" "$repo" "$ref" "$dir_name" "$source_options" || rc=$?
         if [ "$rc" -eq 0 ]; then
             if [ "$i" -gt 1 ]; then
                 info "$label priming succeeded on attempt $i/$attempts"
@@ -684,9 +689,18 @@ ensure_shared_git_source() {
     local repo="$2"
     local ref="$3"
     local dir_name="$4"
-    # "verbatim-eol" opts this cache out of git's end-of-line conversion; see
-    # pin_source_cache_verbatim_eol. Anything else keeps stock git behaviour.
-    local verbatim_eol="${5:-}"
+    # Space-separated options:
+    #   verbatim-eol   opt this cache out of git's end-of-line conversion; see
+    #                  pin_source_cache_verbatim_eol.
+    #   no-submodules  never initialize submodules. For a dependency whose
+    #                  submodules Pulp does not compile, and whose CMake
+    #                  declaration sets GIT_SUBMODULES "" to match, so priming
+    #                  never reaches a network host the build does not need.
+    local source_options="${5:-}"
+    local verbatim_eol=""
+    local init_submodules=true
+    case " $source_options " in *" verbatim-eol "*) verbatim_eol="verbatim-eol" ;; esac
+    case " $source_options " in *" no-submodules "*) init_submodules=false ;; esac
     local target="$FETCHCONTENT_CACHE_ROOT/$dir_name"
     local lockdir="$FETCHCONTENT_CACHE_ROOT/.${dir_name}.lock"
     local current_remote=""
@@ -803,7 +817,7 @@ ensure_shared_git_source() {
             fi
         fi
 
-        if [ -f "$target/.gitmodules" ]; then
+        if $init_submodules && [ -f "$target/.gitmodules" ]; then
             # submodule update fetches over the network per sub-submodule
             # (e.g. VST3 SDK has 5 sub-submodules). Retry the whole thing
             # so one transient failure doesn't cost a full CI cycle (#402).
@@ -1119,6 +1133,38 @@ ensure_shared_git_source_with_retry "three.js" "https://github.com/mrdoob/three.
     "077dd13c0e869d9f3dbe55875686f920367de457" \
     "$(fetchcontent_cache_dir_name "threejs" "077dd13c0e869d9f3dbe55875686f920367de457")" \
     "verbatim-eol"
+
+# Every dependency PulpDependencies.cmake fetches unconditionally is primed
+# here, so a configure after setup never clones from the network. Configure-time
+# clones have no retry of their own, and a DNS or connect blip there fails the
+# whole build (the iOS-simulator configure in the macos gate re-resolves every
+# unprimed dependency a second time). Each ref is the exact GIT_TAG CMake
+# declares; the directory name is the REF its pulp_register_fetchcontent_source
+# call derives. test_setup_source_cache.sh fails if either drifts, because a
+# mismatched directory is a SILENT miss that brings the network clone back.
+# Opt-in dependencies (draco, simdjson, fastgltf, MTS-ESP, tuning-library) are
+# left to configure: most builds never fetch them.
+ensure_shared_git_source_with_retry "Highway" "https://github.com/google/highway.git" \
+    "457c891775a7397bdb0376bb1031e6e027af1c48" "$(fetchcontent_cache_dir_name "highway" "1.2.0")"
+
+ensure_shared_git_source_with_retry "Mbed TLS" "https://github.com/Mbed-TLS/mbedtls.git" \
+    "107ea89daaefb9867ea9121002fbbdf926780e98" "$(fetchcontent_cache_dir_name "mbedtls" "107ea89daaefb9867ea9121002fbbdf926780e98")"
+
+ensure_shared_git_source_with_retry "SheenBidi" "https://github.com/Tehreer/SheenBidi.git" \
+    "c0aa79da5b5ff44bd2cbd9ce92963f81e4de6b1e" "$(fetchcontent_cache_dir_name "sheenbidi" "v3.0.0")"
+
+ensure_shared_git_source_with_retry "Brotli" "https://github.com/google/brotli.git" \
+    "028fb5a23661f123017c060daa546b55cf4bde29" "$(fetchcontent_cache_dir_name "brotli" "v1.2.0")" \
+    "no-submodules"
+
+# woff2's own brotli submodule (and that submodule's libdivsufsort) is never
+# compiled: Pulp builds the decoder from the brotli source above.
+ensure_shared_git_source_with_retry "woff2" "https://github.com/google/woff2.git" \
+    "fb9c3379f2605b10f3e8f1d9636664ab5576775c" "$(fetchcontent_cache_dir_name "woff2" "fb9c3379f2605b10f3e8f1d9636664ab5576775c")" \
+    "no-submodules"
+
+ensure_shared_git_source_with_retry "yaml-cpp" "https://github.com/jbeder/yaml-cpp.git" \
+    "0.8.0" "$(fetchcontent_cache_dir_name "yaml-cpp" "0.8.0")"
 
 # VST3 SDK
 # MIT only from v3.8.0 onward. Every earlier tag (including v3.7.12) ships

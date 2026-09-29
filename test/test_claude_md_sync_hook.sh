@@ -198,10 +198,50 @@ python3 - "${installer}" <<'PY' || fail "Codex trust hash formula drifted"
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("inst", sys.argv[1])
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-m.TIMEOUT_S = 3000
-got = m.codex_trust_hash("/Users/danielraffel/.local/bin/pulp-worktree-lineage-session --hook-json")
+got = m.codex_trust_hash("/Users/danielraffel/.local/bin/pulp-worktree-lineage-session --hook-json",
+                         3000, "startup|resume")
 assert got == "sha256:7cb5f9bde39da6b51ec88785f31ed4c2a4be1791a1ce60d7d9bdfc4217b17d42", got
 PY
+
+# A matcher-less entry hashes without a matcher key (a real Codex value).
+python3 - "${installer}" <<'PY' || fail "Codex trust hash for a matcher-less hook drifted"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("inst", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+got = m.codex_trust_hash("/Users/danielraffel/.cmux/hooks/cmux-codex-hook-persistent-session-start.sh", 5, None)
+assert got == "sha256:62bfcb337fe561d65952ae467a7b10c68f5e57d09090beac03f156c6e1782f1f", got
+PY
+
+# 9b. Other Pulp launchers already in ~/.local/bin are wired too; absent ones never.
+lh="${tmp}/lineagehome"
+mkdir -p "${lh}/.local/bin" "${lh}/.claude" "${lh}/.codex" "${lh}/.subrouter/codex/claude-proxy/acct"
+printf '#!/bin/sh\n' > "${lh}/.local/bin/pulp-worktree-lineage-session"
+chmod +x "${lh}/.local/bin/pulp-worktree-lineage-session"
+lcmd="${lh}/.local/bin/pulp-worktree-lineage-session --hook-json"
+printf '{"hooks":{"SessionStart":[{"matcher":"startup|resume","hooks":[{"type":"command","command":"%s","timeout":3000}]}]}}\n' \
+    "${lcmd}" > "${lh}/.claude/settings.json"
+cp "${lh}/.claude/settings.json" "${lh}/.codex/hooks.json"
+: > "${lh}/.codex/config.toml"
+python3 "${installer}" --home "${lh}" >/dev/null || fail "installer failed with a lineage launcher present"
+python3 - "${lh}" "${installer}" <<'PY' || fail "lineage launcher wiring is wrong"
+import importlib.util, json, sys
+home, inst = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("inst", inst)
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+lin = f"{home}/.local/bin/pulp-worktree-lineage-session --hook-json"
+sync = f"{home}/.local/bin/pulp-claude-md-sync-session --hook-json"
+def cmds(p):
+    return [g["hooks"][0]["command"] for g in json.load(open(p))["hooks"]["SessionStart"]]
+assert cmds(f"{home}/.claude/settings.json") == [lin, sync], "existing lineage entry duplicated or lost"
+assert sorted(cmds(f"{home}/.subrouter/codex/claude-proxy/acct/settings.json")) == sorted([lin, sync])
+toml = open(f"{home}/.codex/config.toml").read()
+# The pre-existing lineage entry is trusted as written (timeout 3000), not as a new entry would be.
+want = m.codex_trust_hash(lin, 3000, "startup|resume")
+assert f'[hooks.state."{home}/.codex/hooks.json:session_start:0:0"]\ntrusted_hash = "{want}"' in toml, toml
+assert f'[hooks.state."{home}/.codex/hooks.json:session_start:1:0"]' in toml, toml
+PY
+grep -q 'pulp-worktree-lineage-session' "${fake}/.subrouter/codex/claude-proxy/acct1/settings.json" \
+    && fail "a launcher that is not installed was wired"
 
 # 10. A session start sweeps: a config folder created later gets wired, and a
 #     lowercase origin URL (GitHub names are case-insensitive) still matches.

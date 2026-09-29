@@ -79,9 +79,13 @@ RetainedChargeOracle exact_owned_store_charge(
         store_bytes<float>(bins), // coordinator reference magnitude
         store_bytes<int>(bins), // coordinator peaks
         store_bytes<float>(bins), // transient history
-        store_bytes<float>(channels * capture_bins),
-        store_bytes<double>(capture_bins),
-        store_bytes<float>(channel_bins),
+        store_bytes<float>(channels * capture_bins), // freeze capture magnitudes
+        store_bytes<double>(bins), // freeze newest phase increment
+        store_bytes<std::complex<float>>(channel_bins), // freeze previous frame
+        store_bytes<float>(channel_bins), // freeze held magnitudes
+        store_bytes<double>(channel_bins), // freeze held phases
+        store_bytes<double>(bins), // freeze instantaneous frequency
+        store_bytes<float>(channel_bins), // freeze staged-restore slot
         store_bytes<double>(channel_bins),
         store_bytes<double>(bins),
         3u * store_bytes<float>(bins), // envelope scratch vectors

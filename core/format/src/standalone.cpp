@@ -663,6 +663,7 @@ bool StandaloneApp::start() {
             runtime::log_error("Standalone: failed to create processor");
             return false;
         }
+        processor_->set_editor_host_kind(EditorHostKind::standalone);
         processor_->set_state_store(&store_);
         processor_->define_parameters(store_);
     }

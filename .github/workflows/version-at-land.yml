@@ -94,6 +94,10 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
           BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
+          # Opt-in (default off): replace a stale bump PR that is not in the
+          # merge queue and not a draft (armed or not) instead of
+          # stale-deferring forever.
+          HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
         run: |
           # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does
           # not trigger workflows (GitHub's loop-prevention), so its required
@@ -115,6 +119,10 @@ jobs:
           #            not).
           # --base is only the first-run FALLBACK before any marker exists;
           # `github.event.before` bounds it to this push.
+          heal=()
+          if [ "$BUMP_ROUTE" = "pr" ] && [ "$HEAL_STALE_PR" = "true" ]; then
+            heal=(--heal-stale-pr)
+          fi
           python3 tools/scripts/version_at_land.py --push \
-              --route "$BUMP_ROUTE" \
+              --route "$BUMP_ROUTE" "${heal[@]}" \
               --base "${{ github.event.before }}"

@@ -124,6 +124,42 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt);
 /// so the one beneath it, or the ordinary tree, answers instead.
 View* hover_target_at(View& root, Point root_pt);
 
+/// Where a PASSIVE pointer input — a wheel / two-finger scroll, a trackpad
+/// magnify or rotate — at `root_pt` goes while overlays may be open.
+struct PassivePointerRoute {
+    /// The view to deliver to, or nullptr when nothing is under the point.
+    /// Always nullptr when `blocked` is set.
+    View* target = nullptr;
+    /// The input must be dropped: an open modal overlay owns the screen and
+    /// the point is outside every overlay that could take it. The host must
+    /// not fall back to any hit test or scroll-pane search.
+    bool blocked = false;
+};
+
+/// Resolve a passive pointer input through the root's open overlays.
+///
+/// Presses and hovers already resolve through the overlay stack
+/// (`route_press_to_active_overlay`, `hover_target_at`). A wheel or a pinch
+/// that used the plain tree `hit_test` instead reached the content painted
+/// UNDER an open dialog: an overlay painted through the overlay queue can sit
+/// earlier in tree order than the plot it covers, so the tree hit test lands
+/// on the plot and a scroll over a dialog's backdrop zooms the content
+/// behind it.
+///
+/// Rules, top of the stack first; like a hover, nothing is ever dismissed:
+///   1. The point lies inside a shown overlay that resolves it to a view: that
+///      view is the target (a scroll inside a dialog scrolls the dialog).
+///   2. The point lies outside every shown overlay, and one of them is MODAL —
+///      a `ModalOverlay`, or an overlay whose accessible role is `dialog`
+///      (`role="dialog"` / `role="alertdialog"`): the input is `blocked`.
+///      A modal dialog makes the content behind it inert, and inert content
+///      receives no scroll or zoom.
+///   3. Otherwise — no overlay, or only non-modal popovers the point misses —
+///      the ordinary tree `hit_test` answers, exactly as before.
+///
+/// Hidden overlays and overlays detached from `root` are ignored. Read-only.
+PassivePointerRoute route_passive_pointer(View& root, Point root_pt);
+
 /// What a context (right-button) press resolved to.
 struct ContextPressResult {
     /// A view claimed the context menu, so the host must not fall through to

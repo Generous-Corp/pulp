@@ -84,6 +84,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/signal/fm_operator_engine.hpp": "Pulp::signal",
     "pulp/signal/fir_design.hpp": "Pulp::signal",
     "pulp/signal/fractional_delay.hpp": "Pulp::signal",
+    "pulp/signal/freeze_hold.hpp": "Pulp::signal",
     "pulp/signal/headphone_crossfeed.hpp": "Pulp::signal",
     "pulp/signal/lfsr.hpp": "Pulp::signal",
     "pulp/signal/linkwitz_riley.hpp": "Pulp::signal",
@@ -238,6 +239,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         "rationale": (
             "Optional prepared output-boundary diagnostics and capture plumbing; "
             "it is a reusable observability surface rather than a generator DSP claim."
+        ),
+    },
+    {
+        "include": "pulp/signal/freeze_hold.hpp",
+        "fingerprint": "sha256:ddf7a96e008201b2a4da6255ee593152f5d3ef0d86ea58d1a35d0b95b0c259ea",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Spectral hold stage composed at the head of a frame chain: inside "
+            "RealtimePitchTimeProcessor, or as a SpectralMaskProcessor pre-mask stage. "
+            "It is a frame-domain building block with its own recall image, not a "
+            "standalone generator DSP claim; its engage, timing, pipeline, and "
+            "snapshot contract is covered by test/test_freeze_hold.cpp."
         ),
     },
     {

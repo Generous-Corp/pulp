@@ -99,32 +99,30 @@ diagnose a stalled queue:
 in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
 the PR head. So "the PR was green" never meant its tests passed.
 
-**`main`'s macOS health is nominally measured on push, and in practice is not.**
-The macOS matrix leg runs on `push: main` for exactly this reason: a merge group
-validates a synthetic merge commit, so without the push leg nothing ever runs
-the full macOS suite against a commit that is actually on `main`. The leg keeps
-its descriptive matrix name on push rather than claiming the required `macos`
-context, so it detects without gating.
+**`main`'s macOS health is the merge group's `macos` job, not a push run.**
+The queue lands with the MERGE method, so the commit on `main` IS the
+merge-group head: `ghapp api 'repos/Generous-Corp/pulp/actions/workflows/build.yml/runs?head_sha=<main-sha>&event=merge_group'`
+finds the run that tested main's exact commit. Read its `macos` **job**, never
+the run's conclusion: the run also folds in advisory hosted Linux, which fails
+routinely, so a run marked `failure` is often a green tip.
 
-That lane reports nothing. Every non-proof event shares the
-`build-<github.ref>` concurrency group, and push sets `cancel-in-progress`
-false there; GitHub holds at most **one** run pending per group and cancels the
-previously pending one when the next merge arrives. On a main that merges faster
-than the suite takes, the intended "serialize to one leg at a time" becomes
-"cancel all but the one already running", and that one's self-hosted macOS leg is
-still queued for a runner when the next merge cancels it too. Over the 60 most
-recent pushes to main: 58 completed, 55 dispatched **no job at all**, and **0**
-executed the macOS suite (the same query over `merge_group` returned 31 of 55).
-So "look at the push run for the merge commit" will almost always hand you a
-cancelled run with zero jobs. Use the base health detector below instead.
+A push-to-main run has no macOS leg at all (`resolve-provider` omits it; a
+static test in `tools/scripts/test_fork_pr_runner_routing.py` pins that no
+push-reachable job routes to a self-hosted runner). It used to carry one on the
+legacy base selector, which the event-class pool never serves: that leg queued
+for hours holding the `build-refs/heads/main` concurrency group
+(`cancel-in-progress` is false for push), so 57 of 60 push runs were cancelled
+while pending with zero jobs, and the Linux/Windows cache-save steps almost
+never ran. Push runs now finish on hosted runners. Never put a self-hosted job
+back on the push lane.
 
 **A batch stops at its first failing test.** `merge_group` runs ctest with
 `--stop-on-failure`; no other lane does. It composes with `--repeat
 until-pass:2` rather than defeating it — ctest stops only once the retries are
 exhausted, so a flake still self-heals — and under `-j8` the stop is bounded by
 the parallel width, so a few extra tests finish. Do not read a batch's short
-test list as the complete set of what is broken; the push lane is the one that
-reports every failure.
+test list as the complete set of what is broken; a Shipyard `workflow_dispatch`
+run of the fix reports every failure.
 
 Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
@@ -231,13 +229,35 @@ python3 tools/scripts/queue_batch_attribute.py --certify \
   --repo Generous-Corp/pulp --pr <n> --run-id <ejecting-run-id>
 ```
 
-It certifies only on positive evidence, per failing step and exhaustively, so
-most batches refuse — including every batch that failed with no ctest block,
+It rules from the batch's **chain ancestry** first: the `pr-<N>-<parent>` ref
+names the commit the entry was stacked on, so a green parent makes the head the
+culprit, and a red parent that failed a superset of this batch's `macos` tests
+makes it a neighbour (`other_pull_request`, naming the ancestor whose own parent
+passed). Known flakes (`tools/scripts/queue_known_flakes.json`) are set aside
+first, and a batch failing only those certifies as `infrastructure`. The
+reading is under `chain.classification` (`culprit` / `neighbour` /
+`known-flake` / `pre-existing-on-main` / `unknown`). Gotcha: a parent that
+failed at `Build` never ran the tests, so it is looked through to the nearest
+ancestor whose suite ran — comparing against its empty test set would make
+every child look like a culprit. When the chain cannot rule, it falls back to
+the per-step accounting, which certifies only on positive evidence, per failing
+step and exhaustively, so most of those batches refuse — including every batch that failed with no ctest block,
 because a link error is how a head most often breaks one. Do not read a refusal
 as a bug in the attributor; read it as "nothing here rules this head out". The
 full rule, and the two candidate signals rejected for certifying a guilty head,
 are in [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) under
 "Letting an un-implicated head back into the queue".
+
+Gotcha: the chain rule compares outcomes, not causes, so it reads a **network**
+ejection as `culprit` when the parent passed on a host that could reach the
+network (`--certify` returns `implicates_head: true` for #8678's pip relay 403
+and #8911's cargo DNS failure). Pulp therefore also sets
+`[queue.environment_requeue] enabled = true`: Shipyard allows ONE same-head
+re-enqueue when every failing required step printed a network signature near its
+first `##[error]`. Before pushing a no-op commit after an ejection, read
+`shipyard landing --pr <n>`'s `ENVIRONMENT RE-ENQUEUE` block; `ALLOWED` means
+`shipyard ship --pr <n>` on the same head. A second ejection of that head is
+refused. See "One same-head retry after a network ejection" in the same guide.
 
 ## Is `main` itself broken? Ask the base health detector
 
@@ -247,10 +267,11 @@ python3 tools/ci/base_poison_detector.py --name-fix-pr
 
 Read-only. It answers "is the base carrying the failure these batches keep
 dying on?" and prints a one-line `base-poison-signal/v1` JSON annotation plus a
-table. `.github/workflows/main-health-detector.yml` runs it after every failed
-merge-group `Build and Test` run (`workflow_run`), on a backstop schedule, and on
-demand; it draws no macOS gate host and **reports only** — pausing a re-forming
-batch is Shipyard's side.
+table. `.github/workflows/main-health-detector.yml` runs it after every
+completed merge-group `Build and Test` run, green or red (`workflow_run`), on a
+backstop schedule, and on demand, so every new tip gets a verdict; it draws no
+macOS gate host and **reports only** — pausing a re-forming batch is Shipyard's
+side.
 
 **Do not rely on `schedule` for anything time-critical in this repo.** GitHub
 throttles its crons to about one run every four hours whatever the expression
@@ -260,12 +281,17 @@ why the detector is event-triggered. When you need a read NOW, dispatch it:
 default branch's copy with base-repo permissions: never check out
 `github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
-**Where main's evidence comes from without a build.** A merge queue validates
-`main` plus its entries as one commit, and the commit that lands carries that
-commit's tree. So when main's head tree equals the head tree of a run whose
-macOS leg genuinely executed the suite, that run built and tested main's exact
-tree, and a failure there is a failure observed on main itself — for two commit
-reads rather than a gate lane.
+**Where main's evidence comes from without a build.** The merge_group run whose
+head sha is main's tip (`source: head-sha`), judged by its **required gate
+jobs** — the names in `.shipyard/config.toml` `[governance]
+required_status_checks`, i.e. `macos` — never by the run conclusion, and read at
+any run status because a group lands as soon as its required checks pass while
+advisory legs may still run. If that run's gate is not evidence (a reused
+receipt, still running), an earlier merge group that built the same tree is
+used (`source: tree-identity`). No merge_group run for the tip (an admin or
+direct push) is `unproven`. The signal carries `main_head_sha`, so a verdict
+always names the tip it is about. Judging the run instead of the gate is what
+made every tip read red while advisory Linux was failing.
 
 | `status` | Means | Act on it? |
 |---|---|---|
@@ -320,6 +346,31 @@ A wait on CI or a PR belongs in one blocking call: `shipyard wait run|job|pr|rel
 when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
+
+## Reporting PR state: quote the checks, never characterize them
+
+- **Ground every status claim.** When you report a PR's state, quote the
+  required-check state from `shipyard landing --pr <n>` (its verdict line where
+  it prints one) or from the head's `statusCheckRollup`, read at the time of the
+  claim and naming the head SHA. "Nothing red" or "still running" without that
+  read is a guess.
+- **Red is a code signal until proven otherwise.** Do not call a failure a
+  flake, infra, "not a code failure", or "still in progress" while any required
+  check is red on the current head, or when the same test failed on an earlier
+  head or merge group of the PR. A repeat on two heads is a code signal. Exonerate
+  only with evidence: the test failing on `main` itself, or batch attribution
+  naming another PR.
+- **An armed or queued PR is rebased by the queue.** Do not rebase it, merge
+  `main` into it, or `update-branch` it by hand: moving the head cancels the
+  running `macos` gate and the queue tests on top of `main` anyway. Enqueue it
+  as it is with `shipyard ship --pr <n>`. Refresh only for a real conflict or a
+  failing required check (see "Do not refresh a `BEHIND` PR" below); the
+  pre-push hook prints a hint when a push only re-bases an armed PR.
+- **A diff-coverage heartbeat is a build, not a hang.** If the work is already
+  validated, stop and re-push with `PULP_SKIP_DIFF_COVER=1`. Never pipe
+  `git push`, `shipyard pr`, or `shipyard ship` through `tail`/`head`: the pipe
+  hides the heartbeat until exit and replaces the command's exit status with the
+  filter's.
 
 ## Current required-macOS truth (read before older incident notes)
 
@@ -619,10 +670,23 @@ queue instead of on its head: `pulp-browser-capture-node-unit` (#8912),
 base→head diff, never its `all` fallback, nothing for a docs/skills/workflow-only
 diff, plus two path families the build graph cannot see (`tools/cmake/**` → the
 `cmake-*` fixtures; the wide tier's manifest, classifier or any `test/` CMake
-registration → `wide-non-native-selftest`). Budget: ten minutes of batches, the
-rest listed as skipped. Replayed on 20 clean PRs it selected a median of 1.5
-tests (max ~155 test-seconds); a red here is the PR's own test, so fix it on the
-branch. The selection needs `Configure` to write the codemodel query; if a
+registration → `wide-non-native-selftest`; any source-selftest lane entry
+script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
+producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
+identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
+compiled-in Dawn identity no source edge reaches). Direct edges are added even when
+the projection is too wide or the diff is docs-only: tests whose declared inputs
+(`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
+rules select, the tests running a program whose own source changed, and the
+registrations a `test/` CMake hunk reaches (`cmake_registration_impact.py`: the
+touched call's test/target, a touched block, and the readers of any variable a
+changed or removed line writes, including `prefix_${key}` templates; only
+within that manifest). Budget: ten minutes of batches, the rest listed as
+skipped. Replayed on 20 clean PRs it selected a median of 8.5 tests (max ~217
+test-seconds); on 16 known PR-culprit ejections it catches every one that is
+neither a `pr-fast` member (already run on the head) nor source-selftest
+labelled (run on the head by `Enforce version & skill sync`). A red here is the
+PR's own test, so fix it on the branch. The selection needs `Configure` to write the codemodel query; if a
 future configure loses it, the step reports `no CMake codemodel reply` and
 selects nothing, so check the annotation's `mode` before trusting a green.
 While main is red the step would block every PR whose diff reaches the red
@@ -764,7 +828,25 @@ consequences worth knowing before you debug:
   `build*/` whose test manifests are current, printed as `build dir: <path>`.
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
-  and the branch was pushed red three times. Host-specific suites (`rack-plugin-loads`) are in
+  and the branch was pushed red three times.
+- The consumption-census checks (`consumption-census-drift` and the others that
+  pass `--build-dir`) only mean something against a build of the scope the
+  census measured. Each profile in `docs/status/consumption-profiles.json`
+  records a `build_scope` (tests ON, examples OFF); a local build with the same
+  feature switches but examples ON gets the same profile key and a bigger link
+  closure (`Pulp::inspect-protocol` went 19→23 nodes on a pristine main). The
+  pr-fast lane now reads the build's `consumption-census-facts.json`, and when
+  its scope differs it sets those tests aside as `NOT CHECKED (build config ≠
+  census profile <key>: PULP_BUILD_EXAMPLES=ON (profile OFF))`; `--build-dir
+  auto` prefers a build that matches the profile. There is no host-detected
+  input behind that closure: `pulp-events` (with CoreServices, Foundation and
+  UserNotifications) links into `Pulp::inspect-protocol` unconditionally on
+  Apple since the "make Apple SDK CLI link complete" change, and across 115
+  first-parent `main` commits the census count (19 before, 23 after) tracks that
+  change exactly. A 19↔23 red locally means the build and the census came from
+  different trees, so a build counts as stale when ANY checkout file CMake read
+  (`build.ninja`'s RERUN_CMAKE inputs) is newer than its configure, not only a
+  test manifest. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed
@@ -788,6 +870,21 @@ standard library. An import under `try/except ImportError`, in an `except
 ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
 branch is allowed. Needing a new third-party package means adding it to the lock
 (and the wheelhouse), not to the check.
+
+### `drift-fast` catches tree-reading drift before the build, advisory only
+
+The hosted `drift-fast` job (`.github/workflows/drift-fast.yml`) configures the
+tip-plus-head tree without building and runs `tools/ci/drift_fast.json`'s
+selection (the `pr-fast` tier plus `wide-non-native-selftest`, the census,
+tools-registry, rack, lane-contract and scheduling checks) in a few minutes.
+When a merge group ejects on one of those, its `drift-fast` run on the same
+group should already name the test, minutes earlier; read it before the
+`macos` log. It is NOT
+required, so it never blocks by itself, and on its Linux configure the census
+comparison skips (only `darwin-arm64` profiles are recorded) and
+`ios-compile-gate-legs` is not registered; both print as `NOT CHECKED`. A new
+tree-reading check that can pass from a configure alone belongs in the
+manifest. See `docs/guides/local-ci.md`.
 
 ### A green ctest job proves nothing about a label its event excludes
 
@@ -1471,6 +1568,24 @@ and per-file hashes. Downstream validation must use that exact prefix and the
 receipt's `source_sha`; a build-tree target check or an unbound SDK directory is
 not installed-SDK evidence.
 
+**An upload reset after green tests is not a test failure.** `ECONNRESET` from
+`actions/upload-artifact` has failed the required gate on m5 after every test
+passed. The `ctest-logs-<key>` upload is now `continue-on-error` (a missing
+log artifact on a green run means the upload failed); the SDK upload retries
+once after 90 s with `overwrite: true` and only then fails the job, because a
+green job must imply the artifact exists.
+
+**Configure should not clone.** `setup.sh` primes every dependency
+`PulpDependencies.cmake` fetches unconditionally into the shared FetchContent
+cache, at CMake's exact `GIT_TAG` and in the directory its
+`pulp_register_fetchcontent_source` REF names. Configure-time clones have no
+retry, so a `Failed to clone repository` / `Could not resolve host` in a
+configure log (often the iOS-simulator configure, which resolves dependencies
+a second time) means a new unconditional `FetchContent_Declare` was added
+without a registration and a `setup.sh` priming call.
+`test_setup_source_cache.sh` fails on that drift, and on any `setup.sh` curl
+that lacks `--retry-all-errors`.
+
 ### Provisioning a skipped dependency is a SEPARATE decision from reporting it
 
 Making a skip visible is safe. Removing the skip is not, and the two must not
@@ -1555,6 +1670,17 @@ way on 2026-09-22/23 until tartci allowed `pypi.org` and
 `files.pythonhosted.org`. PEP 668 is probed once (`EXTERNALLY-MANAGED` beside
 the stdlib) rather than by retrying each install, so an index outage is not paid
 twice per attempt.
+
+**Crates and Chrome are fetched before the build, not inside it.** A red
+`macos` whose Build or `pulp-rust-*` ctest shows `Could not resolve host:
+index.crates.io` / `static.crates.io`, or whose Chrome step exits 6 or 56, is
+the gate VM's network, not the diff. `Fetch pulp-rs crates` runs `cargo fetch`
+on `experimental/pulp-rs/Cargo.lock` with three spaced attempts and only warns
+on exhaustion; `PULP_CARGO_NET_OFFLINE=1` (repo variable, off by default) then
+exports `CARGO_NET_OFFLINE=true`. The Chrome download uses
+`--retry-all-errors`, because plain `--retry` skips resolve and reset errors.
+`test_build_fetch_resilience.py` fails on a `curl` in the build job without
+`--retry-all-errors`, so a new unretried download cannot creep back in.
 
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
@@ -1708,6 +1834,11 @@ list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
 the diff-scoped check fails the PR head otherwise and prints that command.
 Run it after every rebase onto main too: main's new script tests are
 advisory drift, but a rebase that touches one of yours is blocking.
+The check blocks only on the PULL-REQUEST HEAD (pr-fast, every push, where
+you see it); in a merge group it reports the same drift as a `::warning`
+and lets the batch land, because ejecting a batch over a stale generated
+list cost two groups on 2026-09-29 for a PR whose head predated the check.
+`PULP_SCRIPT_INPUTS_STRICT=1` makes it block anywhere.
 
 ## The affected-tests shadow annotation selects nothing
 
@@ -3647,6 +3778,14 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
+    - Stale bump PR: a drain that finds an open bump PR cut BEFORE its merge
+      fails `stale-defer` and waits for that PR to land. An ejected PR, or an
+      ARMED PR whose required checks failed, never lands, so every drain stays
+      red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true` (default off,
+      `--heal-stale-pr`) closes a CONFIRMED-stale bump PR unless it
+      is in the merge queue or a draft (armed does not protect it; closing drops
+      auto-merge, so no disarm is needed) and opens a fresh one.
+      An unknown coverage or queue/draft reading always fails closed.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
@@ -5233,6 +5372,19 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.
+
+A **rebase** of an armed or queued PR is the same cost by another route, and
+`refresh_push_check.py` does not see it (a rebase adds no merge commit).
+`tools/scripts/prepush_queue_rebase_hint.py` covers it: when the pushed head
+carries the same PR diff (stable patch-id of `merge-base(head, origin/main)..head`)
+on a newer main base, and GraphQL shows the branch's open PR with
+`autoMergeRequest` or `mergeQueueEntry` set, it prints a hint to keep the old
+head and enqueue with `shipyard ship --pr <n>`. It runs before
+`PULP_SKIP_PREPUSH` is honoured, never blocks, looks up GitHub only after the
+local check matches (3 s, `PULP_QUEUE_REBASE_TIMEOUT`), fails silently without
+`ghapp`/`gh` or auth, and leaves a plain merge-of-main push to
+`refresh_push_check.py` so the two never both print. `PULP_ALLOW_QUEUE_REBASE=1`
+silences it. Tests: `prepush-queue-rebase-hint` ctest.
 
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
