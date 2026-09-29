@@ -1543,7 +1543,15 @@ jobs:
           chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
           if [ ! -x "$chrome" ]; then
             archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
-            curl --fail --location --retry 3 --output "$archive" \
+            # A gate VM has lost DNS for storage.googleapis.com, or had the
+            # transfer reset, for tens of seconds at a time, failing the
+            # required macos check before the build started. Plain `--retry`
+            # treats neither a resolve failure (exit 6) nor a receive reset
+            # (exit 56) as transient, so they must be named with
+            # `--retry-all-errors`; the SHA-256 check below still rejects any
+            # bad bytes a retried transfer could leave behind.
+            curl --fail --location --retry 8 --retry-all-errors --retry-delay 15 \
+              --connect-timeout 30 --output "$archive" \
               https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
             expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
             actual=$(shasum -a 256 "$archive" | awk '{print $1}')
@@ -1553,6 +1561,53 @@ jobs:
           fi
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
+      - name: Fetch pulp-rs crates
+        shell: bash
+        env:
+          PULP_CARGO_NET_OFFLINE: ${{ vars.PULP_CARGO_NET_OFFLINE || '0' }}
+        run: |
+          set -euo pipefail
+          # experimental/pulp-rs (the user-facing Rust CLI) is built by a CMake
+          # custom command and tested by several `cargo test` ctests. On an
+          # ephemeral gate VM the cargo registry cache starts empty, so those
+          # commands downloaded ~100 crates from crates.io in the middle of
+          # the Build and Test steps. A VM that lost DNS for a couple of
+          # minutes ("Could not resolve host: index.crates.io") then failed
+          # the required macos check as a compile or test failure. Fetch the
+          # locked set here instead, with spaced retries, so the build and
+          # the ctests find every crate already on disk.
+          manifest=experimental/pulp-rs/Cargo.toml
+          cargo_bin="$(command -v cargo || true)"
+          if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+            cargo_bin="$HOME/.cargo/bin/cargo"
+          fi
+          if [ -z "$cargo_bin" ]; then
+            # CMake skips pulp-rs and its ctests when it finds no cargo.
+            echo "cargo is not on PATH; CMake does not build pulp-rs here, nothing to fetch"
+            exit 0
+          fi
+          delay="${PULP_CARGO_FETCH_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if "$cargo_bin" fetch --manifest-path "$manifest"; then
+              echo "Fetched the crates in ${manifest%/*}/Cargo.lock"
+              # Opt-in: with every crate on disk the build and test commands
+              # need no network, so a repo that sets PULP_CARGO_NET_OFFLINE=1
+              # makes any later fetch fail loudly instead of reaching out.
+              if [ "$PULP_CARGO_NET_OFFLINE" = "1" ]; then
+                echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+                echo "CARGO_NET_OFFLINE=true for the remaining steps"
+              fi
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::cargo fetch attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+            fi
+          done
+          # Not fatal: the build's own cargo invocation still tries the
+          # registry, which is exactly what happened before this step existed.
+          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; the pulp-rs build and its ctests will try crates.io again"
 
       # Save scope is deliberately narrower than restore scope: GitHub-hosted
       # Linux/Windows only, and only on a push to main.

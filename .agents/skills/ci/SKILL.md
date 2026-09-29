@@ -1585,6 +1585,17 @@ way on 2026-09-22/23 until tartci allowed `pypi.org` and
 the stdlib) rather than by retrying each install, so an index outage is not paid
 twice per attempt.
 
+**Crates and Chrome are fetched before the build, not inside it.** A red
+`macos` whose Build or `pulp-rust-*` ctest shows `Could not resolve host:
+index.crates.io` / `static.crates.io`, or whose Chrome step exits 6 or 56, is
+the gate VM's network, not the diff. `Fetch pulp-rs crates` runs `cargo fetch`
+on `experimental/pulp-rs/Cargo.lock` with three spaced attempts and only warns
+on exhaustion; `PULP_CARGO_NET_OFFLINE=1` (repo variable, off by default) then
+exports `CARGO_NET_OFFLINE=true`. The Chrome download uses
+`--retry-all-errors`, because plain `--retry` skips resolve and reset errors.
+`test_build_fetch_resilience.py` fails on a `curl` in the build job without
+`--retry-all-errors`, so a new unretried download cannot creep back in.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
