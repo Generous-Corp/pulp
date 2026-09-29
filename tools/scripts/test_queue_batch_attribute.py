@@ -407,6 +407,9 @@ class HeaderSuffixTests(unittest.TestCase):
             root = pathlib.Path(directory) / "inc"
             root.mkdir()
             (root / f"probe{suffix}").write_text("")
+            # The census lists only files git tracks, so the probe is staged.
+            subprocess.run(["git", "init", "-q"], cwd=directory, check=True)
+            subprocess.run(["git", "add", "inc"], cwd=directory, check=True)
             return len(consumption_census.header_names(pathlib.Path(directory), "inc"))
 
     def test_every_suffix_the_census_counts_is_declared_and_no_others(self) -> None:
