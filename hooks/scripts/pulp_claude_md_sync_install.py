@@ -30,6 +30,10 @@ import tempfile
 from pathlib import Path
 
 LAUNCHER_NAME = "pulp-claude-md-sync-session"
+# Other user-level Pulp SessionStart launchers. They are installed by their own
+# tooling; when one is present in ~/.local/bin it is wired into the same config
+# folders, so subrouter folders do not silently miss it.
+WIRED_IF_PRESENT = ("pulp-worktree-lineage-session",)
 MATCHER = "startup|resume"
 TIMEOUT_S = 10
 
@@ -60,13 +64,14 @@ def launcher_source(repo: str | None) -> str | None:
     return sibling.read_text() if sibling.is_file() else None
 
 
-def names_launcher(group: object) -> bool:
+def names_launcher(group: object, name: str = LAUNCHER_NAME) -> bool:
     return isinstance(group, dict) and any(
-        isinstance(h, dict) and LAUNCHER_NAME in str(h.get("command", ""))
+        isinstance(h, dict) and name in str(h.get("command", ""))
         for h in group.get("hooks", []) or [])
 
 
-def wire_json(path: Path, command: str) -> tuple[bool, int | None]:
+def wire_json(path: Path, command: str,
+              name: str = LAUNCHER_NAME) -> tuple[bool, int | None]:
     """Ensure a SessionStart group runs the launcher.
 
     Returns (changed, index of the launcher's group), or (False, None) when
@@ -85,7 +90,7 @@ def wire_json(path: Path, command: str) -> tuple[bool, int | None]:
     if not isinstance(groups, list):
         return False, None
     for i, group in enumerate(groups):
-        if names_launcher(group):
+        if names_launcher(group, name):
             return False, i
     groups.append({"matcher": MATCHER,
                    "hooks": [{"type": "command", "command": command,
@@ -94,24 +99,31 @@ def wire_json(path: Path, command: str) -> tuple[bool, int | None]:
     return True, len(groups) - 1
 
 
-def codex_trust_hash(command: str) -> str:
+def codex_trust_hash(command: str, timeout: int = TIMEOUT_S,
+                     matcher: str | None = MATCHER) -> str:
     # Codex trusts a hook by the hash of its normalized settings, not the
     # script contents, so later launcher updates keep the trust.
-    identity = {"event_name": "session_start", "matcher": MATCHER,
+    identity = {"event_name": "session_start",
                 "hooks": [{"async": False, "command": command,
-                           "timeout": TIMEOUT_S, "type": "command"}]}
+                           "timeout": timeout, "type": "command"}]}
+    if matcher is not None:
+        identity["matcher"] = matcher
     blob = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
 
 
-def trust_codex(config: Path, hooks_file: Path, index: int, command: str) -> bool:
+def trust_codex(config: Path, hooks_file: Path, index: int) -> bool:
+    """Trust the SessionStart group at ``index`` exactly as it is written."""
     key = f'[hooks.state."{hooks_file}:session_start:{index}:0"]'
     text = config.read_text() if config.exists() else ""
     if key in text:
         return False
+    group = json.loads(hooks_file.read_text())["hooks"]["SessionStart"][index]
+    hook = group["hooks"][0]
+    trusted = codex_trust_hash(hook["command"], hook.get("timeout", TIMEOUT_S),
+                               group.get("matcher"))
     sep = "" if not text or text.endswith("\n") else "\n"
-    atomic_write(config,
-                 f'{text}{sep}\n{key}\ntrusted_hash = "{codex_trust_hash(command)}"\n')
+    atomic_write(config, f'{text}{sep}\n{key}\ntrusted_hash = "{trusted}"\n')
     return True
 
 
@@ -124,27 +136,26 @@ def install(home: Path, repo: str | None) -> list[str]:
         bindir.mkdir(parents=True, exist_ok=True)
         atomic_write(launcher, source, mode=0o755)
         changes.append(str(launcher))
-    if not launcher.is_file():
-        return changes
-    command = f"{launcher} --hook-json"
+    launchers = [bindir / n for n in (LAUNCHER_NAME, *WIRED_IF_PRESENT)
+                 if (bindir / n).is_file()]
 
     claude_dirs = [home / ".claude"]
     proxies = home / ".subrouter" / "codex" / "claude-proxy"
     if proxies.is_dir():
         claude_dirs += sorted(p for p in proxies.iterdir() if p.is_dir())
-    for d in claude_dirs:
-        if d.is_dir() and wire_json(d / "settings.json", command)[0]:
-            changes.append(str(d / "settings.json"))
-
     codex = home / ".codex"
-    if codex.is_dir():
-        hooks_file = codex / "hooks.json"
-        changed, index = wire_json(hooks_file, command)
-        if changed:
-            changes.append(str(hooks_file))
-        if index is not None and trust_codex(codex / "config.toml", hooks_file,
-                                             index, command):
-            changes.append(str(codex / "config.toml"))
+    for path in launchers:
+        command = f"{path} --hook-json"
+        for d in claude_dirs:
+            if d.is_dir() and wire_json(d / "settings.json", command, path.name)[0]:
+                changes.append(f"{d / 'settings.json'} ({path.name})")
+        if codex.is_dir():
+            hooks_file = codex / "hooks.json"
+            changed, index = wire_json(hooks_file, command, path.name)
+            if changed:
+                changes.append(f"{hooks_file} ({path.name})")
+            if index is not None and trust_codex(codex / "config.toml", hooks_file, index):
+                changes.append(f"{codex / 'config.toml'} ({path.name})")
     return changes
 
 
