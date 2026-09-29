@@ -31,6 +31,12 @@
 // its esbuild dependency via `npm install --prefix <script_dir>`
 // using the pinned version in package.json. Subsequent invocations
 // skip the install when node_modules/esbuild is already present.
+//
+// With PULP_OFFLINE_BUILD set (to anything but 0/false/no/off) the
+// script never reaches the network: a missing esbuild is an error that
+// names the install command, exit code 3. CI sets it and installs the
+// dependency in its own retried step before the build, so a registry
+// outage fails that step, with retries, instead of a compile inside it.
 
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -58,12 +64,29 @@ function parseArgs(argv) {
     return args;
 }
 
+// Exit code for "esbuild is missing and the network is off limits", distinct
+// from a usage error (2) and an esbuild build failure (1).
+const OFFLINE_MISSING_DEPENDENCY_EXIT = 3;
+
+function offlineBuild() {
+    const value = (process.env.PULP_OFFLINE_BUILD || "").trim().toLowerCase();
+    return !["", "0", "false", "no", "off"].includes(value);
+}
+
 // Load esbuild from this script's local node_modules. If it's missing,
 // run `npm install` once to populate it, then retry. Keeps the build
 // reproducible against the pinned version in package.json without
 // relying on a globally installed copy.
 async function loadEsbuild() {
     const localEsbuildEntry = path.join(SCRIPT_DIR, "node_modules", "esbuild", "lib", "main.js");
+    if (!fs.existsSync(localEsbuildEntry) && offlineBuild()) {
+        console.error(
+            `bundle_threejs_for_jsc: esbuild is not installed in ${path.join(SCRIPT_DIR, "node_modules")}, ` +
+            "and PULP_OFFLINE_BUILD is set, so this build step will not fetch it from the network.\n" +
+            `Install it before building: npm ci --prefix ${SCRIPT_DIR}`,
+        );
+        process.exit(OFFLINE_MISSING_DEPENDENCY_EXIT);
+    }
     if (!fs.existsSync(localEsbuildEntry)) {
         process.stderr.write("[bundle_threejs] esbuild not present in tools/scripts/node_modules — running `npm install` (one-time)...\n");
         const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
