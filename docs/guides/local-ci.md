@@ -1795,10 +1795,9 @@ throwaway checkout, and GitHub Actions jobs are exempt.
 
 `build.yml` triggers on `push: branches: [main]` in addition to
 `pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing.
-It does two jobs: it **publishes the GitHub-hosted Linux/Windows ccache and
-FetchContent caches** that PR runs restore from, and it **runs the full macOS
-suite against the commit that actually landed**, which is the only place that
-happens.
+Its job is to **publish the GitHub-hosted Linux/Windows ccache and FetchContent
+caches** that PR runs restore from. It has no macOS leg and runs entirely on
+GitHub-hosted runners.
 
 It is needed because of how GitHub's cloud cache is scoped: a cache entry
 written by a PR run is visible only to that PR's own ref, so PR runs can never
@@ -1810,58 +1809,49 @@ Each trigger runs a deliberately different slice of the matrix:
 
 | | PR run | `merge_group` run | `push: main` cache run |
 |---|---|---|---|
-| macOS matrix leg | yes | yes | **yes** — main's health detector |
+| macOS matrix leg | yes | yes | **no** — main's health is the merge group's `macos` job |
 | Linux matrix leg | yes | **no** — PR-head result is reused | yes (publishes the cache) |
 | Windows matrix leg | **no** — see below | **no** — see below | yes (publishes the cache) |
 | `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | **no** — see below | no |
-| required direct `macos` context | yes | yes | no — descriptive name, gates nothing |
+| required direct `macos` context | yes | yes | no |
 | Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
-### Why the macOS leg runs on push
+### Why the push run has no macOS leg
 
-The push lane carries macOS because nothing else proves main is healthy.
-A pull-request head does not run the suite at all (the `Test (non-Windows)`
-step is gated `github.event_name != 'pull_request'`), and a merge group
-validates a synthetic merge commit rather than the commit that lands. So
-without the push leg, main's macOS health is simply unknown, and a break on
-main first surfaces when a queued batch inherits it, roughly forty minutes
-later, reported against a batch whose name is not the culprit. Because a merge
-queue re-forms a batch after each failure, every subsequent batch inherits the
-same break and pays the same forty minutes.
+main's macOS health is already measured, by the merge queue. The queue lands
+with the MERGE method, so the commit on `main` IS the merge-group head (checked
+over 12 consecutive first-parent commits of main: each had a `merge_group`
+`Build and Test` run whose `head_sha` equalled it). That run's required `macos`
+job built and tested main's exact commit. A push leg would test it a second
+time.
 
-Running it on push moves that detection onto the merge commit that caused it,
-where attribution is free.
+It also never did. Push runs carry no event class, so the leg kept the legacy
+base selector (`…pulp-gate-fast`), which the event-class-v2 pool does not serve.
+It queued for hours while holding the `refs/heads/main` concurrency group, and
+because push runs are exempt from `cancel-in-progress`, GitHub kept at most one
+more push run pending and cancelled it when the next merge arrived: 57 of the
+last 60 push runs were cancelled with zero jobs started, and the Linux/Windows
+cache-save steps ran at most once per stuck window. With the leg omitted, a push
+run finishes on hosted runners and the caches publish on every merge.
 
-The leg keeps its descriptive matrix name on push instead of claiming the
-required `macos` context, so it detects without gating.
+`a2t-protected-event`, the one other push-only job, runs on GitHub-hosted
+`macos-15` for the same reason: its verifier needs only macOS, git and python3.
+`tools/scripts/test_fork_pr_runner_routing.py` (run by `workflow-lint.yml`,
+which installs PyYAML) walks every `build.yml` job reachable on push and fails
+if any routes to a runner that is not a GitHub-hosted label or a hosted lane
+variable in `runner_topology.json`, and runs the embedded resolver on a push
+event to prove its matrix is Linux + Windows only.
 
-**In practice this lane observes nothing, and the bound it was given is why.**
-Push runs share the `refs/heads/main` concurrency group with
-`cancel-in-progress` false, which was intended to serialize consecutive merges
-to at most one macOS leg in flight. GitHub holds at most **one** run pending per
-concurrency group and cancels the previously pending one when another arrives,
-so on a main that merges faster than the macOS suite takes, "serialize" becomes
-"cancel all but the one already running" — and that one's self-hosted macOS leg
-is still queued for a runner when the next merge cancels it too. Over the 60
-most recent pushes to main: 58 completed, 55 dispatched no job at all, and **0**
-executed the macOS suite. The same query over `merge_group` returned 31 of 55
-executed, so the instrument reads a real lane when there is one to read.
-
-Because a cancelled push run's observation is tied to a sha that never comes
-again, the observation is lost rather than deferred. Widening the group to
-per-sha would fix the supersession and hand the shared Studios one ~40-minute
-macOS leg per merge — on the hosts that serve the required `macos` gate. The
-base health detector below takes the other route: it derives main's health from
-evidence that already exists, and costs no gate lane. Caches are still saved only from GitHub-hosted Linux and Windows: the
+Caches are still saved only from GitHub-hosted Linux and Windows: the
 two `Save …` steps stay scoped
 `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which is
 narrower than the restore side on purpose, because the self-hosted Macs keep
 ccache and FetchContent on local disk between jobs.
 
 `tools/ci/test_build_matrix_contract.py` (ctest `build-matrix-contract`) pins
-this: it asserts over the parsed syntax tree that the macOS matrix entry is
-appended unconditionally, so re-gating it on the event name fails a test rather
-than quietly restoring the blind spot.
+the guard: it asserts over the parsed syntax tree that the macOS matrix entry
+sits under exactly `if EVENT_NAME != "push":`, so gating it on any other event
+(which would drop the required gate itself) fails a test.
 
 ### Base health detector (`main-health-detector.yml`)
 
@@ -1872,9 +1862,10 @@ batch's own report says the base is the cause, so each batch reads as a new
 culprit in turn.
 
 `.github/workflows/main-health-detector.yml` runs `tools/ci/base_poison_detector.py`
-right after every failed merge-group `Build and Test` run (`workflow_run`,
-`completed`, gated to `event == 'merge_group'` and `conclusion == 'failure'`),
-on a schedule as a backstop, and on demand. The event trigger is the one that
+right after every completed merge-group `Build and Test` run, green or red
+(`workflow_run`, `completed`, gated to `event == 'merge_group'`), on a schedule
+as a backstop, and on demand. A green group is usually a new tip, and without a
+read then a healthy tip never gets a verdict. The event trigger is the one that
 matters: GitHub throttles this repository's schedules to roughly one run every
 four hours whatever the cron says, longer than a batch's lifetime. A
 `workflow_run` job runs the default branch's copy of the workflow with
@@ -1886,19 +1877,23 @@ prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
 superseded tick loses nothing, because the next one reads main's *current* head,
 which is strictly more relevant than the head the cancelled tick would have
-reported on. That is exactly the property the push lane lacks.
+reported on.
 
-**Where main's evidence comes from without a build.** A merge queue validates
-`main` plus its entries as one commit, and the commit that lands carries that
-commit's tree. So when main's head tree equals the head tree of a run whose
-macOS leg genuinely executed the suite, that run built and tested main's exact
-tree — the same sources, the same binaries, the same result. A failure there is
-a failure observed on main itself, for two commit reads instead of a gate lane.
-Tree identity rather than sha identity, because the queue's merge method can
-produce a landing commit whose sha differs while the tree is the same, and it is
-the tree that determines what was built. The detector prefers a genuine
-push-lane observation when one exists and falls back to tree identity, and the
-signal says which it used.
+**Where main's evidence comes from without a build.** The merge_group run whose
+head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
+method that run tested exactly the commit on main. It is judged by its
+**required gate jobs** — the job names in `.shipyard/config.toml`
+`[governance] required_status_checks`, i.e. `macos` — never by the run's
+conclusion, which also folds in advisory legs: while hosted Linux was failing
+every merge group, reading the run called every green tip red and turned the
+Linux failure into a fake batch streak. The tip's run is read at any status,
+because a group lands as soon as its required checks pass while advisory legs
+may still be running. When the tip's gate is not evidence (a reused receipt, or
+still running), an earlier merge group whose head tree equals main's tree is
+used instead (`tree-identity`): the tree determines what was built. When the
+tip has no merge_group run at all (an admin or direct push), the verdict is
+`unproven` and its reason names the tip. The signal says which source it used
+and carries `main_head_sha`.
 
 Failing test names are read from the `ctest-logs-macos` **artifact**
 (`Testing/Temporary/LastTestsFailed.log`), never from a job log:
@@ -1910,7 +1905,7 @@ yields no failing tests — which reads as "the failure was not a test failure".
 line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
-`main_evidence_source`, `main_failing_tests`, `batch_streak`,
+`main_evidence_source`, `main_head_sha`, `main_failing_tests`, `batch_streak`,
 `batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
 `likely_culprits`, `required_contexts_source`, `reason`.
 
@@ -1957,8 +1952,8 @@ prioritising none.
 `tools/ci/test_base_poison_detector.py` (ctest `base-poison-detector-selftest`)
 pins each of those refusals, and also asserts that a workflow actually invokes
 the detector: a correct rule nothing runs reads exactly like one that works,
-which is how the designated push lane went 58 runs without producing a single
-observation.
+which is how a designated push lane once went 58 runs without producing a
+single observation.
 
 Push runs are also exempt from `cancel-in-progress`: they share the
 `refs/heads/main` concurrency group, so cancelling a superseded one would kill
@@ -2111,10 +2106,9 @@ observed cascade had its leader fail at test 101 and spend about eighteen more
 minutes proving it, across three lanes and more than ten consecutive batches.
 
 So `merge_group` runs ctest with `--stop-on-failure`, and no other lane does.
-The push lane deliberately runs to completion, because it is the only place the
-full macOS suite ever runs against main and its completeness is the point: it
-reports every failing test, which is what
-`tools/scripts/queue_batch_attribute.py` reads to attribute a batch.
+Every other lane runs to completion and reports every failing test; for the
+complete macOS list of a failing change, run it through a Shipyard
+`workflow_dispatch`.
 
 `--stop-on-failure` composes with the existing `--repeat until-pass:2` rather
 than defeating it. ctest stops only after the retries are exhausted, so a
@@ -2132,9 +2126,8 @@ reads exactly like one that works.
 The label set follows the same split. `performance`, `bench` and `quality-lab`
 are relative-timing tests that survive steady load but not the load variance of
 a Studio running concurrent build VMs, so they are excluded wherever the suite
-runs on the shared self-hosted Macs. That now includes the push lane, which is
-why a push macOS leg does not reintroduce those flakes as false alarms about
-main.
+runs on the shared self-hosted Macs, and kept on the steady GitHub-hosted Linux
+and Windows legs.
 
 ## A green `macos` check does not always mean the suite ran
 
@@ -2294,8 +2287,8 @@ Two candidate signals were evaluated against live runs and are deliberately
 
   So the obstacle to certifying this whole class is a CI-topology fact, not a
   missing rule: nothing publishes a same-configuration verdict on a queue base.
-  Give `build.yml`'s main push lane a run that survives to dispatch jobs at each
-  base and the rule becomes checkable and would have cleared all four.
+  A same-configuration verdict on each base would make the rule checkable and
+  would have cleared all four.
 
 
 ## Pull-request heads also run the tests their diff reaches

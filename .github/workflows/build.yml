@@ -7,10 +7,9 @@ on:
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
   # to every other PR — so without this trigger the `Save …` steps below are
-  # unreachable and the restore steps are a permanent miss. A push run also
-  # carries the macOS leg, which is the only place the full macOS suite ever
-  # runs against a commit that is actually on main (see resolve-provider). It
-  # still skips the reporting aliases, so it detects rather than gates.
+  # unreachable and the restore steps are a permanent miss. A push run carries
+  # no macOS leg and no reporting aliases: main's macOS health is the merge
+  # group's `macos` job on the same commit (see resolve-provider).
   push:
     branches: [main]
   # Run the required macos/linux/windows alias gates on queued merge groups so
@@ -745,26 +744,30 @@ jobs:
           ])
 
           include = []
-          # The macOS leg runs for EVERY event, push included. A push to main is
-          # the only lane that runs the full macOS suite against a commit that
-          # is actually on main: pull-request heads skip the test step entirely
-          # and merge groups validate a synthetic merge, so without this a break
-          # on main stays invisible until a queued batch inherits it roughly
-          # forty minutes later and reports the failure against a batch whose
-          # name is not the culprit.
+          # The macOS leg runs on every event EXCEPT push. main's macOS health
+          # is measured by the merge queue, not by a push run: under the queue's
+          # MERGE method the commit that lands on main IS the merge-group head,
+          # so the merge_group run's required `macos` job already tested main's
+          # exact commit. tools/ci/base_poison_detector.py reads that job by the
+          # tip's sha.
           #
-          # The draw on the self-hosted Macs is bounded to one leg at a time:
-          # push runs share the `build-<ref>` concurrency group, so consecutive
-          # merges to main serialize rather than fan out. On push the matrix
-          # child also keeps its descriptive name (see the `name:` expression on
-          # the build job) instead of claiming the required `macos` context, so
-          # this detects a broken main without gating anything.
-          include.append({
-              "key": "macos",
-              "name": "macOS (ARM64)",
-              "runs_on_json": macos_runs_on,
-              "provider": macos_provider,
-          })
+          # A push leg on the self-hosted Macs never produced that evidence and
+          # blocked the rest of the push run. Push runs carry no event class, so
+          # the leg kept the legacy base selector, which the event-class pool
+          # does not serve: it queued for hours while holding the
+          # `build-refs/heads/main` concurrency group (cancel-in-progress is
+          # false for push), and every later push run was cancelled while
+          # pending with zero jobs, taking the Linux/Windows cache-save steps
+          # with it. Without the leg, a push run finishes on hosted runners.
+          # tools/scripts/test_fork_pr_runner_routing.py pins that no job
+          # reachable on push routes to a self-hosted runner.
+          if EVENT_NAME != "push":
+              include.append({
+                  "key": "macos",
+                  "name": "macOS (ARM64)",
+                  "runs_on_json": macos_runs_on,
+                  "provider": macos_provider,
+              })
           # Windows is advisory, GitHub-hosted, and slow, and a run carries four
           # Windows jobs (this leg plus the three compile gates below). The repo
           # gets a fixed pool of concurrent GitHub-hosted jobs, so a handful of
@@ -1272,7 +1275,11 @@ jobs:
       && needs.resolve-provider.result == 'success'
       && needs.classify.result == 'success'
       && needs.classify.outputs.a2t_receipt_verification_required == 'true'
-    runs-on: ${{ fromJSON(needs.resolve-provider.outputs.macos_runs_on_json) }}
+    # GitHub-hosted, never the self-hosted gate selector: on push that selector
+    # carries no event class, so no gate runner serves it and the job would
+    # hold main's push concurrency group while queued. The verifier needs only
+    # macOS (it refuses any other RUNNER_OS), git and python3.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
         with:
