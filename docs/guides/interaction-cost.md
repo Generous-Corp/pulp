@@ -188,7 +188,10 @@ Capture it so the numbers are about the app and not the capture:
 - **Drive a real mouse.** Post `CGEventCreateMouseEvent(kCGEventMouseMoved)` at
   60 Hz across the target, and run a deterministic animation source (an LFO)
   at the same time. Compare a window *during* the sweep against a window of the
-  *same animation with the mouse still*, in one trace.
+  *same animation with the mouse still*, in one trace. That moves the real
+  cursor, so it is for an attended session only; an unattended run should use
+  `PULP_TEST_POINTER_DRAG`, which injects the gesture inside the window host
+  and cannot drive other applications' windows.
 - **Do not measure while a scripted-scenario harness is stepping.** Its
   per-step snapshots add 100–800 ms stalls that look exactly like app jank.
 - **Size the ring for a script-heavy capture.** Set `PULP_TRACE_RING_KB` large
@@ -200,7 +203,12 @@ Capture it so the numbers are about the app and not the capture:
   `__flushTimers__` carry the JS-side cost, `gpu_acquire` the GPU wait, and
   `paint` the drawing.
 
-The `trace-analysis` skill has the full capture and truncation checks.
+The `trace-analysis` skill has the full capture and truncation checks, plus the
+per-phase frame-gap recipe for an editor that animates live audio data
+(including the window after each stroke's release). Agents get the design-time
+checklist this guide explains — commits, data delivery, readouts, analyzer
+backlog, modulation display, effect budgets — from the `view-bridge` skill
+("Realtime scripted editors: the performance checklist").
 
 Note that a userspace-only trace carries no `thread_state`, `sched`, or
 per-slice `thread_dur` rows, so you cannot split wall from CPU time by joining

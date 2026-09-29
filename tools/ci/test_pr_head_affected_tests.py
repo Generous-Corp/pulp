@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -138,6 +140,82 @@ class WorkflowWiringTests(unittest.TestCase):
         configure = configure[:configure.index("\n      - name:", 10)]
         query = configure.index(".cmake/api/v1/query/codemodel-v2")
         self.assertLess(query, configure.index('cmake -S . -B "$PULP_BUILD_DIR"'))
+
+
+class BaseRedTests(unittest.TestCase):
+    """Only a script test that fails the same way on the base is exempted."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name).resolve()
+        self.build = self.tmp / "build"
+        (self.build / "test").mkdir(parents=True)
+        binary = self.build / "test" / "pulp-test-x"
+        binary.write_text("")
+        inventory = {"tests": [
+            {"name": "script-red", "command": ["/usr/bin/python3", str(REPO / "tools/scripts/a.py")]},
+            {"name": "script-flake", "command": ["/usr/bin/python3", str(REPO / "tools/scripts/b.py")]},
+            {"name": "script-new", "command": ["/usr/bin/python3", str(REPO / "tools/scripts/c.py")]},
+            {"name": "compiled", "command": [str(binary), "Some case"]},
+        ]}
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "ctest").write_text(f"#!/bin/sh\ncat {self.tmp / 'inv.json'}\n")
+        (bindir / "ctest").chmod(0o755)
+        (self.tmp / "inv.json").write_text(__import__("json").dumps(inventory))
+        self.env = mock.patch.dict(os.environ, {"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"})
+        self.env.start()
+        self.lane = mock.MagicMock()
+        self.lane._entry_from_command.side_effect = (
+            lambda name, argv, props, repo, build: {"name": name, "raw": True, "argv": [
+                a.replace(str(repo), "{repo}") for a in argv]})
+        self.lane.run.side_effect = lambda entries, **kw: [
+            {"name": e["name"], "returncode": 0 if e["name"] == "script-flake" else 1,
+             "output": "FAIL: t (m.T.t)\n"} for e in entries]
+        self.lane.rerun_on_base.side_effect = lambda still, entries, ref: {
+            r["name"]: (r["name"] == "script-red", "why") for r in still}
+        self.modules = mock.patch.dict(sys.modules, {"source_selftests": self.lane})
+        self.modules.start()
+
+    def tearDown(self) -> None:
+        self.modules.stop()
+        self.env.stop()
+        self._tmp.cleanup()
+
+    def test_only_a_script_test_red_on_the_base_is_exempted(self) -> None:
+        verdicts = step.label_base_failures(
+            self.build, ["script-red", "script-flake", "script-new", "compiled"], "HEAD^1")
+        self.assertEqual({k: v[0] for k, v in verdicts.items()},
+                         {"script-red": True, "script-flake": False,
+                          "script-new": False, "compiled": False})
+        self.assertIn("compiled test", verdicts["compiled"][1])
+        self.assertIn("flake", verdicts["script-flake"][1])
+        # The base re-run is asked only about scripts still failing here.
+        still = self.lane.rerun_on_base.call_args[0][0]
+        self.assertEqual(sorted(r["name"] for r in still), ["script-new", "script-red"])
+
+
+class ExitCodeTests(unittest.TestCase):
+    """A red main does not fail the pull request; its own failure does."""
+
+    def _main(self, verdicts: dict) -> int:
+        plan = {"changed": 1, "mode": "focused", "reason": "r", "families": {},
+                "tests": ["a", "b"]}
+        results = {"passed": [], "failed": list(verdicts), "skipped": [],
+                   "excluded_or_absent": [], "seconds": 1.0}
+        with mock.patch.object(step, "diff_paths", return_value=["x.py"]), \
+                mock.patch.object(step, "inventory_tests", return_value={}), \
+                mock.patch.object(step, "select", return_value=plan), \
+                mock.patch.object(step, "run_budgeted", return_value=results), \
+                mock.patch.object(step, "label_base_failures", return_value=verdicts), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return step.main(["--build-dir", "/nonexistent"])
+
+    def test_every_failure_pre_existing_passes(self) -> None:
+        self.assertEqual(self._main({"a": (True, "same on base")}), 0)
+
+    def test_control_one_branch_caused_failure_fails(self) -> None:
+        self.assertEqual(self._main({"a": (True, "same"), "b": (False, "passes on base")}), 1)
 
 
 if __name__ == "__main__":

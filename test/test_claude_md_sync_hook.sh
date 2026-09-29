@@ -7,8 +7,13 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hook="${PULP_CLAUDE_MD_SYNC_HOOK:-${repo_root}/hooks/scripts/claude_md_sync.py}"
 launcher="${PULP_CLAUDE_MD_SYNC_LAUNCHER:-${repo_root}/hooks/scripts/pulp-claude-md-sync-session}"
+installer="${repo_root}/hooks/scripts/pulp_claude_md_sync_install.py"
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+# The launcher's sweep runs detached and may still be writing at exit.
+trap 'rm -rf "${tmp}" 2>/dev/null || { sleep 1; rm -rf "${tmp}"; }' EXIT
+# The launcher sweeps user-level agent configs; never let it see the real ones.
+export HOME="${tmp}/home"
+mkdir -p "${HOME}"
 export TMPDIR="${tmp}/markers"
 mkdir -p "${TMPDIR}"
 unset CLAUDE_PROJECT_DIR PULP_CLAUDE_MD_SYNC
@@ -29,6 +34,8 @@ seed="${tmp}/seed"
 g clone -q "${origin}" "${seed}" 2>/dev/null
 mkdir -p "${seed}/hooks/scripts"
 cp "${hook}" "${seed}/hooks/scripts/claude_md_sync.py"
+cp "${launcher}" "${seed}/hooks/scripts/pulp-claude-md-sync-session"
+cp "${installer}" "${seed}/hooks/scripts/pulp_claude_md_sync_install.py"
 { printf '# CLAUDE.md\n\nintro\n\n'; section "Build" "old-build" 5; section "Retired Routing" "pulp-gate-fast" 5; } > "${seed}/CLAUDE.md"
 printf '# AGENTS.md\n\nSee CLAUDE.md.\n' > "${seed}/AGENTS.md"
 g -C "${seed}" add -A && g -C "${seed}" commit -qm v1
@@ -145,5 +152,73 @@ printf '{"cwd":"%s"}' "${evil}" | bash "${launcher}" >/dev/null
 # 8. Both hook configs wire the script.
 grep -q 'hooks/scripts/claude_md_sync.py' "${repo_root}/hooks/hooks.json" || fail "plugin hooks.json does not wire the hook"
 grep -q 'hooks/scripts/claude_md_sync.py' "${repo_root}/.codex/hooks.json" || fail ".codex/hooks.json does not wire the hook"
+
+# 9. The user-level installer wires every agent config, idempotently.
+fake="${tmp}/fakehome"
+mkdir -p "${fake}/.claude" "${fake}/.codex" \
+    "${fake}/.subrouter/codex/claude-proxy/acct1" "${fake}/.subrouter/codex/claude-proxy/acct2" \
+    "${fake}/.subrouter/codex/claude-proxy/broken"
+printf '{"theme":"dark","hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"/x/lineage"}]}]}}\n' \
+    > "${fake}/.claude/settings.json"
+printf '{"permissions":{},"hooks":{"PostToolUse":[]}}\n' > "${fake}/.subrouter/codex/claude-proxy/acct1/settings.json"
+printf '{not json\n' > "${fake}/.subrouter/codex/claude-proxy/broken/settings.json"
+printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/x/a"}]},{"hooks":[{"type":"command","command":"/x/b"}]}]}}\n' \
+    > "${fake}/.codex/hooks.json"
+printf 'model = "x"\n\n[hooks.state]\n' > "${fake}/.codex/config.toml"
+python3 "${installer}" --home "${fake}" >/dev/null || fail "installer failed"
+lpath="${fake}/.local/bin/pulp-claude-md-sync-session"
+cmp -s "${lpath}" "${launcher}" && [[ -x "${lpath}" ]] || fail "installer did not install an executable launcher"
+python3 - "${fake}" "${lpath}" <<'PY' || fail "installer wiring is wrong"
+import json, sys
+home, launcher = sys.argv[1], sys.argv[2]
+cmd = f"{launcher} --hook-json"
+def starts(p):
+    return json.load(open(p))["hooks"]["SessionStart"]
+c = json.load(open(f"{home}/.claude/settings.json"))
+assert c["theme"] == "dark", "unrelated settings lost"
+assert [g["hooks"][0]["command"] for g in c["hooks"]["SessionStart"]] == ["/x/lineage", cmd]
+for acct in ("acct1", "acct2"):
+    groups = starts(f"{home}/.subrouter/codex/claude-proxy/{acct}/settings.json")
+    assert [g["hooks"][0]["command"] for g in groups] == [cmd], acct
+assert open(f"{home}/.subrouter/codex/claude-proxy/broken/settings.json").read() == "{not json\n"
+codex = starts(f"{home}/.codex/hooks.json")
+assert codex[2]["hooks"][0]["command"] == cmd and codex[2]["matcher"] == "startup|resume"
+toml = open(f"{home}/.codex/config.toml").read()
+assert toml.startswith('model = "x"\n'), "config.toml prefix changed"
+assert f'[hooks.state."{home}/.codex/hooks.json:session_start:2:0"]' in toml, toml
+PY
+before="$(cat "${fake}"/.claude/settings.json "${fake}"/.codex/* "${fake}"/.subrouter/codex/claude-proxy/*/settings.json | shasum)"
+[[ "$(python3 "${installer}" --home "${fake}")" == "already wired" ]] || fail "second install was not a no-op"
+after="$(cat "${fake}"/.claude/settings.json "${fake}"/.codex/* "${fake}"/.subrouter/codex/claude-proxy/*/settings.json | shasum)"
+[[ "${before}" == "${after}" ]] || fail "second install rewrote files"
+
+# The Codex trust hash matches one Codex itself computed (a real ~/.codex
+# entry for a 3000 s startup|resume hook), so the formula is anchored.
+python3 - "${installer}" <<'PY' || fail "Codex trust hash formula drifted"
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("inst", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.TIMEOUT_S = 3000
+got = m.codex_trust_hash("/Users/danielraffel/.local/bin/pulp-worktree-lineage-session --hook-json")
+assert got == "sha256:7cb5f9bde39da6b51ec88785f31ed4c2a4be1791a1ce60d7d9bdfc4217b17d42", got
+PY
+
+# 10. A session start sweeps: a config folder created later gets wired, and a
+#     lowercase origin URL (GitHub names are case-insensitive) still matches.
+mkdir -p "${HOME}/.subrouter/codex/claude-proxy/later"
+g -C "${stale}" config remote.origin.url "git@github.com:generous-corp/pulp.git"
+lower="$(printf '{"cwd":"%s","session_id":"lower"}' "${stale}" | bash "${launcher}" | context_of)" \
+    || fail "launcher skipped a lowercase origin URL"
+grep -q "PULP INSTRUCTIONS DRIFT" <<<"${lower}" || fail "lowercase origin produced no note"
+swept="${HOME}/.subrouter/codex/claude-proxy/later/settings.json"
+for _ in $(seq 1 50); do [[ -s "${swept}" ]] && break; sleep 0.1; done
+grep -q 'pulp-claude-md-sync-session --hook-json' "${swept}" 2>/dev/null \
+    || fail "session-start sweep did not wire a new config folder"
+[[ -x "${HOME}/.local/bin/pulp-claude-md-sync-session" ]] || fail "sweep did not install the launcher"
+mkdir -p "${HOME}/.subrouter/codex/claude-proxy/optout"
+printf '{"cwd":"%s","session_id":"nosweep"}' "${stale}" | PULP_CLAUDE_MD_SYNC_SWEEP=0 bash "${launcher}" >/dev/null
+sleep 1
+[[ ! -e "${HOME}/.subrouter/codex/claude-proxy/optout/settings.json" ]] || fail "PULP_CLAUDE_MD_SYNC_SWEEP=0 still swept"
+g -C "${stale}" config remote.origin.url "${origin}"
 
 echo "claude-md-sync hook: all tests passed (drifted run ${elapsed}s)"

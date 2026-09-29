@@ -625,6 +625,14 @@ tests (max ~155 test-seconds); a red here is the PR's own test, so fix it on the
 branch. The selection needs `Configure` to write the codemodel query; if a
 future configure loses it, the step reports `no CMake codemodel reply` and
 selects nothing, so check the annotation's `mode` before trusting a green.
+While main is red the step would block every PR whose diff reaches the red
+test (on 2026-09-28 a `wide-non-native-selftest` red on main failed #9018's
+head). A failing script-driven test is therefore re-run from a checkout of the
+merge ref's first parent, with the source-selftest lane's base verdict; when
+every test it fails also fails there, it prints `PRE-EXISTING ON BASE` as a
+warning and does not fail the check. Compiled tests are never exempted: their
+binary is the pull request's own build, so a base run would compare it with
+itself.
 
 ### Only a ready-to-land PR head issues a receipt
 
@@ -746,7 +754,17 @@ consequences worth knowing before you debug:
   (`sys.path` siblings, `from tools.scripts import x`, relative imports), using
   `gate_python_imports_check.local_import_closure`. Across the 338 helper
   modules under `tools/scripts` and `tools/ci`, that reaches suites the name
-  match misses for 33 of them. Host-specific suites (`rack-plugin-loads`) are in
+  match misses for 33 of them.
+- A suite a lane could not run is never read as a pass. Every `NOT CHECKED
+  locally` line from every lane is gathered into its own summary section with a
+  count, and the verdict reads `PASSED WITH N NOT CHECKED — not a full pass`
+  instead of the plain green line; `NO USABLE BUILD` is named in the verdict
+  too. The pr-fast lane picks its build with `--build-dir auto`:
+  `PULP_GATES_BUILD_DIR` first, else the most recently configured Ninja
+  `build*/` whose test manifests are current, printed as `build dir: <path>`.
+  A stale Makefiles `build/` beside a current `build-gate` once made
+  `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
+  and the branch was pushed red three times. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed
