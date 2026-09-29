@@ -2941,6 +2941,7 @@
     "tools/ci/source_selftests.py",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
     "tools/deps/manifest.json",
     "tools/motion/visual/requirements.lock",
