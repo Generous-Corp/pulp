@@ -62,6 +62,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -124,19 +125,59 @@ WEIGHT_CENSUS_HEADER = 100
 WEIGHT_CENSUS_ARTIFACT = 50
 
 
+def gh_cli() -> str:
+    """The GitHub CLI every API read goes through.
+
+    `PULP_GH_CLI` wins: it is the single override every CI helper reads, and a
+    GitHub runner sets it to `gh`, where no App wrapper exists. Otherwise
+    `ghapp`, when PATH resolves it.
+
+    Shipyard's queue-arm guard runs `--certify` with PATH reduced to the system
+    directories, so the `ghapp` installed under ~/.local/bin is not on it. The
+    wrapper that runs the guard exports `GHAPP_REAL_GH`, the real `gh` binary,
+    and `GH_TOKEN`, the App token it minted for this command, so that binary
+    answers the same reads under the same identity.
+    """
+    override = (os.environ.get("PULP_GH_CLI") or "").strip()
+    if override:
+        return override
+    if shutil.which("ghapp"):
+        return "ghapp"
+    real = (os.environ.get("GHAPP_REAL_GH") or "").strip()
+    if real and os.environ.get("GH_TOKEN") and os.access(real, os.X_OK):
+        return real
+    return "ghapp"
+
+
+def run_gh(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run the GitHub CLI; a CLI that cannot be found is an unusable invocation.
+
+    Exits 2 with a message rather than a traceback, so a caller that reads only
+    the exit status and stderr (the queue-arm guard) sees why nothing ruled.
+    """
+    cli = gh_cli()
+    try:
+        return subprocess.run([cli, *args], **kwargs)
+    except FileNotFoundError:
+        print(
+            f"queue_batch_attribute: GitHub CLI {cli!r} is not on PATH "
+            f"({os.environ.get('PATH', '')}); set PULP_GH_CLI to a gh-compatible CLI",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from None
+
+
 def gh(
     path: str,
     jq: str | None = None,
     repo_cwd: str | None = None,
     paginate: bool = False,
 ) -> str | None:
-    # `ghapp` locally; `gh` on a GitHub runner, where no App wrapper exists.
-    # PULP_GH_CLI is the single override every CI helper reads.
-    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", path]
+    args = ["api", path]
     if paginate:
-        cmd.append("--paginate")
-    cmd += ["--jq", jq] if jq else []
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_cwd)
+        args.append("--paginate")
+    args += ["--jq", jq] if jq else []
+    proc = run_gh(args, capture_output=True, text=True, cwd=repo_cwd)
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -376,12 +417,8 @@ def run_log_zip(repo: str, run_id: str) -> bytes | None:
     an empty log rather than an error. The run endpoint serves a zip, which is
     binary and passes through.
     """
-    proc = subprocess.run(
-        [
-            (os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp",
-            "api",
-            f"repos/{repo}/actions/runs/{run_id}/logs",
-        ],
+    proc = run_gh(
+        ["api", f"repos/{repo}/actions/runs/{run_id}/logs"],
         capture_output=True,
     )
     if proc.returncode != 0 or not proc.stdout:
@@ -2191,11 +2228,11 @@ class Ejection:
 
 
 def graphql(query: str, **variables: str) -> dict | None:
-    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", "graphql"]
+    args = ["api", "graphql"]
     for key, value in variables.items():
-        cmd += ["-F", f"{key}={value}"]
-    cmd += ["-f", f"query={query}"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+        args += ["-F", f"{key}={value}"]
+    args += ["-f", f"query={query}"]
+    proc = run_gh(args, capture_output=True, text=True)
     if proc.returncode != 0:
         return None
     try:

@@ -1968,5 +1968,65 @@ class CertifyWithChainTests(unittest.TestCase):
         self.assertEqual(payload["implicated_pr"], 9014)
 
 
+class GuardEnvironmentTests(unittest.TestCase):
+    """`--certify` run exactly as Shipyard's queue-arm guard runs it.
+
+    The guard executes the declared command as a subprocess from the repository
+    root, capturing output, with PATH reduced to the system directories and the
+    App token already minted into GH_TOKEN. `ghapp` lives under ~/.local/bin, so
+    it is not on that PATH; the wrapper exports GHAPP_REAL_GH instead. An
+    attributor that only knows `ghapp` crashes there with FileNotFoundError, and
+    the guard reads the non-zero exit as "did not rule".
+    """
+
+    SCRIPT = pathlib.Path(__file__).resolve().parent / "queue_batch_attribute.py"
+    REPO_ROOT = SCRIPT.parents[2]
+
+    def _run(self, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            empty_bin = pathlib.Path(tmp) / "bin"
+            empty_bin.mkdir()
+            env = {"HOME": tmp, "PATH": str(empty_bin), "GH_REPO": "Generous-Corp/pulp"}
+            env.update({k: v.replace("{tmp}", tmp) for k, v in extra_env.items()})
+            if "GHAPP_REAL_GH" in env:
+                fake = pathlib.Path(env["GHAPP_REAL_GH"])
+                fake.write_text(
+                    "#!/bin/sh\n"
+                    f'printf "%s\\n" "$*" >> "{tmp}/gh-calls.log"\n'
+                    "exit 1\n"
+                )
+                fake.chmod(0o755)
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--certify", "--repo",
+                 "Generous-Corp/pulp", "--pr", "9048", "--run-id", "36535153595"],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=str(self.REPO_ROOT),
+                env=env,
+                timeout=120,
+            )
+            log = pathlib.Path(tmp) / "gh-calls.log"
+            proc.gh_calls = log.read_text() if log.exists() else ""  # type: ignore[attr-defined]
+            return proc
+
+    def test_certify_reads_through_the_wrappers_real_gh_when_ghapp_is_off_path(self) -> None:
+        proc = self._run({"GH_TOKEN": "app-token", "GHAPP_REAL_GH": "{tmp}/gh"})
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("api repos/Generous-Corp/pulp/actions/runs/36535153595",
+                      proc.gh_calls)  # type: ignore[attr-defined]
+        verdict = json.loads(proc.stdout)
+        self.assertEqual(verdict["run_id"], 36535153595)
+        # Every read failed, so nothing may be certified.
+        self.assertIsNot(verdict["implicates_head"], False)
+
+    def test_no_reachable_cli_is_a_clean_unusable_invocation(self) -> None:
+        proc = self._run({})
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("PULP_GH_CLI", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
