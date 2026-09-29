@@ -2212,9 +2212,39 @@ python3 tools/scripts/queue_batch_attribute.py --certify \
   --repo Generous-Corp/pulp --pr 8773 --run-id 35973715485
 ```
 
-Certification is per failing step and exhaustive: every failing step of every
-failing job must be positively accounted for, and one unaccounted step refuses
-the whole verdict. Two accounts qualify.
+The first reading is the batch's **chain ancestry**. A queue ref is
+`gh-readonly-queue/main/pr-<N>-<parent>`, and `<parent>` is the commit the entry
+was stacked on — main's tip or the previous entry's group commit — so each batch
+is a one-entry experiment against its parent. Comparing only the required
+`macos` gate:
+
+- parent passed (on main, or its group's `macos` went green) → the head is the
+  **culprit** (`implicates_head: true`);
+- parent failed and every test this batch failed, the parent failed too → the
+  head is a **neighbour**: `other_pull_request`, `implicated_pr` = the ancestor
+  whose own parent passed. A parent that failed before its suite ran (a `Build`
+  failure) observed none of the tests, so it is looked through to the nearest
+  ancestor whose suite ran; if that ancestor passed, nobody is named;
+- parent failed but this batch failed a test the parent did not → culprit;
+- every failing test is on the known-flake list
+  (`tools/scripts/queue_known_flakes.json`) → **known flake**, certified as
+  `infrastructure`;
+- main's tip fails the same tests → **pre-existing on main**, `infrastructure`.
+
+Known flakes are set aside before any comparison. A clearing chain verdict still
+refuses when another REQUIRED job failed (the chain compares `macos` only),
+when the head's diff cannot be read, or when the head's own diff owns a failing
+test — two entries can break the same test. The reading is recorded under
+`chain` in the JSON (`classification`, `parent_state`, the failing test sets);
+the guard reads only the top-level fields. On 69 failed `macos` groups over
+three days the file-ownership reading below named no culprit at all, while the
+chain reading classified 67.
+
+When the chain cannot rule — an unreadable parent, a parent still running, a
+batch not named for this pull request — certification falls back to the
+per-step accounting. It is per failing step and exhaustive: every failing step
+of every failing job must be positively accounted for, and one unaccounted step
+refuses the whole verdict. Two accounts qualify.
 
 - **The step is a package-manager fetch, an artifact move, a cache warm, or
   runner-generated** — and the head changes nothing that step reads. Both halves
