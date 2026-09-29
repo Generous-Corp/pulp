@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260928-canvas2d-cached-groups",
+  "kind": "change",
+  "created_at": "2026-09-28T00:00:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "CanvasWidget gains keyed cached groups for the Canvas2D shim's ctx.pulpCachedGroup: begin_group/end_group record commands into a group stored beside the frame's command stream, replay_group appends a replay_group command by reference, and invalidate_group/invalidate_all_groups drop them. The retained-ui-kernel touch is confined to canvas_widget.hpp and canvas_widget.cpp: paint() walks a stream that contains group replays through replay_sequence(), which expands each replay in place inside an implicit save/restore, drops a restore that would pop state saved outside the group, and closes saves the group leaves open. A stream with no group replays is walked exactly as before, so existing command streams paint unchanged; the new replay_group command type is appended to the enum. Cached groups are a Pulp extension to its own Canvas2D command replay with no counterpart framework behavior to backport, so this is recorded pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-group-design-import-widgets [cached-group]"
+  ],
+  "disposition": "pulp-only"
+}

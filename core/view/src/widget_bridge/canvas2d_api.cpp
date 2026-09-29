@@ -570,6 +570,36 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // Cached groups (ctx.pulpCachedGroup). Begin/end bracket the recording
+    // of a keyed group; replay appends a stored group by reference and
+    // reports whether it was stored, so the shim records it again after an
+    // invalidation, a reload, or a canvas whose stream was replaced.
+    register_bridge_function(api, "canvasBeginGroup", [&self](choc::javascript::ArgumentList args) {
+        auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")));
+        return choc::value::createBool(c && c->begin_group(args.get<std::string>(1, "")));
+    });
+
+    register_bridge_function(api, "canvasEndGroup", [&self](choc::javascript::ArgumentList args) {
+        auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")));
+        return choc::value::createBool(c && c->end_group());
+    });
+
+    register_bridge_function(api, "canvasReplayGroup", [&self](choc::javascript::ArgumentList args) {
+        auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")));
+        return choc::value::createBool(c && c->replay_group(args.get<std::string>(1, "")));
+    });
+
+    // A key drops that group; no key drops every group on the canvas.
+    register_bridge_function(api, "canvasInvalidateGroup", [&self](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
+            if (args.numArgs >= 2 && args[1] != nullptr && args[1]->isString())
+                c->invalidate_group(args.get<std::string>(1, ""));
+            else
+                c->invalidate_all_groups();
+        }
+        return choc::value::Value();
+    });
+
     // Transform
     register_bridge_function(api, "canvasTranslate", [&self](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {

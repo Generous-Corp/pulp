@@ -175,6 +175,13 @@ function CanvasRenderingContext2D(canvasEl) {
     // synchronous hit tests. The bridge owns the canonical SkPath used for
     // fill / stroke / clip; this JS mirror exists only for query methods.
     this._pathSubpaths = [];
+    // True while pulpCachedGroup is recording drawFn into a native group.
+    this._groupRecording = false;
+    // Save-stack depth a restore() may not pop below (0: unbounded).
+    this._stateFloor = 0;
+    // A new context is a new script realm drawing this canvas; groups another
+    // realm recorded are not its content.
+    if (typeof canvasInvalidateGroup === "function") canvasInvalidateGroup(this._id);
 }
 
 // Every `_sent*` cache field. save() snapshots them, restore() puts them back,
@@ -748,7 +755,9 @@ CanvasRenderingContext2D.prototype.clearRect = function(x, y, w, h) {
     // forever. The tolerance is strictly less than one backing-store pixel,
     // so a genuinely partial clear remains observable.
     var coverageTolerance = 0.5;
-    var full = this._pulpRetainedCanvasFrames
+    // A clear recorded into a cached group is part of that group, never a
+    // replacement of the frame the group is being recorded into.
+    var full = this._pulpRetainedCanvasFrames && !this._groupRecording
         && axisAligned && this._clipDepth === 0
         && isFinite(left) && isFinite(top) && isFinite(right) && isFinite(bottom)
         && left <= coverageTolerance && top <= coverageTolerance
@@ -933,11 +942,25 @@ CanvasRenderingContext2D.prototype.save = function() {
     this._fp();
     this._flushCachedState();
     if (typeof canvasSave === "function") canvasSave(this._id);
-    // Snapshot the drawing state, the record of what the native canvas
-    // holds, and the JS-side transform / path / clip mirrors. The native
-    // replay reverts its own drawing state on restore() on every backend, so
-    // restore() can put the `_sent*` record back instead of discarding it
-    // and re-sending every setter before the next draw.
+    this._stateStack.push(this._captureState());
+};
+
+CanvasRenderingContext2D.prototype.restore = function() {
+    this._fp();
+    // Inside a cached group, a restore() cannot pop state saved outside it.
+    if (this._stateFloor > 0 && this._stateStack.length <= this._stateFloor) return;
+    if (typeof canvasRestore === "function") canvasRestore(this._id);
+    // Spec: restoring with no matching save is a no-op.
+    if (this._stateStack.length === 0) return;
+    this._applyState(this._stateStack.pop());
+};
+
+// Snapshot the drawing state, the record of what the native canvas holds,
+// and the JS-side transform / path / clip mirrors. The native replay reverts
+// its own drawing state on restore() on every backend, so restoring can put
+// the `_sent*` record back instead of discarding it and re-sending every
+// setter before the next draw.
+CanvasRenderingContext2D.prototype._captureState = function() {
     var state = {}, sent = {};
     var sf = CanvasRenderingContext2D._STATE_FIELDS;
     for (var i = 0; i < sf.length; ++i) state[sf[i]] = this[sf[i]];
@@ -946,22 +969,17 @@ CanvasRenderingContext2D.prototype.save = function() {
     // Later path appends only ever extend the last subpath, so a shallow copy
     // plus that subpath's length is a complete snapshot of the path mirror.
     var subs = this._pathSubpaths;
-    this._stateStack.push({
+    return {
         state: state,
         sent: sent,
         transform: this._currentTransform.slice(),
         subpaths: subs.slice(),
         lastSubpathLength: subs.length > 0 ? subs[subs.length - 1].length : 0,
         clipDepth: this._clipDepth
-    });
+    };
 };
 
-CanvasRenderingContext2D.prototype.restore = function() {
-    this._fp();
-    if (typeof canvasRestore === "function") canvasRestore(this._id);
-    // Spec: restoring with no matching save is a no-op.
-    if (this._stateStack.length === 0) return;
-    var snap = this._stateStack.pop();
+CanvasRenderingContext2D.prototype._applyState = function(snap) {
     var sf = CanvasRenderingContext2D._STATE_FIELDS;
     for (var i = 0; i < sf.length; ++i) this[sf[i]] = snap.state[sf[i]];
     if (snap.sent) {
@@ -979,6 +997,75 @@ CanvasRenderingContext2D.prototype.restore = function() {
     }
     this._pathSubpaths = subs;
     this._clipDepth = snap.clipDepth || 0;
+};
+
+// ── Cached groups (Pulp extension, not Canvas2D) ──────────────────────────
+//
+// ctx.pulpCachedGroup(key, drawFn) draws static content once and replays it
+// by reference: while `key` stays valid the call is one bridge crossing and
+// drawFn does not run. The group replays in place, under the current
+// transform and in the stream's blend order, so its pixels are exactly those
+// of calling drawFn directly. It runs inside an implicit save()/restore(), so
+// nothing it sets leaks into later draws, on either the recording frame or a
+// replay.
+//
+// The cached content is a function of the key: drawFn is not re-run while the
+// key is valid, so a group whose content depends on anything else must set
+// that state itself or be invalidated with ctx.pulpInvalidateGroup(key) when
+// it changes. State the enclosing code assigned before the call (fillStyle,
+// font, ...) is sent first and inherited on every replay. Resizing the canvas
+// and creating its context drop every group.
+CanvasRenderingContext2D.prototype.pulpCachedGroup = function(key, drawFn) {
+    this._fp();
+    this._flushCachedState();
+    key = String(key);
+    if (!this._groupRecording && typeof canvasReplayGroup === "function") {
+        if (canvasReplayGroup(this._id, key)) return;
+        if (canvasBeginGroup(this._id, key)) {
+            // The native group brackets itself in save/restore; mirror only
+            // the JS side here so no save/restore command enters the stream.
+            var snap = this._captureState();
+            var depth = this._stateStack.length, floor = this._stateFloor;
+            var completed = false;
+            this._groupRecording = true;
+            this._stateFloor = depth;
+            try {
+                drawFn(this);
+                completed = true;
+            } finally {
+                this._fp();
+                this._groupRecording = false;
+                this._stateFloor = floor;
+                // Saves the group left open close with it, as they do natively.
+                this._stateStack.length = depth;
+                this._applyState(snap);
+                canvasEndGroup(this._id);
+                // A drawFn that threw left a partial group; do not keep it.
+                if (!completed) canvasInvalidateGroup(this._id, key);
+            }
+            return;
+        }
+    }
+    // A group inside a recording group, or a host without cached groups:
+    // draw directly with the same scoping.
+    var outer = this._stateStack.length, outerFloor = this._stateFloor;
+    this.save();
+    this._stateFloor = outer + 1;
+    try {
+        drawFn(this);
+    } finally {
+        this._stateFloor = outerFloor;
+        while (this._stateStack.length > outer) this.restore();
+    }
+};
+
+// Drop the cached group `key`, or every group on this canvas when called
+// with no key, so the next pulpCachedGroup call runs drawFn again.
+CanvasRenderingContext2D.prototype.pulpInvalidateGroup = function(key) {
+    this._fp();
+    if (typeof canvasInvalidateGroup !== "function") return;
+    if (key === undefined) canvasInvalidateGroup(this._id);
+    else canvasInvalidateGroup(this._id, String(key));
 };
 
 // ── Canvas2D transform methods ────────────────────────────────────────────

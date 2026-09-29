@@ -252,6 +252,10 @@ canvasPathEllipse	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasPathRoundRect	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasSave	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasRestore	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasBeginGroup	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasEndGroup	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasReplayGroup	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasInvalidateGroup	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasTranslate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasScale	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasRotate	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

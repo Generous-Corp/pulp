@@ -2464,6 +2464,30 @@ A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→nativ
   method emits (every emitting method calls `_fp()` first — enforced by
   `check_canvas_path_flush.py`) or at the 65536-coordinate cap. Stroking each
   segment separately defeats this.
+- **Static content: use a cached group, not a second canvas.** Grids, scales
+  and labels that do not change per frame go in
+  `ctx.pulpCachedGroup(key, drawFn)`: the first call records drawFn, and every
+  later one is a single `canvasReplayGroup` crossing that does not run drawFn.
+  A second stacked canvas for the static layer still re-sends every call
+  whenever it redraws and adds a widget to paint. The replay runs the stored
+  commands in place, under the current transform, inside an implicit
+  save/restore, so pixels and blend order match calling drawFn directly
+  (Skia and CoreGraphics, `test/test_canvas2d_cached_group.cpp`), and a
+  `restore()` inside the group cannot pop state saved outside it. The content
+  is a function of the key: set every style the group uses inside drawFn and
+  call `ctx.pulpInvalidateGroup(key)` when its inputs change; a canvas resize
+  or a new context drops every group. Groups live beside the frame's command
+  stream, so a retained-frame full clear keeps them, and `canvasReplayGroup`
+  returning false is how the shim learns it must record again. A native
+  consumer of a canvas's commands must walk `CanvasWidget::replay_sequence()`,
+  not `commands()`, or it misses what groups draw. The group replays its
+  commands, not a cached texture, on purpose: `begin_layer(cacheable)` handles
+  do persist across frames (the live Skia surfaces share one
+  `RetainedLayerStore`), but a texture replay matches direct drawing only when
+  the device translation is integer-aligned, and 8-bit source-over is not
+  associative, so drawing into a transparent layer and compositing it can
+  differ by 1 LSB. Caching pixels would trade the byte-exact guarantee for
+  native replay cost; measure that cost in a trace before reaching for it.
 - **A full-frame `clearRect` on a retained-frame canvas replaces the native
   stream**, so it clears the `_sent*` record — including the copies held by
   open save() snapshots.

@@ -547,7 +547,10 @@ Object.defineProperty(Element.prototype, "width", {
     set: function(v) {
         if (this.tagName.toLowerCase() !== "canvas") return;
         var width = _coerceCanvasDimension(v, 300);
+        var resized = this._canvasWidth !== width;
         this._canvasWidth = width;
+        // Cached groups were recorded for the old backing store.
+        if (resized && this._canvasContext2d) this._canvasContext2d.pulpInvalidateGroup();
         // Canvas width is the backing-store width, not the CSS layout width.
         // Preserve an explicitly authored CSS size (e.g. width:100%); only
         // supply the browser's intrinsic-size default when no CSS width has
@@ -564,7 +567,10 @@ Object.defineProperty(Element.prototype, "height", {
     set: function(v) {
         if (this.tagName.toLowerCase() !== "canvas") return;
         var height = _coerceCanvasDimension(v, 150);
+        var resized = this._canvasHeight !== height;
         this._canvasHeight = height;
+        // Cached groups were recorded for the old backing store.
+        if (resized && this._canvasContext2d) this._canvasContext2d.pulpInvalidateGroup();
         if (!this.style.height) this.style.height = height + "px";
     }
 });
