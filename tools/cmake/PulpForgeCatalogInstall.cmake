@@ -33,7 +33,12 @@ function(pulp_install_forge_catalog)
                 "-DEXPORTER=$<TARGET_FILE:pulp-cli>"
                 "-DOUTPUT=${_catalog}"
                 -P "${_writer}"
-            DEPENDS pulp-cli "${_writer}"
+            # Keep both the target-order dependency and the concrete executable
+            # file dependency.  The former guarantees the exporter is built;
+            # the latter makes a rebuilt producer invalidate an existing
+            # generated catalog in single-config generators as well as in the
+            # multi-config CI generators used by the SDK gates.
+            DEPENDS pulp-cli "$<TARGET_FILE:pulp-cli>" "${_writer}"
             COMMENT "Exporting this SDK's enabled Forge catalog"
             VERBATIM)
         add_custom_target(pulp-forge-sdk-catalog ALL DEPENDS "${_catalog}")
