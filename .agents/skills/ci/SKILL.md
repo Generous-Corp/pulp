@@ -231,8 +231,19 @@ python3 tools/scripts/queue_batch_attribute.py --certify \
   --repo Generous-Corp/pulp --pr <n> --run-id <ejecting-run-id>
 ```
 
-It certifies only on positive evidence, per failing step and exhaustively, so
-most batches refuse — including every batch that failed with no ctest block,
+It rules from the batch's **chain ancestry** first: the `pr-<N>-<parent>` ref
+names the commit the entry was stacked on, so a green parent makes the head the
+culprit, and a red parent that failed a superset of this batch's `macos` tests
+makes it a neighbour (`other_pull_request`, naming the ancestor whose own parent
+passed). Known flakes (`tools/scripts/queue_known_flakes.json`) are set aside
+first, and a batch failing only those certifies as `infrastructure`. The
+reading is under `chain.classification` (`culprit` / `neighbour` /
+`known-flake` / `pre-existing-on-main` / `unknown`). Gotcha: a parent that
+failed at `Build` never ran the tests, so it is looked through to the nearest
+ancestor whose suite ran — comparing against its empty test set would make
+every child look like a culprit. When the chain cannot rule, it falls back to
+the per-step accounting, which certifies only on positive evidence, per failing
+step and exhaustively, so most of those batches refuse — including every batch that failed with no ctest block,
 because a link error is how a head most often breaks one. Do not read a refusal
 as a bug in the attributor; read it as "nothing here rules this head out". The
 full rule, and the two candidate signals rejected for certifying a guilty head,
