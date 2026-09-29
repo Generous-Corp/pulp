@@ -3665,6 +3665,13 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
+    - Stale bump PR: a drain that finds an open bump PR cut BEFORE its merge
+      fails `stale-defer` and waits for that PR to land. A merge-queue ejection
+      leaves that PR open but unarmed and unqueued, so it never lands and every
+      drain stays red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true`
+      (default off, `--heal-stale-pr`) closes a CONFIRMED-stale, CONFIRMED-idle
+      bump PR (not armed, not in the queue, not draft) and opens a fresh one.
+      An unknown coverage or in-flight reading always fails closed.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
