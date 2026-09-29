@@ -625,6 +625,14 @@ tests (max ~155 test-seconds); a red here is the PR's own test, so fix it on the
 branch. The selection needs `Configure` to write the codemodel query; if a
 future configure loses it, the step reports `no CMake codemodel reply` and
 selects nothing, so check the annotation's `mode` before trusting a green.
+While main is red the step would block every PR whose diff reaches the red
+test (on 2026-09-28 a `wide-non-native-selftest` red on main failed #9018's
+head). A failing script-driven test is therefore re-run from a checkout of the
+merge ref's first parent, with the source-selftest lane's base verdict; when
+every test it fails also fails there, it prints `PRE-EXISTING ON BASE` as a
+warning and does not fail the check. Compiled tests are never exempted: their
+binary is the pull request's own build, so a base run would compare it with
+itself.
 
 ### Only a ready-to-land PR head issues a receipt
 
