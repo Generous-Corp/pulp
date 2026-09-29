@@ -14,6 +14,7 @@ class DawnSubmissionTracker {
 
     enum class QueueResult : std::uint8_t { Pending, Success, Error, Cancelled };
     enum class ScopeResult : std::uint8_t { Pending, Clean, Error };
+    enum class ReadbackResult : std::uint8_t { Pending, Success, Error, Cancelled };
     enum class Terminal : std::uint8_t { RetiredSuccess, RetiredFailure };
 
     struct Observation {
@@ -22,9 +23,13 @@ class DawnSubmissionTracker {
         bool physically_drained = false;
     };
 
-    bool begin(Generation generation, std::uint64_t uncaptured_error_generation) noexcept;
+    bool begin(Generation generation, std::uint64_t uncaptured_error_generation,
+               bool requires_readback = false) noexcept;
     bool record_queue(Generation generation, QueueResult result) noexcept;
     bool record_scope(Generation generation, ScopeResult result) noexcept;
+    // Success means the serialized owner has copied the mapped bytes and
+    // unmapped the buffer, not merely that the MapAsync callback fired.
+    bool record_readback(Generation generation, ReadbackResult result) noexcept;
     bool mark_expired(Generation generation) noexcept;
     std::optional<Terminal> observe(Generation generation, const Observation& observation) noexcept;
 
@@ -49,8 +54,10 @@ class DawnSubmissionTracker {
     std::uint64_t rejected_evidence_ = 0;
     QueueResult queue_ = QueueResult::Pending;
     ScopeResult scope_ = ScopeResult::Pending;
+    ReadbackResult readback_ = ReadbackResult::Pending;
     bool active_ = false;
     bool expired_ = false;
+    bool requires_readback_ = false;
 };
 
 } // namespace pulp::gpu_audio::detail

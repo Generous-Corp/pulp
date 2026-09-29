@@ -1,6 +1,6 @@
 {
   "id": "sample-region-sequencer-interoperability",
-  "title": "Timeline automation and graph modulation reach authored ProcessorNode parameters",
+  "title": "Timeline automation, graph diagnostics, and modulation reach authored ProcessorNode parameters",
   "classification": "engine_internal",
   "delivery_state": "pending",
   "claim_id": "5746539377",
@@ -44,12 +44,20 @@
         "S4 exposure row and example retain the existing authority boundaries",
         "kSequencerParam = 2901"
       ]
+    },
+    {
+      "path": "core/host/src/signal_graph_diagnostics.cpp",
+      "needles": [
+        "register_custom_node_diagnostics",
+        "query_custom_node_diagnostics",
+        "diagnostic_graph_identity_"
+      ]
     }
   ],
   "surfaces": {
     "installed_sdk": {
       "disposition": "not_applicable",
-      "rationale": "This S4 slice makes existing graph-owned ProcessorNode parameters reachable through the host timeline binding and graph modulation routes. It adds no installed SDK header, target, or exported catalog entry."
+      "rationale": "This pending host interoperability slice also carries the graph-owned diagnostics query used to inspect the actual GPU audio node instance during lifecycle-safe, non-realtime observation. It adds no installed SDK target or exported catalog entry; the diagnostic report remains a host inspection seam."
     },
     "offline_timeline_cli": {
       "disposition": "not_applicable",

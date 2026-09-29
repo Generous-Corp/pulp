@@ -1,0 +1,53 @@
+# Called by the build graph, never writes to the source snapshot.
+if(NOT DEFINED EXPORTER OR NOT DEFINED OUTPUT)
+    message(FATAL_ERROR "Forge catalog export requires EXPORTER and OUTPUT")
+endif()
+get_filename_component(_directory "${OUTPUT}" DIRECTORY)
+file(MAKE_DIRECTORY "${_directory}")
+set(_temporary "${OUTPUT}.tmp")
+execute_process(COMMAND "${EXPORTER}" forge catalog export --json
+    OUTPUT_FILE "${_temporary}" ERROR_VARIABLE _error
+    RESULT_VARIABLE _result TIMEOUT 60)
+if(NOT _result STREQUAL "0")
+    file(REMOVE "${_temporary}")
+    message(FATAL_ERROR "Forge catalog exporter failed (${_result}): ${_error}")
+endif()
+file(READ "${_temporary}" _json)
+string(JSON _schema ERROR_VARIABLE _json_error GET "${_json}" schema)
+if(_json_error OR NOT _schema STREQUAL "pulp.forge-catalog.v1")
+    file(REMOVE "${_temporary}")
+    message(FATAL_ERROR "Forge catalog exporter returned invalid catalog JSON")
+endif()
+# The exporter audits the full semantic contract. This independent packaging
+# guard catches accidentally invoking a CPU-only exporter in a GPU SDK build.
+string(JSON _count ERROR_VARIABLE _json_error LENGTH "${_json}" nodes)
+set(_gpu_found FALSE)
+if(NOT _json_error AND _count GREATER 0)
+    math(EXPR _last "${_count} - 1")
+    foreach(_i RANGE 0 ${_last})
+        string(JSON _key ERROR_VARIABLE _key_error GET "${_json}" nodes ${_i} key)
+        if(NOT _key_error AND _key STREQUAL "convolution_reverb")
+            string(JSON _realizations ERROR_VARIABLE _realization_error
+                LENGTH "${_json}" nodes ${_i} realizations)
+            if(NOT _realization_error AND _realizations GREATER 0)
+                math(EXPR _last_realization "${_realizations} - 1")
+                foreach(_j RANGE 0 ${_last_realization})
+                    string(JSON _mode ERROR_VARIABLE _mode_error
+                        GET "${_json}" nodes ${_i} realizations ${_j} mode)
+                    string(JSON _type_id ERROR_VARIABLE _type_error
+                        GET "${_json}" nodes ${_i} realizations ${_j} type_id)
+                    if(NOT _mode_error AND NOT _type_error AND
+                       _mode STREQUAL "gpu" AND
+                       _type_id STREQUAL "space.convolution_reverb_gpu")
+                        set(_gpu_found TRUE)
+                    endif()
+                endforeach()
+            endif()
+        endif()
+    endforeach()
+endif()
+if(NOT _gpu_found)
+    file(REMOVE "${_temporary}")
+    message(FATAL_ERROR "Enabled GPU convolution is missing from the exported Forge catalog")
+endif()
+file(RENAME "${_temporary}" "${OUTPUT}")

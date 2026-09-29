@@ -21,6 +21,19 @@ ctest --test-dir build -R '^pulp-gpu-shared-io-paced-convolution-probe$' \
   --output-on-failure
 ```
 
+SDK-only builds can use the same provider options with `PULP_BUILD_TESTS=OFF`.
+Production `pulp-gpu-audio` initializes the expected Dawn revision independently
+of test registration. Exact proof validates the manifest, retained provider
+archive, extracted headers/libraries, and generation receipt at configure time
+and again before building the library. A mismatch fails the build. Configure
+and library prelink receipts are under `build/gpu-audio-provider-identity/`;
+probe executable binding receipts remain separate evidence when tests are built.
+The experimental convolver option is still required to enable its shared path.
+With exact proof off, the expected revision remains empty: providers may check
+header/procedure-table agreement, but no manifest authentication is claimed.
+These build checks establish provider identity, not successful GPU delivery or
+a realtime performance claim.
+
 Run a bounded diagnostic, choosing a new output directory:
 
 ```sh

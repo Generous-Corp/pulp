@@ -1146,3 +1146,14 @@ add_test(NAME cmake-bundle-build-info-contract
 set_tests_properties(cmake-bundle-build-info-contract PROPERTIES
     LABELS "cmake;ship"
     TIMEOUT 60)
+
+# Verify installed metadata follows the enabled runtime catalog, including
+# producer failure and a CPU-only exporter negative control.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME cmake-forge-catalog-install
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_forge_catalog_install.py"
+            --source "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cmake-forge-catalog-install PROPERTIES
+        LABELS "cmake;host;sdk" TIMEOUT 180)
+endif()

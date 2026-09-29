@@ -189,16 +189,26 @@ struct CustomNodeType {
     // counts per rate, so a fixed count could only ever be right at one of them.
     // A rate-independent latency stays expressible as `[](double) { return n; }`.
     //
-    // Kept last to preserve source compatibility for positional aggregate
-    // initializers written before the latency contract was added. The graph
-    // captures it at prepare; changing it requires re-registration/re-prepare
-    // and an identity version bump for persisted graphs.
+    // Kept after the historical callbacks to preserve source compatibility for
+    // positional aggregate initializers written before the latency contract was
+    // added. The graph captures it at prepare; changing it requires
+    // re-registration/re-prepare and an identity version bump for persisted
+    // graphs.
     //
     // The EVALUATED result is range-checked against `kMaxLatencySamples` at
     // compile time. It cannot be checked at registration, because it is not
     // known until the sample rate is.
     static constexpr int kMaxLatencySamples = 65535;
     std::function<int(double /*sample_rate*/)> latency_samples;
+
+    // Optional block-aware latency contract. This is used by nodes whose
+    // fixed scheduling lead is expressed in host quanta (for example a GPU
+    // transport with a two-block lead). The graph captures max_block_size
+    // during prepare/compile, off the audio thread; it is never queried from
+    // process(). When present it takes precedence over latency_samples.
+    // Kept after the historical callback for aggregate-initializer
+    // compatibility.
+    std::function<int(double /*sample_rate*/, int /*max_block_size*/)> latency_samples_for_block;
 
     bool is_valid_registration() const noexcept {
         const bool has_plain_callback =
@@ -213,9 +223,9 @@ struct CustomNodeType {
         // or loses a transport context. Declaring ANY latency callback is the
         // registration-time stand-in for a non-zero fixed latency, since the
         // value itself is not resolvable this early.
-        if (type_id.empty() || version <= 0 || num_input_ports < 0 ||
-            num_output_ports < 0 ||
-            (latency_samples && has_transport_callback && !has_plain_callback)) {
+        if (type_id.empty() || version <= 0 || num_input_ports < 0 || num_output_ports < 0 ||
+            ((latency_samples || latency_samples_for_block) && has_transport_callback &&
+             !has_plain_callback)) {
             return false;
         }
 

@@ -33,6 +33,8 @@ class SharedIoConvolutionSession {
         bool shared_host_pointer_capable = true;
         bool cpu_fallback_prepared = true;
         SharedIoTraceConfig trace;
+        SharedIoArenaProvider::StorageKind storage_kind =
+            SharedIoArenaProvider::StorageKind::ImportedHostPointer;
     };
 
     struct ProviderPair {
@@ -104,6 +106,8 @@ class SharedIoConvolutionSession {
     // the bridge CPU-only; offline processing cannot silently reactivate it.
     bool fence_for_offline() noexcept;
     bool release() noexcept;
+    // Quiescent paired experiment only. A failed drain retains ownership.
+    std::unique_ptr<SharedIoArenaProvider> release_to_owner() noexcept;
 
     bool prepared() const noexcept {
         return prepared_;

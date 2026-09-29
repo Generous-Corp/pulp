@@ -2374,6 +2374,7 @@ plug-ins, wire them into a DAG, and process audio through the chain.
 | Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
 | PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
 | SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology, retained in-process `ProcessorNodeInstance` insertion, and topological sort |
+| Custom-node diagnostics | `pulp/host/custom_node_diagnostics.hpp` | Bounded owned reports from an actual graph instance, qualified by graph generation and serialized against lifecycle changes. See [query contract](../guides/custom-node-diagnostics.md) |
 | Bake | `pulp/host/baked_graph_processor.hpp` | Freeze a lowerable `SignalGraph` into an optimized `BakedGraphProcessor` (bit-identical to the live graph). `bake()` is the in-process (trusted) path |
 | Baked codec | `pulp/host/baked_codec.hpp` | Signed on-disk `.pulpbake` artifact: `write_baked_signed` + verify-before-parse `load_baked` (Ed25519 trust-set, bounded parse). See [signal-graph](signal-graph.md#baking-a-graph-to-a-shippable-artifact) |
 

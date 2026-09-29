@@ -1204,6 +1204,22 @@ registry header. Use the family header that owns the DSP you are exposing:
   `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
   `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
 
+The space catalog's GPU convolution route is an opt-in host realization, not a
+replacement for the CPU node.  Enable it with
+`PULP_HOST_ENABLE_GPU_CONVOLUTION=ON` only in a GPU/provider-configured SDK
+build; the exported family keeps `space.convolution_reverb` as the default and
+adds the `gpu` realization with type ID `space.convolution_reverb_gpu`.
+Consumers must preserve the seven convolution controls (IR gain, pre-delay,
+wet/dry, width, low/high cut) and the route's fixed three-quantum PDC: a host
+capacity is rounded up to the next power-of-two transport quantum (for example,
+192 becomes 256) before reporting `3 * quantum` latency.  The GPU node is
+intentionally non-lowerable and accepts
+only one- or two-channel dual-mono IRs; four-channel true-stereo assets remain
+on the CPU realization until a channel-matrix GPU route exists.  The exact
+provider probe is `pulp-gpu-convolution-reverb-probe`, and a Forge consumer
+acceptance must use an installed SDK whose catalog export contains both
+realizations and whose source/build provenance is bound to the same Pulp SHA.
+
 The sidechain HPF setter resets its biquad when the cutoff changes. Cache the
 last applied cutoff in any baked adapter and call the setter only on an actual
 change; calling it unconditionally per block manufactures a fresh detector
@@ -2291,6 +2307,16 @@ expected-node inventory. Keep the missing-node negative control: removing a
 registry entry must fail instead of emitting a shorter, superficially valid
 document. SDK installs carry the checked projection at
 `share/pulp/forge-catalog.json`; consumers read it from the selected SDK.
+With `PULP_HOST_ENABLE_GPU_CONVOLUTION=ON`, the SDK install builds that JSON
+from its own native `pulp-cli forge catalog export --json`; the default CPU
+snapshot cannot describe this option. The generated file stays in the build
+tree, depends on the exporter, and fails installation if generation fails or
+omits the GPU realization. Default-OFF builds still install the checked snapshot.
+A raw `cmake --install` does not build missing outputs; use the build's `install`
+target to generate the enabled catalog before copying it.
+The `cli-forge-catalog-check` test compares the complete runtime export against
+that generated artifact when enabled, and against the committed snapshot in
+default builds. A GPU mode's presence alone does not prove metadata equality.
 
 The export's `add(...)` registrations live in one translation unit per catalog
 family (`core/host/src/forge_catalog_export_<family>.cpp`, behind the private
@@ -2464,3 +2490,25 @@ an asymmetric unit negotiates correctly too.
 Diagnostic: the AU slot logs `AU v2: initialized with N channels`. If that N disagrees with the
 width you are rendering, the render is silence regardless of what the status says — check it before
 trusting any AU measurement.
+
+## Querying the instance that actually runs
+
+Do not use `nodes()` and an opaque pointer as a live diagnostics shortcut. A
+shared owner keeps an object alive but cannot stop prepare/release from replacing
+its engine. Use the graph-owned custom-node diagnostic query: it tries the same
+mutation lock as lifecycle operations and retains the control-thread `Slot::live()`
+owner. Never take an RCU reader pin under that mutation lock; release may wait for
+those pins. The query is non-RT and its type-key lookup may allocate.
+
+Keep the diagnostic descriptor separate from the positional `CustomNodeType`
+aggregate. A live parameter wrapper receives its own opaque wrapper instance,
+not the original GPU instance: its inspector must unwrap the private inner
+pointer before calling the original inspector. Register against the exact alias
+and preserve the original producer identity separately. Otherwise plausible
+metadata can describe a different instance than the one producing audio.
+
+A live counter snapshot is approximate. `AudioCallerStopped` is an explicit
+caller promise, not a request to stop processing or a proof of worker drain.
+Read selected-delivery totals after joining the sole process caller and before
+release resets them; keep worker output distinct from authenticated GPU-selected
+output. See [the query contract](../../../docs/guides/custom-node-diagnostics.md).

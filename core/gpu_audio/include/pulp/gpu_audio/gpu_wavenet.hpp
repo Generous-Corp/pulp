@@ -79,6 +79,13 @@ enum class GpuWaveNetBlockStatus : std::uint8_t {
     GpuDelivered = 0,
     ProviderFailed,
 };
+/// Completion servicing policy for the serialized, non-realtime dispatcher.
+/// These policies never authorize waiting or Dawn calls from an audio callback.
+enum class GpuWaveNetCompletionPolicy : std::uint8_t {
+    ProcessEvents,
+    WaitAny,
+    TimedWaitAny,
+};
 
 struct GpuWaveNetBlockResult {
     std::uint64_t sequence = 0;
@@ -105,6 +112,12 @@ class GpuWaveNetSession {
         GpuWaveNetDescriptor descriptor{};
         std::span<const float> weights{};
         std::uint32_t slots = 2;
+        /// Selects how the non-realtime service thread waits for completions.
+        /// The default preserves the existing ProcessEvents behavior.
+        GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
+        /// TimedWaitAny wait budget in nanoseconds. Zero selects the provider default.
+        /// This is a dispatcher wait budget, not an audio deadline.
+        std::uint64_t completion_wait_ns = 0;
     };
 
     struct CreateResult {
@@ -124,6 +137,11 @@ class GpuWaveNetSession {
 
     bool prepared() const noexcept;
     std::uint32_t block_size() const noexcept;
+    /// Returns the requested policy. It remains observable even when the
+    /// backend cannot provide that policy and falls back to its default.
+    GpuWaveNetCompletionPolicy completion_policy() const noexcept;
+    /// True when the provider accepted the requested policy without fallback.
+    bool completion_policy_supported() const noexcept;
 
     /// Copies one mono block into a persistent shared slot and submits it to
     /// the authenticated provider. `deadline_ns == 0` disables late marking.
@@ -133,6 +151,10 @@ class GpuWaveNetSession {
     /// Services already-submitted provider work without waiting for a future
     /// completion. Returns the number of newly visible terminal records.
     std::size_t service(std::uint64_t now_ns) noexcept;
+
+    /// Services completions until the supplied steady-clock deadline. This is
+    /// serialized non-realtime work; never call it from an audio callback.
+    std::size_t service_until(std::uint64_t deadline_ns) noexcept;
 
     /// Copies one completed block into `output` and releases its shared slot.
     /// A failed provider completion returns a result with no output written.

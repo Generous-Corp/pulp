@@ -15,6 +15,8 @@ class SharedIoComputePlan {
         std::uint32_t slots = 0;
         std::size_t input_bytes_per_slot = 0;
         std::size_t output_bytes_per_slot = 0;
+        SharedIoArenaProvider::StorageKind storage_kind =
+            SharedIoArenaProvider::StorageKind::ImportedHostPointer;
     };
     struct SubmitToken {
         SharedIoSlotLedger::SlotToken slot;
@@ -58,6 +60,7 @@ class SharedIoComputePlan {
     // A pre-submit refusal must return the write lease to the fixed ledger.
     bool cancel(const SubmitToken& token) noexcept;
     std::size_t drain(std::uint64_t now_ns) noexcept;
+    std::size_t drain_until(std::uint64_t now_ns, std::uint64_t service_deadline_ns) noexcept;
     std::optional<Completion> pop_completion() noexcept;
     std::optional<SharedIoArena::OutputLease>
     acquire_output(const Completion& completion) noexcept {

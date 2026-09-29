@@ -27,7 +27,14 @@ bool SharedIoConvolutionExecutor::prepare(const Config& config, std::uint64_t ep
         return false;
     }
     prepared_ = true;
-    return fence_and_reprime(epoch, first_sequence);
+    if (!fence_and_reprime(epoch, first_sequence))
+        return false;
+    // A new stream starts with known zero history. Recovery mid-stream must
+    // rebuild missing FIR history, but cold preparation must not suppress
+    // otherwise valid initial output while the transport consumes its lead.
+    if (first_sequence == 0)
+        valid_from_ = 0;
+    return true;
 }
 
 bool SharedIoConvolutionExecutor::fence_and_reprime(std::uint64_t epoch,

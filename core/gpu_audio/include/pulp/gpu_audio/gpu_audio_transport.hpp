@@ -59,12 +59,30 @@ class GpuAudioTransport {
         // keeps effective latency pinned at latency_blocks instead of creeping one
         // block per miss (which would comb-filter dry against wet).
         std::uint64_t resynced_blocks = 0;
-        // Wall-clock cost of the node's work per block, measured on the worker
-        // thread (includes the GPU submit + the blocking readback — the honest
-        // real cost of the GPU path). last = most recent block; avg = an EWMA.
-        // Zero until the first block is produced.
+        // Worker-observed wall time. The staged path measures one process_block
+        // call, including any blocking readback. The shared path measures one
+        // service call that reports progress; it may cover several completions.
+        // Neither interval is GPU execution time, CPU consumption, or an audio
+        // deadline measurement. last is the latest recorded interval; avg is an
+        // EWMA. Both remain zero until the worker first reports progress.
         double last_block_us = 0.0;
         double avg_block_us = 0.0;
+    };
+
+    /// Selected output for prepared process() calls, not worker completions or
+    /// GPU admissions. Each call contributes to exactly one counter, including
+    /// a rejected view's single invalid position. Offline and unprepared calls
+    /// are excluded. These counters do not identify individual stream blocks.
+    struct DeliverySnapshot {
+        std::uint64_t gpu_blocks = 0; // callback-side GPU path selected ready output
+        // A generic node may implement process_gpu() using CPU work or internal
+        // fallback. A ring delivery alone cannot establish GPU execution.
+        std::uint64_t worker_output_blocks = 0;
+        std::uint64_t cpu_fallback_blocks = 0;
+        std::uint64_t silence_blocks = 0;
+        std::uint64_t passthrough_blocks = 0;
+        std::uint64_t priming_blocks = 0;
+        std::uint64_t invalid_blocks = 0;
     };
 
     GpuAudioTransport() = default;
@@ -126,6 +144,13 @@ class GpuAudioTransport {
 
     Stats stats() const noexcept;
 
+    /// Allocation-free independent atomic loads: approximate while process()
+    /// runs, exact once its caller has stopped. No coherent multi-field instant
+    /// is promised. Successful prepare() resets counters; release() and a false
+    /// prepare() result preserve them, although failed preparation leaves the
+    /// transport unprepared. Preparation/destruction must not race readers.
+    DeliverySnapshot delivery_snapshot() const noexcept;
+
     /// Host/UI-only snapshot of the prepared integration path. This is
     /// allocation-free and does not touch the callback timeline. Provider
     /// identity is Unknown when a generic staged node cannot establish it.
@@ -151,7 +176,7 @@ class GpuAudioTransport {
     void reset_staged_transport_state() noexcept;
     void process_shared(const audio::BufferView<const float>&, audio::BufferView<float>&,
                         std::uint32_t, std::uint64_t, bool input_valid,
-                        std::uint64_t callback_start_ns) noexcept;
+                        std::uint64_t callback_start_ns, bool count_delivery) noexcept;
     void process_realtime_position(const audio::BufferView<const float>&, audio::BufferView<float>&,
                                    std::uint32_t, std::uint64_t, bool input_valid,
                                    std::uint64_t callback_start_ns) noexcept;
@@ -161,6 +186,7 @@ class GpuAudioTransport {
     void publish_trial_delivery(std::uint64_t sequence, std::uint8_t disposition,
                                 std::uint64_t callback_start_ns, std::uint64_t callback_end_ns,
                                 std::uint64_t result_visible_ns) noexcept;
+    void record_delivery(std::uint8_t disposition, bool worker_output) noexcept;
 
     audio::PlanarAudioRingBuffer input_ring_;
     audio::PlanarAudioRingBuffer output_ring_;
@@ -183,6 +209,8 @@ class GpuAudioTransport {
     std::atomic<std::uint64_t> miss_blocks_{0};
     std::atomic<std::uint64_t> input_dropped_blocks_{0}; // whole-block input drops
     std::atomic<std::uint64_t> resynced_blocks_{0};      // late wet blocks dropped to realign
+    std::atomic<std::uint64_t> delivery_gpu_{0}, delivery_worker_{0}, delivery_fallback_{0},
+        delivery_silence_{0}, delivery_passthrough_{0}, delivery_priming_{0}, delivery_invalid_{0};
     // Resync debt: output slots a miss already substituted for, whose late wet
     // counterparts must still be dropped to realign the stream. Incremented on a
     // miss, decremented as those blocks are drained. Touched ONLY by process() on

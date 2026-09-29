@@ -11,6 +11,7 @@ target_include_directories(pulp-host
 target_sources(pulp-host PRIVATE
     src/scanner.cpp
     src/signal_graph.cpp
+    src/signal_graph_diagnostics.cpp
     src/signal_graph_reference_walk.cpp
     src/signal_graph_live_swap.cpp
     src/signal_graph_prepared_topology_edit.cpp
@@ -58,6 +59,21 @@ target_sources(pulp-host PRIVATE
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::format pulp::graph pulp::midi pulp::playback pulp::runtime pulp::state)
 target_link_libraries(pulp-host PUBLIC pulp::native-components)
 target_link_libraries(pulp-host PRIVATE pulp::platform pulp::view-core)
+
+# The GPU convolution realization is an explicit opt-in.  Keeping this edge
+# disabled by default leaves the CPU catalog (and its zero-latency contract)
+# unchanged for ordinary SDK/Forge consumers.  When enabled, the host owns the
+# catalog factory and links the SDK's two-lane authenticated route.
+option(PULP_HOST_ENABLE_GPU_CONVOLUTION
+       "Expose the opt-in authenticated GPU convolution Forge realization" OFF)
+if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+    if(NOT TARGET pulp::gpu-audio)
+        message(FATAL_ERROR
+            "PULP_HOST_ENABLE_GPU_CONVOLUTION requires the pulp::gpu-audio target")
+    endif()
+    target_compile_definitions(pulp-host PUBLIC PULP_HOST_ENABLE_GPU_CONVOLUTION=1)
+    target_link_libraries(pulp-host PUBLIC pulp::gpu-audio)
+endif()
 # node_pack.cpp dlopen()s signed node packs (desktop + Android). iOS never builds
 # pulp-host. Link the dynamic-loader libs where they are a separate library.
 if(NOT WIN32)

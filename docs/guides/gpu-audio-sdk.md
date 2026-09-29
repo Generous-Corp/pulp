@@ -186,12 +186,30 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 shifted late against every other track in the session.
 
 `GpuConvolver` exposes a host-thread-only provider policy for experiments that
-need an explicit selection: `Auto` keeps the normal shared-then-staged
-behavior, `StagedOnly` forces the legacy staged provider, and `SharedRequired`
+need an explicit selection: `Auto` preserves staged execution, `StagedOnly`
+forces the staged provider, and `SharedRequired`
 fails `prepare()` unless the exact authenticated shared Dawn provider is ready.
 Set the policy before `prepare()`; changing it while prepared is rejected. This
 is a preparation capability contract, not a realtime scheduling guarantee, and
 it exposes no Dawn handles, queues, rings, or callback controls.
+
+The Darwin arm64 SDK produced by `release-cli.yml` compiles the shared convolver
+and validates its pinned Dawn provider at configure and before library builds. Installed CMake
+exports `PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO`,
+`PULP_GPU_AUDIO_SHARED_CONVOLVER_ENABLED` and
+`PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF_ENABLED` as producer capability facts.
+They do not establish runtime availability or change a plugin's default engine.
+The release provenance binds these facts to the installed config and GPU-audio
+archive; older SDKs may not contain these facts. Traced/probe builds and the
+Vellum D15 experiment remain outside the official release contract. The legacy
+`release-cli-local.sh` helper does not produce this qualified capability receipt;
+its archive is not a substitute for the official release artifact.
+
+Earlier experimental builds let `Auto` try shared execution when the convolver
+compile flag was enabled. Experiments relying on that behavior must now request
+`SharedRequired` before preparation. Private diagnostic trial overrides retain
+their explicit selection. WaveNet and spectral sessions do not depend on the
+convolver flag; they still require a supported shared provider.
 
 The ordinary staged transport copies between its CPU rings and the provider.
 The experimental shared path instead keeps provider-owned slots persistently
@@ -211,8 +229,9 @@ and whether the CPU fallback and persistent provider-owned resources were
 prepared. `validate_gpu_audio_program()` applies the same fail-closed rules to
 every provider. It is metadata and preparation validation only: it deliberately
 does not expose Dawn or Metal handles, queues, rings, or callbacks, and it does
-not by itself activate a generic shared provider. `GpuConvolver` remains the
-authenticated shared consumer until a typed execution implementation is added.
+not by itself activate a generic shared provider. Shared execution requires a
+concrete SDK-owned adapter, such as `GpuConvolver` or the experimental
+`GpuWaveNetRealtimeNode`.
 
 The installed SDK also includes `<pulp/gpu_audio/gpu_wavenet.hpp>`. Its
 `GpuWaveNetDescriptor` is the narrow, model-neutral admission boundary for a
@@ -225,6 +244,13 @@ release without exposing Dawn or Metal handles. The first session requires
 service methods are serialized non-realtime operations; it does not turn GPU
 scheduling into a hard-realtime contract. Consumers must keep a continuously
 prepared CPU fallback for unavailable, failed, or late blocks.
+
+`<pulp/gpu_audio/gpu_wavenet_realtime_node.hpp>` adds a narrow stamped adapter
+for these sessions. Derive from `GpuWaveNetRealtimeNode` to retain a continuously
+primed, aligned CPU shadow without a second worker CPU model. Provider failures
+and missing results remain tied to their epoch/sequence; they never shift later
+samples into an earlier hole. See [the lifecycle and limitations](gpu-audio-wavenet-realtime.md).
+This is experimental correctness infrastructure, not a CPU-saving claim.
 
 When a host has already prepared a transport, pass its
 `GpuAudioCapabilityReport` to the two-argument overload of
@@ -255,7 +281,8 @@ read-only and deliberately exposes no rings, queues, callback hooks, or live
 path-switching controls.
 
 At present, the authenticated shared provider has concrete `GpuConvolver` and
-one-stream `GpuWaveNetSession` integrations. A custom `GpuAudioNode` passed to
+one-stream `GpuWaveNetSession` integrations, with `GpuWaveNetRealtimeNode` providing
+a stamped transport adapter for the latter. A custom `GpuAudioNode` passed to
 `GpuAudioTransport` uses the staged path unless it is implemented by a Pulp-owned
 shared-provider adapter;
 the generic node API cannot opt into shared execution merely by reporting a
@@ -500,3 +527,61 @@ For the experimental shared-memory route, the [paced convolution
 probe](gpu-audio-paced-probe.md) records callback timing, missed deliveries,
 and numerical correctness through the public transport and its own worker.
 Use the [tracing guide](gpu-audio-tracing.md) for per-block lifecycle analysis.
+
+### Verify the output selected by the audio callback
+
+`GpuAudioTransport::delivery_snapshot()` reports cumulative, allocation-free
+counters for prepared `process()` calls. Each call increments exactly one field:
+`gpu_blocks`, `worker_output_blocks`, `cpu_fallback_blocks`, `silence_blocks`,
+`passthrough_blocks`, `priming_blocks`, or `invalid_blocks`.
+
+Use these counters when testing an installed plugin. A successful submission or
+worker completion does not prove the callback used that result. `gpu_blocks`
+counts ready output selected through the callback-side GPU path. Generic worker
+ring output is counted separately as `worker_output_blocks`: a generic node can
+perform CPU work or internal fallback, so a ring delivery cannot establish GPU
+execution. Pair the counters with the capability report and an audio reference
+comparison; counters alone establish neither numerical correctness nor a speedup.
+
+Offline and unprepared calls are excluded. Invalid prepared calls count once,
+even when the transport sanitizes their views. Successful preparation resets the
+counters; release and preparation returning false preserve them. A failed
+preparation leaves the transport unprepared.
+
+Snapshots use independent atomic loads and may combine different callback
+instants while processing continues. Stop the callback before checking exact
+aggregate totals. Do not race preparation or destruction with snapshot readers.
+These aggregate counters complement the per-block tracing identities; they do
+not replace terminal-disposition or deadline analysis.
+
+### Keep host controls separate from callback execution
+
+Musical parameters retain the plugin's existing parameter IDs and automation
+path. Change backend policy, pipeline lead and fallback configuration while
+processing is stopped, then prepare again and publish the resulting host latency.
+Do not route per-block submission or completion servicing through the control
+broker, CLI or MCP.
+
+The existing `dev.pulp.gpu/health.read@1` control describes rendering health;
+it does not report GPU-audio delivery. Use the audio capability report,
+delivery counters and per-block traces for audio diagnostics. A remote audio
+report would need its own registered operation and a non-realtime publisher
+with a stable producer lifetime. No such broker operation is supplied by these
+C++ reports. Include the counter's unit when presenting product-specific
+diagnostics: host callbacks and internal processing quantums are not
+interchangeable.
+
+### Interpret worker timing separately
+
+`Stats::last_block_us` and `avg_block_us` retain their existing names, but their
+measurement scope depends on the path. Staged processing times one worker-side
+`process_block()` call, including any blocking readback. Shared processing times
+a service call that reports progress, which can cover multiple completions.
+The average is an exponentially weighted average of those recorded intervals.
+
+These values do not measure GPU execution time, process CPU consumption, or the
+callback's deadline margin. Do not turn them into a realtime percentage or
+compare them across paths as equivalent per-block costs. Use callback timing,
+process CPU measurements, and scope-matched GPU timestamps for those questions.
+Likewise, `produced_blocks` records worker progress, not selected GPU output;
+use `delivery_snapshot()` for output selection.

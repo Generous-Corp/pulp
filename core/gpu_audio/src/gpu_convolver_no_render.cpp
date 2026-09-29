@@ -30,6 +30,16 @@ bool GpuConvolver::set_provider_policy(ProviderPolicy policy) noexcept {
     return true;
 }
 
+bool GpuConvolver::configure_trace(const GpuConvolverTraceConfig& config) noexcept {
+    if (prepared_ || config.success_stride == 0)
+        return false;
+    trial_enable_trace_ = config.enabled;
+    trial_capture_admissions_ = config.capture_admissions;
+    trial_capture_callback_timing_ = config.capture_callback_timing;
+    trial_success_stride_ = config.success_stride;
+    return true;
+}
+
 bool GpuConvolver::has_realtime_shared_io() const noexcept {
     return false;
 }

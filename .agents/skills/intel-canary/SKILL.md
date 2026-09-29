@@ -107,6 +107,14 @@ field for the era before suspecting the cross-compile leg.
    file-scoped.
 5. Hardcoded `CMAKE_OSX_ARCHITECTURES=arm64` (arm64-only) — **`tools/cmake/**`**.
 
+The GPU-audio exact-provider helper authenticates a thin Apple-Silicon asset.
+Its three ARM literals are intentional only behind the target-architecture
+check; ordinary Intel and universal builds keep exact proof disabled. The
+allowlist uses narrow substrings, with a mutated unrelated ARM asset as a
+negative control. When changing that helper, run both
+`test_gpu_audio_provider_identity.py` and `test_intel_canary_lint.py`; a clean
+lint alone does not establish Intel configuration or native execution.
+
 ## Non-obvious gotchas (learned building this)
 
 - **`vst3` is NOT a NEON intrinsic.** The NEON store intrinsics are

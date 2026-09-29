@@ -586,6 +586,20 @@ pulp_add_test_suite(pulp-test-gpu-audio-transport
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+# Dawn-free configuration/lifecycle coverage for the public convolution route.
+# These cases stop before provider creation, so malformed configuration and
+# fail-closed behavior remain testable on every CPU-only builder.
+pulp_add_test_suite(pulp-test-gpu-convolution-reverb-contract
+    SOURCES test_gpu_convolution_reverb_contract.cpp
+    GROUP pulp-test-group-core-gpu-audio-private)
+
+# Dawn-free validation and capability coverage for the public spectral mask
+# route. Valid configurations remain fail-closed on CPU-only builders.
+pulp_add_test_suite(pulp-test-gpu-spectral-mask-contract
+    SOURCES test_gpu_spectral_mask_contract.cpp
+    GROUP pulp-test-group-core-gpu-audio-private
+    LIBRARIES pulp::gpu-audio)
+
 # Dawn-free private contract for P2's explicit algorithmic lead, typed
 # fallback, and bridge telemetry. This is a CPU/fake lane; it intentionally
 # does not expose or link raw provider handles.
@@ -601,6 +615,11 @@ pulp_add_test_suite(pulp-test-gpu-wavenet-descriptor
     SOURCES test_gpu_wavenet_descriptor.cpp
     LIBRARIES pulp::gpu-audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/include)
+
+pulp_add_test_suite(pulp-test-gpu-wavenet-realtime-node
+    SOURCES test_gpu_wavenet_realtime_node.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio pulp::runtime Threads::Threads
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 # Public one-stream WaveNet session boundary. The test exercises descriptor
 # and weight ownership on every platform; when Dawn is available it also
@@ -942,3 +961,48 @@ pulp_add_test_suite(pulp-test-mmap-reader-ranged GROUP pulp-test-group-core-audi
 # SearchIndex — pure ranking/matching core of the off-UI-thread query service (R7).
 pulp_add_test_suite(pulp-test-search-index GROUP pulp-test-group-core-runtime
     LIBRARIES pulp::runtime)
+
+# Explicit physical-provider gate; ordinary VM/GPU-off runs must not claim a
+# skipped hardware run as shared spectral correctness evidence.
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    add_executable(pulp-gpu-shared-spectral-probe test_gpu_shared_spectral_probe.cpp)
+    target_link_libraries(pulp-gpu-shared-spectral-probe PRIVATE pulp::gpu-audio)
+    target_compile_definitions(pulp-gpu-shared-spectral-probe PRIVATE
+        PULP_SPECTRAL_REQUIRE_CONFIGURED_PROVIDER=1)
+    add_test(NAME pulp-gpu-shared-spectral-probe COMMAND pulp-gpu-shared-spectral-probe)
+    set_tests_properties(pulp-gpu-shared-spectral-probe PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+        RESOURCE_LOCK pulp_gpu
+        TIMEOUT 60)
+endif()
+
+# Opt-in same-device storage experiment. It is never an ordinary GPU-off pass.
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    add_executable(pulp-gpu-same-device-storage-probe test_gpu_same_device_storage_probe.cpp)
+    target_include_directories(pulp-gpu-same-device-storage-probe PRIVATE
+        ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+    target_link_libraries(pulp-gpu-same-device-storage-probe PRIVATE pulp::gpu-audio)
+    get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
+    target_compile_definitions(pulp-gpu-same-device-storage-probe PRIVATE
+        PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+    add_test(NAME pulp-gpu-same-device-storage-probe COMMAND pulp-gpu-same-device-storage-probe)
+    set_tests_properties(pulp-gpu-same-device-storage-probe PROPERTIES
+        FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity RESOURCE_LOCK pulp_gpu TIMEOUT 60)
+endif()
+
+if(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO AND PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+    # Manual paired campaign: requires a fresh output directory and a reserved GPU.
+    add_executable(pulp-gpu-same-device-paired-probe test_gpu_same_device_paired_probe.cpp)
+    target_include_directories(pulp-gpu-same-device-paired-probe PRIVATE
+        ${PROJECT_SOURCE_DIR}/core/gpu_audio/src)
+    target_link_libraries(pulp-gpu-same-device-paired-probe PRIVATE pulp::gpu-audio)
+    get_target_property(_same_device_revision pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
+    target_compile_definitions(pulp-gpu-same-device-paired-probe PRIVATE
+        PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_same_device_revision}")
+endif()
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME gpu-same-device-storage-receipt-controls
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover
+            -s ${PROJECT_SOURCE_DIR}/test -p test_verify_gpu_same_device_storage.py)
+endif()

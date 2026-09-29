@@ -100,7 +100,8 @@ int run(Config config) {
     std::vector<Record> records(total_blocks);
 
     GpuConvolver node(channels, config.frames, sample_rate, ir, config.lead);
-    if (!node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
+    if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired) ||
+        !node.prepare() || !pulp::gpu_audio::detail::realtime_gpu_node_path(&node).active()) {
         std::cout << "{\"schema\":\"pulp.gpu-audio-paced-convolution.v1\","
                      "\"status\":\"unavailable\",\"reason\":\"shared_provider_not_active\"}\n";
         return 2;

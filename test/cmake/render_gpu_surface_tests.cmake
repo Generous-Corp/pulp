@@ -61,93 +61,13 @@
     target_link_libraries(pulp-test-gpu-compute PRIVATE pulp::render pulp::signal Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-compute ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
-    # Native Apple-Silicon capability proof for Dawn's HostMappedPointer path.
-    set(_pulp_gpu_audio_target_archs "${CMAKE_OSX_ARCHITECTURES}")
-    if(APPLE AND NOT _pulp_gpu_audio_target_archs)
-        set(_pulp_gpu_audio_target_archs "${CMAKE_SYSTEM_PROCESSOR}")
-    endif()
-    list(LENGTH _pulp_gpu_audio_target_archs _pulp_gpu_audio_target_arch_count)
-    set(_pulp_gpu_audio_target_is_arm64 FALSE)
-    if(_pulp_gpu_audio_target_arch_count EQUAL 1)
-        list(GET _pulp_gpu_audio_target_archs 0 _pulp_gpu_audio_target_arch)
-        if(_pulp_gpu_audio_target_arch MATCHES "^(arm64|aarch64)$")
-            set(_pulp_gpu_audio_target_is_arm64 TRUE)
-        endif()
-    endif()
-    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT
-            (APPLE AND NOT IOS AND NOT PULP_IOS
-             AND _pulp_gpu_audio_target_is_arm64))
-        message(FATAL_ERROR
-            "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires a thin Apple-Silicon macOS target")
-    endif()
-    if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND
-            (NOT PULP_HAS_SKIA OR NOT EXISTS "${DAWN_LIBRARY}"))
-        message(FATAL_ERROR
-            "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires the pinned Skia/Dawn provider")
-    endif()
-
-    # This is a standalone probe rather than a Catch test because CI and field
-    # machines need distinct pass / failed / unavailable exit states plus one
-    # bounded JSON receipt with the exact provider identity.
+    # Read the production library identity; probes do not initialize it.
     if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_HAS_SKIA
             AND EXISTS "${DAWN_LIBRARY}")
-        file(SHA256 "${DAWN_LIBRARY}" _pulp_gpu_audio_dawn_archive_sha256)
-        set(_pulp_gpu_audio_asset_sha256 "unknown")
-        if(EXISTS "${SKIA_DIR}/.skia-asset-sha256")
-            file(READ "${SKIA_DIR}/.skia-asset-sha256"
-                _pulp_gpu_audio_asset_sha256)
-            string(STRIP "${_pulp_gpu_audio_asset_sha256}"
-                _pulp_gpu_audio_asset_sha256)
-        endif()
-
-        set(_pulp_gpu_audio_expected_dawn_sha "unknown")
-        if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
-            list(GET SKIA_INCLUDE_DIRS 0 _pulp_gpu_audio_skia_include_root)
-            set(_pulp_gpu_audio_dawn_header
-                "${_pulp_gpu_audio_skia_include_root}/dawn/dawn_version.h")
-            set(_pulp_gpu_audio_identity_dir
-                "${CMAKE_CURRENT_BINARY_DIR}/gpu-audio-provider-identity")
-            set(_pulp_gpu_audio_identity_cmake
-                "${_pulp_gpu_audio_identity_dir}/identity.cmake")
-            set(_pulp_gpu_audio_configure_receipt
-                "${_pulp_gpu_audio_identity_dir}/configure.json")
-            set(_pulp_gpu_audio_prelink_receipt
-                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/pre-link.json")
-            set(_pulp_gpu_audio_bound_receipt
-                "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/bound.json")
-            file(MAKE_DIRECTORY "${_pulp_gpu_audio_identity_dir}")
-            execute_process(
-                COMMAND "${Python3_EXECUTABLE}"
-                    "${PROJECT_SOURCE_DIR}/tools/scripts/gpu_audio_provider_identity.py"
-                    validate
-                    --manifest "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
-                    --platform darwin-arm64
-                    --skia-dir "${SKIA_DIR}"
-                    --dawn-header "${_pulp_gpu_audio_dawn_header}"
-                    --dawn-library "${DAWN_LIBRARY}"
-                    --result "${_pulp_gpu_audio_configure_receipt}"
-                    --cmake-output "${_pulp_gpu_audio_identity_cmake}"
-                RESULT_VARIABLE _pulp_gpu_audio_identity_result
-                OUTPUT_VARIABLE _pulp_gpu_audio_identity_output
-                ERROR_VARIABLE _pulp_gpu_audio_identity_error)
-            if(NOT _pulp_gpu_audio_identity_result EQUAL 0)
-                message(FATAL_ERROR
-                    "GPU-audio exact-provider validation failed:\n"
-                    "${_pulp_gpu_audio_identity_output}"
-                    "${_pulp_gpu_audio_identity_error}")
-            endif()
-            include("${_pulp_gpu_audio_identity_cmake}")
-            set(_pulp_gpu_audio_expected_dawn_sha
-                "${PULP_GPU_AUDIO_EXPECTED_DAWN_SHA}")
-            set(_pulp_gpu_audio_asset_sha256
-                "${PULP_GPU_AUDIO_EXPECTED_ASSET_SHA256}")
-            set(_pulp_gpu_audio_dawn_archive_sha256
-                "${PULP_GPU_AUDIO_DAWN_ARCHIVE_SHA256}")
-        endif()
-
-        target_compile_definitions(pulp-gpu-audio PRIVATE
-            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
-
+        foreach(key expected_dawn_sha asset_sha256 dawn_archive_sha256 dawn_header
+                    identity_dir configure_receipt prelink_receipt bound_receipt)
+            get_target_property(_pulp_gpu_audio_${key} pulp-gpu-audio "PULP_PROVIDER_${key}")
+        endforeach()
         add_executable(pulp-gpu-host-mapped-pointer-probe
             test_gpu_host_mapped_pointer_probe.cpp)
         target_link_libraries(pulp-gpu-host-mapped-pointer-probe PRIVATE
@@ -170,6 +90,7 @@
             PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}"
             PULP_GPU_AUDIO_BUILD_TYPE="$<CONFIG>")
         if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
+            find_package(Python3 REQUIRED COMPONENTS Interpreter)
             set_property(TARGET pulp-gpu-host-mapped-pointer-probe APPEND PROPERTY
                 LINK_DEPENDS
                     "${PROJECT_SOURCE_DIR}/tools/deps/manifest.json"
@@ -438,6 +359,34 @@
                     "${PROJECT_SOURCE_DIR}/test/test_gpu_dawn_vellum_d15_source.py")
             set_tests_properties(pulp-gpu-dawn-vellum-d15-source PROPERTIES
                 TIMEOUT 20)
+
+            # Exact-provider Forge convolution route probe. This target is
+            # deliberately opt-in: it links the host catalog only when the
+            # GPU Forge realization is enabled, and it is admitted behind the
+            # authenticated provider fixture above. The probe drives paced
+            # callbacks through the concrete catalog factory, verifies
+            # sample-rate conversion, arbitrary callback partitions, in-place
+            # aliasing, PDC, block-boundary automation, finite output, and
+            # callback-selected GPU delivery on both lanes.
+            if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+                add_executable(pulp-gpu-convolution-reverb-probe
+                    test_gpu_convolution_reverb_probe.cpp)
+                # Match the catalog exporter's C++23 consumer: inline array
+                # initialization must not require the private Lane definition.
+                target_compile_features(pulp-gpu-convolution-reverb-probe PRIVATE cxx_std_23)
+                target_link_libraries(pulp-gpu-convolution-reverb-probe PRIVATE
+                    pulp::host pulp::gpu-audio)
+                target_include_directories(pulp-gpu-convolution-reverb-probe PRIVATE
+                    "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+                add_dependencies(pulp-gpu-convolution-reverb-probe
+                    pulp-gpu-dawn-shared-io-provider-probe)
+                add_test(NAME pulp-gpu-convolution-reverb-probe
+                    COMMAND pulp-gpu-convolution-reverb-probe)
+                set_tests_properties(pulp-gpu-convolution-reverb-probe PROPERTIES
+                    FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                    RESOURCE_LOCK pulp_gpu
+                    TIMEOUT 120)
+            endif()
 
             add_executable(pulp-gpu-shared-io-private-convolution-probe
                 test_gpu_shared_io_private_convolution_probe.cpp)
