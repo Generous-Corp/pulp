@@ -76,6 +76,84 @@ class Repo:
         ]}
 
 
+class ProfileIndependenceTests(unittest.TestCase):
+    """`--write` must not depend on the local configure: the gate builds with
+    examples OFF, and its build directory has no fixed name."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.repo = Repo(self.tmp)
+
+    def inventory_with_example(self, keep_root: Path | None = None) -> dict:
+        r = str(self.repo.root)
+        inv = self.repo.inventory()
+        write(self.repo.root, "examples/pulp-gain/CMakeLists.txt", "add_test(auval-PulpGain ...)\n")
+        write(self.repo.root, "tools/ci/run_auval.py", "x = 1\n")
+        inv["backtraceGraph"] = {"files": [f"{r}/examples/pulp-gain/CMakeLists.txt", f"{r}/test/cmake/quality_tests.cmake"],
+                                 "nodes": [{"file": 0}, {"file": 1}, {"parent": 1}]}
+        inv["tests"] += [
+            {"name": "auval-PulpGain", "command": ["/usr/bin/python3", f"{r}/tools/ci/run_auval.py"], "properties": [], "backtrace": 0},
+            {"name": "auval-helper-selftest", "command": ["/usr/bin/python3", f"{r}/tools/ci/run_auval.py"], "properties": [], "backtrace": 2},
+        ]
+        return inv
+
+    def test_example_registered_tests_are_excluded_so_an_examples_on_build_writes_the_gate_list(self) -> None:
+        inv = self.inventory_with_example()
+        with_examples = sti.build_list(inv, self.repo.root)
+        self.assertNotIn("auval-PulpGain", with_examples["tests"])
+        self.assertIn("auval-helper-selftest", with_examples["tests"], "a test registered from test/ is not an example")
+        gate_only = dict(inv, tests=[t for t in inv["tests"] if t["name"] != "auval-PulpGain"])
+        self.assertEqual(json.dumps(with_examples, indent=1, sort_keys=True),
+                         json.dumps(sti.build_list(gate_only, self.repo.root), indent=1, sort_keys=True))
+        self.assertEqual(sti.outside_gate_profile(inv, self.repo.root), {"auval-PulpGain"})
+
+    def test_the_census_profile_decides_the_scope(self) -> None:
+        inv = self.inventory_with_example()
+        write(self.repo.root, "docs/status/consumption-profiles.json", json.dumps(
+            {"profiles": {"darwin-a": {"build_scope": {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "ON"}}}}))
+        self.assertEqual(sti.gate_build_scope(self.repo.root)["PULP_BUILD_EXAMPLES"], "ON")
+        self.assertIn("auval-PulpGain", sti.build_list(inv, self.repo.root)["tests"])
+        write(self.repo.root, "docs/status/consumption-profiles.json", "not json")
+        self.assertEqual(sti.gate_build_scope(self.repo.root), sti.GATE_BUILD_SCOPE)
+
+    def test_an_entry_generated_into_the_build_tree_records_a_token_not_the_directory_name(self) -> None:
+        lists = {}
+        for name in ("build-gate", "bld"):
+            build = self.tmp / name
+            write(build, "test/run_mutation_control.py", "import sys\n")
+            inv = self.repo.inventory()
+            inv["tests"].append({"name": "mutation-control", "properties": [],
+                                 "command": ["/usr/bin/python3", f"{build}/test/run_mutation_control.py", f"{build}/test/pulp-test-x"]})
+            lists[name] = json.dumps(sti.build_list(inv, self.repo.root, build), indent=1, sort_keys=True)
+        self.assertEqual(lists["build-gate"], lists["bld"])
+        entry = json.loads(lists["bld"])["tests"]["mutation-control"]
+        self.assertEqual(entry["entry"], "${CMAKE_BINARY_DIR}/test/run_mutation_control.py")
+        self.assertNotIn("bld", lists["bld"])
+        self.assertNotIn("build-gate", lists["build-gate"])
+
+    def test_write_from_two_build_directories_is_byte_identical_through_the_cli(self) -> None:
+        outs = {}
+        for name in ("build-gate", "elsewhere"):
+            build = self.tmp / name
+            write(build, "test/run_mutation_control.py", "import sys\n")
+            inv = self.inventory_with_example()
+            inv["tests"].append({"name": "mutation-control", "properties": [],
+                                 "command": ["/usr/bin/python3", f"{build}/test/run_mutation_control.py"]})
+            inv_path = build / "inv.json"; inv_path.write_text(json.dumps(inv), encoding="utf-8")
+            out = build / "list.json"
+            proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(self.repo.root), "--build-dir", str(build),
+                                   "--inventory-json", str(inv_path), "--list", str(out), "--write"],
+                                  capture_output=True, text=True, timeout=60, env=tool_env(event=None, strict=False))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("excluded 1 test(s) registered from examples/", proc.stdout)
+            outs[name] = out.read_bytes()
+        self.assertEqual(outs["build-gate"], outs["elsewhere"])
+        self.assertIn(b"${CMAKE_BINARY_DIR}/test/run_mutation_control.py", outs["elsewhere"])
+        self.assertNotIn(b"auval-PulpGain", outs["elsewhere"])
+
+
 class BuildListTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
