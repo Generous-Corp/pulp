@@ -15,6 +15,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <unordered_map>
@@ -68,7 +69,25 @@ editor_resize_handlers() {
     return table;
 }
 
+/// Processors a Pulp standalone app owns, keyed by `this` so `Processor`'s
+/// layout is unchanged. Absent means the processor is hosted as a plug-in.
+/// Guarded by editor_resize_mutex().
+inline std::unordered_map<const void*, bool>& standalone_processors() {
+    static std::unordered_map<const void*, bool> table;
+    return table;
+}
+
 }  // namespace detail
+
+/// Where a processor's editor lives, as far as the keyboard is concerned.
+///
+/// `plugin`: a DAW or other host owns the window and the keyboard. Plain keys
+/// are the host's (transport, Musical Typing, key commands); an editor should
+/// consume them only while its own focused field or open popup needs them.
+///
+/// `standalone`: the Pulp standalone app owns the window, so the editor may
+/// bind plain-key global shortcuts.
+enum class EditorHostKind : std::uint8_t { plugin, standalone };
 
 /// The plugin processor interface.
 ///
@@ -112,8 +131,30 @@ public:
         // the frozen Processor node ABI.
         std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
         detail::editor_resize_handlers().erase(this);
+        detail::standalone_processors().erase(this);
     }
     virtual ~Processor() = default;
+
+    /// Whether this processor runs inside a plug-in host or the Pulp
+    /// standalone app. Every plug-in format adapter leaves the default,
+    /// `plugin`; only `StandaloneApp` marks its processor `standalone`. Safe
+    /// to call from `create_view()` and from any editor code on the main
+    /// thread. The same answer reaches scripted editors as `hostKind()`.
+    EditorHostKind editor_host_kind() const {
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        return detail::standalone_processors().count(this) != 0
+                   ? EditorHostKind::standalone
+                   : EditorHostKind::plugin;
+    }
+
+    /// @internal Set by `StandaloneApp` when it creates its processor.
+    void set_editor_host_kind(EditorHostKind kind) {
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        if (kind == EditorHostKind::standalone)
+            detail::standalone_processors()[this] = true;
+        else
+            detail::standalone_processors().erase(this);
+    }
 
     /// Return the plugin's metadata. Called once during initialization.
     virtual PluginDescriptor descriptor() const = 0;

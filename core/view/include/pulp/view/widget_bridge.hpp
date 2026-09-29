@@ -377,6 +377,16 @@ public:
     // Override the AI CLI command used by the design tool chat.
     void set_ai_cli_command(std::string cmd);
 
+    // Where this editor lives, as scripts see it through `hostKind()`:
+    // "plugin" (a DAW owns the window and its plain keys), "standalone" (the
+    // Pulp standalone app), or "unknown" (never declared — a preview, test, or
+    // a bridge nothing configured). ScriptedUiSession::set_host_kind owns it
+    // across reloads; the format layer's ViewBridge sets that from
+    // Processor::editor_host_kind().
+    // Scripts use it to keep plain-key global shortcuts standalone-only.
+    void set_host_kind(std::string kind) { host_kind_ = std::move(kind); }
+    const std::string& host_kind() const { return host_kind_; }
+
     // Inspect the native texture backing a canvas element when the native GPU
     // bridge is active. Used by low-level native WebGPU/Skia validation.
     CanvasWidget::NativeGpuTextureFrame describe_native_canvas_frame(const std::string& canvas_id) const;
@@ -533,6 +543,7 @@ private:
 
     // Model-agnostic AI CLI command (default: Claude)
     std::string ai_cli_command_ = "claude --print --model {model}";
+    std::string host_kind_ = "unknown";
 
     struct AsyncExecResult {
         std::string callback_id;

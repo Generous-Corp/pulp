@@ -445,6 +445,36 @@ TEST_CASE("ViewBridge contains throwing scripted reload opt-in callbacks",
     REQUIRE(bridge.scripted_ui() == p.scripted_session.get());
 }
 
+TEST_CASE("ViewBridge tells a scripted editor whether it is hosted or standalone",
+          "[view_bridge][scripted-ui][keyboard]") {
+    state::StateStore store;
+    ScriptedCustomViewProcessor p;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // The session keeps the declaration and hands it to every realm it
+    // builds (pinned in test_scripted_ui.cpp); this fixture never loads one.
+    auto host_kind = [&p] {
+        REQUIRE(p.scripted_session != nullptr);
+        return p.scripted_session->host_kind();
+    };
+
+    SECTION("a plug-in adapter's processor reads as plugin") {
+        REQUIRE(p.editor_host_kind() == format::EditorHostKind::plugin);
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK(host_kind() == "plugin");
+    }
+
+    SECTION("the standalone app's processor reads as standalone") {
+        p.set_editor_host_kind(format::EditorHostKind::standalone);
+        REQUIRE(p.editor_host_kind() == format::EditorHostKind::standalone);
+        format::ViewBridge bridge(p, store);
+        REQUIRE(bridge.open());
+        CHECK(host_kind() == "standalone");
+    }
+}
+
 TEST_CASE("Processor scripted UI accessors default to null", "[view_bridge][scripted-ui]") {
     StubProcessor p;
     REQUIRE(p.active_scripted_ui() == nullptr);
