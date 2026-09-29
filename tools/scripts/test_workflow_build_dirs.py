@@ -407,8 +407,24 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("ctest-evidence/selected.json", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
-            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration"):
+            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration",
+                          "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
+
+    def test_per_test_receipts_are_uploaded_only_from_merge_group_macos(self) -> None:
+        """The shadow's receipts are written by the merge-group macOS job only
+        (the trusted writer the reader checks for), and uploading them can
+        never fail the gate."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Record per-test receipts (shadow)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("always()", "github.event_name == 'merge_group'", "runner.os == 'macOS'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(step["with"]["name"], "test-receipts-macos")
+        self.assertEqual(step["with"]["path"], "${{ runner.temp }}/merge-group-shadows/test-receipts.json")
+        self.assertEqual(step["with"]["if-no-files-found"], "ignore")
+        shadows = str(workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")["run"])
+        self.assertIn('--work-dir "$RUNNER_TEMP/merge-group-shadows"', shadows)
 
     def test_failed_pr_head_full_suite_is_announced(self) -> None:
         """The pull-request Test step is continue-on-error, so its failure must

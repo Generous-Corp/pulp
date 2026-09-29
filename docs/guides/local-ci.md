@@ -869,6 +869,29 @@ possible if identical approaches 100% on tree-identical groups; read the
 aggregate with `binary_identity_shadow.py report --repository <o/r>`, which
 says "waiting on receipts" until 20 such groups have been compared.
 
+The same merge-group step also computes **per-test content-hash receipts in
+shadow mode** (`tools/ci/test_receipts_shadow.py`, notice
+`pulp-test-receipts-shadow/v1`). Each ctest entry gets a key: its normalised
+command and properties, the bytes of its executable and of every file its
+command names, the toolchain, the CI policy files, and then for a script test
+the blob ids of its declared inputs (`test/ctest_script_inputs.json`), or for a
+compiled test the runtime surface (every tracked non-compiled, non-doc file)
+and the build's non-test executables (compiled tests read both through
+`PULP_SOURCE_DIR`/`PULP_BUILD_DIR`). The job writes the keys of the tests
+that passed, and the names that failed, as the `test-receipts-macos`
+artifact, only from merge-group runs. It then reads the last 20 trusted
+receipts and reports how many selected tests a receipt-keyed skip WOULD have
+skipped and their test-seconds (job summary: "Per-test receipts (shadow):
+would skip N of M tests"). Always-run, never counted: drift/lint/registry/
+sync/guard/census/inventory tests and probes, `pr-fast`/GPU/host-labelled
+tests, script tests that declare a top-level directory, unkeyable tests
+(undeclared scripts, nested builds), and anything that failed in a receipt
+run read; a CMake change or a control run id would force a full run. Nothing
+is skipped. The safety number is `would_skip_failed` (would-skip tests that
+failed in the same run): it must stay 0 over a long window, and binary
+identity must approach 100%, before enforcement is proposed as a contract
+amendment.
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether

@@ -1729,6 +1729,22 @@ narrowing change needs a new shadow window. The gate's own network fetches
 (npm, Skia) are NOT inputs; a same-digest fail-then-pass is a flake, not a
 missing input, when the log shows a fetch error.
 
+## Per-test receipts are a shadow; `would_skip_failed` is the number
+
+`tools/ci/test_receipts_shadow.py` (a fourth instrument in
+`merge_group_shadows.py`) keys every ctest entry on its executable, named
+files, properties, toolchain, CI policy, and declared inputs (script tests) or
+runtime surface + build products (compiled tests — they read the source and
+build trees through `PULP_SOURCE_DIR`/`PULP_BUILD_DIR`, which their bytes do
+not capture). Merge-group runs upload `test-receipts-macos`; each run reports
+what the last 20 trusted receipts WOULD have skipped. Nothing is skipped. The
+always-run rules (drift/lint/guard/probe names, `pr-fast`/GPU/host labels,
+top-level-directory declarers, unkeyed tests, recent failures) and the forced
+full run on a CMake change or control run id are the contract any enforcement
+inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
+identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
+binary only means zero hits, but a missed runtime input means a false skip.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the

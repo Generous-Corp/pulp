@@ -4490,6 +4490,21 @@
    ],
    "kind": "python"
   },
+  "test-receipts-shadow-selftest": {
+   "entry": "tools/ci/test_test_receipts_shadow.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "docs/status",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/test_receipts_shadow.py",
+    "tools/ci/test_test_receipts_shadow.py",
+    "tools/cmake",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
+   ],
+   "kind": "python"
+  },
   "test-shared-objects": {
    "entry": "tools/scripts/shared_test_objects_check.py",
    "inputs": [
