@@ -157,6 +157,8 @@ ignore:
   - "**/skia_canvas.cpp"
   - "**/skia_canvas_path.cpp"
   - "**/gpu_surface_dawn.cpp"
+  - "**/gpu_spectral_mask.cpp"
+  - "**/gpu_wavenet.cpp"
   - "**/skia_surface.cpp"
   - "**/widget_bridge.cpp"
   # Perfetto tracing (dev-only, PULP_TRACING). The ON implementation +
