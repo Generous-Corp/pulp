@@ -336,6 +336,31 @@ when the condition holds. A loop that reads the same state every few seconds
 costs an agent turn per read and changes nothing: in one week of agent sessions
 on one host, poll turns were a fifth of all tool calls.
 
+## Reporting PR state: quote the checks, never characterize them
+
+- **Ground every status claim.** When you report a PR's state, quote the
+  required-check state from `shipyard landing --pr <n>` (its verdict line where
+  it prints one) or from the head's `statusCheckRollup`, read at the time of the
+  claim and naming the head SHA. "Nothing red" or "still running" without that
+  read is a guess.
+- **Red is a code signal until proven otherwise.** Do not call a failure a
+  flake, infra, "not a code failure", or "still in progress" while any required
+  check is red on the current head, or when the same test failed on an earlier
+  head or merge group of the PR. A repeat on two heads is a code signal. Exonerate
+  only with evidence: the test failing on `main` itself, or batch attribution
+  naming another PR.
+- **An armed or queued PR is rebased by the queue.** Do not rebase it, merge
+  `main` into it, or `update-branch` it by hand: moving the head cancels the
+  running `macos` gate and the queue tests on top of `main` anyway. Enqueue it
+  as it is with `shipyard ship --pr <n>`. Refresh only for a real conflict or a
+  failing required check (see "Do not refresh a `BEHIND` PR" below); the
+  pre-push hook prints a hint when a push only re-bases an armed PR.
+- **A diff-coverage heartbeat is a build, not a hang.** If the work is already
+  validated, stop and re-push with `PULP_SKIP_DIFF_COVER=1`. Never pipe
+  `git push`, `shipyard pr`, or `shipyard ship` through `tail`/`head`: the pipe
+  hides the heartbeat until exit and replaces the command's exit status with the
+  filter's.
+
 ## Current required-macOS truth (read before older incident notes)
 
 Pulp's required PR and merge-queue macOS checks use the local M1/M3/M5 Tart
@@ -5285,6 +5310,19 @@ pre-push hook applies the same rule there (`tools/scripts/refresh_push_check.py`
 
 Read the log to measure the habit: pure refreshes with `gate_in_flight: true`
 are the avoidable cancellations; all lines are the control population.
+
+A **rebase** of an armed or queued PR is the same cost by another route, and
+`refresh_push_check.py` does not see it (a rebase adds no merge commit).
+`tools/scripts/prepush_queue_rebase_hint.py` covers it: when the pushed head
+carries the same PR diff (stable patch-id of `merge-base(head, origin/main)..head`)
+on a newer main base, and GraphQL shows the branch's open PR with
+`autoMergeRequest` or `mergeQueueEntry` set, it prints a hint to keep the old
+head and enqueue with `shipyard ship --pr <n>`. It runs before
+`PULP_SKIP_PREPUSH` is honoured, never blocks, looks up GitHub only after the
+local check matches (3 s, `PULP_QUEUE_REBASE_TIMEOUT`), fails silently without
+`ghapp`/`gh` or auth, and leaves a plain merge-of-main push to
+`refresh_push_check.py` so the two never both print. `PULP_ALLOW_QUEUE_REBASE=1`
+silences it. Tests: `prepush-queue-rebase-hint` ctest.
 
 ### The arm is not armed until you read it back — `update-branch` disarms it silently
 
