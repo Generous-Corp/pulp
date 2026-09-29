@@ -152,7 +152,8 @@ struct Walker {
         std::vector<CanvasTextState> stack;
         int text_index = 0;
 
-        for (const auto& cmd : widget.commands()) {
+        for (const auto* replayed : widget.replay_sequence()) {
+            const auto& cmd = *replayed;
             switch (cmd.type) {
                 case CanvasDrawCmd::Type::save:
                     stack.push_back(state);

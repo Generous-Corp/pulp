@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260928-canvas-stroke-rect-width-and-pattern-clear-watch",
+  "created_at": "2026-09-28T21:10:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record two Pulp-owned Canvas2D shim correctness fixes: strokeRect now passes the current lineWidth to canvasStrokeRect (with an empty colour that keeps the active strokeStyle) instead of letting the native stroke_rect default to a 1 px hairline, and assigning a solid strokeStyle after a pattern clears the stroke shader the pattern installed, as it already did after a gradient. The change stays inside the existing web-compat Canvas2D shim and its tests, adds no Vellum implementation or authority transfer, and leaves the accepted expansion boundary unchanged.",
+  "tests": [
+    "pulp-test-canvas2d-call-budget",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

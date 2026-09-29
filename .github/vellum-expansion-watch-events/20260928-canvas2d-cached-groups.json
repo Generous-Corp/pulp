@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260928-canvas2d-cached-groups",
+  "created_at": "2026-09-28T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the design-source-ingest and render-assets-and-backends watch families only through their broad core/view/** and generated bridge-surface selectors. The Pulp-owned change adds cached Canvas2D groups: ctx.pulpCachedGroup(key, drawFn) records drawFn once into a keyed CanvasWidget group and later replays it with one canvasReplayGroup bridge call, and ctx.pulpInvalidateGroup drops groups. Four canvas2d bridge functions are added to the WidgetBridge manifest and its generated TypeScript globals and mocks. CanvasWidget::paint expands each replay in place inside an implicit save/restore under the current transform, so the pixels and blend order of existing command streams are unchanged and a stream with no group replays is walked exactly as before; the appearance scan walks the same expanded sequence. No layer, texture, asset, renderer, Skia, Dawn, importer, or authority behavior changes. Regressions are confined to test/test_canvas2d_cached_group.cpp, with the existing Canvas2D suites unchanged. No accepted expansion boundary moves, no Vellum implementation is changed, and no manifest row moves. Registered watch-only so both families' coverage stays explicit about this Canvas2D bridge addition.",
+  "tests": [
+    "build/test/pulp-test-group-design-import-widgets [cached-group]",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -1,0 +1,4943 @@
+{
+ "schema": "pulp-ctest-script-inputs/v1",
+ "tests": {
+  "advisory-macos-runner-policy": {
+   "entry": "tools/scripts/test_advisory_macos_runner_policy.py",
+   "inputs": [
+    "tools/scripts/test_advisory_macos_runner_policy.py"
+   ],
+   "kind": "python"
+  },
+  "affected-targets-selftest": {
+   "entry": "tools/scripts/test_affected_targets.py",
+   "inputs": [
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/log.hpp",
+    "core/view",
+    "core/view/include/pulp/view/widgets.hpp",
+    "core/view/src/widgets.cpp",
+    "test/harness/rt_allocation_probe.cpp",
+    "test/test_cli_shellout.cpp",
+    "test/test_host.cpp",
+    "test/test_runtime.cpp",
+    "test/test_state.cpp",
+    "test/test_widget_bridge.cpp",
+    "test/test_widgets.cpp",
+    "test/test_widgets_label.cpp",
+    "tools/cli",
+    "tools/cli/cmd_build.cpp",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/test_affected_targets.py"
+   ],
+   "kind": "python"
+  },
+  "affected-tests-shadow-selftest": {
+   "entry": "tools/ci/test_affected_tests_shadow.py",
+   "inputs": [
+    "docs/status",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/test_affected_tests_shadow.py",
+    "tools/cmake",
+    "tools/scripts/lib"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-installed-sdk": {
+   "entry": "tools/scripts/test_agent_capability_installed_sdk.py",
+   "inputs": [
+    "tools/scripts/agent_capability_installed_sdk_consumers.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_agent_capability_installed_sdk.py"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-installed-sdk-helper-selftest": {
+   "entry": "tools/scripts/test_agent_capability_installed_sdk_helpers.py",
+   "inputs": [
+    "tools/scripts/agent_capability_installed_sdk_consumers.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_agent_capability_installed_sdk.py",
+    "tools/scripts/test_agent_capability_installed_sdk_helpers.py"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-manifest-check": {
+   "entry": "tools/scripts/agent_capability_manifest.py",
+   "inputs": [
+    "core/audio/include/pulp/audio",
+    "core/host/include",
+    "core/midi/include/pulp/midi",
+    "core/music/include/pulp/music",
+    "core/playback/include/pulp/playback",
+    "core/sequence/include/pulp/sequence",
+    "core/signal/include/pulp/signal",
+    "core/timebase/include/pulp/timebase",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capabilities.schema.json",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/agent-capability-surface.schema.json",
+    "docs/status/forge-catalog.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+    "tools/dsp_vocabulary.py",
+    "tools/scripts/agent_capability_catalog_foundations.py",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_catalog_signal.py",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_evolution.py",
+    "tools/scripts/agent_capability_history.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/agent_capability_registry_types.py",
+    "tools/scripts/agent_capability_surface.py",
+    "tools/scripts/agent_capability_transaction.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/json_schema_lite.py"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-manifest-selftest": {
+   "entry": "tools/scripts/test_agent_capability_manifest.py",
+   "inputs": [
+    "core/audio/include/pulp/audio",
+    "core/host/include",
+    "core/midi/include/pulp/midi",
+    "core/music/include/pulp/music",
+    "core/playback/include/pulp/playback",
+    "core/sequence/include/pulp/sequence",
+    "core/signal/include/pulp/signal",
+    "core/timebase/include/pulp/timebase",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capabilities.schema.json",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/agent-capability-surface.schema.json",
+    "docs/status/forge-catalog.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+    "tools/dsp_vocabulary.py",
+    "tools/scripts/agent_capability_catalog_foundations.py",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_catalog_signal.py",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_evolution.py",
+    "tools/scripts/agent_capability_history.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/agent_capability_registry_types.py",
+    "tools/scripts/agent_capability_surface.py",
+    "tools/scripts/agent_capability_transaction.py",
+    "tools/scripts/authority_navigation.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_agent_capability_installed_sdk.py",
+    "tools/scripts/test_agent_capability_manifest.py"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-rederive-selftest": {
+   "entry": "tools/scripts/test_agent_capability_rederive.py",
+   "inputs": [
+    "core/audio/include/pulp/audio",
+    "core/host/include",
+    "core/midi/include/pulp/midi",
+    "core/music/include/pulp/music",
+    "core/playback/include/pulp/playback",
+    "core/sequence/include/pulp/sequence",
+    "core/signal/include/pulp/signal",
+    "core/timebase/include/pulp/timebase",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capabilities.schema.json",
+    "docs/status/agent-capability-surface.json",
+    "docs/status/agent-capability-surface.schema.json",
+    "docs/status/forge-catalog.json",
+    "test/test_agent_capability_compile.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+    "tools/dsp_vocabulary.py",
+    "tools/scripts/agent_capability_catalog_foundations.py",
+    "tools/scripts/agent_capability_catalog_performance.py",
+    "tools/scripts/agent_capability_catalog_signal.py",
+    "tools/scripts/agent_capability_catalog_timing.py",
+    "tools/scripts/agent_capability_evolution.py",
+    "tools/scripts/agent_capability_history.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_rederive.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/agent_capability_registry_types.py",
+    "tools/scripts/agent_capability_surface.py",
+    "tools/scripts/agent_capability_transaction.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_agent_capability_rederive.py"
+   ],
+   "kind": "python"
+  },
+  "agent-capability-sdk-handoff-selftest": {
+   "entry": "tools/scripts/test_sdk_capability_handoff.py",
+   "inputs": [
+    "docs/status/agent-capability-handoff.schema.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_sdk_capability_handoff.py"
+   ],
+   "kind": "python"
+  },
+  "agent-hook-paths": {
+   "entry": "tools/scripts/test_agent_hook_paths.py",
+   "inputs": [
+    "hooks/hooks.json",
+    "hooks/scripts/cli-plugin-sync.sh",
+    "hooks/scripts/docs-reminder.sh",
+    "tools/scripts/test_agent_hook_paths.py"
+   ],
+   "kind": "python"
+  },
+  "agent-panel-clipped-is-rejected": {
+   "entry": "tools/import-validation/check_agent_panel_invariants.py",
+   "inputs": [
+    "test/fixtures/agent-panels/polystrike",
+    "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "agent-panel-gate-classifier-selftest": {
+   "entry": "tools/import-validation/test_check_agent_panel_invariants.py",
+   "inputs": [
+    "tools/import-validation/test_check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "agent-panel-native-invariants": {
+   "entry": "tools/import-validation/check_agent_panel_invariants.py",
+   "inputs": [
+    "test/fixtures/agent-panels/magneto",
+    "tools/import-validation/check_agent_panel_invariants.py"
+   ],
+   "kind": "python"
+  },
+  "android-smoke": {
+   "entry": "tools/scripts/android_smoke.sh",
+   "inputs": [
+    "tools/scripts/android_smoke.sh"
+   ],
+   "kind": "shell"
+  },
+  "auval-helper-worker-selftest": {
+   "entry": "tools/ci/test_run_auval_component.py",
+   "inputs": [
+    "tools/ci/test_run_auval_component.py"
+   ],
+   "kind": "python"
+  },
+  "base-poison-detector-selftest": {
+   "entry": "tools/ci/test_base_poison_detector.py",
+   "inputs": [
+    ".github/actions",
+    ".github/workflows",
+    ".github/workflows/build.yml",
+    ".github/workflows/main-health-detector.yml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "test/cmake/test_gpu_audio_sdk_consumer.cmake",
+    "tools/ci/base_poison_detector.py",
+    "tools/ci/test_base_poison_detector.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/gate_suite_executed.py",
+    "tools/scripts/queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "binary-identity-shadow-selftest": {
+   "entry": "tools/ci/test_binary_identity_shadow.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/binary_identity_shadow.py",
+    "tools/ci/test_binary_identity_shadow.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "build-dir-lock-selftest": {
+   "entry": "tools/ci/test_build_dir_lock.py",
+   "inputs": [
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/test_build_dir_lock.py"
+   ],
+   "kind": "python"
+  },
+  "build-matrix-contract": {
+   "entry": "tools/ci/test_build_matrix_contract.py",
+   "inputs": [
+    "tools/ci/test_build_matrix_contract.py"
+   ],
+   "kind": "python"
+  },
+  "build-parallelism-guard": {
+   "entry": "tools/scripts/build_parallelism_guard.py",
+   "inputs": [
+    ".github/workflows",
+    "test/cmake",
+    "tools/cli",
+    "tools/import-validation",
+    "tools/mcp",
+    "tools/scripts",
+    "tools/scripts/build_parallelism_guard.py",
+    "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "build-parallelism-guard-selftest": {
+   "entry": "tools/scripts/test_build_parallelism_guard.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    ".github/workflows/format-baseline-diff.yml",
+    ".github/workflows/web-plugins.yml",
+    "test/cmake/test_gpu_health_cpu_only_configure.sh",
+    "tools/scripts/local_diff_cover.sh",
+    "tools/scripts/test_build_parallelism_guard.py"
+   ],
+   "kind": "python"
+  },
+  "build-speed-proxies-selftest": {
+   "entry": "tools/scripts/test_build_speed_proxies.py",
+   "inputs": [
+    "tools/scripts/test_build_speed_proxies.py"
+   ],
+   "kind": "python"
+  },
+  "build-speed-scorecard-selftest": {
+   "entry": "tools/scripts/test_build_speed_scorecard.py",
+   "inputs": [
+    "tools/scripts/test_build_speed_scorecard.py"
+   ],
+   "kind": "python"
+  },
+  "build-time-report-selftest": {
+   "entry": "tools/scripts/test_build_time_report.py",
+   "inputs": [
+    "core/view",
+    "core/view/include/pulp/view/view.hpp",
+    "tools/scripts/test_build_time_report.py"
+   ],
+   "kind": "python"
+  },
+  "bundled-font-lists-agree": {
+   "entry": "tools/scripts/check_bundled_font_lists.py",
+   "inputs": [
+    "tools/scripts/check_bundled_font_lists.py"
+   ],
+   "kind": "python"
+  },
+  "canvas-path-flush-lint": {
+   "entry": "tools/scripts/check_canvas_path_flush.py",
+   "inputs": [
+    "core/view/js/web-compat-canvas.js",
+    "tools/scripts/check_canvas_path_flush.py"
+   ],
+   "kind": "python"
+  },
+  "canvas-path-flush-lint-selftest": {
+   "entry": "tools/scripts/test_check_canvas_path_flush.py",
+   "inputs": [
+    "tools/scripts/test_check_canvas_path_flush.py"
+   ],
+   "kind": "python"
+  },
+  "capability-contract-gate-wiring": {
+   "entry": "tools/scripts/test_capability_contract_gate.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "core/format/include/pulp/format/processor.hpp",
+    "core/midi/include/pulp/midi/message.hpp",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.json",
+    "test/test_au_plugin_state.mm",
+    "tools/agent-capabilities/legacy-unreviewed-baseline.json",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/gates.sh",
+    "tools/scripts/test_capability_contract_gate.py"
+   ],
+   "kind": "python"
+  },
+  "catch-discover-timeout-guard": {
+   "entry": "tools/scripts/catch_discover_timeout_guard.py",
+   "inputs": [
+    "tools/scripts/catch_discover_timeout_guard.py"
+   ],
+   "kind": "python"
+  },
+  "catch-discover-timeout-guard-selftest": {
+   "entry": "tools/scripts/test_catch_discover_timeout_guard.py",
+   "inputs": [
+    "tools/scripts/catch_discover_timeout_guard.py",
+    "tools/scripts/test_catch_discover_timeout_guard.py"
+   ],
+   "kind": "python"
+  },
+  "ccache-job-delta-selftest": {
+   "entry": "tools/ci/test_ccache_job_delta.py",
+   "inputs": [
+    "tools/ci/ccache_job_delta.py",
+    "tools/ci/test_ccache_job_delta.py"
+   ],
+   "kind": "python"
+  },
+  "ccache-pch-isolation": {
+   "entry": "tools/scripts/test_ccache_pch_isolation.py",
+   "inputs": [
+    "tools/scripts/test_ccache_pch_isolation.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-policy-selftest": {
+   "entry": "tools/scripts/test_changed_surface_policy.py",
+   "inputs": [
+    "core/platform/include/pulp/platform/child_process.hpp",
+    "core/signal/include/pulp/signal/signal.hpp",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/status/sequencer-exposure.json",
+    "test/CMakeLists.txt",
+    "test/cmake/native_component_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/fixtures/child_process_input_fixture.cpp",
+    "test/test_child_process.cpp",
+    "test/test_child_process_standard_input.cpp",
+    "test/test_runtime_utils.cpp",
+    "tools/cli/cmd_forge.cpp",
+    "tools/cli/cmd_misc.cpp",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/toolchains/macos-arm64-osxcross.cmake",
+    "tools/import-design/browser_capture/security.mjs",
+    "tools/rack/generate.py",
+    "tools/rack/patch.py",
+    "tools/rack/provenance_check.py",
+    "tools/rack/test_acid_preflight.py",
+    "tools/rack/test_generate_safety.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/test_changed_surface_policy.py",
+    "tools/scripts/test_runner_topology_check.py"
+   ],
+   "kind": "python"
+  },
+  "check-bundle-architectures-selftest": {
+   "entry": "tools/scripts/test_check_bundle_architectures.py",
+   "inputs": [
+    "tools/scripts/check_bundle_architectures.py",
+    "tools/scripts/test_check_bundle_architectures.py"
+   ],
+   "kind": "python"
+  },
+  "check-panel-presence-selftest": {
+   "entry": "tools/import-validation/test_check_panel_presence.py",
+   "inputs": [
+    "tools/import-validation/test_check_panel_presence.py"
+   ],
+   "kind": "python"
+  },
+  "check-pulp-cli-hook": {
+   "entry": "test/test_check_pulp_cli_hook.sh",
+   "inputs": [
+    "test/test_check_pulp_cli_hook.sh"
+   ],
+   "kind": "shell"
+  },
+  "checkout-location-guard-selftest": {
+   "entry": "tools/ci/test_checkout_location_guard.py",
+   "inputs": [
+    "tools/ci/checkout_location_guard.py",
+    "tools/ci/test_checkout_location_guard.py"
+   ],
+   "kind": "python"
+  },
+  "ci-python-selector-selftest": {
+   "entry": "tools/ci/test_find_python311.py",
+   "inputs": [
+    "tools/ci/test_find_python311.py"
+   ],
+   "kind": "python"
+  },
+  "ci-routing-digest-check": {
+   "entry": "tools/scripts/ci_routing_digest.py",
+   "inputs": [
+    ".github/workflows",
+    "tools/scripts/ci_routing_digest.py",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/tools_registry_check.py",
+    "tools/scripts/workflow_runner_selector_audit.py"
+   ],
+   "kind": "python"
+  },
+  "ci-routing-digest-selftest": {
+   "entry": "tools/scripts/test_ci_routing_digest.py",
+   "inputs": [
+    ".github/workflows",
+    "tools/scripts/ci_routing_digest.py",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/test_ci_routing_digest.py",
+    "tools/scripts/tools_registry_check.py",
+    "tools/scripts/workflow_runner_selector_audit.py"
+   ],
+   "kind": "python"
+  },
+  "classify-changes-selftest": {
+   "entry": "tools/scripts/test_classify_changes.py",
+   "inputs": [
+    ".githooks/lib/gate-supervisor.py",
+    ".githooks/pre-push",
+    ".github/workflows/build.yml",
+    "core/audio/CMakeLists.txt",
+    "core/format/src/au_adapter.mm",
+    "core/midi/CMakeLists.txt",
+    "core/midi/src/midi_file.cpp",
+    "core/midi/src/mpe_voice_tracker.cpp",
+    "core/platform/platform/mac/environment_mac.mm",
+    "core/signal/include/pulp/signal/biquad.hpp",
+    "core/signal/src/fft_backend.cpp",
+    "core/view/include/pulp/view/view.hpp",
+    "core/view/js/web-compat-element.js",
+    "core/view/platform/ios/window_host_ios.mm",
+    "docs/status/agent-capabilities.json",
+    "docs/status/agent-capability-surface.schema.json",
+    "docs/status/cli-commands.yaml",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "docs/status/forge-catalog.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "docs/status/modules.yaml",
+    "docs/status/sequencer-exposure.json",
+    "docs/status/support-matrix.yaml",
+    "docs/status/tools.yaml",
+    "examples/ios-auv3-synth/src/sine_synth.cpp",
+    "examples/pulp-gain/main.cpp",
+    "templates/ios-auv3/HostApp/ContentView.swift",
+    "test/CMakeLists.txt",
+    "test/cmake/consumption_census_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/test_ios_compile_gate.sh",
+    "test/cmake/test_ios_source_syntax.sh",
+    "test/fixtures/native_ui_link_floor/CMakeLists.txt",
+    "test/harness/rt_allocation_probe.cpp",
+    "test/ios/coremidi_backend_harness.mm",
+    "test/test_agent_capability_compile.cpp",
+    "test/test_child_process.cpp",
+    "test/test_coremidi_shared_client.cpp",
+    "test/test_state.cpp",
+    "test/test_widgets.cpp",
+    "tools/agent-capabilities/contract-history.json",
+    "tools/ci/ios_gate_digest.py",
+    "tools/ci/source_selftests.json",
+    "tools/cli",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_dsp.cpp",
+    "tools/cli/cmd_forge.cpp",
+    "tools/cli/gpu_probe",
+    "tools/cmake/PulpAuv3.cmake",
+    "tools/cmake/PulpConfig.cmake.in",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/deps/manifest.json",
+    "tools/dsp_vocabulary.py",
+    "tools/scripts/agent_capability_registry.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/resolve_runs_on.py",
+    "tools/scripts/source_tree_pollution_check.py",
+    "tools/scripts/test_agent_capability_manifest.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    "tools/scripts/test_prepush_gate_supervisor.py",
+    "tools/scripts/test_release_build_matrix.py"
+   ],
+   "kind": "python"
+  },
+  "claude-md-sync-hook": {
+   "entry": "test/test_claude_md_sync_hook.sh",
+   "inputs": [
+    "hooks/scripts/claude_md_sync.py",
+    "test/test_claude_md_sync_hook.sh"
+   ],
+   "kind": "shell"
+  },
+  "clean-build-cov-selftest": {
+   "entry": "tools/scripts/test_clean_build_cov.py",
+   "inputs": [
+    "tools/scripts/test_clean_build_cov.py"
+   ],
+   "kind": "python"
+  },
+  "clean-worktree-builds-selftest": {
+   "entry": "tools/scripts/test_clean_worktree_builds.py",
+   "inputs": [
+    "tools/scripts/test_clean_worktree_builds.py"
+   ],
+   "kind": "python"
+  },
+  "clean-worktrees-selftest": {
+   "entry": "tools/scripts/test_clean_worktrees.py",
+   "inputs": [
+    "tools/scripts/test_clean_worktrees.py"
+   ],
+   "kind": "python"
+  },
+  "cmake-catch-multilabel-properties": {
+   "entry": "tools/scripts/test_catch_multilabel_properties.py",
+   "inputs": [
+    "tools/cmake/PulpCatch.cmake",
+    "tools/cmake/PulpCatchAddTests.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/test_catch_multilabel_properties.py"
+   ],
+   "kind": "python"
+  },
+  "cmake-clap-bundle-plist": {
+   "entry": "test/cmake/test_clap_bundle_plist.sh",
+   "inputs": [
+    "test/cmake/test_clap_bundle_plist.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-examples-reorder-init-guard": {
+   "entry": "test/cmake/test_examples_reorder_init_guard.sh",
+   "inputs": [
+    "test/cmake/test_examples_reorder_init_guard.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-ios-auv3-configure": {
+   "entry": "test/cmake/test_ios_auv3_configure.sh",
+   "inputs": [
+    "test/cmake/test_ios_auv3_configure.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-ios-hostapp-bundle-guard": {
+   "entry": "test/cmake/test_ios_hostapp_bundle_guard.sh",
+   "inputs": [
+    "test/cmake/test_ios_hostapp_bundle_guard.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-ios-hostapp-links": {
+   "entry": "test/cmake/test_ios_hostapp_links.sh",
+   "inputs": [
+    "test/cmake/test_ios_hostapp_links.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-ios-source-syntax": {
+   "entry": "test/cmake/test_ios_source_syntax.sh",
+   "inputs": [
+    "test/cmake/test_ios_source_syntax.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-link-floor-selftest": {
+   "entry": "tools/scripts/link_floor_selftest.py",
+   "inputs": [
+    "tools/scripts/link_floor_selftest.py"
+   ],
+   "kind": "python"
+  },
+  "cmake-manifest-parse": {
+   "entry": "tools/scripts/test_cmake_manifest_parse.py",
+   "inputs": [
+    "tools/scripts/test_cmake_manifest_parse.py"
+   ],
+   "kind": "python"
+  },
+  "cmake-pulp-macos-libcxx-floor": {
+   "entry": "test/cmake/test_macos_libcxx_floor.sh",
+   "inputs": [
+    "test/cmake/test_macos_libcxx_floor.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-require-gpu-for-sdk": {
+   "entry": "test/cmake/test_require_gpu_for_sdk.sh",
+   "inputs": [
+    "test/cmake/test_require_gpu_for_sdk.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-swift-option-reserved": {
+   "entry": "test/cmake/test_swift_option_reserved.sh",
+   "inputs": [
+    "test/cmake/test_swift_option_reserved.sh"
+   ],
+   "kind": "shell"
+  },
+  "cmake-test-group-discovery": {
+   "entry": "tools/scripts/test_pulp_test_group.py",
+   "inputs": [
+    "tools/cmake/PulpCatch.cmake",
+    "tools/cmake/PulpCatchAddTests.cmake",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/scripts/pch_wiring_check.py",
+    "tools/scripts/test_pulp_test_group.py"
+   ],
+   "kind": "python"
+  },
+  "codex-review-signal-selftest": {
+   "entry": "tools/scripts/test_codex_review_signal.sh",
+   "inputs": [
+    "tools/scripts/test_codex_review_signal.sh"
+   ],
+   "kind": "shell"
+  },
+  "combined-installer-selftest": {
+   "entry": "tools/scripts/test_build_combined_installer.py",
+   "inputs": [
+    "tools/scripts/test_build_combined_installer.py"
+   ],
+   "kind": "python"
+  },
+  "component-visual-regression": {
+   "entry": "tools/scripts/component_regression.py",
+   "inputs": [
+    "assets/design-system/ink-signal/reference/components",
+    "tools/scripts/component_regression.py",
+    "tools/scripts/gallery_visual_diff.py"
+   ],
+   "kind": "python"
+  },
+  "configure-check-cache": {
+   "entry": "tools/scripts/test_configure_check_cache.py",
+   "inputs": [
+    "tools/scripts/test_configure_check_cache.py"
+   ],
+   "kind": "python"
+  },
+  "confirm-failure-harness": {
+   "entry": "tools/scripts/test_confirm_failure.sh",
+   "inputs": [
+    "tools/scripts/test_confirm_failure.sh"
+   ],
+   "kind": "shell"
+  },
+  "consumption-census-contract-control-note": {
+   "entry": "tools/scripts/test_consumption_census_contract_note.py",
+   "inputs": [
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "tools/scripts/test_consumption_census_contract_note.py"
+   ],
+   "kind": "python"
+  },
+  "consumption-census-drift": {
+   "entry": "tools/scripts/consumption_census.py",
+   "inputs": [
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/json_schema_lite.py"
+   ],
+   "kind": "python"
+  },
+  "consumption-census-drift-description": {
+   "entry": "tools/scripts/test_consumption_census.py",
+   "inputs": [
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_consumption_census.py"
+   ],
+   "kind": "python"
+  },
+  "consumption-census-negative-contract": {
+   "entry": "tools/scripts/consumption_census_contract.py",
+   "inputs": [
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/json_schema_lite.py"
+   ],
+   "kind": "python"
+  },
+  "consumption-census-schema": {
+   "entry": "tools/scripts/consumption_census.py",
+   "inputs": [
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/json_schema_lite.py"
+   ],
+   "kind": "python"
+  },
+  "contributor-check": {
+   "entry": "tools/scripts/test_contributor_check.sh",
+   "inputs": [
+    "tools/scripts/test_contributor_check.sh"
+   ],
+   "kind": "shell"
+  },
+  "control-authoring-examples": {
+   "entry": "test/test_control_authoring_examples.py",
+   "inputs": [
+    "test/test_control_authoring_examples.py"
+   ],
+   "kind": "python"
+  },
+  "control-product-b-absence": {
+   "entry": "tools/scripts/control_product_b_absence_check.py",
+   "inputs": [
+    "experimental/pulp-rs/CMakeLists.txt",
+    "tools/check-docs.sh",
+    "tools/scripts/control_product_b_absence_check.py",
+    "tools/scripts/test_control_product_b_absence_check.py"
+   ],
+   "kind": "python"
+  },
+  "control-product-b-absence-selftest": {
+   "entry": "tools/scripts/test_control_product_b_absence_check.py",
+   "inputs": [
+    "core/format",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "inspect/include",
+    "tools/check-docs.sh",
+    "tools/scripts/control_product_b_absence_check.py",
+    "tools/scripts/test_control_product_b_absence_check.py"
+   ],
+   "kind": "python"
+  },
+  "control-product-b-rust-cli-absence": {
+   "entry": "tools/scripts/control_product_b_absence_check.py",
+   "inputs": [
+    "experimental/pulp-rs/CMakeLists.txt",
+    "tools/check-docs.sh",
+    "tools/scripts/control_product_b_absence_check.py",
+    "tools/scripts/test_control_product_b_absence_check.py"
+   ],
+   "kind": "python"
+  },
+  "control-profile-downgrade-announced": {
+   "entry": "tools/scripts/test_control_profile_downgrade_is_announced.py",
+   "inputs": [
+    "tools/scripts/test_control_profile_downgrade_is_announced.py"
+   ],
+   "kind": "python"
+  },
+  "create-templates-verify": {
+   "entry": "tools/scripts/test_verify_create_templates.py",
+   "inputs": [
+    "tools/scripts/test_verify_create_templates.py",
+    "tools/scripts/verify_create_templates.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-duplicate-registration": {
+   "entry": "tools/scripts/test_ctest_duplicate_registration.py",
+   "inputs": [
+    "tools/scripts/test_ctest_duplicate_registration.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-gate-args-selftest": {
+   "entry": "tools/ci/test_ctest_gate_args.py",
+   "inputs": [
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/test_ctest_gate_args.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-inventory-parity-self-check": {
+   "entry": "tools/scripts/ctest_inventory_parity.py",
+   "inputs": [
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/ctest_inventory_parity.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-label-exclusion-guard": {
+   "entry": "tools/scripts/ctest_label_exclusion_guard.py",
+   "inputs": [
+    "test/cmake",
+    "tools/scripts/ctest_label_exclusion_guard.json",
+    "tools/scripts/ctest_label_exclusion_guard.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-label-exclusion-guard-selftest": {
+   "entry": "tools/scripts/test_ctest_label_exclusion_guard.py",
+   "inputs": [
+    "test/cmake/character_delay_tests.cmake",
+    "tools/scripts/test_ctest_label_exclusion_guard.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-measured-budgets": {
+   "entry": "tools/scripts/test_ctest_measured_budgets.py",
+   "inputs": [
+    "tools/scripts/test_ctest_measured_budgets.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-scheduling-contract": {
+   "entry": "tools/scripts/test_ctest_scheduling_contract.py",
+   "inputs": [
+    "tools/scripts/ctest_scheduling_policy.py",
+    "tools/scripts/test_ctest_scheduling_contract.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-unique-names": {
+   "entry": "tools/scripts/ctest_unique_names_check.py",
+   "inputs": [
+    "tools/scripts/ctest_unique_names_check.py"
+   ],
+   "kind": "python"
+  },
+  "ctest-unique-names-selftest": {
+   "entry": "tools/scripts/test_ctest_unique_names_check.py",
+   "inputs": [
+    "tools/scripts/ctest_unique_names_check.py",
+    "tools/scripts/test_ctest_unique_names_check.py"
+   ],
+   "kind": "python"
+  },
+  "decisions-contract-selftest": {
+   "entry": "tools/scripts/test_decisions_contract.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/scripts/decisions_contract.py",
+    "tools/scripts/test_decisions_contract.py",
+    "tools/shipyard.toml"
+   ],
+   "kind": "python"
+  },
+  "decisions-contract-validate": {
+   "entry": "tools/scripts/decisions_contract.py",
+   "inputs": [
+    "tools/scripts/decisions_contract.py"
+   ],
+   "kind": "python"
+  },
+  "diff-cover-targets-selftest": {
+   "entry": "tools/scripts/test_diff_cover_targets.py",
+   "inputs": [
+    ".githooks/pre-push",
+    "core/runtime",
+    "core/state",
+    "core/state/include/pulp/state/store.hpp",
+    "core/state/src/param_json.cpp",
+    "core/state/src/store.cpp",
+    "core/view",
+    "core/view/src/view.cpp",
+    "test/test_cli_shellout.cpp",
+    "test/test_runtime.cpp",
+    "test/test_state.cpp",
+    "test/test_view.cpp",
+    "tools/ci/governed-build.sh",
+    "tools/cli",
+    "tools/scripts/diff_cover_targets.py",
+    "tools/scripts/local_diff_cover.sh",
+    "tools/scripts/test_diff_cover_targets.py"
+   ],
+   "kind": "python"
+  },
+  "doxygen-installed-header-check": {
+   "entry": "tools/scripts/doxygen_installed_header_check.py",
+   "inputs": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "inspect/include",
+    "inspect/include/pulp",
+    "inspect/include/pulp/inspect",
+    "tools/audio/analysis/include",
+    "tools/audio/analysis/include/pulp",
+    "tools/cli/gpu_health/include",
+    "tools/cli/gpu_health/include/pulp_tooling",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/doxygen_installed_header_check.py"
+   ],
+   "kind": "python"
+  },
+  "doxygen-installed-header-selftest": {
+   "entry": "tools/scripts/test_doxygen_installed_header_check.py",
+   "inputs": [
+    "core/runtime/CMakeLists.txt",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/timeline_view/include/pulp/timeline_view/arranger_view.hpp",
+    "core/timeline_view/include/pulp/timeline_view/piano_roll_view.hpp",
+    "inspect/include",
+    "inspect/include/pulp",
+    "inspect/include/pulp/inspect",
+    "inspect/include/pulp/inspect/protocol.hpp",
+    "tools/audio/analysis/include",
+    "tools/audio/analysis/include/pulp",
+    "tools/cli/gpu_health/include",
+    "tools/cli/gpu_health/include/pulp_tooling",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/scripts/doxygen_installed_header_check.py",
+    "tools/scripts/test_doxygen_installed_header_check.py"
+   ],
+   "kind": "python"
+  },
+  "dsp-provenance-audit": {
+   "entry": "tools/scripts/dsp_provenance_audit.py",
+   "inputs": [
+    "core/dsl/include/pulp/dsl/faust_base.hpp",
+    "docs/status/cmake-functions.yaml",
+    "examples/faust-filter/reference_filter.hpp",
+    "examples/faust-gain/CMakeLists.txt",
+    "examples/faust-gain/reference_gain.hpp",
+    "examples/faust-tremolo/CMakeLists.txt",
+    "examples/faust-tremolo/reference_tremolo.hpp",
+    "tools/cmake/PulpFaust.cmake",
+    "tools/scripts/cmajor_external.py",
+    "tools/scripts/dsp_provenance_audit.py"
+   ],
+   "kind": "python"
+  },
+  "dsp-provenance-audit-selftest": {
+   "entry": "tools/scripts/test_dsp_provenance_audit.py",
+   "inputs": [
+    "examples/faust-gain/generated_gain.hpp",
+    "tools/cmake/PulpFaust.cmake",
+    "tools/scripts/cmajor_external.py",
+    "tools/scripts/test_dsp_provenance_audit.py"
+   ],
+   "kind": "python"
+  },
+  "dsp-vocabulary-selftest": {
+   "entry": "tools/test_dsp_vocabulary.py",
+   "inputs": [
+    "tools/test_dsp_vocabulary.py"
+   ],
+   "kind": "python"
+  },
+  "ensure-signing-ready": {
+   "entry": "tools/scripts/test_ensure_signing_ready.sh",
+   "inputs": [
+    "tools/scripts/test_ensure_signing_ready.sh"
+   ],
+   "kind": "shell"
+  },
+  "example-validation-paths": {
+   "entry": "tools/scripts/test_example_validation_paths.py",
+   "inputs": [
+    ".github/actions/install-linux-build-deps",
+    ".github/actions/install-linux-build-deps/action.yml",
+    ".github/workflows/examples-validation.yml",
+    "core/format",
+    "core/format/src/clap_adapter.cpp",
+    "core/playback/PulpPlaybackSources.cmake",
+    "core/playback/include/pulp/playback/transport.hpp",
+    "core/signal/include/pulp/signal/fft.hpp",
+    "core/state/include",
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/timeline/PulpTimelineSources.cmake",
+    "core/view/cmake/PulpViewSources.cmake",
+    "core/view/include/pulp/view/view.hpp",
+    "examples/PulpTempoSampler/CMakeLists.txt",
+    "external/miniz/miniz.h",
+    "test/au_bundle_lifecycle.cpp",
+    "test/clap_bundle_lifecycle.cpp",
+    "test/cmake/quality_tests.cmake",
+    "test/vst3_bundle_lifecycle.cpp",
+    "tools/ci/governed-build.sh",
+    "tools/ci/install_linux_build_deps.py",
+    "tools/ci/lib/auval-exec-check.sh",
+    "tools/ci/linux_build_deps.json",
+    "tools/ci/run-auval-component.sh",
+    "tools/cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/deps",
+    "tools/deps/manifest.json",
+    "tools/scripts/example_validation_paths.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/test_example_validation_paths.py"
+   ],
+   "kind": "python"
+  },
+  "figma-rest-export": {
+   "entry": "test/test_figma_rest_export.py",
+   "inputs": [
+    "test/test_figma_rest_export.py"
+   ],
+   "kind": "python"
+  },
+  "findskia-arch-assert-selftest": {
+   "entry": "tools/scripts/test_findskia_arch_assert.py",
+   "inputs": [
+    "tools/cmake/FindSkia.cmake",
+    "tools/scripts/test_findskia_arch_assert.py"
+   ],
+   "kind": "python"
+  },
+  "flake-exoneration-shadow-selftest": {
+   "entry": "tools/ci/test_flake_exoneration_shadow.py",
+   "inputs": [
+    ".github/actions",
+    ".github/workflows",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "tools/ci/base_poison_detector.py",
+    "tools/ci/flake_exoneration_shadow.py",
+    "tools/ci/test_flake_exoneration_shadow.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/gate_suite_executed.py",
+    "tools/scripts/queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "fleet-remote-probe-selftest": {
+   "entry": "tools/fleet/test_probe_remote.py",
+   "inputs": [
+    "tools/fleet/probe_remote.py",
+    "tools/fleet/test_probe_remote.py"
+   ],
+   "kind": "python"
+  },
+  "fleet-runner-policy-selftest": {
+   "entry": "tools/fleet/test_fleet_lib.py",
+   "inputs": [
+    "tools/fleet/fleet_lib.py",
+    "tools/fleet/test_fleet_lib.py"
+   ],
+   "kind": "python"
+  },
+  "fleet-snapshot-selftest": {
+   "entry": "tools/scripts/test_fleet_snapshot.py",
+   "inputs": [
+    "tools/scripts/test_fleet_snapshot.py"
+   ],
+   "kind": "python"
+  },
+  "forced-restore-lint": {
+   "entry": "tools/scripts/forced_restore_lint.py",
+   "inputs": [
+    "tools/scripts/forced_restore_lint.py",
+    "tools/scripts/test_forced_restore_lint.py"
+   ],
+   "kind": "python"
+  },
+  "forced-restore-lint-selftest": {
+   "entry": "tools/scripts/test_forced_restore_lint.py",
+   "inputs": [
+    "tools/scripts/forced_restore_lint.py",
+    "tools/scripts/test_forced_restore_lint.py"
+   ],
+   "kind": "python"
+  },
+  "forge-modular-release-package-selftest": {
+   "entry": "examples/forge-modular/test_release_package.py",
+   "inputs": [
+    "examples/forge-modular/test_release_package.py"
+   ],
+   "kind": "python"
+  },
+  "fork-pr-runner-routing": {
+   "entry": "tools/scripts/test_fork_pr_runner_routing.py",
+   "inputs": [
+    "tools/scripts/test_fork_pr_runner_routing.py"
+   ],
+   "kind": "python"
+  },
+  "format-baseline-diff-selftest": {
+   "entry": "tools/scripts/test_format_baseline_diff.py",
+   "inputs": [
+    "tools/scripts/test_format_baseline_diff.py"
+   ],
+   "kind": "python"
+  },
+  "format-changed-selftest": {
+   "entry": "tools/scripts/test_format_changed.sh",
+   "inputs": [
+    "tools/scripts/test_format_changed.sh"
+   ],
+   "kind": "shell"
+  },
+  "framework-neutrality": {
+   "entry": "tools/scripts/framework_neutrality_check.py",
+   "inputs": [
+    "core/format/include/pulp/format/host_quirks/cubase.hpp",
+    "core/runtime/include/pulp/runtime/spsc_ring_index.hpp",
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/view/js/web-compat-element.js",
+    "experimental/pulp-rs/src/cmd/pkg.rs",
+    "test/fixtures/refactor-baselines",
+    "test/test_cli_import.cpp",
+    "test/test_host_quirks.cpp",
+    "test/test_host_version.cpp",
+    "tools/cmake",
+    "tools/deps",
+    "tools/packages/registry.json",
+    "tools/scripts/cmajor_external.py",
+    "tools/scripts/framework_neutrality_check.py",
+    "tools/scripts/test_cmajor_external_extra.py",
+    "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "framework-neutrality-selftest": {
+   "entry": "tools/scripts/framework_neutrality_check.py",
+   "inputs": [
+    "core/format/include/pulp/format/host_quirks/cubase.hpp",
+    "core/runtime/include/pulp/runtime/spsc_ring_index.hpp",
+    "core/state/include/pulp/state/parameter.hpp",
+    "core/view/js/web-compat-element.js",
+    "experimental/pulp-rs/src/cmd/pkg.rs",
+    "test/fixtures/refactor-baselines",
+    "test/test_cli_import.cpp",
+    "test/test_host_quirks.cpp",
+    "test/test_host_version.cpp",
+    "tools/cmake",
+    "tools/deps",
+    "tools/packages/registry.json",
+    "tools/scripts/cmajor_external.py",
+    "tools/scripts/framework_neutrality_check.py",
+    "tools/scripts/test_cmajor_external_extra.py",
+    "tools/validation"
+   ],
+   "kind": "python"
+  },
+  "gallery-diff-selftest": {
+   "entry": "tools/scripts/test_gallery_visual_diff.py",
+   "inputs": [
+    "tools/scripts/gallery_visual_diff.py",
+    "tools/scripts/test_gallery_visual_diff.py"
+   ],
+   "kind": "python"
+  },
+  "gallery-visual-regression": {
+   "entry": "tools/scripts/gallery_regression.py",
+   "inputs": [
+    "assets/design-system/ink-signal/reference/gallery",
+    "tools/scripts/gallery_regression.py",
+    "tools/scripts/gallery_visual_diff.py"
+   ],
+   "kind": "python"
+  },
+  "gate-common-selftest": {
+   "entry": "tools/scripts/test_gate_common.py",
+   "inputs": [
+    "tools/cli",
+    "tools/cli/cmd_doctor.cpp",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/test_gate_common.py"
+   ],
+   "kind": "python"
+  },
+  "gate-python-imports": {
+   "entry": "tools/scripts/gate_python_imports_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/source_selftests.json",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py"
+   ],
+   "kind": "python"
+  },
+  "gate-python-imports-selftest": {
+   "entry": "tools/scripts/test_gate_python_imports_check.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/source_selftests.json",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/test_gate_python_imports_check.py"
+   ],
+   "kind": "python"
+  },
+  "gate-suite-executed-selftest": {
+   "entry": "tools/scripts/test_gate_suite_executed.py",
+   "inputs": [
+    "tools/scripts/gate_suite_executed.py",
+    "tools/scripts/test_gate_suite_executed.py"
+   ],
+   "kind": "python"
+  },
+  "golden-regression-selftest": {
+   "entry": "tools/import-validation/golden_regression.py",
+   "inputs": [
+    "tools/import-validation/golden_regression.py"
+   ],
+   "kind": "python"
+  },
+  "governed-build-selftest": {
+   "entry": "tools/ci/test_governed_build.py",
+   "inputs": [
+    "tools/ci/test_governed_build.py"
+   ],
+   "kind": "python"
+  },
+  "governed-build-wrapper": {
+   "entry": "test/test_governed_build.sh",
+   "inputs": [
+    "test/test_governed_build.sh"
+   ],
+   "kind": "shell"
+  },
+  "gpu-audio-p4-evidence-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_p4_evidence.py",
+   "inputs": [
+    "tools/scripts/test_gpu_audio_p4_evidence.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-provider-identity-selftest": {
+   "entry": "tools/scripts/test_gpu_audio_provider_identity.py",
+   "inputs": [
+    "external/skia-build",
+    "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/test_gpu_audio_provider_identity.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-audio-trace-validator-selftest": {
+   "entry": "tools/scripts/test_validate_gpu_audio_trace_captures.py",
+   "inputs": [
+    "tools/scripts/test_validate_gpu_audio_trace_captures.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-clean-agent-journey-selftest": {
+   "entry": "tools/scripts/test_gpu_clean_agent_journey.py",
+   "inputs": [
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "test/cmake/gpu_clean_agent_journey_test.cmake",
+    "tools/scripts/gpu_clean_agent_isolation.py",
+    "tools/scripts/gpu_clean_agent_journey.py",
+    "tools/scripts/gpu_clean_agent_trust.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_clean_agent_journey.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-connected-git-history-selftest": {
+   "entry": "tools/scripts/test_connected_git_history.py",
+   "inputs": [
+    "docs/status/gpu-vellum-handoff.yaml",
+    "tools/scripts/connected_git_history.py",
+    "tools/scripts/test_connected_git_history.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-calibration-failure-proof": {
+   "entry": "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/dpr/manifest.json",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_experiment.py",
+    "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+    "tools/scripts/gpu_dpr_runner.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_dpr_v2_runner.py",
+    "tools/scripts/gpu_dpr_v2_terminal.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_dpr_calibration_failure_proof.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-experiment-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_dpr_experiment.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/dpr/manifest.json",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_experiment.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_dpr_v2_terminal.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_dpr_experiment.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-inconclusive-receipt-selftest": {
+   "entry": "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py",
+   "inputs": [
+    "tools/scripts/test_verify_gpu_dpr_inconclusive_receipt.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-pulp-native-adapter-selftest": {
+   "entry": "tools/scripts/test_gpu_dpr_pulp_native_adapter.py",
+   "inputs": [
+    "test/fixtures/gpu-ux/dpr/dense-text-thin-strokes.ui.js",
+    "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+    "tools/scripts/test_gpu_dpr_pulp_native_adapter.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-runner-selftest": {
+   "entry": "tools/scripts/test_gpu_dpr_runner.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/format",
+    "core/render",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/view",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/dpr/manifest.json",
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mcp_server.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_experiment.py",
+    "tools/scripts/gpu_dpr_runner.py",
+    "tools/scripts/gpu_dpr_test_support.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_dpr_v2_runner.py",
+    "tools/scripts/gpu_dpr_v2_terminal.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_dpr_runner.py",
+    "tools/scripts/test_gpu_dpr_v2_evidence.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_health_read_contract.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-v2-evidence-selftest": {
+   "entry": "tools/scripts/test_gpu_dpr_v2_evidence.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/dpr/manifest.json",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_experiment.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_dpr_v2_runner.py",
+    "tools/scripts/gpu_dpr_v2_terminal.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_dpr_v2_evidence.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-dpr-web-adapter-selftest": {
+   "entry": "tools/scripts/test_gpu_dpr_web_adapter.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "examples/web-demos/super-convolver-ui/browser-test",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_web_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/test_gpu_dpr_web_adapter.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-acceptance-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/format",
+    "core/render",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/view",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mcp_server.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_health_read_contract.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-acceptance-v2-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-campaign-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/format",
+    "core/render",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/view",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mcp_server.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_health_read_contract.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-external-adapter-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/format",
+    "core/render",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/view",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mcp_server.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_health_read_contract.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-role-producers-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/format",
+    "core/render",
+    "core/render/src/gpu_surface_dawn.cpp",
+    "core/render/src/metal_surface_mac.mm",
+    "core/render/src/render_loop.cpp",
+    "core/render/src/render_loop_apple.mm",
+    "core/render/src/render_loop_state.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/runtime",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "core/runtime/include/pulp/runtime/trace.hpp",
+    "core/view",
+    "docs/status/tools.yaml",
+    "experimental/pulp-rs",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/Cargo.lock",
+    "experimental/pulp-rs/Cargo.toml",
+    "experimental/pulp-rs/src/cmd/mod.rs",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/cmd/trace_fetch.rs",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/trace_response.rs",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "experimental/pulp-rs/tests",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+    "experimental/pulp-rs/tests/trace_gpu_analysis_tool_test.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "inspect/src/control_standalone_host.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/healthy.pftrace",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "test/test_mcp_server.cpp",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/import-design/browser_capture/runtime_manifest.txt",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_tools.hpp",
+    "tools/mcp/mcp_tools_internal.cpp",
+    "tools/mcp/mcp_tools_internal.hpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/packages/tool-registry.json",
+    "tools/scripts",
+    "tools/scripts/cli_mcp_parity_baseline.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_contained_process.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_build_verifier.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_analyzer.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead_analyzer.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_scope.json",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/release_product_matrix.json",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_health_read_contract.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/verify_gpu_trace_overhead_acceptance.py",
+    "tools/testing/daw-smoke/insert_and_float.lua",
+    "tools/testing/daw-smoke/reaper_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-first-visible-trace-producer-overhead-selftest": {
+   "entry": "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py",
+   "inputs": [
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/editor_bridge.cpp",
+    "core/view/src/view.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.cpp",
+    "tools/scripts/gpu_first_visible_a3_trace_producer_overhead.py",
+    "tools/scripts/test_gpu_first_visible_a3_trace_producer_overhead.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-handoff-pin-freshness-selftest": {
+   "entry": "tools/scripts/test_gpu_handoff_pin_freshness.py",
+   "inputs": [
+    ".githooks/pre-push",
+    "core/view/src/view.cpp",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/gates.sh",
+    "tools/scripts/gpu_handoff_pin_freshness.py",
+    "tools/scripts/test_gpu_handoff_pin_freshness.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-handoff-provenance-selftest": {
+   "entry": "tools/scripts/test_gpu_handoff_provenance.py",
+   "inputs": [
+    ".githooks/pre-push",
+    ".github/vellum-ownership.json",
+    ".github/workflows/release-cli.yml",
+    "core/render/include/pulp/render/headless_surface.hpp",
+    "core/render/include/pulp/render/skia_surface.hpp",
+    "core/render/src/skia_surface.cpp",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/editor_bridge.cpp",
+    "core/view/src/view.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.cpp",
+    "docs/status/gpu-recipes.yaml",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "experimental/pulp-rs/src/cmd/upgrade.rs",
+    "experimental/pulp-rs/src/install.rs",
+    "experimental/pulp-rs/src/install/tests.rs",
+    "inspect/include/pulp/inspect/control_gpu_health_provider.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_read_executor.hpp",
+    "inspect/include/pulp/inspect/control_gpu_health_view_adapter.hpp",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "inspect/src/control_gpu_health_read_executor.cpp",
+    "inspect/src/control_gpu_health_view_adapter.cpp",
+    "test/cmake/gpu_health_tests.cmake",
+    "test/fixtures/gpu-ux/dpr",
+    "test/support/a3_control_build_identity.hpp",
+    "test/test_control_gpu_health_provider.cpp",
+    "test/test_control_gpu_health_standalone_product.cpp",
+    "tools/cli/gpu_health",
+    "tools/cli/gpu_health/include/pulp_tooling/gpu_health/health_read_result.hpp",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/cli/gpu_probe",
+    "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/mcp_trace_tools.cpp",
+    "tools/scripts",
+    "tools/scripts/connected_git_history.py",
+    "tools/scripts/gates.sh",
+    "tools/scripts/gpu_dpr_evidence.py",
+    "tools/scripts/gpu_dpr_experiment.py",
+    "tools/scripts/gpu_dpr_pulp_native_adapter.py",
+    "tools/scripts/gpu_dpr_runner.py",
+    "tools/scripts/gpu_dpr_v2_evidence.py",
+    "tools/scripts/gpu_dpr_v2_runner.py",
+    "tools/scripts/gpu_dpr_v2_terminal.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/gpu_first_visible_a3_acceptance_v2.py",
+    "tools/scripts/gpu_first_visible_a3_auv2_logic_producer.py",
+    "tools/scripts/gpu_first_visible_a3_campaign.py",
+    "tools/scripts/gpu_first_visible_a3_clap_reaper_producer.py",
+    "tools/scripts/gpu_first_visible_a3_constrained_adapter_producer.py",
+    "tools/scripts/gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/gpu_first_visible_a3_forge_producer.py",
+    "tools/scripts/gpu_first_visible_a3_headless_producer.py",
+    "tools/scripts/gpu_first_visible_a3_role_producer.py",
+    "tools/scripts/gpu_first_visible_a3_standalone_producer.py",
+    "tools/scripts/gpu_first_visible_a3_vst3_reaper_producer.py",
+    "tools/scripts/gpu_handoff_provenance.py",
+    "tools/scripts/gpu_ledger_merge_driver.py",
+    "tools/scripts/gpu_ledger_sentinel_check.py",
+    "tools/scripts/gpu_recipe_catalog.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/install-githooks.sh",
+    "tools/scripts/package_cli.py",
+    "tools/scripts/release_artifact_contents.py",
+    "tools/scripts/release_product_matrix.json",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance.py",
+    "tools/scripts/test_gpu_first_visible_a3_acceptance_v2.py",
+    "tools/scripts/test_gpu_first_visible_a3_campaign.py",
+    "tools/scripts/test_gpu_first_visible_a3_external_adapter.py",
+    "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+    "tools/scripts/test_gpu_handoff_provenance.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_package_cli.py",
+    "tools/scripts/test_release_artifact_contents.py",
+    "tools/scripts/verify_gpu_probe_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-health-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_health_contract.py",
+   "inputs": [
+    "tools/scripts/gpu_health_contract.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_health_contract.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-health-cpu-only-configure": {
+   "entry": "test/cmake/test_gpu_health_cpu_only_configure.sh",
+   "inputs": [
+    "test/cmake/test_gpu_health_cpu_only_configure.sh"
+   ],
+   "kind": "shell"
+  },
+  "gpu-health-read-contract-selftest": {
+   "entry": "tools/scripts/test_gpu_health_read_contract.py",
+   "inputs": [
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "tools/cli/gpu_health/src/health_read_result_json.cpp",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_health_read_contract.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-health-run-attestation": {
+   "entry": "tools/scripts/test_gpu_health_run_attestation.py",
+   "inputs": [
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "tools/scripts/gpu_health_contract.py",
+    "tools/scripts/gpu_health_run_attestation.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_gpu_health_run_attestation.py",
+    "tools/scripts/verify_gpu_health_run_attestation.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-probe-acceptance-verifier-selftest": {
+   "entry": "tools/scripts/test_verify_gpu_probe_acceptance.py",
+   "inputs": [
+    "tools/cli/gpu_probe/src/native_acceptance.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp",
+    "tools/cli/gpu_probe/src/probe_result_json.cpp",
+    "tools/scripts/test_verify_gpu_probe_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-probe-historical-v1-acceptance": {
+   "entry": "tools/scripts/verify_gpu_probe_acceptance.py",
+   "inputs": [
+    "core/render/include/pulp/render/gpu_compute.hpp",
+    "core/render/include/pulp/render/renderer3d.hpp",
+    "core/render/src/gpu_compute.cpp",
+    "core/render/src/renderer3d.cpp",
+    "core/runtime/include/pulp/runtime/build_info.hpp.in",
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "docs/validation/gpu-probes/m3-a2-real-probes-20260828",
+    "experimental/pulp-rs/CMakeLists.txt",
+    "experimental/pulp-rs/src/fallthrough.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_gpu.cpp",
+    "tools/cli/gpu_artifact_publication.cpp",
+    "tools/cli/gpu_artifact_publication.hpp",
+    "tools/cli/gpu_probe/CMakeLists.txt",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/recipes.hpp",
+    "tools/cli/gpu_probe/src/native_acceptance.cpp",
+    "tools/cli/gpu_probe/src/native_recipes.cpp",
+    "tools/cli/gpu_probe/src/probe_result.cpp",
+    "tools/cli/gpu_probe/src/probe_result_json.cpp",
+    "tools/cli/gpu_probe/src/stft_native_acceptance.cpp",
+    "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/cmake/FindSkia.cmake",
+    "tools/cmake/FindV8.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/gpu_probe_acceptance.py",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/sdk_capability_handoff.py",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/verify_gpu_probe_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-probe-terminal-recorder-selftest": {
+   "entry": "tools/scripts/test_gpu_probe_acceptance.py",
+   "inputs": [
+    "test/fixtures/gpu-ux/pass-hardware.json",
+    "tools/cli/gpu_artifact_publication.cpp",
+    "tools/cli/gpu_artifact_publication.hpp",
+    "tools/scripts/gpu_trace_overhead_acceptance.py",
+    "tools/scripts/test_gpu_probe_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-provenance-hydration-real-git-selftest": {
+   "entry": "tools/scripts/test_hydrate_real_git.py",
+   "inputs": [
+    "docs/status/gpu-vellum-handoff.yaml",
+    "tools/scripts/hydrate_gpu_provenance_commits.py",
+    "tools/scripts/test_hydrate_real_git.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-provenance-hydration-selftest": {
+   "entry": "tools/scripts/test_hydrate_gpu_provenance_commits.py",
+   "inputs": [
+    "docs/status/gpu-vellum-handoff.yaml",
+    "tools/scripts/hydrate_gpu_provenance_commits.py",
+    "tools/scripts/test_hydrate_gpu_provenance_commits.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-recipe-catalog-selftest": {
+   "entry": "tools/scripts/test_gpu_recipe_catalog.py",
+   "inputs": [
+    ".github/vellum-ownership.json",
+    "core/render/src/skia_surface.cpp",
+    "core/view/platform/mac/window_host_mac.mm",
+    "docs/status/gpu-recipes.schema.json",
+    "docs/status/gpu-recipes.yaml",
+    "docs/status/gpu-vellum-handoff.yaml",
+    "experimental/pulp-rs/src/install.rs",
+    "tools/cli/gpu_probe",
+    "tools/cli/gpu_probe/CMakeLists.txt",
+    "tools/cli/gpu_probe/include/pulp_tooling/gpu_probe/probe_result.hpp",
+    "tools/cli/gpu_recipe_catalog_data.h.in",
+    "tools/mcp/mcp_gpu_tools.cpp",
+    "tools/scripts/connected_git_history.py",
+    "tools/scripts/gpu_recipe_catalog.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/release_artifact_contents.py",
+    "tools/scripts/test_gpu_recipe_catalog.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-test-resource-locks": {
+   "entry": "tools/scripts/test_gpu_test_resource_locks.py",
+   "inputs": [
+    "tools/scripts/test_gpu_test_resource_locks.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-trace-overhead-acceptance-selftest": {
+   "entry": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
+   "inputs": [
+    "core/render",
+    "core/view/platform/mac/window_host_mac.mm",
+    "core/view/src/editor_bridge.cpp",
+    "core/view/src/view.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "core/view/src/widget_bridge/bridge_dispatch.cpp",
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "inspect/src/control_gpu_health_provider.cpp",
+    "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+    "tools/cli/gpu_probe/src/dpr_measurement_session.cpp",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "gpu-trace-overhead-verifier-selftest": {
+   "entry": "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py",
+   "inputs": [
+    "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
+    "test/fixtures/perfetto-gpu",
+    "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+    "tools/scripts/sdk_provenance.py",
+    "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
+  "heritage-calibration-toolkit": {
+   "entry": "tools/audio/heritage-calibration/test_heritage_calibration.py",
+   "inputs": [
+    "tools/audio/heritage-calibration/heritage_calibration.py",
+    "tools/audio/heritage-calibration/test_heritage_calibration.py"
+   ],
+   "kind": "python"
+  },
+  "host-quirks-catalog-parity": {
+   "entry": "tools/scripts/test_host_quirks_catalog_parity.py",
+   "inputs": [
+    "tools/scripts/test_host_quirks_catalog_parity.py"
+   ],
+   "kind": "python"
+  },
+  "host-vitals-selftest": {
+   "entry": "tools/scripts/test_host_vitals.sh",
+   "inputs": [
+    "tools/scripts/test_host_vitals.sh"
+   ],
+   "kind": "shell"
+  },
+  "import-fidelity-diff": {
+   "entry": "test/test_import_fidelity_diff.py",
+   "inputs": [
+    "test/test_import_fidelity_diff.py"
+   ],
+   "kind": "python"
+  },
+  "import-layout-parity": {
+   "entry": "test/test_layout_parity.py",
+   "inputs": [
+    "test/test_layout_parity.py"
+   ],
+   "kind": "python"
+  },
+  "import-layout-parity-gate": {
+   "entry": "test/test_layout_parity_gate.py",
+   "inputs": [
+    "test/fixtures/imports/fig/synthetic.fig",
+    "test/test_layout_parity_gate.py",
+    "tools/import-design/fig_decode.mjs",
+    "tools/import-design/layout_parity.py"
+   ],
+   "kind": "python"
+  },
+  "import-montage": {
+   "entry": "test/test_import_montage.py",
+   "inputs": [
+    "test/test_import_montage.py"
+   ],
+   "kind": "python"
+  },
+  "import-realtime-contract": {
+   "entry": "tools/import-design/test_realtime_contract.py",
+   "inputs": [
+    "tools/import-design/realtime_contract.py",
+    "tools/import-design/test_realtime_contract.py"
+   ],
+   "kind": "python"
+  },
+  "import-vendored-runtime-staleness": {
+   "entry": "tools/import-validation/test_check_vendored_runtime.py",
+   "inputs": [
+    "tools/import-validation/check_vendored_runtime.py",
+    "tools/import-validation/test_check_vendored_runtime.py"
+   ],
+   "kind": "python"
+  },
+  "importer-differential-lab": {
+   "entry": "test/test_importer_differential_lab.py",
+   "inputs": [
+    "test/test_importer_differential_lab.py"
+   ],
+   "kind": "python"
+  },
+  "inject-claude-prefs-hook": {
+   "entry": "test/test_inject_claude_prefs_hook.sh",
+   "inputs": [
+    "test/test_inject_claude_prefs_hook.sh"
+   ],
+   "kind": "shell"
+  },
+  "inject-worktree-lineage-hook": {
+   "entry": "test/test_inject_worktree_lineage_hook.sh",
+   "inputs": [
+    "test/test_inject_worktree_lineage_hook.sh"
+   ],
+   "kind": "shell"
+  },
+  "inspector-protocol-registry-check-selftest": {
+   "entry": "tools/scripts/check_inspector_protocol_registry.py",
+   "inputs": [
+    "experimental/pulp-rs/src",
+    "inspect/include/pulp/inspect/protocol.hpp",
+    "inspect/include/pulp/inspect/protocol_methods.inc",
+    "tools/cli",
+    "tools/mcp",
+    "tools/scripts/check_inspector_protocol_registry.py"
+   ],
+   "kind": "python"
+  },
+  "inspector-protocol-registry-complete": {
+   "entry": "tools/scripts/check_inspector_protocol_registry.py",
+   "inputs": [
+    "experimental/pulp-rs/src",
+    "inspect/include/pulp/inspect/protocol.hpp",
+    "inspect/include/pulp/inspect/protocol_methods.inc",
+    "tools/cli",
+    "tools/mcp",
+    "tools/scripts/check_inspector_protocol_registry.py"
+   ],
+   "kind": "python"
+  },
+  "inspector-truth-check-selftest": {
+   "entry": "tools/scripts/test_inspector_truth_check.py",
+   "inputs": [
+    "docs/status/cli-commands.yaml",
+    "experimental/pulp-rs/src/cmd",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/help.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "inspect/CMakeLists.txt",
+    "inspect/include/pulp/inspect",
+    "inspect/include/pulp/inspect/capability_definitions.inc",
+    "inspect/include/pulp/inspect/client.hpp",
+    "inspect/include/pulp/inspect/control_inspector_client.hpp",
+    "inspect/include/pulp/inspect/control_registry_digest.inc",
+    "inspect/include/pulp/inspect/trace_inspector.hpp",
+    "inspect/src/control_manifest.cpp",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "tools/cli",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_inspect.cpp",
+    "tools/cli/pulp_cli.cpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/mcp",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/inspector_truth_check.py",
+    "tools/scripts/test_inspector_truth_check.py"
+   ],
+   "kind": "python"
+  },
+  "install-control-broker-activation": {
+   "entry": "test/test_install_control_broker_activation.sh",
+   "inputs": [
+    "test/test_install_control_broker_activation.sh"
+   ],
+   "kind": "shell"
+  },
+  "install-rpath-closure": {
+   "entry": "tools/scripts/test_check_installed_rpaths.py",
+   "inputs": [
+    "tools/scripts/check_installed_rpaths.py",
+    "tools/scripts/test_check_installed_rpaths.py"
+   ],
+   "kind": "python"
+  },
+  "install-sh-platform-detect": {
+   "entry": "test/test_install_platform_detect.sh",
+   "inputs": [
+    "test/test_install_platform_detect.sh"
+   ],
+   "kind": "shell"
+  },
+  "install-sh-runs-sdk-install": {
+   "entry": "test/test_install_sh_runs_sdk_install.sh",
+   "inputs": [
+    "test/test_install_sh_runs_sdk_install.sh"
+   ],
+   "kind": "shell"
+  },
+  "install-sha256sums-current": {
+   "entry": "tools/scripts/test_install_sha256sums.py",
+   "inputs": [
+    "tools/scripts/test_install_sha256sums.py"
+   ],
+   "kind": "python"
+  },
+  "interchange-capability-emit-selftest": {
+   "entry": "core/interchange/tools/test_capability_emit.py",
+   "inputs": [
+    "core/interchange/tools/capability_emit.py",
+    "core/interchange/tools/test_capability_emit.py"
+   ],
+   "kind": "python"
+  },
+  "interchange-concepts-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/interchange/include/pulp/interchange/generated/concepts.hpp",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "interchange-matrix-docs-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "docs/reference/interchange-matrix.md",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "interchange-tables-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/interchange/include/pulp/interchange/generated/capability_tables.hpp",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "ios-compile-gate-legs": {
+   "entry": "tools/scripts/test_ios_compile_gate_legs.py",
+   "inputs": [
+    "tools/scripts/test_ios_compile_gate_legs.py"
+   ],
+   "kind": "python"
+  },
+  "ios-gate-digest-selftest": {
+   "entry": "tools/ci/test_ios_gate_digest.py",
+   "inputs": [
+    ".github/ISSUE_TEMPLATE",
+    ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
+    ".github/workflows",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
+    "core/midi/include/pulp/midi/midi.hpp",
+    "core/view/src/widgets.cpp",
+    "docs/status/agent-capabilities.json",
+    "docs/status/authority-navigation.json",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "docs/status/gpu-recipes.yaml",
+    "test/CMakeLists.txt",
+    "test/cmake/check_bundle_build_info.cmake",
+    "test/cmake/plugin_lab_clap_roundtrip.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/test_ios_compile_gate.sh",
+    "test/gpu_health_scene3d_acceptance.cpp",
+    "test/mac_objc_coload_probe.cpp",
+    "test/test_agent_capability_compile.cpp",
+    "test/test_biquad.cpp",
+    "test/test_control_phase15_aggregate_e2e.cpp",
+    "test/test_coremidi_shared_client.cpp",
+    "tools/ci/ios_gate_digest.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/test_ios_gate_digest.py",
+    "tools/ci/wide_non_native_checks.json",
+    "tools/cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
+    "tools/dsp_vocabulary.py",
+    "tools/import-validation",
+    "tools/scripts",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/gates.sh",
+    "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_ios_compile_gate_legs.py",
+    "tools/scripts/test_prepush_gate_supervisor.py",
+    "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/wide_non_native.py",
+    "tools/testing"
+   ],
+   "kind": "python"
+  },
+  "linux-runner-group-selftest": {
+   "entry": "tools/ci/test_verify_linux_runner_group.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/test_verify_linux_runner_group.py"
+   ],
+   "kind": "python"
+  },
+  "linux-runner-lane-contract": {
+   "entry": "tools/ci/test_linux_runner_lane_contract.py",
+   "inputs": [
+    "tools/ci/proxmox-pr-safe-ephemeral-runner-linux.sh",
+    "tools/ci/proxmox-trusted-ephemeral-runner-linux.sh",
+    "tools/ci/pulp-ephemeral-runner.sh",
+    "tools/ci/test_linux_runner_lane_contract.py"
+   ],
+   "kind": "python"
+  },
+  "live-build-check-selftest": {
+   "entry": "tools/scripts/test_live_build_check.py",
+   "inputs": [
+    "tools/scripts/test_live_build_check.py"
+   ],
+   "kind": "python"
+  },
+  "local-diff-cover-selftest": {
+   "entry": "tools/scripts/test_local_diff_cover.py",
+   "inputs": [
+    ".githooks/pre-push",
+    "tools/scripts/local_diff_cover.sh",
+    "tools/scripts/test_local_diff_cover.py"
+   ],
+   "kind": "python"
+  },
+  "mac-objc-source-list-guard": {
+   "entry": "tools/scripts/mac_objc_source_list_guard.py",
+   "inputs": [
+    "core/view/CMakeLists.txt",
+    "core/view/platform/mac",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/scripts/mac_objc_source_list_guard.py"
+   ],
+   "kind": "python"
+  },
+  "mac-objc-source-list-guard-selftest": {
+   "entry": "tools/scripts/test_mac_objc_source_list_guard.py",
+   "inputs": [
+    "core/view/CMakeLists.txt",
+    "core/view/platform/mac",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/scripts/mac_objc_source_list_guard.py",
+    "tools/scripts/test_mac_objc_source_list_guard.py"
+   ],
+   "kind": "python"
+  },
+  "measure-min-os-selftest": {
+   "entry": "tools/scripts/test_measure_min_os.py",
+   "inputs": [
+    "tools/scripts/measure_min_os.py",
+    "tools/scripts/test_measure_min_os.py"
+   ],
+   "kind": "python"
+  },
+  "merge-group-shadows-selftest": {
+   "entry": "tools/ci/test_merge_group_shadows.py",
+   "inputs": [
+    "tools/ci/merge_group_shadows.py",
+    "tools/ci/test_merge_group_shadows.py"
+   ],
+   "kind": "python"
+  },
+  "minblep-table-reproducible": {
+   "entry": "tools/scripts/generate_minblep_table.py",
+   "inputs": [
+    "core/signal/include/pulp/signal/osc/detail/minblep_table.hpp",
+    "tools/scripts/generate_minblep_table.py"
+   ],
+   "kind": "python"
+  },
+  "minos-registry-absent-selftest": {
+   "entry": "tools/scripts/test_minos_registry_absent.py",
+   "inputs": [
+    "tools/scripts/test_minos_registry_absent.py"
+   ],
+   "kind": "python"
+  },
+  "msvc-string-literal-guard": {
+   "entry": "tools/scripts/msvc_string_literal_guard.py",
+   "inputs": [
+    "examples/threejs-native-demo/main.cpp",
+    "tools/cli",
+    "tools/scripts/msvc_string_literal_guard.py"
+   ],
+   "kind": "python"
+  },
+  "native-intel-runner-group-selftest": {
+   "entry": "tools/ci/test_verify_native_intel_runner_group.py",
+   "inputs": [
+    "tools/ci/test_verify_native_intel_runner_group.py"
+   ],
+   "kind": "python"
+  },
+  "native-intel-runner-selftest": {
+   "entry": "tools/ci/test_native_intel_runner.py",
+   "inputs": [
+    "tools/ci/test_native_intel_runner.py"
+   ],
+   "kind": "python"
+  },
+  "odr-macro-gated-headers": {
+   "entry": "tools/scripts/test_odr_macro_gated_headers.py",
+   "inputs": [
+    "test/denormal_null_refgen.cpp",
+    "tools/scripts/repo_source_scan.py",
+    "tools/scripts/test_odr_macro_gated_headers.py"
+   ],
+   "kind": "python"
+  },
+  "overlay-dismissal-wiring": {
+   "entry": "tools/scripts/overlay_dismissal_wiring_guard.py",
+   "inputs": [
+    "core/view/include/pulp/view/overlay_dismissal.hpp",
+    "core/view/include/pulp/view/platform",
+    "core/view/include/pulp/view/web",
+    "core/view/platform",
+    "core/view/src/overlay_dismissal.cpp",
+    "tools/scripts/overlay_dismissal_wiring_guard.py"
+   ],
+   "kind": "python"
+  },
+  "palette-health-selftest": {
+   "entry": "tools/import-validation/test_check_palette_health.py",
+   "inputs": [
+    "tools/import-validation/test_check_palette_health.py"
+   ],
+   "kind": "python"
+  },
+  "param-designator-order": {
+   "entry": "tools/scripts/test_param_designator_order.py",
+   "inputs": [
+    "tools/scripts/repo_source_scan.py",
+    "tools/scripts/test_param_designator_order.py"
+   ],
+   "kind": "python"
+  },
+  "planning-gitlink-guard-selftest": {
+   "entry": "tools/scripts/test_planning_gitlink_guard.py",
+   "inputs": [
+    "tools/scripts/test_planning_gitlink_guard.py"
+   ],
+   "kind": "python"
+  },
+  "playback-negative-capability": {
+   "entry": "tools/scripts/negative_capability_check.py",
+   "inputs": [
+    "core/host/include/pulp/host/timeline_graph_binding.hpp",
+    "core/playback/include/pulp/playback/program_compiler.hpp",
+    "core/playback/src/program_compiler.cpp",
+    "core/playback/src/sequence_content_lowerer.cpp",
+    "core/timeline/include/pulp/timeline",
+    "core/timeline/schema/timeline_schema.json",
+    "tools/scripts/negative_capability_allowlist.json",
+    "tools/scripts/negative_capability_check.py"
+   ],
+   "kind": "python"
+  },
+  "playback-negative-capability-selftest": {
+   "entry": "tools/scripts/negative_capability_check.py",
+   "inputs": [
+    "core/host/include/pulp/host/timeline_graph_binding.hpp",
+    "core/playback/include/pulp/playback/program_compiler.hpp",
+    "core/playback/src/program_compiler.cpp",
+    "core/playback/src/sequence_content_lowerer.cpp",
+    "core/timeline/include/pulp/timeline",
+    "core/timeline/schema/timeline_schema.json",
+    "tools/scripts/negative_capability_allowlist.json",
+    "tools/scripts/negative_capability_check.py"
+   ],
+   "kind": "python"
+  },
+  "portable-ci-timeout-selftest": {
+   "entry": "tools/ci/test_run_with_timeout.py",
+   "inputs": [
+    "tools/ci/run_with_timeout.py",
+    "tools/ci/test_run_with_timeout.py"
+   ],
+   "kind": "python"
+  },
+  "pr-batch-advisor": {
+   "entry": "tools/scripts/test_pr_batch_advisor.py",
+   "inputs": [
+    "tools/scripts/test_pr_batch_advisor.py"
+   ],
+   "kind": "python"
+  },
+  "pr-check-triage-selftest": {
+   "entry": "tools/scripts/test_pr_check_triage.py",
+   "inputs": [
+    "tools/scripts/test_pr_check_triage.py"
+   ],
+   "kind": "python"
+  },
+  "pr-fast-tier-contract": {
+   "entry": "tools/scripts/pr_fast_tier_check.py",
+   "inputs": [
+    "tools/scripts/pr_fast_tier_check.py"
+   ],
+   "kind": "python"
+  },
+  "pr-fast-tier-selftest": {
+   "entry": "tools/scripts/test_pr_fast_tier_check.py",
+   "inputs": [
+    "tools/scripts/test_pr_fast_tier_check.py"
+   ],
+   "kind": "python"
+  },
+  "pr-flow-audit-selftest": {
+   "entry": "tools/scripts/test_pr_flow_audit.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/scripts/test_pr_flow_audit.py"
+   ],
+   "kind": "python"
+  },
+  "pr-head-affected-tests-selftest": {
+   "entry": "tools/ci/test_pr_head_affected_tests.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "test/CMakeLists.txt",
+    "test/cmake/cmake_smoke_tests.cmake",
+    "test/cmake/pr_fast_tests.cmake",
+    "tools/ci/build_dir_lock.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/pr_head_affected_tests.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/ci/test_pr_head_affected_tests.py",
+    "tools/ci/wide_non_native_checks.json",
+    "tools/cmake/PulpPlugin.cmake",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/affected_targets.py",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "prepush-cannot-measure": {
+   "entry": "tools/scripts/test_prepush_cannot_measure.py",
+   "inputs": [
+    ".githooks/lib/gate-output.sh",
+    ".githooks/pre-push",
+    "tools/scripts/test_prepush_cannot_measure.py"
+   ],
+   "kind": "python"
+  },
+  "prepush-format-gate-wiring": {
+   "entry": "tools/scripts/test_prepush_format_gate.py",
+   "inputs": [
+    ".githooks/pre-push",
+    ".github/workflows/format-changed-check.yml",
+    "tools/scripts/format_changed.sh",
+    "tools/scripts/gates.sh",
+    "tools/scripts/test_prepush_format_gate.py"
+   ],
+   "kind": "python"
+  },
+  "prepush-gate-output": {
+   "entry": "tools/scripts/test_prepush_gate_output.py",
+   "inputs": [
+    ".githooks/lib/gate-output.sh",
+    ".githooks/pre-push",
+    "tools/scripts/test_prepush_gate_output.py"
+   ],
+   "kind": "python"
+  },
+  "prepush-gate-supervisor": {
+   "entry": "tools/scripts/test_prepush_gate_supervisor.py",
+   "inputs": [
+    "tools/scripts/test_prepush_gate_supervisor.py"
+   ],
+   "kind": "python"
+  },
+  "prepush-refresh-push": {
+   "entry": "tools/scripts/test_refresh_push_check.py",
+   "inputs": [
+    ".githooks/lib",
+    ".githooks/pre-push",
+    "tools/scripts",
+    "tools/scripts/refresh_push_check.py",
+    "tools/scripts/test_refresh_push_check.py"
+   ],
+   "kind": "python"
+  },
+  "process-deadline-selftest": {
+   "entry": "tools/ci/test_run_with_deadline.py",
+   "inputs": [
+    "tools/ci/test_run_with_deadline.py"
+   ],
+   "kind": "python"
+  },
+  "project-package-mutation-control": {
+   "entry": "build-gate/test/run_project_package_mutation_control.py",
+   "inputs": [],
+   "kind": "python"
+  },
+  "pulp-browser-capture-node-integration": {
+   "entry": "tools/import-design/browser_capture/run_integration.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/capture.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_frame_fitting.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_geometry.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_interaction_guards.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_interactions.integration.test.mjs",
+    "tools/import-design/browser_capture/capture_paint.integration.test.mjs",
+    "tools/import-design/browser_capture/run_integration.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-browser-capture-node-unit": {
+   "entry": "tools/import-design/browser_capture/health.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/health.mjs",
+    "tools/import-design/browser_capture/health.test.mjs",
+    "tools/import-design/browser_capture/interactions.test.mjs",
+    "tools/import-design/browser_capture/lifecycle.test.mjs",
+    "tools/import-design/browser_capture/materialized_coordinate_space.test.mjs",
+    "tools/import-design/browser_capture/materialized_layout_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_paint_bindings.test.mjs",
+    "tools/import-design/browser_capture/materialized_text_bindings.test.mjs",
+    "tools/import-design/browser_capture/native_text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/network_dependencies.test.mjs",
+    "tools/import-design/browser_capture/renderers.test.mjs",
+    "tools/import-design/browser_capture/run_integration.test.mjs",
+    "tools/import-design/browser_capture/security.test.mjs",
+    "tools/import-design/browser_capture/semantics.test.mjs",
+    "tools/import-design/browser_capture/settle.test.mjs",
+    "tools/import-design/browser_capture/text_diagnostics.test.mjs",
+    "tools/import-design/browser_capture/tokens.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_css_variables.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_dynamic_layout.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_font_bindings.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_frame_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_layer_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_metadata_contract.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_canvas_owner.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_runtime_commit_cost.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_state_atlas.test.mjs",
+    "tools/import-design/jsx-runtime/materialized_text_contract.test.mjs",
+    "tools/import-design/jsx-runtime/runtime_fingerprint.test.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-browser-capture-process-lifecycle": {
+   "entry": "tools/import-design/browser_capture/browser_process.test.mjs",
+   "inputs": [
+    "tools/import-design/browser_capture/browser_process.mjs",
+    "tools/import-design/browser_capture/browser_process.test.mjs",
+    "tools/import-design/browser_capture/security.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-cli-autoupdate-hook": {
+   "entry": "test/test_pulp_cli_autoupdate.sh",
+   "inputs": [
+    "test/test_pulp_cli_autoupdate.sh"
+   ],
+   "kind": "shell"
+  },
+  "pulp-fig-decode-unit": {
+   "entry": "tools/import-design/fig/fig.test.mjs",
+   "inputs": [
+    "tools/import-design/fig/container.mjs",
+    "tools/import-design/fig/fig.test.mjs",
+    "tools/import-design/fig/fonts.mjs",
+    "tools/import-design/fig/kiwi.mjs",
+    "tools/import-design/fig/paths-layout-stroke.test.mjs",
+    "tools/import-design/fig/paths.mjs",
+    "tools/import-design/fig/paths.test.mjs",
+    "tools/import-design/fig/scene.mjs",
+    "tools/import-design/material_audit.test.mjs"
+   ],
+   "kind": "node"
+  },
+  "pulp-installer-mcp-contract": {
+   "entry": "test/test_pulp_installer_mcp_contract.sh",
+   "inputs": [
+    "test/test_pulp_installer_mcp_contract.sh"
+   ],
+   "kind": "shell"
+  },
+  "pulp-mcp-binary-smoke": {
+   "entry": "test/test_pulp_mcp_binary_smoke.py",
+   "inputs": [
+    "test/test_pulp_mcp_binary_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-visual-capture-smoke": {
+   "entry": "tools/motion/visual/test_capture_smoke.py",
+   "inputs": [
+    "tools/motion/visual/test_capture_smoke.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-visual-grid-self-check": {
+   "entry": "tools/motion/visual/test_grid_overlay.py",
+   "inputs": [
+    "tools/motion/visual/test_grid_overlay.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-motion-visual-self-check": {
+   "entry": "tools/motion/visual/test_self_check.py",
+   "inputs": [
+    "tools/motion/visual/test_self_check.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-rust-gpu-trace-analysis-ctest-selftest": {
+   "entry": "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py",
+   "inputs": [
+    "experimental/pulp-rs/tests/test_trace_gpu_analysis_ctest.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-rust-gpu-trace-analysis-integration": {
+   "entry": "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py",
+   "inputs": [
+    "experimental/pulp-rs/Cargo.toml",
+    "experimental/pulp-rs/tests/run_trace_gpu_analysis_integration.py"
+   ],
+   "kind": "python"
+  },
+  "pulp-test-timeout-enforced": {
+   "entry": "test/test_ctest_timeout_kills_wedged.sh",
+   "inputs": [
+    "test/test_ctest_timeout_kills_wedged.sh"
+   ],
+   "kind": "shell"
+  },
+  "pulp-uninstaller-contract": {
+   "entry": "tools/scripts/test_pulp_uninstall.py",
+   "inputs": [
+    "tools/scripts/test_pulp_uninstall.py"
+   ],
+   "kind": "python"
+  },
+  "pulp_bundle_threejs_for_jsc_smoke": {
+   "entry": "tools/scripts/test_bundle_threejs_for_jsc.mjs",
+   "inputs": [
+    "tools/scripts/test_bundle_threejs_for_jsc.mjs"
+   ],
+   "kind": "node"
+  },
+  "queue-batch-attribute-selftest": {
+   "entry": "tools/scripts/test_queue_batch_attribute.py",
+   "inputs": [
+    ".github/actions",
+    ".github/actions/install-linux-build-deps/action.yml",
+    ".github/workflows",
+    ".github/workflows/build.yml",
+    ".github/workflows/wclap-cloudflare.yml",
+    "core/canvas/include",
+    "core/canvas/include/pulp/canvas/drawlist_format.hpp",
+    "core/canvas/include/pulp/canvas/path.hpp",
+    "core/canvas/include/pulp/canvas/path_measure.hpp",
+    "core/canvas/src/path_measure.cpp",
+    "core/view/include",
+    "core/view/src/widget_bridge/widget_assets_api.cpp",
+    "core/view/src/widgets.cpp",
+    "docs/status/consumption-profiles.json",
+    "docs/status/consumption-profiles.schema.json",
+    "test/cmake/consumption_census_tests.cmake",
+    "test/cmake/quality_tests.cmake",
+    "test/cmake/test_gpu_audio_sdk_consumer.cmake",
+    "test/test_canvas_path_measure.cpp",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/queue_admission_guard.py",
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/test_prepush_cannot_measure.py",
+    "tools/scripts/test_queue_batch_attribute.py"
+   ],
+   "kind": "python"
+  },
+  "rack-acid-behavior": {
+   "entry": "tools/rack/test_acid_behavior.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_acid_behavior.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-acid-preflight": {
+   "entry": "tools/rack/test_acid_preflight.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_acid_preflight.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-acid-runtime-gate": {
+   "entry": "tools/rack/test_acid_runtime_gate.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_acid_runtime_gate.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-acid-taps": {
+   "entry": "tools/rack/test_acid_taps.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_acid_taps.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-adjudicate-scenes": {
+   "entry": "tools/rack/test_adjudicate_scenes.py",
+   "inputs": [
+    "tools/rack/adjudicate_scenes.py",
+    "tools/rack/file_lock.py",
+    "tools/rack/qualify_scenes.py",
+    "tools/rack/test_adjudicate_scenes.py"
+   ],
+   "kind": "python"
+  },
+  "rack-capability-lessons": {
+   "entry": "tools/rack/test_capability_lessons.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_capability_lessons.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-capability-verify": {
+   "entry": "tools/rack/test_capability_verify.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/capability_verify.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_capability_lessons.py",
+    "tools/rack/test_capability_verify.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-corpus-audit": {
+   "entry": "tools/rack/test_corpus_audit.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/corpus_audit.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_corpus.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_corpus_audit.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-corpus-export": {
+   "entry": "tools/rack/test_corpus_export.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/corpus_audit.py",
+    "tools/rack/corpus_export.py",
+    "tools/rack/corpus_sweep.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_corpus.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_corpus_export.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-cv-depth": {
+   "entry": "tools/rack/test_cv_depth.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_cv_depth.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-deterministic-repair": {
+   "entry": "tools/rack/test_deterministic_repair.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_deterministic_repair.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-fidelity": {
+   "entry": "tools/rack/test_fidelity.py",
+   "inputs": [
+    "tools/rack/crash_watch.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/test_fidelity.py"
+   ],
+   "kind": "python"
+  },
+  "rack-generation-eligibility": {
+   "entry": "tools/rack/test_generation_eligibility.py",
+   "inputs": [
+    "examples/forge-modular/app/ui/main.js",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_generation_eligibility.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-generator-endings": {
+   "entry": "tools/rack/test_generator_endings.py",
+   "inputs": [
+    "tools/rack/test_generator_endings.py"
+   ],
+   "kind": "python"
+  },
+  "rack-generator-safety": {
+   "entry": "tools/rack/test_generate_safety.py",
+   "inputs": [
+    "core/audio",
+    "core/format",
+    "core/platform",
+    "core/runtime",
+    "core/signal",
+    "core/signal/include/pulp/signal",
+    "core/state",
+    "core/timebase",
+    "core/timebase/include/pulp/timebase",
+    "docs/status/agent-capabilities.json",
+    "examples/forge-modular/install_pack.sh",
+    "examples/forge-modular/modules",
+    "examples/forge-modular/src",
+    "external/fonts",
+    "tools/dsp_vocabulary.py",
+    "tools/rack",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/generate.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/knowledge/module/dsp-primitives.json",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_generate_safety.py",
+    "tools/rack/toolchain_headers.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-inert-input-cause": {
+   "entry": "tools/rack/test_inert_input_cause.py",
+   "inputs": [
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/test_inert_input_cause.py"
+   ],
+   "kind": "python"
+  },
+  "rack-knowledge-admission": {
+   "entry": "tools/rack/test_knowledge_admission.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_knowledge_admission.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-licence-fix-replay": {
+   "entry": "tools/rack/test_replay_licence_fix.py",
+   "inputs": [
+    "examples/forge-modular/patches",
+    "examples/forge-modular/patches/kick.vcv",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/fixtures",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_gate.cpp",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/replay_licence_fix.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_fixtures",
+    "tools/rack/test_replay_licence_fix.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-measure-ranges": {
+   "entry": "tools/rack/test_measure_ranges.py",
+   "inputs": [
+    "tools/rack/crash_watch.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/param_units.py",
+    "tools/rack/test_measure_ranges.py"
+   ],
+   "kind": "python"
+  },
+  "rack-module-index-atomic": {
+   "entry": "tools/rack/test_module_index_atomic.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_module_index_atomic.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-param-units": {
+   "entry": "tools/rack/test_param_units.py",
+   "inputs": [
+    "tools/rack/param_units.py",
+    "tools/rack/test_param_units.py"
+   ],
+   "kind": "python"
+  },
+  "rack-patch-replay": {
+   "entry": "tools/rack/test_patch_replay.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_patch_replay.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-physical-targets": {
+   "entry": "tools/rack/test_physical_targets.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_physical_targets.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-plugin-loads": {
+   "entry": "tools/rack/test_rack_plugin_loads.py",
+   "inputs": [
+    "core/audio",
+    "core/format",
+    "core/platform",
+    "core/runtime",
+    "core/signal",
+    "core/state",
+    "core/timebase",
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/generate.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_rack_plugin_loads.py",
+    "tools/rack/toolchain_headers.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-qualify-scenes": {
+   "entry": "tools/rack/test_qualify_scenes.py",
+   "inputs": [
+    "examples/forge-modular/binary_identity.py",
+    "tools/rack",
+    "tools/rack/file_lock.py",
+    "tools/rack/qualify_scenes.py",
+    "tools/rack/test_qualify_scenes.py"
+   ],
+   "kind": "python"
+  },
+  "rack-recover-subset-font-pdf": {
+   "entry": "tools/rack/test_recover_subset_font_pdf.py",
+   "inputs": [
+    "tools/rack/recover_subset_font_pdf.py",
+    "tools/rack/test_recover_subset_font_pdf.py"
+   ],
+   "kind": "python"
+  },
+  "rack-run-state": {
+   "entry": "tools/rack/test_run_state.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_run_state.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-signal-path": {
+   "entry": "tools/rack/test_signal_path.py",
+   "inputs": [
+    "tools/rack/acid_behavior.py",
+    "tools/rack/acid_runtime_gate.py",
+    "tools/rack/acid_taps.py",
+    "tools/rack/affordances.py",
+    "tools/rack/archive.py",
+    "tools/rack/attempt_artifacts.py",
+    "tools/rack/capability_lessons.py",
+    "tools/rack/crash_watch.py",
+    "tools/rack/cv_depth.py",
+    "tools/rack/deterministic_repair.py",
+    "tools/rack/fetch_sdk.py",
+    "tools/rack/fidelity.py",
+    "tools/rack/fidelity_signal.py",
+    "tools/rack/forge_modular.py",
+    "tools/rack/idiom_check.py",
+    "tools/rack/intent_context.py",
+    "tools/rack/knowledge.py",
+    "tools/rack/maker_intent.py",
+    "tools/rack/measure_ranges.py",
+    "tools/rack/module_kinds.py",
+    "tools/rack/param_units.py",
+    "tools/rack/patch.py",
+    "tools/rack/patch_vocabulary.py",
+    "tools/rack/portmap_seed.py",
+    "tools/rack/rack_open.py",
+    "tools/rack/run_state.py",
+    "tools/rack/signal_path.py",
+    "tools/rack/test_signal_path.py",
+    "tools/rack/toolpaths.py"
+   ],
+   "kind": "python"
+  },
+  "rack-source-index": {
+   "entry": "tools/rack/test_source_index.py",
+   "inputs": [
+    "tools/rack/source_index.py",
+    "tools/rack/test_source_index.py"
+   ],
+   "kind": "python"
+  },
+  "rack-with-app-model-selection": {
+   "entry": "tools/rack/test_with_app_model_selection.py",
+   "inputs": [
+    "tools/rack/test_with_app_model_selection.py"
+   ],
+   "kind": "python"
+  },
+  "raw-this-async-check": {
+   "entry": "tools/scripts/raw_this_async_check.py",
+   "inputs": [
+    "tools/scripts/raw_this_async_check.py"
+   ],
+   "kind": "python"
+  },
+  "raw-this-async-selftest": {
+   "entry": "tools/scripts/raw_this_async_check.py",
+   "inputs": [
+    "tools/scripts/raw_this_async_check.py"
+   ],
+   "kind": "python"
+  },
+  "refactor-baseline-manifest": {
+   "entry": "tools/scripts/verify_refactor_baselines.py",
+   "inputs": [
+    "core/render/src/renderer3d.cpp",
+    "core/view/src/widget_bridge.cpp",
+    "test/fixtures/refactor-baselines/phase0-hotspots.json",
+    "tools/scripts/verify_refactor_baselines.py"
+   ],
+   "kind": "python"
+  },
+  "refactor-baseline-manifest-negative-contract": {
+   "entry": "tools/scripts/verify_refactor_baselines_contract.py",
+   "inputs": [
+    "test/fixtures/refactor-baselines/phase0-hotspots.json",
+    "tools/scripts/verify_refactor_baselines.py",
+    "tools/scripts/verify_refactor_baselines_contract.py"
+   ],
+   "kind": "python"
+  },
+  "refactor-downstream-consumers-manifest": {
+   "entry": "tools/scripts/verify_downstream_consumers.py",
+   "inputs": [
+    "test/fixtures/refactor-baselines/downstream-consumers.json",
+    "tools/scripts/verify_downstream_consumers.py"
+   ],
+   "kind": "python"
+  },
+  "refactor-downstream-consumers-negative-contract": {
+   "entry": "tools/scripts/verify_downstream_consumers_contract.py",
+   "inputs": [
+    "test/fixtures/refactor-baselines/downstream-consumers.json",
+    "tools/scripts/verify_downstream_consumers.py",
+    "tools/scripts/verify_downstream_consumers_contract.py"
+   ],
+   "kind": "python"
+  },
+  "relay-contract-hosts": {
+   "entry": "tools/scripts/relay_contract_check.py",
+   "inputs": [
+    "tools/rack/library_catalog.py",
+    "tools/scripts/bundle_threejs_for_jsc.mjs",
+    "tools/scripts/relay_contract_check.py"
+   ],
+   "kind": "python"
+  },
+  "relay-contract-hosts-selftest": {
+   "entry": "tools/scripts/test_relay_contract_check.py",
+   "inputs": [
+    "tools/rack/library_catalog.py",
+    "tools/scripts/bundle_threejs_for_jsc.mjs",
+    "tools/scripts/relay_contract_check.py",
+    "tools/scripts/test_relay_contract_check.py"
+   ],
+   "kind": "python"
+  },
+  "release-trailer-guard-selftest": {
+   "entry": "tools/scripts/test_release_trailer_guard.py",
+   "inputs": [
+    "tools/scripts/gate_common.py",
+    "tools/scripts/release_trailer_guard.py",
+    "tools/scripts/test_release_trailer_guard.py",
+    "tools/scripts/version_bump_apply.py",
+    "tools/scripts/version_bump_check.py",
+    "tools/scripts/version_bump_heuristics.py",
+    "tools/scripts/version_bump_render.py",
+    "tools/scripts/version_bump_surfaces.py"
+   ],
+   "kind": "python"
+  },
+  "repo-source-scan": {
+   "entry": "tools/scripts/test_repo_source_scan.py",
+   "inputs": [
+    "test/test_signal.cpp",
+    "tools/scripts/repo_source_scan.py",
+    "tools/scripts/test_repo_source_scan.py"
+   ],
+   "kind": "python"
+  },
+  "retry-git-clone": {
+   "entry": "test/test_retry_git_clone.sh",
+   "inputs": [
+    "test/test_retry_git_clone.sh"
+   ],
+   "kind": "shell"
+  },
+  "runner-topology-selftest": {
+   "entry": "tools/scripts/test_runner_topology_check.py",
+   "inputs": [
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/test_runner_topology_check.py"
+   ],
+   "kind": "python"
+  },
+  "runner-topology-static-selftest": {
+   "entry": "tools/scripts/test_runner_topology_static.py",
+   "inputs": [
+    ".github/workflows",
+    "tools/scripts/runner_topology.json",
+    "tools/scripts/runner_topology_check.py",
+    "tools/scripts/runner_topology_static.py",
+    "tools/scripts/test_runner_topology_static.py",
+    "tools/scripts/workflow_runner_selector_audit.py"
+   ],
+   "kind": "python"
+  },
+  "rust-cli-build-edge": {
+   "entry": "tools/scripts/rust_cli_build_edge_check.py",
+   "inputs": [
+    "tools/scripts/rust_cli_build_edge_check.py"
+   ],
+   "kind": "python"
+  },
+  "rust-cli-build-edge-selftest": {
+   "entry": "tools/scripts/test_rust_cli_build_edge_check.py",
+   "inputs": [
+    "tools/scripts/rust_cli_build_edge_check.py",
+    "tools/scripts/test_rust_cli_build_edge_check.py"
+   ],
+   "kind": "python"
+  },
+  "sample-region-catalog-contract": {
+   "entry": "tools/scripts/test_sample_region_catalogs.py",
+   "inputs": [
+    "core/host/include/pulp/host/forge_catalog_export.hpp",
+    "docs/status/dsp-capabilities.json",
+    "docs/status/forge-catalog.json",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/json_schema_lite.py",
+    "tools/scripts/test_sample_region_catalogs.py"
+   ],
+   "kind": "python"
+  },
+  "sample-region-compat-baseline": {
+   "entry": "tools/scripts/sample_region_compat_baseline.py",
+   "inputs": [
+    "core/format/include/pulp/format/processor.hpp",
+    "core/host/include/pulp/host/plugin_slot.hpp",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/node_abi_gate.py",
+    "tools/scripts/sample_region_compat_baseline.py"
+   ],
+   "kind": "python"
+  },
+  "sample-region-compat-baseline-selftest": {
+   "entry": "tools/scripts/test_sample_region_compat_baseline.py",
+   "inputs": [
+    "core/format/include/pulp/format/processor.hpp",
+    "core/host/include/pulp/host/plugin_slot.hpp",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/node_abi_gate.py",
+    "tools/scripts/sample_region_compat_baseline.py",
+    "tools/scripts/test_sample_region_compat_baseline.py"
+   ],
+   "kind": "python"
+  },
+  "sample-region-i2-rt02-process-contract": {
+   "entry": "test/sample_region_i2/rt02_process_contract.py",
+   "inputs": [
+    "core/host/include/pulp/host/sample_region_runtime.hpp",
+    "core/host/src/sample_region_runtime.cpp",
+    "test/sample_region_i2/rt02_process_contract.py"
+   ],
+   "kind": "python"
+  },
+  "sampler-interpolation-benchmark-source-evidence": {
+   "entry": "tools/scripts/verify_sampler_interpolation_benchmark.py",
+   "inputs": [
+    "core/audio/include/pulp/audio/loop_types.hpp",
+    "core/audio/include/pulp/audio/sample_interpolation.hpp",
+    "core/audio/include/pulp/audio/sample_sinc_kernel.hpp",
+    "core/signal/include/pulp/signal/interpolator.hpp",
+    "core/signal/include/pulp/signal/windowing.hpp",
+    "test/cmake/sampler_interpolation_benchmark_tests.cmake",
+    "test/sample_interpolation_benchmark.cpp",
+    "test/support/sample_interpolation_render.hpp",
+    "tools/scripts/verify_sampler_interpolation_benchmark.py"
+   ],
+   "kind": "python"
+  },
+  "sampler-interpolation-benchmark-source-evidence-self-test": {
+   "entry": "tools/scripts/verify_sampler_interpolation_benchmark.py",
+   "inputs": [
+    "core/audio/include/pulp/audio/loop_types.hpp",
+    "core/audio/include/pulp/audio/sample_interpolation.hpp",
+    "core/audio/include/pulp/audio/sample_sinc_kernel.hpp",
+    "core/signal/include/pulp/signal/interpolator.hpp",
+    "core/signal/include/pulp/signal/windowing.hpp",
+    "test/cmake/sampler_interpolation_benchmark_tests.cmake",
+    "test/sample_interpolation_benchmark.cpp",
+    "test/support/sample_interpolation_render.hpp",
+    "tools/scripts/verify_sampler_interpolation_benchmark.py"
+   ],
+   "kind": "python"
+  },
+  "scene3d-cmake-boundary": {
+   "entry": "tools/scene3d/verify_scene3d_cmake_boundary.py",
+   "inputs": [
+    "core/scene",
+    "tools/scene3d/verify_scene3d_cmake_boundary.py"
+   ],
+   "kind": "python"
+  },
+  "scene3d-cmake-boundary-negative-contract": {
+   "entry": "tools/scene3d/verify_scene3d_cmake_boundary_contract.py",
+   "inputs": [
+    "core/scene",
+    "tools/scene3d/verify_scene3d_cmake_boundary.py",
+    "tools/scene3d/verify_scene3d_cmake_boundary_contract.py"
+   ],
+   "kind": "python"
+  },
+  "script-test-inputs-drift": {
+   "entry": "tools/scripts/script_test_inputs.py",
+   "inputs": [
+    "docs/status",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "script-test-inputs-selftest": {
+   "entry": "tools/scripts/test_script_test_inputs.py",
+   "inputs": [
+    "docs/status",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "sdk-consumer-sweep-selftest": {
+   "entry": "tools/scripts/test_sdk_consumer_sweep.py",
+   "inputs": [
+    "tools/scripts/sdk_consumer_sweep.py",
+    "tools/scripts/test_sdk_consumer_sweep.py"
+   ],
+   "kind": "python"
+  },
+  "sdk-consumer-update-selftest": {
+   "entry": "tools/scripts/test_sdk_consumer_update.py",
+   "inputs": [
+    "tools/scripts/sdk_consumer_update.py",
+    "tools/scripts/test_sdk_consumer_update.py"
+   ],
+   "kind": "python"
+  },
+  "sdk-plist-templates-installed": {
+   "entry": "tools/scripts/test_sdk_plist_templates_installed.py",
+   "inputs": [
+    "tools/scripts/test_sdk_plist_templates_installed.py"
+   ],
+   "kind": "python"
+  },
+  "seed-build-dir-selftest": {
+   "entry": "tools/scripts/test_seed_build_dir.py",
+   "inputs": [
+    "tools/scripts/seed_build_dir.py",
+    "tools/scripts/test_seed_build_dir.py"
+   ],
+   "kind": "python"
+  },
+  "sequencer-control-skill-coverage": {
+   "entry": "tools/scripts/sequencer_control_skill_check.py",
+   "inputs": [
+    "docs/status/cli-commands.yaml",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/help.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "inspect/CMakeLists.txt",
+    "inspect/include/pulp/inspect/capability_definitions.inc",
+    "inspect/include/pulp/inspect/client.hpp",
+    "inspect/include/pulp/inspect/control_inspector_client.hpp",
+    "inspect/include/pulp/inspect/control_registry_digest.inc",
+    "inspect/include/pulp/inspect/trace_inspector.hpp",
+    "inspect/src/control_manifest.cpp",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_inspect.cpp",
+    "tools/cli/pulp_cli.cpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/inspector_truth_check.py",
+    "tools/scripts/sequencer_control_skill_check.py"
+   ],
+   "kind": "python"
+  },
+  "sequencer-control-skill-coverage-selftest": {
+   "entry": "tools/scripts/test_sequencer_control_skill_check.py",
+   "inputs": [
+    "docs/status/cli-commands.yaml",
+    "experimental/pulp-rs/src/cmd/trace.rs",
+    "experimental/pulp-rs/src/cmd/trace_dispatch.rs",
+    "experimental/pulp-rs/src/help.rs",
+    "experimental/pulp-rs/src/main.rs",
+    "inspect/CMakeLists.txt",
+    "inspect/include/pulp/inspect",
+    "inspect/include/pulp/inspect/capability_definitions.inc",
+    "inspect/include/pulp/inspect/client.hpp",
+    "inspect/include/pulp/inspect/control_inspector_client.hpp",
+    "inspect/include/pulp/inspect/control_registry_digest.inc",
+    "inspect/include/pulp/inspect/trace_inspector.hpp",
+    "inspect/src",
+    "inspect/src/control_manifest.cpp",
+    "test/cmake/view_widget_bridge_tests.cmake",
+    "tools/cli/CMakeLists.txt",
+    "tools/cli/cmd_inspect.cpp",
+    "tools/cli/pulp_cli.cpp",
+    "tools/cmake/PulpControlShipping.cmake",
+    "tools/cmake/PulpInstallRules.cmake",
+    "tools/cmake/PulpUtils.cmake",
+    "tools/mcp/CMakeLists.txt",
+    "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/inspector_truth_check.py",
+    "tools/scripts/sequencer_control_skill_check.py",
+    "tools/scripts/test_sequencer_control_skill_check.py"
+   ],
+   "kind": "python"
+  },
+  "setup-bootstrap-plan-guard": {
+   "entry": "tools/scripts/setup_bootstrap_plan_guard.py",
+   "inputs": [
+    "tools/scripts/setup_bootstrap_plan_guard.py"
+   ],
+   "kind": "python"
+  },
+  "setup-bootstrap-plan-guard-selftest": {
+   "entry": "tools/scripts/test_setup_bootstrap_plan_guard.py",
+   "inputs": [
+    "tools/scripts/test_setup_bootstrap_plan_guard.py"
+   ],
+   "kind": "python"
+  },
+  "setup-source-cache": {
+   "entry": "tools/scripts/test_setup_source_cache.sh",
+   "inputs": [
+    "tools/scripts/test_setup_source_cache.sh"
+   ],
+   "kind": "shell"
+  },
+  "silent-revert-guard-selftest": {
+   "entry": "tools/scripts/test_silent_revert_guard.py",
+   "inputs": [
+    "tools/scripts/gate_common.py",
+    "tools/scripts/silent_revert_guard.py",
+    "tools/scripts/test_silent_revert_guard.py"
+   ],
+   "kind": "python"
+  },
+  "skills-doc-check-selftest": {
+   "entry": "tools/scripts/test_skills_doc_check.py",
+   "inputs": [
+    "tools/scripts/skills_doc_check.py",
+    "tools/scripts/test_skills_doc_check.py"
+   ],
+   "kind": "python"
+  },
+  "skills-doc-sync": {
+   "entry": "tools/scripts/skills_doc_check.py",
+   "inputs": [
+    "tools/scripts/skills_doc_check.py"
+   ],
+   "kind": "python"
+  },
+  "skip-not-pass-lint": {
+   "entry": "tools/scripts/check_skip_not_pass.py",
+   "inputs": [
+    "tools/scripts/check_skip_not_pass.py"
+   ],
+   "kind": "python"
+  },
+  "skip-not-pass-lint-selftest": {
+   "entry": "tools/scripts/test_check_skip_not_pass.py",
+   "inputs": [
+    "tools/scripts/test_check_skip_not_pass.py"
+   ],
+   "kind": "python"
+  },
+  "source-selftest-lane-contract": {
+   "entry": "tools/ci/source_selftests.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "test/cmake/pr_fast_tests.cmake",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "source-selftest-lane-selftest": {
+   "entry": "tools/ci/test_source_selftests.py",
+   "inputs": [
+    ".githooks/pre-push",
+    ".github/workflows/build.yml",
+    "test/cmake/design_import_tool_cli_tests.cmake",
+    "test/cmake/pr_fast_tests.cmake",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/source_selftests.json",
+    "tools/ci/source_selftests.py",
+    "tools/ci/test_source_selftests.py",
+    "tools/motion/visual/requirements.lock",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_ci_throughput_workflows.py",
+    "tools/scripts/test_generated_version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "spectr-roundtrip-window-only-capture": {
+   "entry": "test/test_spectr_roundtrip_window_only_capture.sh",
+   "inputs": [
+    "test/test_spectr_roundtrip_window_only_capture.sh"
+   ],
+   "kind": "shell"
+  },
+  "status-tone-signal-lint": {
+   "entry": "tools/scripts/status_tone_signal_lint.py",
+   "inputs": [
+    "core/view/src",
+    "tools/scripts/status_tone_signal_lint.py"
+   ],
+   "kind": "python"
+  },
+  "status-tone-signal-lint-selftest": {
+   "entry": "tools/scripts/test_status_tone_signal_lint.py",
+   "inputs": [
+    "tools/scripts/test_status_tone_signal_lint.py"
+   ],
+   "kind": "python"
+  },
+  "style-dedup-table-sync": {
+   "entry": "tools/scripts/style_dedup_table.py",
+   "inputs": [
+    "tools/scripts/style_dedup_table.py"
+   ],
+   "kind": "python"
+  },
+  "tart-home-resolution": {
+   "entry": "tools/scripts/test_tart_home_resolution.py",
+   "inputs": [
+    "tools/scripts/test_tart_home_resolution.py"
+   ],
+   "kind": "python"
+  },
+  "test-pch-wiring": {
+   "entry": "tools/scripts/pch_wiring_check.py",
+   "inputs": [
+    "tools/scripts/pch_wiring_check.py"
+   ],
+   "kind": "python"
+  },
+  "test-pch-wiring-selftest": {
+   "entry": "tools/scripts/test_pch_wiring_check.py",
+   "inputs": [
+    "tools/scripts/pch_wiring_check.py",
+    "tools/scripts/test_pch_wiring_check.py"
+   ],
+   "kind": "python"
+  },
+  "test-shared-objects": {
+   "entry": "tools/scripts/shared_test_objects_check.py",
+   "inputs": [
+    "tools/scripts/shared_test_objects_check.py"
+   ],
+   "kind": "python"
+  },
+  "test-shared-objects-selftest": {
+   "entry": "tools/scripts/test_shared_test_objects_check.py",
+   "inputs": [
+    "test/harness/rt_allocation_probe.cpp",
+    "tools/scripts/shared_test_objects_check.py",
+    "tools/scripts/test_shared_test_objects_check.py"
+   ],
+   "kind": "python"
+  },
+  "thread-safe-assertions": {
+   "entry": "tools/scripts/thread_assert_check.py",
+   "inputs": [
+    "tools/scripts/thread_assert_check.py"
+   ],
+   "kind": "python"
+  },
+  "thread-safe-assertions-selftest": {
+   "entry": "tools/scripts/test_thread_assert_check.py",
+   "inputs": [
+    "tools/scripts/test_thread_assert_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-api-docs-check-selftest": {
+   "entry": "tools/scripts/timeline_api_docs_check.py",
+   "inputs": [
+    "core/music/include",
+    "core/timeline/include",
+    "core/timeline_editor/include",
+    "core/timeline_view/include",
+    "tools/scripts/timeline_api_docs_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-command-doc-coverage": {
+   "entry": "tools/scripts/timeline_command_doc_check.py",
+   "inputs": [
+    "core/timeline/include/pulp/timeline/command.hpp",
+    "core/timeline/schema/timeline_cli_verbs.json",
+    "tools/scripts/timeline_command_doc_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-engine-dependency-floor": {
+   "entry": "tools/scripts/timeline_engine_dependency_floor_check.py",
+   "inputs": [
+    "tools/scripts/timeline_engine_dependency_floor_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-engine-dependency-floor-selftest": {
+   "entry": "tools/scripts/timeline_engine_dependency_floor_check.py",
+   "inputs": [
+    "tools/scripts/timeline_engine_dependency_floor_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-fixture-coverage": {
+   "entry": "tools/scripts/timeline_fixture_coverage_check.py",
+   "inputs": [
+    "tools/scripts/timeline_fixture_coverage_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-fixture-coverage-selftest": {
+   "entry": "tools/scripts/test_timeline_fixture_coverage_check.py",
+   "inputs": [
+    "tools/scripts/test_timeline_fixture_coverage_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-launcher-bulk-build-contract": {
+   "entry": "tools/scripts/verify_timeline_launcher_resource_contract.py",
+   "inputs": [
+    "core/timeline/src/sequence_scene_internal.cpp",
+    "tools/scripts/verify_timeline_launcher_resource_contract.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-launcher-resource-contract-mutation-control": {
+   "entry": "tools/scripts/verify_timeline_launcher_resource_contract.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_launcher_resource_contract.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-launcher-retained-size-contract": {
+   "entry": "tools/scripts/verify_timeline_launcher_resource_contract.py",
+   "inputs": [
+    "core/timeline/src/command.cpp",
+    "tools/scripts/verify_timeline_launcher_resource_contract.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-live-capture-hardware": {
+   "entry": "tools/scripts/verify_timeline_live_capture.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_live_capture.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-live-capture-verifier-self-test": {
+   "entry": "tools/scripts/verify_timeline_live_capture.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_live_capture.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-mcp-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/timeline/schema/timeline_mcp_tools.json",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-mcp-selftest": {
+   "entry": "core/timeline/tools/test_schema_mcp_emit.py",
+   "inputs": [
+    "core/timeline/tools/test_schema_mcp_emit.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-cli-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/timeline/schema/timeline_cli_verbs.json",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-cli-selftest": {
+   "entry": "core/timeline/tools/test_schema_cli_emit.py",
+   "inputs": [
+    "core/timeline/tools/test_schema_cli_emit.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/timeline/schema/timeline_schema.json",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-drift-selftest": {
+   "entry": "tools/scripts/test_schema_drift_check.py",
+   "inputs": [
+    "tools/scripts/test_schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-js-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/timeline/schema/timeline_facade.js",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-js-selftest": {
+   "entry": "core/timeline/tools/test_schema_js_emit.py",
+   "inputs": [
+    "core/timeline/tools/test_schema_js_emit.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-ts-drift": {
+   "entry": "tools/scripts/schema_drift_check.py",
+   "inputs": [
+    "core/timeline/schema/timeline_types.d.ts",
+    "tools/scripts/schema_drift_check.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-schema-ts-selftest": {
+   "entry": "core/timeline/tools/test_schema_ts_emit.py",
+   "inputs": [
+    "core/timeline/tools/test_schema_ts_emit.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-sync-hardware-soak": {
+   "entry": "tools/scripts/verify_timeline_sync_soak.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_sync_soak.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-sync-soak-verifier-self-test": {
+   "entry": "tools/scripts/verify_timeline_sync_soak.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_sync_soak.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-transaction-launcher-complexity": {
+   "entry": "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
+   "inputs": [
+    "core/timeline/src/transaction_scene_internal.cpp",
+    "tools/scripts/verify_timeline_transaction_launcher_complexity.py"
+   ],
+   "kind": "python"
+  },
+  "timeline-transaction-launcher-complexity-mutation-control": {
+   "entry": "tools/scripts/verify_timeline_transaction_launcher_complexity.py",
+   "inputs": [
+    "tools/scripts/verify_timeline_transaction_launcher_complexity.py"
+   ],
+   "kind": "python"
+  },
+  "token-coverage-ratchet": {
+   "entry": "tools/scripts/token_coverage_check.py",
+   "inputs": [
+    "tools/scripts/token_coverage_check.py"
+   ],
+   "kind": "python"
+  },
+  "token-key-correctness": {
+   "entry": "tools/scripts/token_key_check.py",
+   "inputs": [
+    "core/view/src",
+    "core/view/src/theme_presets.cpp",
+    "core/view/src/widgets",
+    "tools/scripts/token_key_check.py"
+   ],
+   "kind": "python"
+  },
+  "tool-registry-reminder-hook": {
+   "entry": "test/test_tool_registry_reminder_hook.sh",
+   "inputs": [
+    "test/test_tool_registry_reminder_hook.sh"
+   ],
+   "kind": "shell"
+  },
+  "tools-registry-check": {
+   "entry": "tools/scripts/tools_registry_check.py",
+   "inputs": [
+    "tools/scripts/tools_registry_check.py"
+   ],
+   "kind": "python"
+  },
+  "tools-registry-check-selftest": {
+   "entry": "tools/scripts/test_tools_registry_check.py",
+   "inputs": [
+    "tools/import-design/montage.py",
+    "tools/scripts/test_tools_registry_check.py",
+    "tools/scripts/tools_registry_check.py"
+   ],
+   "kind": "python"
+  },
+  "trace-span-category-lint": {
+   "entry": "tools/scripts/trace_span_category_lint.py",
+   "inputs": [
+    "tools/scripts/trace_span_category_lint.py"
+   ],
+   "kind": "python"
+  },
+  "trace-span-category-lint-selftest": {
+   "entry": "tools/scripts/test_trace_span_category_lint.py",
+   "inputs": [
+    "tools/scripts/test_trace_span_category_lint.py"
+   ],
+   "kind": "python"
+  },
+  "transient-interaction-trace-budget-selftest": {
+   "entry": "tools/scripts/test_check_transient_interaction_trace.py",
+   "inputs": [
+    "tools/scripts/test_check_transient_interaction_trace.py"
+   ],
+   "kind": "python"
+  },
+  "unbounded-wait-lint-selftest": {
+   "entry": "tools/scripts/test_unbounded_wait_lint.py",
+   "inputs": [
+    "core/host/src/signal_graph.cpp",
+    "tools/scripts/test_unbounded_wait_lint.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-trusted-merge-selftest": {
+   "entry": "tools/scripts/test_vellum_trusted_merge.py",
+   "inputs": [
+    "tools/scripts/test_vellum_trusted_merge.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-watch-preflight-selftest": {
+   "entry": "tools/scripts/test_vellum_watch_preflight.py",
+   "inputs": [
+    ".githooks/pre-push",
+    ".github/vellum-expansion-watch-events",
+    "tools/scripts/gates.sh",
+    "tools/scripts/test_vellum_watch_preflight.py"
+   ],
+   "kind": "python"
+  },
+  "vellum-workflow-dispatch": {
+   "entry": "tools/scripts/test_vellum_workflow_dispatch.py",
+   "inputs": [
+    "tools/scripts/test_vellum_workflow_dispatch.py"
+   ],
+   "kind": "python"
+  },
+  "verify-rendered-panel-selftest": {
+   "entry": "tools/scripts/test_verify_rendered_panel.py",
+   "inputs": [
+    "tools/scripts/test_verify_rendered_panel.py"
+   ],
+   "kind": "python"
+  },
+  "version-at-land-selftest": {
+   "entry": "tools/scripts/test_version_at_land.py",
+   "inputs": [
+    "docs/status/gpu-vellum-handoff.yaml",
+    "docs/status/pulp-tooling-disposition.json",
+    "tools/scripts/connected_git_history.py",
+    "tools/scripts/gate_common.py",
+    "tools/scripts/gate_test_support.py",
+    "tools/scripts/gpu_handoff_provenance.py",
+    "tools/scripts/pulp_tooling_disposition.py",
+    "tools/scripts/skill_path_map.json",
+    "tools/scripts/test_version_at_land.py",
+    "tools/scripts/version_at_land.py",
+    "tools/scripts/version_bump_apply.py",
+    "tools/scripts/version_bump_check.py",
+    "tools/scripts/version_bump_heuristics.py",
+    "tools/scripts/version_bump_render.py",
+    "tools/scripts/version_bump_surfaces.py",
+    "tools/scripts/versioning.json"
+   ],
+   "kind": "python"
+  },
+  "visual-python-deps-present": {
+   "entry": "tools/scripts/check_visual_python_deps.py",
+   "inputs": [
+    "tools/scripts/check_visual_python_deps.py"
+   ],
+   "kind": "python"
+  },
+  "visual-python-deps-selftest": {
+   "entry": "tools/scripts/test_check_visual_python_deps.py",
+   "inputs": [
+    "tools/scripts/check_visual_python_deps.py",
+    "tools/scripts/test_check_visual_python_deps.py"
+   ],
+   "kind": "python"
+  },
+  "vst3-bundle-layout": {
+   "entry": "tools/cmake/scripts/check_vst3_bundle_layout.py",
+   "inputs": [
+    "tools/cmake/scripts/check_vst3_bundle_layout.py"
+   ],
+   "kind": "python"
+  },
+  "wasm-skia-fetch-mapping": {
+   "entry": "tools/scripts/verify_wasm_skia_slice.py",
+   "inputs": [
+    "external/skia-build",
+    "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/verify_wasm_skia_slice.py"
+   ],
+   "kind": "python"
+  },
+  "wasm-skia-slice-invariants": {
+   "entry": "tools/scripts/verify_wasm_skia_slice.py",
+   "inputs": [
+    "external/skia-build",
+    "tools/deps/manifest.json",
+    "tools/scripts/fetch_skia_for_release.py",
+    "tools/scripts/verify_wasm_skia_slice.py"
+   ],
+   "kind": "python"
+  },
+  "web-timeline-source-closure": {
+   "entry": "tools/scripts/web_timeline_source_closure_check.py",
+   "inputs": [
+    "core/audio/src/finite_time_stretch.cpp",
+    "core/audio/src/realtime_time_stretch.cpp",
+    "core/audio/src/rolling_audio_capture_buffer.cpp",
+    "core/playback/PulpPlaybackSources.cmake",
+    "core/runtime/src/sha256.cpp",
+    "core/timeline/PulpTimelineSources.cmake",
+    "tools/cmake/PulpWam.cmake",
+    "tools/cmake/PulpWclap.cmake",
+    "tools/scripts/web_timeline_source_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "web-timeline-source-closure-selftest": {
+   "entry": "tools/scripts/test_web_timeline_source_closure_check.py",
+   "inputs": [
+    "core/audio/src/finite_time_stretch.cpp",
+    "core/audio/src/realtime_time_stretch.cpp",
+    "core/audio/src/rolling_audio_capture_buffer.cpp",
+    "core/playback/PulpPlaybackSources.cmake",
+    "core/runtime/src/sha256.cpp",
+    "core/timeline/PulpTimelineSources.cmake",
+    "tools/cmake/PulpWam.cmake",
+    "tools/cmake/PulpWclap.cmake",
+    "tools/scripts/test_web_timeline_source_closure_check.py",
+    "tools/scripts/web_timeline_source_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "wide-non-native-selftest": {
+   "entry": "tools/scripts/test_wide_non_native.py",
+   "inputs": [
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
+    ".github/workflows/version-skill-check.yml",
+    "core/view/src/widgets.cpp",
+    "test/CMakeLists.txt",
+    "test/cmake/quality_tests.cmake",
+    "tools/ci/governed-build.sh",
+    "tools/ci/source_selftests.py",
+    "tools/ci/test_source_selftests.py",
+    "tools/cli/cmd_pr.cpp",
+    "tools/cmake/PulpTestSuite.cmake",
+    "tools/import-validation/check_agent_panel_invariants.py",
+    "tools/rack/test_generate_safety.py",
+    "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",
+    "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/check_inspector_protocol_registry.py",
+    "tools/scripts/check_skip_not_pass.py",
+    "tools/scripts/consumption_census.py",
+    "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/doxygen_installed_header_check.py",
+    "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/mac_objc_source_list_guard.py",
+    "tools/scripts/msvc_string_literal_guard.py",
+    "tools/scripts/raw_this_async_check.py",
+    "tools/scripts/sample_region_compat_baseline.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/skills_doc_check.py",
+    "tools/scripts/style_dedup_table.py",
+    "tools/scripts/test_agent_capability_installed_sdk.py",
+    "tools/scripts/test_build_combined_installer.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_configure_check_cache.py",
+    "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
+    "tools/scripts/test_gpu_probe_acceptance.py",
+    "tools/scripts/test_gpu_test_resource_locks.py",
+    "tools/scripts/test_sdk_plist_templates_installed.py",
+    "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/thread_assert_check.py",
+    "tools/scripts/web_timeline_source_closure_check.py"
+   ],
+   "kind": "python"
+  },
+  "workspace-freshness": {
+   "entry": "test/test_workspace_freshness.sh",
+   "inputs": [
+    "test/test_workspace_freshness.sh"
+   ],
+   "kind": "shell"
+  },
+  "worktree-lineage-selftest": {
+   "entry": "tools/scripts/test_worktree_lineage.sh",
+   "inputs": [
+    "tools/scripts/test_worktree_lineage.sh"
+   ],
+   "kind": "shell"
+  },
+  "yoga-oracle-pin-lockstep": {
+   "entry": "tools/scripts/check_yoga_oracle_pin.py",
+   "inputs": [
+    "tools/scripts/check_yoga_oracle_pin.py"
+   ],
+   "kind": "python"
+  },
+  "yoga-oracle-pin-lockstep-selftest": {
+   "entry": "tools/scripts/test_check_yoga_oracle_pin.py",
+   "inputs": [
+    "tools/scripts/test_check_yoga_oracle_pin.py"
+   ],
+   "kind": "python"
+  }
+ }
+}

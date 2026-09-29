@@ -251,8 +251,8 @@ TEST_CASE("Canvas2D restore() after a command-stream replacement re-sends state"
     CHECK(count_type(*cw, CanvasDrawCmd::Type::fill_rect) == 1);
 }
 
-// fill_text sets the fill colour it carries and stroke_rect sets its own line
-// width. The shim's record of sent state must follow, or the next draw that
+// fill_text sets the fill colour it carries and stroke_rect sets the line
+// width it carries. The shim's record of sent state must follow, or the next draw that
 // asks for the previous value is skipped and paints with the implicit one.
 TEST_CASE("Canvas2D draws that set state implicitly keep the sent record honest",
           "[view][canvas2d][call-budget]") {
@@ -291,6 +291,77 @@ TEST_CASE("Canvas2D draws that set state implicitly keep the sent record honest"
     }
     CHECK(fill_at_last_rect.find("rgba(1.000 0.000 0.000 1.000)") != std::string::npos);
     CHECK(width_at_last_stroke.rfind("set_line_width 3.000 ", 0) == 0);
+}
+
+TEST_CASE("Canvas2D strokeRect strokes at the current lineWidth",
+          "[view][canvas2d][stroke-state]") {
+    ScriptedBridge env;
+    env.load(std::string(kNewCanvas) + R"(
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(10, 10, 20, 10);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(40, 10, 10, 10);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    std::vector<float> widths;
+    for (const auto& cmd : cw->commands())
+        if (cmd.type == CanvasDrawCmd::Type::stroke_rect) {
+            CHECK(cmd.use_active_style);
+            widths.push_back(cmd.extra);
+        }
+    REQUIRE(widths == std::vector<float>{6.0f, 1.0f});
+
+#ifdef PULP_HAS_SKIA
+    // A 6 px stroke centred on x = 10 covers x = 7..13; a 1 px one would
+    // leave x = 12 empty.
+    cw->set_bounds({0, 0, 64, 32});
+    SkImageInfo info = SkImageInfo::Make(64, 32, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorTRANSPARENT);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+    cw->paint(canvas);
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    const auto* p = static_cast<const uint8_t*>(pm.addr(12, 15));
+    INFO("rgba at (12,15) " << int(p[0]) << "," << int(p[1]) << "," << int(p[2]) << "," << int(p[3]));
+    CHECK(p[0] == 255);
+    CHECK(p[3] == 255);
+#endif
+}
+
+TEST_CASE("Canvas2D solid strokeStyle after a pattern clears the stroke pattern",
+          "[view][canvas2d][stroke-state]") {
+    ScriptedBridge env;
+    env.load(std::string(kNewCanvas) + R"(
+        var pat = ctx.createPattern('/tmp/does-not-need-to-exist.png', 'repeat');
+        ctx.strokeStyle = pat;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(10, 10); ctx.stroke();
+        ctx.strokeStyle = '#00ff00';
+        ctx.beginPath(); ctx.moveTo(0, 10); ctx.lineTo(10, 0); ctx.stroke();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    cw->set_bounds({0, 0, 64, 32});
+    pulp::canvas::RecordingCanvas rc;
+    cw->paint(rc);
+    const std::string drawlist = pulp::canvas::format_commands(rc.commands());
+    INFO(drawlist);
+    // The stroke paint in effect at the second stroke: the last stroke
+    // pattern must have been cleared after it was set.
+    std::istringstream lines(drawlist);
+    std::string line, paint, paint_at_last;
+    int strokes = 0;
+    while (std::getline(lines, line)) {
+        if (line.rfind("set_stroke_pattern", 0) == 0) paint = "pattern";
+        if (line.rfind("clear_stroke_gradient", 0) == 0) paint = "cleared";
+        if (line.rfind("stroke_current_path", 0) == 0) { ++strokes; paint_at_last = paint; }
+    }
+    REQUIRE(strokes == 2);
+    CHECK(paint_at_last == "cleared");
 }
 
 TEST_CASE("Canvas2D disjoint subpaths cross the bridge in one call",

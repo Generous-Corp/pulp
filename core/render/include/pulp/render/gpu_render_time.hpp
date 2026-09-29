@@ -118,4 +118,27 @@ private:
     std::atomic<bool> have_sample_{false};
 };
 
+/// Frames whose GPU work has been submitted but has not finished executing.
+///
+/// Incremented when a frame's recording is inserted and decremented by that
+/// recording's finished callback, which Graphite always delivers, on success
+/// or failure. Callbacks run on the thread that pumps GPU completion (the next
+/// submit or completion check), so the count is as of the last such pump and
+/// may run up to one frame high. A count that stays at 2 or more while a
+/// frame waits in swapchain acquire says the GPU, not the CPU, is behind.
+class GpuFramesInFlight {
+public:
+    void on_submitted() { count_.fetch_add(1, std::memory_order_relaxed); }
+    void on_finished() {
+        int current = count_.load(std::memory_order_relaxed);
+        while (current > 0 &&
+               !count_.compare_exchange_weak(current, current - 1,
+                                             std::memory_order_relaxed)) {}
+    }
+    [[nodiscard]] int count() const { return count_.load(std::memory_order_relaxed); }
+
+private:
+    std::atomic<int> count_{0};
+};
+
 } // namespace pulp::render

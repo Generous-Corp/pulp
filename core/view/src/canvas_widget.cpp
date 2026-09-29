@@ -119,11 +119,50 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::path_arc_to: return "path_arc_to";
         case CanvasDrawCmd::Type::path_ellipse: return "path_ellipse";
         case CanvasDrawCmd::Type::path_round_rect: return "path_round_rect";
+        case CanvasDrawCmd::Type::replay_group: return "replay_group";
     }
     return "unknown";
 }
 
 } // namespace
+
+void CanvasWidget::append_replay_sequence(const RecordedCommands& stream,
+                                          std::vector<const CanvasDrawCmd*>& out) {
+    static const CanvasDrawCmd group_save = [] {
+        CanvasDrawCmd c; c.type = CanvasDrawCmd::Type::save; return c;
+    }();
+    static const CanvasDrawCmd group_restore = [] {
+        CanvasDrawCmd c; c.type = CanvasDrawCmd::Type::restore; return c;
+    }();
+    out.reserve(out.size() + stream.commands.size());
+    for (const auto& cmd : stream.commands) {
+        if (cmd.type != CanvasDrawCmd::Type::replay_group) {
+            out.push_back(&cmd);
+            continue;
+        }
+        const auto group = stream.groups.find(cmd.text);
+        if (group == stream.groups.end()) continue;
+        out.push_back(&group_save);
+        int open_saves = 0;
+        for (const auto& inner : group->second.commands) {
+            if (inner.type == CanvasDrawCmd::Type::replay_group) continue;
+            if (inner.type == CanvasDrawCmd::Type::save) ++open_saves;
+            if (inner.type == CanvasDrawCmd::Type::restore) {
+                if (open_saves == 0) continue;
+                --open_saves;
+            }
+            out.push_back(&inner);
+        }
+        for (; open_saves > 0; --open_saves) out.push_back(&group_restore);
+        out.push_back(&group_restore);
+    }
+}
+
+std::vector<const CanvasDrawCmd*> CanvasWidget::replay_sequence() const {
+    std::vector<const CanvasDrawCmd*> out;
+    append_replay_sequence(*recorded_commands_, out);
+    return out;
+}
 
 void CanvasWidget::paint(canvas::Canvas& canvas) {
     const auto commands = recorded_commands_;
@@ -341,7 +380,16 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // see canvas_replay_state.hpp.
     detail::CanvasReplayState replay_state;
 
-    for (const auto& cmd : commands->commands) {
+    // A stream that replays cached groups is walked through its expanded
+    // sequence (see replay_sequence()); every other stream is walked in place.
+    const bool expand_groups = commands->has_group_replays;
+    std::vector<const CanvasDrawCmd*> expanded;
+    if (expand_groups) append_replay_sequence(*commands, expanded);
+    const std::size_t sequence_length =
+        expand_groups ? expanded.size() : commands->commands.size();
+
+    for (std::size_t index = 0; index < sequence_length; ++index) {
+        const auto& cmd = expand_groups ? *expanded[index] : commands->commands[index];
         if (const auto slot = detail::CanvasReplayState::slot_for(cmd.type)) {
             detail::apply_canvas_state_setter(canvas, cmd);
             replay_state.note_setter(*slot, cmd);
@@ -377,6 +425,8 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::set_stroke_gradient_conic:
         case CanvasDrawCmd::Type::set_stroke_pattern:
         case CanvasDrawCmd::Type::clear_stroke_gradient:
+        // Expanded above; an unexpanded replay has nothing to draw.
+        case CanvasDrawCmd::Type::replay_group:
             break;
 
         // Shapes

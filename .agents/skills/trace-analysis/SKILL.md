@@ -521,6 +521,42 @@ the swapchain acquire (`gpu_acquire`, added 2026-07-25): with a Fifo present
 mode `GetCurrentTexture()` blocks until the next refresh. Before that span
 existed the time had nowhere to be attributed and the trace looked healthy.
 
+### Reading a long `gpu_acquire` on macOS: CPU bunching or GPU-bound?
+
+On Metal the acquire is `[CAMetalLayer nextDrawable]`, which blocks until one
+of the layer's drawables (three by default; Dawn and Pulp set neither
+`maximumDrawableCount` nor `allowsNextDrawableTimeout`) comes back. A wait of
+one or two refresh intervals means every drawable was held, and in the
+standalone GPU window the span's args say by whom (a plug-in editor's
+`gpu_acquire` carries no args yet):
+
+| arg | meaning |
+|---|---|
+| `frames_in_flight` | frames submitted to the GPU and not yet finished (as of the last completion pump; may read one high) |
+| `gpu_render_ms` | last sampled GPU render time — 0 unless GPU timing is on (`PULP_GPU_TIMING=1` for a standalone window) |
+| `late_ms` | acquire start minus the display-link target presentation time; negative = rendering ahead |
+| `refresh_period_ms` | the display's refresh interval |
+| `vsync_driven` | false for resize / capture / first-show frames rendered outside the link |
+
+`frames_in_flight` ≥ 2 with `gpu_render_ms` near or above `refresh_period_ms`
+is a GPU-bound frame: cut GPU work. `frames_in_flight` ≤ 1 with the previous
+frame having presented inside the same refresh interval (negative or small
+`late_ms` on back-to-back frames) is CPU bunching: two presents landed in one
+interval and filled the queue.
+
+**Known issue — "nonblocking" is not non-blocking on macOS.** Dawn's Metal
+backend treats Mailbox exactly like Fifo (it can only toggle
+`displaySyncEnabled`, which only Immediate turns off). The plug-in editor's
+`PresentPolicy::nonblocking` asks for Mailbox first, so on macOS it is still
+paced to vsync and can still block in acquire. Do not read a macOS
+editor's acquire wait as proof the policy is broken elsewhere.
+
+**Measuring without touching the user's audio.** A standalone launched with
+`PULP_AUDIO_DEVICE=null` renders its audio graph on a real-time paced thread
+with no output device (`PULP_TEST_SIGNAL` still feeds the input), so a
+live-window trace can run with meters and analyzers publishing at their normal
+rate and nothing reaching the speakers.
+
 ### Driving a Windows GUI capture with nobody watching
 
 Screenshot/input automation needs an **Active** session; a disconnected RDP

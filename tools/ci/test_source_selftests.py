@@ -423,7 +423,8 @@ class GatesWiringTests(unittest.TestCase):
                       f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
-                   if k != "PULP_SKIP_SOURCE_SELFTESTS"}
+                   if k != "PULP_SKIP_SOURCE_SELFTESTS"
+                   and k != "PULP_GATES_BUILD_DIR"}  # the caller's build-dir override must not reach the fixture
             result = subprocess.run(
                 ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
             argv = calls.read_text() if calls.exists() else ""

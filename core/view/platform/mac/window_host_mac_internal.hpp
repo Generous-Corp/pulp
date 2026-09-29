@@ -256,6 +256,14 @@ inline double display_link_seconds(const CVTimeStamp* ts) {
     return CACurrentMediaTime();
 }
 
+/// The refresh interval (seconds) a display-link timestamp reports, or 0 when
+/// it carries none.
+inline double display_link_refresh_seconds(const CVTimeStamp* ts) {
+    if (!ts || ts->videoTimeScale <= 0) return 0.0;
+    return static_cast<double>(ts->videoRefreshPeriod) /
+           static_cast<double>(ts->videoTimeScale);
+}
+
 /// Nominal frame interval (seconds) of `link`, for HostFramePump::set_nominal_dt.
 /// Returns 0 when the link can report no refresh period at all, in which case the
 /// caller should leave the pump's default (1/60) in place.

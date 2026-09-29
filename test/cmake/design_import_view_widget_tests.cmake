@@ -112,6 +112,12 @@ pulp_add_test_suite(pulp-test-canvas2d-shim-late GROUP pulp-test-group-design-im
 pulp_add_test_suite(pulp-test-canvas2d-call-budget GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
 
+# Canvas2D cached groups (ctx.pulpCachedGroup): replay pixel-identical to
+# direct drawing on Skia and CoreGraphics, one bridge call per replay,
+# invalidation, and no state leaking out of a group.
+pulp_add_test_suite(pulp-test-canvas2d-cached-group GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
+
 # SvgPathWidget tests
 pulp_add_test_suite(pulp-test-svg-path-widget GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)

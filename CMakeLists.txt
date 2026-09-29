@@ -450,6 +450,7 @@ set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_control_host.cpp
     core/format/src/standalone_musical_typing.cpp
+    core/format/src/null_audio_device.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
 # Synthetic key delivery for the test harness needs AppKit, so the macOS

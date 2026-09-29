@@ -1705,6 +1705,39 @@ and, as the safety control, `would_skip` followed by `ran_failed` (must be
 0). Do not turn the verdict into a skip in build.yml; that is a decisions-
 contract amendment with the shadow data as its Step Zero.
 
+## Script tests declare inputs in `test/ctest_script_inputs.json`
+
+The build graph cannot see what a Python, Node or shell ctest reads, so the
+affected-test shadow used to count all ~400 of them affected on any script
+change (44% of gate test-seconds). `tools/scripts/script_test_inputs.py`
+generates their inputs (Chromium's `.pydeps` pattern) and the pr-fast
+`script-test-inputs-drift` check is DIFF-SCOPED: it fails a PR head only for
+drift in scripts the PR's own diff touches (entry script or a listed input;
+base = `origin/$GITHUB_BASE_REF`, or `HEAD^1` in a merge group) and reports
+drift from main's own movement as an advisory note. A generated file drifts
+every time main moves; failing every PR for someone else's script was a
+treadmill. Regenerate with `--write` against a configured build dir and
+commit the file; `--check --full` shows every stale entry.
+A test the generator cannot bound (cmake-driven, no command) has no entry
+and stays fail-closed; do not hand-edit entries to make a test look narrower.
+**Every PR that adds or changes a script-driven test must regenerate the
+list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
+--write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
+the diff-scoped check fails the PR head otherwise and prints that command.
+Run it after every rebase onto main too: main's new script tests are
+advisory drift, but a rebase that touches one of yours is blocking.
+
+## The affected-tests shadow annotation selects nothing
+
+Merge-group `macos` jobs carry a `pulp-affected-tests-shadow/v1` notice
+(`tools/ci/affected_tests_shadow.py`): the ctest entries the Ninja graph says
+the change reached, plus `failed_outside_selection`. It is evidence for a
+future selector, read as a count that must be zero over a long window, and
+its fail-closed rules (CMake change selects all; script-driven tests are
+affected whenever a script surface changed; a changed file no edge reads
+selects all) are the contract any real selector inherits. The ctest step takes
+no input from it; do not wire it into `-R`/`-L` without a contract decision.
+
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 
 `ccache --show-stats` counts for the life of the cache directory, and the
@@ -1731,6 +1764,26 @@ reason plus a job-summary line; the receipt step now does). And when a
 downstream step is unexpectedly skipped, read the upstream step's LOG, not
 its API conclusion. The pr-fast `ctest-unique-names` guard now catches the
 original cause on the PR head.
+
+## Binary identity across VMs is measured, not assumed
+
+`pulp-binary-identity-shadow/v1` on merge-group `macos` jobs compares the
+group's own test-binary sha256 list with the PR head's receipt. Until
+`tools/ci/binary_identity_shadow.py report` shows n >= 20 tree-identical
+groups at ~100% identical, no design may assume two VMs link the same bytes;
+a differing path names the linker input to normalise (embedded path, UUID,
+timestamp) before any per-binary reuse is proposed.
+
+## The flake-exoneration shadow annotation exonerates nothing
+
+A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
+(`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
+when it failed on >= 2 other heads in 24 h AND passes on main's latest
+merge-group run. It is evidence, not a verdict: `base_poison_detector.py`
+records why cross-batch corroboration alone was measured unsafe, and this
+shadow inherits that by requiring the main pass and acting on nothing. Read
+exonerated-only failures ÷ failures; do not wire it into the job outcome
+without a contract decision and the shadow data as Step Zero.
 
 ## A PR head's full-suite failure is announced, not hidden behind continue-on-error
 

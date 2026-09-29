@@ -2429,6 +2429,21 @@ free on a silent editor can dominate a frame with loud, dense audio. Cap the
 number of glowing elements or reuse one cached gradient, and judge the cost
 with real audio running, never on an idle editor.
 
+## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
+
+`PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.
+On macOS that choice is a no-op: Dawn's Metal swapchain can only toggle
+`CAMetalLayer.displaySyncEnabled`, which Mailbox and Fifo both leave on, so an
+embedded editor is still vsync-paced and `gpu_acquire` (`nextDrawable`) still
+blocks when all three drawables are held. Treat that as a known issue, not
+evidence the policy works. Before changing present modes or adding a
+frame-in-flight gate, capture a trace and read the standalone GPU window's
+`gpu_acquire` args (`frames_in_flight`, `gpu_render_ms`, `late_ms`,
+`refresh_period_ms`) to tell a GPU-bound frame from CPU bunching — see the
+trace-analysis skill. `PULP_GPU_TIMING=1` turns on GPU render timing for a
+standalone window (it relaxes Dawn validation, so it is never on by default),
+and `PULP_AUDIO_DEVICE=null` lets that session run without an audio device.
+
 ## Scripted Canvas2D editors: the frame cost is the bridge-call count
 
 A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→native
@@ -2453,8 +2468,8 @@ A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→nativ
   `CanvasReplayState::slot_for` slot and a `_sent*` entry in
   `_SENT_FIELDS`, or restore() will leak it on Skia.
 - **A draw command that sets state implicitly must update the record.**
-  `fill_text` sets the fill colour it carries and `stroke_rect` sets its own
-  line width (1 when the call carries none); the shim writes those values into
+  `fill_text` sets the fill colour it carries and `stroke_rect` sets the line
+  width it carries (1 when the call carries none; the shim passes `lineWidth`); the shim writes those values into
   `_sentFillColor` / `_sentLineWidth`, and the replay notes them. A new such
   command that skips either side draws with a stale colour after the next
   cache hit.
@@ -2464,6 +2479,30 @@ A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→nativ
   method emits (every emitting method calls `_fp()` first — enforced by
   `check_canvas_path_flush.py`) or at the 65536-coordinate cap. Stroking each
   segment separately defeats this.
+- **Static content: use a cached group, not a second canvas.** Grids, scales
+  and labels that do not change per frame go in
+  `ctx.pulpCachedGroup(key, drawFn)`: the first call records drawFn, and every
+  later one is a single `canvasReplayGroup` crossing that does not run drawFn.
+  A second stacked canvas for the static layer still re-sends every call
+  whenever it redraws and adds a widget to paint. The replay runs the stored
+  commands in place, under the current transform, inside an implicit
+  save/restore, so pixels and blend order match calling drawFn directly
+  (Skia and CoreGraphics, `test/test_canvas2d_cached_group.cpp`), and a
+  `restore()` inside the group cannot pop state saved outside it. The content
+  is a function of the key: set every style the group uses inside drawFn and
+  call `ctx.pulpInvalidateGroup(key)` when its inputs change; a canvas resize
+  or a new context drops every group. Groups live beside the frame's command
+  stream, so a retained-frame full clear keeps them, and `canvasReplayGroup`
+  returning false is how the shim learns it must record again. A native
+  consumer of a canvas's commands must walk `CanvasWidget::replay_sequence()`,
+  not `commands()`, or it misses what groups draw. The group replays its
+  commands, not a cached texture, on purpose: `begin_layer(cacheable)` handles
+  do persist across frames (the live Skia surfaces share one
+  `RetainedLayerStore`), but a texture replay matches direct drawing only when
+  the device translation is integer-aligned, and 8-bit source-over is not
+  associative, so drawing into a transparent layer and compositing it can
+  differ by 1 LSB. Caching pixels would trade the byte-exact guarantee for
+  native replay cost; measure that cost in a trace before reaching for it.
 - **A full-frame `clearRect` on a retained-frame canvas replaces the native
   stream**, so it clears the `_sent*` record — including the copies held by
   open save() snapshots.

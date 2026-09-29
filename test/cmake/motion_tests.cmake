@@ -23,6 +23,10 @@ pulp_add_test_suite(pulp-test-animation GROUP pulp-test-group-motion
 pulp_add_test_suite(pulp-test-frame-clock GROUP pulp-test-group-motion
     LIBRARIES pulp::view)
 
+# What a window host records about a swapchain acquire (gpu_acquire span args).
+pulp_add_test_suite(pulp-test-gpu-acquire-diagnostics GROUP pulp-test-group-motion
+    LIBRARIES pulp::view)
+
 # Host frame-timing seam: measured-dt pump (60/120 Hz, variable refresh,
 # dropped + coalesced callbacks, first frame, wake-from-idle) and the
 # one-dt-to-every-consumer contract the hosts are wired to.

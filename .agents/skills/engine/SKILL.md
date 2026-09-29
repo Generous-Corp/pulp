@@ -740,6 +740,17 @@ shim's `_sent*` record of native state instead of clearing it: see the
 `view-bridge` skill's scripted-editor call-budget checklist for the replay-side
 contract that makes that safe.
 
+`ctx.pulpCachedGroup(key, drawFn)` records drawFn into a native group between
+`canvasBeginGroup` and `canvasEndGroup` and later replays it with one
+`canvasReplayGroup` call. While `_groupRecording` is set, two shim behaviours
+change and must stay changed: a full-frame `clearRect` must not take the
+retained-frame `canvasClear` path (that would replace the frame the group is
+being recorded into), and `restore()` must not pop below `_stateFloor`, the
+save depth at which the group began. The JS state snapshot is taken with
+`_captureState()`/`_applyState()` rather than `save()`/`restore()`, because the
+native group brackets itself and a real save/restore would land inside the
+group.
+
 ### CSS-shim gap fills — translator vs. bridge contract
 
 Four classes of "silent drop" recur in `web-compat-style-decl.js`. When

@@ -384,6 +384,27 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
         self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
 
+    def test_merge_group_shadows_run_from_one_advisory_step(self) -> None:
+        """The three merge-group shadow instruments run from ONE step through
+        tools/ci/merge_group_shadows.py, gated on a merge group with a
+        successful build, continue-on-error, after ctest; neither Build nor
+        Test reads anything from them."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("always()", "github.event_name == 'merge_group'", "runner.os == 'macOS'",
+                       "steps.build.outcome == 'success'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(step["env"]["PULP_GH_CLI"], "gh")
+        run = str(step["run"])
+        self.assertIn("merge_group_shadows.py run", run)
+        self.assertIn('--ctest-outcome "${{ steps.ctest.outcome }}"', run)
+        self.assertIn("ctest-evidence/selected.json", run)
+        for name in ("Build", "Test (non-Windows)"):
+            body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
+            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration"):
+                self.assertNotIn(token, body)
+
     def test_failed_pr_head_full_suite_is_announced(self) -> None:
         """The pull-request Test step is continue-on-error, so its failure must
         be named where a PR reader sees it: a warning annotation with the
