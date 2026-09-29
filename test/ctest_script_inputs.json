@@ -1273,6 +1273,13 @@
    ],
    "kind": "python"
   },
+  "git-stdin-pipe-deadlock-selftest": {
+   "entry": "tools/scripts/test_git_stdin_pipe_deadlock.py",
+   "inputs": [
+    "tools/scripts/test_git_stdin_pipe_deadlock.py"
+   ],
+   "kind": "python"
+  },
   "golden-regression-selftest": {
    "entry": "tools/import-validation/golden_regression.py",
    "inputs": [

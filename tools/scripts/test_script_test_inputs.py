@@ -20,6 +20,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -231,6 +232,33 @@ class CheckModeTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--base", "base-ref", inventory=inv)
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertIn("missing from list: linux-only", proc.stdout)   # advisory, not blocking
+
+    def test_merge_group_reports_blocking_drift_as_a_warning_and_exits_0(self) -> None:
+        """The pull-request head is the enforcement point; a merge group must
+        never eject a batch over a stale generated list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr edits a listed input")
+            env = dict(os.environ, GITHUB_EVENT_NAME="merge_group")
+            env.pop("PULP_SCRIPT_INPUTS_STRICT", None)
+            inv = repo.build / "inv.json"; inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+            proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
+                                   "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("::warning title=script-test inputs stale (advisory in a merge group)::", proc.stdout)
+            self.assertIn("stale entry: alpha", proc.stdout)
+            env["PULP_SCRIPT_INPUTS_STRICT"] = "1"
+            strict = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
+                                     "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(strict.returncode, 1, strict.stdout)
+            env.pop("PULP_SCRIPT_INPUTS_STRICT"); env["GITHUB_EVENT_NAME"] = "pull_request"
+            head = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
+                                   "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(head.returncode, 1, head.stdout)
 
     def test_unreadable_inventory_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
