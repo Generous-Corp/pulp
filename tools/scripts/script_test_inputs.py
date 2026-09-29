@@ -394,14 +394,18 @@ def main(argv: list[str]) -> int:
     scope = f"diff-scoped against {base}" if base else "full compare (no base resolved)"
     if advisory:
         print(f"script-test-inputs: note: {len(advisory)} entr{'y' if len(advisory) == 1 else 'ies'} drifted from "
-              f"scripts this change does not touch ({scope}); regenerate with --write when convenient:")
+              f"scripts this change does not touch ({scope}); not blocking. Refresh when convenient with\n"
+              f"  python3 tools/scripts/script_test_inputs.py --build-dir {a.build_dir or '<configured build dir>'} --write")
         for kind, name, _ in advisory[:15]:
             print(f"  {kind}: {name}")
     if blocking:
-        print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches "
-              f"({scope}); regenerate with --write:")
+        build_hint = a.build_dir or "<configured build dir>"
+        print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  {kind}: {name}")
+        print("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
+              f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
+              f"  git add {DEFAULT_LIST.as_posix()}")
         return 1
     print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync for this change "
           f"({scope}; {total_scripts} interpreter-driven entries)")

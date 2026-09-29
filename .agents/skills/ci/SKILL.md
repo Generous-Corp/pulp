@@ -1661,6 +1661,12 @@ treadmill. Regenerate with `--write` against a configured build dir and
 commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
+**Every PR that adds or changes a script-driven test must regenerate the
+list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
+--write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
+the diff-scoped check fails the PR head otherwise and prints that command.
+Run it after every rebase onto main too: main's new script tests are
+advisory drift, but a rebase that touches one of yours is blocking.
 
 ## The affected-tests shadow annotation selects nothing
 
