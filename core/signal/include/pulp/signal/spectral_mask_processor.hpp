@@ -12,6 +12,14 @@
 /// successful `prepare()`. An audio-owner may also stage the latest layout with
 /// `set_layout_rt()`; fixed-capacity compilation and adoption happen at the next
 /// spectral-frame boundary without a control-thread round trip.
+///
+/// Two optional source seams let a freeze, hold, loop, or granular source
+/// replace what the live mask shapes, while the dry path stays live:
+/// - a time-domain wet-source stage (`set_wet_source_stage()`) rewrites the
+///   block the wet path analyzes, before the STFT;
+/// - a frame-domain pre-mask stage (`set_pre_mask_stage()`) rewrites each
+///   analysis frame group after the STFT and before the mask.
+/// Unset, each costs one pointer test per block or frame.
 
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
@@ -49,6 +57,31 @@ struct SpectralMaskProcessorConfigT {
         kSpectralMaskProcessorDefaultMaximumRetainedBytes;
 };
 
+/// A frame-domain stage that `SpectralMaskProcessorT::process()` runs on each
+/// analysis frame group before the mask. It may read and rewrite the frames
+/// in place (all `channels` spectra of `num_bins` bins, DC..Nyquist). It runs
+/// on the audio thread: it must not allocate, lock, or block.
+template <typename SampleType = float>
+class SpectralPreMaskStageT {
+public:
+    virtual ~SpectralPreMaskStageT() = default;
+    virtual void process_frames(std::complex<SampleType>* const* frames,
+                                int channels, int num_bins) noexcept = 0;
+};
+
+/// A time-domain stage that `SpectralMaskProcessorT::process()` runs on each
+/// block before the wet path's analysis. It writes the block to analyze into
+/// `wet` (all `channels`, `num_samples` samples); `input` is the live block,
+/// which the dry path still uses. A stage that wants the live signal copies
+/// it. It runs on the audio thread: it must not allocate, lock, or block.
+template <typename SampleType = float>
+class SpectralWetSourceStageT {
+public:
+    virtual ~SpectralWetSourceStageT() = default;
+    virtual void process_block(const SampleType* const* input, SampleType* const* wet,
+                               int channels, int num_samples) noexcept = 0;
+};
+
 template <typename SampleType = float>
 class SpectralMaskProcessorT {
 public:
@@ -57,6 +90,8 @@ public:
     using Config = SpectralMaskProcessorConfigT<SampleType>;
     using Layout = SpectralBandLayoutT<SampleType>;
     using Table = SpectralMaskTableT<SampleType>;
+    using PreMaskStage = SpectralPreMaskStageT<SampleType>;
+    using WetSourceStage = SpectralWetSourceStageT<SampleType>;
 
     /// Prepare a complete replacement state. Failure leaves the prior prepared
     /// state intact. This control-thread operation allocates the STFT and dry
@@ -105,6 +140,15 @@ public:
         candidate->mixer.set_ramp_samples(config.mix_ramp_samples);
         candidate->mixer.set_wet_latency(candidate->engine.latency_samples());
         candidate->mixer.prepare(config.frame.channels, config.frame.max_block);
+        const auto channel_count = static_cast<std::size_t>(config.frame.channels);
+        const auto block = static_cast<std::size_t>(config.frame.max_block);
+        candidate->wet_input.assign(channel_count * block, SampleType{});
+        candidate->wet_write.resize(channel_count);
+        candidate->wet_read.resize(channel_count);
+        for (std::size_t ch = 0; ch < channel_count; ++ch) {
+            candidate->wet_write[ch] = candidate->wet_input.data() + ch * block;
+            candidate->wet_read[ch] = candidate->wet_write[ch];
+        }
 
         state_ = std::move(candidate);
         next_generation_ = 1;
@@ -161,10 +205,19 @@ public:
         }
 
         state_->mixer.push_dry(input, state_->config.frame.channels, num_samples);
+        const SampleType* const* analysis_input = input;
+        if (wet_source_stage_ != nullptr) {
+            wet_source_stage_->process_block(input, state_->wet_write.data(),
+                                             state_->config.frame.channels, num_samples);
+            analysis_input = state_->wet_read.data();
+        }
         bool frame_ok = true;
-        state_->engine.process(input, output, num_samples,
+        state_->engine.process(analysis_input, output, num_samples,
             [this, &frame_ok](std::complex<SampleType>* const* frames,
                               int bins) noexcept {
+                if (pre_mask_stage_ != nullptr)
+                    pre_mask_stage_->process_frames(
+                        frames, state_->config.frame.channels, bins);
                 if (!process_frame(frames, bins)) frame_ok = false;
             });
         if (!frame_ok) {
@@ -195,6 +248,23 @@ public:
             return false;
         }
         return true;
+    }
+
+    /// Install (or clear, with nullptr) the non-owning pre-mask frame stage.
+    /// Call from the thread that runs process(), or while it is not running;
+    /// the stage must outlive its installation. The stage survives prepare()
+    /// and reset(), and is not applied by process_frame(), whose caller
+    /// already supplies the frames it wants masked. The dry path is never
+    /// routed through it.
+    void set_pre_mask_stage(PreMaskStage* stage) noexcept { pre_mask_stage_ = stage; }
+    [[nodiscard]] PreMaskStage* pre_mask_stage() const noexcept { return pre_mask_stage_; }
+
+    /// Install (or clear, with nullptr) the non-owning time-domain wet-source
+    /// stage. Same threading, lifetime, and prepare()/reset() rules as
+    /// set_pre_mask_stage(). The dry path always carries the live input.
+    void set_wet_source_stage(WetSourceStage* stage) noexcept { wet_source_stage_ = stage; }
+    [[nodiscard]] WetSourceStage* wet_source_stage() const noexcept {
+        return wet_source_stage_;
     }
 
     /// Audio-thread-safe dry/wet controls. Mix defaults to fully wet.
@@ -265,6 +335,9 @@ private:
         runtime::SeqLock<std::uint64_t> published_generation;
         runtime::SeqLock<std::uint64_t> active_generation;
         runtime::SeqLock<std::uint64_t> active_version;
+        std::vector<SampleType> wet_input;             // channels * max_block
+        std::vector<SampleType*> wet_write;            // per-channel views
+        std::vector<const SampleType*> wet_read;
         std::uint64_t consumed_generation = 0;
         std::uint64_t retained_bytes = 0;
         std::uint32_t transition_total = 0;
@@ -280,11 +353,14 @@ private:
                            + static_cast<std::uint64_t>(config.frame.analysis_hop);
         std::uint64_t samples_per_channel = 0;
         std::uint64_t dry_samples = 0;
+        std::uint64_t wet_samples = 0;
         if (!checked_capacity_sum(latency,
                                   static_cast<std::uint64_t>(config.frame.max_block),
                                   config.max_retained_bytes, samples_per_channel)
             || !checked_capacity_product(samples_per_channel, channels,
-                                         config.max_retained_bytes, dry_samples))
+                                         config.max_retained_bytes, dry_samples)
+            || !checked_capacity_product(static_cast<std::uint64_t>(config.frame.max_block),
+                                         channels, config.max_retained_bytes, wet_samples))
             return std::nullopt;
 
         CheckedRetainedByteCharge charge(config.max_retained_bytes);
@@ -294,6 +370,9 @@ private:
                    sizeof(runtime::TripleBuffer<PublishedTable>))
             || !charge.add<SampleType>(dry_samples)
             || !charge.add<std::vector<SampleType>>(channels)
+            || !charge.add<SampleType>(wet_samples)
+            || !charge.add<SampleType*>(channels)
+            || !charge.add<const SampleType*>(channels)
             || charge.total() > config.max_retained_bytes)
             return std::nullopt;
         return charge.total();
@@ -421,6 +500,8 @@ private:
     }
 
     std::unique_ptr<PreparedState> state_;
+    PreMaskStage* pre_mask_stage_ = nullptr;
+    WetSourceStage* wet_source_stage_ = nullptr;
     std::uint64_t next_generation_ = 1;
 };
 
@@ -428,5 +509,9 @@ using SpectralMaskProcessorConfig = SpectralMaskProcessorConfigT<float>;
 using SpectralMaskProcessorConfig64 = SpectralMaskProcessorConfigT<double>;
 using SpectralMaskProcessor = SpectralMaskProcessorT<float>;
 using SpectralMaskProcessor64 = SpectralMaskProcessorT<double>;
+using SpectralPreMaskStage = SpectralPreMaskStageT<float>;
+using SpectralPreMaskStage64 = SpectralPreMaskStageT<double>;
+using SpectralWetSourceStage = SpectralWetSourceStageT<float>;
+using SpectralWetSourceStage64 = SpectralWetSourceStageT<double>;
 
 } // namespace pulp::signal
