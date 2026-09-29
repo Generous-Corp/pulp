@@ -2468,8 +2468,8 @@ A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→nativ
   `CanvasReplayState::slot_for` slot and a `_sent*` entry in
   `_SENT_FIELDS`, or restore() will leak it on Skia.
 - **A draw command that sets state implicitly must update the record.**
-  `fill_text` sets the fill colour it carries and `stroke_rect` sets its own
-  line width (1 when the call carries none); the shim writes those values into
+  `fill_text` sets the fill colour it carries and `stroke_rect` sets the line
+  width it carries (1 when the call carries none; the shim passes `lineWidth`); the shim writes those values into
   `_sentFillColor` / `_sentLineWidth`, and the replay notes them. A new such
   command that skips either side draws with a stale colour after the next
   cache hit.

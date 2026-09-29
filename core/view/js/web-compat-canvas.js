@@ -392,10 +392,11 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
         this._activeStrokeKind = "pattern";
     } else {
         colorStr = String(ss == null ? "" : ss);
-        // Solid-color assignment after a gradient: clear any active
-        // stroke shader so the next stroke uses set_stroke_color cleanly
-        // (mirrors fillStyle's canvasClearGradient flush).
-        if (this._activeStrokeKind === "gradient" &&
+        // Solid-color assignment after a gradient or pattern: clear the
+        // stroke shader both install, so the next stroke uses
+        // set_stroke_color cleanly (mirrors fillStyle's canvasClearGradient
+        // flush).
+        if ((this._activeStrokeKind === "gradient" || this._activeStrokeKind === "pattern") &&
             typeof canvasClearStrokeGradient === "function") {
             canvasClearStrokeGradient(this._id);
         }
@@ -719,10 +720,11 @@ CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
     this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokeRect === "function") {
-        canvasStrokeRect(this._id, x, y, w, h);
-        // The native stroke_rect sets its own line width (1 when the call
-        // carries none), so the canvas no longer holds `lineWidth`.
-        this._sentLineWidth = 1;
+        // An empty colour keeps the active strokeStyle; the native stroke_rect
+        // sets the line width it carries, so pass the current one.
+        var lw = +this.lineWidth;
+        canvasStrokeRect(this._id, x, y, w, h, "", lw);
+        this._sentLineWidth = (lw === this.lineWidth) ? lw : null;
     }
 };
 
