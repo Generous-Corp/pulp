@@ -333,12 +333,16 @@ Nothing about that is audio-thread related, which is why the original
 now follows:
 - A host entrypoint only *schedules* delivery; the post runs on the main
   thread's next turn, after the host call returned and dropped its lock.
+- `setActive(false)` schedules nothing: the flags stay latched until the
+  next activation, query or poll tick. A restart delivered right after a
+  deactivation lets a host that services it synchronously reactivate the
+  component while the host itself believes it is inactive.
 - `deliver_pending_host_notifications()` is re-entrancy guarded: the host
   may call back into the plug-in from inside `restartComponent` (JUCE
   re-queries latency on `kLatencyChanged`), and that nested entrypoint
   must not start a second delivery.
 - With **no** dispatcher that accepts posts (Windows / Linux hosts have
-  no registered backend today), `setActive` keeps the flags latched;
+  no registered backend today), activation transitions never deliver;
   only the state-free queries deliver inline. That leaves one known gap:
   a no-backend JUCE host that queries latency under its lock with a
   `kReloadComponent` pending can still hang — a real main-thread backend

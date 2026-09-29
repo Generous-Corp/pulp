@@ -1500,11 +1500,16 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
         note_id_map_clear();
     }
     // Hosts deactivate and reactivate while holding their processing lock, so
-    // a restart the audio thread accumulated is posted for delivery after this
-    // call returns, never delivered from inside it. Start/stop the paced poll
-    // so a mid-stream change while active is delivered without an incidental
-    // host query.
-    schedule_host_notifications(InlineFallback::forbidden);
+    // a restart the audio thread accumulated is never delivered from inside
+    // this call. On activation it is posted for delivery once the host call
+    // returns. On deactivation it stays latched: a restart delivered to a
+    // component the host has just deactivated can make a host that services
+    // it synchronously reactivate the component behind its own back, and the
+    // host re-reads latency and tail when it activates again anyway.
+    // Start/stop the paced poll so a mid-stream change while active is
+    // delivered without an incidental host query.
+    if (state)
+        schedule_host_notifications(InlineFallback::forbidden);
     if (poll_active_) {
         if (state) {
             start_restart_poll();

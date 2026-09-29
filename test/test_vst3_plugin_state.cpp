@@ -1735,6 +1735,16 @@ public:
         return true;
     }
 
+    // Host-side latency refresh under the processing lock.
+    bool query_latency_locked() {
+        if (!acquire_lock()) return false;
+        inside_host_call_ = true;
+        (void)plugin_.getLatencySamples();
+        inside_host_call_ = false;
+        release_lock();
+        return true;
+    }
+
     // Host-side prepare: lock, query latency, activate, start processing.
     bool prepare_to_play() {
         if (!acquire_lock()) return false;
@@ -1863,7 +1873,7 @@ TEST_CASE("VST3 never calls restartComponent from inside a host-initiated call",
     data.inputs = ab_in;
     data.outputs = ab_out;
 
-    SECTION("deactivation defers the restart to the main thread's next turn") {
+    SECTION("deactivation holds the restart until the host activates again") {
         ScopedMainThreadBackend backend;
         REQUIRE(host.prepare_to_play());
         REQUIRE(processor.process(data) == Steinberg::kResultOk);
@@ -1873,8 +1883,14 @@ TEST_CASE("VST3 never calls restartComponent from inside a host-initiated call",
         REQUIRE_FALSE(host.lock_timed_out);
         REQUIRE_FALSE(host.reentered);
         REQUIRE(host.restart_calls == 0);
+        // Nothing is queued against the deactivated component.
+        REQUIRE(backend.immediate_pending() == 0);
+        REQUIRE(processor.restart_dispatch_armed_for_test());
 
-        // The host call has returned; its run loop now delivers the restart.
+        // Reactivation (latency query + setActive under the host lock) only
+        // queues the delivery; the host's run loop delivers it afterwards.
+        REQUIRE(host.prepare_to_play());
+        REQUIRE(host.restart_calls == 0);
         REQUIRE(backend.run_immediate() == 1);
         REQUIRE(host.restart_calls == 1);
         REQUIRE(host.accumulated_flags == kReloadComponent);
@@ -1886,19 +1902,19 @@ TEST_CASE("VST3 never calls restartComponent from inside a host-initiated call",
         backend.run_delayed();
         backend.run_delayed();
         REQUIRE(host.restart_calls == 1);
+        REQUIRE(host.release_resources());
     }
 
     SECTION("a latency query under the host lock defers the restart") {
         ScopedMainThreadBackend backend;
         REQUIRE(host.prepare_to_play());
         REQUIRE(processor.process(data) == Steinberg::kResultOk);
-        REQUIRE(host.release_resources());
-        REQUIRE(host.restart_calls == 0);
 
-        // Re-prepare queries latency while holding the lock; the one queued
-        // post already covers the pending restart.
-        REQUIRE(host.prepare_to_play());
+        // A query the host makes while holding its lock only queues the
+        // delivery, and later entrypoints in the same burst add no second post.
+        REQUIRE(host.query_latency_locked());
         REQUIRE(host.restart_calls == 0);
+        (void)processor.getTailSamples();
         REQUIRE(backend.immediate_pending() == 1);
 
         backend.run_immediate();
