@@ -27,6 +27,8 @@ GpuConvolutionReverbConfig valid_config() {
 TEST_CASE("GPU convolution route fails closed before provider preparation",
           "[gpu_audio][convolution][configuration]") {
     auto config = valid_config();
+    GpuConvolutionReverb enabled_probe(config);
+    CHECK(enabled_probe.gpu_enabled());
 
     config.gpu_enabled = false;
     GpuConvolutionReverb disabled(config);
@@ -105,6 +107,35 @@ TEST_CASE("GPU convolution route clears output while unprepared and releases ide
     route.release();
     CHECK_FALSE(route.prepared());
     CHECK(route.latency_samples() == 0);
+}
+
+TEST_CASE("GPU convolution configuration setters clamp finite values and ignore non-finite input",
+          "[gpu_audio][convolution][configuration]") {
+    auto route = GpuConvolutionReverb(valid_config());
+    route.set_ir_gain_db(-12.0);
+    route.set_ir_gain_db(std::numeric_limits<double>::quiet_NaN());
+    route.set_predelay_ms(10.0);
+    route.set_predelay_ms(std::numeric_limits<double>::infinity());
+    route.set_wet_percent(37.0);
+    route.set_wet_percent(std::numeric_limits<double>::quiet_NaN());
+    route.set_dry_percent(63.0);
+    route.set_dry_percent(std::numeric_limits<double>::infinity());
+    route.set_width_percent(22.0);
+    route.set_width_percent(std::numeric_limits<double>::quiet_NaN());
+    route.set_lowcut_hz(80.0);
+    route.set_lowcut_hz(std::numeric_limits<double>::infinity());
+    route.set_highcut_hz(12'000.0);
+    route.set_highcut_hz(std::numeric_limits<double>::quiet_NaN());
+    CHECK_FALSE(route.prepare());
+    CHECK_FALSE(route.prepared());
+}
+
+TEST_CASE("GPU convolution valid configuration fails closed when the shared provider is absent",
+          "[gpu_audio][convolution][capability]") {
+    GpuConvolutionReverb route(valid_config());
+    CHECK_FALSE(route.prepare());
+    CHECK_FALSE(route.prepared());
+    CHECK_FALSE(route.report().authenticated_shared_provider);
 }
 
 } // namespace

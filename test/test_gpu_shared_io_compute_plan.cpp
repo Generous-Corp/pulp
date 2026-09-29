@@ -63,8 +63,14 @@ class FakeProvider final : public SharedIoArenaProvider {
         resources.opaque = slot;
         slots_.push_back(slot);
         resources.input_lifecycle = {
-            .allocated = true, .import_attempted = true, .import_succeeded = true};
+            .allocated = !invalid_lifecycle, .import_attempted = true, .import_succeeded = true};
         resources.output_lifecycle = resources.input_lifecycle;
+        resources.storage_kind = storage_kind;
+        if (storage_kind == StorageKind::Staged) {
+            resources.input_lifecycle.import_attempted = false;
+            resources.input_lifecycle.import_succeeded = false;
+            resources.output_lifecycle = resources.input_lifecycle;
+        }
         return true;
     }
     void retire_slot(SlotResources& resources) noexcept override {
@@ -155,6 +161,8 @@ class FakeProvider final : public SharedIoArenaProvider {
     };
     std::vector<PendingTerminal> pending_terminals;
     bool defer_terminals = false, allow_drain = true;
+    bool invalid_lifecycle = false;
+    StorageKind storage_kind = StorageKind::ImportedHostPointer;
     bool accept_submissions = true;
     bool require_program_release = false;
     bool program_released = false;
@@ -268,7 +276,7 @@ TEST_CASE("shared IO program session owns generic provider lifecycle",
     REQUIRE(input);
     reinterpret_cast<float*>(input->bytes.data())[0] = 2.0f;
     REQUIRE(session.submit({input->token, 100}));
-    REQUIRE(session.service(100) == 1);
+    REQUIRE(session.service_until(100, 200) == 1);
     auto completion = session.pop_completion();
     REQUIRE(completion);
     auto output = session.acquire_output(*completion);
@@ -278,6 +286,65 @@ TEST_CASE("shared IO program session owns generic provider lifecycle",
     output.reset();
     REQUIRE(session.release());
     CHECK(lifecycle_state->program_released);
+}
+
+TEST_CASE("empty shared IO program session service paths are inert",
+          "[gpu_audio][shared_io][lifecycle]") {
+    SharedIoProgramSession session;
+    CHECK_FALSE(session.prepared());
+    CHECK(session.service(1) == 0);
+    CHECK(session.service_until(1, 2) == 0);
+    CHECK_FALSE(session.acquire_input(1, 2));
+    CHECK_FALSE(session.pop_completion());
+    CHECK_FALSE(session.acquire_output({}));
+    CHECK_FALSE(session.release_output({}));
+    CHECK_FALSE(session.expire_delivery({}));
+    CHECK_FALSE(session.discard_completion({}));
+    CHECK_FALSE(session.reprime_when_quiescent());
+    CHECK(session.release());
+}
+
+TEST_CASE("shared IO arena rejects invalid backing lifecycle facts",
+          "[gpu_audio][shared_io][arena]") {
+    {
+        FakeProvider provider;
+        provider.invalid_lifecycle = true;
+        SharedIoArena arena;
+        CHECK_FALSE(arena.prepare(provider, {.slots = 1,
+                                             .input_bytes_per_slot = 16,
+                                             .output_bytes_per_slot = 16}));
+    }
+    {
+        FakeProvider provider;
+        provider.storage_kind = SharedIoArenaProvider::StorageKind::Staged;
+        auto config = SharedIoArena::Config{.slots = 1,
+                                            .input_bytes_per_slot = 16,
+                                            .output_bytes_per_slot = 16,
+                                            .storage_kind = provider.storage_kind};
+        SharedIoArena arena;
+        REQUIRE(arena.prepare(provider, config));
+        REQUIRE(arena.release());
+    }
+    {
+        FakeProvider provider;
+        provider.storage_kind =
+            static_cast<SharedIoArenaProvider::StorageKind>(0xff);
+        SharedIoArena arena;
+        CHECK_FALSE(arena.prepare(provider, {.slots = 1,
+                                             .input_bytes_per_slot = 16,
+                                             .output_bytes_per_slot = 16,
+                                             .storage_kind = provider.storage_kind}));
+    }
+}
+
+TEST_CASE("shared IO provider compatibility defaults remain explicit",
+          "[gpu_audio][shared_io][lifecycle]") {
+    FakeProvider provider;
+    SharedIoArenaProvider& base = provider;
+    base.service_until(0);
+    CHECK(base.service_wait_ns() == 0);
+    CHECK_FALSE(base.device_lost());
+    CHECK_FALSE(base.can_resume_after_drain());
 }
 
 TEST_CASE("healthy spectral result copies exact output and releases its slot",
@@ -350,6 +417,34 @@ TEST_CASE("spectral failure poisons later physical successes until recreation",
     REQUIRE(session.release());
 }
 
+TEST_CASE("spectral result rejects short output and quarantines undersized provider output",
+          "[gpu_audio][shared_io][spectral]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 1, .input_bytes_per_slot = 16, .output_bytes_per_slot = 16}));
+    auto input = session.acquire_input(50, 0);
+    REQUIRE(input);
+    std::fill(input->bytes.begin(), input->bytes.end(), std::byte{});
+    REQUIRE(session.submit({input->token, 0}));
+    REQUIRE(session.service(0) == 1);
+    bool failed = false;
+    std::uint64_t copied = 0;
+    std::array<float, 5> short_output{};
+    CHECK_FALSE(receive_shared_spectral_result(session, 2, failed,
+                                               std::span<float>(short_output).first(3), 4,
+                                               copied));
+    CHECK_FALSE(failed);
+    auto result = receive_shared_spectral_result(session, 2, failed, short_output, 5, copied);
+    REQUIRE(result);
+    CHECK_FALSE(result->delivered);
+    CHECK(failed);
+    CHECK(copied == 0);
+    REQUIRE(session.release());
+}
+
 TEST_CASE("program release observer sees final retirements only after physical barrier",
           "[gpu_audio][shared_io][spectral]") {
     auto provider = std::make_unique<FakeProvider>();
@@ -391,6 +486,30 @@ TEST_CASE("program release observer sees final retirements only after physical b
     CHECK(state->provider_destroyed);
     REQUIRE(session.release(observer));
     CHECK(observed.calls == 1);
+}
+
+TEST_CASE("shared IO session retains ownership when release barrier fails",
+          "[gpu_audio][shared_io][lifecycle]") {
+    auto provider = std::make_unique<FakeProvider>();
+    auto* control = provider.get();
+    auto state = provider->lifecycle_state;
+    auto program = std::make_unique<FakePreparedProgram>(*provider);
+    program->allow_release = true;
+    SharedIoProgramSession session;
+    REQUIRE(session.prepare({std::move(provider), std::move(program)},
+                            {.slots = 1, .input_bytes_per_slot = 16,
+                             .output_bytes_per_slot = 16}));
+    control->allow_drain = false;
+    CHECK_FALSE(session.release_to_owner());
+    CHECK(session.prepared());
+    CHECK_FALSE(state->provider_destroyed);
+    control->allow_drain = true;
+    auto owner = session.release_to_owner();
+    REQUIRE(owner);
+    CHECK_FALSE(session.prepared());
+    CHECK_FALSE(state->provider_destroyed);
+    owner.reset();
+    CHECK(state->provider_destroyed);
 }
 
 TEST_CASE("shared IO prepared program retains generic lifecycle and releases before slots",

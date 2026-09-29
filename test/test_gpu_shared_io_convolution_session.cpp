@@ -266,6 +266,32 @@ TEST_CASE("shared convolution session packs provider slots and delivers exact pr
     REQUIRE(fixture.session.release());
 }
 
+TEST_CASE("shared convolution session trace captures admission and terminal identity",
+          "[gpu_audio][shared_io][trace]") {
+    Fixture fixture;
+    auto owner = std::make_unique<FakeProvider>(fixture.state);
+    fixture.provider = owner.get();
+    auto program = std::make_unique<FakeProgram>(*fixture.provider, fixture.state);
+    REQUIRE(fixture.session.prepare(
+        {std::move(owner), std::move(program)},
+        {.pipeline = {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 2,
+                      .ir_length = 1},
+         .slots = 2,
+         .sample_rate = 48'000,
+         .trace = {.success_stride = 1, .capture_admissions = true, .enabled = true}}));
+
+    std::array<float, 2> output{};
+    const auto record = callback(fixture.session, a, output);
+    REQUIRE(record.valid());
+    REQUIRE(fixture.session.service(10).submitted == 1);
+    const auto drained = fixture.session.drain_trace();
+    CHECK(drained.records_drained >= 1);
+    CHECK(fixture.session.trace_stats().admissions_enqueued >= 1);
+    CHECK(fixture.session.trace_stats().enqueued >= 1);
+    REQUIRE(fixture.session.release());
+    CHECK(fixture.session.last_closed_trace_stats().drained >= 1);
+}
+
 TEST_CASE("shared convolution session preserves fixed planar channel layout in complex slots",
           "[gpu_audio][shared_io][session]") {
     Fixture fixture;
