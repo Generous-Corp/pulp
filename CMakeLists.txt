@@ -660,6 +660,7 @@ endif()
 # modules.
 if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/bundle_name_quoting)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────

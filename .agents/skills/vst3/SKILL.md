@@ -298,7 +298,8 @@ allocate, and synchronously re-enter the plug-in (some hosts deactivate
 and reactivate the component inside it), so calling it on the real-time
 audio thread is an RT-safety violation even though latency changes are
 infrequent. The matching `restartComponent(flags)` fires on the main
-thread via `drain_pending_restart()` / `deliver_pending_restart()`.
+thread via `deliver_pending_restart()`, and only at a main-thread safe
+point **outside any host-initiated call**.
 
 Delivery is driven primarily by a **paced self-rescheduling poll on the
 host main thread** (`MainThreadDispatcher::call_async_after`, ~33ms,
@@ -309,13 +310,49 @@ audio-thread block could trigger, and the audio thread must not post
 (`call_async` allocates/locks). The poll closes that gap: a mid-stream
 latency/tail change is delivered within one tick even if the host never
 issues another query. The poll tick is cheap (an idle tick is one
-acquire load + early return). As belt-and-suspenders the drain also runs
-from the main-thread host entrypoints the adapter already receives
-(`getLatencySamples` / `getTailSamples` / `setActive` / `getState`).
-When a backend reports the call is running off the main thread, the
-delivery is marshaled to the main thread via a one-shot `call_async`.
-The publisher coalesces a burst of flagged blocks into a single host
-notification.
+acquire load + early return). As belt-and-suspenders the main-thread
+host entrypoints the adapter already receives (`getLatencySamples` /
+`getTailSamples` / `setActive` / `getState`) call
+`schedule_host_notifications()`, which queues ONE coalesced
+`call_async` post — it never delivers inline. The publisher coalesces a
+burst of flagged blocks into a single host notification.
+
+**Never call `restartComponent` from inside a host call — main thread
+is not enough.** Hosts call `setActive`, `setProcessing` and
+`getLatencySamples` while holding their own processing lock, and some
+service `restartComponent` synchronously on their message thread. JUCE's
+VST3 host (so pluginval, and every JUCE-based DAW) handles
+`kReloadComponent` by calling its `reset()`, which retakes the same
+non-recursive `SpinLock` its `releaseResources()` / `prepareToPlay()`
+hold around `setActive` / `getLatencySamples`. A plug-in that delivered
+a pending restart from inside `setActive(false)` therefore spun forever
+— pluginval hung in its Automation test on a plug-in whose parameter
+edge called `flag_tail_changed()` (tail maps to `kReloadComponent`).
+Nothing about that is audio-thread related, which is why the original
+"marshal off the audio thread" fix did not catch it. Rules the adapter
+now follows:
+- A host entrypoint only *schedules* delivery; the post runs on the main
+  thread's next turn, after the host call returned and dropped its lock.
+- `deliver_pending_host_notifications()` is re-entrancy guarded: the host
+  may call back into the plug-in from inside `restartComponent` (JUCE
+  re-queries latency on `kLatencyChanged`), and that nested entrypoint
+  must not start a second delivery.
+- With **no** dispatcher that accepts posts (Windows / Linux hosts have
+  no registered backend today), `setActive` keeps the flags latched;
+  only the state-free queries deliver inline. That leaves one known gap:
+  a no-backend JUCE host that queries latency under its lock with a
+  `kReloadComponent` pending can still hang — a real main-thread backend
+  for those platforms is the fix.
+
+Regression: `VST3 never calls restartComponent from inside a
+host-initiated call` models that host (a non-recursive lock with a
+bounded wait around `setActive` / `getLatencySamples`, synchronous reset
+on `kReloadComponent`) and asserts no re-entry, no lock timeout, and
+exactly one delivery afterwards. The `PulpBundleNameQuoting` fixture
+plug-in (`test/fixtures/bundle_name_quoting`, named `Pulp Test (dev) Plugin`) flips its tail on a Freeze
+toggle, and `pluginval-bundle-name-quoting-VST3` (label `validation`,
+registered when pluginval is installed) drives it through a real JUCE
+host at strictness 5.
 
 **Lifetime safety.** Every main-thread lambda the adapter posts (the
 paced tick and the off-main one-shot) captures a shared `alive` flag and
@@ -359,8 +396,8 @@ Three things that are easy to get wrong:
   null and the edge stays latched, it fires against whatever handler the host
   installs next — a dirty mark arriving long after the change that caused it.
   The adapter consumes first, delivers second.
-- **The drain's early-out has to consider it.** `drain_pending_restart()`
-  returns early when the restart publisher is unarmed; a dirty edge with no
+- **The scheduler's early-out has to consider it.**
+  `schedule_host_notifications()` returns early when the restart publisher is unarmed; a dirty edge with no
   restart pending would never reach delivery through a host entrypoint if that
   check did not also test `state_dirty_pending()`.
 
@@ -843,6 +880,19 @@ one most VST3 hosts enforce, so the workflow above is more durable.
 if you need a side-by-side comparison build, bump the VST3 UID's
 SubCategory bytes (last 4 bytes of the 16-byte UID, by convention) so
 the two builds register as separate plugins.
+
+### A plug-in name with parentheses breaks the link unless POST_BUILD is VERBATIM
+
+`PLUGIN_NAME` flows verbatim into every bundle path, and each POST_BUILD step
+`pulp_add_plugin()` attaches is appended to the link command the generator runs
+through `/bin/sh`. Without `VERBATIM`, CMake escapes a space but not a `(`, so
+`Spectr Freeze (dev)` failed the VST3 *link* step with `syntax error near
+unexpected token '('` — the error names the linker line, not the post-build
+step. Every custom command in the format helpers passes `VERBATIM` and avoids
+shell syntax (PkgInfo is copied from a configure-time file instead of
+`echo ... >`; the one step that needs `||` is a fixed `sh -c` string). The
+`cmake-bundle-name-quoting` ctest builds and inspects a plug-in named
+`Pulp Test (dev) Plugin` in every available format.
 
 ### `DEVELOPMENT` / `RELEASE` macro must precede the SDK include
 
