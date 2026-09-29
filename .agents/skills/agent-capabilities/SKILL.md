@@ -347,8 +347,9 @@ target proofs before configuration. The test must reject wrong-target
 declarations and checkout-path leakage, and use configuration-aware build/install
 and executable paths. Because that proof can take roughly 18 minutes when every
 consumer is configured and built serially on an Apple runner, its CTest
-registration carries `slow;agent-capability-installed-sdk`. Ordinary PR and
-merge-group corpora exclude it, but `classify_changes.py` restores the exact
+registration carries `slow-affected;agent-capability-installed-sdk` (every
+lane's `slow` exclusion matches it). Ordinary PR and merge-group corpora exclude
+it, but `classify_changes.py` restores the exact
 test on the parallel macOS and Linux matrix legs when the diff touches capability manifests,
 schemas, history, registries/generators, vocabulary, install rules, or their
 compile tests. All CMake target/export definitions are included because an

@@ -21,6 +21,8 @@ from __future__ import annotations
 import pathlib
 import re
 import shlex
+import shutil
+import tempfile
 import subprocess
 import sys
 import unittest
@@ -148,6 +150,85 @@ class ShellOutputTests(unittest.TestCase):
         )
         self.assertEqual(payload["label_exclude"], LEGACY_GATE_LABEL_EXCLUDE)
         self.assertEqual(payload["stop_on_failure"], "")
+
+
+class AffectedSlowTests(unittest.TestCase):
+    """A required `slow-affected` proof joins the gate suite; nothing else moves."""
+
+    def test_the_gate_admits_the_proof_by_anchoring_slow_only(self) -> None:
+        for event in ("merge_group", "pull_request", "workflow_dispatch"):
+            with self.subTest(event=event):
+                admitted = ctest_gate_args.label_exclude(event, "macOS", affected_slow=True)
+                self.assertEqual(admitted, GATE_LABEL_EXCLUDE.replace("slow", "^slow$"))
+
+    def test_control_an_unrequired_proof_keeps_the_default_set(self) -> None:
+        self.assertEqual(ctest_gate_args.label_exclude("merge_group", "macOS"),
+                         GATE_LABEL_EXCLUDE)
+        # Non-gate lanes never change: they already run or exclude by their own set.
+        for event, runner in (("push", "macOS"), ("push", "Linux"), ("schedule", "Linux")):
+            with self.subTest(event=event):
+                self.assertEqual(
+                    ctest_gate_args.label_exclude(event, runner, affected_slow=True),
+                    ctest_gate_args.label_exclude(event, runner))
+
+    def test_cli_reads_the_classifier_output(self) -> None:
+        def run(*extra: str) -> str:
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), "--event-name", "merge_group",
+                 "--runner-os", "macOS", *extra],
+                capture_output=True, text=True, check=True)
+            return dict(token.split("=", 1) for token in
+                        shlex.split(proc.stdout.replace("\n", " ")))["label_exclude"]
+
+        self.assertIn("^slow$", run("--affected-slow", "true"))
+        for value in ("false", "", "True-ish"):
+            with self.subTest(value=value):
+                self.assertEqual(run("--affected-slow", value), GATE_LABEL_EXCLUDE)
+
+    @unittest.skipUnless(shutil.which("cmake") and shutil.which("ctest"),
+                         "needs cmake and ctest to read ctest's own label filter")
+    def test_ctest_itself_selects_the_proof_only_when_admitted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, build = pathlib.Path(tmp, "src"), pathlib.Path(tmp, "build")
+            src.mkdir()
+            (src / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.16)\nproject(p NONE)\nenable_testing()\n"
+                "foreach(t plain slow proof)\n"
+                "  add_test(NAME ${t} COMMAND ${CMAKE_COMMAND} -E true)\nendforeach()\n"
+                'set_tests_properties(slow PROPERTIES LABELS "slow")\n'
+                'set_tests_properties(proof PROPERTIES LABELS '
+                f'"{ctest_gate_args.AFFECTED_SLOW_LABEL};x")\n')
+            subprocess.run(["cmake", "-S", str(src), "-B", str(build)], check=True,
+                           capture_output=True)
+
+            def selected(affected: bool) -> set[str]:
+                import json
+                exclude = ctest_gate_args.label_exclude("merge_group", "macOS", affected)
+                out = subprocess.run(
+                    ["ctest", "--test-dir", str(build), "--show-only=json-v1",
+                     "-LE", exclude], check=True, capture_output=True, text=True).stdout
+                return {t["name"] for t in json.loads(out)["tests"]}
+
+            self.assertEqual(selected(False), {"plain"})
+            self.assertEqual(selected(True), {"plain", "proof"})
+
+
+class AffectedSlowWiringTests(unittest.TestCase):
+    def test_the_full_suite_passes_the_classifier_output(self) -> None:
+        text = BUILD_YML.read_text(encoding="utf-8")
+        step = text[text.index("- name: Test (non-Windows)"):]
+        step = step[:step.index("\n      - name:")]
+        self.assertIn("AFFECTED_SLOW: ${{ needs.classify.outputs."
+                      "agent_capability_installed_sdk_required }}", step)
+        self.assertIn('--affected-slow "${AFFECTED_SLOW:-false}"', step)
+
+    def test_the_separate_step_is_left_to_fast_tier_heads(self) -> None:
+        text = BUILD_YML.read_text(encoding="utf-8")
+        step = text[text.index("- name: Test installed SDK capability contract"):]
+        condition = step[:step.index("run:")]
+        self.assertIn("github.event_name == 'pull_request'", condition)
+        self.assertIn("steps.pr_suite.outputs.suite != 'full'", condition)
+        self.assertNotIn("merge_group", condition)
 
 
 BASE = "b" * 40

@@ -4522,6 +4522,7 @@
   "test-receipts-shadow-selftest": {
    "entry": "tools/ci/test_test_receipts_shadow.py",
    "inputs": [
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
