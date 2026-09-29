@@ -222,8 +222,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     catch_discover_tests(pulp-test-canvas-widget-layer-gpu
         TEST_SPEC "[bench]"
         TEST_PREFIX "bench::"
-        LABELS bench
-        PROPERTIES RESOURCE_LOCK pulp_gpu)
+        PROPERTIES RESOURCE_LOCK pulp_gpu
+        LABELS bench)
 
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
