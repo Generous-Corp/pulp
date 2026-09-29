@@ -9,7 +9,8 @@ hook="${PULP_CLAUDE_MD_SYNC_HOOK:-${repo_root}/hooks/scripts/claude_md_sync.py}"
 launcher="${PULP_CLAUDE_MD_SYNC_LAUNCHER:-${repo_root}/hooks/scripts/pulp-claude-md-sync-session}"
 installer="${repo_root}/hooks/scripts/pulp_claude_md_sync_install.py"
 tmp="$(mktemp -d)"
-trap 'rm -rf "${tmp}"' EXIT
+# The launcher's sweep runs detached and may still be writing at exit.
+trap 'rm -rf "${tmp}" 2>/dev/null || { sleep 1; rm -rf "${tmp}"; }' EXIT
 # The launcher sweeps user-level agent configs; never let it see the real ones.
 export HOME="${tmp}/home"
 mkdir -p "${HOME}"
