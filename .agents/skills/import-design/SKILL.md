@@ -28,6 +28,8 @@ exists:
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
+| **Before importing agent-authored HTML/JSX: contracts + realtime performance** | `python3 tools/import-design/check_contracts.py panel.html [app.jsx ...] [--system DIR] [--macros M.json]` |
+| **Is the app's vendored `runtime.js` older than this SDK's @pulp/react?** | `python3 tools/import-validation/check_vendored_runtime.py <runtime.js\|app-dir>` (CMake: `pulp_check_vendored_react_runtime(<bundle>)`) |
 
 The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
 outputs, and availability for each), and its digest is generated into CLAUDE.md
@@ -35,6 +37,32 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Run `check_contracts.py` on every agent-authored panel before importing
+it — its `realtime` gate is the one check here that sees frame cost.** A React
+state setter inside `onPointerMove` / `onMouseMove` / `onWheel` (either phase),
+a `requestAnimationFrame` loop or a repeating timer commits the whole captured
+document on every event; one materialized editor measured ~42 ms per
+`pointermove` against ~0.2 ms for the same element's `mousemove`. Screenshots,
+pixel scores and the browser capture are all blind to it. The gate also flags a
+setter called with a fresh object/array in a sync effect (every run commits) and
+one handler registered for both capture and bubble phases, each with
+file:line and the fix. It is static: it follows local functions a few calls
+deep but not props, context or imports, and a clean run is not a frame-rate
+proof — the view-bridge skill's "Realtime scripted editors" checklist and the
+`trace-analysis` skill are. Without `--system` / `--macros` it still runs the
+realtime gate and says which contract gates it SKIPPED.
+
+**A vendored runtime does not update itself.** Materialized and JSX imports
+compile @pulp/react into a bundle the app checks in; a later SDK fix (the scoped
+captured-metadata re-apply, ~44 ms per commit) never reaches it until the
+transform is re-run. Bundles now carry a `/* @pulp/react runtime revision N */`
+banner from `packages/pulp-react/runtime-fingerprint.json`;
+`check_vendored_runtime.py` (or `pulp_check_vendored_react_runtime()` at
+configure time, warn-only unless `STRICT`) names each missing fix and the
+refresh command, and judges banner-less bundles by each fix's signature. Bump
+the manifest's revision and add a fix entry when a runtime change is worth a
+refresh.
 
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent

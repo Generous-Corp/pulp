@@ -1189,10 +1189,16 @@ jobs:
                 receipt_path="$RUNNER_TEMP/${target}-receipt.json"
                 decision_path="$RUNNER_TEMP/${target}-decision.json"
                 verify_err="$RUNNER_TEMP/${target}-verify.err"
+                # The merge-group entry this group validates, from the queue ref
+                # (refs/heads/gh-readonly-queue/main/pr-<N>-<base>). A run whose
+                # pull_requests is empty (App-opened PRs) is bound to its PR
+                # through the commit, and only when that PR IS this entry.
+                entry_pr="$(printf '%s' "$GITHUB_REF" | sed -nE 's#^refs/heads/gh-readonly-queue/[^/]+/pr-([0-9]+)-[0-9a-f]+$#\1#p')"
                 if ! python3 "$RUNNER_TEMP/protected_merge_receipt.py" download \
                     --repository "$GITHUB_REPOSITORY" --target "$target" \
                     --token "$RECEIPT_TOKEN" --artifact-name "$artifact_name" \
                     --base-sha "$base" --head-sha "$head" \
+                    ${entry_pr:+--entry-pr "$entry_pr"} \
                     --output "$receipt_path" 2> "$verify_err"; then
                   cat "$verify_err" >&2
                   echo "::notice::receipt reuse unavailable for ${target}; full validation retained"
@@ -1722,6 +1728,10 @@ jobs:
           # it `render_to_rgba` returns an empty buffer, so capture-based view
           # tests fail for the configuration rather than for the change.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          # Ask CMake for its codemodel: the pull-request step that runs the
+          # tests a diff reaches maps changed files to targets through it.
+          mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
+          : > "$PULP_BUILD_DIR/.cmake/api/v1/query/codemodel-v2"
           cmake -S . -B "$PULP_BUILD_DIR" "${gen[@]}" ${cmake_extra[@]+"${cmake_extra[@]}"} "${cmake_args[@]}"
           # Mark the build in-progress; the Build step clears it on success, so a
           # build interrupted/cancelled before completion is detected next run
@@ -2048,6 +2058,38 @@ jobs:
           # so where `shipyard landing` reads it (a check-run annotation).
           echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"fast","selector":"pr-fast","full_suite_runs_in":"merge_group"}'
 
+      - name: Test what this pull request reaches (pull request head)
+        # Most merge-group macOS failures in a week were a pull request's OWN
+        # test, one its diff plainly reaches, failing in a batch it then
+        # ejected instead of on its head. This runs, after the fast tier, the
+        # ctests `pulp affected` selects for the pull request's base→head diff
+        # (the merge ref's first parent is the base), and a failure fails the
+        # required check here. It never widens to the full suite: a diff of
+        # docs, skills or workflows, or one the projection cannot focus,
+        # selects nothing extra. The extra time is capped at ten minutes;
+        # tests left over are listed as skipped, and the merge group still
+        # runs everything. Rules and selection: tools/ci/pr_head_affected_tests.py.
+        id: pr_affected_tests
+        if: runner.os != 'Windows' && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate_args="$(python3 tools/ci/ctest_gate_args.py \
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+          eval "$gate_args"
+          : "${label_exclude:?ctest gate arguments did not resolve}"
+          rc=0
+          python3 tools/ci/pr_head_affected_tests.py \
+            --build-dir "$PULP_BUILD_DIR" --base HEAD^1 --head HEAD \
+            --budget-secs 600 --jobs 4 --label-exclude "$label_exclude" \
+            --junit-dir "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/pr-affected-junit" || rc=$?
+          case "$rc" in
+            0) ;;
+            1) exit 1 ;;  # a test this diff reaches failed on its own head
+            2) echo "::warning title=pr-head-affected-tests::could not read the diff or the ctest inventory, so nothing was selected; this is not a verdict on the pull request" ;;
+            *) echo "::error title=pr-head-affected-tests::selector exited $rc"; exit "$rc" ;;
+          esac
+
       - name: Test (non-Windows)
         id: ctest
         # Tests run in the merge queue, not on the pull request head. The queue
@@ -2230,6 +2272,34 @@ jobs:
       # --exclude-regex list, and configure-time absence remove tests from the
       # report entirely — a broader class this step measures but does not close.
       # An empty report provides no execution evidence; selection may be empty.
+      # On a pull request the Test step is continue-on-error, so a failed full
+      # suite shows as a green step whose only trace is a skipped receipt.
+      # Name it: the failing tests in a warning annotation and a job-summary
+      # line, so "why no receipt" is readable on the PR. Non-gating.
+      - name: Announce a failed PR-head full suite (non-gating)
+        if: >-
+          always() && github.event_name == 'pull_request' && runner.os != 'Windows'
+          && steps.ctest.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          names="$(python3 - "$junit" <<'PY' || true
+          import sys, xml.etree.ElementTree as ET
+          try:
+              root = ET.parse(sys.argv[1]).getroot()
+          except Exception as exc:  # unreadable report: say so, never fail the step
+              print(f"(JUnit unreadable: {exc})"); raise SystemExit
+          failed = sorted({c.get("name") or "" for c in root.iter("testcase")
+                           if any(x.tag in ("failure", "error") for x in c)} - {""})
+          head = ", ".join(failed[:12]) + (f" (+{len(failed) - 12} more)" if len(failed) > 12 else "")
+          print(f"{len(failed)} failing: {head}" if failed else "no failing testcase in the report (ctest exit was nonzero)")
+          PY
+          )"
+          echo "::warning title=PR-head full suite failed (non-gating)::${names} — no receipt will be issued; the merge group validates in full"
+          printf '### PR-head full suite: FAILED (non-gating)\n\n%s\n\nNo protected receipt is issued from this run; the merge group will validate in full.\n\n' \
+            "$names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
       - name: Observe ctest non-runs (non-Windows)
         if: always() && runner.os != 'Windows'
         continue-on-error: true

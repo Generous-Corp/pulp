@@ -90,6 +90,10 @@ OPTIONAL_IMPORT_MARKERS = re.compile(
 def entry_sources(entry: dict[str, Any], repo: pathlib.Path) -> list[pathlib.Path]:
     """The script file(s) an entry executes, resolved against ``repo``."""
     argv = entry["argv"]
+    if entry.get("raw"):
+        # A ctest command: every argument that names a checkout file.
+        files = [pathlib.Path(expand(a, repo)) for a in argv[1:] if "{repo}" in a]
+        return [f for f in files if f.is_file()] or [pathlib.Path(expand(argv[0], repo))]
     if argv[:2] == ["-m", "unittest"] and entry.get("cwd"):
         return [pathlib.Path(expand(entry["cwd"], repo)) / f"{argv[2]}.py"]
     return [pathlib.Path(expand(argv[0], repo))]
@@ -199,6 +203,25 @@ class _Slots:
             self.cond.notify_all()
 
 
+def ctest_verdict(entry: dict[str, Any], returncode: int, output: str) -> int:
+    """The exit status ctest would record, given the test's properties.
+
+    PASS_REGULAR_EXPRESSION decides pass/fail by output alone, a
+    SKIP_RETURN_CODE exit is a skip (reported as a pass, marked in the
+    output), and WILL_FAIL inverts the result, all as ctest does.
+    """
+    skip = entry.get("skip_return_code")
+    if skip is not None and returncode == int(skip):
+        return 0
+    patterns = entry.get("pass_regex") or []
+    if patterns:
+        # A CMake regex `.` also matches a newline.
+        returncode = 0 if any(re.search(p, output or "", re.DOTALL) for p in patterns) else 1
+    if entry.get("will_fail"):
+        returncode = 0 if returncode != 0 else 1
+    return returncode
+
+
 def _run_one(
     entry: dict[str, Any],
     repo: pathlib.Path,
@@ -206,7 +229,9 @@ def _run_one(
     locks: dict[str, threading.Lock],
     slots: _Slots | None = None,
 ) -> dict[str, Any]:
-    argv = [python] + [expand(a, repo) for a in entry["argv"]]
+    argv = [expand(a, repo) for a in entry["argv"]]
+    if not entry.get("raw"):
+        argv = [python] + argv
     env = {k: v for k, v in os.environ.items()}
     for key, value in (entry.get("env") or {}).items():
         env[key] = expand(value, repo)
@@ -222,6 +247,10 @@ def _run_one(
             if entry.get("cwd"):
                 cwd = expand(entry["cwd"], repo)
                 scratch = None
+                if not pathlib.Path(cwd).is_dir():
+                    result.update(returncode=1, seconds=0.0,
+                                  output=f"working directory does not exist: {cwd}\n")
+                    break
             else:
                 # ctest runs these from a directory of the build tree; the lane
                 # has none, so each attempt gets an empty directory rather than
@@ -242,7 +271,8 @@ def _run_one(
                     timeout=timeout,
                     check=False,
                 )
-                result.update(returncode=proc.returncode, output=proc.stdout)
+                result.update(returncode=ctest_verdict(entry, proc.returncode, proc.stdout),
+                              output=proc.stdout)
             except subprocess.TimeoutExpired as exc:
                 out = exc.stdout or ""
                 if isinstance(out, bytes):
@@ -317,6 +347,10 @@ GENERIC_BASENAMES = frozenset({
 })
 
 
+_WALKS = re.compile(r"\b(?:r?glob|os\.walk|iterdir|scandir)\(")
+_STRING_LITERAL = re.compile(r"""["']([A-Za-z0-9_][A-Za-z0-9_./-]*)["']""")
+
+
 def changed_paths(base: str, repo: pathlib.Path = REPO_ROOT) -> list[str]:
     """Paths changed since the merge-base with ``base``, committed or not."""
     merge_base = subprocess.run(
@@ -349,6 +383,11 @@ WORKFLOW_LOCAL_SKIPS = {
     "tools/scripts/test_generated_version_bump_check.py": (
         "replays generators that walk full git history per file: ~105 s for its "
         "whole step on CI's shallow clone, over 600 s on a full-history checkout"
+    ),
+    # ctest registrations (the --ctest-python lane) share this list.
+    "rack-plugin-loads": (
+        "compiles the Rack pack against whatever Rack SDK this host installed, so "
+        "its result is host-specific and cannot be compared with the merge-base"
     ),
 }
 WORKFLOW_TIMEOUT = 600.0
@@ -384,6 +423,37 @@ def workflow_entries(
     return entries
 
 
+class _ImportClosure:
+    """Repo files each script loads, through repo helpers (cached per run)."""
+
+    def __init__(self, repo: pathlib.Path) -> None:
+        self.repo = repo
+        self._cache: dict[pathlib.Path, set[pathlib.Path]] = {}
+        self._modules = None
+        try:
+            sys.path.insert(0, str(repo / "tools" / "scripts"))
+            import gate_python_imports_check as imports
+            self._imports = imports
+        except ImportError:
+            self._imports = None
+        finally:
+            sys.path.pop(0)
+
+    def of(self, script: pathlib.Path) -> set[pathlib.Path]:
+        if self._imports is None:
+            return set()
+        script = script.resolve()
+        if script not in self._cache:
+            if self._modules is None:
+                try:
+                    self._modules = self._imports.tracked_python(self.repo)
+                except (OSError, subprocess.SubprocessError):
+                    self._modules = {}
+            self._cache[script] = self._imports.local_import_closure(
+                script, self.repo, self._modules)
+        return self._cache[script]
+
+
 def select_for_changes(
     entries: list[dict[str, Any]],
     changed: list[str],
@@ -391,9 +461,10 @@ def select_for_changes(
     lane_files: tuple[str, ...] = LANE_FILES,
 ) -> list[dict[str, Any]]:
     """Entries a diff can plausibly break: every entry when the lane itself
-    changed, otherwise each entry whose own script changed or whose source
-    names a changed file. A textual reference is a heuristic that
-    over-selects rather than under-selects; the required lane still runs all.
+    changed, otherwise each entry whose own script changed, that loads a
+    changed module through its repo imports, or whose source names a changed
+    file. A textual reference is a heuristic that over-selects rather than
+    under-selects; the required lane still runs all.
     """
     if any(path in lane_files for path in changed):
         return list(entries)
@@ -401,10 +472,18 @@ def select_for_changes(
     tokens = set().union(*(change_tokens(path) for path in changed)) if changed else set()
     word = {t: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])")
             for t in tokens}
+    changed_py = {p for p in changed_abs if p.suffix == ".py"}
+    closure = _ImportClosure(repo) if changed_py else None
     selected = []
     for entry in entries:
         sources = entry_sources(entry, repo)
         if any(src.resolve() in changed_abs for src in sources):
+            selected.append(entry)
+            continue
+        # A changed module reaches every script that loads it, directly or
+        # through a repo helper that imports it in turn.
+        if closure is not None and any(closure.of(src) & changed_py for src in sources
+                                       if src.suffix == ".py"):
             selected.append(entry)
             continue
         # A checker handed directories scans whatever is in them.
@@ -421,7 +500,236 @@ def select_for_changes(
                 pass
         if any(pattern.search(text) for pattern in word.values()):
             selected.append(entry)
+            continue
+        # A script that walks a directory reads files it never names.
+        if _WALKS.search(text):
+            walked = [lit.rstrip("/") + "/" for lit in _STRING_LITERAL.findall(text)
+                      if lit and lit not in (".", "/") and "/" not in lit[:1]
+                      and (repo / lit).is_dir()]
+            if walked and any(path.startswith(tuple(walked)) for path in changed):
+                selected.append(entry)
     return selected
+
+
+# --------------------------------------------------------------------------
+# a ctest label run without ctest (local only)
+
+PR_FAST_MANIFEST = "test/cmake/pr_fast_tests.cmake"
+_CMAKE_SOURCE_VARS = ("CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR", "PULP_ROOT_DIR")
+_CMAKE_ARG = re.compile(r'"((?:[^"\\]|\\.)*)"|([^\s()"]+)')
+
+
+def _pin_build(value: str, build: pathlib.Path | None) -> str:
+    """Keep build-tree paths absolute, so a merge-base re-run reads the same build.
+
+    The base checkout has no build of its own; a registration that reads the
+    configured inventory must see the one the branch run saw, or every such
+    failure would differ on the base for a reason the branch does not share.
+    """
+    if build is None:
+        return value
+    return value.replace(str(build), "\0BUILD\0")
+
+
+def _unpin_build(value: str, build: pathlib.Path | None) -> str:
+    return value.replace("\0BUILD\0", str(build)) if build is not None else value
+
+
+def _to_repo(value: str, repo: pathlib.Path) -> str:
+    root = str(repo)
+    return value.replace(root, "{repo}") if root in value else value
+
+
+def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
+                        repo: pathlib.Path, build: pathlib.Path | None = None) -> dict[str, Any]:
+    def portable(value: str) -> str:
+        return _unpin_build(_to_repo(_pin_build(value, build), repo), build)
+
+    entry: dict[str, Any] = {"name": name, "raw": True, "argv": [portable(a) for a in argv]}
+    if props.get("WORKING_DIRECTORY"):
+        entry["cwd"] = portable(str(props["WORKING_DIRECTORY"]))
+    if props.get("TIMEOUT"):
+        entry["timeout"] = float(props["TIMEOUT"])
+    if props.get("PASS_REGULAR_EXPRESSION"):
+        value = props["PASS_REGULAR_EXPRESSION"]
+        entry["pass_regex"] = value if isinstance(value, list) else str(value).split(";")
+    if props.get("SKIP_RETURN_CODE") not in (None, ""):
+        entry["skip_return_code"] = int(props["SKIP_RETURN_CODE"])
+    if str(props.get("WILL_FAIL", "")).upper() in ("1", "ON", "TRUE", "YES"):
+        entry["will_fail"] = True
+    if props.get("ENVIRONMENT"):
+        value = props["ENVIRONMENT"]
+        pairs = value if isinstance(value, list) else str(value).split(";")
+        entry["env"] = dict(p.split("=", 1) for p in pairs if "=" in p)
+    if props.get("RESOURCE_LOCK"):
+        value = props["RESOURCE_LOCK"]
+        entry["resource_lock"] = value if isinstance(value, list) else str(value).split(";")
+    return entry
+
+
+def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
+    """A configured build older than any test manifest registers an old tier."""
+    stamp = build / "CTestTestfile.cmake"
+    if not stamp.is_file():
+        return False
+    configured = stamp.stat().st_mtime
+    manifests = [repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
+    return any(m.is_file() and m.stat().st_mtime > configured for m in manifests)
+
+
+def ctest_label_entries_from_build(
+    label: str, build_dir: pathlib.Path, repo: pathlib.Path = REPO_ROOT, ctest: str = "ctest",
+) -> list[dict[str, Any]]:
+    """Members of ``label`` exactly as the configured build registered them."""
+    proc = subprocess.run(
+        [ctest, "--test-dir", str(build_dir), "-N", "-L", f"^{label}$", "--show-only=json-v1"],
+        capture_output=True, text=True, check=True,
+    )
+    entries = []
+    for test in json.loads(proc.stdout).get("tests", []):
+        props = {p["name"]: p["value"] for p in test.get("properties", [])}
+        if label not in (props.get("LABELS") or []) or not test.get("command"):
+            continue
+        entries.append(_entry_from_command(test["name"], test["command"], props, repo, build_dir))
+    return entries
+
+
+def _cmake_args(text: str) -> list[str]:
+    return [m.group(1) if m.group(1) is not None else m.group(2)
+            for m in _CMAKE_ARG.finditer(text)]
+
+
+def _cmake_calls(source: str, command: str) -> list[list[str]]:
+    """Argument lists of every ``command(...)`` call, parentheses balanced."""
+    calls = []
+    for match in re.finditer(r"(?im)^\s*" + command + r"\s*\(", source):
+        depth, index = 1, match.end()
+        while index < len(source) and depth:
+            char = source[index]
+            if char == "#" and (index == 0 or source[index - 1] != "\\"):
+                index = source.find("\n", index)
+                if index < 0:
+                    break
+                continue
+            depth += {"(": 1, ")": -1}.get(char, 0)
+            index += 1
+        calls.append(_cmake_args(source[match.end():index - 1]))
+    return calls
+
+
+def ctest_label_entries_from_source(
+    label: str, repo: pathlib.Path = REPO_ROOT,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Members of the ``pr-fast`` tier read from the CMake manifests.
+
+    Used when no configured build exists. A member whose command needs a
+    value only a configure knows (the build directory, a generator
+    expression) cannot run here and is returned as not checked, with why.
+    """
+    if label != "pr-fast":
+        raise ValueError("only the pr-fast tier has a source-side member list")
+    return static_ctest_entries(pr_fast_names(repo), repo)
+
+
+def pr_fast_names(repo: pathlib.Path = REPO_ROOT) -> list[str]:
+    manifest = (repo / PR_FAST_MANIFEST).read_text(encoding="utf-8")
+    listed = re.search(r"set\(PULP_PR_FAST_TESTS(.*?)\n\)", manifest, re.S)
+    return _cmake_args(re.sub(r"#[^\n]*", "", listed.group(1))) if listed else []
+
+
+def static_ctest_entries(
+    names: list[str] | None, repo: pathlib.Path = REPO_ROOT,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Registrations read from test/**/*.cmake; every one when ``names`` is None."""
+    sources = [repo / "test" / "CMakeLists.txt", *sorted((repo / "test").rglob("*.cmake"))]
+    commands: dict[str, list[str]] = {}
+    props: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        if not source.is_file():
+            continue
+        # test/CMakeLists.txt include()s these manifests, so the current source
+        # directory is test/ while the list directory is the manifest's own.
+        text = (source.read_text(encoding="utf-8", errors="replace")
+                .replace("${CMAKE_CURRENT_SOURCE_DIR}", str(repo / "test"))
+                .replace("${CMAKE_CURRENT_LIST_DIR}", str(source.parent)))
+        _collect_tests(text, commands, props)
+    substitutions = {"Python3_EXECUTABLE": sys.executable, "CMAKE_CTEST_COMMAND": "ctest",
+                     "CMAKE_COMMAND": "cmake", **{v: str(repo) for v in _CMAKE_SOURCE_VARS}}
+    return _resolve_members(names, commands, props, substitutions, repo)
+
+
+def _collect_tests(text: str, commands: dict[str, list[str]],
+                   props: dict[str, dict[str, Any]]) -> None:
+    for args in _cmake_calls(text, "add_test"):
+        if len(args) >= 4 and args[0] == "NAME" and args[2] == "COMMAND":
+            argv, rest = [], args[3:]
+            while rest and rest[0] not in ("WORKING_DIRECTORY", "CONFIGURATIONS",
+                                          "COMMAND_EXPAND_LISTS"):
+                argv.append(rest.pop(0))
+            if rest[:1] == ["WORKING_DIRECTORY"] and len(rest) > 1:
+                props.setdefault(args[1], {})["WORKING_DIRECTORY"] = rest[1]
+            commands[args[1]] = argv
+    for args in _cmake_calls(text, "set_tests_properties"):
+        if "PROPERTIES" not in args:
+            continue
+        at = args.index("PROPERTIES")
+        pairs = args[at + 1:]
+        for test in args[:at]:
+            for key, value in zip(pairs[0::2], pairs[1::2]):
+                props.setdefault(test, {})[key] = value
+
+
+def _resolve_members(names, commands, props, substitutions, repo):
+    entries, not_checked = [], {}
+    for name in (names if names is not None else sorted(commands)):
+        if name not in commands:
+            not_checked[name] = "no add_test registration found in test/**/*.cmake"
+            continue
+        argv = []
+        for arg in commands[name]:
+            for var, value in substitutions.items():
+                arg = arg.replace("${" + var + "}", value)
+            argv.append(arg)
+        unresolved = sorted({m for a in argv for m in re.findall(r"\$[{<][^}>]*[}>]", a)})
+        if unresolved:
+            not_checked[name] = "needs a configured build (" + ", ".join(unresolved) + ")"
+            continue
+        member_props = {k: v for k, v in props.get(name, {}).items()}
+        if "WORKING_DIRECTORY" in member_props:
+            wd = member_props["WORKING_DIRECTORY"]
+            for var in _CMAKE_SOURCE_VARS:
+                wd = wd.replace("${" + var + "}", str(repo))
+            if "${" in wd:
+                member_props.pop("WORKING_DIRECTORY")
+            else:
+                member_props["WORKING_DIRECTORY"] = wd
+        entries.append(_entry_from_command(name, argv, member_props, repo))
+    return entries, not_checked
+
+
+def python_ctest_entries(repo: pathlib.Path = REPO_ROOT) -> list[dict[str, Any]]:
+    """Every registered ctest that hands a checkout Python script to Python.
+
+    The pr-fast tier and the source-selftest manifest are left out: gates.sh
+    runs those through their own lanes.
+    """
+    entries, _ = static_ctest_entries(None, repo)
+    skip = set(pr_fast_names(repo))
+    manifest_scripts = {
+        pathlib.Path(expand(e["argv"][0], repo)).resolve()
+        for e in load_manifest(repo / "tools" / "ci" / "source_selftests.json")
+    }
+    python = []
+    for entry in entries:
+        argv = entry["argv"]
+        if entry["name"] in skip or len(argv) < 2 or "ython" not in pathlib.Path(argv[0]).name:
+            continue
+        if not (argv[1].startswith("{repo}/") and argv[1].endswith(".py")):
+            continue
+        if pathlib.Path(expand(argv[1], repo)).resolve() in manifest_scripts:
+            continue
+        python.append(entry)
+    return python
 
 
 # --------------------------------------------------------------------------
@@ -445,13 +753,26 @@ def failing_test_names(output: str) -> set[str]:
     return names
 
 
-def base_verdict(branch: dict[str, Any], base: dict[str, Any] | None) -> tuple[bool, str]:
+_TIMINGS = re.compile(r"\d+(?:\.\d+)?\s*(?:s|sec|seconds|ms)\b")
+
+
+def _normalized_failure(output: str, *roots: str) -> str:
+    text = output or ""
+    for root in roots:
+        if root:
+            text = text.replace(root, "<repo>")
+    return _TIMINGS.sub("<t>", text).strip()
+
+
+def base_verdict(branch: dict[str, Any], base: dict[str, Any] | None,
+                 branch_root: str = "", base_root: str = "") -> tuple[bool, str]:
     """Whether a branch failure is fully explained by the base failing too.
 
-    Pre-existing only when the base run also failed and every failing test the
-    branch reports also fails on the base. A suite whose failures cannot be
-    named, a timeout, or a suite the base cannot run is not provably
-    pre-existing, so it keeps failing.
+    Pre-existing when the base run also failed and every failing test the
+    branch reports also fails on the base, or, for a suite whose failures
+    cannot be named, when both runs failed with the same output (checkout
+    paths and timings aside). A timeout, a suite the base cannot run, or a
+    differing unnamed failure is not provably pre-existing, so it keeps failing.
     """
     if base is None:
         return False, "the suite does not exist on the base"
@@ -462,7 +783,13 @@ def base_verdict(branch: dict[str, Any], base: dict[str, Any] | None) -> tuple[b
     branch_names = failing_test_names(branch.get("output", ""))
     base_names = failing_test_names(base.get("output", ""))
     if not branch_names:
-        return False, "its failing tests could not be named, so they cannot be compared"
+        if base_names or not branch.get("output"):
+            return False, "its failing tests could not be named, so they cannot be compared"
+        # The base run can print the branch's root too: a build tree is shared.
+        if (_normalized_failure(branch["output"], branch_root)
+                == _normalized_failure(base.get("output", ""), base_root, branch_root)):
+            return True, "fails with the same output on the base"
+        return False, "its failing tests could not be named and its output differs on the base"
     new = sorted(branch_names - base_names)
     if new:
         return False, "new failures on this branch: " + ", ".join(new)
@@ -506,7 +833,8 @@ def rerun_on_base(
         base_results = {r["name"]: r for r in
                         run(runnable, repo=base, jobs=jobs, stream=io.StringIO())}
     for res in failed:
-        verdicts[res["name"]] = base_verdict(res, base_results.get(res["name"]))
+        verdicts[res["name"]] = base_verdict(
+            res, base_results.get(res["name"]), str(repo), str(base))
     return verdicts
 
 
@@ -683,6 +1011,37 @@ def entry_from_registration(test: dict[str, Any], repo: pathlib.Path, build: str
 # --------------------------------------------------------------------------
 
 
+def _run_and_report(args: argparse.Namespace, parser: argparse.ArgumentParser,
+                    entries: list[dict[str, Any]], start: float) -> int:
+    results = run(entries, jobs=args.jobs)
+    failed = [r for r in results if r["returncode"] != 0]
+    preexisting: list[str] = []
+    if failed and args.label_base_failures:
+        if not args.changed_from:
+            parser.error("--label-base-failures needs --changed-from BASE")
+        verdicts = rerun_on_base(failed, entries, args.changed_from, jobs=args.jobs)
+        for res in failed:
+            on_base, why = verdicts[res["name"]]
+            if on_base:
+                preexisting.append(res["name"])
+                print(f"source-selftests: PRE-EXISTING ON BASE: {res['name']} fails on "
+                      f"{args.changed_from} too — not caused by this branch ({why})",
+                      flush=True)
+            else:
+                print(f"source-selftests: CAUSED BY THIS BRANCH: {res['name']} ({why})",
+                      flush=True)
+    caused = [r for r in failed if r["name"] not in preexisting]
+    for res in caused:
+        print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
+        print(res.get("output", "")[-6000:])
+    print(
+        f"\nsource-selftests: {len(results) - len(failed)} passed, "
+        f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
+        f"out of {len(results)} in {time.monotonic() - start:.1f}s"
+    )
+    return 1 if caused or len(results) != len(entries) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -700,6 +1059,21 @@ def main(argv: list[str] | None = None) -> int:
         type=pathlib.Path,
         help="run the repo Python scripts a workflow file invokes instead of the "
         "manifest (e.g. .github/workflows/workflow-lint.yml)",
+    )
+    p_run.add_argument(
+        "--ctest-label",
+        metavar="LABEL",
+        help="run the members of a ctest label (e.g. pr-fast) instead of the "
+        "manifest: from --build-dir's registrations when it is configured, "
+        "otherwise from the CMake manifests. The whole tier runs; it is not "
+        "diff-scoped",
+    )
+    p_run.add_argument("--build-dir", type=pathlib.Path)
+    p_run.add_argument(
+        "--ctest-python",
+        action="store_true",
+        help="run the registered ctests that execute a checkout Python script "
+        "(outside the pr-fast tier and this manifest), scoped by --changed-from",
     )
     p_run.add_argument(
         "--label-base-failures",
@@ -729,8 +1103,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "run":
-        entries = (workflow_entries(args.workflow.resolve()) if args.workflow
-                   else load_manifest(args.manifest))
+        if args.ctest_label:
+            build = args.build_dir
+            stale = build is not None and build_is_stale(build)
+            if stale:
+                print(f"source-selftests: {build} was configured before the test manifests "
+                      "last changed; reading the members from the manifests instead", flush=True)
+            if build and not stale and (build / "CTestTestfile.cmake").is_file():
+                entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())
+                origin = f"the configured build {build}"
+            else:
+                entries, not_checked = ctest_label_entries_from_source(args.ctest_label)
+                origin = "the CMake manifests"
+                for name, why in sorted(not_checked.items()):
+                    print(f"source-selftests: NOT CHECKED locally: {name} ({why})", flush=True)
+            print(f"source-selftests: {len(entries)} {args.ctest_label} member(s) from {origin}",
+                  flush=True)
+            if not entries:
+                print("source-selftests: the tier resolved to no runnable member; the "
+                      "instrument is pointed at the wrong place", file=sys.stderr)
+                return 2
+            return _run_and_report(args, parser, entries, time.monotonic())
+        if args.ctest_python:
+            entries = python_ctest_entries()
+        else:
+            entries = (workflow_entries(args.workflow.resolve()) if args.workflow
+                       else load_manifest(args.manifest))
         if len(entries) < args.min_count:
             print(
                 f"source-selftests: manifest lists {len(entries)} entries, "
@@ -738,7 +1136,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        if args.workflow:
+        if args.workflow or args.ctest_python:
             for entry in [e for e in entries if e["name"] in WORKFLOW_LOCAL_SKIPS]:
                 entries.remove(entry)
                 if not args.changed_from or entry in select_for_changes(
@@ -759,34 +1157,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if not entries:
                 return 0
-        start = time.monotonic()
-        results = run(entries, jobs=args.jobs)
-        failed = [r for r in results if r["returncode"] != 0]
-        preexisting: list[str] = []
-        if failed and args.label_base_failures:
-            if not args.changed_from:
-                parser.error("--label-base-failures needs --changed-from BASE")
-            verdicts = rerun_on_base(failed, entries, args.changed_from, jobs=args.jobs)
-            for res in failed:
-                on_base, why = verdicts[res["name"]]
-                if on_base:
-                    preexisting.append(res["name"])
-                    print(f"source-selftests: PRE-EXISTING ON BASE: {res['name']} fails on "
-                          f"{args.changed_from} too — not caused by this branch ({why})",
-                          flush=True)
-                else:
-                    print(f"source-selftests: CAUSED BY THIS BRANCH: {res['name']} ({why})",
-                          flush=True)
-        caused = [r for r in failed if r["name"] not in preexisting]
-        for res in caused:
-            print(f"\n===== {res['name']} (exit {res['returncode']}) =====")
-            print(res.get("output", "")[-6000:])
-        print(
-            f"\nsource-selftests: {len(results) - len(failed)} passed, "
-            f"{len(caused)} failed, {len(preexisting)} pre-existing on base, "
-            f"out of {len(results)} in {time.monotonic() - start:.1f}s"
-        )
-        return 1 if caused or len(results) != len(entries) else 0
+        return _run_and_report(args, parser, entries, time.monotonic())
 
     repo = REPO_ROOT
     build_dir = args.build_dir.resolve()

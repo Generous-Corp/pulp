@@ -435,10 +435,14 @@ class GatesWiringTests(unittest.TestCase):
         out, argv = self._run_block(0).split("|", 1)
         self.assertEqual(out, "fail=0")
         calls = argv.splitlines()
-        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual(len(calls), 4, calls)
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
         self.assertRegex(calls[1], r"^run --workflow \S+/\.github/workflows/workflow-lint\.yml "
                                    r"--changed-from origin/main --label-base-failures$")
+        self.assertRegex(calls[2], r"^run --ctest-label pr-fast --build-dir \S+/build "
+                                   r"--changed-from origin/main --label-base-failures$")
+        self.assertEqual(calls[3], "run --ctest-python --changed-from origin/main "
+                                   "--label-base-failures")
 
 
 class WorkflowEntriesTests(unittest.TestCase):
@@ -494,6 +498,7 @@ class WorkflowEntriesTests(unittest.TestCase):
         # A skip for a suite the workflow no longer runs would hide nothing and
         # rot silently; a skip must name a live entry.
         names = {e["name"] for e in lane.workflow_entries()}
+        names |= {e["name"] for e in lane.python_ctest_entries()}
         for skipped in lane.WORKFLOW_LOCAL_SKIPS:
             self.assertIn(skipped, names)
 
@@ -541,6 +546,18 @@ class BaseFailureTests(unittest.TestCase):
             with self.subTest(branch=branch, base=base):
                 self.assertFalse(lane.base_verdict(branch, base)[0])
 
+    def test_an_unnamed_failure_identical_on_base_is_pre_existing(self) -> None:
+        branch = self._r(1, "[Errno 2] No such file: /work/branch/planning/plan.md (0.08s)")
+        base = self._r(1, "[Errno 2] No such file: /work/base/planning/plan.md (0.11s)")
+        self.assertTrue(lane.base_verdict(branch, base, "/work/branch", "/work/base")[0])
+        other = self._r(1, "[Errno 2] No such file: /work/base/planning/other.md (0.11s)")
+        self.assertFalse(lane.base_verdict(branch, other, "/work/branch", "/work/base")[0])
+
+    def test_a_shared_build_path_in_the_base_output_still_matches(self) -> None:
+        out = "ERROR: 2 duplicates\n  /work/branch/build/test/a x\n"
+        branch, base = self._r(1, out), self._r(1, out)
+        self.assertTrue(lane.base_verdict(branch, base, "/work/branch", "/work/base")[0])
+
     def _git(self, repo: pathlib.Path, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True,
                               text=True).stdout.strip()
@@ -584,6 +601,142 @@ class BaseFailureTests(unittest.TestCase):
             (on_base, why), _ = self._repo(pathlib.Path(tmp), ["a"], ["a", "b"])
         self.assertFalse(on_base)
         self.assertIn("test_b", why)
+
+
+class CtestLaneTests(unittest.TestCase):
+    """The pr-fast and ctest-Python lanes run what ctest registered, as ctest would."""
+
+    def test_verdict_honours_ctest_properties(self) -> None:
+        self.assertEqual(lane.ctest_verdict({"skip_return_code": 77}, 77, ""), 0)
+        self.assertEqual(lane.ctest_verdict({"pass_regex": ["a.*b"]}, 3, "a\nb"), 0)
+        self.assertEqual(lane.ctest_verdict({"pass_regex": ["zzz"]}, 0, "ok"), 1)
+        self.assertEqual(lane.ctest_verdict({"will_fail": True}, 1, ""), 0)
+        self.assertEqual(lane.ctest_verdict({"will_fail": True}, 0, ""), 1)
+        self.assertEqual(lane.ctest_verdict({}, 2, ""), 2)
+
+    def test_build_paths_stay_absolute_for_a_base_rerun(self) -> None:
+        repo = pathlib.Path("/work/branch")
+        build = repo / "build"
+        entry = lane._entry_from_command(
+            "inv", ["/usr/bin/python3", "/work/branch/tools/inv.py", "--build-dir",
+                    "/work/branch/build"], {"WORKING_DIRECTORY": "/work/branch/build/test"},
+            repo, build)
+        # Checkout paths follow the run to the base; the build tree does not.
+        self.assertEqual(entry["argv"][1:], ["{repo}/tools/inv.py", "--build-dir", "/work/branch/build"])
+        self.assertEqual(entry["cwd"], "/work/branch/build/test")
+
+    def test_a_build_older_than_the_manifests_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "test" / "cmake").mkdir(parents=True)
+            (root / "build").mkdir()
+            manifest = root / "test" / "cmake" / "x_tests.cmake"
+            stamp = root / "build" / "CTestTestfile.cmake"
+            manifest.write_text("")
+            stamp.write_text("")
+            os.utime(manifest, (1000, 1000))
+            os.utime(stamp, (2000, 2000))
+            self.assertFalse(lane.build_is_stale(root / "build", root))
+            os.utime(manifest, (3000, 3000))
+            self.assertTrue(lane.build_is_stale(root / "build", root))
+
+    def test_a_missing_working_directory_is_a_failure_not_a_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            results = lane.run([{"name": "x", "raw": True, "argv": ["true"],
+                                 "cwd": "{repo}/absent"}],
+                               repo=pathlib.Path(tmp), stream=io.StringIO())
+        self.assertEqual(results[0]["returncode"], 1)
+        self.assertIn("working directory does not exist", results[0]["output"])
+
+    def _tree(self, root: pathlib.Path) -> None:
+        (root / "test" / "cmake").mkdir(parents=True)
+        (root / "tools" / "ci").mkdir(parents=True)
+        (root / "tools" / "ci" / "source_selftests.json").write_text(
+            json.dumps({"schema_version": 1, "tests": [{"name": "m", "argv": ["{repo}/tools/moved.py"]}]}))
+        (root / "test" / "cmake" / "pr_fast_tests.cmake").write_text(
+            "add_test(NAME fast-one COMMAND ${Python3_EXECUTABLE}\n"
+            '    "${CMAKE_SOURCE_DIR}/tools/fast.py" --flag)\n'
+            "set_tests_properties(fast-one PROPERTIES TIMEOUT 42 SKIP_RETURN_CODE 77)\n"
+            "add_test(NAME fast-needs-build COMMAND ${Python3_EXECUTABLE}\n"
+            '    "${CMAKE_SOURCE_DIR}/tools/inv.py" --build-dir "${CMAKE_BINARY_DIR}")\n'
+            "set(PULP_PR_FAST_TESTS\n    fast-one\n    fast-needs-build  # comment\n)\n")
+        (root / "test" / "cmake" / "other_tests.cmake").write_text(
+            "add_test(NAME contract COMMAND ${Python3_EXECUTABLE}\n"
+            '    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/contract.py")\n'
+            "add_test(NAME moved COMMAND ${Python3_EXECUTABLE} \"${CMAKE_SOURCE_DIR}/tools/moved.py\")\n"
+            "add_test(NAME binary COMMAND pulp-test-thing)\n")
+        for name in ("fast.py", "inv.py", "contract.py", "moved.py"):
+            (root / "tools" / name).write_text("pass\n")
+
+    def test_pr_fast_members_are_read_from_the_manifests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            entries, not_checked = lane.ctest_label_entries_from_source("pr-fast", root)
+        self.assertEqual([e["name"] for e in entries], ["fast-one"])
+        self.assertEqual(entries[0]["argv"][1:], ["{repo}/tools/fast.py", "--flag"])
+        self.assertEqual((entries[0]["timeout"], entries[0]["skip_return_code"]), (42.0, 77))
+        self.assertIn("CMAKE_BINARY_DIR", not_checked["fast-needs-build"])
+
+    def test_python_ctests_exclude_the_other_lanes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            entries = lane.python_ctest_entries(root)
+        # Not the pr-fast member, not the manifest's script, not a binary; the
+        # current source dir resolves to test/, as the include() gives it.
+        self.assertEqual([e["name"] for e in entries], ["contract"])
+        self.assertEqual(entries[0]["argv"][1], "{repo}/test/../tools/contract.py")
+
+    def test_a_directory_walking_contract_is_selected_by_a_change_inside(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "test" / "cmake").mkdir(parents=True)
+            (root / "tools").mkdir()
+            (root / "tools" / "walker.py").write_text(
+                'for p in (REPO / "test").rglob("*.cmake"): pass\n')
+            (root / "tools" / "reader.py").write_text('open("test/x.cmake")\n')
+            entries = [entry("walker", ["{repo}/tools/walker.py"]),
+                       entry("reader", ["{repo}/tools/reader.py"])]
+            picked = lane.select_for_changes(entries, ["test/cmake/new_tests.cmake"], root)
+        # The walker reads everything under test/; the reader names one other file.
+        self.assertEqual([e["name"] for e in picked], ["walker"])
+
+
+class ImportClosureSelectionTests(unittest.TestCase):
+    """A changed module selects every suite that loads it through repo imports."""
+
+    def _repo(self, root: pathlib.Path) -> list[dict]:
+        scripts = root / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "census.py").write_text("def header_names(): return []\n")
+        (scripts / "batch_attr.py").write_text("import census\n")
+        (scripts / "test_batch.py").write_text(
+            "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
+            "import batch_attr\n")
+        (scripts / "test_ns.py").write_text("from tools.scripts import batch_attr\n")
+        (scripts / "test_other.py").write_text("import json\n")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        return [entry("batch", ["{repo}/tools/scripts/test_batch.py"]),
+                entry("ns", ["{repo}/tools/scripts/test_ns.py"]),
+                entry("other", ["{repo}/tools/scripts/test_other.py"])]
+
+    def test_a_module_two_imports_away_selects_its_suites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            picked = lane.select_for_changes(entries, ["tools/scripts/census.py"], root)
+        # Neither suite names census; each loads it through batch_attr, one by a
+        # sys.path sibling import, one through the repo-root namespace.
+        self.assertEqual([e["name"] for e in picked], ["batch", "ns"])
+
+    def test_control_an_unimported_module_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            (root / "tools" / "scripts" / "unused.py").write_text("x = 1\n")
+            picked = lane.select_for_changes(entries, ["tools/scripts/unused.py"], root)
+        self.assertEqual(picked, [])
 
 
 if __name__ == "__main__":

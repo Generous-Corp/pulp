@@ -1079,6 +1079,38 @@ integration target (`--lib --bins` plus each globbed `tests/*.rs`), and
 A new `tests/*.rs` file is picked up at the next configure; a new exclusion
 needs a named reason in `experimental/pulp-rs/CMakeLists.txt`.
 
+### Cargo tests share one process: one env lock, no process-wide side effects
+
+`cargo test` runs a crate's unit tests as threads of one process, so the
+environment, the cwd and PATH are shared. Once the whole suite ran in the
+gate (`pulp-rust-cli-cargo-tests`) this ejected a merge group on a loaded
+host. Rules that keep it deterministic:
+
+- **One lock.** Mutate env only through `test_support::EnvVarGuard` (or
+  while holding `test_support::ENV_LOCK`). A second, module-local mutex
+  guarding the same variables serializes nothing: `trace_fetch`'s
+  `ENV_MUTEX` set `PULP_HOME` while `tool` tests read it, and is now an alias
+  of `ENV_LOCK`.
+- **Pin what the code reads, not just what you set.** A test that relies on
+  "pulp-cpp is not on PATH" must pin `PULP_RS_NO_FALLTHROUGH=1`; on a host
+  with an installed `pulp-cpp` the doctor tests ran it for real.
+- **No process-wide state from production paths.** `delegate_with` used to
+  `set_var(PULP_RS_FALLTHROUGH)` on the running process, which made every
+  later delegation in it report Disabled; tests passed or failed by run
+  order. The marker now goes to the child only.
+- **Stubs must not answer for other tests.** A PATH stub inherited by a
+  concurrent test's subprocess gets that test's calls too; the recorder
+  `shipyard` stub records only `metrics` calls and renames its file into
+  place, and the reader waits for a complete record.
+- **Own target dir, one at a time.** Every cargo ctest uses
+  `build/experimental/pulp-rs/cargo-test/target` (still a `target` path, so
+  the upgrade guard treats it as a cargo artifact) under
+  `RESOURCE_LOCK pulp-rs-cargo-test`, instead of several `cargo test`s
+  blocking on the product build's cargo dir.
+
+Proof bar used: the suite 20 times under 8 busy cores, 0/20 failed;
+the same with `EnvVarGuard`'s lock removed, 20/20 failed.
+
 ### Rust CLI cutover path convention
 
 Rust CLI commands that spawn an external analyzer over caller-supplied

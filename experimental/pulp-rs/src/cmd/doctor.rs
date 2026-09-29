@@ -86,8 +86,10 @@ mod tests {
 
     #[test]
     fn non_json_versions_falls_through_to_stub_without_pulp_cpp() {
-        // When pulp-cpp isn't on PATH in the test environment, the
-        // delegated path returns NotFound and we render the stub.
+        // With delegation unavailable the non-JSON lane renders the stub.
+        // Pin it: an installed pulp-cpp on the host's PATH would otherwise
+        // run for real.
+        let _env = crate::test_support::EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let mut buf = Vec::new();
         let err = run(true, false, &mut buf).unwrap_err();
         assert!(
@@ -100,6 +102,7 @@ mod tests {
 
     #[test]
     fn default_doctor_falls_through_to_stub_without_pulp_cpp() {
+        let _env = crate::test_support::EnvVarGuard::set(crate::fallthrough::DISABLE_ENV, "1");
         let mut buf = Vec::new();
         let err = run(false, false, &mut buf).unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));

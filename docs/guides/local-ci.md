@@ -830,6 +830,17 @@ verdicts followed by `ran_failed`, which must be zero before a digest-keyed
 skip could be proposed (that switch-on is a decisions-contract amendment,
 not a workflow edit).
 
+Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
+verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
+App-opened pull requests (most of this repository's), so the verifier binds
+such a run to its pull request through the commit (`commits/<head>/pulls`)
+and accepts only when exactly one open pull request from this repository
+carries that head, its base is the protected base, the run is a successful
+`pull_request` run of `build.yml`, and the pull request number equals the
+merge-group entry parsed from the queue ref. Any other shape refuses with a
+`commit-pull lookup:` reason that the `shipyard-receipt-decision` annotation
+carries, so refusals caused by the binding are countable.
+
 The fleet section reads each host's `~/.local/state/pulp/host_vitals.json`
 (one `ssh <host> cat` per host). The host-vitals sensor publishes a `build`
 snapshot there — ccache hit rate and fill for the host cache and the gate
@@ -1861,7 +1872,17 @@ line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
 `main_evidence_source`, `main_failing_tests`, `batch_streak`,
-`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`, `reason`.
+`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
+`likely_culprits`, `required_contexts_source`, `reason`.
+
+`likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
+whose presence separates the merge groups that failed a test from the ones that
+ran it green over the last 24 hours (`--history-since`, capped at
+`--history-limit` runs), from `queue_batch_attribute.py --history`. It names a pull request
+to dequeue; `candidate_fix_pr` names one to prioritise, and the two are never
+merged. `required_contexts_source` is `protection` when every required context
+was judged, and `macos-only-fallback` when branch protection could not be read
+(the job summary then says the finding judged macos only).
 
 | `status` | Means | `safe_to_pause_queue` |
 |---|---|---|
@@ -2207,6 +2228,21 @@ Two candidate signals were evaluated against live runs and are deliberately
   Give `build.yml`'s main push lane a run that survives to dispatch jobs at each
   base and the rule becomes checkable and would have cleared all four.
 
+
+## Pull-request heads also run the tests their diff reaches
+
+After the `pr-fast` tier, the `Test what this pull request reaches` step runs
+`tools/ci/pr_head_affected_tests.py` against the configured PR-head build: the
+diff is the merge ref's first parent to its head, the selection is `pulp
+affected`'s projection (`changed_surface_inventory.project_affected` plus the
+Shipyard changed-surface families), and `Configure` writes the CMake codemodel
+query it reads. It is gating. It never takes the projection's `all` fallback,
+skips docs/skills/workflow-only diffs, adds the `cmake-*` fixtures for
+`tools/cmake/**` and `wide-non-native-selftest` for the wide tier's inputs or a
+`test/` CMake registration, drops `pr-fast` members, and stops starting batches
+after ten minutes, listing the rest as skipped. Its annotation is
+`pr-head-affected-tests` (`pulp-pr-head-affected-tests/v1`): selected, passed,
+failed, skipped-for-budget and minutes, which is the per-PR extra cost to watch.
 
 ## Exact PR receipts on an unchanged merge-group candidate
 

@@ -33,6 +33,10 @@
     {
       "name": "tools-registry-check",
       "argv": ["{repo}/tools/scripts/tools_registry_check.py", "--check"]
+    },
+    {
+      "name": "create-templates-verify",
+      "argv": ["{repo}/tools/scripts/test_verify_create_templates.py"]
     }
   ]
 }

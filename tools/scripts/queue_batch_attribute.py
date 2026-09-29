@@ -13,7 +13,7 @@ pull request that adds or touches that file owns the failure.
 which maps to the one pull request adding it.
 
 That signal is blind to a gate that reports a COUNT rather than a file, and the
-consumption census is exactly one: `public_headers.count` is walked live from
+consumption census is exactly one: its public header lists are walked live from
 each target's exported include roots, so one header added under a root a target
 already exports drifts the census while sharing no token with the gate's name.
 The header's own pull request then scores zero everywhere and the batch reads as
@@ -60,7 +60,9 @@ import re
 import subprocess
 import sys
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DEFAULT_REPO = "Generous-Corp/pulp"
@@ -439,7 +441,9 @@ def parse_failing_tests(log: str) -> list[str]:
         match = FAILED_TEST_LINE_RE.search(line)
         if match:
             names.append(match.group(1).strip())
-        elif "Errors while running CTest" in line:
+        elif "Errors while running CTest" in line and names:
+            # ctest writes this to stderr, so in a merged log it can land
+            # before the block's entries as well as after them.
             break
     return names
 
@@ -952,6 +956,810 @@ def certification_for(repo: str, run_id: str, pr: int, source_root: Path) -> Cer
     )
 
 
+# --------------------------------------------------------------------------
+# Membership history: who separates the failing batches from the passing ones.
+# --------------------------------------------------------------------------
+#
+# File ownership is blind to a pull request that breaks a test it never names:
+# a change to a node header that moves an ABI size, or a new test file a tier
+# audit has not heard of. The queue's own history is not. A merge_group batch is
+# a controlled experiment -- the same base plus a known set of entries -- and
+# over a few hours the queue runs many of them with overlapping memberships. The
+# entry whose presence exactly separates the batches that failed a test from the
+# batches that ran it green is the culprit, whatever its diff looks like.
+#
+# The rule is deliberately exact. One passing batch that contained the entry
+# clears it, and one failing batch without it clears it, because either is a
+# direct observation that the entry is neither necessary nor sufficient. Only
+# groups inside the span the entry was queued for count: the same test red on
+# main hours before the entry existed is a different break. A test
+# that no entry separates, failing at a low rate across unrelated memberships or
+# rescued by a retry, is a flake and is named as one rather than pinned on
+# whichever entry it happened to eject.
+
+# The job whose ctest results decide the merge.
+REQUIRED_JOB = "macos"
+
+# A separator seen in only one failing batch is reported but never named: one
+# ejection is equally explained by a flake that happened to land there.
+MIN_SEPARATING_FAILURES = 2
+
+# At or below this failure rate, among batches that ran the test, a test with
+# no separating entry reads as a flake rather than a break.
+FLAKE_MAX_RATE = 0.34
+
+HISTORY_CULPRIT = "culprit"
+HISTORY_AMBIGUOUS = "ambiguous"
+HISTORY_WEAK = "weak"
+HISTORY_FLAKE = "flake"
+HISTORY_UNATTRIBUTED = "unattributed"
+
+# One ctest result line, as ctest prints it during the run (padded with dots).
+CTEST_RESULT_RE = re.compile(
+    r"Test\s+#\d+:\s+(?P<name>.+?)\s+\.+\s*"
+    r"(?P<result>Passed|\*\*\*Failed|\*\*\*Timeout|\*\*\*Exception|Subprocess aborted)"
+)
+
+
+@dataclass(frozen=True)
+class GroupObservation:
+    """What one merge_group batch showed about its tests.
+
+    `passed is None` means the required job's test step succeeded, so every test
+    it runs passed; otherwise only the tests seen passing count as run, because a
+    failed test step can stop before most of the suite ran, and a test that never
+    ran is no evidence either way.
+    """
+
+    run_id: str
+    members: frozenset[int] | None
+    host: str = ""
+    created: str = ""
+    failed: frozenset[str] = frozenset()
+    passed: frozenset[str] | None = None
+    retried: frozenset[str] = frozenset()
+    # Required contexts that concluded on this group, when read; failures
+    # outside the ctest suite are named `[context] step` and ran wherever their
+    # context concluded.
+    required_ran: frozenset[str] | None = None
+    # Reds outside the required set. The queue never ejects on these.
+    advisory_failed: frozenset[str] = frozenset()
+    # Pull request -> the head sha it entered this group at, when read.
+    heads: tuple[tuple[int, str], ...] = ()
+
+    def entries(self) -> frozenset[tuple[int, str]]:
+        """Each member as (pull request, head); head is "" when unread."""
+        head = dict(self.heads)
+        return frozenset((pr, head.get(pr, "")) for pr in self.members or ())
+
+    def ran(self, test: str) -> bool:
+        if test in self.failed:
+            return True
+        context = item_context(test)
+        if context is not None:
+            return self.required_ran is not None and context in self.required_ran
+        return self.passed is None or test in self.passed
+
+
+@dataclass
+class Separator:
+    pr: int
+    with_fail: int
+    with_pass: int
+    without_fail: int
+    alone_fail: int
+    head: str = ""
+    failed_runs: frozenset[str] = frozenset()
+
+    @property
+    def exact(self) -> bool:
+        return self.with_fail > 0 and self.with_pass == 0 and self.without_fail == 0
+
+
+@dataclass
+class TestHistory:
+    test: str
+    failed_runs: list[str] = field(default_factory=list)
+    ran_runs: list[str] = field(default_factory=list)
+    retried_runs: list[str] = field(default_factory=list)
+    unknown_membership_runs: list[str] = field(default_factory=list)
+    separators: list[Separator] = field(default_factory=list)
+    verdict: str = HISTORY_UNATTRIBUTED
+    # One per episode: the same test can break twice for unrelated reasons in
+    # one window, and each break has its own culprit.
+    culprits: list[int] = field(default_factory=list)
+
+    @property
+    def culprit(self) -> int | None:
+        return self.culprits[0] if len(self.culprits) == 1 else None
+
+    @property
+    def failure_rate(self) -> float:
+        return len(self.failed_runs) / len(self.ran_runs) if self.ran_runs else 0.0
+
+    def as_json(self) -> dict:
+        return {
+            "test": self.test,
+            "verdict": self.verdict,
+            "culprits": self.culprits,
+            "failed_runs": self.failed_runs,
+            "ran": len(self.ran_runs),
+            "retried_runs": self.retried_runs,
+            "unknown_membership_runs": self.unknown_membership_runs,
+            "separators": [
+                {
+                    "pr": s.pr,
+                    "with_fail": s.with_fail,
+                    "with_pass": s.with_pass,
+                    "without_fail": s.without_fail,
+                    "alone_fail": s.alone_fail,
+                }
+                for s in self.separators
+            ],
+        }
+
+
+def parse_ctest_results(log: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """(final failures, tests seen passing, tests that failed then passed).
+
+    The final "tests FAILED" block is the verdict; a failure line for a test that
+    is absent from it was a retry that passed, which is flake evidence.
+    """
+    final = frozenset(parse_failing_tests(log))
+    passed: set[str] = set()
+    failed_once: set[str] = set()
+    for match in CTEST_RESULT_RE.finditer(log):
+        name = match.group("name").strip()
+        if match.group("result") == "Passed":
+            passed.add(name)
+        else:
+            failed_once.add(name)
+    retried = frozenset((failed_once & passed) - final)
+    return final, frozenset(passed - final), retried
+
+
+def history_attribution(
+    observations: list[GroupObservation], tests: list[str] | None = None
+) -> list[TestHistory]:
+    """For each failing test, the entries whose presence separates its batches."""
+    if tests is None:
+        names: list[str] = []
+        for obs in observations:
+            for name in sorted(obs.failed | obs.retried):
+                if name not in names:
+                    names.append(name)
+        tests = names
+    observations = sorted(observations, key=chronological)
+    candidates = sorted({key for obs in observations for key in obs.entries()})
+    # An entry can only cause a failure while it is being validated, so a failure
+    # outside the span of groups it appeared in is a different episode (main red
+    # before it was queued, another entry after it left) and does not clear it.
+    # An entry is a pull request AT ONE HEAD: the fixed head that later merges
+    # green is a different entry, and must not clear the broken one.
+    span: dict[tuple[int, str], tuple[int, int]] = {}
+    for position, obs in enumerate(observations):
+        for key in obs.entries():
+            first, _ = span.get(key, (position, position))
+            span[key] = (first, position)
+    histories: list[TestHistory] = []
+    for test in tests:
+        hist = TestHistory(test=test)
+        known: list[GroupObservation] = []
+        for position, obs in enumerate(observations):
+            if test in obs.retried:
+                hist.retried_runs.append(obs.run_id)
+            if not obs.ran(test):
+                continue
+            hist.ran_runs.append(obs.run_id)
+            if test in obs.failed:
+                hist.failed_runs.append(obs.run_id)
+            if obs.members is None:
+                hist.unknown_membership_runs.append(obs.run_id)
+            else:
+                known.append((position, obs))
+        for key in candidates:
+            pr, head = key
+            sep = Separator(
+                pr=pr, head=head, with_fail=0, with_pass=0, without_fail=0, alone_fail=0
+            )
+            first, last = span[key]
+            for position, obs in known:
+                if not first <= position <= last:
+                    continue
+                failed = test in obs.failed
+                entries = obs.entries()
+                present = key in entries
+                if present and failed:
+                    sep.with_fail += 1
+                    sep.failed_runs = sep.failed_runs | {obs.run_id}
+                    if entries == {key}:
+                        sep.alone_fail += 1
+                elif present:
+                    sep.with_pass += 1
+                elif failed:
+                    sep.without_fail += 1
+            if sep.exact:
+                hist.separators.append(sep)
+        hist.separators.sort(key=lambda s: (-s.with_fail, -s.alone_fail, s.pr, s.head))
+        classify_history(hist)
+        histories.append(hist)
+    return histories
+
+
+def chronological(obs: GroupObservation) -> tuple[str, int]:
+    """Creation time, then run id, which GitHub assigns in increasing order."""
+    return (obs.created, int(obs.run_id) if obs.run_id.isdigit() else 0)
+
+
+def classify_history(hist: TestHistory) -> None:
+    strong = [s for s in hist.separators if s.with_fail >= MIN_SEPARATING_FAILURES]
+    if strong:
+        # A separator whose failing groups another separator's strictly contain
+        # is dominated: the wider one explains everything it does and more (a
+        # later group holding only the wider entry). What remains is one set of
+        # failing groups per episode. Entries that always travelled together tie
+        # on that set and picking one is a coin toss, so a tied or overlapping
+        # episode names nobody; disjoint episodes each name their own culprit.
+        dominant = [
+            s for s in strong if not any(o.failed_runs > s.failed_runs for o in strong)
+        ]
+        episodes: dict[frozenset[str], list[int]] = {}
+        for sep in dominant:
+            if sep.pr not in episodes.setdefault(sep.failed_runs, []):
+                episodes[sep.failed_runs].append(sep.pr)
+        clean = [
+            runs
+            for runs in episodes
+            if all(other is runs or not (other & runs) for other in episodes)
+        ]
+        hist.culprits = sorted(
+            {episodes[runs][0] for runs in clean if len(episodes[runs]) == 1}
+        )
+        hist.verdict = HISTORY_CULPRIT if hist.culprits else HISTORY_AMBIGUOUS
+        return
+    if not hist.failed_runs:
+        hist.verdict = HISTORY_FLAKE if hist.retried_runs else HISTORY_UNATTRIBUTED
+        return
+    if hist.retried_runs or hist.failure_rate <= FLAKE_MAX_RATE:
+        hist.verdict = HISTORY_FLAKE
+    elif hist.separators:
+        hist.verdict = HISTORY_WEAK
+    else:
+        hist.verdict = HISTORY_UNATTRIBUTED
+
+
+def likely_culprits(histories: list[TestHistory]) -> dict[int, list[str]]:
+    """Pull request -> the tests the history names it the culprit for."""
+    named: dict[int, list[str]] = {}
+    for hist in histories:
+        if hist.verdict == HISTORY_CULPRIT:
+            for pr in hist.culprits:
+                named.setdefault(pr, []).append(hist.test)
+    return named
+
+
+def render_history(histories: list[TestHistory]) -> list[str]:
+    if not histories:
+        return ["no failing test in the observed merge groups"]
+    lines: list[str] = []
+    for hist in histories:
+        lines.append(
+            f"{hist.test}: {hist.verdict}"
+            + ("".join(f" -> #{pr}" for pr in hist.culprits))
+            + f"  (failed {len(hist.failed_runs)} of {len(hist.ran_runs)} groups that ran it"
+            + (f", retry-rescued in {len(hist.retried_runs)}" if hist.retried_runs else "")
+            + ")"
+        )
+        for sep in hist.separators:
+            lines.append(
+                f"    #{sep.pr}: in {sep.with_fail} failing group(s)"
+                f" ({sep.alone_fail} alone), 0 passing with it, 0 failing without it"
+            )
+        if hist.unknown_membership_runs:
+            lines.append(
+                "    membership unreadable for: "
+                + ", ".join(hist.unknown_membership_runs)
+            )
+    return lines
+
+
+# First-parent steps read per group: deeper than any batch the queue builds.
+CHAIN_DEPTH = 12
+
+# The default history window, and the most runs one pass reads. The cap keeps a
+# cold pass (no cache) inside the detector workflow's timeout on a busy day.
+DEFAULT_HISTORY_SINCE = "24h"
+DEFAULT_HISTORY_MAX_RUNS = 60
+HISTORY_WORKERS = 6
+CACHE_SCHEMA = 4
+
+SINCE_RE = re.compile(r"^(\d+)([mhd])$")
+
+
+def parse_since(text: str, now: datetime) -> datetime:
+    """`24h`, `90m`, `2d`, or an ISO-8601 instant, as an aware UTC datetime."""
+    match = SINCE_RE.match(text.strip())
+    if match:
+        unit = {"m": "minutes", "h": "hours", "d": "days"}[match.group(2)]
+        return now - timedelta(**{unit: int(match.group(1))})
+    moment = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
+def members_from_chain(chain: list[tuple], stop: str) -> frozenset[int] | None:
+    """The entries of a first-parent chain above `stop`, or None if it never gets there.
+
+    Stopping short of `stop` (a commit that is not a queue merge, or a chain
+    read too shallow) is unknown membership, never a partial one: a partial set
+    would clear every entry it missed.
+    """
+    members: set[int] = set()
+    for sha, pr, *_ in chain:
+        if sha == stop:
+            return frozenset(members) if members else None
+        members.add(pr)
+    return None
+
+
+def chain_heads(chain: list[tuple]) -> tuple[tuple[int, str], ...]:
+    """(pull request, entry head) for every queue merge the chain read."""
+    return tuple(
+        (int(step[1]), str(step[2])) for step in chain if len(step) > 2 and step[1]
+    )
+
+
+def group_chain(repo: str, head_sha: str, depth: int = CHAIN_DEPTH) -> list[tuple[str, int, str]]:
+    """(commit, pull request, entry head) by first parent from a group head, while each is a queue merge.
+
+    Immutable once read, so it is what the cache keeps; which of these entries
+    still count as the group's members depends on where main is now.
+    """
+    chain: list[tuple[str, int, str]] = []
+    sha = head_sha.strip()
+    for _ in range(depth):
+        raw = gh(
+            f"repos/{repo}/commits/{sha}",
+            '[(.commit.message|split("\\n")[0]),(.parents[0].sha//""),'
+            '(.parents[1].sha//"")]|@tsv',
+        )
+        if not raw or "\t" not in raw:
+            break
+        subject, parent, entry_head = (raw.split("\t") + ["", ""])[:3]
+        merged = MERGED_PR_RE.match(subject.strip())
+        if not merged:
+            break
+        # The queue merge's second parent is the head the entry was queued at.
+        chain.append((sha, int(merged.group(1)), entry_head.strip()))
+        sha = parent.strip()
+    # The first commit below the last merge closes the chain, so a stop at it
+    # is recognised.
+    chain.append((sha, 0, ""))
+    return chain
+
+
+def group_members(
+    repo: str,
+    head_branch: str,
+    head_sha: str,
+    base: str = "main",
+    chain: list[tuple] | None = None,
+) -> frozenset[int] | None:
+    """Every entry a merge_group batch contains, from its commit chain.
+
+    The ref's embedded sha is the commit the entry was stacked on, which is the
+    previous entry's group commit rather than the branch base, so a compare from
+    it sees only the last entry. The chain is walked by first parent from the
+    group head down to its merge base with `base`; each step is one entry's
+    "Merge pull request #N" commit. An entry whose group commit later landed is
+    part of `base` by then and correctly drops out; a group that itself landed
+    is walked down to the commit it was stacked on instead.
+    """
+    ref = BATCH_BRANCH_RE.match(head_branch.strip())
+    if not ref:
+        return None
+    stop = gh(f"repos/{repo}/compare/{base}...{head_sha}", ".merge_base_commit.sha")
+    if not stop:
+        return None
+    if stop.strip() == head_sha.strip():
+        # The group landed, so its whole chain is on `base` now. Every stacked
+        # entry below it landed from its own passing group, so this group adds
+        # only the entry it is named for: walk down to the commit it was
+        # stacked on.
+        stop = ref.group(2)
+    if chain is None:
+        chain = group_chain(repo, head_sha)
+    return members_from_chain(chain, stop.strip())
+
+
+def required_contexts(repo: str, base: str = "main") -> frozenset[str] | None:
+    """The status contexts `base` requires, from branch protection and rulesets.
+
+    Read rather than hard-coded: the merge queue ejects on exactly this set, and
+    a red outside it (the hosted Linux job) never removes an entry. None when
+    neither source could be read.
+    """
+    names: set[str] = set()
+    classic = gh(f"repos/{repo}/branches/{base}/protection/required_status_checks", ".contexts[]")
+    if classic:
+        names.update(line for line in classic.splitlines() if line)
+    rules = gh(
+        f"repos/{repo}/rules/branches/{base}",
+        '.[]|select(.type=="required_status_checks")'
+        "|.parameters.required_status_checks[].context",
+    )
+    if rules:
+        names.update(line for line in rules.splitlines() if line)
+    return frozenset(names) or None
+
+
+JOB_URL_RE = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
+
+
+def latest_check_runs(repo: str, sha: str) -> dict[str, dict]:
+    """Check-run name -> its latest check run on `sha`, across every workflow."""
+    raw = gh(
+        f"repos/{repo}/commits/{sha}/check-runs?per_page=100",
+        ".check_runs[]|@json",
+        paginate=True,
+    )
+    if raw is None:
+        raise RuntimeError(f"check runs for {sha} could not be read")
+    latest: dict[str, dict] = {}
+    for line in raw.splitlines():
+        try:
+            check = json.loads(line)
+        except ValueError:
+            continue
+        name = str(check.get("name") or "")
+        if name and int(check.get("id") or 0) >= int(latest.get(name, {}).get("id") or 0):
+            latest[name] = check
+    return latest
+
+
+def failing_step_names(repo: str, job_id: str) -> list[str]:
+    raw = gh(
+        f"repos/{repo}/actions/jobs/{job_id}",
+        '.steps[]|select(.conclusion=="failure")|.name',
+    )
+    return [line for line in (raw or "").splitlines() if line]
+
+
+def context_item(context: str, name: str) -> str:
+    """A failure outside the macos ctest suite, named by its context."""
+    return f"[{context}] {name}" if name else f"[{context}]"
+
+
+def item_context(item: str) -> str | None:
+    return item[1 : item.index("]")] if item.startswith("[") and "]" in item else None
+
+
+def read_group(repo: str, run: dict, required: frozenset[str]) -> dict:
+    """The immutable facts of one completed merge_group run, as a cache record.
+
+    Every REQUIRED context on the group's head is read, whichever workflow
+    reported it: the macos job's ctest results by test name, any other required
+    failure by its failing step. A red outside the required set is recorded as
+    advisory and never as a failure, because the queue does not eject on it.
+    `evidence` is false when no required context concluded.
+    """
+    run_id = str(run.get("id"))
+    record: dict = {
+        "schema": CACHE_SCHEMA,
+        "run_id": run_id,
+        "head_branch": str(run.get("head_branch") or ""),
+        "head_sha": str(run.get("head_sha") or ""),
+        "created": str(run.get("created_at") or ""),
+        "evidence": False,
+        "required": sorted(required),
+        "required_ran": [],
+        "advisory_failed": [],
+        "failed": [],
+        "passed": [],
+        "retried": [],
+    }
+    checks = latest_check_runs(repo, record["head_sha"])
+    failed: list[str] = []
+    for name, check in sorted(checks.items()):
+        conclusion = check.get("conclusion")
+        if name not in required:
+            if conclusion == "failure":
+                record["advisory_failed"].append(name)
+            continue
+        if conclusion not in ("success", "failure"):
+            continue
+        record["required_ran"].append(name)
+        job = JOB_URL_RE.search(str(check.get("details_url") or ""))
+        if name == REQUIRED_JOB and job:
+            detail = json.loads(gh(f"repos/{repo}/actions/jobs/{job.group(2)}") or "{}")
+            record["host"] = str(detail.get("runner_name") or "")
+            if conclusion == "success":
+                # A hosted placeholder concludes `macos` green without running
+                # the suite; only a green test step means every test passed.
+                ran_tests = any(
+                    test_step(str(step.get("name") or ""))
+                    and step.get("conclusion") == "success"
+                    for step in detail.get("steps") or []
+                )
+                record["passed"] = None if ran_tests else []
+        if conclusion == "success":
+            continue
+        if name == REQUIRED_JOB and job:
+            archive = run_log_zip(repo, job.group(1))
+            if archive is None:
+                raise RuntimeError(f"logs for run {job.group(1)} could not be read")
+            tests, passed, retried = parse_ctest_results(
+                unpack_job_logs(archive).get(REQUIRED_JOB, "")
+            )
+            record["passed"] = sorted(passed)
+            record["retried"] = sorted(retried)
+            if tests:
+                failed += sorted(tests)
+                continue
+        steps = failing_step_names(repo, job.group(2)) if job else []
+        failed += [context_item(name, step) for step in steps] or [context_item(name, "")]
+    record["failed"] = failed
+    record["evidence"] = bool(record["required_ran"])
+    if record["evidence"]:
+        record["chain"] = [list(step) for step in group_chain(repo, record["head_sha"])]
+    return record
+
+
+def observation_from_record(
+    record: dict, members: frozenset[int] | None
+) -> GroupObservation:
+    passed = record.get("passed")
+    return GroupObservation(
+        run_id=str(record["run_id"]),
+        members=members,
+        host=str(record.get("host") or ""),
+        created=str(record.get("created") or ""),
+        failed=frozenset(record.get("failed") or ()),
+        passed=None if passed is None else frozenset(passed),
+        retried=frozenset(record.get("retried") or ()),
+        required_ran=frozenset(record.get("required_ran") or ()),
+        advisory_failed=frozenset(record.get("advisory_failed") or ()),
+        heads=chain_heads(record.get("chain") or []),
+    )
+
+
+def default_cache_dir(repo: str) -> Path:
+    override = (os.environ.get("PULP_QUEUE_HISTORY_CACHE") or "").strip()
+    root = Path(override) if override else Path.home() / ".cache/pulp/queue-history"
+    return root / repo.replace("/", "__")
+
+
+def load_record(cache_dir: Path | None, run_id: str) -> dict | None:
+    if cache_dir is None:
+        return None
+    try:
+        record = json.loads((cache_dir / f"{run_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return record if record.get("schema") == CACHE_SCHEMA else None
+
+
+def store_record(cache_dir: Path | None, record: dict) -> None:
+    if cache_dir is None:
+        return
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        path = cache_dir / f"{record['run_id']}.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+@dataclass
+class HistoryRead:
+    """What one pass over the window saw, including what it could not read."""
+
+    observations: list[GroupObservation] = field(default_factory=list)
+    since: str = ""
+    listed: int = 0
+    from_cache: int = 0
+    fetched: int = 0
+    unreadable: list[str] = field(default_factory=list)
+    capped: bool = False
+    required: list[str] = field(default_factory=list)
+    required_unread: bool = False
+
+
+def list_group_runs(repo: str, since: datetime, max_runs: int) -> tuple[list[dict], bool]:
+    """Completed merge_group runs created since `since`, newest first, and whether the cap cut it."""
+    stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    runs: list[dict] = []
+    page = 1
+    while True:
+        raw = gh(
+            f"repos/{repo}/actions/workflows/build.yml/runs?event=merge_group"
+            f"&status=completed&per_page=100&page={page}&created=%3E%3D{stamp}"
+        )
+        try:
+            batch = json.loads(raw or "{}").get("workflow_runs", [])
+        except ValueError:
+            batch = []
+        for run in batch:
+            if len(runs) >= max_runs:
+                return runs, True
+            runs.append(run)
+        if len(batch) < 100:
+            return runs, False
+        page += 1
+
+
+def observe_history(
+    repo: str,
+    since: str = DEFAULT_HISTORY_SINCE,
+    max_runs: int = DEFAULT_HISTORY_MAX_RUNS,
+    cache_dir: Path | None = None,
+    now: datetime | None = None,
+) -> HistoryRead:
+    """Every merge group in the window as an observation.
+
+    A completed run never changes, so its jobs, ctest results and commit chain
+    are cached per run and a repeated pass reads only new runs. Membership is
+    not cached: it depends on where main is now.
+    """
+    start = parse_since(since, now or datetime.now(timezone.utc))
+    runs, capped = list_group_runs(repo, start, max_runs)
+    read = HistoryRead(since=start.isoformat(), listed=len(runs), capped=capped)
+    required = required_contexts(repo)
+    if required is None:
+        # Unreadable protection: judge the one context known to gate the merge,
+        # and say so rather than guess the rest.
+        required = frozenset({REQUIRED_JOB})
+        read.required_unread = True
+    read.required = sorted(required)
+
+    def one(run: dict) -> tuple[dict | None, bool]:
+        run_id = str(run.get("id"))
+        cached = load_record(cache_dir, run_id)
+        # Which reds count depends on the required set, so a record read under
+        # another set is stale.
+        if cached is not None and cached.get("required") == sorted(required):
+            return cached, True
+        try:
+            record = read_group(repo, run, required)
+        except (RuntimeError, ValueError):
+            return None, False
+        store_record(cache_dir, record)
+        return record, False
+
+    def members(record: dict) -> frozenset[int] | None:
+        chain = [tuple(step) for step in record.get("chain") or []]
+        return group_members(
+            repo, record["head_branch"], record["head_sha"], chain=chain or None
+        )
+
+    with ThreadPoolExecutor(max_workers=HISTORY_WORKERS) as pool:
+        results = list(pool.map(one, runs))
+        evidence = []
+        for run, (record, hit) in zip(runs, results):
+            if record is None:
+                read.unreadable.append(str(run.get("id")))
+                continue
+            read.from_cache += int(hit)
+            read.fetched += int(not hit)
+            if record.get("evidence"):
+                evidence.append(record)
+        memberships = list(pool.map(members, evidence))
+    read.observations = [
+        observation_from_record(record, group)
+        for record, group in zip(evidence, memberships)
+    ]
+    return read
+
+
+def advisory_only(observations: list[GroupObservation]) -> list[GroupObservation]:
+    """Groups red only outside the required set: the queue ejected nobody for these."""
+    return [o for o in observations if o.advisory_failed and not o.failed]
+
+
+def render_advisory(observations: list[GroupObservation]) -> list[str]:
+    groups = advisory_only(observations)
+    if not groups:
+        return []
+    lines = ["advisory-only reds (not required, never an ejection cause):"]
+    for obs in groups:
+        lines.append(f"    {obs.run_id}: " + ", ".join(sorted(obs.advisory_failed)))
+    return lines
+
+
+@dataclass
+class Ejection:
+    """One failed_checks removal of a pull request, and the group that caused it."""
+
+    removed_at: str
+    before: str
+    run_id: str = ""
+    record: dict | None = None
+
+
+def graphql(query: str, **variables: str) -> dict | None:
+    cmd = [(os.environ.get("PULP_GH_CLI") or "").strip() or "ghapp", "api", "graphql"]
+    for key, value in variables.items():
+        cmd += ["-F", f"{key}={value}"]
+    cmd += ["-f", f"query={query}"]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except ValueError:
+        return None
+
+
+EJECTIONS_QUERY = """
+query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){
+pullRequest(number:$pr){timelineItems(last:20,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT]){
+nodes{... on RemovedFromMergeQueueEvent{createdAt reason beforeCommit{oid}}}}}}}
+"""
+
+
+def parse_ejections(payload: dict | None) -> list[Ejection]:
+    nodes = (
+        ((payload or {}).get("data") or {}).get("repository", {}) or {}
+    ).get("pullRequest", {}) or {}
+    found: list[Ejection] = []
+    for node in ((nodes.get("timelineItems") or {}).get("nodes") or []):
+        if (node or {}).get("reason") != "failed_checks":
+            continue
+        before = ((node.get("beforeCommit") or {}).get("oid")) or ""
+        if before:
+            found.append(Ejection(removed_at=str(node.get("createdAt") or ""), before=before))
+    return found
+
+
+def ejections(repo: str, pr: int) -> list[Ejection]:
+    """Every failed_checks removal of `pr`, each tied to the group run that ejected it.
+
+    The removal event's `beforeCommit` is the head of the entry's own merge
+    group -- the commit the next entry was stacked on -- so the ejecting run is
+    the merge_group run built on exactly that sha, found by identity rather
+    than by time.
+    """
+    owner, name = repo.split("/", 1)
+    found = parse_ejections(graphql(EJECTIONS_QUERY, owner=owner, name=name, pr=str(pr)))
+    for ejection in found:
+        raw = gh(
+            f"repos/{repo}/actions/workflows/build.yml/runs?event=merge_group"
+            f"&head_sha={ejection.before}",
+            ".workflow_runs[0].id",
+        )
+        ejection.run_id = (raw or "").strip()
+    return found
+
+
+def render_ejection(
+    pr: int,
+    ejection: Ejection,
+    observation: GroupObservation | None,
+    histories: dict[str, TestHistory],
+) -> list[str]:
+    head = f"#{pr} ejected {ejection.removed_at} by merge group {ejection.run_id or '(run not found)'}"
+    if observation is None:
+        return [head, "    that group is outside the window or proves nothing; widen --since"]
+    lines = [head + (f" (members {sorted(observation.members)})" if observation.members else "")]
+    if not observation.failed:
+        lines.append(
+            "    no required context failed on that group, so its checks do not "
+            "explain the ejection"
+        )
+    for item in sorted(observation.failed):
+        hist = histories.get(item)
+        verdict = hist.verdict if hist else HISTORY_UNATTRIBUTED
+        named = "".join(f" #{n}" for n in hist.culprits) if hist else ""
+        lines.append(f"    required failure: {item} -> {verdict}{named}")
+    if observation.advisory_failed:
+        lines.append(
+            "    advisory reds, not the cause: "
+            + ", ".join(sorted(observation.advisory_failed))
+        )
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_id", nargs="?", help="failed merge_group run id")
@@ -965,7 +1773,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--pr",
         type=int,
-        help="the pull request to rule on, required by --certify",
+        help="the pull request to rule on, required by --certify; with --history, "
+        "also explain each of its failed_checks ejections from the group that "
+        "caused it",
     )
     parser.add_argument(
         "--certify",
@@ -979,6 +1789,31 @@ def main(argv: list[str] | None = None) -> int:
         help="checkout whose committed census names the exported include roots",
     )
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument(
+        "--history",
+        action="store_true",
+        help="attribute by batch membership over the recent merge groups: name "
+        "the entry whose presence separates the failing batches from the passing "
+        "ones, and name flakes as flakes",
+    )
+    parser.add_argument(
+        "--since",
+        default=DEFAULT_HISTORY_SINCE,
+        help="--history window: 24h, 90m, 2d, or an ISO-8601 instant "
+        f"(default {DEFAULT_HISTORY_SINCE})",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_HISTORY_MAX_RUNS,
+        help="most merge_group runs --history reads; a window holding more is "
+        f"cut to the newest and says so (default {DEFAULT_HISTORY_MAX_RUNS})",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="--history reads every run afresh instead of the per-run cache",
+    )
     args = parser.parse_args(argv)
 
     if args.run_id and args.run_id_flag and args.run_id != args.run_id_flag:
@@ -1003,6 +1838,73 @@ def main(argv: list[str] | None = None) -> int:
             args.repo, given, args.pr, Path(args.source_root)
         )
         print(json.dumps(verdict.as_json(), indent=2, sort_keys=True))
+        return 0
+
+    if args.history:
+        read = observe_history(
+            args.repo,
+            since=args.since,
+            max_runs=args.limit,
+            cache_dir=None if args.no_cache else default_cache_dir(args.repo),
+        )
+        observations = read.observations
+        focus = None
+        if given:
+            focus = sorted(
+                {t for obs in observations if obs.run_id == given for t in obs.failed}
+            )
+        histories = history_attribution(observations, focus)
+        explained: list[str] = []
+        if args.pr is not None:
+            by_run = {obs.run_id: obs for obs in observations}
+            by_test = {hist.test: hist for hist in histories}
+            for ejection in ejections(args.repo, args.pr):
+                explained += render_ejection(
+                    args.pr, ejection, by_run.get(ejection.run_id), by_test
+                )
+        if args.format == "json":
+            print(
+                json.dumps(
+                    {
+                        "since": read.since,
+                        "required_contexts": read.required,
+                        "required_unread": read.required_unread,
+                        "advisory_only": {
+                            obs.run_id: sorted(obs.advisory_failed)
+                            for obs in advisory_only(observations)
+                        },
+                        "ejections": explained,
+                        "listed_groups": read.listed,
+                        "capped": read.capped,
+                        "from_cache": read.from_cache,
+                        "unreadable": read.unreadable,
+                        "observed_groups": len(observations),
+                        "tests": [h.as_json() for h in histories],
+                        "likely_culprits": {
+                            str(pr): tests
+                            for pr, tests in likely_culprits(histories).items()
+                        },
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(
+                f"{read.listed} merge group(s) since {read.since}"
+                f" ({read.from_cache} cached), {len(observations)} with test evidence"
+            )
+            if read.capped:
+                print(f"window cut to the newest {read.listed}; raise --limit to read further back")
+            if read.unreadable:
+                print("unreadable, left out: " + ", ".join(read.unreadable))
+            if read.required_unread:
+                print("required contexts unreadable; judging macos only")
+            else:
+                print("required contexts: " + ", ".join(read.required))
+            for line in explained:
+                print(line)
+            print("\n".join(render_history(histories) + render_advisory(observations)))
         return 0
 
     run_id = given or latest_failed_merge_group(args.repo)

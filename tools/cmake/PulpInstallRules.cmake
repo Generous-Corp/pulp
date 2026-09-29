@@ -759,6 +759,9 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/install_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/remove_control_host.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
+    # Included by PulpUtils.cmake; resolves the fingerprint installed below
+    # relative to its own directory.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReactRuntime.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlatformConfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacosArchiveFloor.cmake"
@@ -789,6 +792,15 @@ install(FILES
     # its own directory, so it must land beside it in the installed SDK too.
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.standalone.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+)
+
+# The @pulp/react runtime fingerprint pulp_check_vendored_react_runtime()
+# compares an app's vendored runtime.js against. Without it the check reports
+# that it could not run rather than passing.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/packages/pulp-react/runtime-fingerprint.json"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+    RENAME pulp-react-runtime-fingerprint.json
 )
 
 # Ship the min-OS floor data next to PulpMinOs.cmake so a find_package(Pulp)

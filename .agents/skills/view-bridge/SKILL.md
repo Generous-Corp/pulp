@@ -760,6 +760,24 @@ returns `nullptr` by default, so a processor that declares nothing costs nothing
 the same name. Resolving across the two would bind a meter to the wrong signal
 and look like it worked.
 
+**Reference implementation: `pulp create --template gain`.** Its
+`processor.hpp.template` declares an `output` meter channel and publishes one
+peak/RMS `MeterFrame` per block; its `ui/main.js` binds it with
+`bindMeter("out-meter", "value:output")`, so no script runs per audio tick, and
+throttles its numeric readout to ~10 Hz with a pinned width. Copy that shape for
+any meter or level before reaching for a per-tick push. Data that is not a
+meter (analyzer frames, modulation) goes through
+`WidgetBridge::dispatch_native_message`, never `load_script` — the processor
+template's custom-editor comment block says so where an author starts a custom
+editor. Three gates keep scaffolds and imports on this path:
+`tools/scripts/verify_create_templates.py` (no template calls `load_script`, and
+every template UI script passes the realtime contract; `create-templates-verify`
+ctest), `test/test_template_ui_scripts.cpp` (the gain script's meter really
+follows the channel through the bridge, and the readout width is pinned), and
+`tools/import-design/check_contracts.py`, whose `realtime` gate flags a React
+state setter on a pointer-move / wheel / rAF / repeating-timer path, a
+fresh-object setter in a sync effect, and one handler bound to both phases.
+
 ## Drag input is held per presented frame — do not dispatch raw AppKit events
 
 Both macOS plug-in editor hosts (`MacPluginViewHost` CPU, `MacGpuPluginViewHost`

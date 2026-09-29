@@ -10,6 +10,18 @@
 //   GainKnob → createKnob()     MixFader → createFader()
 //   OutputMeter → createMeter()  FilterXYPad → createXYPad()
 
+// Live data and interaction stay fast only if the imported UI keeps them off
+// the framework's commit path (the view-bridge skill's "Realtime scripted
+// editors" checklist):
+//   - meters: bindMeter('id', 'value:<channel>') to a processor value channel,
+//     which updates natively each frame; see the gain template;
+//   - pointer, hover and animation state: refs plus direct canvas/text writes,
+//     never a React state setter per move or per frame;
+//   - numeric readouts: ~10 Hz at most, with a pinned width.
+// Before importing agent-authored HTML/JSX, run
+//   python3 tools/import-design/check_contracts.py <panel> [scripts...]
+// which flags a state commit on a per-frame path with file:line.
+
 setTheme('dark');
 
 // Placeholder layout — replace by importing your Figma design

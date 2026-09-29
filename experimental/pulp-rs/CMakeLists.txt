@@ -184,21 +184,30 @@ add_custom_target(pulp-rust-cli ALL
 if(PULP_BUILD_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+    # Every cargo-driven test shares one target dir of its own and one
+    # RESOURCE_LOCK. Pointing them at the build's cargo-target let ctest -j
+    # start several `cargo test`s on one dir ("Blocking waiting for file lock
+    # on build directory") and race the product build's cargo. The last path
+    # component stays `target` so the upgrade guard still recognizes these
+    # binaries as cargo build artifacts.
+    set(_pulp_rs_test_target_dir "${CMAKE_CURRENT_BINARY_DIR}/cargo-test/target")
+
     add_test(NAME pulp-rust-gpu-trace-analysis-unit
         COMMAND ${CMAKE_COMMAND} -E env
-            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             trace_gpu_analysis)
     set_tests_properties(pulp-rust-gpu-trace-analysis-unit
-        PROPERTIES LABELS "trace;gpu;rust")
+        PROPERTIES RESOURCE_LOCK pulp-rs-cargo-test LABELS "trace;gpu;rust")
     add_test(NAME pulp-rust-gpu-trace-analysis-integration
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_trace_gpu_analysis_integration.py"
             --cargo "${CARGO_EXECUTABLE}"
-            --target-dir "${_pulp_rs_target_dir}"
+            --target-dir "${_pulp_rs_test_target_dir}"
             --manifest "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml")
     set_tests_properties(pulp-rust-gpu-trace-analysis-integration PROPERTIES
+        RESOURCE_LOCK pulp-rs-cargo-test
         LABELS "trace;gpu;rust"
         SKIP_RETURN_CODE 77)
     add_test(NAME pulp-rust-gpu-trace-analysis-ctest-selftest
@@ -211,12 +220,12 @@ if(PULP_BUILD_TESTS)
     # re-running through a checkout's own CLI, before any configure.
     add_test(NAME pulp-rust-stale-cli-guard
         COMMAND ${CMAKE_COMMAND} -E env
-            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             stale_cli)
     set_tests_properties(pulp-rust-stale-cli-guard
-        PROPERTIES LABELS "cli;rust")
+        PROPERTIES RESOURCE_LOCK pulp-rs-cargo-test LABELS "cli;rust")
 
     # The whole crate's unit and integration tests. Only named slices above
     # used to run, which left ~94% of them (about 1,120 of 1,200) unexecuted
@@ -236,20 +245,22 @@ if(PULP_BUILD_TESTS)
     endforeach()
     add_test(NAME pulp-rust-cli-cargo-tests
         COMMAND ${CMAKE_COMMAND} -E env
-            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             --no-fail-fast --lib --bins ${_pulp_rs_test_target_args})
     set_tests_properties(pulp-rust-cli-cargo-tests PROPERTIES
+        RESOURCE_LOCK pulp-rs-cargo-test
         LABELS "cli;rust"
         TIMEOUT 900)
     add_test(NAME pulp-rust-cli-doc-tests
         COMMAND ${CMAKE_COMMAND} -E env
-            "CARGO_TARGET_DIR=${_pulp_rs_target_dir}"
+            "CARGO_TARGET_DIR=${_pulp_rs_test_target_dir}"
             ${CARGO_EXECUTABLE} test
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml"
             --doc)
     set_tests_properties(pulp-rust-cli-doc-tests PROPERTIES
+        RESOURCE_LOCK pulp-rs-cargo-test
         LABELS "cli;rust"
         TIMEOUT 600)
 

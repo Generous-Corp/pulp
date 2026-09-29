@@ -21,6 +21,15 @@ This script is the structural guard:
      `KNOWN_TEMPLATE_VARS`.
   2. Every plugin/app template directory ships the minimum required
      files for that template type.
+  3. No template demonstrates a per-frame cost: nothing calls
+     `load_script` (per-tick data goes through
+     `WidgetBridge::dispatch_native_message` or a value-channel binding),
+     and every UI script passes the realtime contract that
+     `tools/import-design/check_contracts.py` runs on imported panels (no
+     React state setter in a pointer-move / wheel handler,
+     requestAnimationFrame or repeating-timer callback). New projects copy
+     these files verbatim, so a slow pattern here is a slow pattern in every
+     scaffolded plugin.
 
 It does NOT build anything. It does NOT need the CLI binary. It runs
 in seconds on every supported platform (Linux x86_64, Linux arm64,
@@ -38,6 +47,9 @@ import argparse
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "import-design"))
+from realtime_contract import check_realtime, line_of, strip_comments  # noqa: E402
 
 # Keep this list in sync with the `vars` substitution map in
 # `tools/cli/cmd_create.cpp` (the inline `std::vector<std::pair<...>>`
@@ -106,6 +118,43 @@ REQUIRED_FILES_BY_TYPE = {
 }
 
 _VAR_PATTERN = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
+_LOAD_SCRIPT = re.compile(r"\bload_script\s*\(")
+_SCRIPT_SUFFIXES = (".js", ".jsx", ".mjs", ".ts", ".tsx", ".html")
+_SOURCE_SUFFIXES = _SCRIPT_SUFFIXES + (".cpp", ".hpp", ".h", ".mm", ".m", ".in")
+
+
+def _logical_suffix(path: Path) -> str:
+    """`main.js.template` is a `.js` file once materialized."""
+    name = path.name[:-len(".template")] if path.name.endswith(".template") else path.name
+    return Path(name).suffix
+
+
+def check_realtime_patterns(type_name: str, dir_path: Path) -> list[str]:
+    """Flag per-frame costs a scaffolded project would inherit."""
+    failures: list[str] = []
+    for path in sorted(p for p in dir_path.rglob("*") if p.is_file()):
+        suffix = _logical_suffix(path)
+        if suffix not in _SOURCE_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue  # reported by the placeholder scan for .template files
+        rel = path.relative_to(dir_path)
+        code = strip_comments(text)
+        for m in _LOAD_SCRIPT.finditer(code):
+            failures.append(
+                f"[{type_name}] {rel}:{line_of(code, m.start())}: calls "
+                "load_script -- push per-tick data with "
+                "WidgetBridge::dispatch_native_message or bind a value "
+                "channel with bindMeter (view-bridge skill, \"Realtime "
+                "scripted editors\")")
+        if suffix in _SCRIPT_SUFFIXES:
+            for finding in check_realtime(text):
+                failures.append(
+                    f"[{type_name}] {rel}:{finding.line}: [{finding.rule}] "
+                    f"{finding.message}")
+    return failures
 
 
 def scan_template_vars(text: str) -> set[str]:
@@ -215,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for type_dir in type_dirs:
         all_failures.extend(check_template_dir(type_dir.name, type_dir))
+        all_failures.extend(check_realtime_patterns(type_dir.name, type_dir))
 
     if all_failures:
         for line in all_failures:
@@ -228,7 +278,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"verify_create_templates: {len(type_dirs)} template directories "
-        f"OK — all `{{{{VAR}}}}` references match the substitution map"
+        f"OK — all `{{{{VAR}}}}` references match the substitution map and "
+        f"no template carries a per-frame cost"
     )
     return 0
 
