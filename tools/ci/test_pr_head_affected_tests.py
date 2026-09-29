@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import cmake_registration_impact as impact  # noqa: E402
 import pr_head_affected_tests as step  # noqa: E402
 
 REPO = HERE.parent.parent
@@ -35,8 +37,13 @@ NAMES = {
 
 
 class SelectionTests(unittest.TestCase):
-    def plan(self, paths: list[str], projected: step.inventory.Selection) -> dict:
-        with mock.patch.object(step, "project", return_value=projected) as project:
+    def plan(self, paths: list[str], projected: step.inventory.Selection,
+             *, scripts: list[str] = (), inputs: list[str] = (), own: list[str] = ()) -> dict:
+        with mock.patch.object(step, "project", return_value=projected) as project, \
+                mock.patch.object(step, "script_reference_tests", return_value=list(scripts)), \
+                mock.patch.object(step, "script_input_tests", return_value=list(inputs)), \
+                mock.patch.object(step, "own_tests", return_value=list(own)), \
+                mock.patch.object(step, "registration_tests", return_value=[]):
             plan = step.select(Path("/b"), paths, NAMES)
         plan["_projected"] = project.called
         return plan
@@ -70,9 +77,179 @@ class SelectionTests(unittest.TestCase):
                 plan = self.plan([path], selection("focused", []))
                 self.assertIn("wide-non-native-selftest", plan["tests"])
 
+    def test_script_tests_are_added_even_for_a_docs_only_diff(self) -> None:
+        # A census test parses docs/status: the declared inputs apply where the
+        # build projection does not run at all.
+        plan = self.plan(["docs/status/consumption-profiles.json"], selection("focused", []),
+                         inputs=["unit-a"], scripts=["unit-b"])
+        self.assertEqual(sorted(plan["tests"]), ["unit-a", "unit-b"])
+        self.assertFalse(plan["_projected"])
+
+    def test_a_too_wide_projection_still_runs_the_tests_the_diff_edits(self) -> None:
+        plan = self.plan(["core/x/a.cpp", "test/test_a.cpp"],
+                         selection("all", [], "670 affected targets exceed 40% of 774"),
+                         own=["unit-a"])
+        self.assertEqual(plan["tests"], ["unit-a"])
+
+    def test_control_a_focused_projection_does_not_add_own_tests_twice(self) -> None:
+        plan = self.plan(["test/test_a.cpp"], selection("focused", ["unit-a"]), own=["unit-b"])
+        self.assertEqual(plan["tests"], ["unit-a"])
+
     def test_an_unrelated_tools_change_does_not_reach_the_families(self) -> None:
         plan = self.plan(["tools/scripts/other.py"], selection("focused", ["other"]))
         self.assertEqual(plan["tests"], ["other"])
+
+
+MANIFEST = """\
+add_executable(pulp-probe probe.cpp)
+foreach(key sha dir)
+    get_target_property(_provider_id_${key} pulp-lib "PROVIDER_${key}")
+endforeach()
+target_compile_definitions(pulp-probe PRIVATE
+    SHA="${_provider_id_sha}")
+add_test(NAME probe-run COMMAND pulp-probe)
+# a comment that names nothing
+add_test(NAME unrelated COMMAND other)
+set_tests_properties(unrelated PROPERTIES TIMEOUT 5)
+if(_arm_only)
+    add_test(NAME arm-control COMMAND pulp-probe --arm)
+endif()
+"""
+
+
+class RegistrationImpactTests(unittest.TestCase):
+    def reach(self, touched: set[int], removed: list[str] = ()) -> impact.Impact:
+        return impact.impact(MANIFEST, touched, removed)
+
+    def test_an_edited_add_test_reaches_that_test_only(self) -> None:
+        self.assertEqual(self.reach({7}).tests, {"probe-run"})
+
+    def test_an_edited_properties_call_reaches_its_tests(self) -> None:
+        self.assertEqual(self.reach({10}).tests, {"unrelated"})
+
+    def test_a_templated_variable_write_reaches_the_target_that_reads_it(self) -> None:
+        # The loop body writes _provider_id_${key}; the probe's definitions read it.
+        reached = self.reach({3})
+        self.assertIn("pulp-probe", reached.targets)
+        self.assertNotIn("unrelated", reached.tests)
+
+    def test_a_removed_variable_write_reaches_the_block_it_conditions(self) -> None:
+        # Only the comment line is touched; the removed write is the edge.
+        reached = self.reach({8}, removed=["set(_arm_only TRUE)"])
+        self.assertEqual(reached.tests, {"arm-control"})
+
+    def test_an_edited_block_header_reaches_the_block(self) -> None:
+        self.assertIn("arm-control", self.reach({11}).tests)
+
+    def test_control_an_edited_comment_reaches_nothing(self) -> None:
+        reached = self.reach({8})
+        self.assertEqual((reached.tests, reached.targets), (set(), set()))
+
+    def test_control_a_parenthesis_in_a_quoted_argument_does_not_end_the_call(self) -> None:
+        text = 'add_test(NAME q COMMAND x ")"\n    --flag)\nadd_test(NAME r COMMAND y)\n'
+        self.assertEqual(impact.impact(text, {2}).tests, {"q"})
+
+
+class ChangedLinesTests(unittest.TestCase):
+    def test_hunks_give_head_lines_and_removed_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True,  # noqa: E731
+                                            capture_output=True, text=True).stdout.strip()
+            git("init", "-q")
+            (repo / "t.cmake").write_text("a\nb\nc\nd\n")
+            git("add", "t.cmake")
+            git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            (repo / "t.cmake").write_text("a\nB\nd\n")
+            git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "head")
+            touched, removed = step.changed_lines(base, "HEAD", ["t.cmake"], repo)["t.cmake"]
+        self.assertEqual((touched, removed), ({2}, ["b", "c"]))
+
+
+class DirectEdgeTests(unittest.TestCase):
+    def test_declared_script_inputs_match_files_and_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "test").mkdir()
+            (root / step.SCRIPT_INPUTS_LIST).write_text(
+                '{"tests": {"census": {"inputs": ["docs/status/", "x.json"]},'
+                ' "other": {"inputs": ["y.json"]}}}')
+            self.assertEqual(step.script_input_tests(["docs/status/a.yaml"], root), ["census"])
+            self.assertEqual(step.script_input_tests(["docs/statusx"], root), [])
+
+    def model(self) -> step.inventory.CodeModel:
+        T = step.inventory.Target
+        return step.inventory.CodeModel(
+            targets={"pulp-probe": T("pulp-probe", "EXECUTABLE", "", "", ["test/probe.cpp"],
+                                     artifacts=["bin/pulp-probe"]),
+                     "lib": T("lib", "STATIC_LIBRARY", "", "", ["core/lib.cpp"],
+                              artifacts=["lib/liblib.a"])},
+            source_root="/s", build_root="/b")
+
+    def entries(self) -> list:
+        E = step.inventory.CTestEntry
+        return [E("probe-run", ["bin/pulp-probe"], {}), E("other", ["bin/x"], {})]
+
+    def patched(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(step.inventory, "codemodel_reply_available",
+                                              return_value=True))
+        stack.enter_context(mock.patch.object(step.inventory, "load_codemodel_targets",
+                                              return_value=self.model()))
+        stack.enter_context(mock.patch.object(step.inventory, "load_projection_ctest_entries",
+                                              return_value=self.entries()))
+        return stack
+
+    def test_an_edited_program_source_selects_the_tests_that_run_it(self) -> None:
+        with self.patched():
+            self.assertEqual(step.own_tests(Path("/b"), REPO, ["test/probe.cpp"]), ["probe-run"])
+            self.assertEqual(step.own_tests(Path("/b"), REPO, ["core/lib.cpp"]), [])
+
+    def test_a_registration_edit_reaches_the_tests_that_run_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "test" / "cmake").mkdir(parents=True)
+            (root / "test" / "cmake" / "m.cmake").write_text(MANIFEST)
+            with self.patched():
+                reached = step.registration_tests(Path("/b"), ["test/cmake/m.cmake"], root,
+                                                  {"test/cmake/m.cmake": ({3}, [])})
+                untouched = step.registration_tests(Path("/b"), ["test/cmake/m.cmake"], root,
+                                                    {"test/cmake/m.cmake": ({8}, [])})
+        self.assertIn("probe-run", reached)
+        self.assertEqual(untouched, [])
+
+    def test_editing_a_lane_entry_script_reaches_the_lane_contract(self) -> None:
+        names = ["source-selftest-lane-contract", "unit-a"]
+        # Both entry shapes: a `{repo}/x.py` script and a `-m unittest` module.
+        for entry in ("tools/ci/test_pr_head_affected_tests.py",
+                      "tools/scripts/test_build_time_report.py"):
+            self.assertEqual(step.source_lane_contract_tests([entry], names, REPO),
+                             ["source-selftest-lane-contract"], entry)
+        self.assertEqual(step.source_lane_contract_tests(["docs/a.md"], names, REPO), [])
+
+    def test_an_unowned_file_is_set_aside_and_the_rest_projected(self) -> None:
+        calls: list[list[str]] = []
+
+        def project_affected(model, changed, *rest):
+            calls.append(list(changed))
+            if "core/new.cpp" in changed:
+                return selection("all", [], "source not owned by any configured target: core/new.cpp")
+            return selection("focused", ["unit-a"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel in ("core/new.cpp", "core/lib.cpp"):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text("")
+            with self.patched(), \
+                    mock.patch.object(step.affected_targets, "policy_families", return_value=[]), \
+                    mock.patch.object(step.inventory, "header_owners", return_value={}), \
+                    mock.patch.object(step.inventory, "project_affected",
+                                      side_effect=project_affected):
+                chosen = step.project(Path("/b"), root, ["core/new.cpp", "core/lib.cpp"])
+        self.assertEqual((chosen.mode, chosen.tests), ("focused", ["unit-a"]))
+        self.assertEqual(calls[-1], ["core/lib.cpp"])
 
 
 class BudgetTests(unittest.TestCase):
