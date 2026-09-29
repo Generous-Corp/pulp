@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260929-codeql-security-remediation-watch",
+  "created_at": "2026-09-29T08:40:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a security-only remediation that crosses these families through the broad test/** selectors. The control-host tests gain CodeQL false-positive suppressions for public fixture manifests, and the capability-contract test removes an unused ambiguous regex that CodeQL flagged; dependency manifests update Vitest and js-yaml to their patched releases. No DesignIR, importer, capture path, renderer, asset, codegen output, fixture behaviour, threshold or Vellum-owned source changes.",
+  "tests": [
+    "python3 -m unittest tools.scripts.test_capability_contract_gate",
+    "packages/pulp-react vitest (739 tests)",
+    "packages/pulp-import-ir vitest (79 tests)",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
