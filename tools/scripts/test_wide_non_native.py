@@ -374,6 +374,9 @@ REVIEWED_SCANNERS = {
         "build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",
     "tools/scripts/consumption_census.py": "counts installed headers under build roots",
     "tools/scripts/consumption_census_contract.py": "runs consumption_census.py by name",
+    "tools/scripts/test_consumption_census.py":
+        "lists tracked files under the census's recorded include roots, none of them "
+        "under tools/scripts, tools/testing or tools/import-validation",
     "tools/scripts/raw_this_async_check.py": "walks core/ only",
     "tools/scripts/sample_region_compat_baseline.py": "walks CMake and build trees",
     "tools/scripts/skills_doc_check.py": "walks .agents/skills",
