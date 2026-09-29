@@ -2767,8 +2767,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/trace-sql/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "3f8211f221495debd7d449ca677c3b232dcf757d",
-          "object_id": "d6bc29736fa789b256526ccfee584ef81a703ed8",
+          "revision": "a8ee5592bf54f5d9b86b410e4952e9a7f188c1e3",
+          "object_id": "0697eda1ff983dca18f99a477fc325900ddbb26b",
           "object_type": "blob"
         },
         {
@@ -3010,8 +3010,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".github/workflows/release-cli.yml",
           "state": "pulp-owned-retained",
-          "revision": "916b3f605b482aa07d63ca7a7c4f8edd47e1d118",
-          "object_id": "0994efde35d8576147215aae75b7abd2192fd57a",
+          "revision": "8d1224342b0f350877eee2a54a1e7a09b10473d7",
+          "object_id": "ebc67ae57d8de3d7ccdda275a2aba6a51e429630",
           "object_type": "blob"
         },
         {
