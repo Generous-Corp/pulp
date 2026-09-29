@@ -1737,7 +1737,14 @@ conclusion success, and the PR number equal to the merge-group entry parsed
 from the queue ref (`--entry-pr`). Every refusal is prefixed `commit-pull
 lookup:` so it is countable in `shipyard-receipt-decision` reasons. The
 reuse step runs the verifier from the PROTECTED BASE, so a change here takes
-effect only after it lands on main.
+effect only after it lands on main. The verifier judges the receipt's own
+target JOB (`macos` concluded success, issue and publish steps success), not
+the run-level conclusion: an advisory hosted-Linux red turned the run red
+while the receipt was sound (PR 9024). Every REQUIRED context from
+`.github/rulesets/main-protection.json` must still be green on the head
+(skipped/neutral count as green, as branch protection counts them); a red or
+absent one refuses and is named. Preamble refusals name their field (workflow
+name, event, head_sha, path).
 
 ## A test that "fails" on the required gate may only have run out of clock
 
