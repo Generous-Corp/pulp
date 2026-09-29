@@ -116,12 +116,27 @@ class BuildListTests(unittest.TestCase):
                 self.assertFalse(p.startswith("/"), p)
 
 
+def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
+    """Every case pins the event environment the script reads, so the selftest
+    gives the same verdict inside a pull-request job, a merge-group job (where
+    the runner exports GITHUB_EVENT_NAME=merge_group and the script would
+    otherwise go advisory under a case that expects a block), and a shell."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_EVENT_NAME", "PULP_SCRIPT_INPUTS_STRICT")}
+    if event is not None:
+        env["GITHUB_EVENT_NAME"] = event
+    if strict:
+        env["PULP_SCRIPT_INPUTS_STRICT"] = "1"
+    return env
+
+
 class CheckModeTests(unittest.TestCase):
-    def run_tool(self, repo: Repo, *args: str, inventory: dict | None = None) -> subprocess.CompletedProcess[str]:
+    def run_tool(self, repo: Repo, *args: str, inventory: dict | None = None,
+                 event: str = "pull_request", strict: bool = False) -> subprocess.CompletedProcess[str]:
         inv = repo.build / "inv.json"
         inv.write_text(json.dumps(inventory or repo.inventory()), encoding="utf-8")
         return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
-                               "--inventory-json", str(inv), *args], capture_output=True, text=True, timeout=60)
+                               "--inventory-json", str(inv), *args], capture_output=True, text=True, timeout=60,
+                              env=tool_env(event=event, strict=strict))
 
     def test_write_then_check_is_clean_then_drifts_on_a_new_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -243,21 +258,13 @@ class CheckModeTests(unittest.TestCase):
             write(repo.root, "tools/scripts/extra.py", "z = 1\n")
             write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
             self.g("add", "-A"); self.g("commit", "-q", "-m", "pr edits a listed input")
-            env = dict(os.environ, GITHUB_EVENT_NAME="merge_group")
-            env.pop("PULP_SCRIPT_INPUTS_STRICT", None)
-            inv = repo.build / "inv.json"; inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
-            proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
-                                   "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            proc = self.run_tool(repo, "--check", "--base", "base-ref", event="merge_group")
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertIn("::warning title=script-test inputs stale (advisory in a merge group)::", proc.stdout)
             self.assertIn("stale entry: alpha", proc.stdout)
-            env["PULP_SCRIPT_INPUTS_STRICT"] = "1"
-            strict = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
-                                     "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            strict = self.run_tool(repo, "--check", "--base", "base-ref", event="merge_group", strict=True)
             self.assertEqual(strict.returncode, 1, strict.stdout)
-            env.pop("PULP_SCRIPT_INPUTS_STRICT"); env["GITHUB_EVENT_NAME"] = "pull_request"
-            head = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--inventory-json", str(inv),
-                                   "--check", "--base", "base-ref"], capture_output=True, text=True, timeout=60, env=env)
+            head = self.run_tool(repo, "--check", "--base", "base-ref", event="pull_request")
             self.assertEqual(head.returncode, 1, head.stdout)
 
     def test_unreadable_inventory_exits_2(self) -> None:
@@ -265,7 +272,7 @@ class CheckModeTests(unittest.TestCase):
             repo = Repo(Path(tmp))
             proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
                                    "--inventory-json", str(repo.build / "absent.json"), "--check"],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, timeout=60, env=tool_env(event="merge_group", strict=False))
             self.assertEqual(proc.returncode, 2)
 
 

@@ -424,6 +424,8 @@ def main(argv: list[str]) -> int:
             # signal. A stale entry today only informs the shadow selector, so
             # the group reports and lets the PR land; the next push to any PR
             # touching those scripts is blocked until the list is regenerated.
+            # If a GATING selector ever consumes this list, drop this advisory
+            # branch: a stale list would then skip real tests in the group.
             names = ", ".join(name for _, name, _ in blocking[:10])
             print(f"::warning title=script-test inputs stale (advisory in a merge group)::{names} — "
                   f"regenerate with script_test_inputs.py --write on the next push")
