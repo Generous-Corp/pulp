@@ -28,20 +28,15 @@ function(pulp_install_forge_catalog)
         endif()
         pulp_generated_forge_catalog_path(_catalog)
         set(_writer "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpGenerateForgeCatalog.cmake")
-        add_custom_command(OUTPUT "${_catalog}"
+        add_custom_target(pulp-forge-sdk-catalog ALL
             COMMAND "${CMAKE_COMMAND}"
                 "-DEXPORTER=$<TARGET_FILE:pulp-cli>"
                 "-DOUTPUT=${_catalog}"
                 -P "${_writer}"
-            # Keep both the target-order dependency and the concrete executable
-            # file dependency.  The former guarantees the exporter is built;
-            # the latter makes a rebuilt producer invalidate an existing
-            # generated catalog in single-config generators as well as in the
-            # multi-config CI generators used by the SDK gates.
-            DEPENDS pulp-cli "$<TARGET_FILE:pulp-cli>" "${_writer}"
+            BYPRODUCTS "${_catalog}"
+            DEPENDS pulp-cli "${_writer}"
             COMMENT "Exporting this SDK's enabled Forge catalog"
             VERBATIM)
-        add_custom_target(pulp-forge-sdk-catalog ALL DEPENDS "${_catalog}")
     elseif(NOT EXISTS "${_catalog}")
         message(FATAL_ERROR "Required Forge catalog snapshot is missing: ${_catalog}")
     endif()
