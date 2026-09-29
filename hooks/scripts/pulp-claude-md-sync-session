@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# User-level SessionStart entry point for claude_md_sync.py.
+#
+# A checkout parked on an old branch carries old project hooks too, so its own
+# .codex/hooks.json and the plugin copy it was installed from can predate
+# claude_md_sync.py and never run it. This launcher is meant to be referenced
+# from a user-level hook config (outside any checkout). It runs the copy of
+# claude_md_sync.py stored at the checkout's already-fetched origin/main, so
+# the logic stays current without reinstalling anything.
+#
+# It only executes that blob when the checkout's origin is Pulp's GitHub repo,
+# never for an arbitrary repository. Every failure path exits 0 silently.
+set -u
+
+case "${PULP_CLAUDE_MD_SYNC:-1}" in 0|off|false|no) exit 0 ;; esac
+command -v python3 >/dev/null 2>&1 || exit 0
+
+input=""
+[ -t 0 ] || input="$(cat 2>/dev/null || true)"
+cwd="$(printf '%s' "${input}" | python3 -c '
+import json, sys
+try:
+    value = json.load(sys.stdin)
+    print(value.get("cwd") or value.get("project_dir") or "")
+except Exception:
+    pass
+' 2>/dev/null || true)"
+cwd="${cwd:-${CLAUDE_PROJECT_DIR:-${PWD:-.}}}"
+
+root="$(git -C "${cwd}" rev-parse --show-superproject-working-tree 2>/dev/null || true)"
+[ -n "${root}" ] || root="$(git -C "${cwd}" rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "${root}" ] || exit 0
+
+case "$(git -C "${root}" config --get remote.origin.url 2>/dev/null)" in
+    *Generous-Corp/pulp|*Generous-Corp/pulp.git|*danielraffel/pulp|*danielraffel/pulp.git) ;;
+    *) exit 0 ;;
+esac
+
+script="$(GIT_OPTIONAL_LOCKS=0 git -C "${root}" cat-file blob \
+    refs/remotes/origin/main:hooks/scripts/claude_md_sync.py 2>/dev/null)" || exit 0
+[ -n "${script}" ] || exit 0
+
+printf '%s' "${input}" | python3 -c "${script}" "${1:---hook-json}" 2>/dev/null || true
+exit 0
