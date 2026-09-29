@@ -1314,11 +1314,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)magnifyWithEvent:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
-    // Through the open overlays, like a wheel: a pinch over a dialog must
-    // not zoom the content behind it.
-    const auto route = pulp::view::route_passive_pointer(*self.rootView, pt);
-    auto* target = route.target;
-    if (route.blocked || !target) return;
+    auto* target = pulp::view::route_passive_pointer(*self.rootView, pt).target;  // null when blocked
+    if (!target) return;
 
     pulp::view::GestureEvent ge;
     if (event.phase == NSEventPhaseBegan)        ge.phase = pulp::view::GesturePhase::began;
@@ -1336,11 +1333,8 @@ static void pump_cocoa_main_thread_until(const std::function<bool()>& ready_to_r
 - (void)rotateWithEvent:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
-    // Through the open overlays, like a wheel: a pinch over a dialog must
-    // not zoom the content behind it.
-    const auto route = pulp::view::route_passive_pointer(*self.rootView, pt);
-    auto* target = route.target;
-    if (route.blocked || !target) return;
+    auto* target = pulp::view::route_passive_pointer(*self.rootView, pt).target;  // null when blocked
+    if (!target) return;
 
     pulp::view::GestureEvent ge;
     if (event.phase == NSEventPhaseBegan)        ge.phase = pulp::view::GesturePhase::began;
