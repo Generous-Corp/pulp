@@ -311,6 +311,15 @@ def touched_by(changed: set[str], paths: set[str]) -> bool:
     return any(f == p or f.startswith(p.rstrip("/") + "/") for f in changed for p in paths)
 
 
+def advisory_here() -> bool:
+    """A merge group reports drift but never fails on it; a pull-request head
+    (or a local run) blocks. Overridable for tests and for a deliberate
+    blocking run in a group: PULP_SCRIPT_INPUTS_STRICT=1."""
+    if os.environ.get("PULP_SCRIPT_INPUTS_STRICT") == "1":
+        return False
+    return os.environ.get("GITHUB_EVENT_NAME") == "merge_group"
+
+
 def resolve_base(root: Path, explicit: str | None) -> str | None:
     """The ref this check is diff-scoped against, or None for a full compare.
     Order: --base, PULP_SCRIPT_INPUTS_BASE, origin/<GITHUB_BASE_REF> (pull
@@ -400,12 +409,27 @@ def main(argv: list[str]) -> int:
             print(f"  {kind}: {name}")
     if blocking:
         build_hint = a.build_dir or "<configured build dir>"
+        fix = ("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
+               f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
+               f"  git add {DEFAULT_LIST.as_posix()}")
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  {kind}: {name}")
-        print("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
-              f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
-              f"  git add {DEFAULT_LIST.as_posix()}")
+        print(fix)
+        if advisory_here():
+            # The enforcement point is the PULL-REQUEST HEAD, where the pr-fast
+            # tier runs on every push and the author sees the verdict. A merge
+            # group is too late and too expensive: it ejects the whole batch,
+            # and a PR whose head ran before this check existed gets no earlier
+            # signal. A stale entry today only informs the shadow selector, so
+            # the group reports and lets the PR land; the next push to any PR
+            # touching those scripts is blocked until the list is regenerated.
+            # If a GATING selector ever consumes this list, drop this advisory
+            # branch: a stale list would then skip real tests in the group.
+            names = ", ".join(name for _, name, _ in blocking[:10])
+            print(f"::warning title=script-test inputs stale (advisory in a merge group)::{names} — "
+                  f"regenerate with script_test_inputs.py --write on the next push")
+            return 0
         return 1
     print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync for this change "
           f"({scope}; {total_scripts} interpreter-driven entries)")

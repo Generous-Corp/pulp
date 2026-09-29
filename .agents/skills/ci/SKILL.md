@@ -1792,6 +1792,11 @@ list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
 the diff-scoped check fails the PR head otherwise and prints that command.
 Run it after every rebase onto main too: main's new script tests are
 advisory drift, but a rebase that touches one of yours is blocking.
+The check blocks only on the PULL-REQUEST HEAD (pr-fast, every push, where
+you see it); in a merge group it reports the same drift as a `::warning`
+and lets the batch land, because ejecting a batch over a stale generated
+list cost two groups on 2026-09-29 for a PR whose head predated the check.
+`PULP_SCRIPT_INPUTS_STRICT=1` makes it block anywhere.
 
 ## The affected-tests shadow annotation selects nothing
 
