@@ -2136,6 +2136,74 @@ runs on the shared self-hosted Macs. That now includes the push lane, which is
 why a push macOS leg does not reintroduce those flakes as false alarms about
 main.
 
+## `drift-fast`: tree-reading drift checks on a hosted runner
+
+Most merge groups that fail the required `macos` gate fail only Python
+registrations that read the checkout and the configured test graph, never a
+compiled binary: `wide-non-native-selftest`, the `consumption-census-*` checks,
+`tools-registry-check`, `rack-generator-safety`, `prepush-refresh-push`,
+`script-test-inputs-drift`, `ctest-scheduling-contract` and the
+`source-selftest-lane-*` pair. Over three days, 45 of 69 failed groups failed
+only those (or those plus known flakes). They surface only when a head is
+combined with the current tip, and on `macos` they run after a ~20-minute
+build that none of them needs.
+
+`.github/workflows/drift-fast.yml` runs them on `ubuntu-latest` for every
+`pull_request` (the `refs/pull/N/merge` tree) and every `merge_group`, both of
+which are the tip combined with the head. The job bootstraps dependencies,
+configures exactly as the gate does (`Release`, examples off, GPU on) and does
+not build. `tools/ci/drift_fast.py run` then runs the selection named in
+`tools/ci/drift_fast.json`: every member of `ctest_labels` (today the whole
+`pr-fast` tier, 99 tests) plus the listed registrations outside it, through
+ctest itself, so `SKIP_RETURN_CODE`, pass regexes, timeouts and resource locks
+behave as on the gate, with the gate's `--repeat until-pass:2`.
+
+What it cannot check, and says so as `NOT CHECKED` lines rather than passing
+silently:
+
+- `ios-compile-gate-legs` is registered only on Apple, so a Linux configure
+  does not register it.
+- `consumption-census-drift` and `consumption-census-negative-contract` compare
+  against a recorded profile for this host. The census records only
+  `darwin-arm64-*` profiles, so on Linux the comparison skips (exit 77); only a
+  stale feature roster, which fails on every host, still fails here. The census
+  content itself is still checked on `macos`.
+- A selected test whose command names a build-tree file the configure did not
+  create needs the build this job skips, so the driver drops it. Today that is
+  `project-package-mutation-control` (pr-fast): a `WILL_FAIL` mutation control
+  whose runner, without its `pulp-test-project-package` binary, would "fail as
+  expected" and pass without testing anything.
+
+It fails (exit 2) rather than passing vacuously when a listed label selects no
+registration or when ctest ran a different number of tests than were selected.
+`drift-fast-selftest` (`tools/ci/test_drift_fast.py`, on the source-selftest
+lane) pins the selection and verdict logic and holds the manifest and workflow
+to each other.
+
+Adding a test: append it to `tools/ci/drift_fast.json` with a `why`. It must
+pass from a configure alone; a test that needs a built binary does not belong
+here.
+
+Local reproduction (configure only; no compile):
+
+```bash
+./setup.sh --deps-only --non-interactive
+cmake -S . -B build-drift -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+PULP_SCRIPT_INPUTS_BASE=origin/main python3 tools/ci/drift_fast.py run --build-dir build-drift
+```
+
+On a warm M-series host this is about 60 s of configure plus about 40 s of
+tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
+way CI does; without a base it compares every entry, and entries whose
+recorded path embeds a build-directory name report as stale.
+
+**It is advisory.** `drift-fast` is not a required status check, so a red run
+does not block a merge group. Requiring it is a ruleset change on `main`
+(adding `drift-fast` to the required status checks), which also turns every
+drift-only batch into a fail-in-minutes ejection instead of a
+fail-after-the-build one. That is an owner decision; this workflow does not
+make it.
+
 ## A green `macos` check does not always mean the suite ran
 
 The required `macos` context is reported by more than one job. It can come from

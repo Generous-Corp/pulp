@@ -364,6 +364,8 @@ REVIEWED_SCANNERS = {
     "tools/ci/source_selftests.py":
         "walks test/**/*.cmake for ctest registrations; test/ routes to the native build",
     "tools/ci/test_source_selftests.py": "walks temporary trees",
+    "tools/ci/test_drift_fast.py":
+        "walks test/ for registration names; tools/ci routes to the native build",
     "tools/scripts/gate_python_imports_check.py":
         "reads the configured ctest inventory; runs in the pr-fast tier on the native gate",
     "tools/scripts/script_test_inputs.py":

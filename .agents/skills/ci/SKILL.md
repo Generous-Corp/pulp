@@ -807,6 +807,21 @@ ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
 branch is allowed. Needing a new third-party package means adding it to the lock
 (and the wheelhouse), not to the check.
 
+### `drift-fast` catches tree-reading drift before the build, advisory only
+
+The hosted `drift-fast` job (`.github/workflows/drift-fast.yml`) configures the
+tip-plus-head tree without building and runs `tools/ci/drift_fast.json`'s
+selection (the `pr-fast` tier plus `wide-non-native-selftest`, the census,
+tools-registry, rack, lane-contract and scheduling checks) in a few minutes.
+When a merge group ejects on one of those, its `drift-fast` run on the same
+group should already name the test, minutes earlier; read it before the
+`macos` log. It is NOT
+required, so it never blocks by itself, and on its Linux configure the census
+comparison skips (only `darwin-arm64` profiles are recorded) and
+`ios-compile-gate-legs` is not registered; both print as `NOT CHECKED`. A new
+tree-reading check that can pass from a configure alone belongs in the
+manifest. See `docs/guides/local-ci.md`.
+
 ### A green ctest job proves nothing about a label its event excludes
 
 `build.yml` computes `label_exclude` from the event, and the two values are far
