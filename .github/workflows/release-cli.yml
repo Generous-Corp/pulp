@@ -1208,7 +1208,12 @@ jobs:
             -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=OFF)
           if [ "${{ matrix.platform }}" = "darwin-arm64" ]; then
             GPU_AUDIO_FLAGS=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON
-              -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=ON)
+              -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=ON
+              # The arm64 SDK is the authenticated Apple-Silicon GPU-audio
+              # consumer SDK. Export the opt-in host realization in its
+              # Forge catalog so downstreams can fail closed on the same
+              # capability they link.
+              -DPULP_HOST_ENABLE_GPU_CONVOLUTION=ON)
           fi
           INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
