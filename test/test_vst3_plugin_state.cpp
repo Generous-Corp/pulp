@@ -6274,13 +6274,15 @@ TEST_CASE("VST3 marks the host project dirty for non-parameter state changes",
     // silently discard the work. The adapter republishes the Processor's
     // state-dirty edge as IComponentHandler2::setDirty(true) on the main
     // thread.
-    ScopedMainThreadBackend backend;
     TestVst3Config config;
     reset_test_processor(config);
 
     HostApp host_app;
     pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    // Installed AFTER initialize() so it is the active backend (last
+    // registration wins over the adapter's plugin backend).
+    ScopedMainThreadBackend backend;
     auto* test_processor = TestVst3Processor::g_last_processor;
     REQUIRE(test_processor != nullptr);
 
@@ -6323,12 +6325,12 @@ TEST_CASE("VST3 consumes a state-dirty edge a v1-only host cannot receive",
     // cannot be delivered, but it must still be consumed — a latched dirty
     // would fire against whatever handler the host installs next, long after
     // the change that caused it.
-    ScopedMainThreadBackend backend;
     reset_test_processor(TestVst3Config{});
 
     HostApp host_app;
     pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
     REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+    ScopedMainThreadBackend backend;
     auto* test_processor = TestVst3Processor::g_last_processor;
     REQUIRE(test_processor != nullptr);
 
