@@ -210,6 +210,13 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         LABELS slow
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
+    # SkiaSurface's frames-in-flight count on a live offscreen Dawn/Graphite
+    # surface returns to zero once the GPU finishes. Soft-skips without an
+    # adapter.
+    pulp_add_test_suite(pulp-test-skia-surface-frames-in-flight GROUP pulp-test-group-canvas-text-view-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+
     # CanvasWidget's per-canvas isolation layer on a live offscreen
     # Dawn/Graphite surface: the layer-free path composites the same pixels
     # (enforced), and the [bench] case measures its GPU time per frame with

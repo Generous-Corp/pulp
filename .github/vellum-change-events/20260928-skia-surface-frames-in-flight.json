@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260928-skia-surface-frames-in-flight",
+  "kind": "change",
+  "created_at": "2026-09-28T20:00:00Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "SkiaSurface now registers a Graphite finished callback on every frame recording (the existing GPU-stats callback when timing is supported, a plain finished callback otherwise) and counts frames submitted to the GPU whose work has not finished, exposed as SkiaSurface::gpu_frames_in_flight() with a -1 default for surfaces that do not track it. The render-skia-dawn touch is gpu_render_time.hpp (the GpuFramesInFlight counter), skia_surface.hpp (the appended virtual) and skia_surface.cpp (the callback wiring; the destructor drain already flushes outstanding callbacks). Nothing reads the count to make a decision; it feeds the gpu_acquire trace span so a trace can tell a GPU-bound frame from CPU bunching. This is Pulp's own diagnostic with no counterpart framework behaviour to backport, so it is recorded pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-gpu-render-time",
+    "pulp-test-skia-surface-frames-in-flight"
+  ],
+  "disposition": "pulp-only"
+}

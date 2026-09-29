@@ -3,6 +3,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/gpu_acquire_diagnostics.hpp>
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/hover_cursor.hpp>
 #include <pulp/view/pointer_coalescer.hpp>
@@ -2720,6 +2721,10 @@ private:
     // repaint to the damaged rect and blits a retained persistent-scene target.
     // Default false ⇒ the unconditional full-repaint path is unchanged.
     bool partial_repaint_enabled_ = false;
+    // gpu_acquire span inputs (main thread): the display-link target time of
+    // the frame being rendered (0 outside one) and the refresh interval.
+    double frame_vsync_target_s_ = 0.0;
+    double refresh_period_s_ = 0.0;
     // The backing scale the GPU surfaces were last (re)created at, so a pure
     // backing-scale change (handle_backing_change) can detect the desync a
     // logical resize would otherwise miss.
@@ -2872,6 +2877,10 @@ private:
         gpu_config.width = phys_w;
         gpu_config.height = phys_h;
         gpu_config.native_surface_handle = (__bridge void*)metal_view_.metalLayer;
+        // GPU render timing is opt-in (it relaxes Dawn validation); a live
+        // measurement session turns it on with PULP_GPU_TIMING=1.
+        gpu_config.enable_gpu_timing = pulp::view::gpu_timing_requested(
+            std::getenv(pulp::view::kGpuTimingEnvVar.data()));
 
         if (!gpu_surface_->initialize(gpu_config)) {
             gpu_surface_.reset();
@@ -3094,8 +3103,16 @@ private:
         {
             // Drawable acquisition can block independently of paint/submit.
             // Keep it explicit so a long frame's unaccounted parent time is
-            // not incorrectly attributed to its child paint span.
-            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
+            // not incorrectly attributed to its child paint span. The args say
+            // why it waited: see gpu_acquire_diagnostics.hpp.
+            const auto acquire = pulp::view::gpu_acquire_diagnostics(
+                CACurrentMediaTime(), frame_vsync_target_s_, refresh_period_s_,
+                skia_surface_->gpu_frames_in_flight());
+            PULP_TRACE_SCOPE_NAMED_ARGS("gpu", "gpu_acquire", "vsync_driven", acquire.vsync_driven,
+                "refresh_period_ms", acquire.refresh_period_ms, "late_ms", acquire.late_ms,
+                "frames_in_flight", acquire.frames_in_flight,
+                "gpu_render_ms", skia_surface_->gpu_render_time_ms());
+            (void)acquire;
             acquired = gpu_surface_->begin_frame();
         }
         if (!acquired) {
@@ -3234,6 +3251,8 @@ private:
         // the (jittery, possibly-late) time the block happened to be scheduled.
         const double frame_time =
             pulp::view::mac_frame_timing::display_link_seconds(output_time);
+        const double refresh_period =
+            pulp::view::mac_frame_timing::display_link_refresh_seconds(output_time);
         // Gate now also fires when an idle
         // callback is installed, so JS rAF / setTimeout / async-result
         // queues get a vsync-paced pump even when no native widget is
@@ -3342,7 +3361,10 @@ private:
                         self->tracker_.invalidate_all();
                         ++self->pump_dirty_frames_;
                     }
+                    self->frame_vsync_target_s_ = frame_time;
+                    self->refresh_period_s_ = refresh_period;
                     self->render_frame();
+                    self->frame_vsync_target_s_ = 0.0;
                     self->frame_times_.record(pulp::view::host_elapsed_ms(frame_start));
                     self->render_dispatch_queued_.store(false, std::memory_order_release);
                 }
