@@ -361,26 +361,31 @@ class WorkflowBuildDirTests(unittest.TestCase):
         # The failure path still ends the step non-success so Publish is skipped.
         self.assertIn("exit 1", run.split("::warning title=protected receipt NOT issued", 1)[1])
 
-    def test_ios_gate_digest_shadow_annotates_and_records_without_skipping(self) -> None:
-        """The Build step computes the iOS gate input digest, looks it up, and
-        annotates would_skip / run / ran_ok / ran_failed, then STILL runs the
-        gate; a passing run is recorded under its digest. Shadow mode must not
-        acquire a skip: the gate invocation stays unconditional inside the
-        IOS_COMPILE_REQUIRED branch."""
+    def test_ios_gate_digest_skips_only_on_the_decide_verdict(self) -> None:
+        """The Build step asks `ios_gate_digest.py decide` (trusted receipt,
+        enforce mode, non-control run) and skips the gate only when it answers
+        `skip`; its defaults before the decision are `run`, so a crashed or
+        absent decision runs the gate. A run that executes the gate still
+        annotates ran_ok / ran_failed, and a pass is recorded under its digest.
+        The mode comes from a repository variable defaulting to enforce, so a
+        revert to shadow needs no workflow edit."""
         build = workflow_named_step(BUILD_WORKFLOW, "build", "Build")
         run = str(build["run"])
-        for needle in ("ios_gate_digest.py compute", "ios_gate_digest.py lookup",
-                       "note --verdict would_skip", "note --verdict run",
-                       "--verdict ran_ok", "--verdict ran_failed",
+        self.assertEqual(build["env"]["IOS_GATE_DIGEST_MODE"],
+                         "${{ vars.PULP_IOS_GATE_DIGEST_MODE || 'enforce' }}")
+        for needle in ("ios_gate_digest.py decide", '--run-id "$GITHUB_RUN_ID"',
+                       '--mode "$IOS_GATE_DIGEST_MODE"', "--verdict ran_ok", "--verdict ran_failed",
                        'echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"'):
             self.assertIn(needle, run, needle)
-        # The gate call must not be guarded by the shadow verdict.
+        decide = run.index("ios_gate_digest.py decide")
+        defaults = run.rindex('ios_action=run', 0, decide)
+        self.assertLess(defaults, decide, "the default action must be run before the decision")
         gate_call = run.index("bash test/cmake/test_ios_compile_gate.sh")
-        would_skip = run.index("note --verdict would_skip")
-        between = run[would_skip:gate_call]
-        self.assertNotRegex(between, r"\bexit\b|continue", "shadow verdict must not skip the gate")
-        self.assertIn("set +e", between)
-        record = workflow_named_step(BUILD_WORKFLOW, "build", "Record iOS gate digest (shadow)")
+        between = run[decide:gate_call]
+        self.assertIn('if [ "$ios_action" = skip ]; then', between)
+        self.assertIn("else", between.split('if [ "$ios_action" = skip ]; then', 1)[1])
+        self.assertNotRegex(between, r"\bexit\b|continue", "the skip must not end the step early")
+        record = workflow_named_step(BUILD_WORKFLOW, "build", "Record iOS gate digest")
         self.assertEqual(record.get("if"), "steps.build.outputs.ios_gate_digest != ''")
         self.assertEqual(record["with"]["name"], "ios-gate-ok-${{ steps.build.outputs.ios_gate_digest }}")
 
@@ -402,8 +407,24 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn("ctest-evidence/selected.json", run)
         for name in ("Build", "Test (non-Windows)"):
             body = str(workflow_named_step(BUILD_WORKFLOW, "build", name)["run"])
-            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration"):
+            for token in ("merge_group_shadows", "binary_identity", "affected_tests_shadow", "flake_exoneration",
+                          "test_receipts", "test-receipts"):
                 self.assertNotIn(token, body)
+
+    def test_per_test_receipts_are_uploaded_only_from_merge_group_macos(self) -> None:
+        """The shadow's receipts are written by the merge-group macOS job only
+        (the trusted writer the reader checks for), and uploading them can
+        never fail the gate."""
+        step = workflow_named_step(BUILD_WORKFLOW, "build", "Record per-test receipts (shadow)")
+        self.assertTrue(step.get("continue-on-error"))
+        cond = " ".join(str(step.get("if")).split())
+        for needle in ("always()", "github.event_name == 'merge_group'", "runner.os == 'macOS'"):
+            self.assertIn(needle, cond)
+        self.assertEqual(step["with"]["name"], "test-receipts-macos")
+        self.assertEqual(step["with"]["path"], "${{ runner.temp }}/merge-group-shadows/test-receipts.json")
+        self.assertEqual(step["with"]["if-no-files-found"], "ignore")
+        shadows = str(workflow_named_step(BUILD_WORKFLOW, "build", "Merge-group shadow instruments")["run"])
+        self.assertIn('--work-dir "$RUNNER_TEMP/merge-group-shadows"', shadows)
 
     def test_failed_pr_head_full_suite_is_announced(self) -> None:
         """The pull-request Test step is continue-on-error, so its failure must
@@ -529,7 +550,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         configure = 'cmake -S . -B "$PULP_BUILD_DIR"'
         compile_gate = (
             "bash test/cmake/test_ios_compile_gate.sh \\\n"
-            '                "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
+            '                  "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
         )
         build = 'cmake --build "$PULP_BUILD_DIR" --config Release'
 

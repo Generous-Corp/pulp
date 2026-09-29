@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """Run every merge-group shadow instrument from one workflow step.
 
-The merge-group `macos` job carries three shadow instruments, each of which
+The merge-group `macos` job carries four shadow instruments, each of which
 annotates and changes no outcome:
 
 - binary identity vs the PR head's receipt   (tools/ci/binary_identity_shadow.py)
 - the graph's affected-test set              (tools/ci/affected_tests_shadow.py)
 - flake exoneration of a failed ctest        (tools/ci/flake_exoneration_shadow.py)
+- per-test content-hash receipts             (tools/ci/test_receipts_shadow.py)
 
 Three separate workflow steps meant three places in build.yml that every
 neighbouring change conflicted with. This runner is the one step: it calls
 each instrument in isolation, names any that could not run (an exception or
 a non-zero exit is reported, never propagated), and always exits 0. Gating
 per instrument: identity and affected tests need a successful build and the
-ctest inventory; exoneration runs only when ctest's outcome was failure.
+ctest inventory; exoneration runs only when ctest's outcome was failure;
+receipts run whenever ctest ran (passed or failed) and write
+`<work-dir>/test-receipts.json`, which the workflow uploads as the
+`test-receipts-macos` artifact. Binary identity runs first and leaves its
+per-binary hashes in `<work-dir>/our-identity.json` so receipts do not hash
+the test binaries twice.
 
     merge_group_shadows.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I \\
-        --ctest-outcome success|failure|skipped [--hours 24] [--work-dir W]
+        --ctest-outcome success|failure|skipped [--hours 24] [--work-dir W] [--run-id N]
 """
 from __future__ import annotations
 
@@ -80,6 +86,15 @@ def plan(a: argparse.Namespace) -> list[tuple[str, str, list[str]] | tuple[str, 
                        "--hours", str(a.hours)]))
     else:
         steps.append(("flake-exoneration", "flake_exoneration_shadow", None))
+    if a.ctest_outcome in ("success", "failure"):
+        steps.append(("test-receipts", "test_receipts_shadow",
+                      ["run", "--build-dir", a.build_dir, "--source-root", a.source_root,
+                       "--repository", a.repository, "--merge-sha", a.merge_sha, "--token", a.token,
+                       "--junit", a.junit, "--selected-json", a.selected_json, "--run-id", a.run_id,
+                       "--receipts-out", os.path.join(a.work_dir, "test-receipts.json"),
+                       "--identity-json", os.path.join(a.work_dir, "our-identity.json")]))
+    else:
+        steps.append(("test-receipts", "test_receipts_shadow", None))
     return steps
 
 
@@ -97,6 +112,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--ctest-outcome", choices=("success", "failure", "skipped", "cancelled"), required=True)
     r.add_argument("--hours", type=int, default=24)
     r.add_argument("--work-dir", default=os.environ.get("RUNNER_TEMP", "/tmp"))
+    r.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     a = ap.parse_args(argv[1:])
     results = []
     for label, module_name, args in plan(a):

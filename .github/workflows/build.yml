@@ -1907,6 +1907,7 @@ jobs:
         env:
           IOS_COMPILE_REQUIRED: ${{ needs.classify.outputs.ios_compile_required }}
           IOS_GATE_TOKEN: ${{ github.token }}
+          IOS_GATE_DIGEST_MODE: ${{ vars.PULP_IOS_GATE_DIGEST_MODE || 'enforce' }}
         run: |
           # Snapshot the cumulative ccache counters so the "Ccache stats" step
           # can print this job's own calls (see tools/ci/ccache_job_delta.py).
@@ -1927,56 +1928,47 @@ jobs:
             if [ "$IOS_COMPILE_REQUIRED" = false ]; then
               echo "::notice::iOS compile gate skipped by exact changed-surface authorization"
             else
-              # SHADOW MODE (tools/ci/ios_gate_digest.py): identify this gate run
-              # by a digest of every file the gate's configures can read plus
-              # the Apple toolchain, look the digest up among passing runs, and
-              # ANNOTATE what a digest-keyed skip would have done. The gate
-              # still runs; nothing is skipped and no gating changes. The
-              # annotations are the evidence for (or against) a later
-              # switch-on: would_skip ÷ runs, and would_skip verdicts followed
-              # by a real failure, which must stay at zero.
-              ios_digest="$(python3 tools/ci/ios_gate_digest.py compute \
-                --repo "$GITHUB_WORKSPACE" 2>/dev/null \
-                | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')" \
-                || ios_digest=""
-              ios_shadow_src=""
-              if [ -n "$ios_digest" ]; then
-                ios_lookup="$(python3 tools/ci/ios_gate_digest.py lookup \
+              # Digest-keyed skip (tools/ci/ios_gate_digest.py, decisions
+              # contract row 23): identify this gate run by a digest of every
+              # file the gate's configures can read plus the Apple toolchain,
+              # and skip the gate only when a TRUSTED gate run (this repo's
+              # build.yml, merge_group or same-repo pull_request) recorded a
+              # PASS for the same digest. One run in ten by run id, and every
+              # schedule/push run, is a control that runs anyway. Every
+              # lookup failure decides `run`. The repository variable
+              # PULP_IOS_GATE_DIGEST_MODE=shadow restores annotate-only.
+              ios_digest=""; ios_action=run; ios_src=""; ios_mode=shadow
+              if python3 tools/ci/ios_gate_digest.py decide --repo "$GITHUB_WORKSPACE" \
                   --repository "$GITHUB_REPOSITORY" --token "$IOS_GATE_TOKEN" \
-                  --digest "$ios_digest")" || ios_lookup='{"found": false}'
-                ios_shadow_src="$(printf '%s' "$ios_lookup" | python3 -c '
-          import json, sys
-          d = json.load(sys.stdin)
-          print(d.get("source_run_id") or "") if d.get("found") else print("")')"
-                if [ -n "$ios_shadow_src" ]; then
-                  python3 tools/ci/ios_gate_digest.py note --verdict would_skip \
-                    --digest "$ios_digest" --source-run-id "$ios_shadow_src"
-                  echo "iOS compile gate shadow: would skip (digest ${ios_digest} passed in run ${ios_shadow_src}); running anyway"
-                else
-                  python3 tools/ci/ios_gate_digest.py note --verdict run --digest "$ios_digest"
-                fi
+                  --run-id "$GITHUB_RUN_ID" --mode "$IOS_GATE_DIGEST_MODE" \
+                  --env-out "$RUNNER_TEMP/ios-gate-decision.env"; then
+                . "$RUNNER_TEMP/ios-gate-decision.env"
               fi
-              set +e
-              bash test/cmake/test_ios_compile_gate.sh \
-                "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
-              ios_gate_rc=$?
-              set -e
-              if [ "$ios_gate_rc" = 77 ]; then
-                echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
-              elif [ "$ios_gate_rc" != 0 ]; then
-                [ -z "$ios_digest" ] || python3 tools/ci/ios_gate_digest.py note \
-                  --verdict ran_failed --digest "$ios_digest" \
-                  ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
-                echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
-                exit "$ios_gate_rc"
-              elif [ -n "$ios_digest" ]; then
-                python3 tools/ci/ios_gate_digest.py note --verdict ran_ok \
-                  --digest "$ios_digest" ${ios_shadow_src:+--source-run-id "$ios_shadow_src"}
-                mkdir -p "$RUNNER_TEMP/ios-gate-shadow"
-                printf '{"schema":"pulp-ios-gate-shadow/v1","digest":"%s","run_id":"%s","sha":"%s","event":"%s"}\n' \
-                  "$ios_digest" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" \
-                  > "$RUNNER_TEMP/ios-gate-shadow/marker.json"
-                echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"
+              if [ "$ios_action" = skip ]; then
+                echo "::notice::iOS compile gate skipped: input digest ${ios_digest} passed in trusted run ${ios_src}"
+              else
+                set +e
+                bash test/cmake/test_ios_compile_gate.sh \
+                  "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"
+                ios_gate_rc=$?
+                set -e
+                if [ "$ios_gate_rc" = 77 ]; then
+                  echo "::notice::iOS compile gate skipped (exit 77) — required SDKs absent on this runner"
+                elif [ "$ios_gate_rc" != 0 ]; then
+                  [ -z "$ios_digest" ] || python3 tools/ci/ios_gate_digest.py note \
+                    --verdict ran_failed --digest "$ios_digest" --mode "$ios_mode" \
+                    ${ios_src:+--source-run-id "$ios_src"}
+                  echo "::error::iOS compile gate failed (exit ${ios_gate_rc})"
+                  exit "$ios_gate_rc"
+                elif [ -n "$ios_digest" ]; then
+                  python3 tools/ci/ios_gate_digest.py note --verdict ran_ok --mode "$ios_mode" \
+                    --digest "$ios_digest" ${ios_src:+--source-run-id "$ios_src"}
+                  mkdir -p "$RUNNER_TEMP/ios-gate-shadow"
+                  printf '{"schema":"pulp-ios-gate-shadow/v1","digest":"%s","run_id":"%s","sha":"%s","event":"%s"}\n' \
+                    "$ios_digest" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$GITHUB_EVENT_NAME" \
+                    > "$RUNNER_TEMP/ios-gate-shadow/marker.json"
+                  echo "ios_gate_digest=$ios_digest" >> "$GITHUB_OUTPUT"
+                fi
               fi
             fi
           fi
@@ -2016,9 +2008,9 @@ jobs:
 
       # A passing iOS gate run is recorded under its input digest so later runs
       # (PR heads and merge groups alike: artifacts are repository-wide, not
-      # branch-scoped like the Actions cache) can find it. Shadow mode only
-      # reads these to annotate; see the Build step.
-      - name: Record iOS gate digest (shadow)
+      # branch-scoped like the Actions cache) can find it. The Build step skips
+      # the gate on a trusted receipt from this step; see ios_gate_digest.py.
+      - name: Record iOS gate digest
         if: steps.build.outputs.ios_gate_digest != ''
         uses: actions/upload-artifact@v5
         with:
@@ -2323,9 +2315,9 @@ jobs:
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,
-      # the graph's affected-test set, and flake exoneration of a failed
-      # ctest. Each annotates and changes no outcome; the runner isolates
-      # every instrument and always exits 0. What each measures, and the
+      # the graph's affected-test set, flake exoneration of a failed ctest,
+      # and per-test content-hash receipts. Each annotates and changes no
+      # outcome; the runner isolates every instrument and always exits 0. What each measures, and the
       # proxies read from its annotation, are documented in
       # docs/guides/local-ci.md and the `ci` skill.
       - name: Merge-group shadow instruments
@@ -2345,6 +2337,23 @@ jobs:
             --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
             --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 \
             --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
+
+      # The per-test receipts the shadow step above wrote (keys of the tests
+      # this run saw pass, names that failed). Only a merge_group macOS run
+      # writes them, and later merge-group runs read them to report what a
+      # receipt-keyed skip would have done; nothing reads them to skip.
+      - name: Record per-test receipts (shadow)
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.build.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: test-receipts-macos
+          path: ${{ runner.temp }}/merge-group-shadows/test-receipts.json
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 14
 
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
