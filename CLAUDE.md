@@ -674,20 +674,20 @@ Full Pulp worktrees and their build directories are not temporary-file-sized:
 `PULP_WORKTREES_ROOT` when the host declares it; otherwise use a sibling of the
 primary checkout as shown below. This is a per-machine storage decision:
 
-- M3 (`Daniels-Mac-Studio`) must declare
+- M3 (`Daniels-Mac-Studio-m3`, formerly `Daniels-Mac-Studio`) must declare
   `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`. Stop rather than
   falling back if that volume or declaration is unavailable. M3 keeps code,
   builds, and Tart VMs on Workshop so its internal boot disk cannot fill.
-- M1 and M5 intentionally use their internal disk, so a sibling of the primary
-  checkout remains their default.
+- M1, M5, and m5s (`Daniels-M5-Studio`) intentionally use their internal disk,
+  so a sibling of the primary checkout remains their default.
 
 Before creating parallel lanes, report the resolved root and current free
 space. Do not move an active worktree; let its build finish, capture its git
 state/results, then remove that worktree through `git worktree remove`.
 
 ```bash
-# M3: exported persistently by the host; M1/M5: sibling default.
-if [ "$(hostname -s)" = "Daniels-Mac-Studio" ]; then
+# M3: exported persistently by the host; M1/M5/m5s: sibling default.
+if case "$(hostname -s)" in Daniels-Mac-Studio|Daniels-Mac-Studio-m3) true ;; *) false ;; esac; then
   : "${PULP_WORKTREES_ROOT:?M3 requires PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees}"
   [ "$PULP_WORKTREES_ROOT" = "/Volumes/Workshop/Code/agent-worktrees" ] || {
     echo "M3 worktree root must be /Volumes/Workshop/Code/agent-worktrees" >&2
