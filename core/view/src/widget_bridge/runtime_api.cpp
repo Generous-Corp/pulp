@@ -313,6 +313,14 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
         double ms = std::chrono::duration<double, std::milli>(now - start).count();
         return choc::value::createFloat64(ms);
     });
+
+    // hostKind() -> "plugin" | "standalone" | "unknown"; see
+    // WidgetBridge::set_host_kind. Read it when the decision is made (at
+    // keydown, at render) rather than caching it once at load: the format
+    // layer may declare it after the document's first script ran.
+    register_bridge_function(api, "hostKind", [&self](choc::javascript::ArgumentList) {
+        return choc::value::createString(self.host_kind());
+    });
 }
 
 } // namespace pulp::view

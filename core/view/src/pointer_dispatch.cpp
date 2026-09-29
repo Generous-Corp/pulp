@@ -607,7 +607,12 @@ void deliver_mouse_wheel(View& root, Point root_pt,
         }
     }
 
-    auto* target = root.hit_test(root_pt);
+    // Open overlays answer before the tree: a wheel over a dialog scrolls the
+    // dialog, and one outside a modal dialog reaches nothing behind it. See
+    // route_passive_pointer for the contract.
+    const auto route = route_passive_pointer(root, root_pt);
+    if (route.blocked) return;
+    auto* target = route.target;
     if (!target) {
         // 2. Hovering over empty background inside a scroll pane returns no hit
         // because there is no hit-testable child under the point. Route it to

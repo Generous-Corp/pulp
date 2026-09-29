@@ -377,6 +377,10 @@ public:
     // Override the AI CLI command used by the design tool chat.
     void set_ai_cli_command(std::string cmd);
 
+    // hostKind(): "plugin" | "standalone" | "unknown"; see ScriptedUiSession::set_host_kind.
+    void set_host_kind(std::string kind) { host_kind_ = std::move(kind); }
+    const std::string& host_kind() const { return host_kind_; }
+
     // Inspect the native texture backing a canvas element when the native GPU
     // bridge is active. Used by low-level native WebGPU/Skia validation.
     CanvasWidget::NativeGpuTextureFrame describe_native_canvas_frame(const std::string& canvas_id) const;
@@ -533,6 +537,7 @@ private:
 
     // Model-agnostic AI CLI command (default: Claude)
     std::string ai_cli_command_ = "claude --print --model {model}";
+    std::string host_kind_ = "unknown";
 
     struct AsyncExecResult {
         std::string callback_id;
