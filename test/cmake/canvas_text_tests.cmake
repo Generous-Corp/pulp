@@ -217,6 +217,21 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         LIBRARIES pulp::view pulp::canvas pulp::render
         PROPERTIES RESOURCE_LOCK pulp_gpu)
 
+    # CanvasWidget's per-canvas isolation layer on a live offscreen
+    # Dawn/Graphite surface: the layer-free path composites the same pixels
+    # (enforced), and the [bench] case measures its GPU time per frame with
+    # timestamp queries (a measurement, so it rides the `bench` label).
+    # Soft-skips without an adapter or timing.
+    pulp_add_test_suite(pulp-test-canvas-widget-layer-gpu
+        LIBRARIES pulp::view pulp::canvas pulp::render
+        TEST_SPEC "~[bench]"
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
+    catch_discover_tests(pulp-test-canvas-widget-layer-gpu
+        TEST_SPEC "[bench]"
+        TEST_PREFIX "bench::"
+        PROPERTIES RESOURCE_LOCK pulp_gpu
+        LABELS bench)
+
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
     # a full frame then a clipped frame, and asserts the untouched content

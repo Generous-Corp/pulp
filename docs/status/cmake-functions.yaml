@@ -247,3 +247,17 @@ functions:
     summary: POST_BUILD check that a target's runtime sidecars actually landed beside the built binary.
     required:
       - target
+  - name: pulp_check_vendored_react_runtime
+    status: usable
+    summary: Configure-time warning when an app's vendored @pulp/react runtime bundle predates fixes in the SDK's runtime.
+    required:
+      - bundle
+    optional:
+      - STRICT
+      - FINGERPRINT
+    notes: >
+      Compares the bundle's `@pulp/react runtime revision` banner, or each fix's
+      signature for banner-less bundles, against the SDK's
+      pulp-react-runtime-fingerprint.json and names each missing fix and the
+      refresh command. Warns by default; STRICT makes a stale bundle a
+      configure error.

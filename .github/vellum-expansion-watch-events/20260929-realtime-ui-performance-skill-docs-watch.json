@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260929-realtime-ui-performance-skill-docs-watch",
+  "created_at": "2026-09-29T01:20:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Record a documentation-only change that crosses the design-source-ingest family through its .agents/skills/import-design/** and docs/guides/importing-designs.md selectors. The realtime scripted-UI performance rules previously repeated in the import-design skill and importing-designs guide are consolidated into the view-bridge skill, with the import-design surfaces now pointing there; the trace-analysis and trace-sql skills gain a UI-jank Perfetto playbook and reference SQL. No importer, DesignIR, capture path, renderer, codegen output, fixture, threshold, test verdict or Vellum-owned source changes. Registered as watch-only so the family's coverage stays honest about a change that crossed its selectors. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "skills-doc-sync"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

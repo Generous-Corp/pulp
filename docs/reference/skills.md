@@ -80,7 +80,7 @@ for its complete, authoritative guidance.
 | `update-demos` | Rebuild, re-pin, and republish Pulp's downstream demo/example repos against a new or the latest SDK. |
 | `upgrade` | Guide users through `pulp upgrade` — discover new CLI releases, interpret migration notes for the hop they're performing, and apply breaking-change fixes (CMake macro renames, API surface changes, config file moves). |
 | `video-proof` | Record, compose, publish, serve, and review short desktop validation video proofs for Pulp UX/test-harness work. |
-| `view-bridge` | Editor lifecycle and multi-view attach for Pulp plugins — when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles. |
+| `view-bridge` | Plugin editors — load before writing or changing a JS/scripted plugin UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. |
 | `vst3` | VST3 format adapter for Pulp — SingleComponentEffect wiring, bus arrangement negotiation, parameter / MIDI event routing, state round-trip, and the pitfalls discovered while wiring the adapter against Steinberg's SDK. |
 | `web-plugins` | Pulp in the browser — the WAM v2 and WebCLAP adapters, the wasm runtime, the Skia/WebGL2 browser window host, and the WebGPU (emdawnwebgpu) GPU-audio lane. |
 | `webview-ui` | Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation. |

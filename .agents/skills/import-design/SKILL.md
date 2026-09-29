@@ -28,6 +28,8 @@ exists:
 | Re-import regression vs a golden | `python3 tools/import-validation/golden_regression.py` |
 | Measure native HTML importer convergence against Chromium | `python3 tools/import-validation/importer_differential_lab.py` |
 | Rasterize Figma vector frames | `python3 tools/import-design/figma_rasterize_vector_frames.py` |
+| **Before importing agent-authored HTML/JSX: contracts + realtime performance** | `python3 tools/import-design/check_contracts.py panel.html [app.jsx ...] [--system DIR] [--macros M.json]` |
+| **Is the app's vendored `runtime.js` older than this SDK's @pulp/react?** | `python3 tools/import-validation/check_vendored_runtime.py <runtime.js\|app-dir>` (CMake: `pulp_check_vendored_react_runtime(<bundle>)`) |
 
 The full, machine-checked list is **`docs/status/tools.yaml`** (with inputs,
 outputs, and availability for each), and its digest is generated into CLAUDE.md
@@ -35,6 +37,32 @@ so it is always in context. The table above is the fast path for this skill's
 own work; the registry is the source of truth, and a coverage sweep in
 `tools/scripts/tools_registry_check.py` fails CI if a tool lands here without
 an entry — so nothing can go quiet the way `fidelity_diff.py` did.
+
+**Run `check_contracts.py` on every agent-authored panel before importing
+it — its `realtime` gate is the one check here that sees frame cost.** A React
+state setter inside `onPointerMove` / `onMouseMove` / `onWheel` (either phase),
+a `requestAnimationFrame` loop or a repeating timer commits the whole captured
+document on every event; one materialized editor measured ~42 ms per
+`pointermove` against ~0.2 ms for the same element's `mousemove`. Screenshots,
+pixel scores and the browser capture are all blind to it. The gate also flags a
+setter called with a fresh object/array in a sync effect (every run commits) and
+one handler registered for both capture and bubble phases, each with
+file:line and the fix. It is static: it follows local functions a few calls
+deep but not props, context or imports, and a clean run is not a frame-rate
+proof — the view-bridge skill's "Realtime scripted editors" checklist and the
+`trace-analysis` skill are. Without `--system` / `--macros` it still runs the
+realtime gate and says which contract gates it SKIPPED.
+
+**A vendored runtime does not update itself.** Materialized and JSX imports
+compile @pulp/react into a bundle the app checks in; a later SDK fix (the scoped
+captured-metadata re-apply, ~44 ms per commit) never reaches it until the
+transform is re-run. Bundles now carry a `/* @pulp/react runtime revision N */`
+banner from `packages/pulp-react/runtime-fingerprint.json`;
+`check_vendored_runtime.py` (or `pulp_check_vendored_react_runtime()` at
+configure time, warn-only unless `STRICT`) names each missing fix and the
+refresh command, and judges banner-less bundles by each fix's signature. Bump
+the manifest's revision and add a fix entry when a runtime change is worth a
+refresh.
 
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
@@ -7052,45 +7080,13 @@ rather than letting it read as a verdict.
 
 ## App code: no React commit on a per-move or per-frame path
 
-**Rule.** In a materialized/captured import, a `pointermove`, a hover, an
-animation tick, or any other per-frame path must not commit React. Keep
-pointer, hover and animation state in refs; draw from those refs on the canvas
-and request a repaint; update small DOM text (a readout, a tooltip) imperatively
-through `textContent` and its position; never call a setter with the value it
-already holds; handle each event once.
-
-**Why.** Each commit runs the metadata re-apply described above. Scoping cuts
-its bridge traffic but not its per-commit document walk, and an app that
-vendors an older `runtime.js` pays the full pass. Illustration from one
-captured-import editor: an LFO over 64 bands held 60 fps with the mouse still
-and stalled 100 ms–2.5 s per frame while it moved; each `pointermove` cost
-~42 ms (a `mousemove` on the same element ~0.2 ms), with ~150
-`getLayoutBoxMetrics`, ~160 `setFlex`, ~195 `setFontFamily` and ~12 layout
-passes per event. Paint (~2.5 ms) and `gpu_acquire` (~1–4 ms) were cheap. With
-the rule applied `pointermove` fell to ~0.6 ms and no >100 ms stall remained.
-None of this shows in a screenshot, pixel diff or browser fixture.
-
-**Audit every commit source — one survivor keeps the stall:**
-
-1. hover/pointer state in React state — including "only when the target
-   changes", which on dense targets still commits nearly every move;
-2. a status/readout effect publishing through the root's (or an ancestor's)
-   state;
-3. same-value setter calls — a same-value `setCursor(...)` still committed in
-   this runtime, so compare before calling;
-4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
-   (runs twice per move);
-5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
-   through state — keep it mounted and restart the timer imperatively.
-
-**Measuring it.** Wrap `__dispatch__(id, type, payload)` with a timer and
-compare `pointermove` against `mousemove` on the same element, then confirm in
-a Perfetto capture driven by a real 60 Hz `CGEvent` mouse sweep plus a
-deterministic animation, comparing the sweep window with a no-input window of
-the same animation. Never measure while a scripted-scenario harness steps (its
-snapshots add 100–800 ms stalls), size `PULP_TRACE_RING_KB` large (`524288`),
-and let `PULP_TRACE_SECONDS` plus the flush elapse before ending the process.
-Full recipe: `docs/guides/interaction-cost.md` and the `trace-analysis` skill.
+In a materialized/captured import every React commit runs the metadata
+re-apply described above, so a commit per `pointermove`, hover, animation tick
+or data update turns a drag into one document walk per sample (measured: 100
+ms–2.5 s stalls on a 64-band editor, ~42 ms per `pointermove`). The rule, the
+five commit sources to audit and the evidence live in one place: the
+`view-bridge` skill, "Realtime scripted editors: the performance checklist";
+the capture recipe is in `trace-analysis`.
 
 ## A `vm` sandbox is a second realm, and the entry notices
 
