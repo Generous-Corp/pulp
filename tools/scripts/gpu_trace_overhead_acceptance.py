@@ -3615,11 +3615,17 @@ def git_blobs(repository: Path, revision: str, paths: set[str]) -> dict[str, str
 
 
 def checkout_blobs(repository: Path, paths: set[str]) -> dict[str, str]:
-    completed = subprocess.run(
-        ["git", "hash-object", "--stdin-paths"], cwd=repository,
-        input="".join(f"{path}\n" for path in sorted(paths)),
-        check=False, capture_output=True, text=True,
-    )
+    # The paths reach git from a file, not a pipe: `hash-object --stdin-paths`
+    # answers each line before reading the next, and on macOS a pipe under
+    # memory pressure can poll writable while full, so a pipe-fed request can
+    # block writing into git's stdin while git blocks writing its stdout.
+    with tempfile.TemporaryFile(mode="w+") as request:
+        request.write("".join(f"{path}\n" for path in sorted(paths)))
+        request.seek(0)
+        completed = subprocess.run(
+            ["git", "hash-object", "--stdin-paths"], cwd=repository,
+            stdin=request, check=False, capture_output=True, text=True,
+        )
     values = completed.stdout.splitlines() if completed.returncode == 0 else []
     if len(values) != len(paths):
         return {}
