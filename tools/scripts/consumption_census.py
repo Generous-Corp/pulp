@@ -33,6 +33,7 @@ import argparse
 import collections
 import json
 import platform
+import posixpath
 import re
 import shutil
 import subprocess
@@ -353,21 +354,65 @@ def public_header_roots(target: dict, source_root: Path, binary_dir: Path) -> tu
     return sorted(dict.fromkeys(roots)), excluded
 
 
+_TRACKED_FILES: dict[Path, tuple[str, ...]] = {}
+
+
+def tracked_files(source_root: Path) -> tuple[str, ...]:
+    """Every path git tracks in the checkout, relative to `source_root`.
+
+    Read from the index (`git ls-files`), so a clone that setup or a developer
+    drops into the tree without committing it — the VST3 and AudioUnit SDKs
+    under `external/` — is not part of it. Those clones exist on some hosts and
+    not others; walking the filesystem recorded whatever one machine happened
+    to hold and made every other machine read as drift. Submodule contents are
+    not listed: whether a submodule is initialised is a per-checkout choice too.
+    """
+    key = source_root.resolve()
+    cached = _TRACKED_FILES.get(key)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--cached"],
+            cwd=key, capture_output=True, check=False,
+        )
+    except OSError as error:
+        raise CensusError(f"cannot run git to list tracked headers: {error}") from error
+    if result.returncode != 0:
+        raise CensusError(
+            f"{key} is not a git checkout (git ls-files: "
+            f"{result.stderr.decode(errors='replace').strip()}); the census lists "
+            "public headers from git's index so an untracked SDK clone cannot "
+            "reach the published file"
+        )
+    paths = tuple(sorted(p for p in result.stdout.decode().split("\0") if p))
+    _TRACKED_FILES[key] = paths
+    return paths
+
+
 def header_names(source_root: Path, root: str) -> list[str]:
-    """The public headers under one exported include root, as sorted paths.
+    """The tracked public headers under one exported include root, as sorted paths.
 
     The census records these names rather than a count. Two pull requests that
     each add a header under the same root then each add their own line, which
     git merges into the true set; a count would have both write the same N+1
     and merge cleanly into a number that is wrong for the merged tree.
+
+    Only files git tracks count (see `tracked_files`), so a new header is
+    recorded once it is staged, and an ignored SDK clone under an exported root
+    contributes nothing on any host.
     """
     directory = source_root / root
     if not directory.is_dir():
         return []
+    prefix = posixpath.normpath(Path(root).as_posix())
+    prefix = "" if prefix == "." else prefix + "/"
     return sorted(
-        path.relative_to(directory).as_posix()
-        for path in directory.rglob("*")
-        if path.suffix in (".h", ".hpp") and path.is_file()
+        path[len(prefix):]
+        for path in tracked_files(source_root)
+        if path.startswith(prefix)
+        and posixpath.splitext(path)[1] in (".h", ".hpp")
+        and (source_root / path).is_file()
     )
 
 
@@ -956,7 +1001,8 @@ def describe_target_drift(old: dict, new: dict) -> list[str]:
 HEADER_DRIFT_CAUSE = (
     "a public header added, removed or renamed under an already-exported include "
     "root changes public_headers_by_root on its own: no target, symbol or CMake "
-    "change is involved"
+    "change is involved; the names come from git's index, so stage a new header "
+    "before regenerating"
 )
 
 

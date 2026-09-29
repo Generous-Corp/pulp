@@ -539,7 +539,10 @@ TEST_CASE("Prepared freeze and pitched delay helpers are allocation-free while p
     freeze_config.analysis_hop = 64;
     freeze_config.capture_frames = 3;
     freeze_config.crossfade_frames = 2;
+    freeze_config.max_capture_frames = 6;
     freeze_hold.prepare(freeze_config);
+    FreezeHoldSnapshot freeze_image;
+    REQUIRE(freeze_image.prepare(256, 2, 64));
 
     std::array<std::complex<float>, 129> freeze_left {};
     std::array<std::complex<float>, 129> freeze_right {};
@@ -590,7 +593,16 @@ TEST_CASE("Prepared freeze and pitched delay helpers are allocation-free while p
         freeze_hold.set_frozen(true);
         for (int i = 0; i < 4; ++i)
             freeze_hold.process_group(freeze_frames, 2, 129);
+        (void)freeze_hold.snapshot(freeze_image);
+        (void)freeze_hold.engage_progress();
+        (void)freeze_hold.write_hold(freeze_frames, 2, 129);
+        freeze_hold.advance_hold(2);
+        freeze_hold.rewind_hold_phases(2);
+        freeze_hold.set_capture_frames(5);
+        freeze_hold.clear_history();
         freeze_hold.set_frozen(false);
+        freeze_hold.process_group(freeze_frames, 2, 129);
+        (void)freeze_hold.stage_restore(freeze_image, FreezeRestoreEngage::immediate);
         freeze_hold.process_group(freeze_frames, 2, 129);
         (void)freeze_hold.is_engaged();
         (void)freeze_hold.is_latched();

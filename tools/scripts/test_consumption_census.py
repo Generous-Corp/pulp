@@ -26,6 +26,9 @@ Verified:
   4. An external-dependency change is named as such, duplicates included.
   5. A changed field with no dedicated phrasing names the field rather than
      falling back to a closure claim.
+  6. Header names come from git's index: an ignored SDK clone or a stray
+     untracked header under an exported root is not listed, a tracked one is,
+     and a tree that is not a git checkout is an error rather than a guess.
 
 Run:
     python3 tools/scripts/test_consumption_census.py
@@ -190,6 +193,49 @@ class ParallelAdditionsMerge(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(text)["count"], n + 1)
         self.assertNotEqual(json.loads(text)["count"], n + 2)
+
+
+class HeaderNamesComeFromTheIndex(unittest.TestCase):
+    """Header names are read from git's index, not the filesystem: an SDK clone
+    that exists on one host and not another must not reach the census."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = pathlib.Path(self.tmp.name)
+        git(self.repo, "init", "-q")
+        inc = self.repo / "lib" / "include"
+        (inc / "pulp").mkdir(parents=True)
+        (inc / "pulp" / "tracked.hpp").write_text("")
+        (inc / "pulp" / "notes.txt").write_text("")
+        (self.repo / "lib" / "src").mkdir()
+        (self.repo / ".gitignore").write_text("lib/include/sdk/\n")
+        git(self.repo, "add", ".gitignore", "lib/include/pulp/tracked.hpp", "lib/include/pulp/notes.txt")
+        git(self.repo, "commit", "-q", "-m", "base")
+        # Present on disk, never committed: an ignored SDK clone and a stray
+        # untracked header.
+        (inc / "sdk").mkdir()
+        (inc / "sdk" / "AUBase.h").write_text("")
+        (inc / "pulp" / "untracked.h").write_text("")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_tracked_header_is_listed_and_untracked_ones_are_not(self) -> None:
+        self.assertEqual(cc.header_names(self.repo, "lib/include"), ["pulp/tracked.hpp"])
+
+    def test_a_root_that_holds_only_an_ignored_clone_is_empty(self) -> None:
+        self.assertEqual(cc.header_names(self.repo, "lib/include/sdk"), [])
+
+    def test_a_root_spelled_through_parent_segments_resolves(self) -> None:
+        self.assertEqual(cc.header_names(self.repo, "lib/src/../include"), ["pulp/tracked.hpp"])
+
+    def test_outside_a_git_checkout_is_an_error_not_a_guess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = pathlib.Path(tmp)
+            (plain / "include").mkdir()
+            (plain / "include" / "a.h").write_text("")
+            with self.assertRaises(cc.CensusError):
+                cc.header_names(plain, "include")
 
 
 class OtherDriftKindsStayAccurate(unittest.TestCase):

@@ -14,6 +14,8 @@ import test from "node:test";
 
 import {
   browserCandidates,
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   escapeRegExp,
   execute,
   installedBrowser,
@@ -85,7 +87,7 @@ test("installedBrowser prefers a provisioned browser over system installations",
   });
 
 test("real browser capture waits through a delayed DOM commit",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -130,7 +132,7 @@ test("real browser capture waits through a delayed DOM commit",
         "--initial-width", "320",
         "--initial-height", "240",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const snapshot = JSON.parse(
@@ -151,7 +153,7 @@ test("real browser capture waits through a delayed DOM commit",
   });
 
 test("real browser capture preserves the executable pre-mount document",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -215,7 +217,7 @@ test("real browser capture preserves the executable pre-mount document",
         "--initial-width", "320",
         "--initial-height", "240",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const materialized = JSON.parse(await readFile(
@@ -288,7 +290,7 @@ test("real browser capture preserves the executable pre-mount document",
   });
 
 test("real browser capture separates authored geometry from its affine transform",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -327,7 +329,7 @@ test("real browser capture separates authored geometry from its affine transform
         "--initial-width", "1280",
         "--initial-height", "800",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const materialized = JSON.parse(await readFile(
@@ -363,7 +365,7 @@ test("real browser capture separates authored geometry from its affine transform
   });
 
 test("real browser capture preserves WebGL through software composition",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -406,7 +408,7 @@ test("real browser capture preserves WebGL through software composition",
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const snapshot = JSON.parse(

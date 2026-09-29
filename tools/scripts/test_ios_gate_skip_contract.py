@@ -88,8 +88,8 @@ def workflow_build_step() -> str:
     )
     body = step["run"]
     gate_call = (
-        '    bash test/cmake/test_ios_compile_gate.sh \\\n'
-        '      "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
+        '      bash test/cmake/test_ios_compile_gate.sh \\\n'
+        '        "$GITHUB_WORKSPACE" "$PULP_BUILD_DIR-ios"'
     )
     if body.count(gate_call) != 1:
         raise AssertionError("expected exactly one iOS compile-gate call")
@@ -168,6 +168,46 @@ class TestSkipIsNotAFailure(unittest.TestCase):
                 self.assertEqual(rc, 2)
                 self.assertIn("stub gate exiting 2", out)
                 self.assertNotIn("BUILD_RAN", out)
+
+
+DECIDE_CALL = "python3 tools/ci/ios_gate_digest.py decide"
+
+
+def with_decision(body: str, action: str | None) -> str:
+    """Replace the digest decision with a stub that writes `action` (or, for
+    None, crashes without writing anything)."""
+    if body.count(DECIDE_CALL) != 1:
+        raise AssertionError("expected exactly one digest decision")
+    if action is None:
+        stub = "false"
+    else:
+        stub = ("printf 'ios_digest=%s\\nios_action=%s\\nios_src=41\\nios_mode=enforce\\n' "
+                f"{'a' * 64} {action} > \"$RUNNER_TEMP/ios-gate-decision.env\"; true")
+    # The call's own arguments follow on continuation lines; keep them as
+    # arguments of a harmless function so the stub replaces only the command.
+    return ("stub_decide() { " + stub + "; }\n"
+            + body.replace(DECIDE_CALL, "stub_decide"))
+
+
+class TestDigestDecision(unittest.TestCase):
+    def test_a_skip_decision_skips_the_gate_and_still_builds(self):
+        rc, out = run_step(with_decision(workflow_build_step(), "skip"), 2)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("stub gate exiting", out)
+        self.assertIn("iOS compile gate skipped: input digest", out)
+        self.assertIn("BUILD_RAN", out)
+
+    def test_a_run_decision_runs_the_gate(self):
+        rc, out = run_step(with_decision(workflow_build_step(), "run"), 2)
+        self.assertEqual(rc, 2)
+        self.assertIn("stub gate exiting 2", out)
+
+    def test_a_crashed_decision_runs_the_gate(self):
+        """The control for the skip: no decision at all must mean `run`."""
+        rc, out = run_step(with_decision(workflow_build_step(), None), 2)
+        self.assertEqual(rc, 2)
+        self.assertIn("stub gate exiting 2", out)
+        self.assertNotIn("BUILD_RAN", out)
 
 
 class TestWorkflowUsesTheGuardedForm(unittest.TestCase):

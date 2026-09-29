@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "_comment": "Tree-reading drift checks run by the advisory hosted `drift-fast` job (.github/workflows/drift-fast.yml) against a configured-but-unbuilt tree, so a merge group whose tip-plus-head tree drifts fails in minutes on a hosted runner instead of after the ~20-minute macOS build. `ctest_labels` pulls in every member of each label; `tests` names individual registrations outside those labels. Every entry must pass from a configure alone: no compiled binary, no installed SDK. `tools/ci/drift_fast.py run` fails when a label selects nothing or when ctest ran a different number of tests than it selected. See docs/guides/local-ci.md.",
+  "ctest_labels": [
+    "pr-fast"
+  ],
+  "tests": [
+    {
+      "name": "consumption-census-drift",
+      "why": "consumption census against the configured target graph (pr-fast today; listed so it survives a tier change)"
+    },
+    {
+      "name": "consumption-census-drift-description",
+      "why": "describes census drift over the committed census"
+    },
+    {
+      "name": "consumption-census-negative-contract",
+      "why": "fails closed on a stale census feature roster"
+    },
+    {
+      "name": "ctest-scheduling-contract",
+      "why": "reads the configured registrations' scheduling properties"
+    },
+    {
+      "name": "ios-compile-gate-legs",
+      "why": "Apple-only registration; not registered on a Linux configure"
+    },
+    {
+      "name": "prepush-refresh-push",
+      "why": "pre-push refresh against real fixture repositories"
+    },
+    {
+      "name": "rack-generator-safety",
+      "why": "rack generator inventory against the source tree"
+    },
+    {
+      "name": "script-test-inputs-drift",
+      "why": "test/ctest_script_inputs.json against the configured registrations"
+    },
+    {
+      "name": "source-selftest-lane-contract",
+      "why": "tools/ci/source_selftests.json against the configured registrations"
+    },
+    {
+      "name": "source-selftest-lane-selftest",
+      "why": "source-selftest lane driver"
+    },
+    {
+      "name": "tools-registry-check",
+      "why": "docs/status/tools.yaml and the CLAUDE.md digest against the tree"
+    },
+    {
+      "name": "wide-non-native-selftest",
+      "why": "wide non-native classification replay; the most frequent merge-group-only failure"
+    }
+  ]
+}

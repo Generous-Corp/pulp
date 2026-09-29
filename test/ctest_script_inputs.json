@@ -245,18 +245,21 @@
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/consumption_census_tests.cmake",
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
+    "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
     "tools/ci/test_base_poison_detector.py",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
   "binary-identity-shadow-selftest": {
    "entry": "tools/ci/test_binary_identity_shadow.py",
    "inputs": [
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "tools/ci/binary_identity_shadow.py",
     "tools/ci/test_binary_identity_shadow.py",
@@ -996,6 +999,14 @@
    ],
    "kind": "python"
   },
+  "drift-fast-selftest": {
+   "entry": "tools/ci/test_drift_fast.py",
+   "inputs": [
+    "tools/ci/drift_fast.py",
+    "tools/ci/test_drift_fast.py"
+   ],
+   "kind": "python"
+  },
   "dsp-provenance-audit": {
    "entry": "tools/scripts/dsp_provenance_audit.py",
    "inputs": [
@@ -1096,13 +1107,15 @@
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
     "test/cmake/consumption_census_tests.cmake",
+    "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
     "tools/ci/flake_exoneration_shadow.py",
     "tools/ci/test_flake_exoneration_shadow.py",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
@@ -2620,6 +2633,7 @@
     "docs/status/dsp-capabilities.json",
     "docs/status/forge-catalog.json",
     "docs/status/gpu-recipes.yaml",
+    "ship/CMakeLists.txt",
     "test/CMakeLists.txt",
     "test/cmake/check_bundle_build_info.cmake",
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
@@ -2631,21 +2645,35 @@
     "test/test_biquad.cpp",
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
+    "tools/appearance",
+    "tools/audio",
+    "tools/audio/src/service.cpp",
+    "tools/ci/governed-build.sh",
     "tools/ci/ios_gate_digest.py",
     "tools/ci/source_selftests.json",
     "tools/ci/test_ios_gate_digest.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cli/cmd_build.cpp",
+    "tools/cli/gpu_health",
     "tools/cmake",
     "tools/cmake/PulpInstallRules.cmake",
     "tools/deps/manifest.json",
+    "tools/design",
+    "tools/design-ab",
     "tools/dsp_vocabulary.py",
+    "tools/import-design",
+    "tools/import-design/browser_capture/capture.mjs",
     "tools/import-validation",
+    "tools/screenshot",
     "tools/scripts",
+    "tools/scripts/bundle_threejs_for_jsc.mjs",
     "tools/scripts/classify_changes.py",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fixtures/wide_non_native_replay.json",
     "tools/scripts/gates.sh",
     "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/package-lock.json",
+    "tools/scripts/package.json",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_ios_compile_gate_legs.py",
@@ -2886,12 +2914,15 @@
    "entry": "tools/ci/test_pr_head_affected_tests.py",
    "inputs": [
     ".github/workflows/build.yml",
+    "core/gpu_audio/CMakeLists.txt",
+    "docs/status",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
     "tools/ci/build_dir_lock.py",
+    "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
@@ -2899,14 +2930,17 @@
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/deps/manifest.json",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/affected_targets.py",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/consumption_census.py",
     "tools/scripts/gate_python_imports_check.py",
+    "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/test_build_time_report.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
    "kind": "python"
@@ -2947,6 +2981,14 @@
    ],
    "kind": "python"
   },
+  "prepush-queue-rebase-hint": {
+   "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
+   "inputs": [
+    "tools/scripts/prepush_queue_rebase_hint.py",
+    "tools/scripts/test_prepush_queue_rebase_hint.py"
+   ],
+   "kind": "python"
+  },
   "prepush-refresh-push": {
    "entry": "tools/scripts/test_refresh_push_check.py",
    "inputs": [
@@ -2966,7 +3008,7 @@
    "kind": "python"
   },
   "project-package-mutation-control": {
-   "entry": "build-gate/test/run_project_package_mutation_control.py",
+   "entry": "${CMAKE_BINARY_DIR}/test/run_project_package_mutation_control.py",
    "inputs": [],
    "kind": "python"
   },
@@ -3147,11 +3189,14 @@
     "test/cmake/consumption_census_tests.cmake",
     "test/cmake/quality_tests.cmake",
     "test/cmake/test_gpu_audio_sdk_consumer.cmake",
+    "test/ctest_script_inputs.json",
     "test/test_canvas_path_measure.cpp",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/fixtures/queue_chain_rule.json",
     "tools/scripts/queue_admission_guard.py",
     "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
    ],
@@ -4229,6 +4274,8 @@
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
     "docs/status",
+    "docs/status/consumption-profiles.json",
+    "examples/pulp-gain/CMakeLists.txt",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_script_test_inputs.py"
    ],
@@ -4407,6 +4454,7 @@
    "entry": "tools/ci/test_source_selftests.py",
    "inputs": [
     ".githooks/pre-push",
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "docs/status/consumption-profiles.json",
     "docs/status/consumption-profiles.schema.json",
@@ -4475,6 +4523,21 @@
    "inputs": [
     "tools/scripts/pch_wiring_check.py",
     "tools/scripts/test_pch_wiring_check.py"
+   ],
+   "kind": "python"
+  },
+  "test-receipts-shadow-selftest": {
+   "entry": "tools/ci/test_test_receipts_shadow.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "docs/status",
+    "tools/ci/affected_tests_shadow.py",
+    "tools/ci/ctest_gate_args.py",
+    "tools/ci/test_receipts_shadow.py",
+    "tools/ci/test_test_receipts_shadow.py",
+    "tools/cmake",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
    ],
    "kind": "python"
   },
@@ -4903,6 +4966,7 @@
     "test/cmake/quality_tests.cmake",
     "tools/ci/governed-build.sh",
     "tools/ci/source_selftests.py",
+    "tools/ci/test_drift_fast.py",
     "tools/ci/test_source_selftests.py",
     "tools/cli/cmd_pr.cpp",
     "tools/cmake/PulpTestSuite.cmake",

@@ -1966,7 +1966,8 @@ EXPORTS = [
         key="signal.spectral-mask-processor", domain="signal",
         summary=(
             "Streaming WOLA spectral masking with race-free frame-boundary publication, "
-            "mask interpolation, and latency-aligned dry/wet mixing."
+            "mask interpolation, latency-aligned dry/wet mixing, and optional "
+            "time-domain wet-source and frame-domain pre-mask source stages."
         ),
         rt_class="mixed",
         lifecycle={
@@ -2005,7 +2006,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
+                    "sha256:b48f9daf1117deb88cfd71a66c5b1c3d398c38c3481a3309e69745e65e545cdb"
                 ),
             ),
             binding(
@@ -2014,7 +2015,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
+                    "sha256:b48f9daf1117deb88cfd71a66c5b1c3d398c38c3481a3309e69745e65e545cdb"
                 ),
             ),
         ],

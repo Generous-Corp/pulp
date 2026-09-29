@@ -228,6 +228,12 @@
       ]
     },
     {
+      "name": "drift-fast-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_drift_fast.py"
+      ]
+    },
+    {
       "name": "dsp-provenance-audit-selftest",
       "argv": [
         "{repo}/tools/scripts/test_dsp_provenance_audit.py"

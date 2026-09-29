@@ -263,6 +263,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "claimDocumentNavigationFocus": "() => boolean",
     "clearFocus": "(id: string) => boolean",
     "claimOverlay": "(id: string, consume?: boolean, parentId?: string) => void",
+    "hostKind": "() => 'plugin' | 'standalone' | 'unknown'",
     "setOverlayTrigger": "(id: string, isTrigger?: boolean) => void",
     "clearBoxShadow": "(id: string) => void",
     "clearTransform": "(id: string) => void",

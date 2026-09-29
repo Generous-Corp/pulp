@@ -178,7 +178,9 @@ def run_script(fx: Fixture, *args: str, env_extra: dict | None = None,
     for var in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                 "PULP_WORKTREES_ROOT", "PULP_WORKTREE_BUILD_IDLE_HOURS",
                 "PULP_REAP_LIB_ONLY", "PULP_REAP_SAME_DEVICE_AS",
-                "PULP_REAP_STOP_AT_FREE_BYTES", "PULP_REAP_STOP_AT_PATH"):
+                "PULP_REAP_STOP_AT_FREE_BYTES", "PULP_REAP_STOP_AT_PATH",
+                "PULP_REAP_TEST_QUARANTINE_BARRIER",
+                "PULP_REAP_TEST_QUARANTINE_BARRIER_TIMEOUT"):
         env.pop(var, None)
     env["PULP_BUILD_DIR_LOCK_ROOT"] = str(fx.tmp / "build-dir-locks")
     if env_extra:
@@ -190,35 +192,53 @@ def run_script(fx: Fixture, *args: str, env_extra: dict | None = None,
 
 
 def start_quarantine_watcher(wt: pathlib.Path, action: str,
+                             barrier: pathlib.Path, *, hold: float = 0.0,
                              env_extra: dict | None = None,
                              ready_timeout: float = 60.0) -> subprocess.Popen:
-    """Spawn a helper that acts the instant `build/` is renamed to quarantine.
+    """Spawn a helper that acts inside the reaper's quarantine window.
 
-    The window between that rename and the safety gate that closes it is well
-    under a second. A helper that is still importing its modules when the
-    window opens never sees it, and the caller then reads its own missed cue as
-    the script having done the wrong thing -- a failure that only appears on a
-    host slow enough to push interpreter startup past the window, which is
-    exactly where these tests are hardest to debug. Readiness is handshaken
-    instead: the helper announces itself after its imports and before its first
-    poll, and this returns only once that announcement arrives.
+    The window between the rename of `build/` and the safety gates that close
+    it is well under a second, so a helper that merely polls for the quarantine
+    entry races the reaper: on a loaded host the reaper's re-checks can finish
+    before the helper acts, and the test then reads its own missed cue as the
+    script having done the wrong thing. Polling is also visible to the reaper:
+    `glob` holds the worktree directory open while it scans it, and the
+    reaper's `lsof` snapshot correctly reads an open descriptor on the worktree
+    as a live process working in it. Caught before the rename that keeps the
+    directory without ever opening the window; caught after it, it restores
+    the build before the helper's own event lands. So the helper never touches
+    the worktree while it waits; it watches only the barrier file, which lives
+    outside it. Both ends are handshaken instead:
+
+      * startup -- the helper announces itself after its imports, and this
+        returns only once that announcement arrives;
+      * the window -- the reaper, run with PULP_REAP_TEST_QUARANTINE_BARRIER
+        set to `barrier` (see `barrier_env`), writes `<barrier>.ready` naming
+        the quarantine and waits; the helper acts, then creates
+        `<barrier>.done`, and only then does the reaper re-check.
 
     `action` is the already-indented body to run once the quarantine entry
-    exists, with `root` bound to the worktree path and `p` to the glob match.
+    exists, with `root` bound to the worktree path and `p` to a one-element
+    list holding the quarantine path. `hold` keeps the helper alive for that
+    many seconds AFTER it signals, so state the action opened (a file handle)
+    is still live when the reaper re-checks.
     """
     src = (
-        "import glob, os, pathlib, subprocess, sys, time\n"
+        "import os, pathlib, subprocess, sys, time\n"
         "root=pathlib.Path(os.environ['WATCH_ROOT'])\n"
+        "barrier=os.environ['WATCH_BARRIER']\n"
         "sys.stdout.write('ready\\n'); sys.stdout.flush()\n"
         "deadline=time.time()+120\n"
         "while time.time()<deadline:\n"
-        " p=glob.glob(str(root/'.pulp-reap-build-*'))\n"
-        " if p:\n"
+        " if os.path.exists(barrier+'.ready'):\n"
+        "  p=[pathlib.Path(barrier+'.ready').read_text().strip()]\n"
         + action +
+        "  pathlib.Path(barrier+'.done').write_text('done')\n"
+        f"  time.sleep({float(hold)!r})\n"
         "  break\n"
         " time.sleep(0.001)\n"
     )
-    env = {**os.environ, "WATCH_ROOT": str(wt)}
+    env = {**os.environ, "WATCH_ROOT": str(wt), "WATCH_BARRIER": str(barrier)}
     if env_extra:
         env.update(env_extra)
     proc = subprocess.Popen(
@@ -232,6 +252,18 @@ def start_quarantine_watcher(wt: pathlib.Path, action: str,
     proc.kill()
     proc.wait()
     raise AssertionError("quarantine watcher never signalled readiness")
+
+
+BARRIER_VAR = "PULP_REAP_TEST_QUARANTINE_BARRIER"
+BARRIER_TIMEOUT_VAR = "PULP_REAP_TEST_QUARANTINE_BARRIER_TIMEOUT"
+
+
+def barrier_env(barrier: pathlib.Path, timeout: int | None = None) -> dict:
+    """Environment that makes the reaper rendezvous at `barrier`."""
+    env = {BARRIER_VAR: str(barrier)}
+    if timeout is not None:
+        env[BARRIER_TIMEOUT_VAR] = str(timeout)
+    return env
 
 
 def lib_eval(fx: Fixture, snippet: str) -> subprocess.CompletedProcess:
@@ -729,6 +761,98 @@ class GateTests(FixtureTestCase):
 class DeletionTests(FixtureTestCase):
     """`--yes` removes build directories and nothing else."""
 
+    def assert_watcher_acted(self, barrier: pathlib.Path,
+                             r: subprocess.CompletedProcess) -> None:
+        """The in-window event happened, and happened inside the window.
+
+        Without this a watcher that never ran would leave the restore
+        assertions below reading a gate's keep as the veto under test.
+        """
+        self.assertTrue(
+            barrier.with_name(barrier.name + ".ready").exists(),
+            "the reaper never reached the quarantine barrier; with --verbose its\n"
+            "keep reason is in the output:\n" + r.stdout + r.stderr)
+        self.assertTrue(
+            barrier.with_name(barrier.name + ".done").exists(),
+            "the watcher never signalled that it acted:\n" + r.stdout + r.stderr)
+        self.assertNotIn("barrier timed out", r.stderr)
+
+    def test_quarantine_barrier_holds_the_reaper_until_signalled(self) -> None:
+        wt = self.fx.add_worktree("wt-barrier-holds")
+        self.fx.merge_and_mark(wt)
+        barrier = self.root / "quarantine-barrier"
+        # The watcher waits well past the reaper's own re-check time before it
+        # signals, then records whether the quarantine was still intact. It is
+        # only intact if the reaper really waited at the barrier.
+        watcher = start_quarantine_watcher(wt, (
+            "  time.sleep(3)\n"
+            "  pathlib.Path(barrier+'.seen').write_text(\n"
+            "      str(os.path.isfile(p[0]+'/CMakeCache.txt')))\n"
+        ), barrier)
+        try:
+            r = run_script(self.fx, "--yes", "--verbose",
+                           env_extra=barrier_env(barrier))
+            watcher.wait(timeout=120)
+            self.assert_watcher_acted(barrier, r)
+            self.assertEqual(
+                pathlib.Path(str(barrier) + ".seen").read_text(), "True",
+                "the reaper deleted the quarantine without waiting at the barrier")
+            ready = pathlib.Path(str(barrier) + ".ready").read_text().strip()
+            self.assertRegex(pathlib.Path(ready).name, r"^\.pulp-reap-build-\d+$")
+            self.assertEqual(pathlib.Path(ready).parent, wt.resolve())
+            # With nothing vetoing inside the window, the reap still completes.
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("removed 1 build dir(s)", r.stdout)
+            self.assertFalse((wt / "build").exists())
+            self.assertEqual(list(wt.glob(".pulp-reap-build-*")), [])
+        finally:
+            if watcher.poll() is None:
+                watcher.terminate()
+                watcher.wait()
+
+    def test_quarantine_barrier_timeout_proceeds_and_says_so(self) -> None:
+        wt = self.fx.add_worktree("wt-barrier-timeout")
+        self.fx.merge_and_mark(wt)
+        barrier = self.root / "quarantine-barrier"
+        started = time.monotonic()
+        r = run_script(self.fx, "--yes", "--verbose",
+                       env_extra=barrier_env(barrier, timeout=1))
+        elapsed = time.monotonic() - started
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(pathlib.Path(str(barrier) + ".ready").exists())
+        self.assertIn("quarantine test barrier timed out after 1s; proceeding",
+                      r.stderr)
+        # Proceeding means the ordinary gates decide; nothing vetoed here.
+        self.assertIn("removed 1 build dir(s)", r.stdout)
+        self.assertFalse((wt / "build").exists())
+        self.assertLess(elapsed, 60, "the timeout did not bound the wait")
+
+    def test_without_the_barrier_variable_nothing_waits_or_is_written(self) -> None:
+        wt = self.fx.add_worktree("wt-barrier-unset")
+        self.fx.merge_and_mark(wt)
+        # A path the reaper would write beside if it consulted anything but the
+        # variable. run_script strips the variables from the ambient
+        # environment, so this run is the production configuration.
+        barrier = self.root / "quarantine-barrier"
+        r = run_script(self.fx, "--yes", "--verbose")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("removed 1 build dir(s)", r.stdout)
+        self.assertNotIn("quarantine test barrier", r.stdout + r.stderr)
+        self.assertEqual(list(self.root.glob(barrier.name + "*")), [])
+        self.assertEqual(list(wt.glob(".pulp-reap-build-*")), [])
+        # The helper itself is inert without the variable: sourced in lib-only
+        # mode it returns at once, prints nothing and creates nothing.
+        probe = lib_eval(self.fx, (
+            "unset PULP_REAP_TEST_QUARANTINE_BARRIER\n"
+            "PULP_REAP_TEST_QUARANTINE_BARRIER_TIMEOUT=0\n"
+            f"cd '{self.root}'\n"
+            "start=$SECONDS; quarantine_test_barrier q; rc=$?\n"
+            "echo rc=$rc elapsed=$((SECONDS - start))\n"
+        ))
+        self.assertEqual(probe.stdout.strip(), "rc=0 elapsed=0", probe.stderr)
+        self.assertEqual(probe.stderr, "")
+        self.assertEqual(list(self.root.glob("*.ready*")), [])
+
     def test_dry_run_deletes_nothing(self) -> None:
         wt = self.fx.add_worktree("wt-dry")
         self.fx.merge_and_mark(wt)
@@ -791,12 +915,14 @@ class DeletionTests(FixtureTestCase):
     def test_process_entering_after_quarantine_forces_restore(self) -> None:
         wt = self.fx.add_worktree("wt-post-rename-busy")
         self.fx.merge_and_mark(wt)
+        barrier = self.root / "quarantine-barrier"
         watcher = start_quarantine_watcher(wt, (
             "  f=open(p[0]+'/CMakeCache.txt','rb')\n"
-            "  time.sleep(10)\n"
-        ))
+        ), barrier, hold=30)
         try:
-            r = run_script(self.fx, "--yes", "--verbose")
+            r = run_script(self.fx, "--yes", "--verbose",
+                           env_extra=barrier_env(barrier))
+            self.assert_watcher_acted(barrier, r)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn(
                 "FAILED to remove", r.stdout,
@@ -813,15 +939,17 @@ class DeletionTests(FixtureTestCase):
     def test_short_lived_writer_after_quarantine_forces_restore(self) -> None:
         wt = self.fx.add_worktree("wt-post-rename-write")
         self.fx.merge_and_mark(wt)
+        barrier = self.root / "quarantine-barrier"
         watcher = start_quarantine_watcher(wt, (
             "  pathlib.Path(p[0], 'late-object.o').write_text('new')\n"
-        ))
+        ), barrier)
         try:
-            r = run_script(self.fx, "--yes", "--verbose")
-            # The watcher exits the moment it acts, so this only has to
-            # outlast the script itself -- which on a core-starved host
-            # runs far longer than it does on an idle one.
+            r = run_script(self.fx, "--yes", "--verbose",
+                           env_extra=barrier_env(barrier))
+            # The watcher exits the moment it signals, which is before the
+            # reaper resumes, so this cannot wait on the reaper.
             watcher.wait(timeout=120)
+            self.assert_watcher_acted(barrier, r)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn(
                 "FAILED to remove", r.stdout,
@@ -845,14 +973,17 @@ class DeletionTests(FixtureTestCase):
         old = time.time() - 86_400
         os.utime(precious / "unique.txt", (old, old))
         os.utime(precious, (old, old))
+        barrier = self.root / "quarantine-barrier"
         watcher = start_quarantine_watcher(wt, (
             "  q=pathlib.Path(p[0])\n"
             "  q.rename(root/'saved-original-build')\n"
             "  (root/'precious-source').rename(q)\n"
-        ))
+        ), barrier)
         try:
-            r = run_script(self.fx, "--yes", "--verbose")
+            r = run_script(self.fx, "--yes", "--verbose",
+                           env_extra=barrier_env(barrier))
             watcher.wait(timeout=120)
+            self.assert_watcher_acted(barrier, r)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn(
                 "FAILED to remove", r.stdout,
@@ -874,14 +1005,17 @@ class DeletionTests(FixtureTestCase):
         wt = self.fx.add_worktree("wt-lineage-changed-late")
         self.fx.merge_and_mark(wt)
         branch = git(wt, "branch", "--show-current").strip()
+        barrier = self.root / "quarantine-barrier"
         watcher = start_quarantine_watcher(wt, (
             "  subprocess.run(['git','-C',os.environ['MAIN_ROOT'],'config','--local',"
             "os.environ['KEY'],'active'],check=True)\n"
-        ), env_extra={"MAIN_ROOT": str(self.fx.main),
-                      "KEY": f"branch.{branch}.pulpWorktreeStatus"})
+        ), barrier, env_extra={"MAIN_ROOT": str(self.fx.main),
+                               "KEY": f"branch.{branch}.pulpWorktreeStatus"})
         try:
-            r = run_script(self.fx, "--yes", "--verbose")
+            r = run_script(self.fx, "--yes", "--verbose",
+                           env_extra=barrier_env(barrier))
             watcher.wait(timeout=120)
+            self.assert_watcher_acted(barrier, r)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn(
                 "FAILED to remove", r.stdout,

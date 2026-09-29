@@ -1,32 +1,21 @@
 name: Base health detector
 
-# WHY THIS IS NOT PART OF `Build and Test`. The push-to-main lane in build.yml
-# was designated the detector for a broken base, and it produces no observation.
-# Every non-proof event shares the `build-<github.ref>` concurrency group, so
-# every push to main lands in one domain; `cancel-in-progress` is false there,
-# which means GitHub holds at most ONE run pending and cancels the previously
-# pending one when the next merge arrives. On a main that merges faster than the
-# macOS suite takes, the intended "serialize to one leg at a time" degrades into
-# "cancel all but the one already running", and that one's self-hosted macOS leg
-# is still queued for a runner when the next merge cancels it too.
-#
-# Measured over the 60 most recent pushes to main: 58 completed, 55 dispatched
-# no job at all, and 0 executed the macOS suite. The same query over merge_group
-# returned 31 of 55 executed, so the instrument reads a real lane when there is
-# one to read.
-#
-# Widening build.yml's push concurrency would fix the supersession and hand the
-# shared Mac Studios one ~40-minute macOS leg per merge - the hosts that serve
-# the required `macos` gate. This workflow instead derives main's health from
-# evidence that already exists (see tools/ci/base_poison_detector.py:
-# tree identity), so the detector costs a few API reads and no gate lane.
-#
+# WHY THIS IS NOT PART OF `Build and Test`. main's health is already measured
+# there, by the merge queue: the queue lands with the MERGE method, so the
+# commit on main IS the merge-group head, and that merge_group run's required
+# `macos` job tested main's exact commit. This workflow reads that job by main's
+# tip sha (see tools/ci/base_poison_detector.py) and publishes a verdict, so it
+# costs a few API reads and no gate lane. A push-to-main run carries no macOS
+# leg and is not an observation.
+
 # It REPORTS ONLY. Acting on the signal - pausing re-forming batches,
 # prioritising the fix - is Shipyard's side and is not wired here.
 
 on:
-  # The primary trigger: read main's health right after a merge group fails,
-  # which is the moment a poisoned base first shows. GitHub runs a
+  # The primary trigger: read main's health after EVERY completed merge
+  # group. A failed one is the moment a poisoned base first shows; a green one
+  # is usually a new tip, and without a read then a healthy tip never gets a
+  # verdict and the last published one goes stale. GitHub runs a
   # `workflow_run` workflow from the DEFAULT branch with base-repository
   # permissions, never from the triggering run's code, and this job checks out
   # only the default branch and only reads, so the trigger adds no path for
@@ -52,12 +41,11 @@ on:
         default: true
         type: boolean
 
-# One detector at a time, and never per-sha. A burst of failed batches
+# One detector at a time, and never per-sha. A burst of completed batches
 # collapses to the running read plus one pending. A superseded tick loses nothing:
 # the next one reads main's CURRENT head, which is strictly more relevant than
-# the head the cancelled tick would have reported on. That is the property the
-# push lane lacks - it pins its own sha, so a cancelled run's observation is
-# gone for good.
+# the head the cancelled tick would have reported on. A per-sha group would pin
+# each read to a sha, so a cancelled read's observation would be gone for good.
 concurrency:
   group: main-health-detector
   cancel-in-progress: false
@@ -73,15 +61,14 @@ jobs:
     # A fork's copy of this workflow would probe THIS repository's runs and mail
     # its owner every failure, so an unattended run no-ops off the primary repo.
     # `workflow_dispatch` is untouched, so a fork owner can still run it by hand.
-    # A `workflow_run` read happens only after a FAILED merge-group run: a PR
-    # run, a push run or a green batch says nothing new about main.
+    # A `workflow_run` read happens after every completed merge-group run,
+    # green or red: a PR run or a push run says nothing about main.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.repository == vars.PULP_PRIMARY_REPO &&
        (github.event_name == 'schedule' ||
         (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.event == 'merge_group' &&
-         github.event.workflow_run.conclusion == 'failure')))
+         github.event.workflow_run.event == 'merge_group')))
     runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 15
     steps:

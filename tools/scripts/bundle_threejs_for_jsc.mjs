@@ -16,7 +16,7 @@
 //
 // Implementation: delegates to esbuild (pinned in tools/scripts/
 // package.json) for proper ESM-import resolution, http: import
-// stripping, and IIFE wrapping. The earlier regex-only pass (slice 2)
+// stripping, and IIFE wrapping. The earlier regex-only pass
 // could not resolve sibling `import { ... } from "./three.core.js"`
 // statements that Three.js's webgpu entry depends on, which caused
 // JSC parse errors at runtime ("expecting '('") on every iPad
@@ -28,9 +28,10 @@
 //                                   --output <three.iife.js>
 //
 // On first invocation in a fresh checkout, the script auto-installs
-// its esbuild dependency via `npm install --prefix <script_dir>`
-// using the pinned version in package.json. Subsequent invocations
-// skip the install when node_modules/esbuild is already present.
+// its esbuild dependency via `npm install` in its own directory using
+// the pinned version in package.json / package-lock.json, retrying a
+// transient network failure with backoff. Subsequent invocations skip
+// the install when node_modules/esbuild is already present.
 //
 // With PULP_OFFLINE_BUILD set (to anything but 0/false/no/off) the
 // script never reaches the network: a missing esbuild is an error that
@@ -39,6 +40,7 @@
 // outage fails that step, with retries, instead of a compile inside it.
 
 import { spawnSync } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
@@ -73,10 +75,63 @@ function offlineBuild() {
     return !["", "0", "false", "no", "off"].includes(value);
 }
 
+// npm does not retry a failed DNS lookup: make-fetch-happen's retry list
+// deliberately excludes ENOTFOUND, so one resolver blip on a CI VM fails
+// the whole install (and the iOS build step that runs this script). These
+// are the error codes that name a transient network condition; anything
+// else (a bad lockfile, a missing package, a permissions error) fails on
+// the first attempt because retrying cannot change the answer.
+const TRANSIENT_NPM_ERROR =
+    /\b(ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ERR_SOCKET_TIMEOUT)\b/;
+
+function isTransientNpmFailure(output) {
+    return TRANSIENT_NPM_ERROR.test(output);
+}
+
+function positiveIntFromEnv(name, fallback) {
+    const raw = process.env[name];
+    if (raw === undefined || raw === "") return fallback;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+// Runs one npm invocation and echoes its output. The output is captured
+// (rather than inherited) so a failure can be classified as transient.
+// PULP_BUNDLE_THREEJS_NPM_JS substitutes a Node script for npm so the
+// retry path can be exercised without a network.
+function runNpmOnce(npmArgs) {
+    const fakeNpm = process.env.PULP_BUNDLE_THREEJS_NPM_JS;
+    const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
+    const [command, args, useShell] = fakeNpm
+        ? [process.execPath, [fakeNpm, ...npmArgs], false]
+        // npm.cmd is a shell script on Windows and cannot be spawned
+        // directly by Node's exec/spawn path on every hosted runner.
+        : [npmBin, npmArgs, process.platform === "win32"];
+    const result = spawnSync(command, args, {
+        cwd: SCRIPT_DIR,
+        stdio: ["ignore", "pipe", "pipe"],
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        shell: useShell,
+    });
+    if (result.stdout) process.stderr.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.error) {
+        throw new Error(`failed to launch ${command}: ${result.error.message}`);
+    }
+    return { status: result.status, output: `${result.stdout || ""}${result.stderr || ""}` };
+}
+
 // Load esbuild from this script's local node_modules. If it's missing,
-// run `npm install` once to populate it, then retry. Keeps the build
+// install it from the pinned lockfile, then retry. Keeps the build
 // reproducible against the pinned version in package.json without
 // relying on a globally installed copy.
+//
+// `--prefer-offline` satisfies the install from npm's local cache when
+// the pinned tarball is already there, so a warm machine needs no
+// registry round trip at all. `npm install` rather than `npm ci`:
+// several appex targets can run this script concurrently, and `npm ci`
+// deletes node_modules out from under a sibling that is loading it.
 async function loadEsbuild() {
     const localEsbuildEntry = path.join(SCRIPT_DIR, "node_modules", "esbuild", "lib", "main.js");
     if (!fs.existsSync(localEsbuildEntry) && offlineBuild()) {
@@ -89,19 +144,27 @@ async function loadEsbuild() {
     }
     if (!fs.existsSync(localEsbuildEntry)) {
         process.stderr.write("[bundle_threejs] esbuild not present in tools/scripts/node_modules — running `npm install` (one-time)...\n");
-        const npmBin = process.platform === "win32" ? "npm.cmd" : "npm";
-        const result = spawnSync(npmBin, ["install", "--no-audit", "--no-fund"], {
-            cwd: SCRIPT_DIR,
-            stdio: "inherit",
-            // npm.cmd is a shell script on Windows and cannot be spawned
-            // directly by Node's exec/spawn path on every hosted runner.
-            shell: process.platform === "win32",
-        });
-        if (result.error) {
-            throw new Error(`failed to launch ${npmBin}: ${result.error.message}`);
-        }
-        if (result.status !== 0) {
-            throw new Error(`${npmBin} install in ${SCRIPT_DIR} exited ${result.status}`);
+        const npmArgs = ["install", "--prefer-offline", "--no-audit", "--no-fund"];
+        const attempts = Math.max(1, positiveIntFromEnv("PULP_BUNDLE_THREEJS_NPM_ATTEMPTS", 5));
+        const backoffMs = positiveIntFromEnv("PULP_BUNDLE_THREEJS_NPM_BACKOFF_MS", 5000);
+        for (let attempt = 1; ; ++attempt) {
+            const { status, output } = runNpmOnce(npmArgs);
+            if (status === 0) break;
+            const transient = isTransientNpmFailure(output);
+            if (!transient || attempt >= attempts) {
+                const why = transient
+                    ? `a transient network error persisted through ${attempts} attempts`
+                    : "the failure is not a transient network error, so it was not retried";
+                throw new Error(`npm install in ${SCRIPT_DIR} exited ${status} (${why})`);
+            }
+            // Exponential: 5, 10, 20, 40 s by default, so the retries span
+            // about 75 s of resolver outage before the build gives up.
+            const delay = backoffMs * 2 ** (attempt - 1);
+            process.stderr.write(
+                `[bundle_threejs] npm install hit a transient network error ` +
+                `(attempt ${attempt}/${attempts}); retrying in ${delay} ms...\n`,
+            );
+            await sleep(delay);
         }
     }
     return REQUIRE(path.join(SCRIPT_DIR, "node_modules", "esbuild"));
