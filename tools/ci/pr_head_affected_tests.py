@@ -77,6 +77,15 @@ PATH_FAMILIES = (
      re.compile(r"^(tools/(ci/wide_non_native_checks\.json|scripts/(classify_changes|wide_non_native)\.py)"
                 r"|test/(CMakeLists\.txt|.*\.cmake))$"),
      re.compile(r"^wide-non-native-selftest$")),
+    # The GPU-audio provider probes compare their compiled-in Dawn/Skia identity
+    # with the pinned provider. That identity is produced at configure time by
+    # CMake and the identity script and read back through target properties or
+    # definitions, so no source dependency links a producer edit to the probes.
+    ("gpu-audio-provider-identity",
+     re.compile(r"^(core/gpu_audio/CMakeLists\.txt|tools/cmake/PulpGpuAudioProvider\w*\.cmake"
+                r"|tools/scripts/gpu_audio_provider_identity\.py|tools/deps/manifest\.json"
+                r"|test/cmake/verify_gpu_audio_provider\w*\.cmake)$"),
+     re.compile(r"^pulp-gpu-(audio-provider-identity|host-mapped-pointer-|dawn-shared-io-provider-)")),
 )
 
 

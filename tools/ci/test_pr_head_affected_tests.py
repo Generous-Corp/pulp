@@ -33,6 +33,8 @@ NAMES = {
     "unit-a": set(), "unit-b": set(), "fast-one": {"pr-fast"},
     "cmake-install-layout": set(), "cmake-sdk-smoke": set(),
     "wide-non-native-selftest": set(), "other": set(),
+    "pulp-gpu-host-mapped-pointer-probe": set(), "pulp-gpu-audio-provider-identity": set(),
+    "pulp-gpu-dawn-shared-io-provider-probe": set(), "pulp-gpu-compute-unrelated": set(),
 }
 
 
@@ -76,6 +78,19 @@ class SelectionTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = self.plan([path], selection("focused", []))
                 self.assertIn("wide-non-native-selftest", plan["tests"])
+
+    def test_a_provider_identity_producer_reaches_the_provider_probes(self) -> None:
+        probes = ["pulp-gpu-audio-provider-identity", "pulp-gpu-dawn-shared-io-provider-probe",
+                  "pulp-gpu-host-mapped-pointer-probe"]
+        for path in ("core/gpu_audio/CMakeLists.txt", "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
+                     "tools/scripts/gpu_audio_provider_identity.py", "tools/deps/manifest.json"):
+            with self.subTest(path=path):
+                plan = self.plan([path], selection("all", []))
+                self.assertEqual(sorted(t for t in plan["tests"] if t.startswith("pulp-gpu")), probes)
+
+    def test_control_other_gpu_audio_code_does_not_reach_the_provider_probes(self) -> None:
+        plan = self.plan(["core/gpu_audio/src/other.cpp"], selection("focused", []))
+        self.assertEqual(plan["tests"], [])
 
     def test_script_tests_are_added_even_for_a_docs_only_diff(self) -> None:
         # A census test parses docs/status: the declared inputs apply where the

@@ -635,7 +635,10 @@ base→head diff, never its `all` fallback, nothing for a docs/skills/workflow-o
 diff, plus two path families the build graph cannot see (`tools/cmake/**` → the
 `cmake-*` fixtures; the wide tier's manifest, classifier or any `test/` CMake
 registration → `wide-non-native-selftest`; any source-selftest lane entry
-script → the `source-selftest-lane-*` contract). Direct edges are added even when
+script → the `source-selftest-lane-*` contract; a GPU-audio provider-identity
+producer — `core/gpu_audio/CMakeLists.txt`, `PulpGpuAudioProvider*.cmake`, the
+identity script, the deps manifest — → the `pulp-gpu-*` provider probes, whose
+compiled-in Dawn identity no source edge reaches). Direct edges are added even when
 the projection is too wide or the diff is docs-only: tests whose declared inputs
 (`test/ctest_script_inputs.json`) the diff touches, script tests the gates.sh
 rules select, the tests running a program whose own source changed, and the
