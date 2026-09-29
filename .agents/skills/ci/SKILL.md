@@ -99,32 +99,30 @@ diagnose a stalled queue:
 in the merge queue, on push, and on Shipyard's `workflow_dispatch` — never on
 the PR head. So "the PR was green" never meant its tests passed.
 
-**`main`'s macOS health is nominally measured on push, and in practice is not.**
-The macOS matrix leg runs on `push: main` for exactly this reason: a merge group
-validates a synthetic merge commit, so without the push leg nothing ever runs
-the full macOS suite against a commit that is actually on `main`. The leg keeps
-its descriptive matrix name on push rather than claiming the required `macos`
-context, so it detects without gating.
+**`main`'s macOS health is the merge group's `macos` job, not a push run.**
+The queue lands with the MERGE method, so the commit on `main` IS the
+merge-group head: `ghapp api 'repos/Generous-Corp/pulp/actions/workflows/build.yml/runs?head_sha=<main-sha>&event=merge_group'`
+finds the run that tested main's exact commit. Read its `macos` **job**, never
+the run's conclusion: the run also folds in advisory hosted Linux, which fails
+routinely, so a run marked `failure` is often a green tip.
 
-That lane reports nothing. Every non-proof event shares the
-`build-<github.ref>` concurrency group, and push sets `cancel-in-progress`
-false there; GitHub holds at most **one** run pending per group and cancels the
-previously pending one when the next merge arrives. On a main that merges faster
-than the suite takes, the intended "serialize to one leg at a time" becomes
-"cancel all but the one already running", and that one's self-hosted macOS leg is
-still queued for a runner when the next merge cancels it too. Over the 60 most
-recent pushes to main: 58 completed, 55 dispatched **no job at all**, and **0**
-executed the macOS suite (the same query over `merge_group` returned 31 of 55).
-So "look at the push run for the merge commit" will almost always hand you a
-cancelled run with zero jobs. Use the base health detector below instead.
+A push-to-main run has no macOS leg at all (`resolve-provider` omits it; a
+static test in `tools/scripts/test_fork_pr_runner_routing.py` pins that no
+push-reachable job routes to a self-hosted runner). It used to carry one on the
+legacy base selector, which the event-class pool never serves: that leg queued
+for hours holding the `build-refs/heads/main` concurrency group
+(`cancel-in-progress` is false for push), so 57 of 60 push runs were cancelled
+while pending with zero jobs, and the Linux/Windows cache-save steps almost
+never ran. Push runs now finish on hosted runners. Never put a self-hosted job
+back on the push lane.
 
 **A batch stops at its first failing test.** `merge_group` runs ctest with
 `--stop-on-failure`; no other lane does. It composes with `--repeat
 until-pass:2` rather than defeating it — ctest stops only once the retries are
 exhausted, so a flake still self-heals — and under `-j8` the stop is bounded by
 the parallel width, so a few extra tests finish. Do not read a batch's short
-test list as the complete set of what is broken; the push lane is the one that
-reports every failure.
+test list as the complete set of what is broken; a Shipyard `workflow_dispatch`
+run of the fix reports every failure.
 
 Both event-dependent ctest decisions live in `tools/ci/ctest_gate_args.py`,
 tested by `ctest-gate-args-selftest`, which also asserts `build.yml` still
@@ -231,8 +229,19 @@ python3 tools/scripts/queue_batch_attribute.py --certify \
   --repo Generous-Corp/pulp --pr <n> --run-id <ejecting-run-id>
 ```
 
-It certifies only on positive evidence, per failing step and exhaustively, so
-most batches refuse — including every batch that failed with no ctest block,
+It rules from the batch's **chain ancestry** first: the `pr-<N>-<parent>` ref
+names the commit the entry was stacked on, so a green parent makes the head the
+culprit, and a red parent that failed a superset of this batch's `macos` tests
+makes it a neighbour (`other_pull_request`, naming the ancestor whose own parent
+passed). Known flakes (`tools/scripts/queue_known_flakes.json`) are set aside
+first, and a batch failing only those certifies as `infrastructure`. The
+reading is under `chain.classification` (`culprit` / `neighbour` /
+`known-flake` / `pre-existing-on-main` / `unknown`). Gotcha: a parent that
+failed at `Build` never ran the tests, so it is looked through to the nearest
+ancestor whose suite ran — comparing against its empty test set would make
+every child look like a culprit. When the chain cannot rule, it falls back to
+the per-step accounting, which certifies only on positive evidence, per failing
+step and exhaustively, so most of those batches refuse — including every batch that failed with no ctest block,
 because a link error is how a head most often breaks one. Do not read a refusal
 as a bug in the attributor; read it as "nothing here rules this head out". The
 full rule, and the two candidate signals rejected for certifying a guilty head,
@@ -247,10 +256,11 @@ python3 tools/ci/base_poison_detector.py --name-fix-pr
 
 Read-only. It answers "is the base carrying the failure these batches keep
 dying on?" and prints a one-line `base-poison-signal/v1` JSON annotation plus a
-table. `.github/workflows/main-health-detector.yml` runs it after every failed
-merge-group `Build and Test` run (`workflow_run`), on a backstop schedule, and on
-demand; it draws no macOS gate host and **reports only** — pausing a re-forming
-batch is Shipyard's side.
+table. `.github/workflows/main-health-detector.yml` runs it after every
+completed merge-group `Build and Test` run, green or red (`workflow_run`), on a
+backstop schedule, and on demand, so every new tip gets a verdict; it draws no
+macOS gate host and **reports only** — pausing a re-forming batch is Shipyard's
+side.
 
 **Do not rely on `schedule` for anything time-critical in this repo.** GitHub
 throttles its crons to about one run every four hours whatever the expression
@@ -260,12 +270,17 @@ why the detector is event-triggered. When you need a read NOW, dispatch it:
 default branch's copy with base-repo permissions: never check out
 `github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
-**Where main's evidence comes from without a build.** A merge queue validates
-`main` plus its entries as one commit, and the commit that lands carries that
-commit's tree. So when main's head tree equals the head tree of a run whose
-macOS leg genuinely executed the suite, that run built and tested main's exact
-tree, and a failure there is a failure observed on main itself — for two commit
-reads rather than a gate lane.
+**Where main's evidence comes from without a build.** The merge_group run whose
+head sha is main's tip (`source: head-sha`), judged by its **required gate
+jobs** — the names in `.shipyard/config.toml` `[governance]
+required_status_checks`, i.e. `macos` — never by the run conclusion, and read at
+any run status because a group lands as soon as its required checks pass while
+advisory legs may still run. If that run's gate is not evidence (a reused
+receipt, still running), an earlier merge group that built the same tree is
+used (`source: tree-identity`). No merge_group run for the tip (an admin or
+direct push) is `unproven`. The signal carries `main_head_sha`, so a verdict
+always names the tip it is about. Judging the run instead of the gate is what
+made every tip read red while advisory Linux was failing.
 
 | `status` | Means | Act on it? |
 |---|---|---|
@@ -3666,12 +3681,13 @@ bisectable.
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
     - Stale bump PR: a drain that finds an open bump PR cut BEFORE its merge
-      fails `stale-defer` and waits for that PR to land. A merge-queue ejection
-      leaves that PR open but unarmed and unqueued, so it never lands and every
-      drain stays red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true`
-      (default off, `--heal-stale-pr`) closes a CONFIRMED-stale, CONFIRMED-idle
-      bump PR (not armed, not in the queue, not draft) and opens a fresh one.
-      An unknown coverage or in-flight reading always fails closed.
+      fails `stale-defer` and waits for that PR to land. An ejected PR, or an
+      ARMED PR whose required checks failed, never lands, so every drain stays
+      red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true` (default off,
+      `--heal-stale-pr`) closes a CONFIRMED-stale bump PR unless it
+      is in the merge queue or a draft (armed does not protect it; closing drops
+      auto-merge, so no disarm is needed) and opens a fresh one.
+      An unknown coverage or queue/draft reading always fails closed.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into

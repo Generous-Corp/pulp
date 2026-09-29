@@ -1,0 +1,157 @@
+{
+ "cases": [
+  {
+   "head_branch": "gh-readonly-queue/main/pr-8970-5324ca6450808c7bf5a4d00980ef9197d5ac6846",
+   "head_sha": "9734635709f79ea8ef3ea654602114b4022d839c",
+   "note": "culprit, parent on main",
+   "run_id": 36392125347
+  },
+  {
+   "head_branch": "gh-readonly-queue/main/pr-8970-61697c9262c5c50bd7e68484b69a9cef6b434095",
+   "head_sha": "76fe7219a2099e699e88009f95cff98ab765e778",
+   "note": "culprit, parent failed a disjoint (flake-only) set",
+   "run_id": 36391072871
+  },
+  {
+   "head_branch": "gh-readonly-queue/main/pr-9036-7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+   "head_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+   "note": "neighbour, looking through a parent that failed at Build",
+   "run_id": 36518667100
+  },
+  {
+   "head_branch": "gh-readonly-queue/main/pr-9016-a815f6e5f2295476a7759946d9d80df1a6309149",
+   "head_sha": "61e53f1cd79788f160aa1cd2e57c17ce649298a9",
+   "note": "pure neighbour, subset of parent",
+   "run_id": 36489490448
+  },
+  {
+   "head_branch": "gh-readonly-queue/main/pr-8979-5324ca6450808c7bf5a4d00980ef9197d5ac6846",
+   "head_sha": "61697c9262c5c50bd7e68484b69a9cef6b434095",
+   "note": "known flake only, parent on main",
+   "run_id": 36387270560
+  }
+ ],
+ "gates": {
+  "0a0690be695f9b148e78cea049c68822b68f72f3": {
+   "conclusion": "success",
+   "failed": [],
+   "first_parent": "b22a32955174cc3c5643c74fd440bb77e20f94b5",
+   "pr": 9013,
+   "run_id": "36487462942"
+  },
+  "312128e39f7434be800e0208b4bf7daf574700ef": {
+   "conclusion": "failure",
+   "failed": [
+    "script-test-inputs-drift"
+   ],
+   "first_parent": "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+   "pr": 9034,
+   "run_id": "36516843482"
+  },
+  "4f1649224e7361e1cf97c2f1ea970eaf7cf0449f": {
+   "conclusion": "failure",
+   "failed": [
+    "wide-non-native-selftest"
+   ],
+   "first_parent": "0a0690be695f9b148e78cea049c68822b68f72f3",
+   "pr": 9014,
+   "run_id": "36487464783"
+  },
+  "5324ca6450808c7bf5a4d00980ef9197d5ac6846": {
+   "conclusion": "success",
+   "failed": [],
+   "first_parent": "81208d6caf914ec06be8881c56cfece39b66210c",
+   "pr": 8907,
+   "run_id": "36386987707"
+  },
+  "61697c9262c5c50bd7e68484b69a9cef6b434095": {
+   "conclusion": "failure",
+   "failed": [
+    "pulp-browser-capture-node-integration"
+   ],
+   "first_parent": "5324ca6450808c7bf5a4d00980ef9197d5ac6846",
+   "pr": 8979,
+   "run_id": "36387270560"
+  },
+  "61e53f1cd79788f160aa1cd2e57c17ce649298a9": {
+   "conclusion": "failure",
+   "failed": [
+    "wide-non-native-selftest"
+   ],
+   "first_parent": "a815f6e5f2295476a7759946d9d80df1a6309149",
+   "pr": 9016,
+   "run_id": "36489490448"
+  },
+  "6b41a46fb0df6cc27338a68ed20e8db24b016535": {
+   "conclusion": "failure",
+   "failed": [
+    "script-test-inputs-drift"
+   ],
+   "first_parent": "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+   "pr": 9036,
+   "run_id": "36518667100"
+  },
+  "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1": {
+   "conclusion": "success",
+   "failed": [],
+   "first_parent": "1ed92d25239a2bd0d20d4471fa31e1c22283bfe2",
+   "pr": 9039,
+   "run_id": "36523704313"
+  },
+  "7126a3c7a1dadf081d08fd7902439a9b78663cb1": {
+   "conclusion": "failure",
+   "failed": [
+    "[macos] Build"
+   ],
+   "first_parent": "312128e39f7434be800e0208b4bf7daf574700ef",
+   "pr": 9019,
+   "run_id": "36518227477"
+  },
+  "76fe7219a2099e699e88009f95cff98ab765e778": {
+   "conclusion": "failure",
+   "failed": [
+    "cmake-ios-auv3-control-shipping"
+   ],
+   "first_parent": "61697c9262c5c50bd7e68484b69a9cef6b434095",
+   "pr": 8970,
+   "run_id": "36391072871"
+  },
+  "8b2c6919238eb6955bd81899e259faee3a0f0a7f": {
+   "conclusion": "success",
+   "failed": [],
+   "first_parent": "e4fe73f82ce30daeb07f0f93ff902f93d5ee393a",
+   "pr": 9033,
+   "run_id": "36516507359"
+  },
+  "9734635709f79ea8ef3ea654602114b4022d839c": {
+   "conclusion": "failure",
+   "failed": [
+    "cmake-ios-auv3-control-shipping"
+   ],
+   "first_parent": "5324ca6450808c7bf5a4d00980ef9197d5ac6846",
+   "pr": 8970,
+   "run_id": "36392125347"
+  },
+  "a815f6e5f2295476a7759946d9d80df1a6309149": {
+   "conclusion": "failure",
+   "failed": [
+    "wide-non-native-selftest"
+   ],
+   "first_parent": "4f1649224e7361e1cf97c2f1ea970eaf7cf0449f",
+   "pr": 9015,
+   "run_id": "36487816711"
+  }
+ },
+ "main_tip": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+ "on_main": {
+  "0a0690be695f9b148e78cea049c68822b68f72f3": true,
+  "312128e39f7434be800e0208b4bf7daf574700ef": false,
+  "4f1649224e7361e1cf97c2f1ea970eaf7cf0449f": false,
+  "5324ca6450808c7bf5a4d00980ef9197d5ac6846": true,
+  "61697c9262c5c50bd7e68484b69a9cef6b434095": false,
+  "7126a3c7a1dadf081d08fd7902439a9b78663cb1": false,
+  "8b2c6919238eb6955bd81899e259faee3a0f0a7f": true,
+  "a815f6e5f2295476a7759946d9d80df1a6309149": false
+ },
+ "source": "Generous-Corp/pulp merge_group runs, 2026-09-26..29; required macos gate only, trimmed to the commits the chain rule reads"
+}

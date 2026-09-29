@@ -250,7 +250,8 @@
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
@@ -1102,7 +1103,8 @@
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
     "tools/scripts/gate_suite_executed.py",
-    "tools/scripts/queue_batch_attribute.py"
+    "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json"
    ],
    "kind": "python"
   },
@@ -3143,8 +3145,10 @@
     "test/test_canvas_path_measure.cpp",
     "tools/scripts/consumption_census.py",
     "tools/scripts/consumption_census_contract.py",
+    "tools/scripts/fixtures/queue_chain_rule.json",
     "tools/scripts/queue_admission_guard.py",
     "tools/scripts/queue_batch_attribute.py",
+    "tools/scripts/queue_known_flakes.json",
     "tools/scripts/test_prepush_cannot_measure.py",
     "tools/scripts/test_queue_batch_attribute.py"
    ],

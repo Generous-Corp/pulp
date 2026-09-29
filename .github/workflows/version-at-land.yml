@@ -94,8 +94,9 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
           BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
-          # Opt-in (default off): replace a stale bump PR that is idle (ejected
-          # from the merge queue / unarmed) instead of stale-deferring forever.
+          # Opt-in (default off): replace a stale bump PR that is not in the
+          # merge queue and not a draft (armed or not) instead of
+          # stale-deferring forever.
           HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
         run: |
           # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does
