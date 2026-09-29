@@ -620,6 +620,16 @@
    ],
    "kind": "shell"
   },
+  "cmake-forge-catalog-install": {
+   "entry": "test/cmake/test_forge_catalog_install.py",
+   "inputs": [
+    "docs/status/forge-catalog.json",
+    "test/cmake/test_forge_catalog_install.py",
+    "tools/cmake/PulpForgeCatalogInstall.cmake",
+    "tools/cmake/PulpInstallRules.cmake"
+   ],
+   "kind": "python"
+  },
   "cmake-ios-auv3-configure": {
    "entry": "test/cmake/test_ios_auv3_configure.sh",
    "inputs": [
@@ -1325,7 +1335,9 @@
    "entry": "tools/scripts/test_gpu_audio_provider_identity.py",
    "inputs": [
     "external/skia-build",
+    "tools/deps",
     "tools/deps/manifest.json",
+    "tools/scripts",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
    ],
