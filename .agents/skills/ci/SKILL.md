@@ -248,6 +248,17 @@ full rule, and the two candidate signals rejected for certifying a guilty head,
 are in [docs/guides/local-ci.md](../../../docs/guides/local-ci.md) under
 "Letting an un-implicated head back into the queue".
 
+Gotcha: the chain rule compares outcomes, not causes, so it reads a **network**
+ejection as `culprit` when the parent passed on a host that could reach the
+network (`--certify` returns `implicates_head: true` for #8678's pip relay 403
+and #8911's cargo DNS failure). Pulp therefore also sets
+`[queue.environment_requeue] enabled = true`: Shipyard allows ONE same-head
+re-enqueue when every failing required step printed a network signature near its
+first `##[error]`. Before pushing a no-op commit after an ejection, read
+`shipyard landing --pr <n>`'s `ENVIRONMENT RE-ENQUEUE` block; `ALLOWED` means
+`shipyard ship --pr <n>` on the same head. A second ejection of that head is
+refused. See "One same-head retry after a network ejection" in the same guide.
+
 ## Is `main` itself broken? Ask the base health detector
 
 ```bash
