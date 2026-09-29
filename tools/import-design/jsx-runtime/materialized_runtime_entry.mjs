@@ -199,19 +199,34 @@ const capturedGeometryNodes = new WeakSet();
 // DesignIR canvas wired to an obsolete callback snapshot.
 let syncMaterializedCanvasBehaviorsAfterCommit = null;
 function materializedElementChildren(node, registrySet) {
-  const children = Array.isArray(node && node._children) ? node._children : [];
-  return children.filter(child => child && registrySet.has(child));
+  const children = node && node._children;
+  return Array.isArray(children)
+    ? children.filter(child => child && registrySet.has(child)) : [];
 }
 function materializedNodeTag(node) {
   return String(node && node.tagName || '').toLowerCase();
 }
+// The index also carries two per-snapshot memos. Captured paths share long
+// prefixes -- every control in a row walks through the same row and panel --
+// so without them each step of each binding re-filters that node's children
+// against the registry, and the dynamic-layout scan, the layout, paint and text
+// loops each walk a binding again. With them a pass filters each node's
+// children once and resolves each binding once, whichever loop asks first.
 function materializedPathIndex(values) {
   const registrySet = new Set(values);
   const roots = values.filter(node => {
     const parent = node && (node.parentElement || node._parentElement);
     return !parent || !registrySet.has(parent);
   });
-  return { registrySet, roots };
+  return { registrySet, roots, children: new Map(), nodes: new Map() };
+}
+function materializedIndexedChildren(node, index) {
+  let children = index.children.get(node);
+  if (!children) {
+    children = materializedElementChildren(node, index.registrySet);
+    index.children.set(node, children);
+  }
+  return children;
 }
 // The index is a pure projection of the registry snapshot, so it is rebuilt
 // once per metadata application rather than cached across commits: a retained
@@ -219,14 +234,18 @@ function materializedPathIndex(values) {
 // single application reads the same snapshot anyway.
 function materializedNodeAtPath(binding, values, pathIndex) {
   const index = pathIndex || materializedPathIndex(values);
-  const registrySet = index.registrySet;
+  if (index.nodes.has(binding)) return index.nodes.get(binding);
   let siblings = index.roots;
   let node = null;
   for (const step of binding.path) {
     node = siblings[step.index] || null;
-    if (!node || materializedNodeTag(node) !== step.tag) return null;
-    siblings = materializedElementChildren(node, registrySet);
+    if (!node || materializedNodeTag(node) !== step.tag) {
+      node = null;
+      break;
+    }
+    siblings = materializedIndexedChildren(node, index);
   }
+  index.nodes.set(binding, node);
   return node;
 }
 function materializedOptionalTextNode(binding, values) {
@@ -269,6 +288,41 @@ function materializedNodeInScope(node, scopeSet) {
   }
   return false;
 }
+// The paint channels the last pass wrote per native id: { node, owned } where
+// owned maps opacity / color / fill / stroke to the captured value.
+const materializedPaintOwners = new Map();
+// React props that land on a captured paint channel, and the setter that
+// channel is written through.
+const materializedPaintChannels = {
+  opacity: ['opacity', 'setOpacity'],
+  color: ['color', 'setTextColor'],
+  textColor: ['color', 'setTextColor'],
+  fill: ['fill', 'setSvgFill'],
+  stroke: ['stroke', 'setSvgStroke'],
+};
+// @pulp/react treats a colour/opacity-only commit as paint-only and calls this
+// with the node's changed values instead of re-applying captured metadata.
+// Where the capture owns a changed channel on that node, the frozen value is
+// the visual authority, exactly as the full pass would have made it: put that
+// one property back. Everything else keeps React's value. Returns the number
+// of bridge writes.
+g.__pulpReconcileMaterializedPaint__ = function (id, changes) {
+  const owner = materializedPaintOwners.get(String(id));
+  if (!owner || !changes || typeof changes !== 'object') return 0;
+  const written = new Set();
+  let writes = 0;
+  for (const key of Object.keys(changes)) {
+    const route = materializedPaintChannels[key];
+    if (!route || written.has(route[0]) ||
+        !Object.prototype.hasOwnProperty.call(owner.owned, route[0])) continue;
+    const captured = owner.owned[route[0]];
+    written.add(route[0]);
+    if (changes[key] === captured || typeof g[route[1]] !== 'function') continue;
+    g[route[1]](String(id), captured);
+    ++writes;
+  }
+  return writes;
+};
 // scopeIds is optional and null/empty means "apply everything". Every caller
 // that is not the per-commit hook -- bootstrap, and a captured-state change --
 // deliberately passes nothing: a state flip replaces the whole binding table,
@@ -287,13 +341,31 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
     ? g.__pulpFindMaterializedElement__(activeMaterializedMatch.selector,
         activeMaterializedMatch.ancestor) : null;
   const dynamicNodes = materializedDynamicLayoutScope(scope, activeLayoutBindings,
-    values, pathIndex, materializedNodeAtPath, materializedElementChildren,
-    materializedNodeTag);
+    values, pathIndex, materializedNodeAtPath,
+    node => materializedIndexedChildren(node, pathIndex), materializedNodeTag);
   for (const node of dynamicNodes) {
     if (!capturedGeometryNodes.has(node)) continue;
     restoreMaterializedLayout(node, g);
     capturedGeometryNodes.delete(node);
   }
+  // Paint ownership is rebuilt for exactly the nodes this pass re-applies: all
+  // of them for a full pass, the scoped subtrees otherwise. A node that fell
+  // out of the captured shape (a dynamic subtree) no longer owns its paint.
+  if (!scopeSet) {
+    materializedPaintOwners.clear();
+  } else {
+    for (const [id, owner] of materializedPaintOwners) {
+      if (dynamicNodes.has(owner.node) ||
+          materializedNodeInScope(owner.node, scopeSet)) {
+        materializedPaintOwners.delete(id);
+      }
+    }
+  }
+  // Two text bindings can resolve to the same native Label (a runtime-optional
+  // binding found by its text, beside the one found by its path). Its
+  // typography is the same five setters either way; apply a given face to a
+  // given Label once per pass.
+  const typographyApplied = new Map();
   let applied = 0;
   const diagnostics = {
     state_id: typeof activeCapturedState === 'string' ? activeCapturedState : '',
@@ -382,19 +454,32 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
       tag: binding.tag,
       id: String(id),
     });
-    if (typeof g.setOpacity === 'function')
+    // Record exactly the channels written here, with the values written, so
+    // a later paint-only React commit on this node can put back the one
+    // property it overwrote instead of re-running this pass.
+    const owned = {};
+    materializedPaintOwners.set(String(id), { node, owned });
+    if (typeof g.setOpacity === 'function') {
       g.setOpacity(String(id), binding.paint.opacity);
-    if (typeof g.setTextColor === 'function' && binding.paint.color)
+      owned.opacity = binding.paint.opacity;
+    }
+    if (typeof g.setTextColor === 'function' && binding.paint.color) {
       g.setTextColor(String(id), binding.paint.color);
+      owned.color = binding.paint.color;
+    }
     if (binding.tag !== 'svg') {
       if (binding.paint.stroke_dasharray !== 'none') {
         ++diagnostics.paint_unsupported;
         continue;
       }
-      if (typeof g.setSvgFill === 'function')
+      if (typeof g.setSvgFill === 'function') {
         g.setSvgFill(String(id), binding.paint.fill);
-      if (typeof g.setSvgStroke === 'function')
+        owned.fill = binding.paint.fill;
+      }
+      if (typeof g.setSvgStroke === 'function') {
         g.setSvgStroke(String(id), binding.paint.stroke);
+        owned.stroke = binding.paint.stroke;
+      }
       if (typeof g.setSvgStrokeWidth === 'function')
         g.setSvgStrokeWidth(String(id), binding.paint.stroke_width);
       // SVG primitives are excluded from Yoga layout replay. Apply the
@@ -469,20 +554,25 @@ function applyMaterializedImportMetadata(metadata, scopeIds) {
     // paint target rather than letting it inherit the bridge defaults.
     // Pure Label owners receive the same resolved values, making this path
     // deterministic for both HTML controls and ordinary text elements.
-    if (typeof g.setFontFamily === 'function') {
-      g.setFontFamily(String(id), materializedRuntimeFontStack(binding));
-    }
-    if (typeof g.setFontSize === 'function')
-      g.setFontSize(String(id), binding.basis.requested.font_size);
-    if (typeof g.setFontWeight === 'function')
-      g.setFontWeight(String(id), binding.basis.requested.font_weight);
-    if (typeof g.setFontStyle === 'function')
-      g.setFontStyle(String(id), binding.basis.requested.font_slant === 1
-        ? 'italic' : binding.basis.requested.font_slant === 2
-          ? 'oblique' : 'normal');
-    if (typeof g.setLetterSpacing === 'function' &&
-        Number.isFinite(binding.basis.requested.letter_spacing)) {
-      g.setLetterSpacing(String(id), binding.basis.requested.letter_spacing);
+    const requested = binding.basis.requested;
+    const fontStack = materializedRuntimeFontStack(binding);
+    const face = [fontStack, requested.font_size, requested.font_weight,
+      requested.font_slant, requested.letter_spacing].join('\u0000');
+    if (typographyApplied.get(String(id)) !== face) {
+      typographyApplied.set(String(id), face);
+      if (typeof g.setFontFamily === 'function')
+        g.setFontFamily(String(id), fontStack);
+      if (typeof g.setFontSize === 'function')
+        g.setFontSize(String(id), requested.font_size);
+      if (typeof g.setFontWeight === 'function')
+        g.setFontWeight(String(id), requested.font_weight);
+      if (typeof g.setFontStyle === 'function')
+        g.setFontStyle(String(id), requested.font_slant === 1
+          ? 'italic' : requested.font_slant === 2 ? 'oblique' : 'normal');
+      if (typeof g.setLetterSpacing === 'function' &&
+          Number.isFinite(requested.letter_spacing)) {
+        g.setLetterSpacing(String(id), requested.letter_spacing);
+      }
     }
     let targetBoxes = binding.boxes;
     let targetBasisWidth = binding.basis.width;
@@ -638,8 +728,26 @@ const materializedFindMisses = new Set();
 function materializedFindMissKey(selector, ancestor) {
   return selector + '\u0000' + (ancestor || '');
 }
+// Every attribute name a selector has named. @pulp/react reads this set to
+// decide whether a commit that changed only an attribute (a data-* hover
+// marker) or only a colour can have changed a selector's answer: if no
+// selector names it, it cannot, so the commit needs neither a metadata pass
+// nor an epoch bump. The names are recorded BEFORE the miss cache is
+// consulted, so an attribute is covered from the first query that could have
+// cached an answer depending on it. Captured-state selectors are recorded
+// up front as well (see below), because state resolution stops at the first
+// state that matches and would otherwise never ask about the rest.
+const materializedSelectorAttributes = new Set();
+g.__pulpMaterializedSelectorAttributes__ = materializedSelectorAttributes;
+function recordMaterializedSelectorAttributes(selector) {
+  if (typeof selector !== 'string') return;
+  for (const match of selector.matchAll(/\\[\\s*([A-Za-z0-9_:-]+)/g))
+    materializedSelectorAttributes.add(match[1]);
+}
 g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
   if (typeof selector !== 'string' || selector.length === 0) return null;
+  recordMaterializedSelectorAttributes(selector);
+  recordMaterializedSelectorAttributes(ancestor);
   if (g.document && typeof g.document.querySelector === 'function') {
     const browserNode = g.document.querySelector(selector);
     if (browserNode && (!ancestor || materializedClosest(browserNode, ancestor))) {
@@ -917,6 +1025,12 @@ activeNativeRoot = new NativeRoot();
 activeNativeRoot.render(capturedRootElement);
 if (typeof g.__pulpRuntimeSettle__ === 'function') g.__pulpRuntimeSettle__(8);
 const capturedStates = ${JSON.stringify(stateAtlas)};
+for (const state of capturedStates) {
+  if (state.match) {
+    recordMaterializedSelectorAttributes(state.match.selector);
+    recordMaterializedSelectorAttributes(state.match.ancestor);
+  }
+}
 const capturedPaintStates = ${visualAuthority === 'reference'
   ? 'capturedStates' : '[]'};
 if (capturedPaintStates.length > 0) {
