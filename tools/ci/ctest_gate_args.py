@@ -14,21 +14,10 @@ The lanes, and why they differ:
   the waste: every batch inherits the break, every lane pays it, and each
   re-formed batch pays it again. So the queue stops at the first failure.
 
-* ``push`` to main is the DESIGNATED detector and diagnostic. It is the only
-  lane that would run the whole macOS suite on a commit actually on main, so it
-  must report every failing test rather than the first one. Stopping early here
-  would trade the one complete signal in the system for a few minutes.
-
-  In practice it reports nothing. Every non-proof event shares the
-  ``build-<github.ref>`` concurrency group, so all pushes to main land in one
-  domain; ``cancel-in-progress`` is false there, and GitHub holds at most ONE
-  run pending per group, cancelling the previously pending one when the next
-  merge arrives. Measured over the 60 most recent pushes to main: 58 completed,
-  55 dispatched no job at all, and 0 executed the macOS suite (the same query
-  over ``merge_group`` returned 31 of 55). The label and stop-on-failure rules
-  below are still the right ones for that lane whenever it does run; they are
-  not what makes it observable. ``tools/ci/base_poison_detector.py`` derives
-  main's health from evidence that already exists instead of waiting for it.
+* ``push`` to main runs only the GitHub-hosted Linux and Windows legs, which
+  publish the shared caches; it has no macOS leg. It reports every failing test
+  rather than the first. main's macOS health is the merge group's required
+  ``macos`` job on the same commit, read by ``tools/ci/base_poison_detector.py``.
 
 * The gate events also exclude ``source-selftest``: registrations that read
   only the checkout, which the build-free required ``Enforce version & skill
@@ -41,8 +30,7 @@ The lanes, and why they differ:
 The label set is a separate axis: `performance`, `bench` and `quality-lab` are
 relative-timing tests that are robust to steady load but not to the load
 VARIANCE of a host running concurrent build VMs. They are excluded wherever the
-suite runs on the shared self-hosted macOS gate hosts, which now includes the
-push lane, and retained on the steady GitHub-hosted Linux and Windows runners.
+suite runs on the shared self-hosted macOS gate hosts, and retained on the steady GitHub-hosted Linux and Windows runners.
 """
 from __future__ import annotations
 
@@ -58,7 +46,7 @@ from typing import Any, Callable
 SHARED_HOST_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
 # Source-only Python selftests (tools/ci/source_selftests.json). The required
 # `Enforce version & skill sync` context runs them without a build, so the gate
-# events drop them; `push` keeps them as the macOS detector.
+# events drop them; `push` keeps them.
 SOURCE_SELFTEST_LABEL = "source-selftest"
 # Label set for the gate events.
 GATE_LABEL_EXCLUDE = f"{SHARED_HOST_LABEL_EXCLUDE}|{SOURCE_SELFTEST_LABEL}"
