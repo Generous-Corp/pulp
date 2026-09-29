@@ -2468,6 +2468,28 @@ A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→nativ
   stream**, so it clears the `_sent*` record — including the copies held by
   open save() snapshots.
 
+## Hover and colour commits in a materialized React editor are paint-only
+
+A materialized (captured-import) React editor re-applies Chromium-captured
+metadata after any commit that could move a captured box, and each such pass
+reads layout metrics that force a root layout. From @pulp/react runtime
+revision 2 (`packages/pulp-react/runtime-fingerprint.json`) a commit that only
+changes paint skips that pass and does not bump the mutation epoch:
+`PAINT_ONLY_KEYS` (background, border colours, shadows, cursor, ...), `onX`
+handlers, a `data-*` attribute no captured-state or runtime selector names, and
+`color`/`textColor`/`opacity`/`fill`/`stroke`. For those last five the importer
+runtime puts the captured value back on just that node and property where the
+capture owns the channel, so the end state matches a full pass. A typical
+button hover is then its own few React setters.
+
+What still costs a pass: any size/position/typography/text change, className
+or id changes, structural mutations, and an attribute or colour a selector
+names (`[data-open]`, `path[fill]`). Hover styling written as a `data-*`
+marker plus colour props is cheap; hover styling that swaps a className or
+nudges a padding is not. An editor built from a vendored runtime older than
+revision 2 gets none of this until its bundle is regenerated
+(`tools/import-validation/check_vendored_runtime.py` names what it lacks).
+
 ## Editor-INITIATED host resize (`Processor::request_editor_resize`)
 
 `on_view_resized` is the host→plugin direction (the DAW dragged the window,

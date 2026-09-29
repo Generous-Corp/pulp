@@ -37,11 +37,11 @@ describe('@pulp/react build output', () => {
     // After externalizing react / react-reconciler / scheduler the bundle
     // is ~135 KB for the prop-applier, host-config, intrinsic surface, and
     // renderer-neutral materialized-import metadata bridge. The current
-    // unminified artifact is ~140.4 KB; if anyone re-inlines React it jumps to
-    // ~950 KB. A 160 KB ceiling leaves useful non-React growth headroom while
+    // unminified artifact is ~163 KB; if anyone re-inlines React it jumps to
+    // ~950 KB. A 192 KB ceiling leaves useful non-React growth headroom while
     // retaining a wide gap from that failure signature. The explicit
     // import/source checks below remain the primary externalization oracle.
-    expect(st.size).toBeLessThan(160 * 1024);
+    expect(st.size).toBeLessThan(192 * 1024);
   });
 
   it('keeps `react` as an external ESM import (not inlined)', () => {
