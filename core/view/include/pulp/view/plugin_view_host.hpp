@@ -61,6 +61,11 @@ public:
         /// own work was ~2 ms (paint ~1 ms, submit ~1 ms, present ~0.1 ms)
         /// while whole frames took 19-45 ms — the difference was all acquire.
         /// Seven frames were produced across eight drag sweeps.
+        ///
+        /// On macOS this does not currently avoid vsync pacing: Dawn's Metal
+        /// swapchain can only toggle `CAMetalLayer.displaySyncEnabled`, and
+        /// Mailbox leaves it on exactly as Fifo does, so the preferred
+        /// Mailbox still waits for a free drawable in acquire.
         nonblocking,
     };
 

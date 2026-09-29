@@ -13,6 +13,7 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/format/detail/null_audio_device.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/state/properties_file.hpp>
@@ -734,10 +735,20 @@ bool StandaloneApp::start() {
         return true;
     }
 
-    // Set up audio
-    audio_system_ = audio_system_factory_
-        ? audio_system_factory_()
-        : audio::create_audio_system();
+    // Set up audio. PULP_AUDIO_DEVICE=null renders through a real-time paced
+    // device that opens no platform audio API, so a measurement session can
+    // run the whole audio graph without touching the user's output.
+    const auto device_env = runtime::get_env("PULP_AUDIO_DEVICE");
+    const bool null_device = !audio_system_factory_ && device_env &&
+        detail::null_audio_device_requested(device_env->c_str());
+    audio_system_ = audio_system_factory_ ? audio_system_factory_()
+                    : null_device         ? detail::create_null_audio_system()
+                                          : audio::create_audio_system();
+    if (null_device) {
+        runtime::log_info(
+            "Standalone: PULP_AUDIO_DEVICE=null — rendering in real time with no "
+            "audio output device");
+    }
     if (!audio_system_) {
         runtime::log_error("Standalone: failed to create audio system");
         return false;
@@ -772,7 +783,8 @@ bool StandaloneApp::start() {
     // the live default-device listener) keep tracking the system default output —
     // overwriting it with the resolved id here would pin the app to whatever was
     // default at launch and it would only "follow" on relaunch.
-    if (!config_.audio_device_id.empty())
+    // The null device is a session choice, never a saved device.
+    if (!config_.audio_device_id.empty() && !null_device)
         config_.audio_device_id = audio_device_->info().id;
     config_.sample_rate = audio_device_->sample_rate();
     config_.buffer_size = audio_device_->buffer_size();

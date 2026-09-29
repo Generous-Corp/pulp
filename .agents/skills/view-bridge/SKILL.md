@@ -2392,6 +2392,21 @@ nudges a padding is not. An editor built from a vendored runtime older than
 revision 2 gets none of this until its bundle is regenerated
 (`tools/import-validation/check_vendored_runtime.py` names what it lacks).
 
+## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
+
+`PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.
+On macOS that choice is a no-op: Dawn's Metal swapchain can only toggle
+`CAMetalLayer.displaySyncEnabled`, which Mailbox and Fifo both leave on, so an
+embedded editor is still vsync-paced and `gpu_acquire` (`nextDrawable`) still
+blocks when all three drawables are held. Treat that as a known issue, not
+evidence the policy works. Before changing present modes or adding a
+frame-in-flight gate, capture a trace and read the `gpu_acquire` args
+(`frames_in_flight`, `gpu_render_ms`, and on the standalone window `late_ms` /
+`refresh_period_ms`) to tell a GPU-bound frame from CPU bunching — see the
+trace-analysis skill. `PULP_GPU_TIMING=1` turns on GPU render timing for a
+standalone window (it relaxes Dawn validation, so it is never on by default),
+and `PULP_AUDIO_DEVICE=null` lets that session run without an audio device.
+
 ## Editor-INITIATED host resize (`Processor::request_editor_resize`)
 
 `on_view_resized` is the host→plugin direction (the DAW dragged the window,
