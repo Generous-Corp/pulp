@@ -461,6 +461,34 @@ finally:
 PY
 }
 
+# Test-only synchronisation point between the quarantine rename and the
+# post-quarantine re-checks. The fixture tests prove that something happening
+# INSIDE that window (a late write, a process entering, the lineage turning
+# active, the entry being replaced) vetoes removal. Without a rendezvous, the
+# helper that performs that event races this script: on a loaded host the
+# re-checks can finish before the helper runs, and the test then reports a
+# correct reaper as broken. When PULP_REAP_TEST_QUARANTINE_BARRIER names a path,
+# write `<path>.ready` (holding the quarantine path) and wait for the helper to
+# create `<path>.done`, bounded by PULP_REAP_TEST_QUARANTINE_BARRIER_TIMEOUT
+# seconds (default 60). A timeout proceeds and says so, so a helper that died
+# cannot hang the script. Unset, this returns immediately and touches nothing.
+quarantine_test_barrier() {
+    local barrier="${PULP_REAP_TEST_QUARANTINE_BARRIER:-}" quarantine="$1"
+    local limit="${PULP_REAP_TEST_QUARANTINE_BARRIER_TIMEOUT:-60}" deadline
+    [ -n "${barrier}" ] || return 0
+    [[ "${limit}" =~ ^[0-9]+$ ]] || limit=60
+    printf '%s\n' "$(pwd -P)/${quarantine}" > "${barrier}.ready.tmp" &&
+        mv -f "${barrier}.ready.tmp" "${barrier}.ready"
+    deadline=$((SECONDS + limit))
+    while [ ! -e "${barrier}.done" ]; do
+        if [ "${SECONDS}" -ge "${deadline}" ]; then
+            echo "clean_worktree_builds: quarantine test barrier timed out after ${limit}s; proceeding" >&2
+            return 0
+        fi
+        sleep 0.05
+    done
+}
+
 reap_pinned_build() (
     local wt="$1" expected_identity="$2" roots_file="$3"
     local expected_head="$4" expected_branch="$5" expected_tip="$6"
@@ -487,6 +515,7 @@ reap_pinned_build() (
     mv "${ARTIFACT_NAME}" "${quarantine}" || return 18
     [ "$(path_identity "${quarantine}" 2>/dev/null || true)" = \
         "${build_identity}" ] || return 19
+    quarantine_test_barrier "${quarantine}"
 
     # The rename closes entry by the ordinary build path. Re-snapshot after
     # that synchronization point; any pre-existing process now exposes an
