@@ -567,6 +567,66 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
     return entry
 
 
+GATES_BUILD_DIR_ENV = "PULP_GATES_BUILD_DIR"
+
+
+def _cmake_generator(build: pathlib.Path) -> str:
+    try:
+        cache = (build / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    match = re.search(r"^CMAKE_GENERATOR:INTERNAL=(.*)$", cache, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def unusable_build_reason(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> str:
+    """Why ``build`` cannot supply the current test registrations, or ""."""
+    if not (build / "CTestTestfile.cmake").is_file():
+        return "not configured for tests"
+    generator = _cmake_generator(build)
+    if generator != "Ninja":
+        return f"generator is {generator or 'unknown'}, not Ninja"
+    if build_is_stale(build, repo):
+        return "configured before the test manifests last changed"
+    return ""
+
+
+def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
+                     env: dict[str, str] | os._Environ[str] = os.environ,
+                     ) -> tuple[pathlib.Path | None, str]:
+    """The configured build whose registrations the local tier should run.
+
+    PULP_GATES_BUILD_DIR wins when it names a configured build. Otherwise the
+    most recently configured `build*` directory in the checkout that uses
+    Ninja and was configured after the test manifests last changed; a stale
+    Makefiles `build/` beside a current `build-gate` must not win because of
+    its name. Returns (None, why) when nothing qualifies.
+    """
+    declared = env.get(GATES_BUILD_DIR_ENV, "").strip()
+    if declared:
+        path = pathlib.Path(declared).expanduser()
+        path = path if path.is_absolute() else repo / path
+        if (path / "CTestTestfile.cmake").is_file():
+            return path.resolve(), f"from {GATES_BUILD_DIR_ENV}"
+        return None, f"{GATES_BUILD_DIR_ENV}={declared} is not a configured build"
+    usable, rejected = [], []
+    for candidate in sorted(repo.glob("build*")):
+        if not (candidate / "CMakeCache.txt").is_file():
+            continue
+        why = unusable_build_reason(candidate, repo)
+        if why:
+            rejected.append(f"{candidate.name}: {why}")
+        else:
+            usable.append(candidate)
+    if usable:
+        chosen = max(usable, key=lambda d: (d / "CTestTestfile.cmake").stat().st_mtime)
+        note = f"most recently configured of {len(usable)} usable"
+        if rejected:
+            note += "; passed over " + ", ".join(rejected)
+        return chosen.resolve(), note
+    return None, ", ".join(rejected) or "no build*/CMakeCache.txt in the checkout"
+
+
 def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
     """A configured build older than any test manifest registers an old tier."""
     stamp = build / "CTestTestfile.cmake"
@@ -1105,6 +1165,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         if args.ctest_label:
             build = args.build_dir
+            if build is not None and str(build) == "auto":
+                build, why = choose_build_dir()
+                if build is None:
+                    print(f"source-selftests: NO USABLE BUILD: {why}; members that need a "
+                          "configured build are not checked", flush=True)
+                else:
+                    print(f"source-selftests: build dir: {build} ({why})", flush=True)
             stale = build is not None and build_is_stale(build)
             if stale:
                 print(f"source-selftests: {build} was configured before the test manifests "

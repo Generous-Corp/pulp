@@ -145,6 +145,9 @@ if [ -z "${GITHUB_PR_TITLE:-}" ]; then
 fi
 
 fail=0
+# Every suite a lane could not run locally, collected for the summary.
+not_checked_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-not-checked.XXXXXX")"
+trap 'rm -f "$not_checked_log"' EXIT
 
 echo "gates: base = $BASE" >&2
 
@@ -498,8 +501,10 @@ if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTEST
                 echo "▸ workflow-lint Python contracts (diff-scoped; read from workflow-lint.yml)" >&2
                 src_lane_args=(--workflow "$ROOT/.github/workflows/workflow-lint.yml") ;;
             pr-fast)
-                echo "▸ ctest pr-fast tier (whole tier; from build/ when configured, else the manifests)" >&2
-                src_lane_args=(--ctest-label pr-fast --build-dir "$ROOT/build") ;;
+                # `auto`: PULP_GATES_BUILD_DIR, else the newest current Ninja
+                # build*/ in the checkout; the lane names the one it chose.
+                echo "▸ ctest pr-fast tier (whole tier; from a configured build when one is usable, else the manifests)" >&2
+                src_lane_args=(--ctest-label pr-fast --build-dir auto) ;;
             ctest-python)
                 echo "▸ other ctest-registered Python contracts (diff-scoped; merge-group only in CI)" >&2
                 src_lane_args=(--ctest-python) ;;
@@ -515,6 +520,9 @@ if [ -f "$ROOT/tools/ci/source_selftests.py" ] && [ "${PULP_SKIP_SOURCE_SELFTEST
             echo "  $src_lane: failing — CI runs these; fix before pushing." >&2
             fail=1
         fi
+        # A suite that did not run is not a pass; the summary lists every one.
+        sed -n "s/^source-selftests: \(NOT CHECKED locally: .*\)/[$src_lane] \1/p; s/^source-selftests: \(NO USABLE BUILD: .*\)/[$src_lane] \1/p" \
+            "$src_selftest_log" >>"$not_checked_log"
         rm -f "$src_selftest_log"
     done
 fi
@@ -923,7 +931,25 @@ fi
 
 # ── Summary ────────────────────────────────────────────────────────────────
 echo "" >&2
-if [ "$fail" -eq 0 ]; then
+not_checked=0
+if [ -s "$not_checked_log" ]; then
+    not_checked="$(grep -c "NOT CHECKED" "$not_checked_log" || true)"
+    echo "▸ NOT CHECKED here (${not_checked}): these did not run, so the verdict below does not cover them" >&2
+    sed 's/^/  /' "$not_checked_log" >&2
+    echo "" >&2
+fi
+no_build="$(sed -n 's/^\[[^]]*\] NO USABLE BUILD: //p' "$not_checked_log" | head -n 1)"
+if [ "$fail" -eq 0 ] && { [ "$not_checked" -gt 0 ] || [ -n "$no_build" ]; }; then
+    echo "gates: ✓ PASSED WITH ${not_checked} NOT CHECKED (listed above) — not a full pass." >&2
+    if [ -n "$no_build" ]; then
+        echo "gates: no usable configured build: ${no_build}" >&2
+        echo "       Configure one with Ninja (pulp build), or set PULP_GATES_BUILD_DIR." >&2
+    fi
+    echo "" >&2
+    echo "  Diff-coverage NOT run (slow). When you want it:" >&2
+    echo "    tools/scripts/local_diff_cover.sh [test_target ...]" >&2
+    exit 0
+elif [ "$fail" -eq 0 ]; then
     echo "gates: ✓ all gates pass — safe to push." >&2
     echo "" >&2
     echo "  Diff-coverage NOT run (slow). When you want it:" >&2

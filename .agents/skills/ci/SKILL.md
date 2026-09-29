@@ -746,7 +746,17 @@ consequences worth knowing before you debug:
   (`sys.path` siblings, `from tools.scripts import x`, relative imports), using
   `gate_python_imports_check.local_import_closure`. Across the 338 helper
   modules under `tools/scripts` and `tools/ci`, that reaches suites the name
-  match misses for 33 of them. Host-specific suites (`rack-plugin-loads`) are in
+  match misses for 33 of them.
+- A suite a lane could not run is never read as a pass. Every `NOT CHECKED
+  locally` line from every lane is gathered into its own summary section with a
+  count, and the verdict reads `PASSED WITH N NOT CHECKED — not a full pass`
+  instead of the plain green line; `NO USABLE BUILD` is named in the verdict
+  too. The pr-fast lane picks its build with `--build-dir auto`:
+  `PULP_GATES_BUILD_DIR` first, else the most recently configured Ninja
+  `build*/` whose test manifests are current, printed as `build dir: <path>`.
+  A stale Makefiles `build/` beside a current `build-gate` once made
+  `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
+  and the branch was pushed red three times. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed
