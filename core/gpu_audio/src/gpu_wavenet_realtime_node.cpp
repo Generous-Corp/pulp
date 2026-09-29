@@ -73,6 +73,10 @@ struct GpuWaveNetRealtimeNode::Impl {
         trace_pending = true;
         (void)trace->publish_admission(epoch, input.stamp().sequence);
     }
+    void trace_stage(detail::SharedIoTraceStage stage) noexcept {
+        if (trace_pending && trace)
+            trace_record.set(stage, now_ns());
+    }
     void trace_terminal(detail::SharedIoTraceOutcome outcome,
                         detail::SharedIoGpuTerminalDisposition terminal,
                         detail::SharedIoFallbackReason reason, bool observed = false) noexcept {
@@ -84,6 +88,11 @@ struct GpuWaveNetRealtimeNode::Impl {
         trace_record.reason = trace_record.gpu_reason = reason;
         if (observed)
             trace_record.set(detail::SharedIoTraceStage::CompletionObserved, now_ns());
+        // Retirement is the host-side point at which this admitted block has
+        // a final GPU disposition. It is deliberately separate from
+        // CompletionObserved: a provider can fail, go stale, or be cancelled
+        // without ever producing a completion.
+        trace_record.set(detail::SharedIoTraceStage::RetirementObserved, now_ns());
         (void)trace->publish_worker(trace_record);
         telemetry.record_retired(outcome == detail::SharedIoTraceOutcome::Success);
     }
@@ -465,6 +474,13 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
             std::fill(s.completed.begin(), s.completed.end(), 0);
             s.inflight = true;
             all_submitted = true;
+            s.trace_stage(detail::SharedIoTraceStage::EncodeBegin);
+            // WaveNet's provider path does not expose a separate command
+            // encoder. The channel submit boundary is the authenticated host
+            // submission region, so keep encode and submit timestamps distinct
+            // without claiming either is a GPU timestamp.
+            s.trace_stage(detail::SharedIoTraceStage::EncodeEnd);
+            s.trace_stage(detail::SharedIoTraceStage::SubmitBegin);
             for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
                 if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
                     all_submitted = false;
@@ -473,6 +489,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
                     s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
                 }
             }
+            s.trace_stage(detail::SharedIoTraceStage::SubmitEnd);
             if (s.trace)
                 s.telemetry.record_submit();
             ++s.next_input;

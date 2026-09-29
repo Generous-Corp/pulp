@@ -551,10 +551,22 @@ TEST_CASE("WaveNet owned trace closes each worker admission without inventing GP
     CHECK(first.gpu_terminal == detail::SharedIoGpuTerminalDisposition::CompletedAccepted);
     CHECK(first.sequence == 0);
     CHECK_FALSE(first.has(detail::SharedIoTraceStage::Scheduled));
-    CHECK_FALSE(first.has(detail::SharedIoTraceStage::SubmitBegin));
     CHECK_FALSE(first.gpu_elapsed_available);
     CHECK(first.has(detail::SharedIoTraceStage::WorkerEntry));
+    CHECK(first.has(detail::SharedIoTraceStage::EncodeBegin));
+    CHECK(first.has(detail::SharedIoTraceStage::EncodeEnd));
+    CHECK(first.has(detail::SharedIoTraceStage::SubmitBegin));
+    CHECK(first.has(detail::SharedIoTraceStage::SubmitEnd));
     CHECK(first.has(detail::SharedIoTraceStage::CompletionObserved));
+    CHECK(first.has(detail::SharedIoTraceStage::RetirementObserved));
+    CHECK(first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::WorkerEntry)] <=
+          first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::EncodeBegin)]);
+    CHECK(first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::EncodeEnd)] <=
+          first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::SubmitBegin)]);
+    CHECK(first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::SubmitEnd)] <=
+          first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::CompletionObserved)]);
+    CHECK(first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::CompletionObserved)] <=
+          first.cpu_ns[static_cast<std::size_t>(detail::SharedIoTraceStage::RetirementObserved)]);
     h.callback(2);
     h.service();
     REQUIRE(h.node.release());
