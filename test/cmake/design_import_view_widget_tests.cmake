@@ -67,6 +67,12 @@ pulp_add_test_suite(pulp-test-canvas-widget-sanitize GROUP pulp-test-group-desig
 pulp_add_test_suite(pulp-test-canvas-widget-shadow GROUP pulp-test-group-design-import-widgets
     LIBRARIES pulp::view)
 
+# CanvasWidget opens its per-canvas offscreen layer only for streams that
+# read their backdrop (clearRect, putImageData, non-source-over composite);
+# skipping it changes no pixel, on Skia and CoreGraphics.
+pulp_add_test_suite(pulp-test-canvas-widget-backdrop GROUP pulp-test-group-design-import-widgets
+    LIBRARIES pulp::view)
+
 # Curated named GPU post-effects (crt / grain / vignette / noise / brushed /
 # bloom) applied via CanvasWidget::set_shader_effect ->
 # SkiaCanvas::save_layer_with_shader_effect. Skia-gated headless raster proof
