@@ -2097,28 +2097,27 @@ void View::paint_all(canvas::Canvas& canvas) {
     // so the temporary std::string the canvas API builds stays in SSO and never
     // heap-allocates inside the paint_all no-alloc scope. Only the root paints
     // it (parent_ == nullptr); a golden-screenshot harness can suppress it via
-    // set_tracing_badge_visible(false).
+    // set_tracing_badge_visible(false), and an application can move it onto its
+    // own header line with set_tracing_badge_placement(). The label is centred on
+    // its measured ink rather than placed at a fraction of the pill height.
     if constexpr (pulp::runtime::kTracingEnabled) {
         if (parent_ == nullptr && tracing_badge_should_paint()) {
-            constexpr float kFontPx = 11.0f;
-            constexpr float kPadX   = 8.0f;
-            constexpr float kPadY   = 4.0f;
-            constexpr float kMargin = 8.0f;
-            const char* const label = "◉ TRACING";
-            canvas.set_font("system", kFontPx);
-            const float tw     = canvas.measure_text(label);
-            const float pill_w = tw + 2.0f * kPadX;
-            const float pill_h = kFontPx + 2.0f * kPadY;
-            const float px     = bounds_.width - pill_w - kMargin;
-            const float py     = kMargin;
+            const auto placement = tracing_badge_placement();
+            canvas.set_font("system", placement.font_px);
+            const auto metrics = canvas.measure_text_full(kTracingBadgeLabel);
+            const auto layout = tracing_badge_layout(
+                bounds_.width, metrics.width, metrics.ascent, metrics.descent,
+                placement);
             // High-contrast: near-black translucent pill, bright amber glyph.
             // Fixed diagnostic-overlay colors by design — this dev-only tracing
             // badge is deliberately not themeable, so the literals are not routed
             // through resolve_color.
             canvas.set_fill_color(canvas::Color::rgba8(20, 20, 24, 220));  // token-lint:allow
-            canvas.fill_rounded_rect(px, py, pill_w, pill_h, pill_h * 0.5f);
+            canvas.fill_rounded_rect(layout.pill_x, layout.pill_y,
+                                     layout.pill_width, layout.pill_height,
+                                     layout.pill_height * 0.5f);
             canvas.set_fill_color(canvas::Color::rgba8(255, 190, 60, 255));  // token-lint:allow
-            canvas.fill_text(label, px + kPadX, py + pill_h * 0.72f);
+            canvas.fill_text(kTracingBadgeLabel, layout.text_x, layout.baseline_y);
         }
     }
 
