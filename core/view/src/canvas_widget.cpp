@@ -1,5 +1,7 @@
 #include <pulp/view/canvas_widget.hpp>
 
+#include "canvas_replay_state.hpp"
+
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -334,11 +336,53 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         }
     };
 
+    // Sticky Canvas2D state and its save/restore stack. Setters go through
+    // it so restore() reverts the drawing state identically on every backend;
+    // see canvas_replay_state.hpp.
+    detail::CanvasReplayState replay_state;
+
     for (const auto& cmd : commands->commands) {
+        if (const auto slot = detail::CanvasReplayState::slot_for(cmd.type)) {
+            detail::apply_canvas_state_setter(canvas, cmd);
+            replay_state.note_setter(*slot, cmd);
+            continue;
+        }
         switch (cmd.type) {
+        // Sticky state setters, applied above.
+        case CanvasDrawCmd::Type::set_font:
+        case CanvasDrawCmd::Type::set_font_full:
+        case CanvasDrawCmd::Type::set_text_align:
+        case CanvasDrawCmd::Type::set_line_cap:
+        case CanvasDrawCmd::Type::set_line_join:
+        case CanvasDrawCmd::Type::set_miter_limit:
+        case CanvasDrawCmd::Type::set_image_smoothing:
+        case CanvasDrawCmd::Type::set_global_alpha:
+        case CanvasDrawCmd::Type::set_blend_mode:
+        case CanvasDrawCmd::Type::set_shadow_color:
+        case CanvasDrawCmd::Type::set_shadow_blur:
+        case CanvasDrawCmd::Type::set_shadow_offset_x:
+        case CanvasDrawCmd::Type::set_shadow_offset_y:
+        case CanvasDrawCmd::Type::set_direction:
+        case CanvasDrawCmd::Type::set_filter:
+        case CanvasDrawCmd::Type::set_line_dash:
+        case CanvasDrawCmd::Type::set_fill_gradient_linear:
+        case CanvasDrawCmd::Type::set_fill_gradient_radial:
+        case CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles:
+        case CanvasDrawCmd::Type::set_fill_gradient_conic:
+        case CanvasDrawCmd::Type::set_fill_pattern:
+        case CanvasDrawCmd::Type::clear_fill_gradient:
+        case CanvasDrawCmd::Type::set_stroke_gradient_linear:
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial:
+        case CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles:
+        case CanvasDrawCmd::Type::set_stroke_gradient_conic:
+        case CanvasDrawCmd::Type::set_stroke_pattern:
+        case CanvasDrawCmd::Type::clear_stroke_gradient:
+            break;
+
         // Shapes
         case CanvasDrawCmd::Type::clear:
             canvas.set_fill_color(cmd.color);
+            replay_state.note_fill_color(cmd.color);
             canvas.fill_rect(0, 0, bounds().width, bounds().height);
             break;
         case CanvasDrawCmd::Type::fill_rect:
@@ -348,6 +392,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // recently on the canvas) instead of overwriting with cmd.color.
             if (!cmd.use_active_style) {
                 canvas.set_fill_color(cmd.color);
+                replay_state.note_fill_color(cmd.color);
             }
             canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
@@ -355,37 +400,48 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // Same fallback as fill_rect, applied to strokeStyle.
             if (!cmd.use_active_style) {
                 canvas.set_stroke_color(cmd.color);
+                replay_state.note_stroke_color(cmd.color);
             }
             canvas.set_line_width(cmd.extra);
+            replay_state.note_line_width(cmd.extra);
             canvas.stroke_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
         case CanvasDrawCmd::Type::fill_rounded_rect:
             canvas.set_fill_color(cmd.color);
+            replay_state.note_fill_color(cmd.color);
             canvas.fill_rounded_rect(cmd.x, cmd.y, cmd.w, cmd.h, cmd.extra);
             break;
         case CanvasDrawCmd::Type::stroke_rounded_rect:
             canvas.set_stroke_color(cmd.color);
             canvas.set_line_width(cmd.x2);  // x2 = line width
+            replay_state.note_stroke_color(cmd.color);
+            replay_state.note_line_width(cmd.x2);
             canvas.stroke_rounded_rect(cmd.x, cmd.y, cmd.w, cmd.h, cmd.extra);
             break;
         case CanvasDrawCmd::Type::fill_circle:
             canvas.set_fill_color(cmd.color);
+            replay_state.note_fill_color(cmd.color);
             canvas.fill_circle(cmd.x, cmd.y, cmd.extra);
             break;
         case CanvasDrawCmd::Type::stroke_circle:
             canvas.set_stroke_color(cmd.color);
             canvas.set_line_width(cmd.x2);
+            replay_state.note_stroke_color(cmd.color);
+            replay_state.note_line_width(cmd.x2);
             canvas.stroke_circle(cmd.x, cmd.y, cmd.extra);
             break;
         case CanvasDrawCmd::Type::stroke_line:
             canvas.set_stroke_color(cmd.color);
             canvas.set_line_width(cmd.extra);
+            replay_state.note_stroke_color(cmd.color);
+            replay_state.note_line_width(cmd.extra);
             canvas.stroke_line(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
 
         // Text
         case CanvasDrawCmd::Type::fill_text:
             canvas.set_fill_color(cmd.color);
+            replay_state.note_fill_color(cmd.color);
             // Do NOT call canvas.set_font() / set_text_align
             // here. The JS shim's fillText path runs `_syncTextState()`
             // BEFORE canvasFillText, which records a `set_font` (legacy) or
@@ -431,31 +487,19 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // commentary above).
             canvas.stroke_text(cmd.text, cmd.x, baseline_y(cmd.text, cmd.y), cmd.w);
             break;
-        case CanvasDrawCmd::Type::set_font:
-            canvas.set_font(cmd.text, cmd.extra);
-            break;
-        case CanvasDrawCmd::Type::set_font_full:
-            // Full CSS font shorthand. Weight stored in
-            // `cmd.x`, slant in `cmd.y`, letter_spacing in `cmd.x2`.
-            // Skia's set_font_full honours weight / slant; CG falls
-            // through to family+size via the base default.
-            canvas.set_font_full(
-                cmd.text,
-                cmd.extra,
-                static_cast<int>(cmd.x),
-                static_cast<int>(cmd.y),
-                cmd.x2);
-            break;
 
         // Style
         case CanvasDrawCmd::Type::set_fill_color:
             canvas.set_fill_color(cmd.color);
+            replay_state.note_fill_color(cmd.color);
             break;
         case CanvasDrawCmd::Type::set_stroke_color:
             canvas.set_stroke_color(cmd.color);
+            replay_state.note_stroke_color(cmd.color);
             break;
         case CanvasDrawCmd::Type::set_line_width:
             canvas.set_line_width(cmd.extra);
+            replay_state.note_line_width(cmd.extra);
             break;
 
         // Path
@@ -492,10 +536,12 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // State
         case CanvasDrawCmd::Type::save:
             canvas.save();
+            replay_state.save();
             text_baseline_stack.push_back(text_baseline);
             break;
         case CanvasDrawCmd::Type::restore:
             canvas.restore();
+            replay_state.restore(canvas);
             if (!text_baseline_stack.empty()) {
                 text_baseline = text_baseline_stack.back();
                 text_baseline_stack.pop_back();
@@ -537,6 +583,8 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::stroke_arc:
             canvas.set_stroke_color(cmd.color);
             canvas.set_line_width(cmd.extra);
+            replay_state.note_stroke_color(cmd.color);
+            replay_state.note_line_width(cmd.extra);
             canvas.stroke_arc(cmd.x, cmd.y, cmd.w, cmd.x2, cmd.y2); // cx, cy, radius, start, end
             break;
 
@@ -576,12 +624,7 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             break;
         }
 
-        // Text alignment and baseline
-        case CanvasDrawCmd::Type::set_text_align:
-            if (cmd.int_val == 1) canvas.set_text_align(canvas::TextAlign::center);
-            else if (cmd.int_val == 2) canvas.set_text_align(canvas::TextAlign::right);
-            else canvas.set_text_align(canvas::TextAlign::left);
-            break;
+        // Text baseline is replay-only state; see baseline_y above.
         case CanvasDrawCmd::Type::set_text_baseline:
             if (cmd.int_val == 0) text_baseline = canvas::TextBaseline::top;
             else if (cmd.int_val == 1) text_baseline = canvas::TextBaseline::middle;
@@ -589,114 +632,6 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             else if (cmd.int_val == 4) text_baseline = canvas::TextBaseline::hanging;
             else if (cmd.int_val == 5) text_baseline = canvas::TextBaseline::ideographic;
             else text_baseline = canvas::TextBaseline::alphabetic;
-            break;
-
-        // Line cap/join
-        case CanvasDrawCmd::Type::set_line_cap:
-            if (cmd.int_val == 1) canvas.set_line_cap(canvas::LineCap::round);
-            else if (cmd.int_val == 2) canvas.set_line_cap(canvas::LineCap::square);
-            else canvas.set_line_cap(canvas::LineCap::butt);
-            break;
-        case CanvasDrawCmd::Type::set_line_join:
-            if (cmd.int_val == 1) canvas.set_line_join(canvas::LineJoin::round);
-            else if (cmd.int_val == 2) canvas.set_line_join(canvas::LineJoin::bevel);
-            else canvas.set_line_join(canvas::LineJoin::miter);
-            break;
-
-        // Global alpha and blend mode
-        case CanvasDrawCmd::Type::set_global_alpha:
-            canvas.set_opacity(cmd.extra);
-            break;
-        case CanvasDrawCmd::Type::set_blend_mode:
-            canvas.set_blend_mode(static_cast<canvas::Canvas::BlendMode>(cmd.int_val));
-            break;
-
-        // Gradients
-        case CanvasDrawCmd::Type::set_fill_gradient_linear:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_fill_gradient_linear(cmd.x, cmd.y, cmd.x2, cmd.y2,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::set_fill_gradient_radial:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_fill_gradient_radial(cmd.x, cmd.y, cmd.extra,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        // Canvas2D ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)
-        // two-circle form. Inner circle in (x, y, extra), outer in (x2, y2, w).
-        case CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_fill_gradient_radial_two_circles(
-                    cmd.x, cmd.y, cmd.extra,
-                    cmd.x2, cmd.y2, cmd.w,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        // ctx.createConicGradient. Skia routes through
-        // SkGradientShader::MakeSweep; CoreGraphics software-rasterizes a
-        // conic image because it has no native conic shader. Stops use the
-        // same gradient_colors / gradient_positions vectors as linear/radial.
-        case CanvasDrawCmd::Type::set_fill_gradient_conic:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_fill_gradient_conic(cmd.x, cmd.y, cmd.extra,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::clear_fill_gradient:
-            canvas.clear_fill_gradient();
-            break;
-        // ctx.createPattern. Fill patterns route through backend image-pattern
-        // support (SkShader / CGPattern). tile_x = bit 0, tile_y = bit 1:
-        // 0 = repeat, 1 = no-repeat.
-        case CanvasDrawCmd::Type::set_fill_pattern: {
-            using Tile = canvas::Canvas::PatternTileMode;
-            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
-            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
-            canvas.set_fill_pattern(cmd.text, tx, ty);
-            break;
-        }
-        case CanvasDrawCmd::Type::set_stroke_pattern: {
-            using Tile = canvas::Canvas::PatternTileMode;
-            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
-            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
-            canvas.set_stroke_pattern(cmd.text, tx, ty);
-            break;
-        }
-        // Stroke gradients. Same dispatch shape as
-        // the fill counterparts, targeting the new
-        // `Canvas::set_stroke_gradient_*` virtuals. SkiaCanvas overrides
-        // populate `stroke_shader_`; the base default degrades to the
-        // first-stop color via `set_stroke_color`.
-        case CanvasDrawCmd::Type::set_stroke_gradient_linear:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_stroke_gradient_linear(cmd.x, cmd.y, cmd.x2, cmd.y2,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::set_stroke_gradient_radial:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_stroke_gradient_radial(cmd.x, cmd.y, cmd.extra,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::set_stroke_gradient_radial_two_circles:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_stroke_gradient_radial_two_circles(
-                    cmd.x, cmd.y, cmd.extra,
-                    cmd.x2, cmd.y2, cmd.w,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::set_stroke_gradient_conic:
-            if (!cmd.gradient_colors.empty())
-                canvas.set_stroke_gradient_conic(cmd.x, cmd.y, cmd.extra,
-                    cmd.gradient_colors.data(), cmd.gradient_positions.data(),
-                    static_cast<int>(cmd.gradient_colors.size()));
-            break;
-        case CanvasDrawCmd::Type::clear_stroke_gradient:
-            canvas.clear_stroke_gradient();
             break;
 
         // Clear rect: replace pixels with transparent black, do
@@ -753,6 +688,9 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
                 canvas.fill_text(src.empty() ? "[image]" : src,
                                  cmd.x + 4, cmd.y + cmd.h / 2);
                 canvas.restore();
+                // The placeholder drew with its own colour and font, which
+                // survive a backend restore() on Skia.
+                replay_state.reassert_fill_and_font(canvas);
             }
             break;
         }
@@ -815,67 +753,6 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.draw_sdf_shape(geometry.shape, gx, gy, gw, gh, geometry.style);
             break;
         }
-
-        // setLineDash. Pattern lives in gradient_positions
-        // (an existing vector<float> reuse — avoids growing CanvasDrawCmd).
-        case CanvasDrawCmd::Type::set_line_dash:
-            canvas.set_line_dash(cmd.gradient_positions.data(),
-                                 static_cast<int>(cmd.gradient_positions.size()),
-                                 cmd.extra);
-            break;
-
-        // Canvas2D shadow* state. Sticky values that
-        // the underlying canvas honors on subsequent fill/stroke/text
-        // draws. Stored in `color` (set_shadow_color) or `extra`
-        // (set_shadow_blur / offset_x / offset_y) per the enum doc.
-        case CanvasDrawCmd::Type::set_shadow_color:
-            canvas.set_shadow_color(cmd.color);
-            break;
-        case CanvasDrawCmd::Type::set_shadow_blur:
-            canvas.set_shadow_blur(cmd.extra);
-            break;
-        case CanvasDrawCmd::Type::set_shadow_offset_x:
-            canvas.set_shadow_offset_x(cmd.extra);
-            break;
-        case CanvasDrawCmd::Type::set_shadow_offset_y:
-            canvas.set_shadow_offset_y(cmd.extra);
-            break;
-        // Canvas2D ctx.miterLimit and
-        // ctx.imageSmoothingEnabled / Quality. Sticky stroke / image state
-        // pushed by the JS shim. SkiaCanvas / CoreGraphicsCanvas honor
-        // them on the next stroke / drawImage; RecordingCanvas captures
-        // a single setter cmd per change so tests can assert flush order.
-        case CanvasDrawCmd::Type::set_miter_limit:
-            canvas.set_miter_limit(cmd.extra);
-            break;
-        case CanvasDrawCmd::Type::set_image_smoothing: {
-            using Q = canvas::Canvas::ImageSmoothingQuality;
-            Q q = Q::low;
-            int qi = static_cast<int>(cmd.extra);
-            if (qi == 1) q = Q::medium;
-            else if (qi == 2) q = Q::high;
-            canvas.set_image_smoothing(cmd.int_val != 0, q);
-            break;
-        }
-
-        // Canvas2D ctx.direction / ctx.filter sticky state.
-        // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into int_val;
-        // filter raw CSS string in `text`. SkiaCanvas wraps the next
-        // text/image draw with the corresponding shaper flag /
-        // SkImageFilter chain. RecordingCanvas captures a single setter
-        // cmd per change so canvas2d harness tests can assert flush
-        // order. Other backends accept the no-op default.
-        case CanvasDrawCmd::Type::set_direction: {
-            using D = canvas::Canvas::TextDirection;
-            D d = D::ltr;
-            if (cmd.int_val == 1) d = D::rtl;
-            else if (cmd.int_val == 2) d = D::inherit;
-            canvas.set_direction(d);
-            break;
-        }
-        case CanvasDrawCmd::Type::set_filter:
-            canvas.set_filter(cmd.text);
-            break;
 
         // putImageData. Pixels packed in cmd.text as
         // raw RGBA bytes; int_val = width; x2 = height (as float, will round).

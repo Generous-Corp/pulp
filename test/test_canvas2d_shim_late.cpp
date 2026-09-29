@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
@@ -711,13 +712,13 @@ TEST_CASE("Canvas2D filter flushes before drawImage so sticky chain wraps the bi
     REQUIRE(cw->commands()[filter_idx].text == "invert(100%)");
 }
 
-TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
+TEST_CASE("Canvas2D direction + filter state reverts on save/restore",
           "[view][canvas2d][issue-1520]") {
-    // The JS-side shim invalidates its sticky-flush cache across
-    // ctx.save() / ctx.restore() because the C++ canvas pops the
-    // GState back to the saved snapshot, including any direction /
-    // filter state. Without invalidation the next draw after restore
-    // would skip the flush thinking the value matched cache.
+    // restore() reverts direction and filter to their values at save(), in
+    // the JS getters and on the native canvas: the replay re-applies the
+    // outer values, so the shim's record of what was sent is restored with
+    // them. Re-assigning the outer values after restore() therefore needs no
+    // new flush, and a value that differs from the outer one still gets one.
     ScriptedBridge env;
     env.load(R"(
         var c = document.createElement('canvas');
@@ -729,29 +730,45 @@ TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
         ctx.direction = 'rtl';
         ctx.fillText('a', 0, 10);
         ctx.save();
-        // Inside save scope: change values, draw, restore.
         ctx.filter = 'sepia(100%)';
         ctx.direction = 'ltr';
         ctx.fillText('b', 0, 20);
         ctx.restore();
-        // Re-assign to the OUTER values. Cache is invalidated by
-        // restore(), so the bridge MUST emit setters again.
+        globalThis.__restored = ctx.filter + '|' + ctx.direction;
         ctx.filter = 'blur(2px)';
         ctx.direction = 'rtl';
         ctx.fillText('c', 0, 30);
+        ctx.filter = 'invert(100%)';
+        ctx.fillText('d', 0, 40);
     )");
 
     auto* cw = env.canvas();
     REQUIRE(cw != nullptr);
+    REQUIRE(std::string(env.engine.evaluate("globalThis.__restored").getString()) ==
+            "blur(2px)|rtl");
     int filter_count = 0, dir_count = 0;
     for (const auto& cmd : cw->commands()) {
         if (cmd.type == pulp::view::CanvasDrawCmd::Type::set_filter)    ++filter_count;
         if (cmd.type == pulp::view::CanvasDrawCmd::Type::set_direction) ++dir_count;
     }
-    // 3 distinct flushes per setter: outer pre-save, inner change,
-    // and the post-restore re-assignment.
+    // Outer, inner, and the post-restore change to a new value.
     REQUIRE(filter_count == 3);
-    REQUIRE(dir_count    == 3);
+    REQUIRE(dir_count    == 2);
+
+    // Replayed, the filter in effect at 'c' is the outer one again.
+    pulp::canvas::RecordingCanvas rc;
+    cw->set_bounds({0, 0, 64, 64});
+    cw->paint(rc);
+    std::string filter_at_c;
+    std::string current;
+    int texts = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_filter) current = cmd.text;
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_text && ++texts == 3)
+            filter_at_c = current;
+    }
+    REQUIRE(texts == 4);
+    REQUIRE(filter_at_c == "blur(2px)");
 }
 
 // ── pulp #1526: catalog hygiene round-trip for the already-supported

@@ -76,6 +76,7 @@ target_sources(pulp-view-core PRIVATE
     src/screenshot_gpu.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
+    src/canvas_replay_state.cpp
     src/native_view_host.cpp
     src/gpu_surface_observer.cpp
     src/plugin_frame_renderer.cpp
