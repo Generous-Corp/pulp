@@ -6378,6 +6378,29 @@ When adding any step to a required gate, ask whether it can fail because a
 service outside this fleet is unreachable. If it can, that is a fleet-wide
 outage waiting on someone else's uptime.
 
+Two more downloads followed the same pattern and are now fetched up front:
+
+- **pulp-rs crates.** The Rust CLI is built by a CMake custom command and
+  tested by `cargo test` ctests, and a gate VM starts with an empty cargo
+  registry cache, so those commands pulled about 100 crates from crates.io in
+  the middle of `Build` and `Test`. A VM that lost DNS for a couple of minutes
+  (`Could not resolve host: index.crates.io`) then failed `macos` as a compile
+  or test failure. The `Fetch pulp-rs crates` step runs `cargo fetch` on
+  `experimental/pulp-rs/Cargo.lock` first, with three attempts spaced
+  20 s and 40 s apart (`PULP_CARGO_FETCH_RETRY_DELAY_SECS`). Exhausting them
+  only warns, because the build's own cargo call still tries the registry. A
+  repository variable `PULP_CARGO_NET_OFFLINE=1` additionally exports
+  `CARGO_NET_OFFLINE=true` after a successful fetch, so any later cargo
+  download fails loudly instead of quietly reaching out; it is off by default.
+- **Chrome for Testing.** The pinned download retried only on errors curl
+  calls transient, which excludes a resolve failure (exit 6) and a receive
+  reset (exit 56), the two that actually happened. It now passes
+  `--retry-all-errors` and keeps the SHA-256 check.
+
+`tools/scripts/test_build_fetch_resilience.py` runs the cargo step's real
+script against a stub `cargo`, checks the step precedes every cargo consumer,
+and rejects any `curl` in the build job that lacks `--retry-all-errors`.
+
 ## Protected-validation receipt reuse
 
 A merge group may skip rebuilding and retesting `macos`/`linux` when the pull
