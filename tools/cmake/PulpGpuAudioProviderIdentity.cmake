@@ -42,9 +42,10 @@ function(pulp_gpu_audio_configure_provider_identity target)
             _pulp_gpu_audio_asset_sha256)
     endif()
 
-    # Empty preserves the provider header/proc agreement check without claiming
-    # manifest authentication. A literal "unknown" is a mismatching revision.
-    set(_pulp_gpu_audio_expected_dawn_sha "")
+    # Unknown preserves the provider header/proc agreement check without
+    # claiming manifest authentication. A concrete revision enables the exact
+    # manifest-bound comparison.
+    set(_pulp_gpu_audio_expected_dawn_sha "unknown")
     if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF)
         list(GET SKIA_INCLUDE_DIRS 0 _pulp_gpu_audio_skia_include_root)
         set(_pulp_gpu_audio_dawn_header
