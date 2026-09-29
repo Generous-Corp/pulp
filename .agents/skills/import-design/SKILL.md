@@ -62,7 +62,12 @@ banner from `packages/pulp-react/runtime-fingerprint.json`;
 configure time, warn-only unless `STRICT`) names each missing fix and the
 refresh command, and judges banner-less bundles by each fix's signature. Bump
 the manifest's revision and add a fix entry when a runtime change is worth a
-refresh.
+refresh. Revision 2 added the per-pass path memo, per-pass typography dedup,
+unread `data-*` attributes and reconciled captured paint as paint-only
+commits. A signature must be an identifier the SDK runtime actually emits
+(`runtime_fingerprint.test.mjs` checks each one against the generated entry
+and the @pulp/react source) and one a hand-patched vendored copy is unlikely
+to share.
 
 **Pixel comparison cannot see a bad palette.** Every visual gate above scores
 agreement with the source, so a colour defect the source ALREADY had — an accent
@@ -3970,10 +3975,31 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   rather than to the longest. A new integration file is picked up by the glob
   and excluded from the unit aggregate automatically.
 - **The per-case cost is the capture's own fidelity work, not test overhead.**
-  A trivial page takes ~12 s: `captureStableScreenshot` always observes its full
-  32-frame horizon (an early A,A plateau must not hide a later B,B
+  A trivial page takes ~7.5 s: `captureStableScreenshot` always observes its
+  full 32-frame horizon (an early A,A plateau must not hide a later B,B
   presentation) at ~50 ms per frame of headless software-compositing pacing,
-  once per pixel artifact, plus settle, launch and shutdown.
+  once per pixel artifact, plus settle, launch and a ~1.5 s shutdown (the
+  custody anchor ignores SIGTERM by design, so the guardian waits out its grace
+  window before SIGKILL). It used to take ~12 s because every bounded teardown
+  wait was `Promise.race([p, delay(ms)])`: the losing timer stayed armed and
+  held the capture process open for the rest of a 6 s bound after cleanup had
+  finished. Bound a wait with `waitAtMost` (`browser_process.mjs`), which clears
+  its timer, never with a bare `delay` race; `browser_process.test.mjs` times an
+  owner's exit after teardown to catch a regression.
+- **Integration deadlines come from `capture_integration_support.mjs`.** Every
+  capture in the `*.integration.test.mjs` files runs under
+  `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is
+  `captureCaseTimeout(captures)`, which leaves room for Node start-up and
+  teardown beyond the capture deadlines. Do not hand-write `--timeout-ms` or a
+  case `timeout` in a new case: the old per-case literals (15 s capture inside a
+  20 s case) failed merge groups on the pinned Chrome for Testing with
+  `browser-capture-timeout ... stalled=Page.captureScreenshot` whenever the
+  gate VM's host was busy, and a case timeout at or below its capture deadline
+  surfaced as a bare `test timed out after 20000ms` that names no phase. The
+  guardian's custody deadline (`GUARDIAN_CUSTODY_TIMEOUT_MS`, 5 s) is the
+  same lesson in the product: at 1.5 s a loaded VM missed it and tore down a
+  healthy launch (`guardian did not establish custody: browser child exited
+  (SIGTERM)` -- the SIGTERM is the teardown, not the cause).
   `--disable-frame-rate-limit --disable-gpu-vsync` cut frames to ~5 ms but only
   ~15% of suite time, raised CPU ~60%, and would shrink the horizon's wall-clock
   span for every real import, so it is not used.
@@ -7010,6 +7036,46 @@ match is deliberately never cached. The one exception is
 signal is not a function of the registry, so a runtime that installs one keeps
 the unconditional refresh.
 
+**Path resolution is memoized per pass, never across passes.** The path index
+carries a children memo (each node's registry-filtered children, computed once)
+and a binding→node memo, shared by the dynamic-layout scan and the layout,
+paint and text loops. Captured paths share long prefixes, so without it a pass
+re-filtered the root and each row once per binding that crosses them: 508
+child filters on a 121-node, 170-binding panel, 121 with it. Both memos live on
+the per-pass index for the same reason the index does — a retained one
+resolves stale paths after a reparent. A Label reached by two text bindings in
+one pass gets its five typography setters once (per face), not once per
+binding.
+
+**What a commit can skip the pass for (runtime revision 2).** `@pulp/react`'s
+`isPaintOnlyUpdate` exempts, besides `PAINT_ONLY_KEYS` and handlers:
+
+- a **`data-*` attribute no selector names.** Captured bindings resolve by tag
+  and sibling index, so an attribute can reach metadata only through a
+  selector. The runtime publishes every attribute name a selector has named on
+  `__pulpMaterializedSelectorAttributes__`: all captured-state match selectors
+  up front (state resolution stops at the first match, so it never asks about
+  the rest), and any other selector on its first `__pulpFindMaterializedElement__`
+  call, recorded BEFORE the miss cache is consulted. A named attribute still
+  marks the tree and bumps the epoch. A runtime that publishes no set keeps
+  every `data-*` change geometric.
+- a **captured paint channel** — `color`/`textColor`, `opacity`, `fill`,
+  `stroke` — when the runtime installs `__pulpReconcileMaterializedPaint__`.
+  The pass records which of those channels it wrote on which node, with the
+  captured value; after React's setter runs, commitUpdate hands the node's
+  changed channels to the hook, which rewrites only the owned ones whose React
+  value differs. The end state equals what the full pass would leave (the
+  rig-based `expectFullPassAgrees` cases prove it after hover, theme switch and
+  removal). A selector naming `fill`/`stroke`/`color`/`opacity`/`style` keeps
+  that channel geometric. Ownership is rebuilt for exactly the nodes a pass
+  re-applies, so a state flip to metadata without a paint binding releases it.
+
+A button hover that recolours text/border/background and toggles a `data-*`
+marker is now its own four React setters: no pass, no `getLayoutBoxMetrics`,
+no epoch bump (so the captured-state miss cache survives). The per-commit
+counts are asserted in `packages/pulp-react/test/materialized-commit-cost.test.ts`
+over the real entry + host config (`materialized-runtime-rig.ts`).
+
 **Scoped passes publish diagnostics under a different key.** A scoped
 application legitimately touches a fraction of the document, so writing its
 counts to `__pulpMaterializedMetadataDiagnostics__` — which import validators
@@ -7080,45 +7146,13 @@ rather than letting it read as a verdict.
 
 ## App code: no React commit on a per-move or per-frame path
 
-**Rule.** In a materialized/captured import, a `pointermove`, a hover, an
-animation tick, or any other per-frame path must not commit React. Keep
-pointer, hover and animation state in refs; draw from those refs on the canvas
-and request a repaint; update small DOM text (a readout, a tooltip) imperatively
-through `textContent` and its position; never call a setter with the value it
-already holds; handle each event once.
-
-**Why.** Each commit runs the metadata re-apply described above. Scoping cuts
-its bridge traffic but not its per-commit document walk, and an app that
-vendors an older `runtime.js` pays the full pass. Illustration from one
-captured-import editor: an LFO over 64 bands held 60 fps with the mouse still
-and stalled 100 ms–2.5 s per frame while it moved; each `pointermove` cost
-~42 ms (a `mousemove` on the same element ~0.2 ms), with ~150
-`getLayoutBoxMetrics`, ~160 `setFlex`, ~195 `setFontFamily` and ~12 layout
-passes per event. Paint (~2.5 ms) and `gpu_acquire` (~1–4 ms) were cheap. With
-the rule applied `pointermove` fell to ~0.6 ms and no >100 ms stall remained.
-None of this shows in a screenshot, pixel diff or browser fixture.
-
-**Audit every commit source — one survivor keeps the stall:**
-
-1. hover/pointer state in React state — including "only when the target
-   changes", which on dense targets still commits nearly every move;
-2. a status/readout effect publishing through the root's (or an ancestor's)
-   state;
-3. same-value setter calls — a same-value `setCursor(...)` still committed in
-   this runtime, so compare before calling;
-4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
-   (runs twice per move);
-5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
-   through state — keep it mounted and restart the timer imperatively.
-
-**Measuring it.** Wrap `__dispatch__(id, type, payload)` with a timer and
-compare `pointermove` against `mousemove` on the same element, then confirm in
-a Perfetto capture driven by a real 60 Hz `CGEvent` mouse sweep plus a
-deterministic animation, comparing the sweep window with a no-input window of
-the same animation. Never measure while a scripted-scenario harness steps (its
-snapshots add 100–800 ms stalls), size `PULP_TRACE_RING_KB` large (`524288`),
-and let `PULP_TRACE_SECONDS` plus the flush elapse before ending the process.
-Full recipe: `docs/guides/interaction-cost.md` and the `trace-analysis` skill.
+In a materialized/captured import every React commit runs the metadata
+re-apply described above, so a commit per `pointermove`, hover, animation tick
+or data update turns a drag into one document walk per sample (measured: 100
+ms–2.5 s stalls on a 64-band editor, ~42 ms per `pointermove`). The rule, the
+five commit sources to audit and the evidence live in one place: the
+`view-bridge` skill, "Realtime scripted editors: the performance checklist";
+the capture recipe is in `trace-analysis`.
 
 ## A `vm` sandbox is a second realm, and the entry notices
 

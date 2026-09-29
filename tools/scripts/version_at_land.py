@@ -622,6 +622,59 @@ def _bump_pr_covers(repo: Path, number: str, head: str) -> bool | None:
     return probe.returncode == 0
 
 
+def _bump_pr_held(repo: Path, number: str) -> bool | None:
+    """Is the open bump PR in a state a stale-PR replacement must not touch?
+
+    `True`  — it sits in the merge queue (a merge group holds it), or it is a
+              draft (an explicit release hold its owner must resolve).
+    `False` — confirmed neither. Armed auto-merge does NOT count: an armed PR
+              whose required checks failed can never enqueue, and a stale
+              generated bump is always safely regenerable. Closing the PR also
+              drops its auto-merge, so no separate disarm is needed.
+    `None`  — unknown (query failed); treat as held, never as replaceable.
+    """
+    query = ("query($owner:String!,$name:String!,$number:Int!){"
+             "repository(owner:$owner,name:$name){pullRequest(number:$number){"
+             "state isDraft isInMergeQueue}}}")
+    res = _gh(repo, "api", "graphql", "-f", f"query={query}",
+              "-F", "owner={owner}", "-F", "name={repo}",
+              "-F", f"number={number}", check=False)
+    if res.returncode != 0:
+        return None
+    try:
+        pr = (((json.loads(res.stdout or "{}") or {}).get("data") or {})
+              .get("repository") or {}).get("pullRequest")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(pr, dict) or pr.get("state") != "OPEN":
+        return None
+    if pr.get("isDraft") is True or pr.get("isInMergeQueue") is True:
+        return True
+    if pr.get("isDraft") is not False or pr.get("isInMergeQueue") is not False:
+        return None
+    return False
+
+
+def _close_stale_bump_pr(repo: Path, number: str, head: str) -> bool:
+    """Close a bump PR that is stale (cut before `head`) and not held (neither
+    in the merge queue nor a draft), so this drain can cut a fresh bump covering the whole
+    range. Only the PR is closed; the branch is reclaimed by the normal
+    confirmed-no-PR `--force-with-lease` path. Returns success."""
+    comment = (
+        "version-at-land: closing this bump PR. It was cut before "
+        f"{head[:12]}, so it can never carry that merge's version intent, and it "
+        "is not in the merge queue. A "
+        "fresh bump PR covering the full range replaces it.")
+    res = _gh(repo, "pr", "close", number, "--comment", comment, check=False)
+    if res.returncode != 0:
+        sys.stderr.write(f"version-at-land: closing stale bump PR #{number} "
+                         f"failed (exit {res.returncode}).\n{res.stderr or ''}\n")
+        return False
+    sys.stderr.write(f"version-at-land: closed stale bump PR #{number}; "
+                     "opening a fresh bump.\n")
+    return True
+
+
 def _list_open_bump_pr(repo: Path) -> tuple[bool, str | None]:
     """`(ok, number)` for the open PR on `BUMP_BRANCH`.
 
@@ -700,6 +753,7 @@ def apply_via_pr(
     remote: str = "origin",
     branch: str = "main",
     fallback_base: str | None = None,
+    heal_stale: bool = False,
 ) -> tuple[str, list[Assignment]]:
     """PR-route bumper: build the bump on `BUMP_BRANCH`, open a `chore: bump
     versions` PR, and arm auto-merge (`--merge`) so it lands THROUGH the merge
@@ -715,6 +769,12 @@ def apply_via_pr(
       "arm-failed" — the PR is open but auto-merge could not be armed; the run
                      fails (visible + retried) and the next drain re-arms it via
                      the "pending" path, so there is no permanent wedge.
+      "stale-defer" — the open bump PR was cut before this merge; the run fails
+                     and retries. With `heal_stale`, a stale PR that is not
+                     held (not in the merge queue, not draft) is closed instead
+                     and a fresh bump PR is opened, whether or not it is armed:
+                     an ejected PR, or an armed PR whose checks failed, can
+                     never land and must not wedge the drain.
 
     Safety:
       * Regression — `_strictly_increasing` drops any assignment not exceeding
@@ -757,9 +817,18 @@ def apply_via_pr(
         # postponed. Unknown coverage is treated as NOT covering: a red run that
         # retries is recoverable, a silent green defer is not.
         covers = _bump_pr_covers(repo, existing, head)
-        if covers is not True:
+        if covers is True:
+            return ("pending" if _arm_auto_merge(repo, existing)
+                    else "arm-failed"), plan
+        # A stale PR a merge group holds may still land, and the next drain
+        # covers the remainder. Anywhere else a stale generated bump is safely
+        # regenerable, and arming does not mean it will land (failed checks
+        # keep an armed PR out of the queue forever), so replace it. Only on
+        # CONFIRMED stale + CONFIRMED not held.
+        if not (heal_stale and covers is False
+                and _bump_pr_held(repo, existing) is False
+                and _close_stale_bump_pr(repo, existing, head)):
             return "stale-defer", plan
-        return ("pending" if _arm_auto_merge(repo, existing) else "arm-failed"), plan
 
     edited = _write_plan(repo, config, plan)
     if not edited:
@@ -887,6 +956,13 @@ def main(argv: list[str]) -> int:
                          "is enabled). The workflow selects this via the "
                          "PULP_BUMP_ROUTE repo variable; unset ⇒ direct ⇒ no "
                          "behavior change.")
+    ap.add_argument("--heal-stale-pr", action="store_true",
+                    help="With --route pr: when the open bump PR was cut before "
+                         "this merge AND is not held (not in the merge queue, "
+                         "not draft; armed does not count), close it "
+                         "and open a fresh bump instead of failing stale-defer "
+                         "forever. The workflow enables this via the "
+                         "PULP_BUMP_HEAL_STALE_PR repo variable.")
     ap.add_argument("--remote", default="origin")
     ap.add_argument("--branch", default="main")
     ap.add_argument("--max-retries", type=int, default=3)
@@ -903,7 +979,7 @@ def main(argv: list[str]) -> int:
         if args.route == "pr":
             status, plan = apply_via_pr(
                 repo, config, remote=args.remote, branch=args.branch,
-                fallback_base=args.base,
+                fallback_base=args.base, heal_stale=args.heal_stale_pr,
             )
         else:
             status, plan = apply_and_push(
@@ -927,7 +1003,9 @@ def main(argv: list[str]) -> int:
                 "version-at-land: the open bump PR was cut BEFORE this merge, so "
                 "deferring to it would drop this merge's version intent "
                 "permanently. Failing so the drain retries once that PR "
-                "lands and a fresh bump can carry this range.\n")
+                "lands and a fresh bump can carry this range. If that PR was "
+                "ejected from the merge queue it will never land: close it, or "
+                "set PULP_BUMP_HEAL_STALE_PR=true to replace it automatically.\n")
             return 1
         elif status == "arm-failed":
             sys.stderr.write(

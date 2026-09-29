@@ -170,7 +170,18 @@ For an existing capability change:
   ```
 
   Skip past any claimed integer rather than racing for it; the values only have
-  to be distinct and increasing, not contiguous.
+  to be distinct and increasing, not contiguous. `ghapp pr list --state open
+  --json number,files` answers "does any open PR touch the manifest file" in
+  one call; filter it before fetching any patch.
+- A pending sequencer-exposure row can pin the current inventory integer as an
+  evidence needle (`"SURFACE_INVENTORY_VERSION = 95"`). Bumping the version
+  stales that row and `sequencer_exposure_check.py` fails on it, not on your
+  change. Repoint the needle to the new integer — it is a pending row, so the
+  edit is allowed — and grep every pending row for the outgoing literal first.
+- A summary-only edit to a capability row is not a contract change: raising
+  `contract_version` for it is refused ("contract_version changed without a
+  contract change"). Leave the version, bump `MANIFEST_REVISION`, and let
+  `--write` regenerate the installed manifest.
 - A byte change to a header still classified `legacy_unreviewed` cannot be
   repaired by restamping `tools/agent-capabilities/legacy-unreviewed-baseline.json`.
   `FROZEN_LEGACY_COUNT` and `FROZEN_LEGACY_DIGEST` in

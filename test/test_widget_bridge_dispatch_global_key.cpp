@@ -315,3 +315,19 @@ TEST_CASE("the global fan-out suppresses only a press the bridge was offered",
         CHECK(count() == 2);
     }
 }
+
+TEST_CASE("hostKind() reports where the editor lives, unknown until declared",
+          "[view][widget-bridge][keyboard]") {
+    using namespace pulp::view;
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    CHECK(engine.evaluate("hostKind()").toString() == "unknown");
+    bridge.set_host_kind("plugin");
+    CHECK(engine.evaluate("hostKind()").toString() == "plugin");
+    // Read live, not cached at load: a later declaration is what scripts see.
+    bridge.set_host_kind("standalone");
+    CHECK(engine.evaluate("hostKind()").toString() == "standalone");
+}

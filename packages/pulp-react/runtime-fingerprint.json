@@ -1,12 +1,36 @@
 {
   "schema": 1,
-  "revision": 1,
+  "revision": 2,
   "fixes": [
     {
       "revision": 1,
       "id": "scoped-materialized-reapply",
       "summary": "a React commit re-applies captured import metadata only for the subtree it changed, instead of walking the whole captured document (~44 ms per commit on a large materialized editor)",
       "signature": "materializedDirtyIds"
+    },
+    {
+      "revision": 2,
+      "id": "materialized-path-walk-memo",
+      "summary": "a metadata pass filters each node's children once and resolves each captured binding once, instead of re-walking every binding's path from the root in each filter and loop (a scoped pass on one shipped editor: 13-15 ms -> 1.5 ms)",
+      "signature": "materializedIndexedChildren"
+    },
+    {
+      "revision": 2,
+      "id": "materialized-typography-once-per-pass",
+      "summary": "a metadata pass applies a given face to a given native Label once, however many captured text bindings resolve to it",
+      "signature": "typographyApplied"
+    },
+    {
+      "revision": 2,
+      "id": "unread-data-attributes-paint-only",
+      "summary": "a commit that changes only a data-* attribute no captured-state or runtime selector names runs no metadata pass and does not bump the mutation epoch (a hover marker cost ~1.8 ms of metadata pass plus ~2.9 ms of captured-state rescanning per hover on one shipped editor)",
+      "signature": "materializedReaders"
+    },
+    {
+      "revision": 2,
+      "id": "captured-paint-reconcile",
+      "summary": "a colour/opacity/fill/stroke-only commit is paint-only: where the capture owns that channel on that node the runtime restores just that property, instead of re-running the metadata pass over the subtree and bumping the mutation epoch",
+      "signature": "__pulpReconcileMaterializedPaint__"
     }
   ]
 }

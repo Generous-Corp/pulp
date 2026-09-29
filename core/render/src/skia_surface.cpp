@@ -102,8 +102,8 @@ public:
         retained_layers_.reset();
         if (image_provider_) image_provider_->clear();
         if (context_) {
-            // Drain any outstanding GpuStats finished-with-stats callbacks
-            // before `this` dies — they capture `this` as their context, so a
+            // Drain any outstanding finished callbacks (GPU stats and the
+            // in-flight count) before `this` dies — they capture `this` as their context, so a
             // pending callback firing after destruction would be a
             // use-after-free. A sync submit + completion check flushes them
             // while the object is still alive.
@@ -333,16 +333,22 @@ public:
             skgpu::graphite::InsertRecordingInfo info;
             info.fRecording = recording.get();
 
-            // Request GPU render time for this recording. The callback fires
-            // on a later submit/completion (so the value lags ~1 frame); it
-            // captures `this`, which is kept alive by the destructor drain.
-            // Only request when supported so unsupported devices pay nothing.
+            // Every recording gets a finished callback, which retires the
+            // frame from the in-flight count; Graphite delivers it on success
+            // and on failure alike. GPU render time is requested with it only
+            // when supported, so unsupported devices pay no timestamp queries.
+            // The callback fires on a later submit/completion (so values lag
+            // ~1 frame); it captures `this`, which is kept alive by the
+            // destructor drain.
+            info.fFinishedContext = this;
             if (gpu_elapsed_supported_) {
                 info.fGpuStatsFlags = skgpu::GpuStatsFlags::kElapsedTime;
-                info.fFinishedContext = this;
                 info.fFinishedWithStatsProc = &SkiaSurfaceImpl::on_gpu_stats;
+            } else {
+                info.fFinishedProc = &SkiaSurfaceImpl::on_gpu_finished;
             }
 
+            frames_in_flight_.on_submitted();
             const auto status = context_->insertRecording(info);
             insert_ok = (status == skgpu::graphite::InsertStatus::kSuccess);
             if (!insert_ok) {
@@ -547,6 +553,8 @@ public:
         return gpu_elapsed_supported_;
     }
 
+    int gpu_frames_in_flight() const override { return frames_in_flight_.count(); }
+
 private:
     // Graphite finished-with-stats callback. Fires on the thread pumping GPU
     // completion (render thread, via Context::submit) once the GPU finishes
@@ -560,6 +568,13 @@ private:
         if (!self) return;
         self->gpu_render_tracker_.store(
             stats.elapsedTime, result == skgpu::CallbackResult::kSuccess);
+        self->frames_in_flight_.on_finished();
+    }
+
+    static void on_gpu_finished(skgpu::graphite::GpuFinishedContext ctx,
+                                skgpu::CallbackResult) {
+        if (auto* self = static_cast<SkiaSurfaceImpl*>(ctx))
+            self->frames_in_flight_.on_finished();
     }
 
     GpuSurface& gpu_;
@@ -568,6 +583,7 @@ private:
 
     // GPU render time via Graphite GpuStats.
     bool gpu_elapsed_supported_ = false;  ///< Set once in init() from supportedGpuStats().
+    GpuFramesInFlight frames_in_flight_;
     GpuRenderTimeTracker gpu_render_tracker_;  ///< Latest sample; written by on_gpu_stats().
 
     std::unique_ptr<skgpu::graphite::Context> context_;

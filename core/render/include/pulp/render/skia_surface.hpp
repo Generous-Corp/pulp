@@ -191,6 +191,11 @@ public:
     /// `timestamp-query` AND Graphite advertises `kElapsedTime`. When false the
     /// inspector should show the honest "GPU timing unavailable".
     virtual bool gpu_render_timing_available() const = 0;
+
+    /// Frames submitted to the GPU whose work has not finished yet (see
+    /// `GpuFramesInFlight` in `gpu_render_time.hpp`), or -1 when the surface
+    /// does not track it. Diagnostic only; nothing waits on it.
+    virtual int gpu_frames_in_flight() const { return -1; }
 };
 
 } // namespace pulp::render

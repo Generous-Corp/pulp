@@ -172,6 +172,34 @@ granular pitch shifter spreads its output into grain-rate sidebands, so a single
 880 Hz bin under-reports a working octave-up shifter by an order of magnitude
 and can read as zero.
 
+## Proving a freeze / hold — steady input cannot see capture bugs
+
+A hold averages a window of past frames, so every bug in WHICH frames it
+averaged is invisible on a steady sine: stale and fresh frames look the same.
+`FreezeHold`'s rapid-toggle test passed for months over a real defect (a quick
+re-freeze averaged ~7/8 frames from before the previous freeze). Two stimuli
+make the window observable:
+
+- **Change the tone mid-stream.** Tone A before the first freeze, tone B from
+  partway through the hold on; the re-freeze must hold B, judged by spectral
+  peak. Keep a control in the same test: the first hold must still read A
+  while the input is already B, or the probe proves nothing.
+- **Give every frame its own bin** in a synthetic frame test (frame f → bin
+  10 + f). The set of non-zero held bins then names exactly which frames were
+  averaged — an age assertion, not a similarity score
+  (`test/test_freeze_hold.cpp`).
+
+Two more traps from the same work:
+
+- **A phase accumulated in double and converted to float drifts.** A high bin
+  advances thousands of radians per hop; unwrapped, the float conversion at mix
+  time loses the stereo offset and the frame-to-frame advance within seconds.
+  Assert the inter-channel phase offset and the per-frame advance over a long
+  hold (thousands of frames at a large hop), not the level.
+- **Accumulated `1/N` fade steps do not reach 1 for every N** (N = 12 stops at
+  0.99999988 in float), so "pure hold" never arrives and a residual live leak
+  stays. Count fade steps as integers and test several N, including 12.
+
 ## Copy-this patterns
 
 Describe / debug a render (the "no sound" workflow):

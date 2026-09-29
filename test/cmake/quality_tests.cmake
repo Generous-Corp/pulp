@@ -635,6 +635,21 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
         set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+        # Shadow flake-exoneration verdict the merge-group macos job annotates
+        # after a failed ctest (OCCURS_ON_OTHER_CLS from other heads' ctest-logs
+        # artifacts; never exonerating a test that also fails on main).
+        add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
+        set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # Cross-VM test-binary identity measurement (per-binary receipt reuse
+        # precondition), annotated by merge-group macos jobs after the build.
+        add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
+        set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The one merge-group step that runs all three shadow instruments.
+        add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
+        set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.
@@ -645,6 +660,12 @@ if(Python3_Interpreter_FOUND)
         set_tests_properties(checkout-location-guard-selftest build-dir-lock-selftest
             PROPERTIES TIMEOUT 120)
     endif()
+
+    # Shadow-mode affected-test set the merge-group macos job annotates after
+    # its full ctest run (build graph + recorded header deps + ctest inventory).
+    add_test(NAME affected-tests-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_affected_tests_shadow.py")
+    set_tests_properties(affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
 
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache
@@ -938,6 +959,13 @@ if(Python3_Interpreter_FOUND)
     # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
+
+    # The GPU acceptance verifiers' blob lookups feed `git hash-object
+    # --stdin-paths` from a file; a pipe-fed request can deadlock against git
+    # under macOS pipe-memory pressure. Driven against a git that answers
+    # before it reads, with the degraded pipe's polling behaviour.
+    add_test(NAME git-stdin-pipe-deadlock-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_git_stdin_pipe_deadlock.py")
 
     # The handoff ledger pins a revision, blob, and tree per referenced path, so
     # any commit touching a pinned path stales rows far from the edit. This

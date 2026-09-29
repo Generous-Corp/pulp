@@ -513,3 +513,57 @@ test("launch identity probe abandons a child that already exited",
       await rm(root, { recursive: true, force: true });
     }
   });
+
+test("an owner exits as soon as its browser teardown completes",
+  { skip: process.platform === "win32", timeout: 30000 }, async () => {
+    // Teardown bounds each wait (guardian exit, browser exit) with a timer. A
+    // bound that stays armed after the wait it guards has finished keeps the
+    // owner's event loop alive, so every capture process outlived its own
+    // cleanup by seconds. Run a real launch and teardown in a separate owner
+    // and time how long it takes to exit once teardown has returned.
+    const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-process-test-"));
+    const profile = path.join(root, "pulp-browser-capture-prompt-exit");
+    const fakeBrowser = path.join(root, "fake-browser.sh");
+    const ownerScript = path.join(root, "owner.mjs");
+    try {
+      await writeFile(fakeBrowser, `#!/bin/sh
+profile=""
+for arg in "$@"; do
+  case "$arg" in
+    --user-data-dir=*) profile="\${arg#--user-data-dir=}" ;;
+  esac
+done
+test -n "$profile" || exit 64
+printf '9222\\n/devtools/browser/test\\n' > "$profile/DevToolsActivePort"
+while :; do sleep 1; done
+`, "utf8");
+      await chmod(fakeBrowser, 0o700);
+      const moduleUrl = pathToFileURL(
+        fileURLToPath(new URL("./browser_process.mjs", import.meta.url))).href;
+      await writeFile(ownerScript, `
+import { createEmptyProfile, launchBrowser, terminateBrowser } from ${JSON.stringify(moduleUrl)};
+const [profile, browser] = process.argv.slice(2);
+await createEmptyProfile(profile);
+const launched = await launchBrowser(browser, profile, 5000);
+await terminateBrowser(launched.child);
+process.stdout.write("terminated\\n");
+`, "utf8");
+      const owner = spawn(process.execPath, [ownerScript, profile, fakeBrowser], {
+        stdio: ["ignore", "pipe", "inherit"],
+      });
+      let terminatedAt = 0;
+      owner.stdout.on("data", (chunk) => {
+        if (String(chunk).includes("terminated")) terminatedAt = Date.now();
+      });
+      const exitCode = await new Promise((resolve) => owner.once("exit", resolve));
+      const exitedAt = Date.now();
+      assert.equal(exitCode, 0, "the owner must launch and tear down cleanly");
+      assert.notEqual(terminatedAt, 0, "the owner never reported teardown");
+      // Teardown itself has already waited for the guardian; what remains is
+      // process exit, which takes milliseconds when no timer is left armed.
+      assert.ok(exitedAt - terminatedAt < 2000,
+        `owner lingered ${exitedAt - terminatedAt}ms after teardown returned`);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });

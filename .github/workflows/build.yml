@@ -7,10 +7,9 @@ on:
   # from. Only a non-PR run on the default branch may write to GitHub's cloud
   # cache — a PR-run cache entry is scoped to the PR's own ref and is invisible
   # to every other PR — so without this trigger the `Save …` steps below are
-  # unreachable and the restore steps are a permanent miss. A push run also
-  # carries the macOS leg, which is the only place the full macOS suite ever
-  # runs against a commit that is actually on main (see resolve-provider). It
-  # still skips the reporting aliases, so it detects rather than gates.
+  # unreachable and the restore steps are a permanent miss. A push run carries
+  # no macOS leg and no reporting aliases: main's macOS health is the merge
+  # group's `macos` job on the same commit (see resolve-provider).
   push:
     branches: [main]
   # Run the required macos/linux/windows alias gates on queued merge groups so
@@ -745,26 +744,30 @@ jobs:
           ])
 
           include = []
-          # The macOS leg runs for EVERY event, push included. A push to main is
-          # the only lane that runs the full macOS suite against a commit that
-          # is actually on main: pull-request heads skip the test step entirely
-          # and merge groups validate a synthetic merge, so without this a break
-          # on main stays invisible until a queued batch inherits it roughly
-          # forty minutes later and reports the failure against a batch whose
-          # name is not the culprit.
+          # The macOS leg runs on every event EXCEPT push. main's macOS health
+          # is measured by the merge queue, not by a push run: under the queue's
+          # MERGE method the commit that lands on main IS the merge-group head,
+          # so the merge_group run's required `macos` job already tested main's
+          # exact commit. tools/ci/base_poison_detector.py reads that job by the
+          # tip's sha.
           #
-          # The draw on the self-hosted Macs is bounded to one leg at a time:
-          # push runs share the `build-<ref>` concurrency group, so consecutive
-          # merges to main serialize rather than fan out. On push the matrix
-          # child also keeps its descriptive name (see the `name:` expression on
-          # the build job) instead of claiming the required `macos` context, so
-          # this detects a broken main without gating anything.
-          include.append({
-              "key": "macos",
-              "name": "macOS (ARM64)",
-              "runs_on_json": macos_runs_on,
-              "provider": macos_provider,
-          })
+          # A push leg on the self-hosted Macs never produced that evidence and
+          # blocked the rest of the push run. Push runs carry no event class, so
+          # the leg kept the legacy base selector, which the event-class pool
+          # does not serve: it queued for hours while holding the
+          # `build-refs/heads/main` concurrency group (cancel-in-progress is
+          # false for push), and every later push run was cancelled while
+          # pending with zero jobs, taking the Linux/Windows cache-save steps
+          # with it. Without the leg, a push run finishes on hosted runners.
+          # tools/scripts/test_fork_pr_runner_routing.py pins that no job
+          # reachable on push routes to a self-hosted runner.
+          if EVENT_NAME != "push":
+              include.append({
+                  "key": "macos",
+                  "name": "macOS (ARM64)",
+                  "runs_on_json": macos_runs_on,
+                  "provider": macos_provider,
+              })
           # Windows is advisory, GitHub-hosted, and slow, and a run carries four
           # Windows jobs (this leg plus the three compile gates below). The repo
           # gets a fixed pool of concurrent GitHub-hosted jobs, so a handful of
@@ -1273,7 +1276,11 @@ jobs:
       && needs.resolve-provider.result == 'success'
       && needs.classify.result == 'success'
       && needs.classify.outputs.a2t_receipt_verification_required == 'true'
-    runs-on: ${{ fromJSON(needs.resolve-provider.outputs.macos_runs_on_json) }}
+    # GitHub-hosted, never the self-hosted gate selector: on push that selector
+    # carries no event class, so no gate runner serves it and the job would
+    # hold main's push concurrency group while queued. The verifier needs only
+    # macOS (it refuses any other RUNNER_OS), git and python3.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
         with:
@@ -1544,7 +1551,15 @@ jobs:
           chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
           if [ ! -x "$chrome" ]; then
             archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
-            curl --fail --location --retry 3 --output "$archive" \
+            # A gate VM has lost DNS for storage.googleapis.com, or had the
+            # transfer reset, for tens of seconds at a time, failing the
+            # required macos check before the build started. Plain `--retry`
+            # treats neither a resolve failure (exit 6) nor a receive reset
+            # (exit 56) as transient, so they must be named with
+            # `--retry-all-errors`; the SHA-256 check below still rejects any
+            # bad bytes a retried transfer could leave behind.
+            curl --fail --location --retry 8 --retry-all-errors --retry-delay 15 \
+              --connect-timeout 30 --output "$archive" \
               https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
             expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
             actual=$(shasum -a 256 "$archive" | awk '{print $1}')
@@ -1554,6 +1569,53 @@ jobs:
           fi
           [ -x "$chrome" ] || { echo "Chrome executable missing after verified extraction" >&2; exit 1; }
           echo "PULP_DESIGN_BROWSER=$chrome" >> "$GITHUB_ENV"
+
+      - name: Fetch pulp-rs crates
+        shell: bash
+        env:
+          PULP_CARGO_NET_OFFLINE: ${{ vars.PULP_CARGO_NET_OFFLINE || '0' }}
+        run: |
+          set -euo pipefail
+          # experimental/pulp-rs (the user-facing Rust CLI) is built by a CMake
+          # custom command and tested by several `cargo test` ctests. On an
+          # ephemeral gate VM the cargo registry cache starts empty, so those
+          # commands downloaded ~100 crates from crates.io in the middle of
+          # the Build and Test steps. A VM that lost DNS for a couple of
+          # minutes ("Could not resolve host: index.crates.io") then failed
+          # the required macos check as a compile or test failure. Fetch the
+          # locked set here instead, with spaced retries, so the build and
+          # the ctests find every crate already on disk.
+          manifest=experimental/pulp-rs/Cargo.toml
+          cargo_bin="$(command -v cargo || true)"
+          if [ -z "$cargo_bin" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+            cargo_bin="$HOME/.cargo/bin/cargo"
+          fi
+          if [ -z "$cargo_bin" ]; then
+            # CMake skips pulp-rs and its ctests when it finds no cargo.
+            echo "cargo is not on PATH; CMake does not build pulp-rs here, nothing to fetch"
+            exit 0
+          fi
+          delay="${PULP_CARGO_FETCH_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if "$cargo_bin" fetch --manifest-path "$manifest"; then
+              echo "Fetched the crates in ${manifest%/*}/Cargo.lock"
+              # Opt-in: with every crate on disk the build and test commands
+              # need no network, so a repo that sets PULP_CARGO_NET_OFFLINE=1
+              # makes any later fetch fail loudly instead of reaching out.
+              if [ "$PULP_CARGO_NET_OFFLINE" = "1" ]; then
+                echo "CARGO_NET_OFFLINE=true" >> "$GITHUB_ENV"
+                echo "CARGO_NET_OFFLINE=true for the remaining steps"
+              fi
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::cargo fetch attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+            fi
+          done
+          # Not fatal: the build's own cargo invocation still tries the
+          # registry, which is exactly what happened before this step existed.
+          echo "::warning::could not fetch ${manifest%/*}/Cargo.lock after 3 attempts; the pulp-rs build and its ctests will try crates.io again"
 
       # Save scope is deliberately narrower than restore scope: GitHub-hosted
       # Linux/Windows only, and only on a push to main.
@@ -2260,6 +2322,31 @@ jobs:
           fi
           exit "$ctest_exit"
 
+      # SHADOW instruments for the merge group, one step (tools/ci/
+      # merge_group_shadows.py): binary identity vs the PR head's receipt,
+      # the graph's affected-test set, and flake exoneration of a failed
+      # ctest. Each annotates and changes no outcome; the runner isolates
+      # every instrument and always exits 0. What each measures, and the
+      # proxies read from its annotation, are documented in
+      # docs/guides/local-ci.md and the `ci` skill.
+      - name: Merge-group shadow instruments
+        if: >-
+          always() && github.event_name == 'merge_group' && runner.os == 'macOS'
+          && steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          PULP_GH_CLI: gh
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/ci/merge_group_shadows.py run \
+            --build-dir "$PULP_BUILD_DIR" --source-root "$GITHUB_WORKSPACE" \
+            --repository "$GITHUB_REPOSITORY" --merge-sha "$GITHUB_SHA" --token "$GH_TOKEN" \
+            --junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" \
+            --selected-json "$RUNNER_TEMP/ctest-evidence/selected.json" \
+            --ctest-outcome "${{ steps.ctest.outcome }}" --hours 24 \
+            --work-dir "$RUNNER_TEMP/merge-group-shadows" || true
+
       # Observation, not a gate. A ctest SKIP reads exactly like a PASS on this
       # check, so a test that has never run once is indistinguishable from one
       # that runs and passes every time. This records the non-runs — names,
@@ -2411,7 +2498,14 @@ jobs:
           tar -czf "$SDK_ARTIFACT_TAR" -C "$SDK_ARTIFACT_DIR" .
           test -s "$SDK_ARTIFACT_TAR"
 
+      # The artifact service has reset the upload connection (ECONNRESET) on a
+      # gate VM after every test passed, failing the required check on a green
+      # build. The action's own retries all land inside the same outage, so a
+      # failed first attempt is retried once more after a pause. The retry
+      # carries no continue-on-error: downstream consumers rely on this exact
+      # artifact existing, so a job that could not publish it still fails.
       - name: Upload exact GPU-audio SDK (macOS ARM64)
+        id: gpu_audio_sdk_upload
         if: >-
           runner.os == 'macOS'
           && matrix.key == 'macos'
@@ -2419,6 +2513,7 @@ jobs:
           && (github.event_name == 'pull_request'
               || github.event_name == 'merge_group'
               || github.event_name == 'workflow_dispatch')
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
@@ -2428,6 +2523,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+      - name: Wait before retrying the GPU-audio SDK upload
+        if: steps.gpu_audio_sdk_upload.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::GPU-audio SDK upload failed; retrying once in 90s"
+          sleep 90
+
+      - name: Upload exact GPU-audio SDK (macOS ARM64, retry)
+        if: steps.gpu_audio_sdk_upload.outcome == 'failure'
+        uses: actions/upload-artifact@v5
+        with:
+          name: pulp-gpu-audio-sdk-${{ github.sha }}-${{ matrix.key }}
+          path: |
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.tar.gz
+            ${{ runner.temp }}/pulp-gpu-audio-sdk.receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          # A reset can land after the artifact record was created; replace
+          # that partial record rather than failing on the name conflict.
+          overwrite: true
 
       - name: Test A2T structural receipt issuer
         if: runner.os == 'macOS' && matrix.key == 'macos'
@@ -2516,7 +2633,10 @@ jobs:
         # because ctest.junit.xml is the machine-readable record of which tests
         # did NOT run, and a run where everything skipped is green: the report
         # is most needed on exactly the runs a failure-only upload discards.
+        # Diagnostics only: an artifact-service reset (ECONNRESET) here after
+        # every test passed must never turn a green gate red.
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v5
         with:
           name: ctest-logs-${{ matrix.key }}

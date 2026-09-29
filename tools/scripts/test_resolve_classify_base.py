@@ -360,26 +360,20 @@ class CacheSaveScopeTests(unittest.TestCase):
                 # non-macOS runners to the save path.
                 self.assertNotIn("runner.os != 'macOS' ||", condition)
 
-    def test_macos_leg_runs_on_the_push_matrix(self) -> None:
-        # A push run publishes the Linux/Windows caches AND carries macOS,
-        # because nothing else runs the full macOS suite against main: a
-        # pull-request head skips the test step and a merge group validates a
-        # synthetic merge commit. Dropping the leg again would restore the
-        # window in which a break on main is invisible until a queued batch
-        # inherits it and reports against an innocent entry.
-        #
-        # The draw is bounded rather than unlimited: push runs share the
-        # refs/heads/main concurrency group, so consecutive merges serialize.
+    def test_push_matrix_omits_the_macos_leg(self) -> None:
+        # A push run publishes the Linux/Windows caches and nothing else. The
+        # merge group's required `macos` job already tested the commit that
+        # lands; a push leg on the self-hosted selector queued unserved while
+        # holding main's push concurrency group. tools/ci/
+        # test_build_matrix_contract.py asserts the guard over the parsed
+        # syntax tree, and tools/scripts/test_fork_pr_runner_routing.py runs
+        # the resolver on a push event.
+        self.assertIn('if EVENT_NAME != "push":', self.text)
         self.assertNotIn("PUSH_ONLY_CACHE_EVENTS", self.text)
-        self.assertNotIn("macOS leg omitted", self.text)
-        # tools/ci/test_build_matrix_contract.py asserts the same contract over
-        # the parsed syntax tree, which a differently-spelled event guard
-        # cannot slip past.
 
     def test_push_macos_leg_does_not_claim_the_required_context(self) -> None:
-        # The push leg detects; it must not gate. The matrix child renames
-        # itself to the required `macos` context only for the events whose
-        # branch protection consumes it.
+        # The matrix child renames itself to the required `macos` context only
+        # for the events whose branch protection consumes it.
         self.assertIn(
             "(github.event_name == 'pull_request' || github.event_name == "
             "'workflow_dispatch' || github.event_name == 'merge_group') && "

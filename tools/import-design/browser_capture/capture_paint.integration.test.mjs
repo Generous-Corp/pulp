@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   escapeRegExp,
   execute,
   installedBrowser,
@@ -22,7 +24,7 @@ import {
 } from "./capture_integration_support.mjs";
 
 test("indicator-free capture removes only declared moving art",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) return context.skip("no compatible system browser is installed");
     const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-static-art-"));
@@ -51,7 +53,7 @@ test("indicator-free capture removes only declared moving art",
   });
 
 test("a panel without declared indicators reuses its exact screenshot",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) return context.skip("no compatible system browser is installed");
     const root = await mkdtemp(path.join(os.tmpdir(), "pulp-browser-static-zero-"));
@@ -77,7 +79,7 @@ test("a panel without declared indicators reuses its exact screenshot",
 // keeps the compositor busy forever, so this fails loudly — as a timeout or as
 // capture-frame-not-deterministic — if the freeze ever stops taking effect.
 test("real browser capture freezes a canvas animation and names its browser",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -118,7 +120,7 @@ test("real browser capture freezes a canvas animation and names its browser",
         "--initial-width", "320",
         "--initial-height", "240",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const envelope = JSON.parse(
@@ -187,7 +189,7 @@ test("real browser capture freezes a canvas animation and names its browser",
 // collapsed to one hairline, a dashed left edge silently gone, a layered panel
 // stacked by a z-index guess instead of by Chromium's answer.
 test("real browser capture round-trips whole-panel paint properties",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -262,7 +264,7 @@ test("real browser capture round-trips whole-panel paint properties",
         "--initial-width", "320",
         "--initial-height", "240",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const snapshot = JSON.parse(

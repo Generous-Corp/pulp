@@ -881,10 +881,11 @@ describe('host-config materialized metadata', () => {
     });
 
     // `opacity` and `color` are written by the captured-metadata pass itself.
-    // Suppressing their commits would leave React's value standing until some
-    // later structural commit restored the captured one — a flicker, not a
-    // saving. They must take the ordinary path however cheap they look.
-    it('re-applies metadata for channels the metadata pass owns', () => {
+    // A runtime that cannot put the captured value back per node (no
+    // `__pulpReconcileMaterializedPaint__`) must keep the ordinary path, or
+    // React's value would stand until some later structural commit restored
+    // the captured one.
+    it('re-applies metadata for owned channels when the runtime cannot reconcile them', () => {
         const spy = armSpy();
         const commitUpdate = PulpHostConfig.commitUpdate as
             (...args: unknown[]) => void;
@@ -900,5 +901,63 @@ describe('host-config materialized metadata', () => {
             { color: '#111' }, { color: '#222' }, null);
         resetAfterCommit?.({});
         expect(spy.count()).toBe(2);
+    });
+
+    describe('with an importer runtime that publishes what it reads', () => {
+        const host = globalThis as unknown as Record<string, unknown>;
+        afterEach(() => {
+            delete host.__pulpMaterializedSelectorAttributes__;
+            delete host.__pulpReconcileMaterializedPaint__;
+        });
+        const commitUpdate = PulpHostConfig.commitUpdate as
+            (...args: unknown[]) => void;
+        const commit = (oldProps: Record<string, unknown>,
+                        newProps: Record<string, unknown>) => {
+            commitUpdate(instance('a'), null, 'view', oldProps, newProps, null);
+            resetAfterCommit?.({});
+        };
+
+        it('treats a data-* change no selector names as paint-only', () => {
+            const spy = armSpy();
+            host.__pulpMaterializedSelectorAttributes__ = new Set(['data-open']);
+            commit({ 'data-hover': 'no' }, { 'data-hover': 'yes' });
+            expect(spy.count()).toBe(0);
+            // CONTROL: the named attribute on the same instrument re-applies.
+            commit({ 'data-open': 'no' }, { 'data-open': 'yes' });
+            expect(spy.count()).toBe(1);
+        });
+
+        it('keeps data-* geometric when the runtime publishes no vocabulary', () => {
+            const spy = armSpy();
+            commit({ 'data-hover': 'no' }, { 'data-hover': 'yes' });
+            expect(spy.count()).toBe(1);
+        });
+
+        it('reconciles an owned colour instead of re-applying', () => {
+            const spy = armSpy();
+            const reconciled: unknown[] = [];
+            host.__pulpMaterializedSelectorAttributes__ = new Set<string>();
+            host.__pulpReconcileMaterializedPaint__ =
+                (id: string, changes: unknown) => { reconciled.push([id, changes]); };
+            commit({ color: '#111', opacity: 1, cursor: 'a' },
+                { color: '#222', opacity: 0.5, cursor: 'b' });
+            expect(spy.count()).toBe(0);
+            expect(reconciled).toEqual([['a', { color: '#222', opacity: 0.5 }]]);
+            // A geometric commit takes the pass, which rewrites captured paint
+            // itself, so it is not reconciled separately.
+            commit({ color: '#222', width: 1 }, { color: '#333', width: 2 });
+            expect(spy.count()).toBe(1);
+            expect(reconciled).toHaveLength(1);
+        });
+
+        it('keeps a colour geometric when a selector names its attribute', () => {
+            const spy = armSpy();
+            host.__pulpMaterializedSelectorAttributes__ = new Set(['fill']);
+            host.__pulpReconcileMaterializedPaint__ = () => 0;
+            commit({ fill: '#111' }, { fill: '#222' });
+            expect(spy.count()).toBe(1);
+            commit({ color: '#111' }, { color: '#222' });
+            expect(spy.count()).toBe(1);
+        });
     });
 });

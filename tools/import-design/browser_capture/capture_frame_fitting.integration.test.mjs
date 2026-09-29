@@ -13,12 +13,18 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   execute,
   installedBrowser,
 } from "./capture_integration_support.mjs";
 
+// Fitting captures the page, reloads it at the authored frame and captures
+// again inside one deadline.
+const FIT_RELOAD_DEADLINE_MS = CAPTURE_DEADLINE_MS * 3 / 2;
+
 test("authored-frame fitting reloads once at a contained fixed point",
-  { timeout: 60000 }, async (context) => {
+  { timeout: captureCaseTimeout(1, FIT_RELOAD_DEADLINE_MS) }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -48,7 +54,7 @@ test("authored-frame fitting reloads once at a contained fixed point",
         "--initial-width", "1280",
         "--initial-height", "800",
         "--dpr", "2",
-        "--timeout-ms", "45000",
+        "--timeout-ms", String(FIT_RELOAD_DEADLINE_MS),
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 });
 
@@ -74,7 +80,7 @@ test("authored-frame fitting reloads once at a contained fixed point",
   });
 
 test("authored-frame fitting rejects a viewport-relative non-fixed point",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -103,7 +109,7 @@ test("authored-frame fitting rejects a viewport-relative non-fixed point",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-authored-viewport-nonconvergent"));
@@ -113,7 +119,7 @@ test("authored-frame fitting rejects a viewport-relative non-fixed point",
   });
 
 test("authored-frame fitting rejects a root lost before sidecar collection",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -148,7 +154,7 @@ test("authored-frame fitting rejects a root lost before sidecar collection",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "20000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-authored-frame-unavailable"));
@@ -163,7 +169,7 @@ test("authored-frame fitting rejects a root lost before sidecar collection",
   });
 
 test("authored-frame fitting rejects a root lost before accepted pixels",
-  { timeout: 45000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -206,7 +212,7 @@ test("authored-frame fitting rejects a root lost before accepted pixels",
         "--initial-width", "1280",
         "--initial-height", "300",
         "--dpr", "2",
-        "--timeout-ms", "30000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
         "--fit-authored-frame",
       ], { maxBuffer: 1024 * 1024 }), (error) =>
         error.stderr.includes("capture-authored-frame-unavailable"));
@@ -221,7 +227,7 @@ test("authored-frame fitting rejects a root lost before accepted pixels",
   });
 
 test("authored-frame fitting rejects a missing or uncontained root",
-  { timeout: 60000 }, async (context) => {
+  { timeout: captureCaseTimeout(2) }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -261,7 +267,7 @@ test("authored-frame fitting rejects a missing or uncontained root",
           "--initial-width", "1280",
           "--initial-height", "300",
           "--dpr", "2",
-          "--timeout-ms", "20000",
+          "--timeout-ms", String(CAPTURE_DEADLINE_MS),
           "--fit-authored-frame",
         ], { maxBuffer: 1024 * 1024 }), (error) =>
           error.stderr.includes(fixture.code));

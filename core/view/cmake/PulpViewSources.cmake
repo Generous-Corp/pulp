@@ -76,6 +76,7 @@ target_sources(pulp-view-core PRIVATE
     src/screenshot_gpu.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
+    src/canvas_replay_state.cpp
     src/native_view_host.cpp
     src/gpu_surface_observer.cpp
     src/plugin_frame_renderer.cpp
@@ -97,6 +98,7 @@ target_sources(pulp-view-core PRIVATE
     src/waveform_headless_render_backend.cpp
     src/frame_clock.cpp
     src/host_frame_pump.cpp
+    src/gpu_acquire_diagnostics.cpp
     src/hover_cursor.cpp
     src/motion.cpp
     src/motion_geometry.cpp

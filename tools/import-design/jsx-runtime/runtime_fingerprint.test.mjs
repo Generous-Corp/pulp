@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import {
+  DEFAULT_FINGERPRINT_PATH,
   loadRuntimeFingerprint,
   runtimeFingerprintBanner,
 } from './runtime_fingerprint.mjs';
+import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs';
 
 test('the banner carries the manifest revision the staleness checks parse', () => {
   const manifest = loadRuntimeFingerprint();
@@ -39,4 +41,30 @@ test('an invalid revision is refused rather than stamped', () => {
   const path = join(mkdtempSync(join(tmpdir(), 'pulp-fp-')), 'fp.json');
   writeFileSync(path, JSON.stringify({ schema: 1, revision: 0, fixes: [] }));
   assert.throws(() => loadRuntimeFingerprint(path), /positive integer/);
+});
+
+// A signature the SDK runtime does not itself contain would mark every
+// bundle stale for that fix forever, or -- worse -- a common identifier would
+// mark every bundle current. Each one must name code that ships: the generated
+// materialized entry or the @pulp/react source compiled into the same bundle.
+test('every fix signature names code the SDK runtime ships', () => {
+  const entry = buildMaterializedRuntimeEntry({
+    capturedCssVariables: {}, presentationTime: 0, requestedState: '',
+    textBindings: [], layoutBindings: [], paintBindings: [],
+    runtimeDocumentAsset: null, sidecar: null, productPrelude: '',
+    surfaceBackground: null, authoredLeft: 0, authoredTop: 0, authoredWidth: 1,
+    authoredHeight: 1, authoredTransform: null, visualAuthority: null,
+    stateAtlas: [], visualWidth: 1, visualHeight: 1, canvasBindings: [],
+    behaviorCanvasAnchors: [], capturedPaintAuthorityAnchors: [],
+  });
+  const srcDir = resolve(dirname(DEFAULT_FINGERPRINT_PATH), 'src');
+  const reactSource = readdirSync(srcDir).filter(name => name.endsWith('.ts'))
+    .map(name => readFileSync(resolve(srcDir, name), 'utf8')).join('\n');
+  const manifest = loadRuntimeFingerprint();
+  assert.ok(manifest.fixes.length > 0);
+  for (const fix of manifest.fixes) {
+    if (!fix.signature) continue;
+    assert.ok(entry.includes(fix.signature) || reactSource.includes(fix.signature),
+      `${fix.id}: signature ${fix.signature} is not in the SDK runtime`);
+  }
 });

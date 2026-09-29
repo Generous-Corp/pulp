@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 57,
+  "manifest_revision": 58,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -6413,7 +6413,7 @@
     {
       "key": "signal.spectral-mask-processor",
       "domain": "signal",
-      "summary": "Streaming WOLA spectral masking with race-free frame-boundary publication, mask interpolation, and latency-aligned dry/wet mixing.",
+      "summary": "Streaming WOLA spectral masking with race-free frame-boundary publication, mask interpolation, latency-aligned dry/wet mixing, and optional time-domain wet-source and frame-domain pre-mask source stages.",
       "rt_class": "mixed",
       "lifecycle": {
         "construction": "control",
@@ -11666,17 +11666,38 @@
         ],
         "freeze_hold.hpp": [
           {
+            "class": "FreezeHoldSnapshotT",
+            "qualified_name": "pulp::signal::FreezeHoldSnapshotT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "prepare(int fft, int ch, int hop)",
+              "valid_geometry(int fft, int ch, int hop)",
+              "serialized_size(int fft, int ch)",
+              "valid()",
+              "write_bytes(std::vector<std::uint8_t>& out)",
+              "read_bytes(const std::uint8_t* data, std::size_t size, FreezeHoldSnapshotT& out)"
+            ],
+            "enums": []
+          },
+          {
             "class": "FreezeHoldT",
             "qualified_name": "pulp::signal::FreezeHoldT",
             "template": "typename SampleType = float",
             "methods": [
-              "prepare(const Config& config)",
+              "prepare(const Config& requested)",
               "reset()",
-              "checked_retained_bytes(const Config& config, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
+              "resolve(const Config& config)",
+              "frames_for_seconds(double seconds, const Config& config)",
+              "checked_retained_bytes(const Config& requested, std::uint64_t target_max_bytes, std::uint64_t& bytes)",
+              "config()",
+              "set_capture_frames(int frames)",
+              "set_capture_seconds(double seconds)",
+              "capture_frames()",
+              "clear_history()",
               "set_frozen(bool frozen)",
               "is_engaged()",
               "is_latched()",
-              "process_group(std::complex<SampleType>* const* frames, int channels, int num_bins)"
+              "is_releasing()"
             ],
             "enums": []
           }
@@ -14427,6 +14448,24 @@
         ],
         "spectral_mask_processor.hpp": [
           {
+            "class": "SpectralPreMaskStageT",
+            "qualified_name": "pulp::signal::SpectralPreMaskStageT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process_frames(std::complex<SampleType>* const* frames, int channels, int num_bins)"
+            ],
+            "enums": []
+          },
+          {
+            "class": "SpectralWetSourceStageT",
+            "qualified_name": "pulp::signal::SpectralWetSourceStageT",
+            "template": "typename SampleType = float",
+            "methods": [
+              "process_block(const SampleType* const* input, SampleType* const* wet, int channels, int num_samples)"
+            ],
+            "enums": []
+          },
+          {
             "class": "SpectralMaskProcessorT",
             "qualified_name": "pulp::signal::SpectralMaskProcessorT",
             "template": "typename SampleType = float",
@@ -14438,13 +14477,13 @@
               "publish_table(const Table& table)",
               "set_layout_rt(const Layout& layout)",
               "process_frame(std::complex<SampleType>* const* frames, int num_bins)",
+              "set_pre_mask_stage(PreMaskStage* stage)",
+              "pre_mask_stage()",
+              "set_wet_source_stage(WetSourceStage* stage)",
+              "wet_source_stage()",
               "set_mix(SampleType mix)",
               "set_mix_ramp_samples(int samples)",
-              "set_mix_curve(MixCurve curve)",
-              "prepared()",
-              "latency_samples()",
-              "maximum_tail_samples()",
-              "num_bins()"
+              "set_mix_curve(MixCurve curve)"
             ],
             "enums": []
           }

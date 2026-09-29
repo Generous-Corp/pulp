@@ -1,6 +1,6 @@
 ---
 name: view-bridge
-description: Editor lifecycle and multi-view attach for Pulp plugins — when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles.
+description: Plugin editors — load before writing or changing a JS/scripted plugin UI that animates, shows meters, analyzers or modulation, or handles pointer drawing, drag or zoom, and for editor lifecycle and multi-view attach. The realtime performance checklist covers React commits per pointer move or frame, pushing native data with dispatch_native_message instead of load_script, readout relayout, VisualizationBridge backlog policy and frame-time modulation display. Lifecycle covers when to override Processor::create_view(), the open → notify_attached → resize → close protocol, release_view() ownership rules, and secondary-view roles.
 ---
 
 # ViewBridge skill
@@ -207,6 +207,54 @@ the host never sees it either and the spacebar dies with no visible cause.
 
 Pinned headlessly by `test/test_plugin_key_routing.cpp`, where every case that
 asserts consumption has a sibling asserting the key it must hand back.
+
+### Plain-key global shortcuts: standalone only by default
+
+A script `keydown` listener that calls `preventDefault()` has CONSUMED the key:
+the plug-in view reports it handled and the DAW never sees it. Keys it leaves
+alone go back to the host (pinned by `test_plugin_view_host_script_keys.mm`).
+The framework therefore cannot rescue a host whose keys an editor claims — the
+policy has to be the editor's, and it needs one fact to decide: where it lives.
+
+- **Ask `hostKind()`.** Scripts get `"plugin"`, `"standalone"`, or `"unknown"`
+  (a preview or a bridge nothing configured). `ViewBridge` sets it from
+  `Processor::editor_host_kind()`, which `StandaloneApp` marks `standalone` and
+  every plug-in adapter leaves `plugin`. The session keeps it across hot
+  reloads (`ScriptedUiSession::set_host_kind`). ViewBridge declares it when the
+  editor opens, which is after a processor-owned session's first render, so an
+  editor that builds its own `ScriptedUiSession` inside `create_view()` should
+  call `session->set_host_kind(...)` before `load()`, or read `hostKind()` at
+  keydown/render time rather than caching it at load.
+- **Plain-key global shortcuts (a bare letter or digit that changes editor
+  state) are standalone-only by default.** A DAW owns its plain keys — Logic's
+  Musical Typing plays notes on A S D F G H J K L ; ' and W E T Y U O P, digits
+  pick octave/velocity — and no host lets a plug-in ask whether that is open.
+  In `"plugin"`, return from the listener WITHOUT `preventDefault()`; offer a
+  user setting to opt back in.
+- **Keyboard inside something the user explicitly opened stays the editor's**:
+  arrows/Enter/Escape in an open menu or dialog, typing in a focused field.
+- **Modifier chords are different.** Cmd/Ctrl chords reach the editor through
+  `-performKeyEquivalent:` / `on_global_key` before the host's menus; claiming
+  one (Cmd+Z) takes it from the host for as long as the editor window is key.
+  Claim only chords the editor genuinely owns.
+- **Every hint that names a key shows only while that key is live** — a badge
+  or "A to cycle" in a DAW where A plays a note is a lie.
+
+### Wheel, pinch and rotate resolve through open overlays
+
+`deliver_mouse_wheel` and the macOS magnify/rotate handlers ask
+`route_passive_pointer(root, pt)` before the tree hit test, the way presses
+(`route_press_to_active_overlay`) and hovers (`hover_target_at`) already do. An
+overlay that escapes its ancestors' bounds — a full-editor scrim mounted inside
+a toolbar button — paints over the content, but the tree hit test cannot descend
+into it there and lands on whatever it covers, so a scroll over a dialog's
+backdrop used to zoom the plot behind it. Inside a shown overlay the input goes
+to the overlay's own subtree; outside every overlay while a MODAL one is open
+(`ModalOverlay`, or an overlay with `AccessRole::dialog`) it is dropped;
+otherwise the tree answers as before. Hidden overlays count for nothing — and
+`root_overlay_owns_keyboard` likewise ignores a claimed popover that is not on
+screen, so a dialog that stays mounted while closed cannot hold the DAW's
+keyboard.
 
 ## `release_view()` — for containers that own the view
 
@@ -2306,13 +2354,83 @@ block. When enqueuing overlays from host code, push onto the *painting root's*
 `interaction().overlay_queue`, not a process-global queue, or the overlay
 paints on the wrong editor (see `standalone.cpp`).
 
-## High-rate data pushes must not drive the page's render loop
+## Realtime scripted editors: the performance checklist
 
-A native editor that pushes analyzer or meter data into its page every tick
-must not make `requestAnimationFrame` callbacks run outside the frame. Each
-extra drain of a self-rearming `draw()` is a full scene draw; measured on a
-materialized React import, a `load_script` push per audio-rate update drained
-rAF ~44 extra times a second at ~6.5 ms each and halved the frame rate.
+Read this **while writing or changing** a scripted/JS editor that animates:
+meters, an analyzer, a modulation overlay, pointer drawing, drag or zoom. An
+editor that shows live audio does three things at display rate at once —
+receives data from the audio side, reacts to the pointer, paints — and the
+failures come from one of them quietly doing more work per frame than it looks
+like. None of them show in a screenshot, a pixel diff, a browser fixture or a
+unit test; they show up as a feel. One survivor keeps the stall, so apply every
+item. Proving the result — traced capture, test signal, in-window drag,
+per-phase frame gaps, validity gates, environment traps — is the `trace-analysis`
+skill: its "Measurement mistakes that produce confident wrong answers" table
+first, then the copy-pasteable workflow in
+`.agents/skills/trace-analysis/references/ui_jank_playbook.md`, whose
+worst-frame table maps each trace signature back to the item below that fixes
+it. The long-form rationale is `docs/guides/interaction-cost.md`.
+
+### 1. No framework commit on a per-move, per-frame or per-update path
+
+Never commit React — or anything else that re-applies the whole document —
+per `pointermove`, hover, animation tick, meter or analyzer update, **or at
+`pointerdown`/`pointerup` of a gesture**. A commit at release lands exactly
+when the display should resume; one at press delays the first drag frame.
+Keep pointer, hover, gesture and animation state in refs; draw from the refs on
+the canvas and request a repaint; write small DOM text (a readout, a tooltip, a
+status pill) imperatively through `textContent` and its position. Commit only
+for structural changes (a panel opens, a mode switches).
+
+In a materialized/captured import every commit re-applies the captured import
+metadata (the `import-design` skill explains that mechanism). Scoping cuts its
+bridge traffic but not its per-commit document walk, and an app vendoring an
+older `runtime.js` pays the full pass. Measured on one captured-import editor:
+an LFO over 64 bands held 60 fps with the mouse still and stalled 100 ms–2.5 s
+per frame while it moved; each `pointermove` cost ~42 ms against ~0.2 ms for a
+`mousemove` on the same element, with ~150 `getLayoutBoxMetrics`, ~160
+`setFlex`, ~195 `setFontFamily` and ~12 layout passes per event, while paint
+(~2.5 ms) and `gpu_acquire` (~1–4 ms) stayed cheap. With the rule applied
+`pointermove` fell to ~0.6 ms and no >100 ms stall remained.
+
+Audit every commit source:
+
+1. hover/pointer state in React state — including "only when the target
+   changes", which on dense targets still commits nearly every move;
+2. a status/readout effect publishing through the root's (or an ancestor's)
+   state;
+3. same-value setter calls — a same-value `setCursor(...)` still committed in
+   this runtime, so compare before calling;
+4. one handler registered as both `onPointerMoveCapture` and `onPointerMove`
+   (runs twice per move);
+5. a transient overlay hidden by a timer (`setVisible(false)`) and re-shown
+   through state — keep it mounted and restart the timer imperatively;
+6. a projection or sync path (host automation, native state pushes) calling a
+   React setter with a value equal to the one it holds. Compare before
+   `setState`, or keep derived state in refs. In one spectrum editor an
+   unconditional `setMacroState(newArray)` / `setValue({...})` re-rendered the
+   plot on every host automation change: a viewport change fell from ~33 ms to
+   ~0.06 ms and an LFO-shape change from ~20 ms to ~0.05 ms once guarded.
+
+Quick check before a trace: wrap `__dispatch__(id, type, payload)` with a timer
+and compare `pointermove` against `mousemove` on the same element; orders of
+magnitude apart means the handler commits.
+
+### 2. High-rate native→JS data goes through `dispatch_native_message`
+
+Meters, analyzer frames and modulation frames arrive at audio-hop rate. Push
+them with `WidgetBridge::dispatch_native_message(receiver, type, payload)`:
+typed arguments cross the engine binding directly, no source is generated or
+parsed, microtasks are pumped, and `requestAnimationFrame` callbacks wait for
+the host's frame tick.
+
+Never push per-tick data with `load_script`. It parses JavaScript per push,
+and it must not make rAF callbacks run outside the frame: each extra drain of a
+self-rearming `draw()` is a full scene draw. Before SDK v0.878 every
+`load_script` flushed rAF — measured on a materialized React import, one to two
+extra full redraws per push (~44 extra drains a second at ~6.5 ms each,
+roughly 290 ms of redraw per second with audio playing), halving the frame
+rate. An app pinned to an older SDK still pays that.
 
 - `WidgetBridge::load_script` flushes pending rAF only until the host's frame
   pump is live (the first `service_frame_callbacks()`). After that it leaves
@@ -2320,16 +2438,144 @@ rAF ~44 extra times a second at ~6.5 ms each and halved the frame rate.
   script load with no pump still materialize synchronously; a host that drives
   only `poll_async_results()` never goes live and keeps the eager flush.
   `frame_pump_live()` reports which regime a bridge is in.
-- Prefer `dispatch_native_message(receiver, type, payload)` for per-tick data:
-  typed arguments, no source generation or parse, microtasks pumped, rAF left
-  to the frame tick.
-- A spectrum display that polls `VisualizationBridge` from its frame tick
-  should set `VisualizationConfig::backlog_policy =
-  VisualizationBacklogPolicy::latest_window`. With the default `in_order`
-  policy and a `max_frames_per_poll` budget, a consumer polling slower than the
-  hop rate falls behind, overflows the capture tap, and the resulting
-  discontinuity blanks the spectrum until a full `fft_size` refills —
-  a freeze/jump cycle that looks like the analyzer "disappearing".
+
+### 3. Numeric readouts: throttle to ~10 Hz and pin the width
+
+Digits faster than about 10 Hz are unreadable, and each write is a text shape.
+Give the readout an explicit width sized for its widest string (sign, digits,
+unit): `Label::set_text` skips layout invalidation only when the horizontal
+axis is pinned and the line box is unchanged, so an intrinsic-width readout
+dirties layout on every digit change — a Yoga pass over every node. Do not rely
+on CSS `font-variant-numeric: tabular-nums` in the scripted runtime; the bridge
+does not map it.
+
+### 4. Analyzer: never let a slow UI overflow the capture
+
+A spectrum display that polls `VisualizationBridge` from its frame tick should
+set `VisualizationConfig::backlog_policy =
+VisualizationBacklogPolicy::latest_window`. With the default `in_order` policy
+and a `max_frames_per_poll` budget, a consumer polling slower than the hop rate
+falls behind, overflows the capture tap, and the resulting discontinuity blanks
+the spectrum until a full `fft_size` refills — about 0.2 s blank per overflow in
+a measured spectrum editor, a freeze/jump cycle users report as the analyzer
+"disappearing".
+
+### 5. Modulation display: evaluate at frame time, crossfade in the audio owner
+
+Repainting the last sample an audio block produced judders, because blocks and
+frames run on unrelated clocks. Publish the modulator's inputs instead — phase
+at a known sample time, rate, clock/sync state, current fade — and evaluate the
+shape at the frame's own timestamp. When the user changes a shape, crossfade
+(about 150 ms) in the audio-side owner and publish the fade position with the
+inputs, so the display draws the blend the audio is actually playing; a
+display-only crossfade drifts from what is heard.
+
+### 6. Budget effects whose cost scales with the signal
+
+Bloom, glow and per-band gradients cost per lit element, so an effect that is
+free on a silent editor can dominate a frame with loud, dense audio. Cap the
+number of glowing elements or reuse one cached gradient, and judge the cost
+with real audio running, never on an idle editor.
+
+## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
+
+`PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.
+On macOS that choice is a no-op: Dawn's Metal swapchain can only toggle
+`CAMetalLayer.displaySyncEnabled`, which Mailbox and Fifo both leave on, so an
+embedded editor is still vsync-paced and `gpu_acquire` (`nextDrawable`) still
+blocks when all three drawables are held. Treat that as a known issue, not
+evidence the policy works. Before changing present modes or adding a
+frame-in-flight gate, capture a trace and read the standalone GPU window's
+`gpu_acquire` args (`frames_in_flight`, `gpu_render_ms`, `late_ms`,
+`refresh_period_ms`) to tell a GPU-bound frame from CPU bunching — see the
+trace-analysis skill. `PULP_GPU_TIMING=1` turns on GPU render timing for a
+standalone window (it relaxes Dawn validation, so it is never on by default),
+and `PULP_AUDIO_DEVICE=null` lets that session run without an audio device.
+
+## Scripted Canvas2D editors: the frame cost is the bridge-call count
+
+A Canvas2D draw in a scripted editor costs roughly a fixed amount per JS→native
+`canvas*` call (measured on a 64-band analyzer editor: ~2.7 µs per call, and
+1,700–2,400 calls a frame). Cut calls, not pixels. Checklist:
+
+- **Measure by counting crossings from JS**, not from the recorded command
+  stream: wrap every `globalThis.canvas*` function with a counter (see
+  `test/test_canvas2d_call_budget.cpp`). `canvasPathPolyline` expands back into
+  `move_to`/`line_to` natively, so the stream cannot tell one batched call from
+  hundreds of per-point ones. `PULP_LOG_CANVAS_PAINT=1` gives the per-paint
+  command mix.
+- **`save()`/`restore()` are cheap now; do not avoid them.** The shim keeps its
+  record of what the native canvas holds (`_sent*`) across them — save()
+  snapshots it with the JS state and restore() puts both back — so unchanged
+  state is not re-sent after every restore. This is sound only because
+  `CanvasWidget`'s replay reverts the Canvas2D drawing state on restore() itself
+  (`core/view/src/canvas_replay_state.hpp`): SkiaCanvas's restore() reverts only
+  matrix and clip, and CoreGraphicsCanvas's reverts the gstate but keeps fill
+  and stroke colours in members, so no backend's own restore() gives Canvas2D
+  semantics. If you add a sticky setter command, give it a
+  `CanvasReplayState::slot_for` slot and a `_sent*` entry in
+  `_SENT_FIELDS`, or restore() will leak it on Skia.
+- **A draw command that sets state implicitly must update the record.**
+  `fill_text` sets the fill colour it carries and `stroke_rect` sets the line
+  width it carries (1 when the call carries none; the shim passes `lineWidth`); the shim writes those values into
+  `_sentFillColor` / `_sentLineWidth`, and the replay notes them. A new such
+  command that skips either side draws with a stale colour after the next
+  cache hit.
+- **Many disjoint segments are one call.** Tick marks and grid lines drawn as
+  `moveTo`/`lineTo` pairs inside one `beginPath()` batch into a single
+  `canvasPathPolyline(id, coords, starts)`; the batch only flushes when another
+  method emits (every emitting method calls `_fp()` first — enforced by
+  `check_canvas_path_flush.py`) or at the 65536-coordinate cap. Stroking each
+  segment separately defeats this.
+- **Static content: use a cached group, not a second canvas.** Grids, scales
+  and labels that do not change per frame go in
+  `ctx.pulpCachedGroup(key, drawFn)`: the first call records drawFn, and every
+  later one is a single `canvasReplayGroup` crossing that does not run drawFn.
+  A second stacked canvas for the static layer still re-sends every call
+  whenever it redraws and adds a widget to paint. The replay runs the stored
+  commands in place, under the current transform, inside an implicit
+  save/restore, so pixels and blend order match calling drawFn directly
+  (Skia and CoreGraphics, `test/test_canvas2d_cached_group.cpp`), and a
+  `restore()` inside the group cannot pop state saved outside it. The content
+  is a function of the key: set every style the group uses inside drawFn and
+  call `ctx.pulpInvalidateGroup(key)` when its inputs change; a canvas resize
+  or a new context drops every group. Groups live beside the frame's command
+  stream, so a retained-frame full clear keeps them, and `canvasReplayGroup`
+  returning false is how the shim learns it must record again. A native
+  consumer of a canvas's commands must walk `CanvasWidget::replay_sequence()`,
+  not `commands()`, or it misses what groups draw. The group replays its
+  commands, not a cached texture, on purpose: `begin_layer(cacheable)` handles
+  do persist across frames (the live Skia surfaces share one
+  `RetainedLayerStore`), but a texture replay matches direct drawing only when
+  the device translation is integer-aligned, and 8-bit source-over is not
+  associative, so drawing into a transparent layer and compositing it can
+  differ by 1 LSB. Caching pixels would trade the byte-exact guarantee for
+  native replay cost; measure that cost in a trace before reaching for it.
+- **A full-frame `clearRect` on a retained-frame canvas replaces the native
+  stream**, so it clears the `_sent*` record — including the copies held by
+  open save() snapshots.
+
+## Hover and colour commits in a materialized React editor are paint-only
+
+A materialized (captured-import) React editor re-applies Chromium-captured
+metadata after any commit that could move a captured box, and each such pass
+reads layout metrics that force a root layout. From @pulp/react runtime
+revision 2 (`packages/pulp-react/runtime-fingerprint.json`) a commit that only
+changes paint skips that pass and does not bump the mutation epoch:
+`PAINT_ONLY_KEYS` (background, border colours, shadows, cursor, ...), `onX`
+handlers, a `data-*` attribute no captured-state or runtime selector names, and
+`color`/`textColor`/`opacity`/`fill`/`stroke`. For those last five the importer
+runtime puts the captured value back on just that node and property where the
+capture owns the channel, so the end state matches a full pass. A typical
+button hover is then its own few React setters.
+
+What still costs a pass: any size/position/typography/text change, className
+or id changes, structural mutations, and an attribute or colour a selector
+names (`[data-open]`, `path[fill]`). Hover styling written as a `data-*`
+marker plus colour props is cheap; hover styling that swaps a className or
+nudges a padding is not. An editor built from a vendored runtime older than
+revision 2 gets none of this until its bundle is regenerated
+(`tools/import-validation/check_vendored_runtime.py` names what it lacks).
 
 ## Editor-INITIATED host resize (`Processor::request_editor_resize`)
 

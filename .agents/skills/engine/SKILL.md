@@ -728,6 +728,29 @@ bridge-emitting methods is treated as an error, not a clean result. `moveTo`,
 `lineTo`, `rect` and `_fp` are the only exemptions, because they own the
 buffer.
 
+The run survives a `moveTo`: a later subpath appends its points and records its
+start index in `this._pendStarts`, and `_fp()` sends
+`canvasPathPolyline(id, coords, starts)`, so a row of 63 tick marks is one
+crossing instead of 63. `_openPendingSubpath` flushes first when a run would
+pass the bridge's 65536-coordinate cap — over the cap the bridge rejects the
+whole batch and the path silently vanishes.
+
+The same "the crossing is the cost" logic is why `save()`/`restore()` keep the
+shim's `_sent*` record of native state instead of clearing it: see the
+`view-bridge` skill's scripted-editor call-budget checklist for the replay-side
+contract that makes that safe.
+
+`ctx.pulpCachedGroup(key, drawFn)` records drawFn into a native group between
+`canvasBeginGroup` and `canvasEndGroup` and later replays it with one
+`canvasReplayGroup` call. While `_groupRecording` is set, two shim behaviours
+change and must stay changed: a full-frame `clearRect` must not take the
+retained-frame `canvasClear` path (that would replace the frame the group is
+being recorded into), and `restore()` must not pop below `_stateFloor`, the
+save depth at which the group began. The JS state snapshot is taken with
+`_captureState()`/`_applyState()` rather than `save()`/`restore()`, because the
+native group brackets itself and a real save/restore would land inside the
+group.
+
 ### CSS-shim gap fills — translator vs. bridge contract
 
 Four classes of "silent drop" recur in `web-compat-style-decl.js`. When

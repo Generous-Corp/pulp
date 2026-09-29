@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.879.0
+    VERSION 0.880.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -450,6 +450,7 @@ set(_pulp_standalone_sources
     core/format/src/standalone.cpp
     core/format/src/standalone_control_host.cpp
     core/format/src/standalone_musical_typing.cpp
+    core/format/src/null_audio_device.cpp
     core/format/src/test_signal.cpp
     core/format/src/settings_panel.cpp)
 # Synthetic key delivery for the test harness needs AppKit, so the macOS

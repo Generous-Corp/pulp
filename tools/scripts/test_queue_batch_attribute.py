@@ -924,6 +924,8 @@ class CertifyCliTests(unittest.TestCase):
     def run_cli(self, argv, jobs, changes):
         with mock.patch.object(qba, "failing_jobs", return_value=jobs), mock.patch.object(
             qba, "pr_files", return_value=changes
+        ), mock.patch.object(
+            qba, "chain_verdict_for", return_value=None
         ), contextlib.redirect_stdout(io.StringIO()) as out:
             code = qba.main(argv)
         return code, out.getvalue()
@@ -1022,6 +1024,8 @@ class DeclarationTests(unittest.TestCase):
             mock.patch.object(
                 qba, "pr_files", return_value=[qba.ChangedFile(path="core/x.cpp")]
             )
+        ), mock.patch.object(
+            qba, "chain_verdict_for", return_value=None
         ), contextlib.redirect_stdout(io.StringIO()) as out:
             code = qba.main(argv)
         self.assertEqual(code, 0)
@@ -1695,6 +1699,333 @@ class CtestBlockOrderTests(unittest.TestCase):
             qba.parse_failing_tests(log),
             ["consumption-census-drift", "consumption-census-negative-contract"],
         )
+
+
+CHAIN_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[2] / "tools/scripts/fixtures/queue_chain_rule.json"
+)
+
+
+class FixtureChainSource(qba.ChainSource):
+    """The chain rule's reads served from trimmed real merge-group facts."""
+
+    def __init__(self, fixture: dict) -> None:
+        self.fixture = fixture
+
+    def gate(self, sha):
+        entry = self.fixture["gates"].get(sha)
+        if entry is None:
+            return qba.GateFacts(sha=sha)
+        failed = entry["failed"]
+        return qba.GateFacts(
+            sha=sha,
+            pr=entry["pr"],
+            first_parent=entry["first_parent"],
+            conclusion=entry["conclusion"],
+            failed=None if failed is None else frozenset(failed),
+            run_id=entry["run_id"],
+        )
+
+    def on_main(self, sha):
+        return self.fixture["on_main"].get(sha)
+
+    def main_tip(self):
+        return self.fixture["main_tip"]
+
+
+def load_chain_fixture() -> dict:
+    return json.loads(CHAIN_FIXTURE.read_text(encoding="utf-8"))
+
+
+FLAKES = frozenset({"pulp-browser-capture-node-integration"})
+
+
+def chain_for(run_id: int, fixture: dict | None = None, flakes=FLAKES) -> qba.ChainVerdict:
+    fixture = fixture or load_chain_fixture()
+    case = next(c for c in fixture["cases"] if c["run_id"] == run_id)
+    ref = qba.BATCH_BRANCH_RE.match(case["head_branch"])
+    return qba.classify_chain(
+        int(ref.group(1)),
+        case["head_sha"],
+        ref.group(2),
+        FixtureChainSource(fixture),
+        flakes,
+    )
+
+
+class ChainRuleTests(unittest.TestCase):
+    """Culprit, neighbour, flake and red-main calls from a group's parent.
+
+    Expectations are the manual classification of these real runs, not the
+    classifier's own output replayed back at it.
+    """
+
+    def test_parent_on_main_makes_the_head_the_culprit(self) -> None:
+        # #8970 stacked directly on main's tip and failed a test main passes.
+        verdict = chain_for(36392125347)
+        self.assertEqual(verdict.classification, qba.CHAIN_CULPRIT)
+        self.assertIs(verdict.implicates_head, True)
+        self.assertEqual(verdict.failed, ["cmake-ios-auv3-control-shipping"])
+
+    def test_a_failed_parent_with_a_disjoint_failure_still_names_the_head(self) -> None:
+        # #8970's earlier group sat on #8979, which failed only a known flake;
+        # #8970's own failure is one the parent never had.
+        verdict = chain_for(36391072871)
+        self.assertEqual(verdict.parent_state, qba.PARENT_FAILED)
+        self.assertEqual(verdict.classification, qba.CHAIN_CULPRIT)
+
+    def test_a_subset_of_the_parent_s_failures_is_a_neighbour(self) -> None:
+        # #9016 on #9015 on #9014: all three failed wide-non-native-selftest, and
+        # #9014 is the one whose parent was on main.
+        verdict = chain_for(36489490448)
+        self.assertEqual(verdict.classification, qba.CHAIN_NEIGHBOUR)
+        self.assertIs(verdict.implicates_head, False)
+        self.assertEqual(verdict.parent_pr, 9015)
+        self.assertEqual(verdict.implicated_pr, 9014)
+
+    def test_a_parent_that_never_ran_its_suite_is_looked_through(self) -> None:
+        # #9036's parent #9019 failed at Build, so it observed none of #9036's
+        # tests; its own parent #9034 failed the same script-test-inputs-drift.
+        verdict = chain_for(36518667100)
+        self.assertEqual(verdict.classification, qba.CHAIN_NEIGHBOUR)
+        self.assertEqual(verdict.implicated_pr, 9034)
+        self.assertIn("#9019", verdict.evidence)
+
+    def test_looking_through_to_a_passing_ancestor_names_nobody(self) -> None:
+        # If #9034 had passed, the drift could be #9019's (unobserved) or
+        # #9036's: that is unknown, never a culprit.
+        fixture = load_chain_fixture()
+        fixture["gates"]["312128e39f7434be800e0208b4bf7daf574700ef"].update(
+            conclusion="success", failed=[]
+        )
+        verdict = chain_for(36518667100, fixture)
+        self.assertEqual(verdict.classification, qba.CHAIN_UNKNOWN)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_a_group_failing_only_known_flakes_is_a_flake(self) -> None:
+        verdict = chain_for(36387270560)
+        self.assertEqual(verdict.classification, qba.CHAIN_KNOWN_FLAKE)
+        self.assertEqual(verdict.flakes, ["pulp-browser-capture-node-integration"])
+        self.assertIs(verdict.implicates_head, False)
+
+    def test_the_flake_list_is_the_only_thing_that_makes_a_flake(self) -> None:
+        # Without the list the same run is an ordinary culprit: its parent
+        # was on main.
+        verdict = chain_for(36387270560, flakes=frozenset())
+        self.assertEqual(verdict.classification, qba.CHAIN_CULPRIT)
+
+    def test_main_s_tip_failing_the_same_tests_is_pre_existing(self) -> None:
+        fixture = load_chain_fixture()
+        fixture["gates"][fixture["main_tip"]].update(
+            conclusion="failure", failed=["cmake-ios-auv3-control-shipping"]
+        )
+        verdict = chain_for(36392125347, fixture)
+        self.assertEqual(verdict.classification, qba.CHAIN_PRE_EXISTING)
+
+    def test_main_s_tip_failing_other_tests_does_not_clear_the_head(self) -> None:
+        fixture = load_chain_fixture()
+        fixture["gates"][fixture["main_tip"]].update(
+            conclusion="failure", failed=["something-else"]
+        )
+        self.assertEqual(chain_for(36392125347, fixture).classification, qba.CHAIN_CULPRIT)
+
+    def test_an_unreadable_parent_is_unknown_not_a_verdict(self) -> None:
+        fixture = load_chain_fixture()
+        fixture["on_main"].pop("5324ca6450808c7bf5a4d00980ef9197d5ac6846")
+        del fixture["gates"]["5324ca6450808c7bf5a4d00980ef9197d5ac6846"]
+        verdict = chain_for(36392125347, fixture)
+        self.assertEqual(verdict.classification, qba.CHAIN_UNKNOWN)
+        self.assertIsNone(verdict.implicates_head)
+
+    def test_unreadable_failures_are_unknown(self) -> None:
+        fixture = load_chain_fixture()
+        fixture["gates"]["9734635709f79ea8ef3ea654602114b4022d839c"]["failed"] = None
+        self.assertEqual(chain_for(36392125347, fixture).classification, qba.CHAIN_UNKNOWN)
+
+    def test_the_committed_flake_list_loads_and_a_broken_one_is_empty(self) -> None:
+        self.assertIn("pulp-browser-capture-node-integration", qba.load_known_flakes())
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = pathlib.Path(tmp) / "flakes.json"
+            self.assertEqual(qba.load_known_flakes(bad), frozenset())
+            bad.write_text('{"schema": "other", "flakes": [{"test": "x"}]}')
+            self.assertEqual(qba.load_known_flakes(bad), frozenset())
+
+
+class CertifyWithChainTests(unittest.TestCase):
+    """How a chain verdict reaches the guard's certification contract."""
+
+    HEAD_CHANGES = [qba.ChangedFile(path="core/view/src/widgets.cpp")]
+    MACOS_FAILED = [
+        {"name": "macos", "conclusion": "failure",
+         "steps": [{"name": "Test (non-Windows)", "conclusion": "failure"}]},
+        # An advisory red the queue never ejects on.
+        {"name": "Linux (x64) [github-hosted]", "conclusion": "failure",
+         "steps": [{"name": "Test", "conclusion": "failure"}]},
+    ]
+    REQUIRED = frozenset({"macos", "Enforce version & skill sync"})
+
+    def base(self, run_id: int, pr: int) -> qba.Certification:
+        return qba.certify(
+            run_id, pr, qba.Explanation(unexplained=[qba.StepFailure("macos", "Test")])
+        )
+
+    def certify(self, run_id, pr, jobs=None, required=REQUIRED, changes=None, base=None):
+        return qba.certify_with_chain(
+            base or self.base(run_id, pr),
+            chain_for(run_id),
+            self.MACOS_FAILED if jobs is None else jobs,
+            required,
+            self.HEAD_CHANGES if changes is None else changes,
+        )
+
+    def test_a_neighbour_certifies_as_another_pull_request(self) -> None:
+        payload = self.certify(36489490448, 9016).as_json()
+        self.assertIs(payload["implicates_head"], False)
+        self.assertEqual(payload["verdict"], qba.VERDICT_OTHER_PR)
+        self.assertEqual(payload["implicated_pr"], 9014)
+        self.assertEqual(payload["run_id"], 36489490448)
+        self.assertEqual(payload["chain"]["classification"], qba.CHAIN_NEIGHBOUR)
+
+    def test_a_culprit_implicates_the_head(self) -> None:
+        payload = self.certify(36392125347, 8970).as_json()
+        self.assertIs(payload["implicates_head"], True)
+        self.assertEqual(payload["verdict"], qba.VERDICT_IMPLICATED)
+        self.assertNotIn("implicated_pr", payload)
+
+    def test_a_known_flake_certifies_as_infrastructure(self) -> None:
+        payload = self.certify(36387270560, 8979).as_json()
+        self.assertIs(payload["implicates_head"], False)
+        self.assertEqual(payload["verdict"], qba.VERDICT_INFRASTRUCTURE)
+        self.assertEqual(payload["chain"]["classification"], qba.CHAIN_KNOWN_FLAKE)
+
+    def test_another_failing_required_job_blocks_the_certification(self) -> None:
+        jobs = self.MACOS_FAILED + [
+            {"name": "Enforce version & skill sync", "conclusion": "failure",
+             "steps": [{"name": "Skill sync", "conclusion": "failure"}]}
+        ]
+        payload = self.certify(36489490448, 9016, jobs=jobs).as_json()
+        self.assertIsNone(payload["implicates_head"])
+        self.assertIn("Enforce version & skill sync", payload["evidence"])
+
+    def test_unreadable_required_contexts_block_when_another_job_failed(self) -> None:
+        payload = self.certify(36489490448, 9016, required=None).as_json()
+        self.assertIsNone(payload["implicates_head"])
+
+    def test_a_head_whose_diff_owns_the_test_is_not_cleared(self) -> None:
+        changes = [qba.ChangedFile(path="tools/scripts/wide_non_native_selftest.py")]
+        payload = self.certify(36489490448, 9016, changes=changes).as_json()
+        self.assertIsNone(payload["implicates_head"])
+        self.assertIn("owns failing test", payload["evidence"])
+
+    def test_an_unreadable_head_diff_blocks(self) -> None:
+        # [] is how an unreadable diff arrives; the explicit `changes` default
+        # only replaces None.
+        payload = qba.certify_with_chain(
+            self.base(36489490448, 9016), chain_for(36489490448),
+            self.MACOS_FAILED, self.REQUIRED, [],
+        ).as_json()
+        self.assertIsNone(payload["implicates_head"])
+
+    def test_the_chain_speaks_only_for_the_entry_the_group_is_named_for(self) -> None:
+        payload = self.certify(36489490448, 9015).as_json()
+        self.assertIsNone(payload["implicates_head"])
+        self.assertEqual(payload["verdict"], qba.VERDICT_UNEXPLAINED)
+
+    def test_a_step_level_certification_is_not_overridden(self) -> None:
+        base = qba.certify(36392125347, 8970, qba.Explanation(reasons=["ccache fetch"]))
+        payload = self.certify(36392125347, 8970, base=base).as_json()
+        self.assertEqual(payload["verdict"], qba.VERDICT_INFRASTRUCTURE)
+
+    def test_the_certify_cli_carries_the_chain_verdict(self) -> None:
+        fixture = load_chain_fixture()
+        case = next(c for c in fixture["cases"] if c["run_id"] == 36489490448)
+
+        def fake_gh(path, jq=None, **_):
+            if path == "repos/o/n/actions/runs/36489490448":
+                return f"{case['head_branch']}\t{case['head_sha']}"
+            return None
+
+        with mock.patch.object(qba, "gh", side_effect=fake_gh), mock.patch.object(
+            qba, "LiveChainSource", lambda repo: FixtureChainSource(fixture)
+        ), mock.patch.object(
+            qba, "failing_jobs", return_value=self.MACOS_FAILED
+        ), mock.patch.object(
+            qba, "pr_files", return_value=self.HEAD_CHANGES
+        ), mock.patch.object(
+            qba, "required_contexts", return_value=self.REQUIRED
+        ), mock.patch.object(
+            qba, "failing_tests", return_value=["wide-non-native-selftest"]
+        ), mock.patch.object(
+            qba, "open_prs", return_value=[]
+        ), contextlib.redirect_stdout(io.StringIO()) as out:
+            code = qba.main(
+                ["--certify", "--repo", "o/n", "--pr", "9016", "--run-id", "36489490448"]
+            )
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertIs(payload["implicates_head"], False)
+        self.assertEqual(payload["verdict"], "other_pull_request")
+        self.assertEqual(payload["implicated_pr"], 9014)
+
+
+class GuardEnvironmentTests(unittest.TestCase):
+    """`--certify` run exactly as Shipyard's queue-arm guard runs it.
+
+    The guard executes the declared command as a subprocess from the repository
+    root, capturing output, with PATH reduced to the system directories and the
+    App token already minted into GH_TOKEN. `ghapp` lives under ~/.local/bin, so
+    it is not on that PATH; the wrapper exports GHAPP_REAL_GH instead. An
+    attributor that only knows `ghapp` crashes there with FileNotFoundError, and
+    the guard reads the non-zero exit as "did not rule".
+    """
+
+    SCRIPT = pathlib.Path(__file__).resolve().parent / "queue_batch_attribute.py"
+    REPO_ROOT = SCRIPT.parents[2]
+
+    def _run(self, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as tmp:
+            empty_bin = pathlib.Path(tmp) / "bin"
+            empty_bin.mkdir()
+            env = {"HOME": tmp, "PATH": str(empty_bin), "GH_REPO": "Generous-Corp/pulp"}
+            env.update({k: v.replace("{tmp}", tmp) for k, v in extra_env.items()})
+            if "GHAPP_REAL_GH" in env:
+                fake = pathlib.Path(env["GHAPP_REAL_GH"])
+                fake.write_text(
+                    "#!/bin/sh\n"
+                    f'printf "%s\\n" "$*" >> "{tmp}/gh-calls.log"\n'
+                    "exit 1\n"
+                )
+                fake.chmod(0o755)
+            proc = subprocess.run(
+                [sys.executable, str(self.SCRIPT), "--certify", "--repo",
+                 "Generous-Corp/pulp", "--pr", "9048", "--run-id", "36535153595"],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=str(self.REPO_ROOT),
+                env=env,
+                timeout=120,
+            )
+            log = pathlib.Path(tmp) / "gh-calls.log"
+            proc.gh_calls = log.read_text() if log.exists() else ""  # type: ignore[attr-defined]
+            return proc
+
+    def test_certify_reads_through_the_wrappers_real_gh_when_ghapp_is_off_path(self) -> None:
+        proc = self._run({"GH_TOKEN": "app-token", "GHAPP_REAL_GH": "{tmp}/gh"})
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("api repos/Generous-Corp/pulp/actions/runs/36535153595",
+                      proc.gh_calls)  # type: ignore[attr-defined]
+        verdict = json.loads(proc.stdout)
+        self.assertEqual(verdict["run_id"], 36535153595)
+        # Every read failed, so nothing may be certified.
+        self.assertIsNot(verdict["implicates_head"], False)
+
+    def test_no_reachable_cli_is_a_clean_unusable_invocation(self) -> None:
+        proc = self._run({})
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("PULP_GH_CLI", proc.stderr)
 
 
 if __name__ == "__main__":

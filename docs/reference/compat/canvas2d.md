@@ -101,12 +101,17 @@ Canvas2D drawing inventory or backend status above.
 
 `moveTo` and `lineTo` do not cross the bridge one point at a time. The shim
 buffers a contiguous run of path points and ships it as a single
-`canvasPathPolyline(canvasId, coords)` call, where `coords` is a flat
-`[x0, y0, x1, y1, …]` array; the native side expands it back into the same
-`move_to` + `line_to` command sequence the per-point calls produced. `rect`
-composes through that same buffer. A malformed run — odd length, a
-non-finite coordinate, or more than 65536 values — is rejected whole, so a
-bad batch never records a partial path.
+`canvasPathPolyline(canvasId, coords, starts?)` call, where `coords` is a flat
+`[x0, y0, x1, y1, …]` array and the optional `starts` lists, in increasing
+order, the point indices at which a later `moveTo` opened a new subpath. A
+`moveTo` therefore does not end the batch: a path of many disjoint segments —
+tick marks, grid lines — still crosses once. The native side expands the call
+back into the same `move_to` + `line_to` command sequence the per-point calls
+produced. `rect` composes through that same buffer. A run is flushed before it
+would exceed the 65536-coordinate cap. A malformed run — odd length, a
+non-finite coordinate, more than 65536 values, or a `starts` entry that is not
+an increasing in-range point index — is rejected whole, so a bad batch never
+records a partial path.
 
 This changes the wire, not the Canvas2D drawing inventory or the recorded
 command stream: `moveTo`, `lineTo` and `rect` keep their catalog status and
@@ -120,6 +125,44 @@ emits a `canvas*` bridge call must call `this._fp()` first, or its command
 would land ahead of the buffered points and silently reorder the path.
 `tools/scripts/check_canvas_path_flush.py` (ctest `canvas-path-flush-lint`)
 enforces that for every bridge-emitting method in the shim.
+
+## Cached groups (Pulp extension)
+
+`ctx.pulpCachedGroup(key, drawFn)` is not part of Canvas2D; the `pulp` prefix
+marks it as an extension. It draws static content once and replays it by
+reference: while `key` stays valid the call is a single
+`canvasReplayGroup(canvasId, key)` bridge call and `drawFn` does not run.
+`ctx.pulpInvalidateGroup(key)` drops one group, and `ctx.pulpInvalidateGroup()`
+drops every group on the canvas; resizing the canvas and creating its context
+drop them too.
+
+The native side stores the group's commands, not its pixels, and replays them
+in place, inside an implicit `save()`/`restore()` and under the transform in
+effect at the replay. Output is therefore identical to calling `drawFn`
+directly, including composite operations inside the group and after it, on
+the Skia and CoreGraphics backends. Nothing the group sets leaks out: a
+`restore()` inside the group cannot pop state saved outside it, and saves it
+leaves open close with it. The cached content is a function of the key, so a
+group must set every style it depends on inside `drawFn` or be invalidated
+when its inputs change. A group inside a group that is being recorded is drawn
+directly into the outer one.
+
+## Drawing state across save() and restore()
+
+`restore()` reverts the whole Canvas2D drawing state — fill and stroke style,
+line settings and dash, font and text alignment, global alpha, composite
+operation, shadows, filter, direction and image smoothing — both in the JS
+getters and on the native canvas, identically on the Skia and CoreGraphics
+backends. The native replay tracks the state it applies and re-applies what
+differs after each `restore()`, because neither backend's own restore reverts
+all of it.
+
+Because of that, the shim keeps its record of which state values the native
+canvas already holds across `save()`/`restore()`, and only sends a setter when
+the value a draw needs differs from that record. `save()` first sends any state
+assigned since the last draw, so a value set ahead of a
+`save`/draw/`restore` loop crosses the bridge once rather than once per
+iteration.
 
 ## Native SDF shading commands are outside the Canvas2D inventory
 

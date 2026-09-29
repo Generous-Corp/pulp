@@ -63,10 +63,11 @@ def _resolver_source() -> str:
     return match.group(1)
 
 
-def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
-                   event: str = "pull_request",
-                   dispatch_selector: str = "") -> Any | None:
-    """Run the real resolver and return the macOS leg's runs-on, if any."""
+def _matrix(head_repo: str | None, *, overflow: str = "local-only",
+            event: str = "pull_request",
+            dispatch_selector: str = "",
+            extra_env: dict[str, str] | None = None) -> list[dict]:
+    """Run the real resolver and return its matrix entries."""
     env = dict(os.environ)
     env.update(
         GITHUB_EVENT_NAME=event,
@@ -78,6 +79,7 @@ def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
         GITHUB_WORKSPACE=str(REPO_ROOT),
     )
     env["PR_HEAD_REPO"] = head_repo or ""
+    env.update(extra_env or {})
 
     with tempfile.TemporaryDirectory() as tmp:
         script = Path(tmp) / "resolver.py"
@@ -94,9 +96,17 @@ def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
         match = re.search(r"matrix_json=(.*)", out.read_text())
         if match is None:
             raise AssertionError("resolver emitted no matrix_json")
-        for entry in json.loads(match.group(1)).get("include", []):
-            if entry.get("key") == "macos":
-                return json.loads(entry["runs_on_json"])
+        return json.loads(match.group(1)).get("include", [])
+
+
+def _macos_runs_on(head_repo: str | None, *, overflow: str = "local-only",
+                   event: str = "pull_request",
+                   dispatch_selector: str = "") -> Any | None:
+    """Run the real resolver and return the macOS leg's runs-on, if any."""
+    for entry in _matrix(head_repo, overflow=overflow, event=event,
+                         dispatch_selector=dispatch_selector):
+        if entry.get("key") == "macos":
+            return json.loads(entry["runs_on_json"])
     return None
 
 
@@ -155,6 +165,140 @@ class ForkPullRequestRunnerRouting(unittest.TestCase):
             dispatch_selector=selector,
         )
         self.assertEqual(got, json.loads(selector))
+
+
+TOPOLOGY = REPO_ROOT / "tools" / "scripts" / "runner_topology.json"
+AUTO_LINUX = (
+    '["self-hosted","Linux","X64","pulp-build-linux-x64","pulp-host-macpro",'
+    '"pulp-auto-linux-x64"]'
+)
+_HOSTED_VAR_FALLBACK = re.compile(
+    r"""^\$\{\{\s*fromJSON\(vars\.(PULP_[A-Z0-9_]+_RUNS_ON_JSON)\s*\|\|\s*'"[a-z0-9.-]+"'\)\s*\}\}$"""
+)
+_MATRIX_RUNS_ON = "${{ fromJSON(matrix.runs_on_json) }}"
+
+
+def _conjuncts(expression: str) -> list[str]:
+    """Top-level `&&` terms of a job `if:`, parentheses respected."""
+    text = " ".join(str(expression).replace("${{", "").replace("}}", "").split())
+    terms, depth, current = [], 0, ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if depth == 0 and text.startswith("&&", i):
+            terms.append(current.strip())
+            current = ""
+            i += 2
+            continue
+        current += ch
+        i += 1
+    terms.append(current.strip())
+    return [t for t in terms if t]
+
+
+_EVENT_EQ = re.compile(r"^github\.event_name == '([a-z_]+)'$")
+
+
+def _excludes_push(expression: Any) -> bool:
+    """True when some top-level conjunct can never hold on a push event."""
+    if expression is None:
+        return False
+    for term in _conjuncts(expression):
+        if term == "github.event_name != 'push'":
+            return True
+        inner = term[1:-1] if term.startswith("(") and term.endswith(")") else term
+        alternatives = [a.strip() for a in inner.split("||")]
+        events = [_EVENT_EQ.match(a) for a in alternatives]
+        if all(events) and all(m.group(1) != "push" for m in events):
+            return True
+    return False
+
+
+def _hosted_lane_variables() -> set[str]:
+    topology = json.loads(TOPOLOGY.read_text())
+    return {
+        lane["variable"]
+        for lane in topology["lanes"]
+        if lane.get("provisioning") == "github-hosted"
+    }
+
+
+def _hosted_labels() -> set[str]:
+    return set(json.loads(TOPOLOGY.read_text())["github_hosted_labels"])
+
+
+class PushRunsNeverReachSelfHosted(unittest.TestCase):
+    """A push to main must finish on GitHub-hosted runners.
+
+    Push runs share main's `build-refs/heads/main` concurrency group with
+    cancel-in-progress false, so one job queued for a self-hosted runner holds
+    the group and every later push run is cancelled while pending, with zero
+    jobs -- which took the Linux/Windows cache-save steps down with it. No
+    push-reachable job may route to a self-hosted runner.
+    """
+
+    def test_push_matrix_has_no_macos_leg(self):
+        self.assertIsNone(_macos_runs_on(None, event="push"))
+
+    def test_push_matrix_is_entirely_hosted(self):
+        entries = _matrix(None, event="push",
+                          extra_env={"AUTOMATIC_LINUX_RUNNER_SELECTOR_JSON": AUTO_LINUX})
+        self.assertTrue(entries, "push produced an empty matrix")
+        self.assertEqual({e["key"] for e in entries}, {"linux", "windows"})
+        for entry in entries:
+            with self.subTest(key=entry["key"]):
+                self.assertNotIn("self-hosted", entry["runs_on_json"])
+
+    def test_merge_group_matrix_still_has_the_self_hosted_macos_gate(self):
+        """Control: the push guard must not remove the required gate."""
+        got = _macos_runs_on(None, event="merge_group")
+        self.assertIn("self-hosted", got)
+
+    def test_every_push_reachable_job_routes_to_a_hosted_runner(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - environment-dependent
+            raise unittest.SkipTest("PyYAML not installed")
+        jobs = yaml.safe_load(WORKFLOW.read_text())["jobs"]
+        hosted_vars = _hosted_lane_variables()
+        hosted_labels = _hosted_labels()
+        reachable = []
+        for name, job in jobs.items():
+            if _excludes_push(job.get("if")):
+                continue
+            reachable.append(name)
+            runs_on = job.get("runs-on")
+            with self.subTest(job=name, runs_on=runs_on):
+                if runs_on == _MATRIX_RUNS_ON:
+                    continue  # the resolver tests above pin the push matrix
+                if isinstance(runs_on, str) and runs_on in hosted_labels:
+                    continue
+                match = _HOSTED_VAR_FALLBACK.match(str(runs_on))
+                self.assertIsNotNone(
+                    match,
+                    f"{name} is reachable on push and routes to {runs_on!r}, "
+                    "which is not a GitHub-hosted label or hosted lane variable",
+                )
+                self.assertIn(match.group(1), hosted_vars)
+        # Control: the walk saw the push lane's real jobs, including the one
+        # that used to take the self-hosted gate selector.
+        for expected in ("resolve-provider", "classify", "build", "a2t-protected-event"):
+            self.assertIn(expected, reachable)
+        self.assertNotIn("local-proof", reachable)
+        self.assertNotIn("linux", reachable)
+
+    def test_push_exclusion_parser_controls(self):
+        self.assertTrue(_excludes_push("!cancelled() && github.event_name != 'push'"))
+        self.assertTrue(_excludes_push(
+            "x && (github.event_name == 'pull_request' || github.event_name == 'merge_group')"))
+        self.assertFalse(_excludes_push(
+            "x && (github.event_name == 'push' || github.event_name == 'merge_group')"))
+        self.assertFalse(_excludes_push("!inputs.local_proof && github.event_name == 'push'"))
+        self.assertFalse(_excludes_push(None))
 
 
 if __name__ == "__main__":

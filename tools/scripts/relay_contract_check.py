@@ -81,7 +81,7 @@ class CorpusHost:
 # substring of its source; the check fails when it is gone.
 CORPUS_HOSTS = (
     CorpusHost("registry.npmjs.org", "tools/scripts/bundle_threejs_for_jsc.mjs",
-               '["install", "--no-audit", "--no-fund"]',
+               '["install", "--prefer-offline", "--no-audit", "--no-fund"]',
                "pulp_bundle_threejs_for_jsc_smoke provisions esbuild with npm"),
     CorpusHost("api.vcvrack.com", "tools/rack/library_catalog.py",
                "https://api.vcvrack.com/library/manifests",

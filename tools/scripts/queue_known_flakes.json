@@ -1,0 +1,9 @@
+{
+  "schema": "pulp-queue-known-flakes/v1",
+  "flakes": [
+    {
+      "test": "pulp-browser-capture-node-integration",
+      "reason": "Real-browser capture suite whose per-file timeouts are sensitive to the gate VM's core count; it has failed merge groups whose parent passed and whose head did not touch browser capture."
+    }
+  ]
+}

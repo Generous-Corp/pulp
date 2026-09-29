@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -167,7 +168,11 @@ struct CanvasDrawCmd {
         set_direction,
         set_filter,
         // Clear
-        clear, clear_rect
+        clear, clear_rect,
+        // Cached group: replays the commands stored under the key in `text`
+        // inside an implicit save/restore, under the transform in effect at
+        // this point of the stream (see CanvasWidget::end_group).
+        replay_group
     };
     Type type = Type::clear;
     float x = 0, y = 0, w = 0, h = 0;
@@ -260,6 +265,11 @@ public:
     void clear_commands() {
         recorded_commands_->commands.clear();
         recorded_commands_->needs_backdrop_isolation = false;
+        recorded_commands_->has_group_replays = false;
+        // A recording still open at a frame clear was abandoned (its script
+        // was interrupted before end_group); keep it from swallowing the
+        // new frame.
+        abort_group_recording();
         notify_recorded_command_consumers();
     }
     /// NaN / ±Infinity defense at the recording
@@ -276,6 +286,7 @@ public:
     /// RecordingCanvas, headless capture) gets clean numerics without
     /// a per-backend retrofit.
     void add_command(CanvasDrawCmd cmd) {
+        auto& stream = *recorded_commands_;
         cmd.x       = sanitize_finite(cmd.x);
         cmd.y       = sanitize_finite(cmd.y);
         cmd.w       = sanitize_finite(cmd.w);
@@ -286,8 +297,82 @@ public:
         cmd.y3      = sanitize_finite(cmd.y3);
         cmd.extra   = sanitize_finite(cmd.extra);
         for (auto& p : cmd.gradient_positions) p = sanitize_finite(p);
-        if (reads_backdrop(cmd)) recorded_commands_->needs_backdrop_isolation = true;
-        recorded_commands_->commands.push_back(std::move(cmd));
+        if (stream.recording_group) {
+            if (reads_backdrop(cmd)) stream.recording.reads_backdrop = true;
+            stream.recording.commands.push_back(std::move(cmd));
+            return;
+        }
+        if (reads_backdrop(cmd)) stream.needs_backdrop_isolation = true;
+        stream.commands.push_back(std::move(cmd));
+    }
+
+    // ── Cached groups ──────────────────────────────────────────────────
+    //
+    // A cached group is a keyed command list recorded once and replayed by
+    // reference, so static content (grids, scales, labels) costs one bridge
+    // call per frame instead of one per draw. Groups live beside the frame's
+    // command stream, not in it: clear_commands() does not drop them, and a
+    // canvas sharing this stream (share_recorded_commands_from) shares them.
+    //
+    // A replay runs the stored commands in place, inside an implicit
+    // save/restore and under whatever transform the stream holds at that
+    // point, so its pixels and blend order are exactly those of drawing the
+    // same commands directly. State set inside a group never leaks out, and
+    // a restore() inside a group cannot pop state saved outside it.
+
+    /// Start recording the group `key`: every add_command until end_group()
+    /// goes into the group instead of the frame. Refuses (returns false) while
+    /// another group is recording; groups do not nest.
+    bool begin_group(std::string key) {
+        auto& stream = *recorded_commands_;
+        if (stream.recording_group) return false;
+        stream.recording_group = true;
+        stream.recording_key = std::move(key);
+        stream.recording = CachedGroup{};
+        return true;
+    }
+    /// Seal the recording group under its key, replacing any previous
+    /// content, and append a replay of it to the frame.
+    bool end_group() {
+        auto& stream = *recorded_commands_;
+        if (!stream.recording_group) return false;
+        stream.recording_group = false;
+        auto key = std::move(stream.recording_key);
+        stream.groups[key] = std::move(stream.recording);
+        stream.recording = CachedGroup{};
+        return replay_group(key);
+    }
+    /// Append a replay of the stored group `key` to the frame. Returns false,
+    /// appending nothing, when no such group is stored (never recorded, or
+    /// invalidated) or while a group is recording; the caller then records it.
+    bool replay_group(const std::string& key) {
+        auto& stream = *recorded_commands_;
+        if (stream.recording_group) return false;
+        const auto it = stream.groups.find(key);
+        if (it == stream.groups.end()) return false;
+        if (it->second.reads_backdrop) stream.needs_backdrop_isolation = true;
+        stream.has_group_replays = true;
+        CanvasDrawCmd cmd;
+        cmd.type = CanvasDrawCmd::Type::replay_group;
+        cmd.text = key;
+        stream.commands.push_back(std::move(cmd));
+        return true;
+    }
+    /// Drop the stored group `key`, so the next replay_group() reports it
+    /// missing and the script records it again.
+    void invalidate_group(const std::string& key) {
+        recorded_commands_->groups.erase(key);
+    }
+    void invalidate_all_groups() {
+        recorded_commands_->groups.clear();
+        abort_group_recording();
+    }
+    size_t group_count() const { return recorded_commands_->groups.size(); }
+    /// Stored commands of group `key`, or nullptr. Read-only accessor for
+    /// tests; invalidated by the next group mutation.
+    const std::vector<CanvasDrawCmd>* group_commands(const std::string& key) const {
+        const auto it = recorded_commands_->groups.find(key);
+        return it == recorded_commands_->groups.end() ? nullptr : &it->second.commands;
     }
     size_t command_count() const { return recorded_commands_->commands.size(); }
 
@@ -312,6 +397,14 @@ public:
         return mode != canvas::Canvas::BlendMode::normal &&
                mode != canvas::Canvas::BlendMode::source_over;
     }
+    /// The commands paint() replays, in order: the recorded stream with each
+    /// cached-group replay expanded in place, bracketed by an implicit
+    /// save/restore. A restore inside a group that would pop state saved
+    /// outside it is omitted and saves the group leaves open are closed, so
+    /// a group is balanced by construction. A replay whose group is no longer
+    /// stored contributes nothing. Pointers are invalidated by the next
+    /// mutation of the stream or its groups.
+    std::vector<const CanvasDrawCmd*> replay_sequence() const;
     /// Accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
     /// clear_commands. Callers must not retain the reference past the next
@@ -366,11 +459,28 @@ private:
         return std::isfinite(v) ? v : 0.0f;
     }
 
+    struct CachedGroup {
+        std::vector<CanvasDrawCmd> commands;
+        bool reads_backdrop = false;
+    };
     struct RecordedCommands {
         std::vector<CanvasDrawCmd> commands;
         bool needs_backdrop_isolation = false;
+        bool has_group_replays = false;
+        std::unordered_map<std::string, CachedGroup> groups;
+        bool recording_group = false;
+        std::string recording_key;
+        CachedGroup recording;
         std::vector<std::weak_ptr<RepaintObserver>> observers;
     };
+    void abort_group_recording() {
+        auto& stream = *recorded_commands_;
+        stream.recording_group = false;
+        stream.recording_key.clear();
+        stream.recording = CachedGroup{};
+    }
+    static void append_replay_sequence(const RecordedCommands& stream,
+                                       std::vector<const CanvasDrawCmd*>& out);
     void observe_recorded_commands() {
         repaint_observer_->stream = recorded_commands_.get();
         recorded_commands_->observers.emplace_back(repaint_observer_);

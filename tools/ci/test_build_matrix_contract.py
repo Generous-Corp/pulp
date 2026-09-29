@@ -3,14 +3,15 @@
 
 Two things are pinned here.
 
-The macOS leg must run on EVERY event, push included. A push to main is the
-only lane that runs the full macOS suite against a commit that is actually on
-main: pull-request heads skip the test step, and a merge group validates a
-synthetic merge commit. Re-gating the leg on the event name would restore the
-blind spot in which a break on main is invisible until a queued batch inherits
-it, reports ~40 minutes later, and names a batch member that is not the
-culprit. The assertion is made over the parsed syntax tree rather than the file
-text, so a differently-spelled event guard cannot slip past a string match.
+The macOS leg runs on every event EXCEPT push, and on push only. main's macOS
+health is the merge group's required `macos` job: the queue lands with the
+MERGE method, so the merge-group head IS the commit on main. A push leg
+carried no event class, so no gate runner served its selector; it queued for
+hours holding main's push concurrency group and got every later push run
+cancelled with zero jobs. Dropping it on any OTHER event would remove the
+required gate itself. The assertion is made over the parsed syntax tree rather
+than the file text, so a differently-spelled event guard cannot slip past a
+string match.
 
 The workflow also embeds Python in shell heredocs inside YAML block scalars,
 where indentation carries meaning three times over. A mis-indented edit there
@@ -120,8 +121,8 @@ class HeredocSyntaxTests(unittest.TestCase):
         self.assertGreater(checked, 0, "no embedded Python heredocs were checked")
 
 
-class MacosLegAlwaysRunsTests(unittest.TestCase):
-    """The macOS matrix entry must not be conditional on the event."""
+class MacosLegSkipsOnlyPushTests(unittest.TestCase):
+    """The macOS matrix entry is gated on exactly `EVENT_NAME != "push"`."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -171,47 +172,49 @@ class MacosLegAlwaysRunsTests(unittest.TestCase):
             "expected exactly one include.append for the macos matrix key",
         )
 
-    def test_macos_entry_is_not_inside_a_conditional(self) -> None:
+    def _guards(self) -> list[ast.AST]:
         target = self._macos_append_nodes()[0]
-
         # Map each node to its parent so the append's ancestry can be walked.
         parents: dict[ast.AST, ast.AST] = {}
         for parent in ast.walk(self.tree):
             for child in ast.iter_child_nodes(parent):
                 parents[child] = parent
-
         node: ast.AST = target
         chain: list[ast.AST] = []
         while node in parents:
             node = parents[node]
             chain.append(node)
+        return [n for n in chain if isinstance(n, (ast.If, ast.Try))]
 
-        guards = [n for n in chain if isinstance(n, (ast.If, ast.Try))]
+    def test_macos_entry_is_gated_only_on_not_push(self) -> None:
+        guards = self._guards()
         self.assertEqual(
-            guards,
-            [],
-            "the macOS matrix entry is nested inside a conditional. It must be "
-            "appended unconditionally: a push to main is the only lane that "
-            "runs the full macOS suite against main, so gating it re-opens the "
-            "window in which a break on main is invisible for ~40 minutes and "
-            "is then blamed on an innocent queue entry.",
+            len(guards), 1,
+            "the macOS matrix entry must sit under exactly one guard, "
+            "`if EVENT_NAME != \"push\":`",
         )
-
-    def test_no_event_gated_macos_omission_remains(self) -> None:
-        self.assertNotIn(
-            "PUSH_ONLY_CACHE_EVENTS",
-            self.text,
-            "the push-only cache-event gate is back; it omitted the macOS leg "
-            "on push, which is the blind spot this contract closes.",
+        self.assertIsInstance(guards[0], ast.If)
+        self.assertEqual(
+            ast.unparse(guards[0].test),
+            "EVENT_NAME != 'push'",
+            "the macOS leg is gated on something other than push; any other "
+            "event guard drops the required `macos` gate itself",
+        )
+        body_calls = [n for n in ast.walk(guards[0]) if n in self._macos_append_nodes()]
+        self.assertTrue(body_calls)
+        self.assertFalse(
+            any(n in self._macos_append_nodes() for stmt in guards[0].orelse for n in ast.walk(stmt)),
+            "the macOS entry is on the else branch: it would run ONLY on push",
         )
 
     def test_push_to_main_still_triggers_the_workflow(self) -> None:
-        """Control: the leg is only useful if push actually starts a run."""
+        """Control: push still starts a run, which publishes the Linux/Windows
+        caches; the guard above is only meaningful if push runs exist."""
         self.assertRegex(
             self.text,
             r"\n  push:\n    branches: \[main\]",
-            "build.yml no longer runs on push to main, so the macOS leg above "
-            "would never execute against main.",
+            "build.yml no longer runs on push to main, so the hosted cache-save "
+            "steps are unreachable.",
         )
 
 

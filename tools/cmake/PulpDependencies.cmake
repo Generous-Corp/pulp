@@ -714,6 +714,7 @@ message(STATUS "Pulp: Highway SIMD library enabled")
 set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+pulp_register_fetchcontent_source(mbedtls REF 107ea89daaefb9867ea9121002fbbdf926780e98)
 FetchContent_Declare(
     mbedtls
     GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
@@ -796,6 +797,9 @@ FetchContent_Declare(
     brotli
     GIT_REPOSITORY https://github.com/google/brotli.git
     GIT_TAG 028fb5a23661f123017c060daa546b55cf4bde29
+    # Only the c/ decoder sources are compiled; setup.sh primes this cache
+    # without submodules, and the network fallback must match it.
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR pulp-fetch-only
 )
 FetchContent_MakeAvailable(brotli)
@@ -805,6 +809,10 @@ FetchContent_Declare(
     woff2
     GIT_REPOSITORY https://github.com/google/woff2.git
     GIT_TAG fb9c3379f2605b10f3e8f1d9636664ab5576775c
+    # woff2's brotli submodule is never compiled (the decoder builds from the
+    # brotli source above), and cloning it recursively pulls libdivsufsort from
+    # a third host at configure time.
+    GIT_SUBMODULES ""
     SOURCE_SUBDIR pulp-fetch-only
 )
 FetchContent_MakeAvailable(woff2)
@@ -823,6 +831,7 @@ set(YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_INSTALL      OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+pulp_register_fetchcontent_source(yaml-cpp REF 0.8.0)
 FetchContent_Declare(
     yaml-cpp
     GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git

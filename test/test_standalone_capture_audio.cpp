@@ -14,11 +14,22 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/audio/device.hpp>
+#include <pulp/format/detail/null_audio_device.hpp>
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/standalone.hpp>
 
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#include <unistd.h>
+#endif
+
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <chrono>
 #include <cstdlib>
+#include <thread>
 #include <memory>
 #include <string>
 #include <vector>
@@ -359,4 +370,169 @@ TEST_CASE("PULP_SCREENSHOT_KEEP_AUDIO opts a capture back into audio",
         CHECK_FALSE(resolved.screenshot_keeps_audio);
         CHECK(detail::standalone_capture_skips_audio(resolved));
     }
+}
+
+// ── PULP_AUDIO_DEVICE=null ──────────────────────────────────────────────────
+//
+// A measurement session must run the whole audio graph at real-time rate
+// without reaching the user's speakers.
+
+namespace {
+
+// Counts process() calls and records the peak input sample it saw, so a test
+// can tell the test signal reached the processor.
+class CountingProcessor : public Processor {
+public:
+    static inline std::atomic<int> blocks{0};
+    static inline std::atomic<float> peak_input{0.0f};
+
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor d;
+        d.name = "StandaloneNullDeviceProbe";
+        d.manufacturer = "PulpTest";
+        d.bundle_id = "com.pulp.test.standalone-null-device";
+        d.input_buses = {{"Audio In", 2}};
+        d.output_buses = {{"Audio Out", 2}};
+        d.accepts_midi = false;
+        return d;
+    }
+    void define_parameters(state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(audio::BufferView<float>&,
+                 const audio::BufferView<const float>& input,
+                 midi::MidiBuffer&, midi::MidiBuffer&,
+                 const ProcessContext&) override {
+        float peak = 0.0f;
+        for (std::size_t c = 0; c < input.num_channels(); ++c)
+            for (std::size_t i = 0; i < input.num_samples(); ++i)
+                peak = std::max(peak, std::abs(input.channel(c)[i]));
+        if (peak > peak_input.load()) peak_input.store(peak);
+        blocks.fetch_add(1);
+    }
+};
+
+std::unique_ptr<Processor> make_counting_probe() {
+    return std::make_unique<CountingProcessor>();
+}
+
+#ifdef __APPLE__
+// Whether this process is running IO on any CoreAudio device. A process the
+// HAL has no process object for has never started IO.
+bool process_running_coreaudio_io() {
+    if (__builtin_available(macOS 14.0, *)) {
+        AudioObjectPropertyAddress translate{kAudioHardwarePropertyTranslatePIDToProcessObject,
+                                             kAudioObjectPropertyScopeGlobal,
+                                             kAudioObjectPropertyElementMain};
+        pid_t pid = getpid();
+        AudioObjectID process = kAudioObjectUnknown;
+        UInt32 size = sizeof(process);
+        REQUIRE(AudioObjectGetPropertyData(kAudioObjectSystemObject, &translate,
+                                           sizeof(pid), &pid, &size, &process) == noErr);
+        if (process == kAudioObjectUnknown) return false;
+        AudioObjectPropertyAddress running_address{kAudioProcessPropertyIsRunning,
+                                                   kAudioObjectPropertyScopeGlobal,
+                                                   kAudioObjectPropertyElementMain};
+        UInt32 running = 0;
+        size = sizeof(running);
+        REQUIRE(AudioObjectGetPropertyData(process, &running_address, 0, nullptr,
+                                           &size, &running) == noErr);
+        return running != 0;
+    }
+    return false;
+}
+#endif
+
+}  // namespace
+
+TEST_CASE("PULP_AUDIO_DEVICE selects the null device only for 'null'",
+          "[format][standalone][audio-device][null-device]") {
+    CHECK(detail::null_audio_device_requested("null"));
+    CHECK(detail::null_audio_device_requested("NULL"));
+    CHECK_FALSE(detail::null_audio_device_requested(nullptr));
+    CHECK_FALSE(detail::null_audio_device_requested(""));
+    CHECK_FALSE(detail::null_audio_device_requested("nul"));
+    CHECK_FALSE(detail::null_audio_device_requested("default"));
+}
+
+TEST_CASE("NullAudioDevice delivers blocks at the real-time rate",
+          "[audio][null-device]") {
+    detail::NullAudioDevice device;
+    audio::DeviceConfig config;
+    config.sample_rate = 48000.0;
+    config.buffer_size = 256;
+    config.input_channels = 2;
+    config.output_channels = 2;
+    REQUIRE(device.open(config));
+
+    std::atomic<std::uint64_t> last_position{0};
+    std::atomic<bool> contiguous{true};
+    std::atomic<bool> silent_input{true};
+    std::atomic<std::uint64_t> expected_next{0};
+    REQUIRE(device.start([&](const audio::BufferView<const float>& in,
+                             audio::BufferView<float>& out,
+                             const audio::CallbackContext& ctx) {
+        if (ctx.sample_position != expected_next.load()) contiguous = false;
+        expected_next = ctx.sample_position + static_cast<std::uint64_t>(ctx.buffer_size);
+        last_position = ctx.sample_position;
+        if (in.num_channels() != 2 || out.num_channels() != 2 ||
+            in.num_samples() != 256)
+            contiguous = false;
+        for (std::size_t c = 0; c < in.num_channels(); ++c)
+            for (std::size_t i = 0; i < in.num_samples(); ++i)
+                if (in.channel(c)[i] != 0.0f) silent_input = false;
+    }));
+
+    const auto start = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const auto blocks = device.blocks_rendered();
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - start).count();
+    device.stop();
+
+    const double expected = elapsed * 48000.0 / 256.0;
+    INFO("blocks " << blocks << " expected ~" << expected << " over " << elapsed << " s");
+    // Real-time paced: neither free-running nor stalled.
+    CHECK(blocks >= static_cast<std::uint64_t>(expected * 0.8));
+    CHECK(blocks <= static_cast<std::uint64_t>(expected * 1.1) + 2);
+    CHECK(contiguous.load());
+    CHECK(silent_input.load());
+    CHECK_FALSE(device.is_running());
+}
+
+TEST_CASE("Standalone with PULP_AUDIO_DEVICE=null runs audio without a device",
+          "[format][standalone][audio-device][null-device]") {
+    ScopedEnv device_env("PULP_AUDIO_DEVICE", "null");
+    ScopedEnv signal_env("PULP_TEST_SIGNAL", "sine");
+    CountingProcessor::blocks = 0;
+    CountingProcessor::peak_input = 0.0f;
+
+    StandaloneApp app(&make_counting_probe);
+    StandaloneConfig cfg = base_config();
+    cfg.input_channels = 2;
+    cfg.headless = true;
+    app.set_config(cfg);
+    REQUIRE(app.start());
+
+    auto* device = StandaloneAudioDeviceTestAccess::device(app);
+    REQUIRE(device != nullptr);
+    CHECK(dynamic_cast<detail::NullAudioDevice*>(device) != nullptr);
+    CHECK(device->info().id == detail::kNullAudioDeviceId);
+
+    const auto start = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+#ifdef __APPLE__
+    // The engine is rendering, and this process runs no CoreAudio IO.
+    CHECK_FALSE(process_running_coreaudio_io());
+#endif
+    const int blocks = CountingProcessor::blocks.load();
+    const double elapsed = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - start).count();
+    app.stop();
+
+    const double expected = elapsed * cfg.sample_rate / cfg.buffer_size;
+    INFO("processed " << blocks << " blocks, expected ~" << expected);
+    CHECK(blocks >= static_cast<int>(expected * 0.7));
+    CHECK(blocks <= static_cast<int>(expected * 1.2) + 4);
+    // The test signal still feeds the input.
+    CHECK(CountingProcessor::peak_input.load() > 0.01f);
 }

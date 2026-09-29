@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260928-gpu-acquire-diagnostics-and-null-audio-device-watch",
+  "created_at": "2026-09-28T23:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record Pulp-owned live-measurement enablers. The existing gpu_acquire trace span gains debug args (frames submitted but not finished on the GPU, last GPU render time, and on the standalone window the refresh period, lateness against the display-link target and whether the frame was display-link driven); SkiaSurface exposes the in-flight count from Graphite finished callbacks; PULP_GPU_TIMING opts a standalone window into GPU render timing. The args compile out when tracing is off and nothing reads them to make a decision. A standalone can also render its audio graph through a real-time paced null audio device (PULP_AUDIO_DEVICE=null) that opens no platform audio API. The change stays inside the existing render surface, macOS window host and standalone audio setup, adds no Vellum implementation or authority transfer, and leaves the accepted expansion boundary unchanged.",
+  "tests": [
+    "pulp-test-gpu-acquire-diagnostics",
+    "pulp-test-gpu-render-time",
+    "pulp-test-skia-surface-frames-in-flight",
+    "pulp-test-standalone-capture-audio",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
