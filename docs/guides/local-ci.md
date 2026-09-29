@@ -1497,6 +1497,45 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Build-time Node dependencies are installed before the build, never inside it
+
+The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
+iOS AUv3 POST_BUILD command inside the iOS compile gate and as the
+`pulp_bundle_threejs_for_jsc_smoke` ctest. It loads esbuild from
+`tools/scripts/node_modules`, and when that is absent its default is to run
+`npm install` on the spot. That is convenient in a local checkout and wrong in
+the required gate: an ephemeral VM starts without `node_modules`, so every gate
+run made a compile depend on `registry.npmjs.org`, and a DNS blip
+(`getaddrinfo ENOTFOUND registry.npmjs.org`) failed the `macos` check as an
+iOS compile error (exit 65) three times between 2026-09-27 and 2026-09-29, on
+three different hosts.
+
+`build.yml` now splits the two:
+
+1. The build job sets `PULP_OFFLINE_BUILD=1`. Under it the bundler refuses a
+   missing esbuild with exit 3 and a message naming
+   `npm ci --prefix tools/scripts`, instead of fetching. Any value other than
+   empty, `0`, `false`, `no` or `off` counts. Local builds leave it unset and
+   keep the one-time install.
+2. The **Install build-time Node dependencies** step, ahead of **Build**, runs
+   `npm ci --prefix tools/scripts --prefer-offline` from the committed
+   `package-lock.json` with three attempts spaced 20 s and 40 s apart
+   (`PULP_NPM_RETRY_DELAY_SECS`). It first loads the installed esbuild, checks
+   its version against the lockfile and runs one transform (which starts the
+   platform binary), and stops there with no registry contact when that works.
+   It succeeds only when the same probe passes after the install. Without
+   `node` on `PATH` it does nothing, because CMake then registers neither the
+   bundle step nor its tests.
+
+A registry outage now fails that step, after its retries, with a message that
+says so, rather than surfacing twenty minutes later as a compile failure. No
+tartci host mount carries an npm cache today, so `--prefer-offline` only helps
+where the runner's own `~/.npm` persists; an npm cache mount analogous to
+`TARTCI_PIP_WHEELHOUSE` would remove the registry from the gate entirely.
+`tools/scripts/test_node_build_deps_step.py` runs the step's real script
+against a stub registry, and `pulp_bundle_threejs_for_jsc_offline` proves the
+bundler never launches npm under `PULP_OFFLINE_BUILD`.
+
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 **Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
