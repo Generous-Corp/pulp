@@ -288,3 +288,12 @@ title = "No shared 'could not establish' exit code and no static SKIP_RETURN_COD
 why = "Exit 2 is already argparse/config error (version_bump_check.py, docs_noise_lint.py) and four checks already spend their own codes on this state, so a shared code collides rather than unifies; every aggregator collapses nonzero to fail while the correct response differs per site (block at pre-push, warn on a required check, retry on a platform 503). The working shape already ships: gates.sh cases format_changed.sh's 3 as 'SKIPPED (INFRASTRUCTURE, not a formatting verdict)'."
 do_not = "Minting a repo-wide 'could not establish' code, or a static SKIP_RETURN_CODE ledger of checks that might be blind: there is no enumerable population to freeze, and such a ledger certifies the defect instead of detecting it, so it would have been green throughout the incident that motivated it."
 guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
+
+[[decision]]
+id = 23
+layer = "pulp"
+tags = ["ios-gate", "digest", "skip", "receipt", "content-hash"]
+title = "The iOS compile gate is skipped only on a trusted PASS receipt for its exact input digest, with a 1-in-10 control run."
+why = "The gate costs 6-13 min per macos job. Over its shadow window (2026-09-27..29: 242 gate jobs, 60 would_skip verdicts across merge_group and pull_request) no would_skip was followed by a failing real run; the one digest that failed and later passed failed on an npm registry DNS error, not an input. A code audit then found inputs the digest missed (the Three.js bundler and its npm lockfile, the build wrapper, directories the root CMakeLists adds on iOS), which were added before enforcement."
+do_not = "Trusting a receipt from outside this repository's build.yml merge_group or same-repository pull_request runs; narrowing ios_gate_digest.py's input set without a shadow window; removing the control cadence. A control_run or would_skip followed by ran_failed means an input is missing: set PULP_IOS_GATE_DIGEST_MODE=shadow and widen the set before re-enabling."
+guards = [".github/workflows/build.yml", "tools/ci/ios_gate_digest.py"]

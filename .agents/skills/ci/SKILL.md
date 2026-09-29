@@ -1709,16 +1709,25 @@ the two `scene3d-native-slice-handoff` tests, only one names the plan file in
 its ctest arguments; the other reaches it through a verifier that hardcodes the
 path, so excluding the obvious one alone leaves a permanent red.
 
-## The iOS gate shadow annotation is evidence, not a skip
+## The iOS gate is skipped on a trusted digest receipt — watch the control
 
-`pulp-ios-gate-shadow/v1` notices on the `macos` job (`would_skip` / `run`,
-then `ran_ok` / `ran_failed`) come from `tools/ci/ios_gate_digest.py`, which
-digests the gate's input set + toolchain and looks it up among passing runs.
-Shadow mode changes no gating: a `would_skip` job still ran the gate. Read
-`would_skip ÷ runs` per event (merge group and PR head separately, n ≥ 20)
-and, as the safety control, `would_skip` followed by `ran_failed` (must be
-0). Do not turn the verdict into a skip in build.yml; that is a decisions-
-contract amendment with the shadow data as its Step Zero.
+The Build step skips the iOS compile gate when `tools/ci/ios_gate_digest.py
+decide` finds a PASS receipt (`ios-gate-ok-<digest>`) for the exact input
+digest written by a TRUSTED run: this repo's `build.yml`, `merge_group` or
+same-repository `pull_request`, marker naming the same digest and run
+(decisions contract row 23). One run id in ten and every schedule/push run is
+a control that runs anyway; any lookup error runs it. `pulp-ios-gate-shadow/v1`
+notices record `skipped` / `control_run` / `would_skip` / `run`, then
+`ran_ok` / `ran_failed`. A `control_run` or `would_skip` followed by
+`ran_failed` means the input set missed a file: set the repository variable
+`PULP_IOS_GATE_DIGEST_MODE=shadow` (no workflow edit), widen `INPUT_PATTERNS`
+/ `CONFIGURE_REACHED_DIRS`, then re-enable. The set must stay a SUPERSET of
+what the gate reads: anything the gate or its configures execute (the GPU
+leg's AUv3 post-build runs `tools/scripts/bundle_threejs_for_jsc.mjs`, which
+`npm install`s from `tools/scripts/package-lock.json`) belongs in it, and a
+narrowing change needs a new shadow window. The gate's own network fetches
+(npm, Skia) are NOT inputs; a same-digest fail-then-pass is a flake, not a
+missing input, when the log shows a fetch error.
 
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
