@@ -2321,8 +2321,8 @@ On macOS that choice is a no-op: Dawn's Metal swapchain can only toggle
 embedded editor is still vsync-paced and `gpu_acquire` (`nextDrawable`) still
 blocks when all three drawables are held. Treat that as a known issue, not
 evidence the policy works. Before changing present modes or adding a
-frame-in-flight gate, capture a trace and read the `gpu_acquire` args
-(`frames_in_flight`, `gpu_render_ms`, and on the standalone window `late_ms` /
+frame-in-flight gate, capture a trace and read the standalone GPU window's
+`gpu_acquire` args (`frames_in_flight`, `gpu_render_ms`, `late_ms`,
 `refresh_period_ms`) to tell a GPU-bound frame from CPU bunching — see the
 trace-analysis skill. `PULP_GPU_TIMING=1` turns on GPU render timing for a
 standalone window (it relaxes Dawn validation, so it is never on by default),

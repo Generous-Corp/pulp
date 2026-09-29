@@ -491,15 +491,16 @@ existed the time had nowhere to be attributed and the trace looked healthy.
 On Metal the acquire is `[CAMetalLayer nextDrawable]`, which blocks until one
 of the layer's drawables (three by default; Dawn and Pulp set neither
 `maximumDrawableCount` nor `allowsNextDrawableTimeout`) comes back. A wait of
-one or two refresh intervals means every drawable was held, and the span's
-args say by whom:
+one or two refresh intervals means every drawable was held, and in the
+standalone GPU window the span's args say by whom (a plug-in editor's
+`gpu_acquire` carries no args yet):
 
 | arg | meaning |
 |---|---|
 | `frames_in_flight` | frames submitted to the GPU and not yet finished (as of the last completion pump; may read one high) |
 | `gpu_render_ms` | last sampled GPU render time — 0 unless GPU timing is on (`PULP_GPU_TIMING=1` for a standalone window) |
-| `late_ms` | acquire start minus the display-link target presentation time; negative = rendering ahead (standalone window only) |
-| `refresh_period_ms` | the display's refresh interval (standalone window only) |
+| `late_ms` | acquire start minus the display-link target presentation time; negative = rendering ahead |
+| `refresh_period_ms` | the display's refresh interval |
 | `vsync_driven` | false for resize / capture / first-show frames rendered outside the link |
 
 `frames_in_flight` ≥ 2 with `gpu_render_ms` near or above `refresh_period_ms`
