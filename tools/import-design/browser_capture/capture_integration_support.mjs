@@ -15,12 +15,32 @@ export function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// The deadline every real capture in these suites runs under. It is sized for
+// the gate VM these suites run on, not for an idle workstation: alone a
+// capture finishes in about six seconds, but run beside the other integration
+// files on a VM whose host is also building, its screenshot loop has run past
+// 15 seconds (`browser-capture-timeout ... stalled=Page.captureScreenshot`).
+// These cases prove what a capture records, not how fast it records it, and a
+// wedged capture is still bounded by this deadline and the ctest timeout.
+export const CAPTURE_DEADLINE_MS = 30000;
+
+// Time a case needs beyond its captures' deadlines: Node start-up before the
+// deadline is armed, and browser teardown after it expires.
+const CAPTURE_OVERHEAD_MS = 10000;
+
+// The node:test timeout for a case that runs `captures` captures in sequence,
+// each under `deadlineMs`. A case timeout at or below its own capture deadline
+// reports a slow capture as a test-runner timeout that names no phase.
+export function captureCaseTimeout(captures = 1, deadlineMs = CAPTURE_DEADLINE_MS) {
+  return captures * (deadlineMs + CAPTURE_OVERHEAD_MS);
+}
+
 export async function runCapture(script, browser, input, root, output, width, height) {
   await execute(process.execPath, [
     script, "capture", "--browser", browser, "--input", input,
     "--root", root, "--output", output,
     "--initial-width", String(width), "--initial-height", String(height),
-    "--dpr", "2", "--timeout-ms", "20000",
+    "--dpr", "2", "--timeout-ms", String(CAPTURE_DEADLINE_MS),
   ], { maxBuffer: 1024 * 1024 });
 }
 

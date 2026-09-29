@@ -19,6 +19,29 @@ function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+// Waits for `promise` or `milliseconds`, whichever comes first, and clears the
+// timer either way. `Promise.race([promise, delay(ms)])` leaves the losing
+// timer armed, and an armed timer keeps Node's event loop alive: a capture
+// whose guardian exited promptly still sat out the rest of a six-second
+// teardown bound before its process could exit.
+export async function waitAtMost(promise, milliseconds) {
+  let timer;
+  try {
+    await Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(resolve, milliseconds); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// How long a launch waits for its lifecycle guardian to publish custody. The
+// guardian is a fresh Node process that must start, verify the browser's
+// identity and write its readiness marker; on a loaded machine that alone has
+// overrun 1.5 seconds, and a missed deadline tears down a healthy launch.
+const GUARDIAN_CUSTODY_TIMEOUT_MS = 5000;
+
 const OWNER_MARKER = ".pulp-browser-owner-v1.json";
 const GUARDIAN_READY = ".pulp-browser-guardian-ready";
 const ANCHOR_FAILURE = ".pulp-browser-anchor-failure";
@@ -140,13 +163,10 @@ async function terminateOwnedBrowserPid(
     const treeKill = spawn(
       "taskkill.exe", ["/pid", String(pid), "/T", "/F"],
       { stdio: "ignore", windowsHide: true });
-    await Promise.race([
-      new Promise((resolve) => {
-        treeKill.once("error", resolve);
-        treeKill.once("exit", resolve);
-      }),
-      delay(1500),
-    ]);
+    await waitAtMost(new Promise((resolve) => {
+      treeKill.once("error", resolve);
+      treeKill.once("exit", resolve);
+    }), 1500);
     return true;
   }
   try {
@@ -366,7 +386,7 @@ async function startBrowserGuardian(child, profileDir) {
   guardian.unref();
   guardian.stdin?.unref?.();
   const readyPath = path.join(profileDir, GUARDIAN_READY);
-  const deadline = Date.now() + (process.platform === "win32" ? 5000 : 1500);
+  const deadline = Date.now() + GUARDIAN_CUSTODY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (guardian.exitCode !== null) {
       throw new Error("browser lifecycle guardian exited before custody");
@@ -390,7 +410,7 @@ async function stopBrowserGuardian(child) {
   if (guardian.exitCode !== null) return custody;
   const exited = new Promise((resolve) => guardian.once("exit", resolve));
   guardian.stdin?.end();
-  await Promise.race([exited, delay(6000)]);
+  await waitAtMost(exited, 6000);
   return custody;
 }
 
@@ -530,7 +550,7 @@ export async function terminateBrowser(child) {
       treeKill.once("error", resolve);
       treeKill.once("exit", resolve);
     });
-    await Promise.race([treeKillFinished, delay(1500)]);
+    await waitAtMost(treeKillFinished, 1500);
     if (treeKill.exitCode === null) {
       try {
         treeKill.kill("SIGKILL");
@@ -545,7 +565,7 @@ export async function terminateBrowser(child) {
         // taskkill may have reaped the browser between the state check and kill.
       }
     }
-    await Promise.race([exited, delay(1000)]);
+    await waitAtMost(exited, 1000);
     await stopBrowserGuardian(child);
     return;
   }
@@ -562,7 +582,7 @@ export async function terminateBrowser(child) {
   // and the guardian can fail after recording one. Either way the live handle
   // is still an identity, so neither case may return with the group running.
   await terminateOwnedChildHandle(child);
-  await Promise.race([exited, delay(1000)]);
+  await waitAtMost(exited, 1000);
 }
 
 // A capture's cleanup terminates whatever browser it has been handed, but a

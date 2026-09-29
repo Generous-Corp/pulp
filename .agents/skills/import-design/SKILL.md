@@ -3975,10 +3975,31 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   rather than to the longest. A new integration file is picked up by the glob
   and excluded from the unit aggregate automatically.
 - **The per-case cost is the capture's own fidelity work, not test overhead.**
-  A trivial page takes ~12 s: `captureStableScreenshot` always observes its full
-  32-frame horizon (an early A,A plateau must not hide a later B,B
+  A trivial page takes ~7.5 s: `captureStableScreenshot` always observes its
+  full 32-frame horizon (an early A,A plateau must not hide a later B,B
   presentation) at ~50 ms per frame of headless software-compositing pacing,
-  once per pixel artifact, plus settle, launch and shutdown.
+  once per pixel artifact, plus settle, launch and a ~1.5 s shutdown (the
+  custody anchor ignores SIGTERM by design, so the guardian waits out its grace
+  window before SIGKILL). It used to take ~12 s because every bounded teardown
+  wait was `Promise.race([p, delay(ms)])`: the losing timer stayed armed and
+  held the capture process open for the rest of a 6 s bound after cleanup had
+  finished. Bound a wait with `waitAtMost` (`browser_process.mjs`), which clears
+  its timer, never with a bare `delay` race; `browser_process.test.mjs` times an
+  owner's exit after teardown to catch a regression.
+- **Integration deadlines come from `capture_integration_support.mjs`.** Every
+  capture in the `*.integration.test.mjs` files runs under
+  `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is
+  `captureCaseTimeout(captures)`, which leaves room for Node start-up and
+  teardown beyond the capture deadlines. Do not hand-write `--timeout-ms` or a
+  case `timeout` in a new case: the old per-case literals (15 s capture inside a
+  20 s case) failed merge groups on the pinned Chrome for Testing with
+  `browser-capture-timeout ... stalled=Page.captureScreenshot` whenever the
+  gate VM's host was busy, and a case timeout at or below its capture deadline
+  surfaced as a bare `test timed out after 20000ms` that names no phase. The
+  guardian's custody deadline (`GUARDIAN_CUSTODY_TIMEOUT_MS`, 5 s) is the
+  same lesson in the product: at 1.5 s a loaded VM missed it and tore down a
+  healthy launch (`guardian did not establish custody: browser child exited
+  (SIGTERM)` -- the SIGTERM is the teardown, not the cause).
   `--disable-frame-rate-limit --disable-gpu-vsync` cut frames to ~5 ms but only
   ~15% of suite time, raised CPU ~60%, and would shrink the horizon's wall-clock
   span for every real import, so it is not used.
