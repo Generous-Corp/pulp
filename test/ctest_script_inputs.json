@@ -2964,12 +2964,12 @@
    "kind": "python"
   },
   "prepush-queue-rebase-hint": {
-   "kind": "python",
    "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
    "inputs": [
     "tools/scripts/prepush_queue_rebase_hint.py",
     "tools/scripts/test_prepush_queue_rebase_hint.py"
-   ]
+   ],
+   "kind": "python"
   },
   "prepush-refresh-push": {
    "entry": "tools/scripts/test_refresh_push_check.py",
@@ -2990,7 +2990,7 @@
    "kind": "python"
   },
   "project-package-mutation-control": {
-   "entry": "build-gate/test/run_project_package_mutation_control.py",
+   "entry": "${CMAKE_BINARY_DIR}/test/run_project_package_mutation_control.py",
    "inputs": [],
    "kind": "python"
   },
@@ -4248,6 +4248,8 @@
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
     "docs/status",
+    "docs/status/consumption-profiles.json",
+    "examples/pulp-gain/CMakeLists.txt",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_script_test_inputs.py"
    ],
