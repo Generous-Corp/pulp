@@ -774,7 +774,15 @@ consequences worth knowing before you debug:
   pr-fast lane now reads the build's `consumption-census-facts.json`, and when
   its scope differs it sets those tests aside as `NOT CHECKED (build config ≠
   census profile <key>: PULP_BUILD_EXAMPLES=ON (profile OFF))`; `--build-dir
-  auto` prefers a build that matches the profile. Host-specific suites (`rack-plugin-loads`) are in
+  auto` prefers a build that matches the profile. There is no host-detected
+  input behind that closure: `pulp-events` (with CoreServices, Foundation and
+  UserNotifications) links into `Pulp::inspect-protocol` unconditionally on
+  Apple since the "make Apple SDK CLI link complete" change, and across 115
+  first-parent `main` commits the census count (19 before, 23 after) tracks that
+  change exactly. A 19↔23 red locally means the build and the census came from
+  different trees, so a build counts as stale when ANY checkout file CMake read
+  (`build.ninja`'s RERUN_CMAKE inputs) is newer than its configure, not only a
+  test manifest. Host-specific suites (`rack-plugin-loads`) are in
   `WORKFLOW_LOCAL_SKIPS` and print NOT CHECKED. A `build/` configured before
   the test manifests last changed is treated as stale and the tier is read from
   the manifests instead, and a merge-base re-run keeps build-tree paths pointed

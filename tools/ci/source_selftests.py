@@ -587,7 +587,7 @@ def unusable_build_reason(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -
     if generator != "Ninja":
         return f"generator is {generator or 'unknown'}, not Ninja"
     if build_is_stale(build, repo):
-        return "configured before the test manifests last changed"
+        return "configured before its CMake inputs last changed"
     return ""
 
 
@@ -691,14 +691,42 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
     return None, ", ".join(rejected) or "no build*/CMakeCache.txt in the checkout"
 
 
+def cmake_inputs(build: pathlib.Path, repo: pathlib.Path) -> list[pathlib.Path]:
+    """The checkout files CMake read to configure ``build`` (a Ninja build).
+
+    Ninja's regeneration rule lists every file whose change re-runs CMake;
+    those under the checkout are what a build's registrations and link graph
+    were computed from.
+    """
+    try:
+        text = (build / "build.ninja").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    root = str(repo.resolve()) + os.sep
+    for line in text.replace("$\n", "").splitlines():
+        if line.startswith("build build.ninja") and ": RERUN_CMAKE" in line:
+            implicit = line.split(" | ", 1)[1].split(" || ")[0] if " | " in line else ""
+            paths = [p.replace("$ ", " ") for p in re.split(r"(?<!\$) ", implicit) if p]
+            return [pathlib.Path(p) for p in paths if p.startswith(root)]
+    return []
+
+
 def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
-    """A configured build older than any test manifest registers an old tier."""
+    """A build configured before its CMake inputs last changed is stale.
+
+    Its test registrations and link graph describe another tree: a build
+    configured from one checkout and read after switching to another reports
+    the other tree's census closure (the inspect-protocol 19↔23 flip), and an
+    old configure registers an old tier. Every checkout file CMake read counts,
+    not only the test manifests.
+    """
     stamp = build / "CTestTestfile.cmake"
     if not stamp.is_file():
         return False
     configured = stamp.stat().st_mtime
-    manifests = [repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
-    return any(m.is_file() and m.stat().st_mtime > configured for m in manifests)
+    inputs = cmake_inputs(build, repo) or [
+        repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
+    return any(m.is_file() and m.stat().st_mtime > configured for m in inputs)
 
 
 def ctest_label_entries_from_build(
@@ -1238,7 +1266,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"source-selftests: build dir: {build} ({why})", flush=True)
             stale = build is not None and build_is_stale(build)
             if stale:
-                print(f"source-selftests: {build} was configured before the test manifests "
+                print(f"source-selftests: {build} was configured before its CMake inputs "
                       "last changed; reading the members from the manifests instead", flush=True)
             if build and not stale and (build / "CTestTestfile.cmake").is_file():
                 entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())

@@ -648,6 +648,29 @@ class CtestLaneTests(unittest.TestCase):
             os.utime(manifest, (3000, 3000))
             self.assertTrue(lane.build_is_stale(root / "build", root))
 
+    def test_any_cmake_input_newer_than_the_configure_makes_it_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            (root / "inspect").mkdir()
+            (root / "build").mkdir()
+            cmake = root / "inspect" / "CMakeLists.txt"
+            cmake.write_text("")
+            outside = pathlib.Path(tmp).resolve().parent / "not-in-checkout.cmake"
+            (root / "build" / "build.ninja").write_text(
+                "build build.ninja /x/y: RERUN_CMAKE | "
+                f"{cmake} {root}/build/CMakeCache.txt {outside} || cmake_object_order\n")
+            stamp = root / "build" / "CTestTestfile.cmake"
+            stamp.write_text("")
+            os.utime(cmake, (1000, 1000))
+            os.utime(stamp, (2000, 2000))
+            self.assertEqual(lane.cmake_inputs(root / "build", root),
+                             [cmake, root / "build" / "CMakeCache.txt"])
+            self.assertFalse(lane.build_is_stale(root / "build", root))
+            # A checkout switch rewrites the file after the configure: the
+            # build now describes another tree (not a test manifest at all).
+            os.utime(cmake, (3000, 3000))
+            self.assertTrue(lane.build_is_stale(root / "build", root))
+
     def test_a_missing_working_directory_is_a_failure_not_a_crash(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results = lane.run([{"name": "x", "raw": True, "argv": ["true"],
@@ -783,7 +806,7 @@ class BuildDirChoiceTests(unittest.TestCase):
             self._build(root, "build", "Ninja", 1000)
             chosen, why = lane.choose_build_dir(root, {})
         self.assertIsNone(chosen)
-        self.assertIn("configured before the test manifests last changed", why)
+        self.assertIn("configured before its CMake inputs last changed", why)
 
     def test_the_newest_of_two_current_builds_wins(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
