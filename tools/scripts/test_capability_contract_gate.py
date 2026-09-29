@@ -38,9 +38,6 @@ HOOK = ROOT / ".githooks" / "pre-push"
 BASE_ENV = "PULP_AGENT_CAPABILITY_BASE_REF"
 RESOLVED = 'capability_base="$(git rev-parse --verify --quiet "$BASE^{commit}" || true)"'
 
-PREDICATE = re.compile(r"\^\((?:[^)]*\|)*[^)]*\)")
-
-
 def _predicate(text: str) -> str:
     """The extended-regex alternation each surface uses to decide relevance."""
     match = re.search(r"'(\^\([^']+\))'", text)
