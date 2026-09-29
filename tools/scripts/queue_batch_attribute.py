@@ -64,6 +64,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable, Iterable
 
 DEFAULT_REPO = "Generous-Corp/pulp"
 
@@ -993,6 +994,13 @@ HISTORY_AMBIGUOUS = "ambiguous"
 HISTORY_WEAK = "weak"
 HISTORY_FLAKE = "flake"
 HISTORY_UNATTRIBUTED = "unattributed"
+HISTORY_INPUTS = "touched-inputs"
+
+# Declared inputs for script-driven ctests (tools/scripts/script_test_inputs.py).
+SCRIPT_INPUTS_LIST = "test/ctest_script_inputs.json"
+# The drift check compares every listed script's inputs, so any of them, or
+# the list itself, is an input to it.
+DRIFT_TEST = "script-test-inputs-drift"
 
 # One ctest result line, as ctest prints it during the run (padded with dots).
 CTEST_RESULT_RE = re.compile(
@@ -1228,11 +1236,71 @@ def classify_history(hist: TestHistory) -> None:
         hist.verdict = HISTORY_UNATTRIBUTED
 
 
+def declared_inputs(test: str, document: dict) -> tuple[str, ...] | None:
+    """The checkout paths (files or directories) a script-driven test reads."""
+    tests = document.get("tests") or {}
+    if test == DRIFT_TEST:
+        inputs = {SCRIPT_INPUTS_LIST}
+        for entry in tests.values():
+            inputs.update(entry.get("inputs") or [])
+        return tuple(sorted(inputs))
+    entry = tests.get(test)
+    return tuple(entry.get("inputs") or []) if entry else None
+
+
+def touches(paths: Iterable[str], inputs: tuple[str, ...]) -> bool:
+    return any(p == i or p.startswith(i.rstrip("/") + "/") for p in paths for i in inputs)
+
+
+def attribute_by_inputs(
+    histories: list[TestHistory],
+    observations: list[GroupObservation],
+    document: dict,
+    files_of: Callable[[int], list[str]],
+) -> None:
+    """Name the entries that touched a failing test's declared inputs.
+
+    A test that failed in a few groups and passed in the rest reads as a flake
+    to the separator rule when the groups that broke it held DIFFERENT pull
+    requests. When every failing group holds at least one entry whose diff
+    touched that test's declared inputs, the failure is deterministic and
+    those entries are its cause, so they are named instead of a flake. A group
+    with no such entry, or one whose membership is unknown, keeps the old
+    verdict: then the inputs cannot explain every failure.
+    """
+    by_run = {obs.run_id: obs for obs in observations}
+    cache: dict[int, list[str]] = {}
+
+    def files(pr: int) -> list[str]:
+        if pr not in cache:
+            cache[pr] = files_of(pr)
+        return cache[pr]
+
+    for hist in histories:
+        if hist.verdict == HISTORY_CULPRIT or not hist.failed_runs:
+            continue
+        inputs = declared_inputs(hist.test, document)
+        if not inputs:
+            continue
+        named: set[int] = set()
+        for run_id in hist.failed_runs:
+            obs = by_run.get(run_id)
+            if obs is None or obs.members is None:
+                break
+            touching = {pr for pr in obs.members if touches(files(pr), inputs)}
+            if not touching:
+                break
+            named |= touching
+        else:
+            hist.verdict = HISTORY_INPUTS
+            hist.culprits = sorted(named)
+
+
 def likely_culprits(histories: list[TestHistory]) -> dict[int, list[str]]:
     """Pull request -> the tests the history names it the culprit for."""
     named: dict[int, list[str]] = {}
     for hist in histories:
-        if hist.verdict == HISTORY_CULPRIT:
+        if hist.verdict in (HISTORY_CULPRIT, HISTORY_INPUTS):
             for pr in hist.culprits:
                 named.setdefault(pr, []).append(hist.test)
     return named
@@ -1854,6 +1922,11 @@ def main(argv: list[str] | None = None) -> int:
                 {t for obs in observations if obs.run_id == given for t in obs.failed}
             )
         histories = history_attribution(observations, focus)
+        inputs_list = Path(args.source_root) / SCRIPT_INPUTS_LIST
+        if inputs_list.is_file():
+            attribute_by_inputs(
+                histories, observations, json.loads(inputs_list.read_text(encoding="utf-8")),
+                lambda pr: [c.path for c in pr_files(args.repo, pr)])
         explained: list[str] = []
         if args.pr is not None:
             by_run = {obs.run_id: obs for obs in observations}
