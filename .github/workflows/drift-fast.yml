@@ -60,6 +60,14 @@ jobs:
         run: |
           git fetch --no-tags --depth=1 origin "+${BASE_SHA}:refs/remotes/origin/${BASE_REF}"
 
+      # The historical GPU-probe acceptance check is selected by drift_fast.py
+      # and walks commits outside the depth-2 event checkout. Reconnect the
+      # bounded provenance history before configuring so a shallow hosted clone
+      # cannot turn this advisory diagnostic into a deterministic red check.
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
       - name: Install Linux dependencies
         uses: ./.github/actions/install-linux-build-deps
 

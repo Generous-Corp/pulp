@@ -13,6 +13,12 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+The hosted `drift-fast` workflow selects the historical GPU-probe acceptance
+test from a depth-2 checkout. Keep its bounded
+`hydrate_gpu_provenance_commits.py` step after checkout and before configure;
+removing it produces a deterministic shallow-history failure unrelated to the
+source change.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
