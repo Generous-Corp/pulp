@@ -405,3 +405,23 @@ if(TARGET pulp-import-design)
 endif()
 catch_discover_tests(pulp-test-cli-import-figma-url
     PROPERTIES LABELS "parser-import")
+
+# Pure-Python authoring and vendoring gates agents run before or after an
+# import: the realtime-performance contract check_contracts.py applies to
+# panel HTML/JSX (a React commit on a per-frame path), and the check that an
+# app's vendored @pulp/react runtime is not older than this SDK's. Each suite
+# carries its own negative control.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME import-realtime-contract
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/import-design/test_realtime_contract.py)
+    set_tests_properties(import-realtime-contract PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 60)
+    add_test(NAME import-vendored-runtime-staleness
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/import-validation/test_check_vendored_runtime.py)
+    set_tests_properties(import-vendored-runtime-staleness PROPERTIES
+        LABELS "parser-import;import"
+        TIMEOUT 60)
+endif()

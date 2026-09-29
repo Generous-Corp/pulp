@@ -259,7 +259,10 @@ private:
 
     CGContextRef ctx_;
     float width_, height_;
-    int in_transparency_layer_ = 0;
+    // One entry per open save level: true when that level is a transparency
+    // layer (save_layer), so restore() ends a layer only at the level that
+    // opened it, and restore_to_count() closes layers as it pops them.
+    std::vector<bool> save_is_layer_;
     Color fill_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     Color stroke_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     std::string font_family_ = "Helvetica";
@@ -332,11 +335,11 @@ private:
     double baseline_xform_[6] = {1, 0, 0, 1, 0, 0};
 
     // Manual GState depth tracking. CG doesn't expose a saveCount() API, so
-    // save() increments and restore() decrements this counter;
-    // restore_to_count() pops repeatedly until depth matches the requested
-    // target. CanvasWidget::paint() snapshots the depth at entry and pops back
-    // to it at exit so an unbalanced JS ctx.save() can't leak GState into the
-    // parent View's paint scope.
+    // save() and save_layer() increment and restore() decrements this
+    // counter; restore_to_count() pops repeatedly until depth matches the
+    // requested target. CanvasWidget::paint() snapshots the depth at entry and
+    // pops back to it at exit so an unbalanced JS ctx.save() can't leak
+    // GState into the parent View's paint scope.
     int save_depth_ = 0;
 
     // Canvas2D shadow* state. CGContext owns the sticky shadow via its GState

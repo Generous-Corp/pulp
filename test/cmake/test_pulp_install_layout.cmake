@@ -460,6 +460,15 @@ if(NOT EXISTS "${_installed_minos_json}")
         "Expected: ${_installed_minos_json}\n"
         "PulpMinOs.cmake finds no floor data and cannot pin the consumer.")
 endif()
+# pulp_check_vendored_react_runtime() resolves its fingerprint beside its own
+# module; without it the check warns that it could not run instead of judging.
+foreach(_react_runtime_file PulpReactRuntime.cmake pulp-react-runtime-fingerprint.json)
+    if(NOT EXISTS "${_pulp_cmake_dir}/${_react_runtime_file}")
+        message(FATAL_ERROR
+            "${_react_runtime_file} not bundled with the installed Pulp SDK.\n"
+            "Expected: ${_pulp_cmake_dir}/${_react_runtime_file}")
+    endif()
+endforeach()
 file(GLOB _pulp_config LIST_DIRECTORIES false
     "${_pulp_cmake_dir}/PulpConfig.cmake")
 if(NOT _pulp_config)

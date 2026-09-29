@@ -533,7 +533,7 @@ A non-zero `traced_buf_write_wrap_count`, or any
 `packet_skipped_seq_needs_incremental_state_invalid`, condemns the trace. Do not
 analyse it and do not report an absence from it — re-capture with
 `PULP_TRACE_RING_KB` raised (KB; default 80 MB; a UI capture carrying
-`js_native:*` spans needs ≥ `262144`).
+`js_native` spans needs ≥ `262144`, and 60 s with audio playing ≈ `1572864`).
 
 Note the asymmetry: a clean `stats` table proves only that nothing overflowed,
 not that anything recorded. Pair it with a positive control whose count MUST be
@@ -586,18 +586,22 @@ the tree emitted.
 
 ## Querying the JS bridge spans
 
-`js_native:<fn>` slices (one per JS→C++ bridge call, tracing builds only) and
-script-authored `pulpTrace` spans both land on the **`js`** category. Attribute a
-handler's native half with:
+`js_native` slices (one per JS→C++ bridge call, tracing builds only) and
+script-authored `pulpTrace` spans both land on the **`js`** category. The slice
+name is the constant `js_native`; the bridge function is its `debug.fn` arg.
+Attribute a handler's native half with:
 
 ```sql
-SELECT name, COUNT(*) AS calls, SUM(dur)/1e6 AS ms, MAX(dur)/1e6 AS max_ms
-FROM slice WHERE name GLOB 'js_native:*' AND dur >= 0
-GROUP BY name ORDER BY ms DESC LIMIT 25;
+SELECT EXTRACT_ARG(arg_set_id, 'debug.fn') AS fn,
+       COUNT(*) AS calls, SUM(dur)/1e6 AS ms, MAX(dur)/1e6 AS max_ms
+FROM slice WHERE category = 'js' AND name = 'js_native' AND dur >= 0
+GROUP BY fn ORDER BY ms DESC LIMIT 25;
 ```
 
-`GLOB`, not `LIKE` — the rule in "SQL discipline" applies here, and `js_native:`
-is a prefix so the pattern is cheap.
+An older naming put the function in the slice name (`js_native:<fn>`); a
+`GLOB 'js_native:*'` filter against a current trace matches nothing and reads
+as "no bridge calls". Pair it with `SELECT COUNT(*) FROM slice WHERE name =
+'js_native'` before believing a zero.
 
 **Check for corrupted parentage before trusting any `js` aggregate.** An
 unbalanced `__traceBegin__` re-parents later slices under a span that never

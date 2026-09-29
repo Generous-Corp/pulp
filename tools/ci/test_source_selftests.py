@@ -413,16 +413,21 @@ class GatesWiringTests(unittest.TestCase):
                 "import sys, pathlib\n"
                 f"with open({str(calls)!r}, 'a') as f: f.write(' '.join(sys.argv[1:]) + '\\n')\n"
                 "print('source-selftests: stub')\n"
+                "print('source-selftests: NOT CHECKED locally: needs-build (needs a configured build)')\n"
                 f"raise SystemExit({stub_exit})\n",
                 encoding="utf-8",
             )
+            log = root / "not-checked.log"
+            self.not_checked = ""
             script = (f'ROOT={str(root)!r}\nPYTHON={sys.executable!r}\nBASE=origin/main\nfail=0\n'
+                      f'not_checked_log={str(log)!r}\n: > "$not_checked_log"\n'
                       + self._block() + '\necho "fail=$fail"\n')
             env = {k: v for k, v in os.environ.items()
                    if k != "PULP_SKIP_SOURCE_SELFTESTS"}
             result = subprocess.run(
                 ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=60)
             argv = calls.read_text() if calls.exists() else ""
+            self.not_checked = log.read_text() if log.exists() else ""
         return result.stdout.strip() + "|" + argv
 
     def test_a_failing_lane_fails_gates(self) -> None:
@@ -439,8 +444,11 @@ class GatesWiringTests(unittest.TestCase):
         self.assertEqual(calls[0], "run --changed-from origin/main --label-base-failures")
         self.assertRegex(calls[1], r"^run --workflow \S+/\.github/workflows/workflow-lint\.yml "
                                    r"--changed-from origin/main --label-base-failures$")
-        self.assertRegex(calls[2], r"^run --ctest-label pr-fast --build-dir \S+/build "
-                                   r"--changed-from origin/main --label-base-failures$")
+        self.assertEqual(calls[2], "run --ctest-label pr-fast --build-dir auto "
+                                   "--changed-from origin/main --label-base-failures")
+        # Every lane's NOT CHECKED lines reach the summary's list, tagged by lane.
+        self.assertEqual(self.not_checked.count("NOT CHECKED locally: needs-build"), 4)
+        self.assertIn("[pr-fast] NOT CHECKED", self.not_checked)
         self.assertEqual(calls[3], "run --ctest-python --changed-from origin/main "
                                    "--label-base-failures")
 
@@ -701,6 +709,145 @@ class CtestLaneTests(unittest.TestCase):
             picked = lane.select_for_changes(entries, ["test/cmake/new_tests.cmake"], root)
         # The walker reads everything under test/; the reader names one other file.
         self.assertEqual([e["name"] for e in picked], ["walker"])
+
+
+class ImportClosureSelectionTests(unittest.TestCase):
+    """A changed module selects every suite that loads it through repo imports."""
+
+    def _repo(self, root: pathlib.Path) -> list[dict]:
+        scripts = root / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "census.py").write_text("def header_names(): return []\n")
+        (scripts / "batch_attr.py").write_text("import census\n")
+        (scripts / "test_batch.py").write_text(
+            "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
+            "import batch_attr\n")
+        (scripts / "test_ns.py").write_text("from tools.scripts import batch_attr\n")
+        (scripts / "test_other.py").write_text("import json\n")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        return [entry("batch", ["{repo}/tools/scripts/test_batch.py"]),
+                entry("ns", ["{repo}/tools/scripts/test_ns.py"]),
+                entry("other", ["{repo}/tools/scripts/test_other.py"])]
+
+    def test_a_module_two_imports_away_selects_its_suites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            picked = lane.select_for_changes(entries, ["tools/scripts/census.py"], root)
+        # Neither suite names census; each loads it through batch_attr, one by a
+        # sys.path sibling import, one through the repo-root namespace.
+        self.assertEqual([e["name"] for e in picked], ["batch", "ns"])
+
+    def test_control_an_unimported_module_selects_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            entries = self._repo(root)
+            (root / "tools" / "scripts" / "unused.py").write_text("x = 1\n")
+            picked = lane.select_for_changes(entries, ["tools/scripts/unused.py"], root)
+        self.assertEqual(picked, [])
+
+
+class BuildDirChoiceTests(unittest.TestCase):
+    """The pr-fast lane reads the build that is current, not the one named build/."""
+
+    def _build(self, root: pathlib.Path, name: str, generator: str, mtime: float) -> pathlib.Path:
+        build = root / name
+        build.mkdir()
+        (build / "CMakeCache.txt").write_text(f"CMAKE_GENERATOR:INTERNAL={generator}\n")
+        stamp = build / "CTestTestfile.cmake"
+        stamp.write_text("")
+        os.utime(stamp, (mtime, mtime))
+        return build
+
+    def _tree(self, root: pathlib.Path) -> None:
+        (root / "test" / "cmake").mkdir(parents=True)
+        manifest = root / "test" / "cmake" / "x_tests.cmake"
+        manifest.write_text("")
+        os.utime(manifest, (2000, 2000))
+
+    def test_a_stale_makefiles_build_loses_to_a_current_build_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            # build/ is even the NEWER configure; only its generator disqualifies it.
+            self._build(root, "build", "Unix Makefiles", 3500)
+            gate = self._build(root, "build-gate", "Ninja", 3000)
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertEqual(chosen, gate)
+        self.assertIn("build: generator is Unix Makefiles, not Ninja", why)
+
+    def test_a_stale_ninja_build_is_passed_over(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            self._build(root, "build", "Ninja", 1000)
+            chosen, why = lane.choose_build_dir(root, {})
+        self.assertIsNone(chosen)
+        self.assertIn("configured before the test manifests last changed", why)
+
+    def test_the_newest_of_two_current_builds_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            self._build(root, "build", "Ninja", 3000)
+            newer = self._build(root, "build-macos", "Ninja", 4000)
+            self.assertEqual(lane.choose_build_dir(root, {})[0], newer)
+
+    def test_the_declared_build_dir_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            self._tree(root)
+            self._build(root, "build-gate", "Ninja", 4000)
+            mine = self._build(root, "elsewhere", "Unix Makefiles", 1000)
+            env = {lane.GATES_BUILD_DIR_ENV: str(mine)}
+            self.assertEqual(lane.choose_build_dir(root, env), (mine, "from PULP_GATES_BUILD_DIR"))
+
+    def test_no_build_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            chosen, why = lane.choose_build_dir(pathlib.Path(tmp), {})
+        self.assertIsNone(chosen)
+        self.assertIn("no build*/CMakeCache.txt", why)
+
+
+class GatesVerdictTests(unittest.TestCase):
+    """A NOT CHECKED suite can never read as a plain green verdict."""
+
+    GATES = HERE.parent / "scripts" / "gates.sh"
+
+    def _verdict(self, fail: int, not_checked: str) -> subprocess.CompletedProcess:
+        text = self.GATES.read_text(encoding="utf-8")
+        summary = text[text.index("# ── Summary"):]
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "nc.log"
+            log.write_text(not_checked, encoding="utf-8")
+            script = f"fail={fail}\nnot_checked_log={str(log)!r}\n" + summary
+            return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                                  timeout=60)
+
+    def test_control_nothing_skipped_is_a_plain_pass(self) -> None:
+        r = self._verdict(0, "")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("gates: ✓ all gates pass", r.stderr)
+
+    def test_not_checked_items_are_listed_and_qualify_the_verdict(self) -> None:
+        r = self._verdict(0, "[pr-fast] NOT CHECKED locally: a (x)\n"
+                             "[pr-fast] NOT CHECKED locally: b (y)\n")
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("NOT CHECKED here (2)", r.stderr)
+        self.assertIn("[pr-fast] NOT CHECKED locally: b (y)", r.stderr)
+        self.assertIn("gates: ✓ PASSED WITH 2 NOT CHECKED", r.stderr)
+        self.assertNotIn("all gates pass", r.stderr)
+
+    def test_no_usable_build_is_named_in_the_verdict(self) -> None:
+        r = self._verdict(0, "[pr-fast] NO USABLE BUILD: build: generator is Unix Makefiles, "
+                             "not Ninja; members that need a configured build are not checked\n")
+        self.assertIn("gates: no usable configured build: build: generator is Unix Makefiles", r.stderr)
+        self.assertNotIn("all gates pass", r.stderr)
+
+    def test_a_failure_still_fails(self) -> None:
+        r = self._verdict(1, "[pr-fast] NOT CHECKED locally: a (x)\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("one or more gates failed", r.stderr)
 
 
 if __name__ == "__main__":

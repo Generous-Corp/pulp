@@ -8,6 +8,8 @@ requires:
   - .agents/skills/trace-analysis/references/hints_gpu.md
   - .agents/skills/trace-analysis/references/hints_gpu_audio.md
   - .agents/skills/trace-analysis/references/hints_crossplatform.md
+  - .agents/skills/trace-analysis/references/ui_jank_playbook.md
+  - .agents/skills/trace-analysis/references/ui_jank.sql
 ---
 
 # trace-analysis — the "why is this slow?" investigation harness
@@ -37,6 +39,36 @@ named query primitives. This harness decides *what to ask*; `trace-sql` is
 > Android domain content (SurfaceFlinger, binder, RenderThread, ftrace, cpu
 > governor) is not — the Pulp domain hints in `references/` are authored fresh
 > against Pulp's own seams. See NOTICE.md.
+
+---
+
+## Measurement mistakes that produce confident wrong answers
+
+**Read this before quoting any number.** Every row happened on one live-editor
+investigation (a spectrum analyzer with modulation, audio playing, pointer
+drawing). None of them errored. Each produced a clean, plausible result that
+was wrong — and several survived several rounds of "fixes" measured against
+them. A run that fails any *Detect* check is discarded, not averaged in.
+
+| Mistake | What it produced | How to detect it | Rule |
+|---|---|---|---|
+| **Trace ring wrapped** | A 512 MB ring over 60 s with audio (~715 MB written) silently dropped the main-thread sequence: 14 of 15 runs read as "no frames". | `stats`: `traced_buf_incremental_sequences_dropped` > 0 or any wrap; file size ≈ ring size; `trace_processor` prints "Trace health issues: Data losses". | Size `PULP_TRACE_RING_KB` so the whole run fits (`1572864` = 1.5 GB for 60 s with audio). Run the health query on **every** capture, first. |
+| **No audio flowing** | Silence / a test fixture left the analyzer path idle; the real cost (audio through the plugin) was invisible. | Data-delivery slice or counter near zero; meters flat in the screenshot. | Always drive `PULP_TEST_SIGNAL=noise` (or `sine`). Do not treat "no input" as "analyzer idle" either — silence still sends analyzer frames. |
+| **Wrong window driven** | A global `CGEvent` mouse mover ran while the app was not frontmost and dragged the user's terminal instead. | Frontmost pid ≠ app pid at any point during the run. | Use in-window stimulus (`PULP_TEST_POINTER_DRAG='rect:…'`); gate every run on frontmost pid == app pid. |
+| **App never actually loaded** | Launched from a sandboxed agent shell, the GUI app never attached to the window server (no window, not registered with LaunchServices) — yet the trace still had `frame` slices from a non-window source. | No window id; screenshot empty; `paint`/`gpu_acquire` counts ≪ `frame` count. | Per-run validity gates: frontmost pid, a window id plus a screenshot someone looks at, and a trace containing editor `paint` **and** data-delivery activity. |
+| **Screen locked** | The display link stops: zero or near-zero editor frames, a well-formed "idle" trace. | Check lock state before *and* after each run. | Discard the run. |
+| **Degraded OS audio** | CoreAudio held 4,096 `com.apple.AirPlayXPCHelper` plug-in objects; every audio app spent 19–75 s in device init, so runs started with no window. | Time a `kAudioHardwarePropertyDevices` query; count the system object's `kAudioObjectPropertyOwnedObjects` by class (thousands of one class). | A human restarts `AirPlayXPCHelper` then `coreaudiod` (`-9`), or reboots; let the load settle before measuring again. |
+| **Harness measures itself** | Scenario/menu-step harness snapshots added 100–800 ms stalls that read as app jank. | Stalls line up with harness actions; any snapshot/eval the script runs lands in-app. | Nothing the measurement script does may run inside the app during the capture window. |
+| **Shared-host load** | Load average 7 vs 30–130 moved frame times more than most fixes did. | Record load average at the start and end of every run. | Interleave old/new runs (A, B, A, B, …) in one session; never compare against a number from another session. |
+| **Automation instead of the gesture** | Setting host params (`param_set`) to simulate zoom/shape changes exercised the host-automation projection path (22–127 ms per change), not the user's wheel/click path. | The slices in the window are host-sync/projection, not `dom_event_*`. | Measure both paths, labelled separately; the user's gesture is the one that decides feel. |
+| **Averages hide the feel** | avg 16.7 ms with max 145 ms still felt sluggish. | — | Report p50/p95/max and counts over 50 / 100 ms **per phase**: mid-stroke, the 2 s after release, steady modulation, zoom. |
+| **Frame rate ≠ content smoothness** | A steady 60 fps drew a spectrum that updated ~23 Hz (the analysis hop). | — | Measure content cadence separately: deliveries/s, max gap, gaps > 150 ms, resets. |
+| **Tracing build ≠ shipping build** | Tracing wraps every JS→native call in a slice, inflating absolute costs. | — | Compare deltas between tracing builds; judge feel on a release build. |
+| **Tooling returned a silent wrong answer** | `/usr/bin/grep` is ugrep (backreferences error out → every run marked INVALID); a zsh `rm` with a no-match glob aborted an `&&` chain, so a batch "finished" instantly with RC=1; a pipeline's exit status is its last command's. | A batch that finishes too fast; every run failing the same way; a zero with no control. | Pair every negative finding with a positive control that must be non-zero on the same instrument (`CLAUDE.md`, "Pair every NEGATIVE finding…"). |
+
+The copy-pasteable capture → validity → per-phase → worst-frame workflow that
+applies these rules is [`references/ui_jank_playbook.md`](references/ui_jank_playbook.md),
+with its SQL in [`references/ui_jank.sql`](references/ui_jank.sql).
 
 ---
 
@@ -317,6 +349,7 @@ grounds the analysis in Pulp's real seams and names the specific traps:
 | Dawn submit/present stalls, Graphite record cost, per-pass GPU time | `references/hints_gpu.md` |
 | Shared-I/O GPU audio admission, terminal/delivery correlation, and quiescent recovery | `references/hints_gpu_audio.md` |
 | a drag/scroll/hover that feels sluggish while frame medians look fine; frames stall only while the mouse moves; huge bridge-call counts over one interaction | `docs/guides/interaction-cost.md` |
+| a live editor (meters, analyzer, modulation) that feels sluggish mid-stroke, after release, or during zoom; classifying the worst frame gaps | `references/ui_jank_playbook.md` (+ `references/ui_jank.sql`) |
 | standalone vs plugin-in-DAW vs iOS/iPadOS AUv3 vs Android/Oboe vs Simulator; sample-position args, thread naming, atrace interleave | `references/hints_crossplatform.md` |
 
 ### 8. Answer in plain English (L1) — never surface SQL
@@ -405,6 +438,8 @@ render (`examples/trace-demo`) so the answer reproduces exactly. See
 - `.agents/skills/trace-analysis/references/hints_gpu.md`
 - `.agents/skills/trace-analysis/references/hints_gpu_audio.md`
 - `.agents/skills/trace-analysis/references/hints_crossplatform.md`
+- `.agents/skills/trace-analysis/references/ui_jank_playbook.md` — live-editor jank workflow
+- `.agents/skills/trace-analysis/references/ui_jank.sql` — its PerfettoSQL definitions
 - `.agents/skills/trace-sql/SKILL.md` — the SQL substrate + trace-stdlib
 - `core/runtime/include/pulp/runtime/trace.hpp` — macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers (L0/L1/L2), worked use cases, gotchas
@@ -830,9 +865,12 @@ locate; it is a handler you cannot see into at all.
 
 Two instruments now open it, and they answer different questions:
 
-- **`js_native:<fn>` spans** — every JS→C++ native is registered through the one
-  `register_bridge_function` template, so each call is wrapped in a span named
-  for the bridge function. This is what to reach for when the script is one this
+- **`js_native` spans** — every JS→C++ native is registered through the one
+  `register_bridge_function` template, so each call is wrapped in a `js_native`
+  span (category `js`) whose `debug.fn` arg names the bridge function. The span
+  name is the constant `js_native`; group by
+  `EXTRACT_ARG(arg_set_id, 'debug.fn')`. A `GLOB 'js_native:*'` filter — the
+  older per-function naming — matches nothing and returns a silent zero. This is what to reach for when the script is one this
   repo does not own (an imported design's `runtime.js`, a materialized React
   bundle): you get the native half of the handler attributed by name with zero
   edits to the script. It is compiled out when tracing is off.
@@ -840,8 +878,8 @@ Two instruments now open it, and they answer different questions:
   `__traceEnd__`) — a script naming its own spans. Only useful when you can edit
   the script, and only covers what you chose to wrap.
 
-Read the two together. A handler whose self time collapses once `js_native:*`
-appears was spending its time in bridge calls; one whose self time stays high is
+Read the two together. A handler whose self time collapses once `js_native`
+spans appear was spending its time in bridge calls; one whose self time stays high is
 spending it in the script's own interpreted work, and no native span will ever
 show you that — you need `pulpTrace` scopes in the script itself.
 
@@ -899,7 +937,7 @@ clean `stats` table on an empty trace only proves nothing overflowed.
 The ring size the env-driven autostart uses is `$PULP_TRACE_RING_KB` (KB,
 default 80 MB, accepted range 1 MB–4 GB; a malformed value is refused on stderr
 rather than silently falling back). The 80 MB default is sized for a render/DSP
-capture. **A script-heavy UI capture with `js_native:*` spans enabled will
+capture. **A script-heavy UI capture with `js_native` spans enabled will
 overrun it** — one 6-second Spectr band drag wrote 100.4 MB into the 80 MB ring
 and produced a zero-slice file. Budget ≥ 256 MB (`PULP_TRACE_RING_KB=262144`)
 for that shape of capture.
@@ -913,7 +951,10 @@ isolates the interaction from everything else in the process:
   `kCGEventMouseMoved` events at 60 Hz across the target while a fixed
   animation source (an LFO) runs, then compare a *during-sweep* window with a
   *same animation, mouse still* window in the same trace. The difference is
-  the interaction's cost; anything present in both is not.
+  the interaction's cost; anything present in both is not. A global `CGEvent`
+  mover moves the real cursor and drives whatever window is under it, so use
+  it only in an attended session; unattended, use `PULP_TEST_POINTER_DRAG`
+  (next section).
 - **Never capture while a scripted-scenario harness is stepping.** Its
   per-step snapshots add 100–800 ms stalls that read exactly like app jank.
 - **Size the ring and let it flush.** Use `PULP_TRACE_RING_KB=524288` for a
@@ -926,6 +967,74 @@ isolates the interaction from everything else in the process:
 
 In a captured/materialized React import, a fat `dom_event_evaluate` on
 `pointermove` is almost always a React commit per move re-applying import
-metadata; the fix and its checklist are in `docs/guides/interaction-cost.md`
-and the `import-design` skill ("App code: no React commit on a per-move or
-per-frame path").
+metadata; the fix and its checklist are in the `view-bridge` skill
+("Realtime scripted editors: the performance checklist").
+
+### Frame pacing of a live editor: recipe and environment traps
+
+For an editor that animates live audio data while the user drags or zooms —
+the design-time rules it should already follow are the checklist in the
+`view-bridge` skill ("Realtime scripted editors: the performance checklist").
+The full query workflow — health, per-phase frame gaps, worst-frame
+classification, content cadence — is `references/ui_jank_playbook.md`; this
+section is the short form.
+
+**Capture.** Put everything in the launched standalone's environment:
+
+```bash
+PULP_TRACE_PATH=/tmp/run.pftrace \
+PULP_TRACE_SECONDS=60 \
+PULP_TRACE_RING_KB=1572864 \
+PULP_TEST_SIGNAL=noise \
+PULP_TEST_POINTER_DRAG='rect:0.20,0.50,0.80,0.50,120,4' \
+  ./build-trace/.../YourPlugin.app/Contents/MacOS/YourPlugin
+```
+
+- **Size the ring for audio, not just script.** A 60 s run with audio playing
+  through a scripted editor writes on the order of 700 MB — nearly nine times
+  the 80 MB default, and more than a 512 MB ring holds. A wrapped ring drops whole sequences, often the main
+  thread's, and the file still opens; check `stats` (above) on every capture
+  and shorten `PULP_TRACE_SECONDS` rather than accept a wrap.
+- **Real audio through the plugin.** `PULP_TEST_SIGNAL=noise` (or `sine`)
+  feeds the standalone's input so meters, analyzer and signal-scaled effects
+  run at their in-use cost. An idle editor measures nothing that matters.
+- **Input inside the window.** `PULP_TEST_POINTER_DRAG` injects the gesture
+  into the window host's own mouse path on its frame schedule
+  (`rect:X0,Y0,X1,Y1,N[,R]`, normalized top-left coordinates; an unparseable
+  value disables the drive). It cannot touch other applications' windows.
+
+**Compute frame gaps per phase.** Take the interval between consecutive
+`frame` slices (`render` category) on the editor's thread and report median
+and p95 for each phase — idle with audio, mid-stroke, and **the 2 s after each
+stroke's release** — never one whole-run mean. The release window is where
+regressions hide: in one measured spectrum editor mid-stroke averaged 31 ms
+(p95 39 ms) while the 2 s after release averaged 56 ms (p95 184 ms). A commit
+at `pointerup`, a data backlog draining after the gesture, or a deferred
+relayout all land there.
+
+**Validity gates — discard any run that fails one:**
+
+- the app was frontmost for the whole capture;
+- a window screenshot taken during the run shows the editor drawing;
+- the trace is non-empty, `stats` shows no wrap or dropped sequence, and it
+  contains both editor `paint` slices and data-delivery activity (analyzer
+  frames reaching the page) — the positive control for this workload.
+
+**Environment traps that fake a regression or hide one:**
+
+- **Locked screen or sleeping display → no display-link frames.** The trace is
+  well-formed and shows an idle editor.
+- **A GUI app launched from a sandboxed agent shell may never attach to the
+  window server.** It runs and traces audio but paints nothing; the screenshot
+  gate catches it.
+- **CoreAudio itself can be degraded.** One host accumulated 4,096 duplicate
+  `com.apple.AirPlayXPCHelper` HAL plug-in objects, and every audio app — not
+  just Pulp — spent roughly 19–75 s in `HALSystem::InitializeDevices` at
+  launch. Diagnose by timing a `kAudioHardwarePropertyDevices` query and
+  counting classes among `kAudioObjectPropertyOwnedObjects` of the system
+  object; thousands of one class is the tell. The fix is
+  `sudo killall AirPlayXPCHelper` then `sudo killall -9 coreaudiod`, or a
+  reboot — a human's call, not an agent's.
+- **Shared-host load skews timings** more than most code changes do. Capture
+  baseline and candidate back to back on the same host with the same signal
+  and gesture; never compare against a number from another session.

@@ -423,6 +423,37 @@ def workflow_entries(
     return entries
 
 
+class _ImportClosure:
+    """Repo files each script loads, through repo helpers (cached per run)."""
+
+    def __init__(self, repo: pathlib.Path) -> None:
+        self.repo = repo
+        self._cache: dict[pathlib.Path, set[pathlib.Path]] = {}
+        self._modules = None
+        try:
+            sys.path.insert(0, str(repo / "tools" / "scripts"))
+            import gate_python_imports_check as imports
+            self._imports = imports
+        except ImportError:
+            self._imports = None
+        finally:
+            sys.path.pop(0)
+
+    def of(self, script: pathlib.Path) -> set[pathlib.Path]:
+        if self._imports is None:
+            return set()
+        script = script.resolve()
+        if script not in self._cache:
+            if self._modules is None:
+                try:
+                    self._modules = self._imports.tracked_python(self.repo)
+                except (OSError, subprocess.SubprocessError):
+                    self._modules = {}
+            self._cache[script] = self._imports.local_import_closure(
+                script, self.repo, self._modules)
+        return self._cache[script]
+
+
 def select_for_changes(
     entries: list[dict[str, Any]],
     changed: list[str],
@@ -430,9 +461,10 @@ def select_for_changes(
     lane_files: tuple[str, ...] = LANE_FILES,
 ) -> list[dict[str, Any]]:
     """Entries a diff can plausibly break: every entry when the lane itself
-    changed, otherwise each entry whose own script changed or whose source
-    names a changed file. A textual reference is a heuristic that
-    over-selects rather than under-selects; the required lane still runs all.
+    changed, otherwise each entry whose own script changed, that loads a
+    changed module through its repo imports, or whose source names a changed
+    file. A textual reference is a heuristic that over-selects rather than
+    under-selects; the required lane still runs all.
     """
     if any(path in lane_files for path in changed):
         return list(entries)
@@ -440,10 +472,18 @@ def select_for_changes(
     tokens = set().union(*(change_tokens(path) for path in changed)) if changed else set()
     word = {t: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])")
             for t in tokens}
+    changed_py = {p for p in changed_abs if p.suffix == ".py"}
+    closure = _ImportClosure(repo) if changed_py else None
     selected = []
     for entry in entries:
         sources = entry_sources(entry, repo)
         if any(src.resolve() in changed_abs for src in sources):
+            selected.append(entry)
+            continue
+        # A changed module reaches every script that loads it, directly or
+        # through a repo helper that imports it in turn.
+        if closure is not None and any(closure.of(src) & changed_py for src in sources
+                                       if src.suffix == ".py"):
             selected.append(entry)
             continue
         # A checker handed directories scans whatever is in them.
@@ -525,6 +565,66 @@ def _entry_from_command(name: str, argv: list[str], props: dict[str, Any],
         value = props["RESOURCE_LOCK"]
         entry["resource_lock"] = value if isinstance(value, list) else str(value).split(";")
     return entry
+
+
+GATES_BUILD_DIR_ENV = "PULP_GATES_BUILD_DIR"
+
+
+def _cmake_generator(build: pathlib.Path) -> str:
+    try:
+        cache = (build / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    match = re.search(r"^CMAKE_GENERATOR:INTERNAL=(.*)$", cache, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def unusable_build_reason(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> str:
+    """Why ``build`` cannot supply the current test registrations, or ""."""
+    if not (build / "CTestTestfile.cmake").is_file():
+        return "not configured for tests"
+    generator = _cmake_generator(build)
+    if generator != "Ninja":
+        return f"generator is {generator or 'unknown'}, not Ninja"
+    if build_is_stale(build, repo):
+        return "configured before the test manifests last changed"
+    return ""
+
+
+def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
+                     env: dict[str, str] | os._Environ[str] = os.environ,
+                     ) -> tuple[pathlib.Path | None, str]:
+    """The configured build whose registrations the local tier should run.
+
+    PULP_GATES_BUILD_DIR wins when it names a configured build. Otherwise the
+    most recently configured `build*` directory in the checkout that uses
+    Ninja and was configured after the test manifests last changed; a stale
+    Makefiles `build/` beside a current `build-gate` must not win because of
+    its name. Returns (None, why) when nothing qualifies.
+    """
+    declared = env.get(GATES_BUILD_DIR_ENV, "").strip()
+    if declared:
+        path = pathlib.Path(declared).expanduser()
+        path = path if path.is_absolute() else repo / path
+        if (path / "CTestTestfile.cmake").is_file():
+            return path.resolve(), f"from {GATES_BUILD_DIR_ENV}"
+        return None, f"{GATES_BUILD_DIR_ENV}={declared} is not a configured build"
+    usable, rejected = [], []
+    for candidate in sorted(repo.glob("build*")):
+        if not (candidate / "CMakeCache.txt").is_file():
+            continue
+        why = unusable_build_reason(candidate, repo)
+        if why:
+            rejected.append(f"{candidate.name}: {why}")
+        else:
+            usable.append(candidate)
+    if usable:
+        chosen = max(usable, key=lambda d: (d / "CTestTestfile.cmake").stat().st_mtime)
+        note = f"most recently configured of {len(usable)} usable"
+        if rejected:
+            note += "; passed over " + ", ".join(rejected)
+        return chosen.resolve(), note
+    return None, ", ".join(rejected) or "no build*/CMakeCache.txt in the checkout"
 
 
 def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
@@ -1065,6 +1165,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run":
         if args.ctest_label:
             build = args.build_dir
+            if build is not None and str(build) == "auto":
+                build, why = choose_build_dir()
+                if build is None:
+                    print(f"source-selftests: NO USABLE BUILD: {why}; members that need a "
+                          "configured build are not checked", flush=True)
+                else:
+                    print(f"source-selftests: build dir: {build} ({why})", flush=True)
             stale = build is not None and build_is_stale(build)
             if stale:
                 print(f"source-selftests: {build} was configured before the test manifests "

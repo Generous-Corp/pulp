@@ -536,6 +536,13 @@
       ]
     },
     {
+      "name": "pr-head-affected-tests-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_pr_head_affected_tests.py"
+      ],
+      "timeout": 120.0
+    },
+    {
       "name": "prepush-gate-output",
       "argv": [
         "{repo}/tools/scripts/test_prepush_gate_output.py"

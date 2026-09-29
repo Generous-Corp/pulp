@@ -176,6 +176,24 @@ def main(argv: list[str]) -> int:
 
             expect("closure-count-drift", run_check(script, staged, write(mutated(drift)), schema), 1)
 
+            # A public header on disk that the census does not list must fail:
+            # recording names instead of a count must not cost the gate the
+            # "header added without being recorded" catch it had.
+            unrecorded = copy.deepcopy(document)
+            header_root = next(
+                root for row in document["profiles"][key]["targets"].values()
+                for root in row["public_headers"]["roots"]
+                if unrecorded["public_headers_by_root"].get(root)
+            )
+            dropped = unrecorded["public_headers_by_root"][header_root].pop(0)
+            result = run_check(script, staged, write(unrecorded), schema)
+            expect("public-header-unrecorded", result, 1)
+            if dropped not in result.stderr:
+                raise ContractFailure(
+                    f"case public-header-unrecorded: the drift message does not name {dropped}\n"
+                    f"{result.stderr}"
+                )
+
             def remove(profile: dict) -> None:
                 profile["targets"].pop(name)
                 profile["summary"]["installed_target_count"] -= 1

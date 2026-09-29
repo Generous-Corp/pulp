@@ -259,6 +259,7 @@ public:
 
     void clear_commands() {
         recorded_commands_->commands.clear();
+        recorded_commands_->needs_backdrop_isolation = false;
         notify_recorded_command_consumers();
     }
     /// NaN / ±Infinity defense at the recording
@@ -285,9 +286,32 @@ public:
         cmd.y3      = sanitize_finite(cmd.y3);
         cmd.extra   = sanitize_finite(cmd.extra);
         for (auto& p : cmd.gradient_positions) p = sanitize_finite(p);
+        if (reads_backdrop(cmd)) recorded_commands_->needs_backdrop_isolation = true;
         recorded_commands_->commands.push_back(std::move(cmd));
     }
     size_t command_count() const { return recorded_commands_->commands.size(); }
+
+    /// Whether the recorded stream contains a command whose result depends
+    /// on the pixels already under it: clearRect, putImageData, or a
+    /// composite operation other than source-over. Canvas2D gives every
+    /// canvas its own backing store, so such a command must see only this
+    /// canvas's pixels; paint() then replays into a per-canvas offscreen
+    /// layer. Every other stream composites identically straight onto the
+    /// parent surface, and skipping the layer saves a full-bounds offscreen
+    /// allocation, clear and composite per paint.
+    bool needs_backdrop_isolation() const {
+        return recorded_commands_->needs_backdrop_isolation;
+    }
+    /// Whether `cmd` depends on the pixels already under it (see
+    /// needs_backdrop_isolation()).
+    static bool reads_backdrop(const CanvasDrawCmd& cmd) {
+        using T = CanvasDrawCmd::Type;
+        if (cmd.type == T::clear_rect || cmd.type == T::put_image_data) return true;
+        if (cmd.type != T::set_blend_mode) return false;
+        const auto mode = static_cast<canvas::Canvas::BlendMode>(cmd.int_val);
+        return mode != canvas::Canvas::BlendMode::normal &&
+               mode != canvas::Canvas::BlendMode::source_over;
+    }
     /// Accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
     /// clear_commands. Callers must not retain the reference past the next
@@ -344,6 +368,7 @@ private:
 
     struct RecordedCommands {
         std::vector<CanvasDrawCmd> commands;
+        bool needs_backdrop_isolation = false;
         std::vector<std::weak_ptr<RepaintObserver>> observers;
     };
     void observe_recorded_commands() {

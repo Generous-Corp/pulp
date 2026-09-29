@@ -859,6 +859,13 @@ pulp_add_test_suite(pulp-test-widget-bridge-runtime-import GROUP pulp-test-group
 # (bindWidgetToParam / bindMeter / unbindWidget + gesture precedence).
 pulp_add_test_suite(pulp-test-widget-bridge-param-binding GROUP pulp-test-group-view-widgets LIBRARIES pulp::view pulp::state)
 
+# `pulp create` UI scripts loaded through the real bridge: the gain template's
+# meter binds natively to a value channel and its readout has a pinned width.
+# Reads the scripts from the source tree, so it carries its own definition.
+pulp_add_test_suite(pulp-test-template-ui-scripts
+    LIBRARIES pulp::view pulp::state
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /
 # canvasSetLineDash / canvasDrawImage, canvasGetImageData /

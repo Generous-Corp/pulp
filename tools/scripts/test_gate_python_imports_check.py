@@ -134,6 +134,17 @@ class ImportScanTests(unittest.TestCase):
         self.assertEqual(len(self.tree.problems(script, allowed=set())), 1)
 
 
+class ClosureTests(unittest.TestCase):
+    def test_the_closure_follows_repo_helpers_and_stops_at_the_stdlib(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            tree = Tree(Path(raw).resolve())
+            census = tree.write("tools/scripts/census.py", "import json\n")
+            helper = tree.write("tools/scripts/helper.py", "import census\n")
+            script = tree.write("tools/scripts/test_x.py", "import helper, os\n")
+            closure = check.local_import_closure(script, tree.root, tree.files)
+        self.assertEqual(closure, {script, helper, census})
+
+
 class InventoryTests(unittest.TestCase):
     def test_only_python_commands_contribute_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

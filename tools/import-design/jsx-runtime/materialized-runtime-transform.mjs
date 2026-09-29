@@ -21,6 +21,7 @@ import { materializedCssVariables } from './materialized_css_variables.mjs';
 import { canonicalizeMaterializedRuntimeDocument } from
   './materialized_runtime_canonicalization.mjs';
 import { buildMaterializedRuntimeEntry } from './materialized_runtime_entry.mjs';
+import { runtimeFingerprintBanner } from './runtime_fingerprint.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -229,6 +230,9 @@ const result = await build({
   write: false,
   minify: false,
   define: { 'process.env.NODE_ENV': '"production"' },
+  // Lets an app that vendors this bundle detect that it predates runtime fixes
+  // in the SDK it builds against (check_vendored_runtime.py).
+  banner: { js: runtimeFingerprintBanner() },
   nodePaths: [deps, resolve(pulpReact, 'node_modules')],
   alias: {
     'react': resolve(deps, 'react'),

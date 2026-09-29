@@ -8,6 +8,7 @@
     "schema",
     "generated_by",
     "derivation",
+    "public_headers_by_root",
     "profiles"
   ],
   "additionalProperties": false,
@@ -53,6 +54,17 @@
             "type": "string"
           }
         }
+      }
+    },
+    "public_headers_by_root": {
+      "type": "object",
+      "description": "Public header names under every exported include root any profile records, as sorted paths relative to the root. Names rather than counts: two changes that each add a header under one root add separate lines that merge into the true set, where a count would have both write the same number and merge into one that is wrong.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "uniqueItems": true
       }
     },
     "profiles": {
@@ -123,8 +135,7 @@
                   "type": "object",
                   "required": [
                     "exported_as",
-                    "closure_node_count",
-                    "public_header_count"
+                    "closure_node_count"
                   ],
                   "additionalProperties": false,
                   "properties": {
@@ -135,10 +146,6 @@
                     "closure_node_count": {
                       "type": "integer",
                       "minimum": 1
-                    },
-                    "public_header_count": {
-                      "type": "integer",
-                      "minimum": 0
                     }
                   }
                 }
@@ -258,16 +265,11 @@
                 "public_headers": {
                   "type": "object",
                   "required": [
-                    "count",
                     "roots",
                     "generated_include_roots"
                   ],
                   "additionalProperties": false,
                   "properties": {
-                    "count": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
                     "roots": {
                       "type": "array",
                       "items": {

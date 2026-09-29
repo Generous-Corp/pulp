@@ -629,6 +629,11 @@ if(Python3_Interpreter_FOUND)
     if(UNIX)
         add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
+        # The pull-request head step that runs the ctests a diff reaches: its
+        # selection rules, the time budget, and that build.yml keeps it gating.
+        add_test(NAME pr-head-affected-tests-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_pr_head_affected_tests.py")
+        set_tests_properties(pr-head-affected-tests-selftest PROPERTIES TIMEOUT 120)
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
@@ -933,6 +938,13 @@ if(Python3_Interpreter_FOUND)
     # asserts an unreachable commit still fails closed.
     add_test(NAME gpu-provenance-hydration-real-git-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_hydrate_real_git.py")
+
+    # The GPU acceptance verifiers' blob lookups feed `git hash-object
+    # --stdin-paths` from a file; a pipe-fed request can deadlock against git
+    # under macOS pipe-memory pressure. Driven against a git that answers
+    # before it reads, with the degraded pipe's polling behaviour.
+    add_test(NAME git-stdin-pipe-deadlock-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_git_stdin_pipe_deadlock.py")
 
     # The handoff ledger pins a revision, blob, and tree per referenced path, so
     # any commit touching a pinned path stales rows far from the edit. This
