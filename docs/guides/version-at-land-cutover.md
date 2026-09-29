@@ -288,12 +288,15 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     `direct` path keeps its event-scoped group unchanged.
   - **Stale bump PR.** A drain never defers to an open bump PR cut before the
     merge it is draining (that PR would land without the merge's intent), so it
-    fails `stale-defer` and retries. That exit relies on the stale PR landing; a
-    PR ejected from the merge queue is left open, unarmed and unqueued, so it
-    never does. Setting the `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default
-    off) makes the drain close such a PR (only when it is confirmed stale AND
-    confirmed idle: not armed, not queued, not draft) and open a fresh bump that
-    covers the whole range, reclaiming the branch through the normal
+    fails `stale-defer` and retries. That exit relies on the stale PR landing,
+    which it never does when it was ejected from the merge queue, or when it is
+    armed but its required checks failed (an armed PR with red checks never
+    enqueues). With the `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off)
+    the drain closes a stale PR unless a merge group holds it or it
+    is a draft; arming alone does not protect it, because a stale generated bump
+    is always safely regenerable and closing drops its auto-merge. It acts only
+    on CONFIRMED stale AND CONFIRMED not held, opens a fresh bump that covers the
+    whole range, and reclaims the branch through the normal
     confirmed-no-PR `--force-with-lease` path.
   - **No regression / no double-bump.** `_strictly_increasing` drops any
     assignment that does not exceed the surface's version at the fresh head, so a

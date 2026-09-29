@@ -731,10 +731,45 @@ class PrRouteTest(unittest.TestCase):
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
 
-    def test_heal_never_closes_a_pr_that_will_still_land(self) -> None:
-        """Armed, queued or draft: the stale PR is not idle, so defer."""
-        for kwargs in ({"armed": True}, {"armed": False, "in_queue": True},
+    def test_heal_replaces_an_armed_stale_bump_pr_that_is_not_queued(self) -> None:
+        """Armed is not a reason to keep a stale bump PR.
+
+        An armed PR whose required checks failed never enqueues, so it never
+        lands: #9038 on 2026-09-29 was stale, armed, not queued, with red
+        required checks, and every drain stale-deferred against it. A stale
+        generated bump is always safely regenerable; closing drops auto-merge.
+        """
+        stale_sha = self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True)
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        self.assertEqual([c[2] for c in fake.calls if c[:2] == ("pr", "close")],
+                         ["1"])
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertIn("--merge", fake.calls[-1])
+        tip = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertNotEqual(tip, stale_sha)
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+    def test_heal_leaves_an_armed_covering_bump_pr_alone(self) -> None:
+        """A bump PR that already covers the merge is deferred to and re-armed."""
+        fake = _FakeGh(open_prs=1, covers=True, armed=True)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pending")
+        self.assertFalse(fake.did("pr", "close"))
+        self.assertFalse(fake.did("pr", "create"))
+        self.assertTrue(fake.did("pr", "merge"))
+
+    def test_heal_never_closes_a_queued_or_draft_or_unknown_pr(self) -> None:
+        """In the merge queue, a draft, or unreadable: the stale PR is held."""
+        for kwargs in ({"armed": True, "in_queue": True},
+                       {"armed": False, "in_queue": True},
                        {"armed": False, "draft_pr": True},
+                       {"armed": True, "draft_pr": True},
                        {"armed": False, "graphql_rc": 1}):
             with self.subTest(**kwargs):
                 fake = _FakeGh(open_prs=1, covers=False, **kwargs)

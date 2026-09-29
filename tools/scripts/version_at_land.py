@@ -622,19 +622,20 @@ def _bump_pr_covers(repo: Path, number: str, head: str) -> bool | None:
     return probe.returncode == 0
 
 
-def _bump_pr_in_flight(repo: Path, number: str) -> bool | None:
-    """Is the open bump PR still on its way to landing?
+def _bump_pr_held(repo: Path, number: str) -> bool | None:
+    """Is the open bump PR in a state a stale-PR replacement must not touch?
 
-    `True`  — auto-merge is armed, it sits in the merge queue, or it is a draft
-              (an explicit release hold its owner must resolve).
-    `False` — confirmed idle: open, not draft, not armed, not queued. This is
-              the state a merge-queue ejection leaves behind; nothing will ever
-              land it, so a stale-defer against it would repeat forever.
-    `None`  — unknown (query failed); treat as in flight, never as idle.
+    `True`  — it sits in the merge queue (a merge group holds it), or it is a
+              draft (an explicit release hold its owner must resolve).
+    `False` — confirmed neither. Armed auto-merge does NOT count: an armed PR
+              whose required checks failed can never enqueue, and a stale
+              generated bump is always safely regenerable. Closing the PR also
+              drops its auto-merge, so no separate disarm is needed.
+    `None`  — unknown (query failed); treat as held, never as replaceable.
     """
     query = ("query($owner:String!,$name:String!,$number:Int!){"
              "repository(owner:$owner,name:$name){pullRequest(number:$number){"
-             "state isDraft isInMergeQueue autoMergeRequest{enabledAt}}}}")
+             "state isDraft isInMergeQueue}}}")
     res = _gh(repo, "api", "graphql", "-f", f"query={query}",
               "-F", "owner={owner}", "-F", "name={repo}",
               "-F", f"number={number}", check=False)
@@ -651,25 +652,25 @@ def _bump_pr_in_flight(repo: Path, number: str) -> bool | None:
         return True
     if pr.get("isDraft") is not False or pr.get("isInMergeQueue") is not False:
         return None
-    return pr.get("autoMergeRequest") is not None
+    return False
 
 
-def _close_idle_stale_bump_pr(repo: Path, number: str, head: str) -> bool:
-    """Close a bump PR that is both stale (cut before `head`) and idle
-    (ejected / unarmed), so this drain can cut a fresh bump covering the whole
+def _close_stale_bump_pr(repo: Path, number: str, head: str) -> bool:
+    """Close a bump PR that is stale (cut before `head`) and not held (neither
+    in the merge queue nor a draft), so this drain can cut a fresh bump covering the whole
     range. Only the PR is closed; the branch is reclaimed by the normal
     confirmed-no-PR `--force-with-lease` path. Returns success."""
     comment = (
         "version-at-land: closing this bump PR. It was cut before "
-        f"{head[:12]} and is no longer armed or queued (e.g. ejected from the "
-        "merge queue), so it can never carry that merge's version intent. A "
+        f"{head[:12]}, so it can never carry that merge's version intent, and it "
+        "is not in the merge queue. A "
         "fresh bump PR covering the full range replaces it.")
     res = _gh(repo, "pr", "close", number, "--comment", comment, check=False)
     if res.returncode != 0:
         sys.stderr.write(f"version-at-land: closing stale bump PR #{number} "
                          f"failed (exit {res.returncode}).\n{res.stderr or ''}\n")
         return False
-    sys.stderr.write(f"version-at-land: closed stale idle bump PR #{number}; "
+    sys.stderr.write(f"version-at-land: closed stale bump PR #{number}; "
                      "opening a fresh bump.\n")
     return True
 
@@ -769,10 +770,11 @@ def apply_via_pr(
                      fails (visible + retried) and the next drain re-arms it via
                      the "pending" path, so there is no permanent wedge.
       "stale-defer" — the open bump PR was cut before this merge; the run fails
-                     and retries. With `heal_stale`, a stale PR that is also
-                     idle (not armed, not queued, not draft — the state a
-                     merge-queue ejection leaves) is closed instead and a fresh
-                     bump PR is opened, so an ejection cannot wedge the drain.
+                     and retries. With `heal_stale`, a stale PR that is not
+                     held (not in the merge queue, not draft) is closed instead
+                     and a fresh bump PR is opened, whether or not it is armed:
+                     an ejected PR, or an armed PR whose checks failed, can
+                     never land and must not wedge the drain.
 
     Safety:
       * Regression — `_strictly_increasing` drops any assignment not exceeding
@@ -818,12 +820,14 @@ def apply_via_pr(
         if covers is True:
             return ("pending" if _arm_auto_merge(repo, existing)
                     else "arm-failed"), plan
-        # A stale PR still armed or queued will land and the next drain covers
-        # the remainder. A stale PR that is IDLE never lands, so deferring to it
-        # repeats forever; replace it. Only on CONFIRMED stale + CONFIRMED idle.
+        # A stale PR a merge group holds may still land, and the next drain
+        # covers the remainder. Anywhere else a stale generated bump is safely
+        # regenerable, and arming does not mean it will land (failed checks
+        # keep an armed PR out of the queue forever), so replace it. Only on
+        # CONFIRMED stale + CONFIRMED not held.
         if not (heal_stale and covers is False
-                and _bump_pr_in_flight(repo, existing) is False
-                and _close_idle_stale_bump_pr(repo, existing, head)):
+                and _bump_pr_held(repo, existing) is False
+                and _close_stale_bump_pr(repo, existing, head)):
             return "stale-defer", plan
 
     edited = _write_plan(repo, config, plan)
@@ -954,8 +958,8 @@ def main(argv: list[str]) -> int:
                          "behavior change.")
     ap.add_argument("--heal-stale-pr", action="store_true",
                     help="With --route pr: when the open bump PR was cut before "
-                         "this merge AND is idle (not armed, not queued, not "
-                         "draft — e.g. ejected from the merge queue), close it "
+                         "this merge AND is not held (not in the merge queue, "
+                         "not draft; armed does not count), close it "
                          "and open a fresh bump instead of failing stale-defer "
                          "forever. The workflow enables this via the "
                          "PULP_BUMP_HEAL_STALE_PR repo variable.")
