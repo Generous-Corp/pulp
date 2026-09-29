@@ -31,8 +31,10 @@ root="$(git -C "${cwd}" rev-parse --show-superproject-working-tree 2>/dev/null |
 [ -n "${root}" ] || root="$(git -C "${cwd}" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "${root}" ] || exit 0
 
-case "$(git -C "${root}" config --get remote.origin.url 2>/dev/null)" in
-    *Generous-Corp/pulp|*Generous-Corp/pulp.git|*danielraffel/pulp|*danielraffel/pulp.git) ;;
+# GitHub owner/repo names are case-insensitive, so compare lowercased.
+origin_url="$(git -C "${root}" config --get remote.origin.url 2>/dev/null | tr '[:upper:]' '[:lower:]')"
+case "${origin_url}" in
+    *generous-corp/pulp|*generous-corp/pulp.git|*danielraffel/pulp|*danielraffel/pulp.git) ;;
     *) exit 0 ;;
 esac
 
@@ -41,4 +43,13 @@ script="$(GIT_OPTIONAL_LOCKS=0 git -C "${root}" cat-file blob \
 [ -n "${script}" ] || exit 0
 
 printf '%s' "${input}" | python3 -c "${script}" "${1:---hook-json}" 2>/dev/null || true
+
+# Keep every user-level agent config wired (including subrouter config folders
+# created after the first install) and this launcher current. Detached so the
+# session never waits on it; PULP_CLAUDE_MD_SYNC_SWEEP=0 disables it.
+case "${PULP_CLAUDE_MD_SYNC_SWEEP:-1}" in 0|off|false|no) exit 0 ;; esac
+installer="$(GIT_OPTIONAL_LOCKS=0 git -C "${root}" cat-file blob \
+    refs/remotes/origin/main:hooks/scripts/pulp_claude_md_sync_install.py 2>/dev/null)" || exit 0
+[ -n "${installer}" ] || exit 0
+( python3 -c "${installer}" --sweep --repo "${root}" </dev/null >/dev/null 2>&1 & ) 2>/dev/null
 exit 0
