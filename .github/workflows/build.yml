@@ -2178,6 +2178,10 @@ jobs:
         # capped at 8. A literal -j8 oversubscribes the smaller gate guests
         # (3 and 6 vCPUs today), and that self-inflicted load lands on the
         # timing-sensitive tests the 120s timeout and the retry exist for.
+        # A per-change `slow-affected` proof the classifier requires runs inside
+        # this suite, started first by its COST, not in a step after it.
+        env:
+          AFFECTED_SLOW: ${{ needs.classify.outputs.agent_capability_installed_sdk_required }}
         run: |
           set -euo pipefail
           # Both event-dependent ctest decisions come from one tested module so
@@ -2204,7 +2208,8 @@ jobs:
           # ctest applies --stop-on-failure only after --repeat until-pass has
           # exhausted its retries, so a single flake still self-heals.
           gate_args="$(python3 tools/ci/ctest_gate_args.py \
-            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS")"
+            --event-name "$GITHUB_EVENT_NAME" --runner-os "$RUNNER_OS" \
+            --affected-slow "${AFFECTED_SLOW:-false}")"
           eval "$gate_args"
           : "${label_exclude:?ctest gate arguments did not resolve}"
           # Expanded unquoted on the ctest line below, where an empty value must
@@ -2437,13 +2442,15 @@ jobs:
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure -C Release \
             --no-tests=error -R '^A lane that requires a GPU adapter has one$'
 
+      # A merge group, a dispatch and a ready-to-land head run this proof inside
+      # the full suite above (the `slow-affected` label). Only a fast-tier
+      # pull-request head, which runs no full suite, still needs it here.
       - name: Test installed SDK capability contract (affected changes)
         if: >-
           runner.os != 'Windows'
           && needs.classify.outputs.agent_capability_installed_sdk_required == 'true'
-          && (github.event_name == 'pull_request'
-              || github.event_name == 'merge_group'
-              || github.event_name == 'workflow_dispatch')
+          && github.event_name == 'pull_request'
+          && steps.pr_suite.outputs.suite != 'full'
         shell: bash
         run: |
           set -euo pipefail

@@ -1337,7 +1337,9 @@ Full model: **`docs/guides/test-lanes.md`**. Operationally, when a PR's required
   matching `build.yml`'s PR ctest and `cross-platform-check.yml`). The required
   gate also runs `--repeat until-pass:2`, so a single timing-flake self-heals.
   A slow proof can still gate an affected diff explicitly: the roughly
-  12-minute `agent-capability-installed-sdk` test is restored by the
+  12-minute `agent-capability-installed-sdk` test (label `slow-affected`) is
+  restored INTO the main suite, started first by its COST, not as a step after
+  it (`ctest_gate_args.py --affected-slow`), by the
   fail-closed classifier on parallel macOS and Linux matrix legs for
   capability/install surfaces and CMake target/export definitions, while unrelated PRs and merge
   groups avoid that cost. A selected skip-safe documentation path must still

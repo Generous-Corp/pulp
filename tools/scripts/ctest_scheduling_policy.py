@@ -92,6 +92,11 @@ BROWSER_TESTS = (
 # invocations one after another; user+sys tracks wall), so two slots declare it;
 # co-scheduled on the gate it runs 52-57 s against a 300 s budget.
 LONG_TESTS = (
+    # A per-change proof (104-174 s) that ran in its own step after the suite,
+    # alone on a VM it uses two cores of. It needs no isolation beyond the
+    # manifest-source lock it already holds, so it runs inside the suite when
+    # required and starts first.
+    row("agent-capability-installed-sdk"),
     row("sample-region-compat-baseline", optional=True),
     row("cmake-control-sdk-consumer", optional=True),
     row("gpu-trace-overhead-acceptance-selftest"),
