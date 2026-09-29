@@ -2949,6 +2949,14 @@
    ],
    "kind": "python"
   },
+  "prepush-queue-rebase-hint": {
+   "kind": "python",
+   "entry": "tools/scripts/test_prepush_queue_rebase_hint.py",
+   "inputs": [
+    "tools/scripts/prepush_queue_rebase_hint.py",
+    "tools/scripts/test_prepush_queue_rebase_hint.py"
+   ]
+  },
   "prepush-refresh-push": {
    "entry": "tools/scripts/test_refresh_push_check.py",
    "inputs": [
