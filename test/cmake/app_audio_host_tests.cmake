@@ -262,7 +262,7 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
-add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/callback_cost_probe.cpp support/transition_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis pulp::audio)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
@@ -276,6 +276,16 @@ add_executable(pulp-test-render-scenario test_render_scenario.cpp)
 target_link_libraries(pulp-test-render-scenario PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-render-scenario PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-render-scenario)
+# Per-callback cost at state transitions. The operation-count gate is
+# deterministic and stays on the required lane; its CPU-time twin is
+# load-sensitive and carries the `performance` label.
+pulp_add_test_suite(pulp-test-transition-cost
+    SOURCES test_transition_cost.cpp
+    LIBRARIES pulp-audio-test-support)
+pulp_add_test_suite(pulp-test-transition-cost-timing
+    SOURCES test_transition_cost_timing.cpp
+    LIBRARIES pulp-audio-test-support
+    LABELS performance)
 add_executable(pulp-test-audio-support test_audio_support.cpp)
 target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)

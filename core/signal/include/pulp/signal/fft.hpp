@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/checked_allocation.hpp>
+#include <pulp/signal/rt_work_counter.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -172,6 +173,7 @@ public:
 
     // Forward FFT (time → frequency) — complex in-place
     void forward(std::complex<SampleType>* data) const {
+        rt::count_fft();
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             forward_vdsp(data);
@@ -185,6 +187,7 @@ public:
 
     // Inverse FFT (frequency → time) — complex in-place
     void inverse(std::complex<SampleType>* data) const {
+        rt::count_fft();
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             inverse_vdsp(data);
@@ -198,6 +201,7 @@ public:
 
     // Real-valued forward FFT: real input → complex output
     void forward_real(const SampleType* input, std::complex<SampleType>* output) const {
+        rt::count_fft();
 #if PULP_FFT_HAS_VDSP
         if constexpr (std::is_same_v<SampleType, float>) {
             forward_real_vdsp(input, output);
@@ -330,7 +334,9 @@ private:
                                std::complex<SampleType>* output) const {
         for (int i = 0; i < size_; ++i)
             output[i] = {input[i], SampleType{0.0f}};
-        forward(output);
+        // forward_fallback, not forward(): the public entry point already
+        // counted this transform once.
+        forward_fallback(output);
     }
 
     void bit_reverse(std::complex<SampleType>* data) const {

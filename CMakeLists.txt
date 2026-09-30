@@ -84,6 +84,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
 else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
 endif()
+# Deterministic RT operation counters (pulp/signal/rt_work_counter.hpp) back
+# the per-callback transition-cost gate. The definition is directory-wide so
+# every translation unit of one build agrees on the inline counter hooks; it
+# follows PULP_BUILD_TESTS so release/SDK builds (tests OFF) carry none.
+option(PULP_RT_WORK_COUNTERS
+       "Count FFT and transcendental calls for RT transition-cost gates"
+       ${PULP_BUILD_TESTS})
+if(PULP_RT_WORK_COUNTERS)
+    add_compile_definitions(PULP_RT_WORK_COUNTERS=1)
+endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        "Validate the exact filtered CTest inventory for Shipyard's declared shadow-selection target"

@@ -115,6 +115,8 @@ ScenarioResult RenderScenario::render() const {
     result.output.resize(static_cast<std::size_t>(output_channels_),
                          static_cast<std::size_t>(total));
 
+    result.block_costs.reserve(static_cast<std::size_t>(
+        (total + block_size_ - 1) / block_size_));
     const auto input_view = std::as_const(input).view();
     std::vector<float*> out_ptrs(static_cast<std::size_t>(output_channels_));
     std::size_t midi_idx = 0, param_idx = 0;
@@ -124,6 +126,7 @@ ScenarioResult RenderScenario::render() const {
             std::min<std::int64_t>(block_size_, total - pos));
 
         // Parameter steps in [pos, pos+n): block-quantized (see header).
+        const std::size_t steps_before = param_idx;
         for (; param_idx < param_script.size() &&
                param_script[param_idx].frame < pos + static_cast<std::int64_t>(n);
              ++param_idx) {
@@ -148,7 +151,18 @@ ScenarioResult RenderScenario::render() const {
                            static_cast<std::size_t>(pos);
         pulp::audio::BufferView<float> out_view(out_ptrs.data(),
                                                 out_ptrs.size(), n);
+        BlockCost cost;
+        cost.start_frame = pos;
+        cost.frames = static_cast<int>(n);
+        cost.param_steps = static_cast<int>(param_idx - steps_before);
+        const auto ops_before = pulp::signal::rt::work_counts();
+        const auto wall_before = wall_now_ns();
+        const auto cpu_before = thread_cpu_now();
         host.process(out_view, in_view, midi_in, midi_out);
+        cost.cpu = thread_cpu_now() - cpu_before;
+        cost.wall_ns = wall_now_ns() - wall_before;
+        cost.ops = pulp::signal::rt::work_counts() - ops_before;
+        result.block_costs.push_back(cost);
 
         // Watch the report at every block boundary. Either signal — a moved
         // value or a raised flag — means the latency is not fixed. The flag

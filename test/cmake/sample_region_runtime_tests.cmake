@@ -8,6 +8,7 @@ pulp_add_test_suite(pulp-test-sample-region-runtime
         sample_region_i2/i2_negative_controls.cpp
         harness/rt_allocation_probe.cpp
         support/render_scenario.cpp
+        support/callback_cost_probe.cpp
         support/audio_signal_generators.cpp
     LIBRARIES
         pulp::host
