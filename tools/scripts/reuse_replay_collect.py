@@ -535,11 +535,14 @@ class Collector:
                 by_head.setdefault(run["head_sha"], []).append(run)
 
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            jobs_done = list(pool.map(lambda g: self.jobs(g["id"]), groups))
-        del jobs_done
+            for _ in pool.map(lambda g: self.jobs(g["id"]) and None, groups):
+                pass
         group_logs = [self.ctest_job(self.jobs(g["id"])) for g in groups]
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            list(pool.map(lambda j: self.parsed_log(j["id"]) if j else None, group_logs))
+            # Warm the log cache only; keeping the parses would hold every
+            # run's per-test rows in memory at once.
+            for _ in pool.map(lambda j: j and self.parsed_log(j["id"]) and None, group_logs):
+                pass
         self.prime_commits([self.parsed_log(j["id"])["checkout_sha"] for j in group_logs if j]
                             + [g["head_sha"] for g in groups])
 
