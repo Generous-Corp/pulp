@@ -1,0 +1,704 @@
+{
+ "schema": "pulp-reuse-replay-scenario/v1",
+ "name": "inert-drift rules",
+ "what_happened": "the inert-drift policy (receipt reuse across docs-only base drift) against a real failure and its fail-closed edges",
+ "cases": [
+  {
+   "label": "docs-only drift and a real failure in the group: reported as a false skip",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/guides/versioning.md",
+         "CLAUDE.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "skills-doc-sync",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "c",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 30.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 1,
+    "skipped_groups": 1,
+    "verdict": "UNSAFE: false skips"
+   }
+  },
+  {
+   "label": "drift into core/ feeds the native build: runs",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/x.md",
+         "core/view/src/widgets.cpp"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "skills-doc-sync",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 0,
+    "skipped_groups": 0,
+    "evaluable_pairs": 1
+   }
+  },
+  {
+   "label": "the planning gitlink is not a planning/ file: runs",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "planning"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "skipped_groups": 0,
+    "evaluable_pairs": 1
+   }
+  },
+  {
+   "label": "stacked on an unlanded entry: runs",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/x.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "skipped_groups": 0,
+    "evaluable_pairs": 1
+   }
+  },
+  {
+   "label": "stacking unknown: unevaluable, never a skip",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": null,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/x.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "skipped_groups": 0,
+    "evaluable_pairs": 0
+   }
+  },
+  {
+   "label": "drift not computable: unevaluable, never a skip",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": null,
+        "drift_declared_input_hits": null,
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "skipped_groups": 0,
+    "evaluable_pairs": 0
+   }
+  },
+  {
+   "label": "inputs variant: a drifted file a script test declares runs",
+   "policy": "inert-drift-inputs",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/status/tools.yaml"
+        ],
+        "drift_declared_input_hits": [
+         "docs/status/tools.yaml"
+        ],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "tools-registry-check",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 0,
+    "skipped_groups": 0
+   }
+  },
+  {
+   "label": "control: skip-nothing policy reads 0% benefit on the same pair",
+   "policy": "none",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/x.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "b",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "benefit_median": 0.0,
+    "skipped_groups": 0,
+    "coverage": 1.0
+   }
+  }
+ ]
+}

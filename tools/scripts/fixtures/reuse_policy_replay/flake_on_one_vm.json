@@ -1,0 +1,204 @@
+{
+ "schema": "pulp-reuse-replay-scenario/v1",
+ "name": "flake on one VM",
+ "what_happened": "seven single-cause flakes each failed twice on one VM and ejected a batch while passing on other heads and on main",
+ "cases": [
+  {
+   "label": "fail-then-pass is a flake-skip; a fail with attempts == 1 and no exoneration stays a false skip",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/guides/x.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "WorkerPool cold-idles",
+       "outcome": "pass",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "TweakStore auto-save",
+       "outcome": "fail",
+       "attempts": 1,
+       "duration_s": 10.0,
+       "exonerated": false
+      },
+      {
+       "test_id": "c",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "flake_skips": 1,
+    "false_skips": 1,
+    "skipped_groups": 1
+   }
+  },
+  {
+   "label": "the same failure exonerated (failed on other heads, passes on main) is a flake-skip",
+   "policy": "inert-drift",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b2",
+       "h1"
+      ],
+      "base_sha": "b2",
+      "merge_tree": "t2",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [
+         "docs/guides/x.md"
+        ],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "WorkerPool cold-idles",
+       "outcome": "pass",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "TweakStore auto-save",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0,
+       "exonerated": true
+      },
+      {
+       "test_id": "c",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "flake_skips": 2,
+    "false_skips": 0
+   }
+  }
+ ]
+}
