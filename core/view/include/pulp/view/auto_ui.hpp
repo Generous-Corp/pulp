@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
 #include <pulp/state/store.hpp>
 #include <cstdint>
 #include <memory>

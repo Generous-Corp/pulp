@@ -1,7 +1,6 @@
 #pragma once
 
 #include <pulp/view/view.hpp>
-#include <pulp/view/widgets.hpp>
 #include <pulp/view/tree_view.hpp>
 #include <pulp/view/property_list.hpp>
 #include <string>

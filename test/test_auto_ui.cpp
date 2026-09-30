@@ -3,6 +3,7 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/motion.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
