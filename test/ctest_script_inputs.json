@@ -2633,6 +2633,7 @@
    "entry": "tools/ci/test_ios_gate_digest.py",
    "inputs": [
     ".github/ISSUE_TEMPLATE",
+    ".github/rulesets/main-protection.json",
     ".github/vellum-change-events",
     ".github/vellum-expansion-watch-events",
     ".github/workflows",
@@ -2686,10 +2687,12 @@
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/package-lock.json",
     "tools/scripts/package.json",
+    "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_ios_compile_gate_legs.py",
     "tools/scripts/test_prepush_gate_supervisor.py",
+    "tools/scripts/test_protected_merge_receipt.py",
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
@@ -4546,7 +4549,8 @@
     "tools/ci/test_test_receipts_shadow.py",
     "tools/cmake",
     "tools/scripts/classify_changes.py",
-    "tools/scripts/protected_merge_receipt.py"
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/test_protected_merge_receipt.py"
    ],
    "kind": "python"
   },

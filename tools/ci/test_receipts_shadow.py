@@ -70,7 +70,6 @@ import subprocess
 import sys
 import time
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -398,11 +397,19 @@ def evaluate(tests: list[dict], keys: dict[str, tuple[str | None, str]],
             "run_failed": sum(1 for s, _ in results.values() if s == "fail")}
 
 
+def lookup_failure(errors: list[str]) -> str:
+    """`receipt lookup failed: <status>` for the first failed request, with the
+    count: a lookup that cannot succeed must not read as zero receipts."""
+    first = errors[0].split(": ", 1)[-1]
+    return f"receipt lookup failed: {first} ({len(errors)} request(s))"
+
+
 def summary_line(v: dict) -> str:
     forced = f"; this run would run in full ({v['would_force_full']})" if v.get("would_force_full") else ""
+    failed = f"; **{v['lookup_error']}**" if v.get("lookup_error") else ""
     return (f"- Per-test receipts (shadow): would skip {v['would_skip']} of {v['selected']} tests, "
             f"~{v['would_skip_seconds']:.0f} s test time, from {v['receipt_runs']} receipt run(s); "
-            f"would-skip tests that failed here: **{v['would_skip_failed']}**{forced}\n")
+            f"would-skip tests that failed here: **{v['would_skip_failed']}**{forced}{failed}\n")
 
 
 # --------------------------------------------------------------------------
@@ -410,19 +417,13 @@ def summary_line(v: dict) -> str:
 
 
 def _fetch_json(url: str, token: str) -> dict:
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - fixed GitHub host
-        return json.load(resp)
+    return pmr.api_json(url, token)
 
 
 def _download(url: str, token: str) -> bytes:
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - GitHub API / blob redirect
-        return resp.read(MAX_RECEIPT_BYTES + 1)
+    # The archive URL redirects to blob storage, which answers 401 to a
+    # forwarded token; pmr's opener drops it on the cross-host hop.
+    return pmr.download_archive(url, token, MAX_RECEIPT_BYTES)
 
 
 def trust_refusal(repository: str, artifact: dict, run: dict, receipt: dict | None) -> str | None:
@@ -460,16 +461,19 @@ def _unzip_receipt(archive: bytes) -> dict | None:
 def load_receipts(repository: str, token: str, exclude_run: str | None,
                   fetch: Callable = _fetch_json, download: Callable = _download,
                   lookback: int = LOOKBACK, budget_secs: float = READ_BUDGET_SECS,
-                  clock: Callable[[], float] = time.monotonic) -> tuple[list[dict], list[str]]:
+                  clock: Callable[[], float] = time.monotonic
+                  ) -> tuple[list[dict], list[str], list[str]]:
     """The newest `lookback` trusted receipts, read within `budget_secs` (the
-    shadow must not hold the gate job), and the reasons any were refused."""
+    shadow must not hold the gate job), the reasons any were refused, and the
+    requests that failed. A failed request is not a refusal: it says nothing
+    about the receipt, so it is reported as a failed lookup."""
     start = clock()
     url = (f"https://api.github.com/repos/{repository}/actions/artifacts?"
            + urllib.parse.urlencode({"name": ARTIFACT_NAME, "per_page": 100}))
     arts = [a for a in fetch(url, token).get("artifacts", [])
             if a.get("name") == ARTIFACT_NAME and not a.get("expired")]
     arts.sort(key=lambda a: a.get("created_at") or "", reverse=True)
-    receipts, refusals = [], []
+    receipts, refusals, lookup_errors = [], [], []
     for art in arts:
         if len(receipts) >= lookback:
             break
@@ -482,15 +486,15 @@ def load_receipts(repository: str, token: str, exclude_run: str | None,
         try:
             run = fetch(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}", token)
             receipt = _unzip_receipt(download(art["archive_download_url"], token))
-        except Exception as exc:  # noqa: BLE001 - a bad candidate is refused, never trusted
-            refusals.append(f"run {run_id}: {exc}")
+        except Exception as exc:  # noqa: BLE001 - a failed request is never trusted
+            lookup_errors.append(f"run {run_id}: {pmr.describe_lookup_error(exc)}")
             continue
         why = trust_refusal(repository, art, run, receipt)
         if why:
             refusals.append(f"run {run_id}: {why}")
         else:
             receipts.append(receipt)
-    return receipts, refusals
+    return receipts, refusals, lookup_errors
 
 
 # --------------------------------------------------------------------------
@@ -535,18 +539,24 @@ def cmd_run(a: argparse.Namespace) -> int:
     receipt = build_receipt(a.run_id, a.merge_sha, {n: k for n, (k, _) in keys.items()}, results)
     Path(a.receipts_out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.receipts_out).write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
-    prior, refusals = [], []
+    prior, refusals, lookup_errors = [], [], []
     if a.token:
         try:
-            prior, refusals = load_receipts(a.repository, a.token, a.run_id)
+            prior, refusals, lookup_errors = load_receipts(a.repository, a.token, a.run_id)
         except Exception as exc:  # noqa: BLE001 - no receipts is a verdict of zero hits, stated
-            refusals.append(f"listing failed: {exc}")
+            lookup_errors.append(f"listing: {pmr.describe_lookup_error(exc)}")
     for why in refusals[:10]:
         print(f"test-receipts shadow: receipt refused: {why}", file=sys.stderr)
+    for why in lookup_errors[:10]:
+        print(f"test-receipts shadow: receipt lookup failed: {why}", file=sys.stderr)
+    if lookup_errors:
+        print(f"::warning title={TITLE}-lookup::{lookup_failure(lookup_errors)}")
     cmake_changed = ats.classify_changes(changed)["cmake_changed"] if base else True
     verdict = evaluate(tests, keys, prior, results, ats.load_script_inputs(source_root),
                        cmake_changed, int(a.run_id) if str(a.run_id).isdigit() else None)
     verdict.update({"receipts_written": len(receipt["passed"]), "refused_receipts": len(refusals),
+                    "lookup_errors": len(lookup_errors),
+                    "lookup_error": lookup_failure(lookup_errors) if lookup_errors else None,
                     "key_seconds": round(keyed_at - t0, 1),
                     "seconds": round(time.monotonic() - t0, 1)})
     print(f"test-receipts shadow: would skip {verdict['would_skip']} of {verdict['selected']} "

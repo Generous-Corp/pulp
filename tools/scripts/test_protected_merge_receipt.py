@@ -10,8 +10,12 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -541,6 +545,101 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             "reason": "exact-tree receipt revalidated", "source_run_id": "42",
             "selected": 1, "passed": 1, "skipped": 0, "inventory_count": 1,
         })
+
+
+class BlobRedirectServer:
+    """GitHub's artifact download, reproduced over real HTTP.
+
+    The "API" server answers `archive_download_url` with 302 to a second host,
+    the "blob store", which behaves like Azure Blob Storage: a request that
+    still carries `Authorization` next to the SAS signature is refused with
+    401 "Server failed to authenticate the request". The two listen on
+    different ports, so the redirect crosses hosts exactly as it does in CI.
+    """
+
+    BLOB_401 = b"Server failed to authenticate the request."
+
+    def __init__(self, body: bytes) -> None:
+        outer = self
+        self.body = body
+        self.blob_saw_authorization: list[bool] = []
+
+        class Blob(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server naming
+                has_auth = self.headers.get("Authorization") is not None
+                outer.blob_saw_authorization.append(has_auth)
+                if has_auth:
+                    self.send_response(401, "Server failed to authenticate the request")
+                    self.end_headers()
+                    self.wfile.write(outer.BLOB_401)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(outer.body)))
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+            def log_message(self, *args):
+                pass
+
+        class Api(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                if self.headers.get("Authorization") != "Bearer tok":
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{outer.blob.server_port}/blob?sig=sas")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        self.blob = ThreadingHTTPServer(("127.0.0.1", 0), Blob)
+        self.api = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+
+    @property
+    def archive_url(self) -> str:
+        return f"http://127.0.0.1:{self.api.server_port}/repos/O/R/actions/artifacts/1/zip"
+
+    def __enter__(self) -> "BlobRedirectServer":
+        for server in (self.blob, self.api):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for server in (self.api, self.blob):
+            server.shutdown()
+            server.server_close()
+
+
+class CredentialSafeDownloadTest(unittest.TestCase):
+    def test_plain_urlopen_forwards_the_token_and_the_blob_store_refuses_it(self) -> None:
+        # The failure the receipt readers had: urllib copies Authorization
+        # onto the cross-host redirect, and the blob store answers 401.
+        with BlobRedirectServer(b"zip-bytes") as server:
+            request = urllib.request.Request(server.archive_url, headers={"Authorization": "Bearer tok"})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=10)  # noqa: S310 - loopback fixture
+            self.assertEqual(caught.exception.code, 401)
+            caught.exception.close()
+            self.assertEqual(server.blob_saw_authorization, [True])
+
+    def test_download_archive_drops_the_token_on_the_cross_host_redirect(self) -> None:
+        with BlobRedirectServer(b"zip-bytes") as server:
+            self.assertEqual(receipt.download_archive(server.archive_url, "tok", 1024), b"zip-bytes")
+            self.assertEqual(server.blob_saw_authorization, [False])
+
+    def test_download_archive_reads_one_byte_past_the_bound(self) -> None:
+        with BlobRedirectServer(b"x" * 100) as server:
+            self.assertEqual(len(receipt.download_archive(server.archive_url, "tok", 10)), 11)
+
+    def test_describe_lookup_error_names_the_status(self) -> None:
+        err = urllib.error.HTTPError("u", 401, "Server failed to authenticate the request", {}, io.BytesIO())
+        self.assertEqual(receipt.describe_lookup_error(err),
+                         "HTTP 401 Server failed to authenticate the request")
+        self.assertEqual(receipt.describe_lookup_error(urllib.error.URLError("timed out")),
+                         "network error: timed out")
+        self.assertEqual(receipt.describe_lookup_error(OSError("boom")), "OSError: boom")
 
 
 class DecisionNoteCliTest(unittest.TestCase):

@@ -831,8 +831,16 @@ same-repository `pull_request` run, with a marker naming the same digest and
 run (decisions contract row 23). One run in ten (by run id) and every
 `schedule`/`push` run is a control that runs the gate anyway, and every
 lookup failure runs it. The job summary says which happened
-(`iOS compile gate: SKIPPED — input digest … passed in trusted run N`), and
-the `pulp-ios-gate-shadow/v1` notice records `skipped`, `control_run`,
+(`iOS compile gate: SKIPPED — input digest … passed in trusted run N`). A
+lookup that could not be answered is reported as such, never as a miss: the
+summary reads `receipt lookup failed: HTTP 401 …`, the job carries an
+`ios-gate-receipt-lookup` warning, and the notice gains a `lookup_error`
+field, while `no matching receipt for this digest` and `no trusted PASS
+receipt for this digest` mean the lookup worked. Artifact archives redirect
+to blob storage, which refuses a forwarded token with 401; every receipt
+reader downloads through `protected_merge_receipt.py`'s
+`download_archive()`, which drops the token on that cross-host hop. The
+`pulp-ios-gate-shadow/v1` notice records `skipped`, `control_run`,
 `would_skip` or `run`, then `ran_ok` or `ran_failed`. The safety number is
 `control_run`/`would_skip` followed by `ran_failed`: it was 0 over the shadow
 window and must stay 0. If it is ever not, set the repository variable
@@ -887,7 +895,11 @@ that passed, and the names that failed, as the `test-receipts-macos`
 artifact, only from merge-group runs. It then reads the last 20 trusted
 receipts and reports how many selected tests a receipt-keyed skip WOULD have
 skipped and their test-seconds (job summary: "Per-test receipts (shadow):
-would skip N of M tests"). Always-run, never counted: drift/lint/registry/
+would skip N of M tests"). A failed receipt request is counted apart from a
+refused receipt (`lookup_errors` and `lookup_error` in the notice, a
+`test-receipts-shadow-lookup` warning, and `receipt lookup failed: <status>`
+in the summary), so `receipt_runs: 0` from a broken lookup cannot pass for an
+empty history. Always-run, never counted: drift/lint/registry/
 sync/guard/census/inventory tests and probes, `pr-fast`/GPU/host-labelled
 tests, script tests that declare a top-level directory, unkeyable tests
 (undeclared scripts, nested builds), and anything that failed in a receipt
