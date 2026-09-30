@@ -432,7 +432,7 @@ bool emit_raw_receipt_if_authenticated(const TrialResult& staged_sync, const Tri
     manifest.sample_rate_hz = kSampleRate;
     manifest.channels = kChannels;
     manifest.ir_frames = 257;
-    manifest.inflight_depth = 2;
+    manifest.inflight_depth = GpuConvolver::kSharedIoSlots;
     manifest.lead_blocks = kLeadBlocks;
     manifest.deadline_ns = (std::uint64_t{1'000'000'000} * kFrames) / kSampleRate;
     manifest.watchdog_ns = manifest.deadline_ns * 4;
