@@ -296,6 +296,44 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(receipt.ReceiptError, "different label set"):
             receipt.issue(self.issue_args())
 
+    def test_issue_accepts_the_selection_that_admits_slow_affected_proofs(self) -> None:
+        # The emitted gate selection of a head whose change requires a
+        # `slow-affected` proof. It excludes fewer tests than the plain
+        # selection, so it is full validation and must yield a receipt.
+        anchored = "validation|^slow$|performance|bench|quality-lab|source-selftest"
+        self.write_selection(label_exclude=anchored)
+        issued = receipt.issue(self.issue_args())
+        self.assertEqual(issued["validation"]["selection"]["label_exclude"], anchored)
+
+    def test_accepted_label_sets_are_exactly_what_the_gate_lanes_emit(self) -> None:
+        # The receipt script carries its own literal (the workflow runs a copy
+        # extracted from the protected base), so pin it to the selector.
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "ci" / "ctest_gate_args.py"
+        spec = importlib.util.spec_from_file_location("ctest_gate_args", path)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        emitted = {
+            gate.label_exclude(event, "macOS", affected_slow)
+            for event in ("pull_request", "merge_group")
+            for affected_slow in (False, True)
+        }
+        self.assertEqual(emitted, set(receipt.ACCEPTED_LABEL_EXCLUDES))
+        self.assertEqual(gate.label_exclude("merge_group", "macOS"), receipt.REQUIRED_LABEL_EXCLUDE)
+
+    def test_issue_refuses_label_sets_that_exclude_more_than_the_gate(self) -> None:
+        for label_exclude in (
+            "validation|slow|performance|bench|quality-lab|source-selftest|pr-fast",
+            "validation|slow|performance|bench|quality-lab|source-selftest|^slow$",
+            "validation|^slow|performance|bench|quality-lab|source-selftest",
+            "validation|slow$|performance|bench|quality-lab|source-selftest",
+            "",
+        ):
+            with self.subTest(label_exclude=label_exclude):
+                self.write_selection(label_exclude=label_exclude)
+                with self.assertRaisesRegex(receipt.ReceiptError, "different label set"):
+                    receipt.issue(self.issue_args())
+
     def test_skipped_tests_count_as_run_evidence_but_not_passes(self) -> None:
         self.write_junit({"unit": "notrun"})
         with self.assertRaisesRegex(receipt.ReceiptError, "no executed tests"):

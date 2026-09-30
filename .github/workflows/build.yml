@@ -1361,6 +1361,11 @@ jobs:
       CCACHE_COMPILERCHECK: content
       CCACHE_NODEPEND: "true"
       CCACHE_SLOPPINESS: time_macros
+      # Build and test commands must not fetch dependencies. The Three.js
+      # bundler (an iOS AUv3 POST_BUILD command and a ctest) honours this by
+      # refusing a missing esbuild instead of running `npm install` inside the
+      # build; "Install build-time Node dependencies" below provides it first.
+      PULP_OFFLINE_BUILD: "1"
 
     steps:
       # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
@@ -1474,13 +1479,30 @@ jobs:
         if: runner.os == 'macOS'
         run: brew update --quiet || echo "brew update failed; install steps retry"
 
+      # The gate VM golden bakes ccache, and `brew install` of an installed
+      # formula still reaches the Homebrew API, so an installed ccache is used
+      # as is. Hosted runners install it with 3 spaced attempts; a brew update
+      # before each retry recovers the stale-config case described above.
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ccache || {
-            brew update
-            brew install ccache
-          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "ccache already installed: $(ccache --version | head -n 1)"
+            exit 0
+          fi
+          delay="${PULP_BREW_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if brew install ccache; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::brew install ccache attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+              brew update --quiet || true
+            fi
+          done
+          echo "::error::brew install ccache failed after 3 attempts"
+          exit 1
 
       - name: Install ccache (Windows)
         if: runner.os == 'Windows'
@@ -1901,6 +1923,64 @@ jobs:
           # Whether the set was pre-provisioned or installed here, the
           # non-skippable `visual-python-deps-present` ctest is what proves it.
           # This step only has to stop being a network-dependent tripwire.
+
+      - name: Install build-time Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Three.js bundler (tools/scripts/bundle_threejs_for_jsc.mjs) runs
+          # as an iOS AUv3 POST_BUILD command inside the iOS compile gate and as
+          # the pulp_bundle_threejs_for_jsc_smoke ctest. It loads esbuild from
+          # tools/scripts/node_modules. Left to itself it runs `npm install`
+          # mid-build, which made a compile depend on registry.npmjs.org: on
+          # 2026-09-27 and 2026-09-29 gate VMs on three hosts failed the
+          # required macos check with `getaddrinfo ENOTFOUND
+          # registry.npmjs.org` inside the build. The job sets
+          # PULP_OFFLINE_BUILD, so the bundler now refuses instead, and the
+          # install happens here, from the committed lockfile, with retries.
+          prefix=tools/scripts
+          if ! command -v node >/dev/null 2>&1; then
+            # CMake registers neither the bundle step nor its ctests without node.
+            echo "node is not on PATH; nothing here runs the Three.js bundler"
+            exit 0
+          fi
+          # Loads the installed esbuild and runs one transform, which starts the
+          # platform binary and checks it against the JS package's version, and
+          # compares that to the lockfile pin. A package from another platform,
+          # a stale version or a half-extracted install all fail it.
+          esbuild_ready() {
+            # The directory is resolved by node against its own cwd, so the
+            # path is native on Windows too (Git Bash $PWD is not).
+            node -e '
+              const dir = require("path").resolve(process.argv[1]);
+              const pin = require(dir + "/package-lock.json")
+                .packages["node_modules/esbuild"].version;
+              const esbuild = require(dir + "/node_modules/esbuild");
+              if (esbuild.version !== pin) process.exit(1);
+              esbuild.transformSync("let x = 1");
+            ' "$prefix" >/dev/null 2>&1
+          }
+          if esbuild_ready; then
+            echo "esbuild already installed in $prefix at the locked version; no registry fetch"
+            exit 0
+          fi
+          # --prefer-offline serves anything already in the npm cache without a
+          # registry round trip. Three spaced attempts cover an outage that
+          # outlasts npm's own fetch retries.
+          delay="${PULP_NPM_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if npm ci --prefix "$prefix" --prefer-offline --no-audit --no-fund \
+                && esbuild_ready; then
+              echo "Installed esbuild into $prefix from package-lock.json"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::npm ci attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+            fi
+          done
+          echo "::error::could not install $prefix/package-lock.json after 3 attempts; the Three.js bundler would fail the build" >&2
+          exit 1
 
       - name: Build
         shell: bash

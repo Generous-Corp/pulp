@@ -30,6 +30,7 @@ EXPECTED_REQUIRED_CONTEXTS = {
     "Build + prove + (owner-gated) deploy",
     "Vellum freeze",
     "Vellum trusted freeze",
+    "drift-fast",
 }
 
 EXPECTED_ADVISORY_CONTEXTS = {

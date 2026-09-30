@@ -101,7 +101,7 @@ jobs:
 
       - name: Install inventory parser dependency without secrets
         if: steps.pr.outputs.active == 'true'
-        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+        run: tools/ci/net-retry.sh python3 -m pip install --quiet 'pyyaml==6.0.2'
 
       - name: Mint one-repository Vellum reader token
         if: steps.pr.outputs.active == 'true'
@@ -170,7 +170,7 @@ jobs:
 
           trusted_root=$PWD
           proposed_tree="$RUNNER_TEMP/vellum-proposed-$PR_NUMBER"
-          git fetch --no-tags origin \
+          tools/ci/net-retry.sh git fetch --no-tags origin \
             "$PR_BASE" \
             "+refs/pull/$PR_NUMBER/head:refs/vellum/pr-head"
           fetched_head=$(git rev-parse refs/vellum/pr-head)
@@ -276,8 +276,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # This job runs the protected base commit's tools, which can predate a
+      # helper this workflow file names, so its retries stay inline rather than
+      # calling tools/ci/net-retry.sh. Same bound: 3 attempts, 20 s then 40 s.
       - name: Install inventory parser dependency
-        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+        run: |
+          for attempt in 1 2 3; do
+            python3 -m pip install --quiet 'pyyaml==6.0.2' && exit 0
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::pip install attempt $attempt failed; retrying in $(( 20 * attempt ))s"
+              sleep $(( 20 * attempt ))
+            fi
+          done
+          echo "::error::pip install failed after 3 attempts"
+          exit 1
 
       - name: Mint one-repository Vellum reader token
         id: vellum-reader-token
@@ -306,7 +318,21 @@ jobs:
           MERGE_BASE: ${{ github.event.merge_group.base_sha }}
           MERGE_HEAD: ${{ github.event.merge_group.head_sha }}
         run: |
-          git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"
+          fetched=false
+          for attempt in 1 2 3; do
+            if git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"; then
+              fetched=true
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::git fetch attempt $attempt failed; retrying in $(( 20 * attempt ))s"
+              sleep $(( 20 * attempt ))
+            fi
+          done
+          if [ "$fetched" != true ]; then
+            echo "::error::git fetch of the merge-group commits failed after 3 attempts"
+            exit 1
+          fi
           trusted_root=$PWD
           proposed_tree="$RUNNER_TEMP/vellum-merge-proposed"
           git worktree add --detach "$proposed_tree" "$MERGE_HEAD"

@@ -161,6 +161,83 @@ class HydrationTests(unittest.TestCase):
                             hydration.hydrate(pathlib.Path("/repo"), "origin"), (1, 0)
                         )
 
+    def _hydrate_with_fetch_errors(
+        self, event_ref: str, errors: dict[str, str], event_sha: str = "",
+        commits_present: bool = True,
+    ) -> tuple[str, str, BaseException | None]:
+        """Run hydrate() where each candidate containing a key fails with its error."""
+
+        def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            if command[:3] == ["git", "rev-parse", "--is-shallow-repository"]:
+                return subprocess.CompletedProcess(command, 0, "true\n", "")
+            if command[:2] == ["git", "fetch"]:
+                for needle, error in errors.items():
+                    if any(needle in arg for arg in command):
+                        return subprocess.CompletedProcess(command, 128, "", error)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        out, err = io.StringIO(), io.StringIO()
+        raised: BaseException | None = None
+        with (
+            mock.patch.object(hydration, "required_commits", return_value=["a" * 40]),
+            mock.patch.object(hydration, "is_commit", return_value=commits_present),
+            mock.patch.object(hydration.subprocess, "run", side_effect=run),
+            mock.patch.dict(os.environ, {"GITHUB_REF": event_ref, "GITHUB_SHA": event_sha}),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            try:
+                hydration.hydrate(pathlib.Path("/repo"), "origin")
+            except hydration.HydrationError as error:
+                raised = error
+        return out.getvalue(), err.getvalue(), raised
+
+    def test_a_vanished_queue_branch_is_a_notice_not_a_fetch_failure(self) -> None:
+        queue = "refs/heads/gh-readonly-queue/main/pr-12-" + "b" * 40
+        sha = "c" * 40
+        # Every candidate fails, so any fetch failure would be reported.
+        out, err, raised = self._hydrate_with_fetch_errors(
+            queue,
+            {
+                "gh-readonly-queue": f"fatal: couldn't find remote ref {queue}\n",
+                sha: "fatal: unable to access: Could not resolve host: github.com\n",
+            },
+            event_sha=sha,
+        )
+        self.assertIsNone(raised)
+        self.assertIn("::notice::gpu-provenance-hydration: merge group gone", out)
+        self.assertNotIn(queue, err)
+        # The event commit's failure is a real transport error and stays one.
+        self.assertIn(f"WARN: bounded fetch failed: {sha}: fatal: unable to access", err)
+
+    def test_other_queue_branch_errors_stay_fetch_failures(self) -> None:
+        queue = "refs/heads/gh-readonly-queue/main/pr-12-" + "b" * 40
+        out, err, _ = self._hydrate_with_fetch_errors(
+            queue, {"gh-readonly-queue": "fatal: Could not resolve host: github.com\n"}
+        )
+        self.assertNotIn("merge group gone", out)
+        self.assertIn(f"WARN: bounded fetch failed: {queue}: fatal: Could not resolve host", err)
+
+    def test_a_missing_non_queue_ref_stays_a_fetch_failure(self) -> None:
+        out, err, _ = self._hydrate_with_fetch_errors(
+            "refs/heads/main",
+            {"refs/heads/main": "fatal: couldn't find remote ref refs/heads/main\n"},
+        )
+        self.assertNotIn("merge group gone", out)
+        self.assertIn("WARN: bounded fetch failed: refs/heads/main", err)
+
+    def test_unresolved_commits_after_a_gone_group_still_fail_and_say_why(self) -> None:
+        queue = "refs/heads/gh-readonly-queue/main/pr-12-" + "b" * 40
+
+        _, _, raised = self._hydrate_with_fetch_errors(
+            queue,
+            {"gh-readonly-queue": f"fatal: couldn't find remote ref {queue}\n"},
+            commits_present=False,
+        )
+        self.assertIsInstance(raised, hydration.HydrationError)
+        self.assertIn("remain unresolved", str(raised))
+        self.assertIn("merge group this run validated is gone", str(raised))
+
     def test_only_a_merge_ref_gains_a_head_fallback(self) -> None:
         self.assertEqual(
             hydration.event_ref_candidates("refs/pull/12/merge"),
