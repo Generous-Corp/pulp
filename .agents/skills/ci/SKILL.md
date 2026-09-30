@@ -844,6 +844,15 @@ consequences worth knowing before you debug:
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
   and the branch was pushed red three times.
+- When the diff can drift `test/ctest_script_inputs.json` (the list itself, a
+  declared entry/input, a script under a declared input directory, or CMake
+  that registers tests) and no current Ninja build exists, `gates.sh`
+  configures `build-gate` (configure only, no compile, ~40 s) and runs the
+  diff-scoped `script-test-inputs-drift` check, printing the exact `--write`
+  command on drift (`tools/scripts/gates_script_inputs.py`). A diff that cannot
+  drift the list configures nothing. `PULP_GATES_NO_CONFIGURE=1` keeps the old
+  NOT CHECKED behaviour with a loud warning. Without this, a hand-edited list
+  passed `gates.sh` as NOT CHECKED and failed only on the PR head.
 - The consumption-census checks (`consumption-census-drift` and the others that
   pass `--build-dir`) only mean something against a build of the scope the
   census measured. Each profile in `docs/status/consumption-profiles.json`
@@ -1916,6 +1925,8 @@ treadmill. Regenerate with `--write` against a configured build dir and
 commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
+**Never hand-edit `test/ctest_script_inputs.json`; regenerate it with
+`--write` against a configured `build-gate`.**
 **Every PR that adds or changes a script-driven test must regenerate the
 list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
 --write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
