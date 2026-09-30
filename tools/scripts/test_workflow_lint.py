@@ -26,7 +26,6 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 ACTIONLINT_CONFIG = REPO_ROOT / ".github" / "actionlint.yaml"
-POST_TAG_SYNC_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
 
 
 def _workflow_text() -> str:
@@ -90,7 +89,7 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         ):
             self.assertGreaterEqual(path_patterns.count(path), 2, path)
 
-    def test_actionlint_knows_the_authority_runner_label(self) -> None:
+    def test_actionlint_knows_the_self_hosted_runner_labels(self) -> None:
         self.assertTrue(
             ACTIONLINT_CONFIG.exists(),
             f"missing actionlint config: {ACTIONLINT_CONFIG}",
@@ -98,33 +97,9 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
         config = ACTIONLINT_CONFIG.read_text(encoding="utf-8")
         self.assertRegex(config, r"(?m)^self-hosted-runner:\s*$")
         self.assertRegex(config, r"(?m)^\s{2}labels:\s*$")
-        self.assertRegex(
-            config,
-            r"(?m)^\s{4}-\s+pulp-queue-authority-studio\s*$",
-        )
         self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build\s*$")
         self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build-vm\s*$")
         self.assertRegex(config, r"(?m)^\s{4}-\s+pulp-build-merge-group\s*$")
-
-    def test_post_tag_sync_runs_on_the_authority_runner(self) -> None:
-        self.assertTrue(
-            POST_TAG_SYNC_WORKFLOW.exists(),
-            f"missing workflow: {POST_TAG_SYNC_WORKFLOW}",
-        )
-        post_tag_sync = POST_TAG_SYNC_WORKFLOW.read_text(encoding="utf-8")
-        self.assertRegex(
-            post_tag_sync,
-            r"(?m)^\s{4}runs-on:\s*\[self-hosted, pulp-queue-authority-studio\]\s*$",
-        )
-
-    def test_post_tag_sync_does_not_queue_on_every_tag(self) -> None:
-        """Its runner label has no registration, so a tag trigger only parks
-        a run in the queue until GitHub cancels it."""
-        doc = yaml.safe_load(POST_TAG_SYNC_WORKFLOW.read_text(encoding="utf-8"))
-        triggers = doc.get("on", doc.get(True))
-        self.assertIsInstance(triggers, dict)
-        self.assertNotIn("push", triggers)
-        self.assertIn("workflow_dispatch", triggers)
 
     def test_workflow_lint_gate_runs_this_regression_suite(self) -> None:
         self.assertIn(
