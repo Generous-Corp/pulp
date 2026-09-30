@@ -1146,6 +1146,7 @@ jobs:
           NATIVE_BUILD_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
           RECEIPT_TOKEN: ${{ github.token }}
           A2T_RECEIPT_VERIFICATION_REQUIRED: ${{ needs.classify.outputs.a2t_receipt_verification_required }}
+          AFFECTED_SLOW_REQUIRED: ${{ needs.classify.outputs.agent_capability_installed_sdk_required }}
         shell: bash
         run: |
           set -u
@@ -1181,6 +1182,12 @@ jobs:
               done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
+              # The group's own proof requirement, passed only to a protected
+              # verifier that accepts it. An empty classify output fails closed.
+              affected_slow_args=()
+              if grep -q -- '--affected-slow-required' "$RUNNER_TEMP/protected_merge_receipt.py"; then
+                affected_slow_args=(--affected-slow-required "${AFFECTED_SLOW_REQUIRED:-true}")
+              fi
               for target in macos linux; do
                 if [ "$target" = macos ] \
                     && [ "$A2T_RECEIPT_VERIFICATION_REQUIRED" = true ]; then
@@ -1211,7 +1218,13 @@ jobs:
                 elif python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
                     --repo "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
                     --target "$target" --group-sha "$group" \
+                    ${affected_slow_args[@]+"${affected_slow_args[@]}"} \
                     --receipt "$receipt_path" --output "$decision_path" 2> "$verify_err"; then
+                  # A reuse the verifier accepted can still carry a finding it
+                  # reports without refusing; surface it rather than drop it.
+                  if [ -s "$verify_err" ]; then
+                    sed 's/^/::notice::/' "$verify_err"
+                  fi
                   matrix="$(MATRIX_JSON="$matrix" TARGET="$target" python3 - <<'PY'
           import json, os
           matrix = json.loads(os.environ["MATRIX_JSON"])

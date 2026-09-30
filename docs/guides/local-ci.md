@@ -2594,6 +2594,19 @@ protected-base verifier's own reason (for example "receipt selection covers too
 little of the built test inventory"). The notes are rendered by the checked-out
 script after the protected-base verifier has decided; they never decide.
 
+A receipt stands in for the group's whole suite, including the
+`slow-affected` proofs (such as `agent-capability-installed-sdk`) that the
+change classifier admits for some changes. The receipt's signed selection
+records whether they ran: the anchored `^slow$` label set means they did. The
+reuse step passes the group's own classification to the verifier as
+`--affected-slow-required` (an empty classifier output counts as `true`), but
+only when the protected-base verifier accepts that flag. A group that requires
+the proofs while the receipt's run skipped them is reported as a
+`::notice::protected receipt: merge group requires the slow-affected proofs
+...` line on an otherwise successful reuse. The verifier does not refuse on it,
+so those notices give the would-refuse count to read before refusal is
+switched on.
+
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the
 history is unavailable). A merge group that changed no native build input is

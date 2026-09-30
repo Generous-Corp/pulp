@@ -666,6 +666,14 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+A receipt must also cover the group's `slow-affected` proofs. The signed
+selection is the record: an anchored `^slow$` label set means they ran. The
+reuse step hands the group's classify output to the protected verifier as
+`--affected-slow-required`, gated on the protected verifier accepting the
+flag, because the verifier runs from the base and an older one rejects an
+unknown argument. Add new verifier inputs the same way: accept the argument
+first, then enforce it once the accepting version is the protected base.
+
 ### A PR head also runs the tests its own diff reaches, and that step gates
 
 Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate
