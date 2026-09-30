@@ -1974,8 +1974,10 @@ reported on.
 **Where main's evidence comes from without a build.** The merge_group run whose
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
 method that run tested exactly the commit on main. It is judged by its
-**required gate jobs** — the job names in `.shipyard/config.toml`
-`[governance] required_status_checks`, i.e. `macos` — never by the run's
+**required gate jobs** — the jobs in that build.yml run named by
+`.shipyard/config.toml` `[governance] required_status_checks`, i.e. `macos`
+(the list's other contexts are produced by other workflows and select no job
+here) — never by the run's
 conclusion, which also folds in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
 Linux failure into a fake batch streak. The tip's run is read at any status,
@@ -2309,8 +2311,10 @@ required check equally; see the `contrib-intake` skill.
 
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
-`[governance]` mirror it. Removing it again is the reverse
-`required_status_checks` edit.
+`[governance]` mirror it, and `base-poison-detector-selftest` fails when those
+two disagree. `[governance]` is the full six-context contract, because
+`shipyard governance apply` pushes exactly that list to branch protection.
+Removing it again is the reverse `required_status_checks` edit.
 
 ## A green `macos` check does not always mean the suite ran
 
@@ -6495,7 +6499,20 @@ jobs** for 15 minutes (the concurrency-holder signature, which reads exactly
 like runner saturation and is not). It opens, edits and closes one issue
 labelled `ci-landing-wedge`, and writes nothing else.
 
-Budget: 1 call plus at most 3 per open PR, every 30 minutes, on
+A required context counts as present when the head carries it as a check run
+**or** a commit status: `Vellum trusted freeze` reaches a pull request's head
+as a status posted by a `pull_request_target` run, so a check-run-only reader
+would call it absent on every pull request. The required set is
+`[governance] required_status_checks`, all six contexts.
+
+Every tick first replays `tools/scripts/fixtures/landing_watchdog_wedge.json`
+against that set as a negative control; it must fire (`absent`, `unassigned`,
+`zero_jobs`) and must not flag the fixture's healthy pull request. The replay
+rewrites the fixture's `REPLACE_OLD` timestamps against the current clock; read
+raw, every age is zero and the control cannot fire.
+
+Budget: 1 call plus 3 per open PR (check runs, combined status, workflow runs),
+plus one jobs probe per pending run (at most 3), every 30 minutes, on
 `GITHUB_TOKEN`'s own per-repository bucket.
 
 ### Both detectors report their own failure

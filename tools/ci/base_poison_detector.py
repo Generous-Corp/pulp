@@ -494,6 +494,12 @@ def required_contexts(config: Path = SHIPYARD_CONFIG) -> tuple[str, ...]:
     That list mirrors the live ruleset, and only the jobs it names decide
     whether main is healthy: an advisory leg's red never ejects a batch and
     must never redden the base.
+
+    It is the whole contract, so it also names contexts other workflows
+    produce (`drift-fast`, the Vellum freezes, the WebCLAP job). This detector
+    reads only build.yml runs, where those names match no job and select
+    nothing; the gate it judges is build.yml's share of the contract. It does
+    not treat a context missing from a build.yml run as missing evidence.
     """
     try:
         import tomllib
