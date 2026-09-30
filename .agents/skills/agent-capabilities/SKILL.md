@@ -180,7 +180,17 @@ For an existing capability change:
   Skip past any claimed integer rather than racing for it; the values only have
   to be distinct and increasing, not contiguous. `ghapp pr list --state open
   --json number,files` answers "does any open PR touch the manifest file" in
-  one call; filter it before fetching any patch.
+  one call; filter it before fetching any patch. A stacked branch (one PR
+  based on another) takes the next integer again: the base PR claims N+1, the
+  stacked one N+2, and each repoints any pending needle that pins the integer.
+- A new header under a covered root also moves the consumption census
+  (`docs/status/consumption-profiles.json`; `test_consumption_census.py`
+  `HeaderNameDrift`). That test reads names from the git index, so it keeps
+  failing until the header is tracked. Regenerate with
+  `consumption_census.py --build-dir <this checkout's build> --write`; pointing
+  `--build-dir` at a sibling worktree's build rewrites every include root to
+  the other tree, so for a stacked branch without its own build add the one
+  header line by hand instead.
 - A pending sequencer-exposure row can pin the current inventory integer as an
   evidence needle (`"SURFACE_INVENTORY_VERSION = 95"`). Bumping the version
   stales that row and `sequencer_exposure_check.py` fails on it, not on your
