@@ -1952,7 +1952,7 @@ four hours whatever the cron says, longer than a batch's lifetime. A
 `workflow_run` job runs the default branch's copy of the workflow with
 base-repository permissions, so the detector checks out only the default branch
 (never the triggering run's head) and its token is read-only (`actions`,
-`contents`, `pull-requests`). It runs on the preamble Linux runner,
+`checks`, `contents`, `pull-requests`, `statuses`). It runs on the preamble Linux runner,
 draws no macOS gate host, and **reports only** — pausing a re-forming batch or
 prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
@@ -1960,37 +1960,65 @@ superseded tick loses nothing, because the next one reads main's *current* head,
 which is strictly more relevant than the head the cancelled tick would have
 reported on.
 
-**Where main's evidence comes from without a build.** The merge_group run whose
+**Where main's evidence comes from without a build.** The merge group whose
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
-method that run tested exactly the commit on main. It is judged by its
-**required gate jobs** — the jobs in that build.yml run named by
-`.shipyard/config.toml` `[governance] required_status_checks`, i.e. `macos`
-(the list's other contexts are produced by other workflows and select no job
-here) — never by the run's
+method its runs tested exactly the commit on main. It is judged on **every
+required status context** — `.shipyard/config.toml` `[governance]
+required_status_checks` (six contexts: `macos`, `Enforce version & skill sync`,
+`Build + prove + (owner-gated) deploy`, `Vellum freeze`, `Vellum trusted
+freeze`, `drift-fast`) — gathered from the merge_group runs of every workflow in
+`[landability] workflows`: build.yml's jobs through the jobs API (their steps
+tell an executed `macos` suite from a reused receipt), the other workflows'
+jobs through one `commits/<sha>/check-runs` read kept to those runs' check
+suites (so a push run on the landed commit is never read as the gate), and the
+commit's statuses for a context published as a status. Never by a run's
 conclusion, which also folds in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. The tip's run is read at any status,
-because a group lands as soon as its required checks pass while advisory legs
-may still be running. When the tip's gate is not evidence (a reused receipt, or
-still running), an earlier merge group whose head tree equals main's tree is
-used instead (`tree-identity`): the tree determines what was built. When the
-tip has no merge_group run at all (an admin or direct push), the verdict is
-`unproven` and its reason names the tip. The signal says which source it used
-and carries `main_head_sha`.
+Linux failure into a fake batch streak. And never by `macos` alone: on
+2026-09-29 the required `drift-fast` context was red on main for about fourteen
+hours while `macos` stayed green, the macos-only detector read `healthy`
+throughout, and every batch that failed `drift-fast` read as a pass, so the
+batch streak stayed 0. Replaying tip `31e644ed61b2` read-only now reports
+`poisoned` (`drift-fast` failed `gpu-probe-historical-v1-acceptance` on main and
+in 5 consecutive batches).
 
-Failing test names are read from the `ctest-logs-macos` **artifact**
-(`Testing/Temporary/LastTestsFailed.log`), never from a job log:
+The tip is `healthy` only when every required context is present and green and
+`macos` executed the suite; a context that failed makes it red whatever the
+others say; a context still running or never reported leaves it `unproven`, and
+its reason names the context. The tip's runs are read at any status, because a
+group lands as soon as its required checks pass while advisory legs may still
+be running. When the tip is not evidence (a reused receipt, still running), an
+earlier merge group whose head tree equals main's tree is used instead
+(`tree-identity`): the tree determines what was built. When the tip has no
+merge_group run at all (an admin or direct push), the verdict is `unproven` and
+its reason names the tip. The signal says which source it used and carries
+`main_head_sha`. Batches are judged the same way, newest head first, so a batch
+counts toward the streak when any required context failed on it.
+
+Failing test names come from wherever the failing context records them: for
+`macos`, the `ctest-logs-macos` **artifact**
+(`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
+artifact (`drift-fast`), the ctest "The following tests FAILED" block of its
+job, read from the **run** log zip. Never the per-job log endpoint:
 `ghapp api .../actions/jobs/<id>/logs` refuses any response carrying terminal
 escape sequences and returns a short refusal instead, so a log scrape silently
 yields no failing tests — which reads as "the failure was not a test failure".
+
+Replay an earlier state read-only with `--tip-sha <sha>` (judge that commit as
+main's tip) and `--before <ISO time>` (batch history as it stood then).
 
 **The signal.** A `::notice title=base-poison-signal::` annotation carrying one
 line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
-`main_evidence_source`, `main_head_sha`, `main_failing_tests`, `batch_streak`,
-`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
-`likely_culprits`, `required_contexts_source`, `reason`.
+`main_evidence_source`, `main_head_sha`, `main_failing_tests`,
+`main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
+source, run_id, tests}` per required context), `batch_streak`,
+`batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
+`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`required_contexts_source`, `reason`. Fields are only ever added under
+`base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
+`safe_to_pause_queue`.
 
 `likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
 whose presence separates the merge groups that failed a test from the ones that
@@ -2003,10 +2031,10 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 
 | `status` | Means | `safe_to_pause_queue` |
 |---|---|---|
-| `healthy` | a job that genuinely ran the suite on main's tree passed | false |
-| `unproven` | no such job exists — main's health is unmeasured | false |
-| `suspected` | a streak, or a main failure naming no test | false |
-| `poisoned` | main's own suite failed a test that a streak of consecutive executed batches also failed | **true** |
+| `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
+| `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
+| `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
+| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
@@ -2301,7 +2329,7 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree. `[governance]` is the full six-context contract, because
+two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 

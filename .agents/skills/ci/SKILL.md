@@ -287,13 +287,19 @@ why the detector is event-triggered. When you need a read NOW, dispatch it:
 default branch's copy with base-repo permissions: never check out
 `github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
-**Where main's evidence comes from without a build.** The merge_group run whose
-head sha is main's tip (`source: head-sha`), judged by its **required gate
-jobs** — the jobs in that build.yml run named by `.shipyard/config.toml`
-`[governance] required_status_checks`, i.e. `macos` (the list's other contexts
-come from other workflows and select no job) — never by the run conclusion, and read at
-any run status because a group lands as soon as its required checks pass while
-advisory legs may still run. If that run's gate is not evidence (a reused
+**Where main's evidence comes from without a build.** The merge group whose
+head sha is main's tip (`source: head-sha`), judged on **every required
+context** in `.shipyard/config.toml` `[governance] required_status_checks`,
+gathered from the merge_group runs of every `[landability] workflows` entry
+(build.yml jobs with steps, the other workflows' check runs by check suite, and
+commit statuses) — never by a run conclusion and never by `macos` alone, and
+read at any run status because a group lands as soon as its required checks
+pass while advisory legs may still run. Judging `macos` alone is how a
+fourteen-hour `drift-fast` red on 2026-09-29 read `healthy`, and why every
+batch that failed `drift-fast` broke the streak (`batch_streak` 0). Failing
+tests come from `ctest-logs-macos` for `macos` and from the RUN log zip for a
+context with no artifact (`drift-fast`); never the per-job log endpoint, which
+`ghapp` answers with a refusal. Replay read-only with `--tip-sha` + `--before`. If that run's gate is not evidence (a reused
 receipt, still running), an earlier merge group that built the same tree is
 used (`source: tree-identity`). No merge_group run for the tip (an admin or
 direct push) is `unproven`. The signal carries `main_head_sha`, so a verdict
@@ -302,8 +308,8 @@ made every tip read red while advisory Linux was failing.
 
 | `status` | Means | Act on it? |
 |---|---|---|
-| `healthy` | a job that genuinely ran the suite on main's tree passed | no |
-| `unproven` | no such job exists; main's health is unmeasured | no |
+| `healthy` | every required context passed on main's tree and `macos` ran the suite | no |
+| `unproven` | a required context is running/missing, or `macos` ran nothing; unmeasured | no |
 | `suspected` | a streak of batches share a failure, or main failed naming no test | **hint only** |
 | `poisoned` | main's own suite failed a test a streak of executed batches also failed | **yes** |
 
@@ -5202,8 +5208,8 @@ alongside `.github/rulesets/main-protection.json`. Two hard rules:
   `base-poison-detector-selftest` fails when the two disagree. The list must be
   the WHOLE contract: `shipyard governance apply` PUTs exactly it to branch
   protection, so a partial list silently drops required checks. A reader that
-  judges only part of it narrows it itself — the base-poison detector reads
-  build.yml runs, where only `macos` names a job; the landing watchdog reads
+  judges only part of it narrows it itself — the base-poison detector judges
+  all six on each merge-group head, reading statuses as well as jobs; the landing watchdog reads
   commit statuses as well as check runs, because `Vellum trusted freeze`
   reaches a PR head as a status from a `pull_request_target` run and a
   check-run-only reader calls it absent on every PR.
