@@ -318,10 +318,11 @@ class Collector:
                 verdict = note.get("verdict")
         return verdict
 
-    def required_contexts_green(self, head_sha: str, required: tuple[str, ...],
-                                as_of: str | None = None) -> bool | None:
-        """Every required context other than macos green on the head, reading
-        only check-runs that had completed by `as_of` (the group's creation)."""
+    def required_contexts(self, head_sha: str, required: tuple[str, ...],
+                          as_of: str | None = None) -> dict[str, list[str]] | None:
+        """The required contexts other than macos that were red, and those with
+        no completed check-run, on the head as of `as_of` (the group's
+        creation). None when the head's check-runs cannot be read."""
         def fetch() -> list:
             rows, page = [], 1
             while True:
@@ -342,13 +343,16 @@ class Collector:
                 continue
             if name and (name not in latest or str(cr.get("completed_at") or "") >= str(latest[name].get("completed_at") or "")):
                 latest[name] = cr
+        out: dict[str, list[str]] = {"red": [], "absent": []}
         for context in required:
             if context == "macos":
                 continue  # the full-suite ctest facts stand in for the head's own macos check
             cr = latest.get(context)
-            if cr is None or cr.get("conclusion") not in GREEN_CONCLUSIONS:
-                return False
-        return True
+            if cr is None:
+                out["absent"].append(context)
+            elif cr.get("conclusion") not in GREEN_CONCLUSIONS:
+                out["red"].append(context)
+        return out
 
     def merged_at(self, since: dt.datetime) -> dict[int, str | None]:
         """merged_at per closed pull request updated since `since`."""
@@ -496,9 +500,10 @@ class Collector:
         parsed = self.parsed_log(job["id"]) if job else {"checkout_sha": None, "ctest": {}, "tests": [],
                                                            "receipt_issued": None}
         checkout = parsed["checkout_sha"]
-        if checkout is None and job is None and kind == "merge_group":
-            # No suite ran (reused, or no native input): the group's commit is
-            # still exactly the run's own head.
+        if checkout is None and kind == "merge_group":
+            # The job never checked out (reused, no native input, cancelled
+            # before checkout, log expired): the group's commit is still
+            # exactly the run's own head, and no suite ran on it.
             checkout = run["head_sha"]
         commit = self.commit(checkout)
         record = {
@@ -513,7 +518,10 @@ class Collector:
             "base_sha": commit["parents"][0] if commit and commit["parents"] else None,
             "merge_tree": commit["tree"] if commit else None,
             "ctest": parsed["ctest"], "receipt_issued": parsed["receipt_issued"],
-            "build_failed": bool(job and job["conclusion"] == "failure" and not parsed["ctest"].get("ran")),
+            # A build failure got as far as checking out and never reached ctest;
+            # a job that failed before checkout (a cancelled leg) ran nothing.
+            "build_failed": bool(job and job["conclusion"] == "failure" and parsed["checkout_sha"]
+                                 and not parsed["ctest"].get("ran")),
             "required_contexts_green": None, "observed_decision": None,
         }
         if kind == "merge_group":
@@ -614,11 +622,15 @@ class Collector:
                         hits = self.declared_input_hits(group, drift)
                     elif drift == []:
                         hits = []
-                green = None
+                contexts = None
                 if record["ctest"].get("complete") and record["ctest"].get("failed") == 0:
-                    green = self.required_contexts_green(record["head_sha"], required, group["created_at"])
-                head_rows.append({"run_id": run_id, "drift_files": drift, "drift_source": source,
-                                  "drift_declared_input_hits": hits, "required_contexts_green": green})
+                    contexts = self.required_contexts(record["head_sha"], required, group["created_at"])
+                head_rows.append({
+                    "run_id": run_id, "drift_files": drift, "drift_source": source,
+                    "drift_declared_input_hits": hits,
+                    "required_contexts_green": None if contexts is None else not (contexts["red"] or contexts["absent"]),
+                    "required_contexts_red": None if contexts is None else contexts["red"],
+                    "required_contexts_absent": None if contexts is None else contexts["absent"]})
             return {"schema": PAIR_SCHEMA, "pr": group["pr"], "head_sha": group["head_sha"],
                     "group_run_id": group["run_id"], "heads": head_rows,
                     "stacked": _stacked(group, queue_commits, merged_at, self)}

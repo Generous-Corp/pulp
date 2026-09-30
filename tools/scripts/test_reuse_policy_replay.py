@@ -297,6 +297,28 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(self.collector(False).drift(head(), other), (None, None))
 
 
+class RunRecordTests(unittest.TestCase):
+    def record(self, parsed: dict, conclusion: str = "failure") -> dict:
+        c = rrc.Collector.__new__(rrc.Collector)
+        job = {"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": conclusion}
+        c.jobs = lambda run_id: [job]
+        c.parsed_log = lambda job_id: parsed
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
+        return c.run_record(run, "merge_group", 7, "h")[0]
+
+    def test_failure_after_checkout_without_ctest_is_a_build_failure(self):
+        rec = self.record({"checkout_sha": "m1", "ctest": {"ran": False}, "tests": [], "receipt_issued": None})
+        self.assertTrue(rec["build_failed"])
+        self.assertEqual(rpr.pair_status(rec), "build_failed")
+
+    def test_failure_before_checkout_ran_nothing(self):
+        rec = self.record({"checkout_sha": None, "ctest": {}, "tests": [], "receipt_issued": None})
+        self.assertFalse(rec["build_failed"])
+        self.assertEqual(rec["checkout_sha"], "m1")
+        self.assertEqual(rpr.pair_status(rec), "no_suite")
+
+
 class GraftTests(unittest.TestCase):
     def test_parents_are_read_through_shallow_grafts(self):
         with tempfile.TemporaryDirectory() as tmp:
