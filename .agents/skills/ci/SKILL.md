@@ -4229,7 +4229,10 @@ bisectable.
   `version_at_land.py` runs `shipyard changelog regenerate` as a derived
   regenerator, so there is no post-tag workflow. Do not run
   `shipyard release-bot hook install`: it recreates `post-tag-sync.yml`, whose
-  per-tag changelog PR pays the required gate again for one docs file.
+  per-tag changelog PR pays the required gate again for one docs file. The
+  bump fast path (`generated_version_bump_check.py`) cannot run Shipyard, so it
+  adopts the candidate's `CHANGELOG.md` bytes (`UNREPRODUCED_DERIVED`) and still
+  reproduces every other byte; add a file there only if the build never reads it.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
