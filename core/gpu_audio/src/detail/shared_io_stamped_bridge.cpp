@@ -109,8 +109,11 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint6
     if (current_.epoch == 0)
         return {current_, Admission::CpuOnly};
     const auto result = publish(ingress_, current_, samples, callback_start_ns_);
-    if (result != Publication::Published)
+    if (result != Publication::Published) {
+        if (trace_telemetry_)
+            trace_telemetry_->record_input_drop();
         request_recovery(SharedIoRecoveryReason::InputSaturated);
+    }
     return {current_, result == Publication::Published ? Admission::Accepted : Admission::Full};
 }
 
