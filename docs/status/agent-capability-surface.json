@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 97,
+  "inventory_version": 98,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 497,
-    "reviewed_headers": 215,
-    "legacy_unreviewed_headers": 282,
+    "reviewed_headers": 216,
+    "legacy_unreviewed_headers": 281,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 118,
       "capability_support": 44,
-      "infrastructure": 51,
-      "legacy_unreviewed": 282,
+      "infrastructure": 52,
+      "legacy_unreviewed": 281,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 9,
-        "legacy_unreviewed_headers": 104,
+        "reviewed_headers": 10,
+        "legacy_unreviewed_headers": 103,
         "unsupported_headers": 0
       },
       "midi": {
@@ -401,11 +401,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "fingerprint": "sha256:75f64718a84bbf884e6818eb3bfcff157da9d566231f79966656ab470f8a6aa3",
+      "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
       "include": "pulp/audio/load_measurer.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Real-time callback load telemetry used by host and format adapters. The AudioWorklet profile explicitly disables the unavailable clock while preserving the no-op measurement contract; this is shared runtime infrastructure rather than an independently advertised generator capability."
     },
     {
       "domain": "audio",

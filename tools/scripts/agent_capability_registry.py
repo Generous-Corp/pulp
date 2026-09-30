@@ -1221,6 +1221,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/audio/load_measurer.hpp",
+        "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Real-time callback load telemetry used by host and format adapters. The "
+            "AudioWorklet profile explicitly disables the unavailable clock while "
+            "preserving the no-op measurement contract; this is shared runtime "
+            "infrastructure rather than an independently advertised generator "
+            "capability."
+        ),
+    },
+    {
         "include": "pulp/signal/convolver_messages.hpp",
         "fingerprint": "sha256:2d4d3361cfa9099d4cd549fc250de196c1053c9c5448fa15b540089433e74e29",
         "disposition": "infrastructure",
