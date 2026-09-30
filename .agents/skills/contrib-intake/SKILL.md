@@ -17,7 +17,7 @@ obtain the required checks**, then treating it like any other PR.
 
 ```
 macos · Enforce version & skill sync · Build + prove + (owner-gated) deploy
-Vellum trusted freeze · Vellum freeze
+Vellum trusted freeze · Vellum freeze · drift-fast
 ```
 
 `macos` is posted by the **self-hosted Mac Studios**, and one required check is

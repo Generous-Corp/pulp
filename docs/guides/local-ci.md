@@ -2235,12 +2235,32 @@ tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
 way CI does; without a base it compares every entry, and entries whose
 recorded path embeds a build-directory name report as stale.
 
-**It is advisory.** `drift-fast` is not a required status check, so a red run
-does not block a merge group. Requiring it is a ruleset change on `main`
-(adding `drift-fast` to the required status checks), which also turns every
-drift-only batch into a fail-in-minutes ejection instead of a
-fail-after-the-build one. That is an owner decision; this workflow does not
-make it.
+**It is required.** `drift-fast` is a required status check on `main`, so a red
+run blocks the pull request and ejects the merge group, in minutes rather than
+after the ~20-minute `macos` build. It was promoted after 18 consecutive green
+`merge_group` runs with no false alarm, following two environment fixes that
+removed its only false alarms: the bounded GPU-provenance hydration above
+(`gpu-probe-historical-v1-acceptance` raised `ShallowCheckoutError` on the
+depth-2 checkout), and `consumption-census-drift-description` comparing only
+header roots the checkout actually provisions. The one caveat: in that window no merge group was genuinely drifted,
+so it has not yet shown a true catch at the merge-group stage; its pull-request
+runs have caught real drift (`skip-not-pass-lint`, `script-test-inputs-drift`)
+on heads that were then fixed before queueing.
+
+Because it is required, it must report on every event it can see. A required
+check that never reports holds a pull request on "Expected — Waiting for
+status" forever. So the workflow triggers on every `pull_request` to `main`
+(drafts included, no `paths:` or `paths-ignore:` filter) and on every
+`merge_group`, and its job carries no job-level `if:`. `tools/ci/drift_fast.py
+check` fails if either invariant is broken, and `drift-fast-selftest` runs it.
+Step-level `if:` is fine: it skips a step, never the job. A pull request from a
+fork needs a maintainer's approval before any workflow runs, which holds every
+required check equally; see the `contrib-intake` skill.
+
+Live enforcement is classic branch protection, not a ruleset; the checked-in
+`.github/rulesets/main-protection.json` and `.shipyard/config.toml`
+`[governance]` mirror it. Removing it again is the reverse
+`required_status_checks` edit.
 
 ## A green `macos` check does not always mean the suite ran
 
@@ -3965,7 +3985,7 @@ hours with 34 PRs open and nothing merging while every check was green.)
    is read from branch protection at runtime, not hardcoded; if the token cannot
    read protection rules it falls back to the complete documented `main` set:
    `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
-   deploy`, `Vellum trusted freeze`, and `Vellum freeze`.
+   deploy`, `Vellum trusted freeze`, `Vellum freeze`, and `drift-fast`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -6322,10 +6342,10 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **five**
+workflow that produces it. Branch protection on `main` requires **six**
 contexts, and the tool's built-in default reads only `build.yml` — which left
-four of them `no_producer`: not checked, and reported as a warning that reads
-identically to a clean result. `.shipyard/config.toml` therefore names all five
+the others `no_producer`: not checked, and reported as a warning that reads
+identically to a clean result. `.shipyard/config.toml` therefore names all six
 producers explicitly:
 
 | required context | producing workflow |
@@ -6335,8 +6355,9 @@ producers explicitly:
 | `Build + prove + (owner-gated) deploy` | `wclap-cloudflare.yml` |
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
+| `drift-fast` | `drift-fast.yml` |
 
-None of the five is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,

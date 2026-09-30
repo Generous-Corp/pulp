@@ -601,6 +601,7 @@ class TestMainCli(unittest.TestCase):
                 "Build + prove + (owner-gated) deploy",
                 "Vellum trusted freeze",
                 "Vellum freeze",
+                "drift-fast",
             },
         )
 
