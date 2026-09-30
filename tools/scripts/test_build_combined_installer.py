@@ -250,6 +250,7 @@ class CombinedInstallerTest(unittest.TestCase):
         architectures: str | None = None,
         d15_fixture: str | None = None,
         expect_success: bool = True,
+        analyze_omits_relocatable: bool = False,
     ) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -318,6 +319,11 @@ class CombinedInstallerTest(unittest.TestCase):
                 '<string>Applications/Fixture.app/Contents/Helpers/Helper.app</string>\n'
                 '</dict></array></plist>\n'
                 'PLIST\n'
+                # macOS 27 pkgbuild --analyze writes no BundleIsRelocatable key.
+                'if [[ "${ANALYZE_OMITS_RELOCATABLE:-0}" == 1 ]]; then\n'
+                '  /usr/libexec/PlistBuddy -c "Delete :0:BundleIsRelocatable" "$last"\n'
+                '  /usr/libexec/PlistBuddy -c "Delete :1:BundleIsRelocatable" "$last"\n'
+                'fi\n'
                 '  exit 0\n'
                 'fi\n'
                 'if [[ -n "$component_plist" ]]; then\n'
@@ -448,6 +454,7 @@ class CombinedInstallerTest(unittest.TestCase):
                 "PULP_SIGN_P12": str(tmp / "signing.p12"),
                 "PULP_SIGN_P12_PW": "test-p12-password",
                 "PULP_SIGN_IDENTITY_HASH": "ABC",
+                "ANALYZE_OMITS_RELOCATABLE": "1" if analyze_omits_relocatable else "0",
             }
             Path(env["PULP_SIGN_KEYCHAIN"]).touch()
             Path(env["PULP_SIGN_P12"]).touch()
@@ -614,6 +621,17 @@ class CombinedInstallerTest(unittest.TestCase):
     def test_apps_are_pinned_to_applications_instead_of_relocated(self) -> None:
         xml, relocation = self._run_installer(
             [], [("Fixture standalone", "Fixture")]
+        )
+
+        self.assertIn("Fixture.app.pkg", xml)
+        self.assertEqual(relocation.splitlines(), ["false", "false"])
+
+    def test_apps_are_pinned_when_analyze_omits_the_relocatable_key(self) -> None:
+        # macOS 27 pkgbuild --analyze no longer writes BundleIsRelocatable, so
+        # the pin must add the key to every component rather than only set it.
+        xml, relocation = self._run_installer(
+            [], [("Fixture standalone", "Fixture")],
+            analyze_omits_relocatable=True,
         )
 
         self.assertIn("Fixture.app.pkg", xml)
