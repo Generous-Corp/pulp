@@ -221,9 +221,14 @@ int run(Config config) {
                   "\"gpu_timestamps\":\"unavailable\",\"clock\":\"steady_clock\","
                   "\"timing_scope\":\"external_callback_envelope\",\"sample_rate_hz\":"
                << sample_rate << ",\"channels\":" << channels << ",\"ir_frames\":" << ir.size()
-               << ",\"frames\":" << config.frames << ",\"lead_blocks\":" << config.lead
-               << ",\"provider_slots\":2,\"warmup_blocks\":" << config.warmup
-               << ",\"measured_blocks\":" << config.blocks
+               << ",\"frames\":" << config.frames << ",\"lead_blocks\":"
+               << config.lead
+               // This is configured physical capacity, not an observed
+               // delivery count. Keep the legacy key and expose the meaning.
+               << ",\"provider_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"configured_provider_slots\":" << GpuConvolver::kSharedIoSlots
+               << ",\"logical_pipeline_capacity\":" << std::max(8u, config.lead + 2u)
+               << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
                << ",\"total_callbacks\":" << total_blocks
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns
