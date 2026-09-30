@@ -614,8 +614,30 @@ main. Shipyard PR validation instead arrives through `workflow_dispatch`, whose
 payload has no protected base SHA, so that path retains the explicit protected
 main fetch.
 
-The required `macos` gate runs the shipyard `mac` target
-(`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
+The Shipyard `mac` target (`.shipyard/config.toml`, `[targets.mac]` +
+`[validation.default]`) is a local Debug build with examples ON plus the full
+ctest run, on the Mac that runs `shipyard`. It is **opt-in**
+(`default = false`): `shipyard pr` and `shipyard ship` push the branch, open or
+find the PR and arm auto-merge, then leave the verdict to the required GitHub
+checks (`[governance] required_status_checks`) and print
+`validation: delegated`. Nothing is queued and no ship-state is written, so a
+missing ship-state for a Pulp PR is expected, not an orphan. Request the lane
+explicitly when you want it:
+
+```bash
+shipyard pr --target mac                  # push/open/arm, then also run the local lane
+shipyard ship --pr <n> --target mac       # run it on an existing PR
+shipyard run --targets mac                # validate the current branch only
+```
+
+It was made opt-in on 2026-09-30 (decisions contract row #9): after 2026-09-02
+it passed 1 of 147 runs, failed 64 of 64 in the week before the change at about
+42 host-hours on one Mac, and PRs merged on the required checks regardless.
+Opt-in needs Shipyard 0.234.0 or later, which fleet hosts receive through
+Shipyard's own auto-update; an older binary ignores the key and runs the lane as
+before.
+
+When requested, its `test` step is
 `ctest ... --repeat until-pass:2 --label-exclude "validation|slow|performance|bench|quality-lab"`
 — it excludes the long `slow` tests, the example plugins' `validation`
 format-validators (reported by the path-filtered, currently advisory
@@ -638,8 +660,8 @@ and fails before the hour-long Debug build if neither exists.
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned
-shipyard run                              # validate current branch
-shipyard pr                               # create, track, validate, and merge on green
+shipyard run --targets mac                # validate current branch on the opt-in local lane
+shipyard pr                               # create/track the PR and arm auto-merge; required checks decide
 shipyard cloud run build <branch>         # dispatch to Namespace
 shipyard rescue <PR>                      # recover a wedged PR
 shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges

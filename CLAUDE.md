@@ -1165,10 +1165,12 @@ VMs produces, so they cannot hold a required gate there. They still run on
 push, on the nightly, and on the advisory `cross-platform-check` lane — which
 excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
 and Windows and on arm64 Linux.
-`build.yml`'s required `macos` Actions job configures examples OFF. Shipyard's
-separate `[validation.default]` remains blocking and deliberately keeps
-`PULP_BUILD_EXAMPLES=ON` until the path-filtered `example-validation` context is
-promoted to a required check. That dedicated lane compiles
+`build.yml`'s required `macos` Actions job configures examples OFF, so example
+plugins are compiled by the advisory, path-filtered `example-validation` lane,
+and by Shipyard's local `mac` lane only when it is requested
+(`shipyard pr --target mac`; it is opt-in, not run by default). Example
+compilation is therefore advisory until `example-validation` is promoted to a
+required check. That dedicated lane compiles
 the full examples tree on Linux and compiles plus runs the available hosted
 validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
 clap-validator require an operator-dispatched advisory image);
@@ -2038,8 +2040,8 @@ shipyard ship                             # resume/operate on an existing Shipya
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
 1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
-2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and invokes Shipyard validation
-3. Shipyard validates the macOS lane through the local self-hosted runner path
+2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and arms auto-merge
+3. The required GitHub checks (the `macos` gate on the self-hosted Mac VMs, plus the other required contexts) decide whether it lands. Shipyard's local `mac` lane is opt-in (`default = false`) and runs only with `shipyard pr --target mac`; by default `shipyard pr` reports `validation: delegated` and writes no ship-state
 4. GitHub Actions runs Linux and Windows on GitHub-hosted runners as advisory checks
 5. Posts a closeout comment
 

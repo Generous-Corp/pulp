@@ -24,6 +24,15 @@ add_test(NAME drift-fast-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/ci/test_drift_fast.py")
 
+# shipyard-target-defaults-selftest keeps the local Shipyard `mac` lane opt-in:
+# a plain `shipyard pr` must resolve no default target, so the required GitHub
+# checks own the verdict, while `--target mac` still runs the Debug,
+# examples-ON, full-ctest recipe. It reads only .shipyard/config.toml.
+add_test(NAME shipyard-target-defaults-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_shipyard_target_defaults.py")
+set_tests_properties(shipyard-target-defaults-selftest PROPERTIES TIMEOUT 60)
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

@@ -142,10 +142,10 @@ build     = "PULP_BUILD_CLASS=background tools/ci/governed-build.sh cmake --buil
 #     (`pluginval-*`, `auval-*`, `clap-dlopen-*`; all live under examples/ and
 #     are the only users of this label). They are slow and flaky under load and
 #     have no business gating unrelated core PRs. Runtime validation lives on
-#     the path-filtered example-validation lane. Compilation deliberately stays
-#     ON here until that stable context is promoted to a required check; only
-#     then may a follow-up turn examples OFF in Shipyard. See
-#     docs/guides/test-lanes.md.
+#     the path-filtered example-validation lane, which is also what compiles
+#     the examples on a pull request. This recipe keeps examples ON for the
+#     opt-in `mac` target (see [targets.mac]), so a requested local run still
+#     compiles them. See docs/guides/test-lanes.md.
 # `--repeat until-pass:2` retries a failed test once before failing the leg, so a
 # single timing-flake self-heals instead of reddening the required `macos` gate
 # and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is
@@ -251,9 +251,11 @@ configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUIL
 build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel 4"
 
 # ── Targets ────────────────────────────────────────────────────────────────
-# One target is declared here: `mac`, the required gate. Linux and Windows
-# validate as advisory GitHub-hosted lanes in .github/workflows/build.yml, so
-# Shipyard does not need a target for them.
+# One target is declared here: `mac`, a local Debug build + full ctest on the
+# host running `shipyard pr`. It is OPT-IN (`default = false`): the required
+# `macos` GitHub check, not this lane, decides whether a PR lands. Linux and
+# Windows validate as advisory GitHub-hosted lanes in
+# .github/workflows/build.yml, so Shipyard does not need a target for them.
 #
 # The SSH `ubuntu` / `windows` targets are OPT-IN, per machine. They used to be
 # declared here with `host` deferred to the gitignored .shipyard.local/config.toml
@@ -285,6 +287,15 @@ build     = "cmake --build build --config Release --parallel 4; if ($LASTEXITCOD
 # 2026-05-20: Namespace macOS routing is disabled for cost control.
 # Shipyard validates the mac target locally again; GitHub Actions routes
 # the required macOS check through the self-hosted pulp-build runners.
+#
+# 2026-09-30: opt-in. From 2026-09-02 this lane passed 1 of 147 runs, and failed
+# 64 of 64 in the week to 2026-09-30 while costing ~42 host-hours on one Mac.
+# PRs landed on the required GitHub checks regardless (one merged while its
+# ship-state said failed). `shipyard pr` / `ship` therefore push, open and arm
+# the PR without running it; request it with `shipyard pr --target mac`,
+# `shipyard ship --pr <n> --target mac` or `shipyard run --targets mac`.
+# The recipe below is unchanged so a requested run is the same lane as before.
+default  = false
 backend  = "local"
 platform = "macos-arm64"
 workflow = "build"
