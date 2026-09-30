@@ -752,9 +752,8 @@ TEST_CASE("GpuAudioTransport can opt its worker into an Audio Workgroup",
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     } while (std::chrono::steady_clock::now() < deadline);
 
-    const bool adoption_observed =
-        observed.worker_workgroup_joined || observed.worker_workgroup_join_failures > 0;
-    CHECK(adoption_observed);
+    REQUIRE(observed.worker_workgroup_joined);
+    CHECK(observed.worker_workgroup_join_failures == 0);
     transport.release();
     os_release(workgroup);
 }
