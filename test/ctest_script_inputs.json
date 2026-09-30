@@ -1718,6 +1718,7 @@
     "test/cmake/consumption_census_tests.cmake",
     "test/ctest_script_inputs.json",
     "tools/ci/base_poison_detector.py",
+    "tools/ci/drift_fast.json",
     "tools/ci/flake_exoneration_shadow.py",
     "tools/ci/test_flake_exoneration_shadow.py",
     "tools/scripts/consumption_census.py",

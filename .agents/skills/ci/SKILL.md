@@ -2022,12 +2022,23 @@ timestamp) before any per-binary reuse is proposed.
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
 (`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
-when it failed on >= 2 other heads in 24 h AND passes on main's latest
-merge-group run. It is evidence, not a verdict: `base_poison_detector.py`
-records why cross-batch corroboration alone was measured unsafe, and this
-shadow inherits that by requiring the main pass and acting on nothing. Read
-exonerated-only failures ÷ failures; do not wire it into the job outcome
-without a contract decision and the shadow data as Step Zero.
+when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
+by the tip's required gate job. It is evidence, not a verdict:
+`base_poison_detector.py` records why cross-batch corroboration alone was
+measured unsafe, and this shadow inherits that by requiring the main pass and
+acting on nothing. Read exonerated-only failures ÷ failures; do not wire it
+into the job outcome without a contract decision and the shadow data as Step
+Zero.
+
+Gotcha: it used to judge "passes on main" from the latest merge group's
+whole-run conclusion (an advisory Linux red counts) and read an undownloadable
+failing-test list as "nothing failed", so 3 of its first 4 exonerations were
+`script-test-inputs-drift`, a deterministic test, on a red main. Now evidence
+that was not read (no executed gate, unreadable or empty list) is "main
+unknown" and never exonerates, `main_evidence_read` is on every verdict, and
+tests labelled `pr-fast` or named in `tools/ci/drift_fast.json` are never
+eligible. Do not reuse `artifact_failing_tests()` where "unreadable" must
+differ from "empty"; it returns `()` for both.
 
 ## A PR head's full-suite failure is announced, not hidden behind continue-on-error
 
