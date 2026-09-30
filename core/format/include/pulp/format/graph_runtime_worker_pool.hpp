@@ -43,6 +43,7 @@ public:
     // the caller of run() is the worker_count-th). worker_count <= 1 means run()
     // executes everything inline on the caller with no threads. Re-start() after
     // stop(). Returns false on an invalid count or thread-spawn failure.
+    // PULP_WASM refuses counts above one without stopping an existing pool.
     bool start(std::uint32_t worker_count);
 
     // Off-RT: signal and join all worker threads. Idempotent.

@@ -10,6 +10,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/planar_audio_ring_buffer.hpp>
+#include <pulp/audio/workgroup.hpp>
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
 
@@ -47,6 +48,12 @@ class GpuAudioTransport {
         // block); default OFF keeps the pure-polling RT path byte-identical.
         // Only meaningful when run_worker_thread is true.
         bool wake_on_write = false;
+        // Optional macOS Audio Workgroup for the owned submission worker. The
+        // handle is borrowed by the transport and must remain valid until
+        // release(). This is an experiment switch: Dawn encode/submit still
+        // runs on the worker and is not claimed to be realtime-safe.
+        void* audio_workgroup = nullptr;
+        bool join_audio_workgroup = false;
     };
 
     struct Stats {
@@ -67,6 +74,8 @@ class GpuAudioTransport {
         // EWMA. Both remain zero until the worker first reports progress.
         double last_block_us = 0.0;
         double avg_block_us = 0.0;
+        bool worker_workgroup_joined = false;
+        std::uint64_t worker_workgroup_join_failures = 0;
     };
 
     /// Selected output for prepared process() calls, not worker completions or
@@ -229,6 +238,10 @@ class GpuAudioTransport {
     std::thread worker_;
     std::atomic<bool> worker_running_{false};
     std::chrono::microseconds poll_interval_{200};
+    void* audio_workgroup_ = nullptr;
+    bool join_audio_workgroup_ = false;
+    std::atomic<bool> worker_workgroup_joined_{false};
+    std::atomic<std::uint64_t> worker_workgroup_join_failures_{0};
 
     // Opt-in wake-on-write (Config::wake_on_write). The RT process() posts
     // `wake_sem_` after each input write; the worker waits on it (bounded by

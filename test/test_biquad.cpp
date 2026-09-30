@@ -210,19 +210,29 @@ TEST_CASE("Biquad clamps invalid controls to finite coefficients",
     }
 }
 
-TEST_CASE("Biquad valid retunes are bit-identical after the clamp guard",
+TEST_CASE("Biquad input guard leaves every finite positive control untouched",
           "[signal][biquad][coverage]") {
-    // The input clamps must be pure no-ops for legitimate controls: a valid retune
-    // has to yield the exact same coefficients (and thus the exact same samples) as
-    // it did before the guard existed. Prove it by driving two filters configured
-    // identically and requiring bit-equality across a signal.
-    Biquad a, b;
-    a.set_coefficients(Biquad::Type::peaking, 1200.0f, 0.75f, kSampleRate, 6.0f);
-    b.set_coefficients(Biquad::Type::peaking, 1200.0f, 0.75f, kSampleRate, 6.0f);
-    for (int n = 0; n < 64; ++n) {
-        const float x = std::sin(0.21f * static_cast<float>(n));
-        REQUIRE(a.process(x) == b.process(x));
-    }
+    // The guard substitutes values only for controls that would produce inf/NaN
+    // (non-positive or non-finite q, sample rate, frequency). A tiny but positive
+    // q is legitimate and must reach the design unchanged, so it has to produce
+    // different coefficients from the guard's own substitute value.
+    Biquad tiny_q, substitute_q;
+    tiny_q.set_coefficients(Biquad::Type::peaking, 1200.0f, 1e-6f, kSampleRate, 6.0f);
+    substitute_q.set_coefficients(Biquad::Type::peaking, 1200.0f, 1e-4f, kSampleRate, 6.0f);
+    const auto a = tiny_q.coefficients();
+    const auto b = substitute_q.coefficients();
+    REQUIRE(std::isfinite(a.b0));
+    REQUIRE(std::isfinite(a.a1));
+    REQUIRE(std::isfinite(a.a2));
+    REQUIRE((a.b0 != b.b0 || a.a2 != b.a2));
+
+    // Control: an invalid q is replaced by that same substitute, so the two
+    // filters must then agree exactly.
+    Biquad zero_q;
+    zero_q.set_coefficients(Biquad::Type::peaking, 1200.0f, 0.0f, kSampleRate, 6.0f);
+    const auto z = zero_q.coefficients();
+    REQUIRE(z.b0 == b.b0);
+    REQUIRE(z.a2 == b.a2);
 }
 
 TEST_CASE("Biquad sample and block processing paths match",

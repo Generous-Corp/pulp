@@ -159,6 +159,14 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/audio/workgroup.hpp",
+        "fingerprint": "sha256:e696902515507a5a444feb4aa94335fc92b896a894e2e548aa7466221e934f60",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": "Audio scheduling infrastructure used by the GPU-audio worker; no agent capability entrypoint.",
+    },
+
+    {
         "include": "pulp/midi/message.hpp",
         "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
         "disposition": "infrastructure",
@@ -1218,6 +1226,19 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
             "Design constants, schedule groups and per-cell state behind "
             "ZeroLatencyConvolverT. Support infrastructure for that engine rather than an "
             "advertised generator surface; it carries no capability claim of its own."
+        ),
+    },
+    {
+        "include": "pulp/audio/load_measurer.hpp",
+        "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Real-time callback load telemetry used by host and format adapters. The "
+            "AudioWorklet profile explicitly disables the unavailable clock while "
+            "preserving the no-op measurement contract; this is shared runtime "
+            "infrastructure rather than an independently advertised generator "
+            "capability."
         ),
     },
     {

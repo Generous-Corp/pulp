@@ -511,6 +511,29 @@
                     RESOURCE_LOCK pulp_gpu
                     SKIP_RETURN_CODE 77
                     TIMEOUT 120)
+
+                # Real CoreAudio callback A/B. This remains opt-in at runtime
+                # because it opens and starts the user's output device. The
+                # worker receives the device's callback_workgroup() handle,
+                # while Dawn submission stays off the callback.
+                if(APPLE AND NOT IOS AND NOT PULP_IOS)
+                    add_executable(pulp-gpu-audio-coreaudio-workgroup-benchmark
+                        test_gpu_audio_coreaudio_workgroup_benchmark.cpp)
+                    target_link_libraries(pulp-gpu-audio-coreaudio-workgroup-benchmark PRIVATE
+                        pulp::gpu-audio pulp::audio)
+                    target_include_directories(pulp-gpu-audio-coreaudio-workgroup-benchmark PRIVATE
+                        "${PROJECT_SOURCE_DIR}/core/audio/platform/mac"
+                        "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+                    add_dependencies(pulp-gpu-audio-coreaudio-workgroup-benchmark
+                        pulp-gpu-dawn-shared-io-provider-probe)
+                    add_test(NAME pulp-gpu-audio-coreaudio-workgroup-benchmark
+                        COMMAND pulp-gpu-audio-coreaudio-workgroup-benchmark)
+                    set_tests_properties(pulp-gpu-audio-coreaudio-workgroup-benchmark PROPERTIES
+                        FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
+                        RESOURCE_LOCK pulp_gpu
+                        SKIP_RETURN_CODE 77
+                        TIMEOUT 180)
+                endif()
             endif()
         endif()
 

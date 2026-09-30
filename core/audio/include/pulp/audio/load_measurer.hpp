@@ -136,6 +136,13 @@ public:
     /// @param num_frames Number of samples in this buffer.
     /// @param sample_rate Current sample rate in Hz.
     void begin(int num_frames, float sample_rate) noexcept {
+#if defined(PULP_AUDIOWORKLET_DISABLE_LOAD_TIMING)
+        // AudioWorkletGlobalScope does not provide the clock import used by
+        // steady_clock. Leave telemetry explicitly unavailable in that profile.
+        (void)num_frames;
+        (void)sample_rate;
+        return;
+#else
         start_time_ = clock::now();
 
         if (num_frames <= 0 || !(sample_rate > 0.0f)) {
@@ -153,10 +160,14 @@ public:
         }
 
         available_ns_ = static_cast<int64_t>(available_ns);
+#endif
     }
 
     /// Call at the end of the audio callback.
     void end() noexcept {
+#if defined(PULP_AUDIOWORKLET_DISABLE_LOAD_TIMING)
+        return;
+#else
         auto elapsed = clock::now() - start_time_;
         int64_t elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
 
@@ -176,6 +187,7 @@ public:
                 overload_count_.fetch_add(1, std::memory_order_relaxed);
             }
         }
+#endif
     }
 
     /// Current smoothed CPU load (0.0 = idle, 1.0 = full buffer, >1.0 = overrun).

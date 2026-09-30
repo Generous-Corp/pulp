@@ -467,3 +467,38 @@ TEST_CASE("AudioWorkgroup first-entry guard pattern is race-free",
     REQUIRE(join_count.load() == 1);
     wg.leave();
 }
+
+#if defined(__APPLE__)
+TEST_CASE("AudioWorkgroup fallback restores the caller's Mach policy",
+          "[audio][workgroup][policy]") {
+    thread_time_constraint_policy_data_t before{};
+    auto before_count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+    boolean_t before_default = FALSE;
+    auto thread = mach_thread_self();
+    REQUIRE(thread_policy_get(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                              reinterpret_cast<thread_policy_t>(&before), &before_count,
+                              &before_default) == KERN_SUCCESS);
+
+    AudioWorkgroup workgroup;
+    const auto joined = workgroup.join_from_audio_thread();
+    if (!joined) {
+        mach_port_deallocate(mach_task_self(), thread);
+        SKIP("Mach time-constraint policy was unavailable");
+        return;
+    }
+    REQUIRE(workgroup.leave());
+
+    thread_time_constraint_policy_data_t after{};
+    auto after_count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
+    boolean_t after_default = FALSE;
+    REQUIRE(thread_policy_get(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                              reinterpret_cast<thread_policy_t>(&after), &after_count,
+                              &after_default) == KERN_SUCCESS);
+    REQUIRE(after_default == before_default);
+    REQUIRE(after.period == before.period);
+    REQUIRE(after.computation == before.computation);
+    REQUIRE(after.constraint == before.constraint);
+    REQUIRE(after.preemptible == before.preemptible);
+    mach_port_deallocate(mach_task_self(), thread);
+}
+#endif
