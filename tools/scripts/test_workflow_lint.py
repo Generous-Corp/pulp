@@ -132,6 +132,29 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             self.text,
         )
 
+    def test_every_named_path_and_invoked_script_exists(self) -> None:
+        # A deleted script that stays listed here is silent twice over: its
+        # trigger path can never match, and its `python3 <script>` line fails
+        # only after the gate has already been skipped on the PR that deleted it.
+        workflow = yaml.safe_load(self.text)
+        triggers = workflow.get("on", workflow.get(True))
+        named: set[str] = set()
+        for event in ("pull_request", "push"):
+            for entry in (triggers.get(event) or {}).get("paths", []):
+                if not any(ch in entry for ch in "*?[!"):
+                    named.add(entry)
+        invoked = set(
+            re.findall(r"python3\s+((?:tools|scripts)/[\w./-]+\.py)", self.text)
+        )
+        # Controls: both collections must be populated, or a parser change
+        # would turn this check into one that inspects nothing.
+        self.assertGreater(len(named), 50)
+        self.assertGreater(len(invoked), 20)
+        missing = sorted(
+            path for path in named | invoked if not (REPO_ROOT / path).exists()
+        )
+        self.assertEqual(missing, [], "workflow-lint.yml names paths that do not exist")
+
     def test_workflow_has_minimal_permissions_and_concurrency(self) -> None:
         self.assertRegex(
             self.text,

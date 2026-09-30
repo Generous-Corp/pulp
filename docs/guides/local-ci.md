@@ -2151,34 +2151,6 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
-## The Shipyard merge steward uses one repository-scoped writer
-
-`.github/workflows/shipyard-merge-steward.yml` is the single logical,
-model-free controller for exact-head PR reconciliation and native merge-queue
-enrollment. M1, M3, and M5 may supply fenced recovery capacity after their
-canaries pass; they must not run independent mutating queue loops.
-
-The steward mints a one-repository GitHub App installation token. Queue
-enrollment requires both `permission-merge-queues: write` and
-`permission-contents: write`: the first grants queue management, while the
-second gives the actor the repository write access GitHub requires to enqueue a
-pull request. Downscoping contents to read fails closed with `Resource not
-accessible by integration` even when the App installation itself owns both
-permissions. Keep the token repository-scoped, retain the exact-head guard, and
-never replace this pair with a personal credential or an admin-merge bypass.
-
-Recovery dispatch must follow TartCI's disposable JIT lifecycle. The controller
-queues one exact-head job on `shipyard-recovery-pool`; it does **not** wait for
-an already-online idle recovery runner. TartCI runners do not exist until a
-matching job is queued, so a pre-dispatch runner census creates a deadlock. An
-eligible M3, M5, or M1 supervisor boots a disposable VM, registers a one-job
-runner whose name starts with `shipyard-recovery-m3-`,
-`shipyard-recovery-m5-`, or `shipyard-recovery-m1-`, and GitHub assigns the
-single queued job. The workflow derives the actual worker from that fenced
-name before checkout; an ordinary CI label or an unknown name fails closed.
-The pending exact-head status remains the durable obligation while every Mac
-is offline, so its age alone never creates a duplicate model invocation.
-
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is
@@ -3758,10 +3730,8 @@ reread confirms the same status, head, event, and workflow. It applies the same
 age thresholds. Push, merge-group, workflow-dispatch, and unrelated workflow
 runs are excluded: they have separate concurrency/merge-stall semantics. A
 zero-job finding points first to an older non-terminal run on the same ref
-holding the workflow concurrency group, not to Tart capacity. The merge steward
-independently cancels bounded superseded-head runs; this alert remains the
-off-fleet backstop when a current-head run is stranded or that cleanup has not
-converged.
+holding the workflow concurrency group, not to Tart capacity. This alert is the
+off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
 degraded sweep suppresses alarms and cannot create, update, reopen, or close the
@@ -6006,31 +5976,12 @@ refreshed. The guard only takes effect on hosts where `shipyard guards status`
 shows `branch-refresh-guard` current. A local `git merge origin/main && git
 push` bypasses it, so do not merge `main` into a PR unless it conflicts.
 
-## Steward auto-handoff is PAUSED (2026-09-07)
+## Steward auto-handoff stays off
 
-`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`. Normally it
-is `true`, making PR creation and durable steward ownership one operation.
-
-It is paused because since 2026-08-31 the handoff rejects every agent-run
-`shipyard pr` against this repo, **after the branch is pushed**, with
-`--workstream-id must be a canonical GEN-style handle`. Two guards combine to
-make that unavoidable here: Shipyard synthesizes the fallback id as `{repo}#{pr}`
-preserving case and its escape hatch requires an already-lowercase slug (this
-repo is `Generous-Corp/pulp`), and even lowercased the hatch is refused once an
-agent route is detected — `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID` are set in
-every agent shell. Deterministic, not flaky.
-
-While paused, new PRs are not steward-managed: `runner steward` marks them
-`shipyard:unmanaged` and will not queue, re-run, cancel or recovery-signal them.
-That is the pre-2026-08-14 landing path — `shipyard ship` validates and merges on
-its own, and ship/queue/watch never consult the managed label. The recovery
-worker goes idle rather than broken.
-
-**Do not pass `--workstream-id` while this is paused**, or the fleet splits into
-managed and unmanaged PRs, which is worse than either state alone.
-
-Restore by setting `auto_handoff = true` once Shipyard's validator accepts a
-mixed-case slug from an agent shell.
+`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`, and nothing
+reads a handoff receipt: Pulp removed its repository-wide steward workflow and
+recovery worker, and PRs land through the native merge queue. Do not pass
+`shipyard pr --workstream-id`; it opts one PR into the same unread handoff.
 
 ## Troubleshooting
 
