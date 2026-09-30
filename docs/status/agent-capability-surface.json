@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 100,
+  "inventory_version": 101,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -42,14 +42,14 @@
     }
   ],
   "counts": {
-    "public_headers": 497,
-    "reviewed_headers": 217,
+    "public_headers": 498,
+    "reviewed_headers": 218,
     "legacy_unreviewed_headers": 280,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 118,
       "capability_support": 44,
-      "infrastructure": 53,
+      "infrastructure": 54,
       "legacy_unreviewed": 280,
       "unsupported_capability": 2
     },
@@ -85,8 +85,8 @@
         "unsupported_headers": 0
       },
       "signal": {
-        "public_headers": 273,
-        "reviewed_headers": 126,
+        "public_headers": 274,
+        "reviewed_headers": 127,
         "legacy_unreviewed_headers": 147,
         "unsupported_headers": 2
       },
@@ -3125,7 +3125,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/fft.hpp",
-      "fingerprint": "sha256:e57fef7ae8facdc36a69e1a432de6b830495e6342a3356d5c684efe222e36176",
+      "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
       "include": "pulp/signal/fft.hpp",
       "disposition": "capability_support",
       "capability_keys": [
@@ -4085,6 +4085,15 @@
       "disposition": "legacy_unreviewed",
       "capability_keys": [],
       "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+    },
+    {
+      "domain": "signal",
+      "source": "core/signal/include/pulp/signal/rt_work_counter.hpp",
+      "fingerprint": "sha256:c4fac5a3b5f1fe62b7ba4f8dcd1fe7e51d2c9a19172280d12a1f87b8ed2a1e1c",
+      "include": "pulp/signal/rt_work_counter.hpp",
+      "disposition": "infrastructure",
+      "capability_keys": [],
+      "rationale": "Deterministic per-callback operation counters (FFT executions, counted transcendental calls, reported per-bin work) that compile to nothing unless PULP_RT_WORK_COUNTERS is defined. They feed transition-cost test gates and are measurement plumbing for DSP authors, not an advertised generator capability."
     },
     {
       "domain": "signal",

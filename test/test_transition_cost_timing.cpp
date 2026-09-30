@@ -2,8 +2,9 @@
 // cost gate.
 //
 // Thread CPU time excludes preemption but still moves with cache state and
-// frequency scaling, so this lane carries the `performance` label and stays
-// off the required gate. Each case takes the minimum over repeats of
+// frequency scaling, so these cases are tagged [performance]: their ctest
+// registration carries the `performance` label and stays off the required
+// gate. Each case takes the minimum over repeats of
 // (worst block from the edge onward) / (worst steady block): an algorithmic
 // spike is present in every repeat, scheduler noise is not. The negative
 // control is ~23 IFFTs plus ~94k polar calls on the edge — several
@@ -18,7 +19,7 @@
 using namespace pulp::test::audio;
 
 TEST_CASE("transition CPU gate passes a processor with no transition burst",
-          "[transition-cost][timing]") {
+          "[transition-cost][timing][performance]") {
     const auto outcomes = TransitionScenario::standard(make_bursty_processor<0>)
                               .block_sizes({128})
                               .warmup_blocks(12)
@@ -30,7 +31,7 @@ TEST_CASE("transition CPU gate passes a processor with no transition burst",
 }
 
 TEST_CASE("transition CPU gate fails a processor that bursts on an edge",
-          "[transition-cost][timing][negative-control]") {
+          "[transition-cost][timing][negative-control][performance]") {
     auto scenario = TransitionScenario(make_bursty_processor<23>)
                         .add({"Engage on", kBurstyEngage, 0.0f, 1.0f})
                         .add({"Engage off", kBurstyEngage, 1.0f, 0.0f})

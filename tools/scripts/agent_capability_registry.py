@@ -205,6 +205,18 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
         ),
     },
     {
+        "include": "pulp/signal/rt_work_counter.hpp",
+        "fingerprint": "sha256:c4fac5a3b5f1fe62b7ba4f8dcd1fe7e51d2c9a19172280d12a1f87b8ed2a1e1c",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Deterministic per-callback operation counters (FFT executions, counted "
+            "transcendental calls, reported per-bin work) that compile to nothing unless "
+            "PULP_RT_WORK_COUNTERS is defined. They feed transition-cost test gates and are "
+            "measurement plumbing for DSP authors, not an advertised generator capability."
+        ),
+    },
+    {
         "include": "pulp/signal/simd_buffer.hpp",
         "fingerprint": "sha256:7780d3b9a8e734dbacd9b2d7d06c5d07328fe167da4d8d3ea88938c71ae5a973",
         "disposition": "infrastructure",
@@ -367,7 +379,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     ],
     {
         "include": "pulp/signal/fft.hpp",
-        "fingerprint": "sha256:e57fef7ae8facdc36a69e1a432de6b830495e6342a3356d5c684efe222e36176",
+        "fingerprint": "sha256:cf26ffef2f59dcc9e06e9bd578b48ae214f34f893f9cedc61e18fab9151c50ab",
         "disposition": "capability_support",
         "capability_keys": ["signal.source-filter-analysis", "signal.streaming-analysis-frontends"],
         "rationale": (

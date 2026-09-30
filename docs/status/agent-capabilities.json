@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 59,
+  "manifest_revision": 60,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -13903,6 +13903,18 @@
               "next()",
               "pitch_factor()",
               "fraction()"
+            ],
+            "enums": []
+          }
+        ],
+        "rt_work_counter.hpp": [
+          {
+            "class": "RtWorkCounter",
+            "qualified_name": "pulp::signal::rt::RtWorkCounter",
+            "template": null,
+            "methods": [
+              "delta()",
+              "restart()"
             ],
             "enums": []
           }

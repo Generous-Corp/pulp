@@ -277,14 +277,16 @@ target_link_libraries(pulp-test-render-scenario PRIVATE pulp-audio-test-support 
 target_include_directories(pulp-test-render-scenario PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-render-scenario)
 # Per-callback cost at state transitions. The operation-count gate is
-# deterministic and stays on the required lane; its CPU-time twin is
-# load-sensitive and carries the `performance` label.
+# deterministic and stays on the required lane; its CPU-time twin
+# ([performance]-tagged cases) is load-sensitive and carries the
+# `performance` label.
 pulp_add_test_suite(pulp-test-transition-cost
-    SOURCES test_transition_cost.cpp
-    LIBRARIES pulp-audio-test-support)
-pulp_add_test_suite(pulp-test-transition-cost-timing
-    SOURCES test_transition_cost_timing.cpp
+    SOURCES test_transition_cost.cpp test_transition_cost_timing.cpp
     LIBRARIES pulp-audio-test-support
+    TEST_SPEC "~[performance]")
+catch_discover_tests(pulp-test-transition-cost
+    TEST_SPEC "[performance]"
+    TEST_PREFIX "performance::"
     LABELS performance)
 add_executable(pulp-test-audio-support test_audio_support.cpp)
 target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)

@@ -1010,6 +1010,7 @@
       "pulp/signal/reverse_buffer.hpp",
       "pulp/signal/rise_fall_generator.hpp",
       "pulp/signal/rng.hpp",
+      "pulp/signal/rt_work_counter.hpp",
       "pulp/signal/rungler.hpp",
       "pulp/signal/saturator.hpp",
       "pulp/signal/scale_quantizer.hpp",
