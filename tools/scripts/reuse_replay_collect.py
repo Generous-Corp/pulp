@@ -382,7 +382,9 @@ class Collector:
             empty = self.cache / "empty-shallow"
             empty.parent.mkdir(parents=True, exist_ok=True)
             empty.write_text("")
-            env = self._env = {**os.environ, "GIT_SHALLOW_FILE": str(empty)}
+            # GIT_NO_LAZY_FETCH: a missing object in a partial clone reads as
+            # missing (commit() then asks the API) instead of fetching into it.
+            env = self._env = {**os.environ, "GIT_SHALLOW_FILE": str(empty), "GIT_NO_LAZY_FETCH": "1"}
         return env
 
     def _read_commits(self, shas: list[str]) -> dict[str, dict]:
@@ -542,7 +544,6 @@ class Collector:
                             + [g["head_sha"] for g in groups])
 
         runs: dict[str, dict] = {}
-        tests: dict[str, list[dict]] = {}
         pairs: list[dict] = []
         group_records: list[dict] = []
         for g in groups:
@@ -551,7 +552,7 @@ class Collector:
             head_sha = commit["parents"][1] if commit and len(commit["parents"]) == 2 else None
             record, group_tests = self.run_record(g, "merge_group", pr, head_sha)
             runs[record["run_id"]] = record
-            tests[record["run_id"]] = group_tests
+            self.write_tests(record, group_tests)  # written now: 21k rows per run add up
             group_records.append(record)
 
         # Head candidates: completed PR-head runs of the same head created before
@@ -594,7 +595,7 @@ class Collector:
                                                  executed * 100 >= MIN_SELECTED_PERCENT * group_selected)
                 if record["run_id"] not in runs:
                     runs[record["run_id"]] = record
-                    tests[record["run_id"]] = head_tests
+                    self.write_tests(record, head_tests)
                 ids.append(record["run_id"])
             head_ids.append(ids)
 
@@ -625,7 +626,7 @@ class Collector:
         for record in runs.values():
             record["rejected"] = validate_run(record)
 
-        self.write(runs, tests, pairs)
+        self.write(runs, pairs)
         manifest = {
             "schema": "pulp-reuse-replay-corpus/v1", "repository": self.gh.repository,
             "since": since.isoformat(), "until": until.isoformat(),
@@ -638,12 +639,13 @@ class Collector:
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         return manifest
 
-    def write(self, runs: dict[str, dict], tests: dict[str, list[dict]], pairs: list[dict]) -> None:
+    def write(self, runs: dict[str, dict], pairs: list[dict]) -> None:
         write_jsonl(self.out / "runs.jsonl", sorted(runs.values(), key=lambda r: r["created_at"]))
         write_jsonl(self.out / "pairs.jsonl", pairs)
-        for run_id, rows in tests.items():
-            run = runs[run_id]
-            write_jsonl(self.out / "tests" / f"{run_id}.jsonl.gz", (
+
+    def write_tests(self, run: dict, rows: list[dict]) -> None:
+        run_id = run["run_id"]
+        write_jsonl(self.out / "tests" / f"{run_id}.jsonl.gz", (
                 {"schema": TEST_SCHEMA, "run_id": run_id, "run_kind": run["run_kind"], "pr": run["pr"],
                  "head_sha": run["head_sha"], "base_sha": run["base_sha"], "merge_tree": run["merge_tree"],
                  "test_id": t["test_id"], "executable": None, "outcome": t["outcome"],
