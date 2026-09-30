@@ -448,6 +448,23 @@ class GovernanceContractTests(unittest.TestCase):
             "the contexts in .github/rulesets/main-protection.json",
         )
 
+    def test_gate_cost_defaults_name_the_required_gate(self) -> None:
+        # `shipyard metrics gate-cost` reads these keys when no flag is given;
+        # a gate job or workflow that drifted from the real gate would make
+        # every flag-free gate-cost number measure the wrong job.
+        try:
+            import tomllib
+        except ImportError:  # Python < 3.11
+            self.skipTest("tomllib unavailable; cannot read .shipyard/config.toml")
+        root = RULESET.parents[2]
+        config = tomllib.loads((root / ".shipyard" / "config.toml").read_text(encoding="utf-8"))
+        gate_cost = config.get("metrics", {}).get("gate_cost", {})
+        self.assertEqual(gate_cost.get("repo"), "Generous-Corp/pulp")
+        self.assertIn(gate_cost.get("gate_job"), ruleset_contexts())
+        workflow = root / ".github" / "workflows" / str(gate_cost.get("workflow"))
+        self.assertTrue(workflow.is_file(), workflow)
+        self.assertEqual(gate_cost.get("base_branch"), "main")
+
     def test_the_ruleset_reader_sees_the_required_contexts(self) -> None:
         # Positive control for the equality above: a reader returning nothing
         # would make an empty governance list look aligned.
