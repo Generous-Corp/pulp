@@ -14,7 +14,12 @@ This tool runs in the merge-group `macos` job after the build:
    `artifact_identity`, the same list a receipt carries);
 2. finds the PR head's receipt (`protected-validation-macos-<head>-<base>`
    for the merge commit's second and first parent) and, when it exists,
-   downloads it through the receipt module's own verifying `download`;
+   downloads it through the receipt module's own verifying `download`. Only
+   heads that ran the full suite issue a receipt, so a head without one is
+   read from its reuse record instead (`reuse-record-macos`, which every
+   pull-request `macos` job writes with every test executable's sha256,
+   `tools/ci/reuse_record.py`), taken only from this repository's
+   `build.yml` pull_request run for that exact head;
 3. compares the two lists path by path and annotates
    `pulp-binary-identity-shadow/v1`: tree_identical (merge tree == head tree),
    compared, identical, differing (with up to 20 example paths), or
@@ -56,6 +61,52 @@ def compare(ours: dict, theirs: dict) -> dict:
             "only_here": len(set(a) - set(b)), "only_there": len(set(b) - set(a)),
             "differing_examples": differing[:20],
             "identical_share": (len(identical) / len(common)) if common else None}
+
+
+RECORD_ARTIFACT = "reuse-record-macos"
+WORKFLOW_PATH = ".github/workflows/build.yml"
+MAX_RECORD_BYTES = 64 * 1024 * 1024
+API = "https://api.github.com"
+
+
+def record_files(identity: dict) -> dict:
+    """A reuse record's identity.json as a receipt-shaped `files` list: the
+    build-tree executables only, paths relative to the build directory."""
+    files = [{"path": key[len("<build>/"):], "sha256": rec["sha256"]}
+             for key, rec in (identity.get("executables") or {}).items()
+             if key.startswith("<build>/") and rec.get("sha256")]
+    return {"files": sorted(files, key=lambda f: f["path"])}
+
+
+def head_record_identity(repository: str, head: str, token: str,
+                         fetch=None, download=None) -> tuple[dict | None, str]:
+    """(identity, source run) from the newest trusted reuse record of `head`:
+    this repository's build.yml, a pull_request run whose head is `head`.
+    (None, reason) when there is none."""
+    import io
+    import zipfile
+
+    fetch = fetch or pmr.api_json
+    download = download or (lambda url, tok: pmr.download_archive(url, tok, MAX_RECORD_BYTES))
+    runs = fetch(f"{API}/repos/{repository}/actions/runs?head_sha={head}&event=pull_request&per_page=50",
+                 token).get("workflow_runs", [])
+    trusted = [r for r in runs if r.get("path") == WORKFLOW_PATH and r.get("head_sha") == head
+               and (r.get("repository") or {}).get("full_name") == repository
+               and (r.get("head_repository") or {}).get("full_name") == repository]
+    if not trusted:
+        return None, f"no trusted build.yml pull_request run for {head}"
+    for run in sorted(trusted, key=lambda r: r.get("id", 0), reverse=True):
+        arts = fetch(f"{API}/repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100",
+                     token).get("artifacts", [])
+        arts = [x for x in arts if not x.get("expired") and
+                (x.get("name") == RECORD_ARTIFACT or x.get("name", "").startswith(RECORD_ARTIFACT + "-attempt-"))]
+        for art in sorted(arts, key=lambda x: x.get("id", 0), reverse=True):
+            with zipfile.ZipFile(io.BytesIO(download(art["archive_download_url"], token))) as zf:
+                ident = json.loads(zf.read("identity.json"))
+            files = record_files(ident)
+            if files["files"]:
+                return files, str(run["id"])
+    return None, f"no reuse record with executable hashes for {head}"
 
 
 def git(repo: Path, *args: str) -> str:
@@ -104,9 +155,21 @@ def cmd_measure(a: argparse.Namespace) -> int:
                          "--artifact-name", artifact_name, "--base-sha", base, "--head-sha", head,
                          "--output", str(receipt_path)], capture_output=True, text=True)
     if dl.returncode != 0:
-        record.update({"verdict": "waiting_on_receipt", "artifact": artifact_name,
-                       "reason": (dl.stderr or dl.stdout).strip().splitlines()[-1:][0] if (dl.stderr or dl.stdout).strip() else "download failed"})
-        print(f"binary-identity shadow: waiting on receipt {artifact_name}: {record['reason']}")
+        receipt_reason = (dl.stderr or dl.stdout).strip().splitlines()[-1:][0] if (dl.stderr or dl.stdout).strip() else "download failed"
+        try:
+            theirs, source_run = head_record_identity(a.repository, head, a.token)
+        except Exception as exc:  # noqa: BLE001 - a failed lookup is reported, never trusted
+            theirs, source_run = None, f"reuse record lookup failed: {pmr.describe_lookup_error(exc)}"
+        if theirs is None:
+            record.update({"verdict": "waiting_on_receipt", "artifact": artifact_name,
+                           "reason": f"{receipt_reason}; {source_run}"})
+            print(f"binary-identity shadow: waiting on receipt {artifact_name}: {record['reason']}")
+            print(note(record))
+            return 0
+        record.update({"verdict": "compared", "source": "reuse-record", "source_run": source_run,
+                       **compare(ours, theirs)})
+        print(f"binary-identity shadow: tree_identical={record['tree_identical']} compared={record['compared']} "
+              f"identical={record['identical']} differing={record['differing']} (head's reuse record)")
         print(note(record))
         return 0
     try:
@@ -118,7 +181,7 @@ def cmd_measure(a: argparse.Namespace) -> int:
         record.update({"verdict": "receipt_unreadable", "reason": str(exc)})
         print(note(record))
         return 0
-    record.update({"verdict": "compared", **compare(ours, theirs)})
+    record.update({"verdict": "compared", "source": "receipt", **compare(ours, theirs)})
     print(f"binary-identity shadow: tree_identical={record['tree_identical']} compared={record['compared']} "
           f"identical={record['identical']} differing={record['differing']}")
     print(note(record))

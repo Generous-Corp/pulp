@@ -926,6 +926,20 @@ offline and decides nothing; a job that should carry one and does not warns
 `reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
 completed `macos` jobs.
 
+The record hashes every registered test executable, not only those the job
+ran, so a fast-tier pull-request head's hashes are there for the merge
+group's **binary-identity shadow**, which reads the head's reuse record when
+the head issued no receipt (annotation field `source: reuse-record`). The
+macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
+(`tools/cmake/PulpLinkMaps.cmake`): every link runs through
+`tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
+linker's status, and for an executable keeps only the map's object list and
+the link arguments under `<build>/link-members/` (the map, megabytes of
+symbol table, is deleted). The linked bytes are identical with and without
+it. `link-members-<sha>.json` in the record then lists, per executable, the
+archive members its link pulled, with `whole` set on archives the link line
+force-loads (`-force_load`, `-all_load`, `-ObjC`).
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether

@@ -286,7 +286,7 @@ class CliTests(unittest.TestCase):
                                    "--suite", f"full={DATA / 'ctest.junit.xml'},attempts={DATA / 'LastTest.full.log'},repeat",
                                    "--not-before-epoch", "0",
                                    "--selected-json", str(sel), "--test-keys", str(keys),
-                                   "--build-outcome", "success", "--context", "ctest=failure"],
+                                   "--build-outcome", "success", "--context", "ctest=failure", "--identity-scope", "ran"],
                                   capture_output=True, text=True, timeout=120, env=env)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             records = [json.loads(l) for l in (out / "tests.jsonl").read_text().splitlines()]
@@ -335,6 +335,45 @@ class CliTests(unittest.TestCase):
             lines = (Path(tmp) / "out" / "tests.jsonl").read_text()
         self.assertEqual((proc.returncode, job["no_suite_reason"], lines), (0, "no suite: alias", ""))
         self.assertNotIn("::warning", proc.stdout)
+
+
+    def test_link_members_are_written_beside_the_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            (build / "link-members").mkdir(parents=True)
+            (build / "link-members" / "t.objects").write_text(
+                f"# Cwd: {build}\n# Path: {build}/t\n# Object files:\n[  1] m.o\n[  2] lib/libx.a(one.o)\n# Sections:\n")
+            (build / "link-members" / "t.args").write_text("c++\n-Wl,-force_load,lib/libx.a\n")
+            env = {**os.environ, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"}
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
+                                   "--build-dir", str(build), "--link-members", "--identity-scope", "ran"],
+                                  capture_output=True, text=True, timeout=60, env=env)
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+            doc = json.loads((Path(tmp) / "out" / "link-members-abc.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((job["link_members"]["executables"], job["link_members"]["whole_archives"]),
+                         (1, ["<build>/lib/libx.a"]))
+        self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o"]})
+        self.assertNotIn("::warning", proc.stdout)
+
+    def test_requested_link_members_that_the_build_did_not_record_warn(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "build").mkdir()
+            proc = self.run_write(tmp, "--build-dir", f"{tmp}/build", "--link-members", "--identity-scope", "ran")
+        self.assertIn("::warning title=reuse-record incomplete::link members requested but the build recorded none",
+                      proc.stdout)
+
+    def test_every_registered_executable_is_hashed_whatever_ran(self) -> None:
+        listing = {"tests": [{"name": "ran"}, {"name": "idle-a"}, {"name": "idle-b"}]}
+        original = pmr.ctest_inventory
+        pmr.ctest_inventory = lambda build_dir, ctest_json=None: listing
+        try:
+            every = rr._load_inventory(Path("/b"), None, {"ran"}, every=True)
+            only = rr._load_inventory(Path("/b"), None, {"ran"}, every=False)
+        finally:
+            pmr.ctest_inventory = original
+        self.assertEqual([t["name"] for t in every], ["ran", "idle-a", "idle-b"])
+        self.assertEqual([t["name"] for t in only], ["ran"])
 
 
 class WorkflowContractTests(unittest.TestCase):

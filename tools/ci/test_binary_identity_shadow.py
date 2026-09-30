@@ -53,6 +53,70 @@ class CompareTests(unittest.TestCase):
         self.assertIsNone(r["identical_share"])
 
 
+def record_zip(executables: dict) -> bytes:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("identity.json", json.dumps({"executables": executables}))
+        zf.writestr("job.json", "{}")
+    return buf.getvalue()
+
+
+def run(run_id: int, head: str = "h1", path: str = ".github/workflows/build.yml",
+        repo: str = "O/R", head_repo: str = "O/R") -> dict:
+    return {"id": run_id, "head_sha": head, "path": path,
+            "repository": {"full_name": repo}, "head_repository": {"full_name": head_repo}}
+
+
+class ReuseRecordTests(unittest.TestCase):
+    """A head that issued no receipt is read from its reuse record."""
+
+    EXES = {"<build>/test/t-a": {"sha256": "A"}, "<build>/test/t-b": {"sha256": "B"},
+            "/opt/homebrew/bin/python3": {"sha256": "P"}, "unresolved:x": {"sha256": None}}
+
+    def lookup(self, runs: list[dict], artifacts: dict[int, list[dict]], blobs: dict[str, bytes]):
+        def fetch(url: str, token: str) -> dict:
+            if "/artifacts" in url:
+                rid = int(url.split("/runs/")[1].split("/")[0])
+                return {"artifacts": artifacts.get(rid, [])}
+            return {"workflow_runs": runs}
+        return bis.head_record_identity("O/R", "h1", "t", fetch=fetch, download=lambda u, t: blobs[u])
+
+    def test_record_files_are_the_build_tree_executables_relative_to_it(self) -> None:
+        self.assertEqual(bis.record_files({"executables": self.EXES}),
+                         {"files": [{"path": "test/t-a", "sha256": "A"}, {"path": "test/t-b", "sha256": "B"}]})
+
+    def test_the_newest_trusted_run_with_a_record_is_read(self) -> None:
+        art = lambda i, name="reuse-record-macos", expired=False: {"id": i, "name": name, "expired": expired,
+                                                                    "archive_download_url": f"u{i}"}
+        theirs, source = self.lookup(
+            [run(10), run(11), run(12)],
+            {10: [art(1)], 11: [art(2)], 12: [art(3, expired=True), art(4, name="ctest-logs-macos")]},
+            {"u1": record_zip({"<build>/t": {"sha256": "old"}}), "u2": record_zip(self.EXES)})
+        self.assertEqual(source, "11")
+        self.assertEqual([f["sha256"] for f in theirs["files"]], ["A", "B"])
+
+    def test_untrusted_runs_are_never_read(self) -> None:
+        blobs = {"u1": record_zip(self.EXES)}
+        arts = {1: [{"id": 1, "name": "reuse-record-macos", "archive_download_url": "u1"}]}
+        for bad in (run(1, path=".github/workflows/other.yml"), run(1, head_repo="fork/R"),
+                    run(1, repo="X/R"), run(1, head="h2")):
+            theirs, reason = self.lookup([bad], arts, blobs)
+            self.assertIsNone(theirs, bad)
+            self.assertIn("no trusted", reason)
+
+    def test_a_head_without_a_record_says_so(self) -> None:
+        theirs, reason = self.lookup([run(1)], {1: []}, {})
+        self.assertIsNone(theirs)
+        self.assertIn("no reuse record", reason)
+
+    def test_a_re_run_attempt_record_is_read(self) -> None:
+        arts = {1: [{"id": 5, "name": "reuse-record-macos-attempt-2", "archive_download_url": "u5"}]}
+        theirs, source = self.lookup([run(1)], arts, {"u5": record_zip(self.EXES)})
+        self.assertEqual((source, len(theirs["files"])), ("1", 2))
+
+
 class GitHelperTests(unittest.TestCase):
     def make_repo(self, tmp: Path, move_base: bool) -> tuple[Path, str, str]:
         repo = tmp / "r"

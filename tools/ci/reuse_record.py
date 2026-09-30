@@ -15,11 +15,17 @@ in the neutral record the replay harness reads:
                      (full|pr-fast|pr-affected), test_id, executable, outcome
                      (pass|fail|timeout|skipped|notrun), attempts, duration_s,
                      runner_image, output_key
-    identity.json    per executable that ran: sha256 (the same digest
+    identity.json    per registered test executable (whatever this job
+                     ran, so a fast-tier head's hashes can be compared with a
+                     merge group's): sha256 (the same digest
                      `protected_merge_receipt.artifact_identity` puts in a
                      receipt) and the runtime closure it loads (transitive
                      Mach-O dylib/framework linkage, a script's interpreter),
                      each member with its own sha256
+    link-members-<sha>.json
+                     per executable, the archive members its link pulled and
+                     which archives it loads whole (tools/ci/link_members.py),
+                     when the build recorded them (--link-members)
     job.json         the run context, per-suite counts, the runner image
                      fingerprint, the declared script-input list's blob id,
                      and the byte size of each file
@@ -65,6 +71,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
 SCHEMA = "pulp-reuse-record/v1"
@@ -520,20 +527,22 @@ def build_records(ctx: dict, image_digest: str, suites: list[dict],
     return records, summary
 
 
-def _load_inventory(build_dir: Path, selected_json: Path | None, ran: set[str]) -> list[dict]:
-    """Inventory entries for the tests that ran: the full suite's selection
-    listing when it covers them, else the build directory's full listing (the
-    fast tiers select tests by label, which the selection listing omits)."""
+def _load_inventory(build_dir: Path, selected_json: Path | None, ran: set[str], every: bool) -> list[dict]:
+    """Inventory entries: every registered test when `every`, else those that
+    ran. The full suite's selection listing is used where it covers them; the
+    build directory's full listing fills in the rest (the fast tiers select
+    tests by label, which the selection listing omits)."""
     import protected_merge_receipt as pmr
 
     tests: list[dict] = []
     if selected_json and selected_json.is_file():
         tests = json.loads(selected_json.read_text(encoding="utf-8")).get("tests", [])
     names = {t.get("name") for t in tests}
-    if not ran - names:
+    if not every and not ran - names:
         return [t for t in tests if t.get("name") in ran]
     full = pmr.ctest_inventory(build_dir).get("tests", [])
-    return [t for t in tests + [t for t in full if t.get("name") not in names] if t.get("name") in ran]
+    merged = tests + [t for t in full if t.get("name") not in names]
+    return merged if every else [t for t in merged if t.get("name") in ran]
 
 
 def cmd_write(a: argparse.Namespace) -> int:
@@ -555,13 +564,17 @@ def cmd_write(a: argparse.Namespace) -> int:
     ran = {c["test_id"] for s in suites for f in suite_files(s["path"], not_before)[0] for c in junit_cases(f)}
     identity: dict = {"schema": SCHEMA, "executables": {}, "closure_files": {}, "unresolved_executables": 0}
     by_test: dict[str, str] = {}
-    if build_dir and ran:
+    # Every test executable is hashed whenever the build succeeded, whatever
+    # this job ran: a fast-tier head's hashes are what a merge group's
+    # binary-identity comparison needs.
+    every = a.identity_scope == "all" and a.build_outcome in (None, "success")
+    if build_dir and (ran or every):
         try:
             seed = {}
             if a.identity_json and Path(a.identity_json).is_file():
                 ident = json.loads(Path(a.identity_json).read_text(encoding="utf-8"))
                 seed = {os.path.realpath(build_dir / f["path"]): f["sha256"] for f in ident.get("files", [])}
-            inventory = _load_inventory(build_dir, Path(a.selected_json) if a.selected_json else None, ran)
+            inventory = _load_inventory(build_dir, Path(a.selected_json) if a.selected_json else None, ran, every)
             identity, by_test = executable_identity(build_dir, source_root or build_dir, inventory, seed)
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"executable identity unavailable: {exc}")
@@ -582,6 +595,24 @@ def cmd_write(a: argparse.Namespace) -> int:
     identity_path = out / "identity.json"
     identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")), encoding="utf-8")
 
+    link_members = None
+    if a.link_members and build_dir:
+        import link_members as lm
+
+        try:
+            doc = lm.collect(build_dir)
+            name = f"link-members-{ctx['merge_sha'] or 'unknown'}.json"
+            (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            link_members = {"file": name, "executables": len(doc["executables"]),
+                            "unreadable": doc["unreadable"], "bytes": (out / name).stat().st_size,
+                            "whole_archives": sorted({arch for rec in doc["executables"].values()
+                                                      for arch, info in rec["archives"].items() if info["whole"]})}
+            if not doc["executables"] and a.build_outcome in (None, "success"):
+                problems.append("link members requested but the build recorded none "
+                                "(PULP_RECORD_LINK_MAPS off, or every executable was already linked)")
+        except Exception as exc:  # noqa: BLE001 - results are still worth writing
+            problems.append(f"link members unavailable: {exc}")
+
     script_inputs_blob = _git(source_root, "rev-parse", f"HEAD:{SCRIPT_INPUTS_LIST}") if source_root else None
     job = {
         "schema": SCHEMA, **ctx,
@@ -595,15 +626,18 @@ def cmd_write(a: argparse.Namespace) -> int:
                      "closure_files": len(identity["closure_files"]),
                      "unresolved_executables": identity["unresolved_executables"],
                      "output_keys": sum(1 for r in records if r["output_key"])},
+        "link_members": link_members,
         "problems": problems,
     }
-    job["bytes"] = {"tests_jsonl": tests_path.stat().st_size, "identity_json": identity_path.stat().st_size}
+    job["bytes"] = {"tests_jsonl": tests_path.stat().st_size, "identity_json": identity_path.stat().st_size,
+                    "link_members": link_members["bytes"] if link_members else 0}
     job["seconds"] = round(time.monotonic() - t0, 1)
     (out / "job.json").write_text(json.dumps(job, sort_keys=True, indent=1), encoding="utf-8")
 
     note = {"schema": SCHEMA, "run_kind": ctx["run_kind"], "tests": len(records),
             "suites": {k: v["tests"] for k, v in summary.items()},
             "executables": job["identity"]["executables"], "bytes": sum(job["bytes"].values()),
+            "linked": link_members["executables"] if link_members else None,
             "runner_image": image["digest"], "seconds": job["seconds"]}
     print(f"::notice title={TITLE}::{json.dumps(note, sort_keys=True)}")
     for p in problems:
@@ -625,6 +659,10 @@ def main(argv: list[str]) -> int:
     w.add_argument("--test-keys", help="test_receipts_shadow --keys-out file (per-test output keys)")
     w.add_argument("--not-before-epoch", help="ignore reports last written before this time (the job's start)")
     w.add_argument("--build-outcome", default=None)
+    w.add_argument("--identity-scope", choices=("all", "ran"), default="all",
+                   help="hash every registered test executable (default) or only those that ran")
+    w.add_argument("--link-members", action="store_true",
+                   help="collect <build>/link-members (tools/ci/link_members.py) into link-members-<sha>.json")
     w.add_argument("--context", action="append", default=[],
                    help="KEY=VALUE recorded under job.json `steps` (e.g. ctest=failure)")
     w.add_argument("--no-suite-reason", default=None)

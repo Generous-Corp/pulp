@@ -1822,6 +1822,13 @@ jobs:
           # it `render_to_rgba` returns an empty buffer, so capture-based view
           # tests fail for the configuration rather than for the change.
           cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          # The macOS gate records which archive members each executable's
+          # link pulled (tools/cmake/PulpLinkMaps.cmake) for the reuse replay
+          # record. It adds a linker map as a side output; the linked bytes
+          # are unchanged.
+          if [ "${RUNNER_OS}" = "macOS" ] && [ "$PULP_BUILD_DIR" = build-macos ]; then
+            cmake_args+=(-DPULP_RECORD_LINK_MAPS=ON)
+          fi
           # Ask CMake for its codemodel: the pull-request step that runs the
           # tests a diff reaches maps changed files to targets through it.
           mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
@@ -2804,7 +2811,7 @@ jobs:
             --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
-            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members \
             --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
