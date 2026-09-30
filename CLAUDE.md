@@ -387,11 +387,8 @@ Non-obvious things that cost real time when you don't know them:
   committed reference is a byte-exact **determinism** fixture; no quality ratchet.
 - **DSP perf is neither gated nor tracked by `bench_diff.py`** — it diffs UI/GPU
   frame-timing JSON, not DSP, and is referenced by zero workflows.
-- **An offline render cannot hear a dropped buffer.** A transition (param
-  edge, engage/release, preset load) that clicks only in a DAW is almost
-  always a per-callback cost spike, not a DSP defect; gate per-callback
-  operation counts at every transition (`audio-harness` → "measure cost at
-  every transition") before asking anyone to listen.
+- **An offline render cannot hear a dropped buffer**: a DAW-only click at a transition is
+  usually a per-callback cost spike; gate its operation counts (`audio-harness`).
 
 ### Thread Model
 
