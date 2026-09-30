@@ -3978,14 +3978,22 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   A trivial page takes ~7.5 s: `captureStableScreenshot` always observes its
   full 32-frame horizon (an early A,A plateau must not hide a later B,B
   presentation) at ~50 ms per frame of headless software-compositing pacing,
-  once per pixel artifact, plus settle, launch and a ~1.5 s shutdown (the
+  once per pixel artifact that differs from the accepted frame, plus settle,
+  launch and a ~1.5 s shutdown (the
   custody anchor ignores SIGTERM by design, so the guardian waits out its grace
   window before SIGKILL). It used to take ~12 s because every bounded teardown
   wait was `Promise.race([p, delay(ms)])`: the losing timer stayed armed and
   held the capture process open for the rest of a 6 s bound after cleanup had
   finished. Bound a wait with `waitAtMost` (`browser_process.mjs`), which clears
   its timer, never with a bare `delay` race; `browser_process.test.mjs` times an
-  owner's exit after teardown to catch a regression.
+  owner's exit after teardown to catch a regression. A plate that hides paint
+  (indicators, canvases) needs its own horizon only when something was hidden:
+  `captureStableFrameWithHiddenPaint` (`settle.mjs`) reuses the accepted bytes
+  when the page reports zero hidden elements. Before it, a canvas-free panel
+  re-proved an identical frame for its chrome plate, so every capture paid two
+  horizons (64 frames); on a loaded gate VM those frames stretch to several
+  hundred ms each, and the repeat alone ran the capture past its deadline in the
+  same-frame-capture phase. A new hidden-paint plate goes through that helper.
 - **Integration deadlines come from `capture_integration_support.mjs`.** Every
   capture in the `*.integration.test.mjs` files runs under
   `CAPTURE_DEADLINE_MS` (30 s), and each case's node:test timeout is
@@ -3996,10 +4004,14 @@ Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *
   `browser-capture-timeout ... stalled=Page.captureScreenshot` whenever the
   gate VM's host was busy, and a case timeout at or below its capture deadline
   surfaced as a bare `test timed out after 20000ms` that names no phase. The
-  guardian's custody deadline (`GUARDIAN_CUSTODY_TIMEOUT_MS`, 5 s) is the
-  same lesson in the product: at 1.5 s a loaded VM missed it and tore down a
-  healthy launch (`guardian did not establish custody: browser child exited
-  (SIGTERM)` -- the SIGTERM is the teardown, not the cause).
+  guardian's custody wait is the same lesson in the product: a fixed budget
+  (1.5 s, then 5 s) was missed by a loaded VM and tore down a healthy launch
+  (`guardian did not establish custody: browser child exited (SIGTERM)` or
+  `...: DevTools listening on ...` -- the SIGTERM is the teardown, not the
+  cause). The wait fails at once if the guardian exits, so it now shares the
+  launch's own deadline (`guardianCustodyTimeoutMs`, never below
+  `GUARDIAN_CUSTODY_MIN_TIMEOUT_MS`). Do not reintroduce a fixed short timer
+  there.
   `--disable-frame-rate-limit --disable-gpu-vsync` cut frames to ~5 ms but only
   ~15% of suite time, raised CPU ~60%, and would shrink the horizon's wall-clock
   span for every real import, so it is not used.

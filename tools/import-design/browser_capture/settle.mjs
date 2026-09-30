@@ -289,6 +289,21 @@ export async function captureStableScreenshot(
   return trailingFrames >= requiredTrailingFrames ? previous : undefined;
 }
 
+// The stable frame of a page with some of its paint hidden. When nothing was
+// hidden the page is the one that produced `acceptedBytes`, so those exact
+// bytes are the answer: proving the same frame again would spend a second
+// full screenshot horizon, each frame of which waits for a fresh compositor
+// presentation, and on a loaded machine that repeat alone can outlast the
+// capture deadline. Only a count the page positively reported as zero is
+// reused; anything else is observed, with one fresh horizon if the first
+// misses its identical tail.
+export async function captureStableFrameWithHiddenPaint(
+  cdp, screenshotOptions, acceptedBytes, hiddenCount) {
+  if (hiddenCount === 0) return acceptedBytes;
+  return await captureStableScreenshot(cdp, screenshotOptions) ??
+    await captureStableScreenshot(cdp, screenshotOptions);
+}
+
 export async function waitForStable(cdp, options = {}) {
   const stableRoundsRequired = options.stableRounds ?? 3;
   const maximumRounds = options.maximumRounds ?? 50;
