@@ -8,6 +8,7 @@ function(pulp_sample_region_web_sources ROOT OUT)
         "${ROOT}/core/host/src/sample_region_plan.cpp"
         "${ROOT}/core/host/src/sample_region_proof.cpp"
         "${ROOT}/core/host/src/signal_graph.cpp"
+        "${ROOT}/core/host/src/signal_graph_diagnostics.cpp"
         "${ROOT}/core/host/src/signal_graph_prepared_topology_edit.cpp"
         "${ROOT}/core/host/src/signal_graph_live_swap.cpp"
         "${ROOT}/core/host/src/signal_graph_reference_walk.cpp"
