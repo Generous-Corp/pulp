@@ -3,11 +3,6 @@
   "_comment": "Header fan-out ledger for header_fanout_guard.py. max_tus is a REFERENCE ceiling on the number of translation units whose include closure contains the header (static #include graph at the checked ref), set to the measured count plus headroom (10%, at least 10) so new direct users pass. A header over its ceiling is a violation only when THIS range grew it (head vs merge-base) and no `Fanout-Grow: <path|all> reason=\"...\"` trailer authorizes it, so the gate stays rebase-stable like hotspot_size_guard.json. The failure a ceiling catches is an umbrella include: one new include edge from a widely included header that pulls hundreds of existing translation units in. When a cut shrinks a header's fan-out, lower its ceiling in the same change to keep the gain. Regenerate candidates with `header_fanout_guard.py --top 40`.",
   "headers": [
     {
-      "path": "core/runtime/include/pulp/runtime/triple_buffer.hpp",
-      "max_tus": 1108,
-      "note": "Top-20 compile fan-out"
-    },
-    {
       "path": "core/canvas/include/pulp/canvas/rectangle_list.hpp",
       "max_tus": 1055,
       "note": "Top-20 compile fan-out"
@@ -83,11 +78,6 @@
       "note": "Top-20 compile fan-out"
     },
     {
-      "path": "core/view/include/pulp/view/value_source.hpp",
-      "max_tus": 876,
-      "note": "Top-20 compile fan-out"
-    },
-    {
       "path": "core/view/include/pulp/view/input_events.hpp",
       "max_tus": 876,
       "note": "Top-20 compile fan-out"
@@ -108,6 +98,21 @@
       "note": "Most-edited core header; every include of it recompiles hundreds of TUs"
     },
     {
+      "path": "core/runtime/include/pulp/runtime/triple_buffer.hpp",
+      "max_tus": 788,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/format/include/pulp/format/processor.hpp",
+      "max_tus": 640,
+      "note": "Plugin authoring contract; frequently edited"
+    },
+    {
+      "path": "core/view/include/pulp/view/value_source.hpp",
+      "max_tus": 536,
+      "note": "Top-20 compile fan-out"
+    },
+    {
       "path": "core/view/include/pulp/view/widgets.hpp",
       "max_tus": 308,
       "note": "Frequently edited widget declarations; include it where a widget type is used, never from a general header"
@@ -118,14 +123,14 @@
       "note": "Frequently edited JS bridge; reached mainly through scripted_ui.hpp"
     },
     {
-      "path": "core/format/include/pulp/format/processor.hpp",
-      "max_tus": 640,
-      "note": "Plugin authoring contract; frequently edited"
-    },
-    {
       "path": "core/timeline/include/pulp/timeline/model.hpp",
       "max_tus": 301,
       "note": "Frequently edited timeline document model"
+    },
+    {
+      "path": "core/audio/include/pulp/audio/load_measurer.hpp",
+      "max_tus": 181,
+      "note": "Reached by most host TUs through signal_graph_runtime.hpp"
     },
     {
       "path": "core/render/include/pulp/render/skia_surface.hpp",
@@ -136,11 +141,6 @@
       "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
       "max_tus": 41,
       "note": "Time-stretch internals; its wide executable reach is libpulp-audio membership, not includes"
-    },
-    {
-      "path": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "max_tus": 181,
-      "note": "Reached by most host TUs through signal_graph_runtime.hpp"
     }
   ]
 }
