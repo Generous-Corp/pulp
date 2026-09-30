@@ -95,9 +95,21 @@ if(_PULP_NODE_FOR_TESTS)
              COMMAND ${_PULP_NODE_FOR_TESTS}
                      ${CMAKE_SOURCE_DIR}/tools/scripts/test_bundle_threejs_for_jsc.mjs)
     set_tests_properties(pulp_bundle_threejs_for_jsc_smoke PROPERTIES
-        # The script provisions esbuild in a temporary package before running
-        # five bundle cases, so cold or contended CI hosts need more than 30s.
+        # The bundler loads esbuild from tools/scripts/node_modules. A local
+        # checkout installs it on first use; CI installs it before the build
+        # and sets PULP_OFFLINE_BUILD, under which a missing esbuild fails
+        # this test instead of fetching. Five bundle cases on a cold or
+        # contended host need more than 30s.
         TIMEOUT 120
+        LABELS "ios-d3b;node;threejs")
+    # With PULP_OFFLINE_BUILD set the bundler refuses a missing esbuild
+    # instead of running `npm install` mid-build. Needs no network and no
+    # installed esbuild: it copies the bundler beside a stub npm.
+    add_test(NAME pulp_bundle_threejs_for_jsc_offline
+             COMMAND ${_PULP_NODE_FOR_TESTS}
+                     ${CMAKE_SOURCE_DIR}/tools/scripts/test_bundle_threejs_offline.mjs)
+    set_tests_properties(pulp_bundle_threejs_for_jsc_offline PROPERTIES
+        TIMEOUT 60
         LABELS "ios-d3b;node;threejs")
 endif()
 

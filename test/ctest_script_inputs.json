@@ -3167,6 +3167,13 @@
    ],
    "kind": "python"
   },
+  "pulp_bundle_threejs_for_jsc_offline": {
+   "entry": "tools/scripts/test_bundle_threejs_offline.mjs",
+   "inputs": [
+    "tools/scripts/test_bundle_threejs_offline.mjs"
+   ],
+   "kind": "node"
+  },
   "pulp_bundle_threejs_for_jsc_smoke": {
    "entry": "tools/scripts/test_bundle_threejs_for_jsc.mjs",
    "inputs": [

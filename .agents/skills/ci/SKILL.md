@@ -1730,6 +1730,22 @@ something being installed: pair the provisioning step with one non-skippable
 test that asserts the provisioning worked. The install step reports that it ran;
 only the test reports that it landed.
 
+**Build-time npm is installed before the build (`PULP_OFFLINE_BUILD`).** The
+Three.js bundler used to `npm install` esbuild mid-build whenever
+`tools/scripts/node_modules` was absent, which on an ephemeral gate VM is every
+run; a `getaddrinfo ENOTFOUND registry.npmjs.org` then red the required `macos`
+check as an iOS compile gate exit 65 (3 jobs, 2026-09-27..29, m1/m3/m5). The
+build job now sets `PULP_OFFLINE_BUILD=1` (bundler exits 3 naming
+`npm ci --prefix tools/scripts` instead of fetching) and the **Install
+build-time Node dependencies** step runs `npm ci` from the lockfile with three
+spaced attempts before **Build**. An npm error in that step is the registry or
+the guest's egress, not the diff. Any new build step or ctest that fetches must
+follow the same split: provision in a retried step, refuse under
+`PULP_OFFLINE_BUILD`. Known remaining in-build fetches: cargo (Rust CLI build
+and `pulp-rust-*` cargo ctests pull crates) and the iOS gate's Skia simulator
+slice (`fetch_skia_for_release.py`, which retries transient download errors
+itself but is fetched fresh into the gate build tree each run).
+
 ## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
 
 Every gate script here fails closed on its own: a missing or unreadable config
