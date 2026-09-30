@@ -1,6 +1,5 @@
 self-hosted-runner:
   labels:
-    - pulp-queue-authority-studio
     - pulp-build
     - pulp-build-vm
     - pulp-build-merge-group

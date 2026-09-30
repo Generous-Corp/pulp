@@ -308,6 +308,14 @@ _DERIVED_REGENERATORS: list[tuple[tuple[str, ...], list[str]]] = [
         _GPU_LEDGER_PAIR,
         ["python3", "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
     ),
+    # CHANGELOG.md is rendered from the tag graph. A separate post-tag PR per
+    # release would pay the required gate a second time for one docs file, so
+    # the bump carries it: each bump renders every tag cut so far, which puts
+    # the newest release on main with the next bump.
+    (
+        ("CHANGELOG.md",),
+        ["shipyard", "changelog", "regenerate"],
+    ),
 ]
 
 

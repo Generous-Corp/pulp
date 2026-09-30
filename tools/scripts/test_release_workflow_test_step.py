@@ -67,7 +67,7 @@ BUILD_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build.yml"
 AUTO_RELEASE = REPO_ROOT / ".github" / "workflows" / "auto-release.yml"
 WATCHDOG_REAPER = REPO_ROOT / ".github" / "workflows" / "watchdog-reaper.yml"
 VERSION_SKILL_CHECK = REPO_ROOT / ".github" / "workflows" / "version-skill-check.yml"
-POST_TAG_SYNC = REPO_ROOT / ".github" / "workflows" / "post-tag-sync.yml"
+VERSION_AT_LAND = REPO_ROOT / ".github" / "workflows" / "version-at-land.yml"
 RELEASE_SIGNING_HELPER = REPO_ROOT / "tools" / "scripts" / "configure_release_bot_ssh_signing.sh"
 SHIPYARD_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
 
@@ -2063,7 +2063,7 @@ class ReleaseBotSshSigning(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.auto_release = AUTO_RELEASE.read_text(encoding="utf-8")
-        cls.post_tag_sync = POST_TAG_SYNC.read_text(encoding="utf-8")
+        cls.version_at_land = VERSION_AT_LAND.read_text(encoding="utf-8")
         cls.helper = RELEASE_SIGNING_HELPER.read_text(encoding="utf-8")
         cls.shipyard_config = SHIPYARD_CONFIG.read_text(encoding="utf-8")
 
@@ -2140,14 +2140,21 @@ class ReleaseBotSshSigning(unittest.TestCase):
             self.auto_release.index("name: Create tags for moved surfaces"),
         )
 
-    def test_post_tag_sync_commits_use_signed_bot_identity(self) -> None:
+    def test_version_bump_commits_use_signed_bot_identity(self) -> None:
+        self.assertIn("name: Configure release bot SSH signing", self.version_at_land)
         self.assertIn(
-            'ssh_signing_setup_script = "tools/scripts/configure_release_bot_ssh_signing.sh"',
-            self.shipyard_config,
+            "RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}",
+            self.version_at_land,
         )
-        self.assertIn("name: Configure release bot SSH signing", self.post_tag_sync)
-        self.assertIn("RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}", self.post_tag_sync)
-        self.assertIn("bash -- tools/scripts/configure_release_bot_ssh_signing.sh", self.post_tag_sync)
+        self.assertIn("bash tools/scripts/configure_release_bot_ssh_signing.sh", self.version_at_land)
+
+    def test_version_bump_can_render_the_changelog(self) -> None:
+        # The bump commit carries CHANGELOG.md, rendered by Shipyard; the
+        # binary has to be on PATH before the step that writes the bump.
+        install = self.version_at_land.index("./tools/install-shipyard.sh")
+        assign = self.version_at_land.index("name: Assign versions (single-writer push)")
+        self.assertLess(install, assign)
+        self.assertIn('echo "$HOME/.local/bin" >> "$GITHUB_PATH"', self.version_at_land)
 
 
 class StrandedReleaseTrackerWorkflow(unittest.TestCase):

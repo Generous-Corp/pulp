@@ -100,14 +100,13 @@ def apply_bumps(
         for vf in v.surface.version_files:
             if _write_version(repo, vf, new_ver):
                 edited.append(vf.path)
-        # CHANGELOG.md is intentionally NOT written here. Ownership lives
-        # with Shipyard post-tag sync via
-        # `.github/workflows/post-tag-sync.yml` and the
-        # `shipyard changelog regenerate` command. PR-side stub insertion
+        # CHANGELOG.md is intentionally NOT written here. The version-bump
+        # commit renders it with `shipyard changelog regenerate` (see
+        # version_at_land.py's derived regenerators). PR-side stub insertion
         # creates repeated multi-PR-train rebases: PR A and PR B both
         # insert `## [0.105.0]` headers, the first one merges, the second
         # one conflicts on the same line. Letting Shipyard own the full
-        # regen at tag time eliminates the conflict class entirely.
+        # render in the bump eliminates the conflict class entirely.
         # `versioning.json` still carries each surface's `changelog` field;
         # Shipyard reads it.
     # Stage for commit so callers see them in `git status`.

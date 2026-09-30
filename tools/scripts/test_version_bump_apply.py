@@ -100,8 +100,8 @@ class VersionBumpApplyTests(GateFixtureTestCase):
         )
 
     def test_apply_bumps_writes_version_files_only_post_c1(self) -> None:
-        # apply_bumps writes version files only. CHANGELOG.md is owned by
-        # Shipyard post-tag sync via `.github/workflows/post-tag-sync.yml`.
+        # apply_bumps writes version files only. CHANGELOG.md is rendered by
+        # the version-bump commit (version_at_land.py).
         # Two PRs both proposing `sdk=minor` must produce identical
         # CHANGELOG.md state to avoid the multi-PR-train rebase class.
         vbc = self._import_gate_module("version_bump_check")

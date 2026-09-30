@@ -206,7 +206,7 @@ tag instead of main HEAD.
 
 5. **Flip `version-at-land.yml` to `--push`** — the one-line diff in the
    GO/NO-GO section. Give the job `contents: write`, add the SSH-signing
-   step (as `post-tag-sync.yml` does), and add a recursion guard is NOT
+   step (`tools/scripts/configure_release_bot_ssh_signing.sh`), and a recursion guard is NOT
    needed (the `Version-Bump-Applied` marker makes the bot's own commit a
    no-op drain). **The workflow has NO `paths:` filter** — it runs on every
    push to `main`. A filter is a silent-loss hole: a fix/feat touching only a

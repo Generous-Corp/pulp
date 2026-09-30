@@ -1229,23 +1229,15 @@ authoritative capability floor in the manual-backfill helper overlay; otherwise
 current releases fail closed or historical releases are incorrectly forced to
 synthesize a contract they predate.
 
-### Shipyard pin drift between local tooling and tag sync
+### Shipyard pin: one source of truth
 
-Pulp's release automation depends on the pinned Shipyard CLI in two places:
-
-- `tools/shipyard.toml` is the source-of-truth pin for local installs and
-  `shipyard pr`.
-- `.github/workflows/post-tag-sync.yml` carries a `SHIPYARD_VERSION` env for
-  tag-time changelog regeneration.
-
-If you bump the Shipyard pin, update `post-tag-sync.yml` in the same PR and keep
-the existing string format in each file (`v0.56.2` in `tools/shipyard.toml`,
-`0.56.2` in the workflow env — the `v` prefix is intentional only on the toml).
-Otherwise local shipping and tag-time changelog regeneration quietly diverge
-onto different Shipyard versions, which is how release-only behavior changes get
-missed. Shipyard v0.55.0+ also ships `shipyard update`; use `shipyard update
---check --json` to report local drift and `shipyard update --to v0.56.2` (or
-newer) before cutting or debugging release jobs.
+`tools/shipyard.toml` is the only Shipyard pin. Local installs, `shipyard pr`,
+and every workflow that needs the CLI (including `version-at-land.yml`, which
+renders `CHANGELOG.md` in the bump commit) install through
+`tools/install-shipyard.sh`, which reads it. Do not add an inline
+`SHIPYARD_VERSION` to a workflow; it drifts from the pin unnoticed. Use
+`shipyard update --check --json` to report local drift and
+`shipyard update --to <pin>` before cutting or debugging release jobs.
 
 ### VST3 SDK tag drift in `sign-and-release.yml`
 

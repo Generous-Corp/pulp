@@ -470,12 +470,9 @@ jobs:
       # release to completion over destroying it. Nothing in the release path may
       # cancel or delete work that is still in flight.
 
-      # CHANGELOG regeneration moved to .github/workflows/post-tag-sync.yml
-      # (installed by `shipyard release-bot hook install`). Firing on the
-      # tag push instead of inline in auto-release decouples the docs
-      # sync from the binary build — if builds fail, CHANGELOG still
-      # regens; if regen fails, builds aren't blocked. See shipyard
-      # issue #53 + PR #73 for the design.
+      # CHANGELOG.md is not written here: the version-bump commit renders it
+      # (version_at_land.py's derived regenerators), so a failed binary build
+      # never blocks the changelog and a failed render never blocks a release.
 
       # ── Stranded fix/feat detector (issue #1009) ─────────────────────
       #
