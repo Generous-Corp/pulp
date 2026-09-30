@@ -199,6 +199,24 @@ Two more traps from the same work:
 - **Accumulated `1/N` fade steps do not reach 1 for every N** (N = 12 stops at
   0.99999988 in float), so "pure hold" never arrives and a residual live leak
   stays. Count fade steps as integers and test several N, including 12.
+- **A hold across a change of material needs a change stimulus, and a level
+  check.** With the default newest-frame frequency, a 2 s hold taken 0.4 s after
+  a chord change plays the older chord ~55 dB down: its bins rotate at the newer
+  chord's leakage frequency and cancel frame to frame. `energy_weighted`
+  frequency brings it to ~-11 dB. A steady tone passes either way. The residual
+  gap is the latched frame's lobe phases (taken from the newer material), which
+  nothing restores yet.
+- **Judge a hold's level over time, not at one point.** An unlocked hold starts
+  phase-coherent and decoheres while audible (about +1 dB over its first 0.5 s
+  on a detuned pad, settling over ~2 s). Compare the first 0.5 s of pure hold
+  with the last second; `phase_lock = peak_lobe` holds it within 0.1 dB. Short
+  (50 ms) windows still beat on detuned partials, so bound the window deviation
+  loosely and the early-versus-settled mean tightly.
+- **A per-hop cost test needs the default's burst as its control.** The freeze
+  cost tests in `test/test_freeze_hold.cpp` count operations per frame group
+  (`rt::RtWorkCounter`) and assert the default configuration shows the burst
+  (a latch summing `capture_frames × channels × bins`, a polar per bin per held
+  hop) before asserting the bounded configuration does not.
 
 ## An offline render cannot hear a dropped buffer — measure cost at every transition
 

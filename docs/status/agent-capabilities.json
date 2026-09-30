@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 60,
+  "manifest_revision": 61,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -14627,6 +14627,26 @@
               "set_stage_gate_mode(int s, StageGateMode m)",
               "stage_gate_mode(int s)",
               "set_stage_slide(int s, bool on)"
+            ],
+            "enums": []
+          }
+        ],
+        "staged_transition.hpp": [
+          {
+            "class": "StagedTransition",
+            "qualified_name": "pulp::signal::StagedTransition",
+            "template": null,
+            "methods": [
+              "due_steps(int total, std::int64_t elapsed, std::int64_t horizon)",
+              "begin(int total_steps)",
+              "cancel()",
+              "run_due(std::int64_t elapsed, std::int64_t horizon, Step&& step)",
+              "run_next(int count, Step&& step)",
+              "finish_now(Step&& step)",
+              "active()",
+              "total()",
+              "completed()",
+              "remaining()"
             ],
             "enums": []
           }

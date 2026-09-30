@@ -1041,6 +1041,7 @@
       "pulp/signal/spectrum_trace.hpp",
       "pulp/signal/square_osc_bank.hpp",
       "pulp/signal/stage_sequencer.hpp",
+      "pulp/signal/staged_transition.hpp",
       "pulp/signal/stft.hpp",
       "pulp/signal/stn_decomposer.hpp",
       "pulp/signal/stretch_preset.hpp",

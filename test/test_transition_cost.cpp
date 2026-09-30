@@ -17,10 +17,13 @@
 
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/fft_backend.hpp>
+#include <pulp/signal/freeze_hold.hpp>
+#include <pulp/signal/spectral_mask_processor.hpp>
 #include <pulp/signal/rt_work_counter.hpp>
 
 #include <algorithm>
 #include <complex>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -180,4 +183,143 @@ TEST_CASE("transition scenario rejects a warmup with no steady block",
     auto scenario = TransitionScenario::standard(make_bursty_processor<0>)
                         .warmup_blocks(1);
     CHECK_THROWS_AS(scenario.run(), std::invalid_argument);
+}
+
+// ── FreezeHold through the gate ────────────────────────────────────────────
+//
+// A spectral freeze as a plugin would build it: FreezeHold as the pre-mask
+// stage of a SpectralMaskProcessor, engaged by a toggle parameter. The
+// default hold bursts its latch into one callback (the whole capture window
+// summed, then a polar per bin per held hop); the bounded configuration
+// (running sums, rotor synthesis, staged engage) stays within a declared
+// allowance of the steady per-callback work.
+
+namespace {
+
+enum FreezeParams : pulp::state::ParamID { kFreeze = 1 };
+
+template <bool Bounded>
+class FreezeProcessor final : public pulp::format::Processor {
+public:
+    static constexpr int kFft = 4096;
+    static constexpr int kHop = 512;
+    static constexpr int kBins = kFft / 2 + 1;
+    static constexpr int kStaging = 512;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "FreezeProcessor",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.test.freeze",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Audio In", 2}},
+            .output_buses = {{"Audio Out", 2}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({
+            .id = kFreeze,
+            .name = "Freeze",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
+            .kind = pulp::state::ParamKind::Toggle,
+        });
+    }
+
+    void prepare(const pulp::format::PrepareContext& context) override {
+        pulp::signal::SpectralMaskProcessorConfig config;
+        config.frame.fft_size = kFft;
+        config.frame.analysis_hop = kHop;
+        config.frame.channels = 2;
+        config.frame.max_block = context.max_buffer_size;
+        config.frame.window = pulp::signal::WindowFunction::Type::hann;
+        config.sample_rate = static_cast<float>(context.sample_rate);
+        (void)spectral_.prepare(config);
+
+        pulp::signal::FreezeHold::Config hold;
+        hold.fft_size = kFft;
+        hold.channels = 2;
+        hold.analysis_hop = kHop;
+        hold.sample_rate = context.sample_rate;
+        hold.capture_seconds = 0.5;
+        if constexpr (Bounded) {
+            hold.synthesis = pulp::signal::FreezeHoldSynthesis::rotor;
+            hold.frequency = pulp::signal::FreezeHoldFrequency::energy_weighted;
+            hold.average = pulp::signal::FreezeHoldAverage::running;
+            hold.engage_bins_per_hop = kStaging;
+        }
+        stage_.hold.prepare(hold);
+        spectral_.set_pre_mask_stage(&stage_);
+    }
+
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const pulp::format::ProcessContext&) override {
+        stage_.hold.set_frozen(state().get_value(kFreeze) >= 0.5f);
+        const float* in[] = {input.channel(0).data(), input.channel(1).data()};
+        float* out[] = {output.channel(0).data(), output.channel(1).data()};
+        (void)spectral_.process(in, out, static_cast<int>(output.num_samples()));
+    }
+
+private:
+    struct Stage final : pulp::signal::SpectralPreMaskStage {
+        pulp::signal::FreezeHold hold;
+        void process_frames(std::complex<float>* const* frames, int channels,
+                            int num_bins) noexcept override {
+            hold.process_group(frames, channels, num_bins);
+        }
+    };
+    pulp::signal::SpectralMaskProcessor spectral_;
+    Stage stage_;
+};
+
+template <bool Bounded>
+std::unique_ptr<pulp::format::Processor> make_freeze_processor() {
+    return std::make_unique<FreezeProcessor<Bounded>>();
+}
+
+template <bool Bounded>
+std::vector<TransitionOutcome> freeze_engage_outcomes() {
+    // 0.5 s of capture at a 512-sample hop is 47 frames; the first frame
+    // completes after 4096 samples. 240 blocks of 128 fill the window with
+    // margin, and 64 settle blocks cover the fade and the staged engage.
+    return TransitionScenario(make_freeze_processor<Bounded>)
+        .add({"Freeze engage", kFreeze, 0.0f, 1.0f})
+        .block_sizes({128})
+        .warmup_blocks(240)
+        .settle_blocks(64)
+        .run();
+}
+
+} // namespace
+
+TEST_CASE("transition ops gate: FreezeHold engage bursts by default",
+          "[transition-cost][gate][freeze][negative-control]") {
+    const auto outcomes = freeze_engage_outcomes<false>();
+    const auto check = assert_transition_ops_bounded(
+        outcomes, {.trig = 2u * FreezeProcessor<true>::kStaging,
+                   .bins = 2u * FreezeProcessor<true>::kBins});
+    INFO(check.message);
+    CHECK_FALSE(check.passed);
+    // The whole 47-frame window is summed in the latching callback.
+    CHECK(outcomes.front().transition_ops_max.bins >=
+          47u * 2u * FreezeProcessor<false>::kBins);
+}
+
+TEST_CASE("transition ops gate: bounded FreezeHold engage stays within its allowance",
+          "[transition-cost][gate][freeze]") {
+    const auto outcomes = freeze_engage_outcomes<true>();
+    // Declared transition allowance: one staged chunk of rotors and
+    // frequencies (a polar and an atan2 per bin), and one divide per channel
+    // bin at the latch.
+    const auto check = assert_transition_ops_bounded(
+        outcomes, {.trig = 2u * FreezeProcessor<true>::kStaging,
+                   .bins = 2u * FreezeProcessor<true>::kBins});
+    INFO(check.message);
+    CHECK(check.passed);
+    // Positive control: the gate saw the STFT and the staged engage.
+    CHECK(outcomes.front().steady_ops_max.fft > 0);
+    CHECK(outcomes.front().transition_ops_max.trig == 2u * FreezeProcessor<true>::kStaging);
 }

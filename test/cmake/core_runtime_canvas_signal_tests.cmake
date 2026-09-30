@@ -419,7 +419,7 @@ pulp_add_test_suite(pulp-test-spectral-primitives GROUP pulp-test-group-core-sig
             test_spectral_mask_processor.cpp
             test_realtime_pitch_time.cpp
             test_realtime_pitch_time_stream_contract.cpp test_finite_stretch_builder.cpp
-            test_transient_freeze_delay.cpp test_freeze_hold.cpp
+            test_transient_freeze_delay.cpp test_freeze_hold.cpp test_staged_transition.cpp
             test_spectral_matrix.cpp test_stn_stretch.cpp
             test_sinc_pitch.cpp
     LIBRARIES pulp::signal)

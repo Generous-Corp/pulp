@@ -358,6 +358,30 @@ bounded random walk, preserving the inter-channel phase offsets.
 Everything after `prepare()` is allocation-free; all members except
 `stage_restore()` and `restore_pending()` belong to the audio owner.
 
+The defaults reproduce the original hold bit for bit. Opt-in `Config` fields
+bound its per-callback cost and fix two long-hold artefacts:
+
+| Field | Default | Opt-in | Effect |
+|---|---|---|---|
+| `synthesis` | `polar` | `rotor` | Unit phasor per bin advanced by a rotor and a 256-entry jitter table: no transcendental per held hop (the default evaluates one `std::polar` per channel per bin per hop). |
+| `engage_bins_per_hop` | `0` | e.g. `512` | With `rotor`, stages the latch-side rotor (and energy-weighted frequency) construction across the following frame groups with `StagedTransition`; `engage_pending()` reports it, and `snapshot()` refuses until it completes. |
+| `average` | `at_latch` | `running` | Running per-bin sums over the capture window, so the latch divides instead of summing `capture_frames × channels × bins` in one callback. |
+| `frequency` | `newest` | `energy_weighted` | Each bin's frequency is the energy-weighted circular mean of its increments over the window, not the newest frame's: a long hold across a change keeps the older sound at its own pitch instead of rotating it at the newer sound's leakage. |
+| `phase_lock` | `none` | `peak_lobe` | Bins within `lobe_half_width` of a peak rotate (and random-walk) at the peak's frequency, and every other bin starts at a random phase, so the hold's level is stationary from its first frame instead of decohering while audible. |
+
+Expensive work is reported to the `pulp::signal::rt` operation counters
+(`rt_work_counter.hpp`), which is what a transition-cost gate reads; see the
+`audio-harness` skill.
+
+### `StagedTransition`
+
+`StagedTransition` (`staged_transition.hpp`) spreads a bounded piece of
+transition work over several audio callbacks: `begin(total)` schedules without
+running anything, `run_due(elapsed, horizon, step)` runs the steps due by then
+(`due_steps()` is the pure schedule, `ceil(total × elapsed / horizon)`),
+`run_next(n, step)` runs the next `n`, and `finish_now(step)` drains the rest.
+It owns no work or storage; each step is a bounded, allocation-free callable.
+
 ### Orthonormal mid/side and stereo width
 
 `mid_side_encode()` and `mid_side_decode()` use the self-inverse

@@ -263,15 +263,27 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/freeze_hold.hpp",
-        "fingerprint": "sha256:ddf7a96e008201b2a4da6255ee593152f5d3ef0d86ea58d1a35d0b95b0c259ea",
+        "fingerprint": "sha256:fa95ab7c526f24022d61ff4e28058700ba5f3e0087f0cb83e2bc1c57dd4643f4",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (
             "Spectral hold stage composed at the head of a frame chain: inside "
             "RealtimePitchTimeProcessor, or as a SpectralMaskProcessor pre-mask stage. "
             "It is a frame-domain building block with its own recall image, not a "
-            "standalone generator DSP claim; its engage, timing, pipeline, and "
-            "snapshot contract is covered by test/test_freeze_hold.cpp."
+            "standalone generator DSP claim; its engage, timing, pipeline, "
+            "snapshot, opt-in per-callback cost modes, and long-hold frequency and "
+            "phase-lock contract is covered by test/test_freeze_hold.cpp."
+        ),
+    },
+    {
+        "include": "pulp/signal/staged_transition.hpp",
+        "fingerprint": "sha256:6578eacace93caba3b14699048a1f16317cba58c02e3985bccf3db85405c0760",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": (
+            "Schedule tracker that spreads bounded transition work over several audio "
+            "callbacks; it owns no DSP and composes inside processors such as FreezeHold "
+            "rather than being an advertised generator capability."
         ),
     },
     {
@@ -720,7 +732,7 @@ REVIEWED_HEADERS: list[dict[str, Any]] = [
     },
     {
         "include": "pulp/signal/signal.hpp",
-        "fingerprint": "sha256:0d3538c3925bfb69da24958a73ee0f723514e62959e1dab02d7658d3fbd8db30",
+        "fingerprint": "sha256:429d4f7631c77db36e446bb91359d053059dd767f123d9e45dffd96efa4105e5",
         "disposition": "infrastructure",
         "capability_keys": [],
         "rationale": (

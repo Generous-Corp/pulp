@@ -10,10 +10,12 @@
 // judges the held content by its spectral peak.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/signal/fft.hpp>
 #include <pulp/signal/freeze_hold.hpp>
+#include <pulp/signal/rt_work_counter.hpp>
 #include <pulp/signal/spectral_mask_processor.hpp>
 
 #include <algorithm>
@@ -215,7 +217,10 @@ TEST_CASE("FreezeHold averages exactly the last capture window of frames",
     // Frame f carries a tone in its own bin (10 + f), so the set of non-zero
     // held bins names exactly which frames a hold averaged: the hold never
     // contains audio older than the last `capture_frames` analysis frames.
-    const auto config = small_config();
+    // Running sums must name exactly the same frames as the latch-time sum.
+    auto config = small_config();
+    config.average = GENERATE(FreezeHoldAverage::at_latch, FreezeHoldAverage::running);
+    CAPTURE(static_cast<int>(config.average));
     ToneFrames tones(config.fft_size, 1, config.analysis_hop);
     auto bin_of = [](long f) { return 10 + static_cast<int>(f); };
     FreezeHold hold;
@@ -415,6 +420,8 @@ TEST_CASE("FreezeHold keeps phase coherence and the stereo offset through a long
     config.analysis_hop = 2048;
     config.capture_frames = 8;
     config.crossfade_frames = 6;
+    config.synthesis = GENERATE(FreezeHoldSynthesis::polar, FreezeHoldSynthesis::rotor);
+    CAPTURE(static_cast<int>(config.synthesis));
     FreezeHold hold;
     hold.prepare(config);
     ToneFrames tones(config.fft_size, 2, config.analysis_hop);
@@ -458,6 +465,9 @@ TEST_CASE("FreezeHold estimates the frequency of an anti-phase stereo bin",
     // tone's true (off-centre) frequency.
     auto config = small_config(2);
     config.phase_jitter = 0.0f;
+    config.frequency = GENERATE(FreezeHoldFrequency::newest,
+                                FreezeHoldFrequency::energy_weighted);
+    CAPTURE(static_cast<int>(config.frequency));
     FreezeHold hold;
     hold.prepare(config);
     ToneFrames tones(config.fft_size, 2, config.analysis_hop);
@@ -868,6 +878,14 @@ TEST_CASE("FreezeHold state, pipeline, and hold-length calls allocate nothing",
           "[signal][freeze][rt-safety]") {
     auto config = small_config(2);
     config.max_capture_frames = 32;
+    if (GENERATE(false, true)) {
+        // Every opt-in cost mode, staged engage included.
+        config.synthesis = FreezeHoldSynthesis::rotor;
+        config.frequency = FreezeHoldFrequency::energy_weighted;
+        config.average = FreezeHoldAverage::running;
+        config.engage_bins_per_hop = 64;
+    }
+    CAPTURE(static_cast<int>(config.synthesis));
     ToneFrames tones(config.fft_size, 2, config.analysis_hop);
     FreezeHold hold;
     hold.prepare(config);
@@ -876,6 +894,9 @@ TEST_CASE("FreezeHold state, pipeline, and hold-length calls allocate nothing",
     for (long f = 0; f < 8; ++f) hold.process_group(tones.tone(50, f), 2, tones.bins());
     hold.set_frozen(true);
     hold.process_group(tones.tone(50, 8), 2, tones.bins());
+    // A staged engage refuses a snapshot until its rotors are built.
+    for (long f = 8; hold.engage_pending(); ++f)
+        hold.process_group(tones.tone(50, f), 2, tones.bins());
 
     const long before = g_alloc_count.load();
     bool ok = hold.snapshot(image);
@@ -892,4 +913,515 @@ TEST_CASE("FreezeHold state, pipeline, and hold-length calls allocate nothing",
     REQUIRE(g_alloc_count.load() == before);
     REQUIRE(ok);
     REQUIRE(engaged);
+}
+
+// ── per-callback cost ──────────────────────────────────────────────────────
+//
+// A host drops the buffer whose callback overruns, and an offline render
+// cannot see that. These tests bound the work of individual frame groups with
+// the deterministic rt::RtWorkCounter counts (FFT / transcendental / per-bin
+// accumulation), never with wall time. Each pairs the bounded configuration
+// with the default one as its control: the default must show the burst, or
+// the count is not seeing the work.
+
+namespace {
+
+// Frames with energy in every bin, so the cost does not depend on content.
+class BroadbandFrames {
+public:
+    BroadbandFrames(int fft_size, int channels)
+        : bins_(fft_size / 2 + 1),
+          storage_(static_cast<size_t>(channels),
+                   std::vector<std::complex<float>>(static_cast<size_t>(bins_))),
+          ptrs_(static_cast<size_t>(channels)) {
+        for (size_t ch = 0; ch < storage_.size(); ++ch) ptrs_[ch] = storage_[ch].data();
+    }
+
+    std::complex<float>* const* frame(long index) {
+        for (size_t ch = 0; ch < storage_.size(); ++ch)
+            for (int k = 0; k < bins_; ++k)
+                storage_[ch][static_cast<size_t>(k)] = std::polar(
+                    0.5f + 0.25f * static_cast<float>((k + index) % 3),
+                    static_cast<float>(wrap(0.37 * k * (index + 1) + 0.9 * static_cast<double>(ch))));
+        return ptrs_.data();
+    }
+    int bins() const { return bins_; }
+
+private:
+    int bins_;
+    std::vector<std::vector<std::complex<float>>> storage_;
+    std::vector<std::complex<float>*> ptrs_;
+};
+
+FreezeHold::Config large_config() {
+    FreezeHold::Config config;
+    config.fft_size = 8192;
+    config.channels = 2;
+    config.analysis_hop = 256;
+    config.capture_frames = 188;  // a 2 s hold at a 512-sample hop and 48 kHz
+    config.max_capture_frames = 188;
+    config.crossfade_frames = 6;
+    return config;
+}
+
+struct LatchCost {
+    pulp::signal::rt::RtWorkCounts steady; // the capturing frame group before the latch
+    pulp::signal::rt::RtWorkCounts latch;  // the latching frame group
+};
+
+LatchCost measure_latch(FreezeHold::Config config, int capture_frames) {
+    config.capture_frames = capture_frames;
+    FreezeHold hold;
+    hold.prepare(config);
+    BroadbandFrames frames(config.fft_size, config.channels);
+    const int channels = config.channels;
+    long f = 0;
+    // Fill the whole ring so the steady frame group slides a full window.
+    for (; f < config.max_capture_frames + 4; ++f)
+        hold.process_group(frames.frame(f), channels, frames.bins());
+    LatchCost cost;
+    {
+        pulp::signal::rt::RtWorkCounter counter;
+        hold.process_group(frames.frame(f++), channels, frames.bins());
+        cost.steady = counter.delta();
+    }
+    hold.set_frozen(true);
+    {
+        pulp::signal::rt::RtWorkCounter counter;
+        hold.process_group(frames.frame(f++), channels, frames.bins());
+        cost.latch = counter.delta();
+    }
+    REQUIRE(hold.is_latched());
+    return cost;
+}
+
+} // namespace
+
+TEST_CASE("FreezeHold running average makes latch cost independent of capture length",
+          "[signal][freeze][rt-cost]") {
+    REQUIRE(pulp::signal::rt::kWorkCountersEnabled);
+    const auto config = large_config();
+    const auto channel_bins = static_cast<std::uint64_t>(config.channels)
+                            * static_cast<std::uint64_t>(config.fft_size / 2 + 1);
+
+    SECTION("control: the latch-time average scales with the window") {
+        const auto short_hold = measure_latch(config, 2);
+        const auto long_hold = measure_latch(config, 188);
+        INFO("latch bins: 2 frames " << short_hold.latch.bins << ", 188 frames "
+                                     << long_hold.latch.bins);
+        CHECK(short_hold.latch.bins == 2 * channel_bins);
+        CHECK(long_hold.latch.bins == 188 * channel_bins);
+    }
+
+    SECTION("running sums: the latch only divides") {
+        auto running = config;
+        running.average = FreezeHoldAverage::running;
+        const auto short_hold = measure_latch(running, 2);
+        const auto long_hold = measure_latch(running, 188);
+        INFO("latch bins: 2 frames " << short_hold.latch.bins << ", 188 frames "
+                                     << long_hold.latch.bins);
+        CHECK(short_hold.latch.bins == long_hold.latch.bins);
+        // Capture slides one frame in and one out; the latch adds one divide
+        // per channel bin on top.
+        CHECK(long_hold.steady.bins == 2 * channel_bins);
+        CHECK(long_hold.latch.bins == long_hold.steady.bins + channel_bins);
+    }
+}
+
+TEST_CASE("FreezeHold rotor synthesis performs no transcendental per held hop",
+          "[signal][freeze][rt-cost]") {
+    REQUIRE(pulp::signal::rt::kWorkCountersEnabled);
+    auto config = large_config();
+    config.capture_frames = 8;
+    const auto channel_bins = static_cast<std::uint64_t>(config.channels)
+                            * static_cast<std::uint64_t>(config.fft_size / 2 + 1);
+    const auto held_trig = [&](FreezeHoldSynthesis synthesis) {
+        auto c = config;
+        c.synthesis = synthesis;
+        FreezeHold hold;
+        hold.prepare(c);
+        BroadbandFrames frames(c.fft_size, c.channels);
+        long f = 0;
+        for (; f < 200; ++f) {
+            if (f == 190) hold.set_frozen(true);
+            hold.process_group(frames.frame(f), c.channels, frames.bins());
+        }
+        REQUIRE(pure_hold(hold));
+        pulp::signal::rt::RtWorkCounter counter;
+        for (int i = 0; i < 100; ++i, ++f)
+            hold.process_group(frames.frame(f), c.channels, frames.bins());
+        return counter.delta().trig;
+    };
+    // Control: the original path evaluates one polar per channel bin per hop.
+    CHECK(held_trig(FreezeHoldSynthesis::polar) == 100 * channel_bins);
+    CHECK(held_trig(FreezeHoldSynthesis::rotor) == 0);
+}
+
+TEST_CASE("FreezeHold staged engage spreads rotor construction across frame groups",
+          "[signal][freeze][rt-cost]") {
+    REQUIRE(pulp::signal::rt::kWorkCountersEnabled);
+    auto config = large_config();
+    config.capture_frames = 8;
+    config.synthesis = FreezeHoldSynthesis::rotor;
+    config.frequency = FreezeHoldFrequency::energy_weighted;
+    config.average = FreezeHoldAverage::running;
+    const int bins = config.fft_size / 2 + 1;
+
+    const auto run = [&](int bins_per_hop, std::vector<std::uint64_t>& per_hop) {
+        auto c = config;
+        c.engage_bins_per_hop = bins_per_hop;
+        FreezeHold hold;
+        hold.prepare(c);
+        BroadbandFrames frames(c.fft_size, c.channels);
+        long f = 0;
+        for (; f < 40; ++f) hold.process_group(frames.frame(f), c.channels, frames.bins());
+        {
+            // Steady capture does no transcendental in this configuration.
+            pulp::signal::rt::RtWorkCounter counter;
+            hold.process_group(frames.frame(f++), c.channels, frames.bins());
+            CHECK(counter.delta().trig == 0);
+        }
+        hold.set_frozen(true);
+        do {
+            pulp::signal::rt::RtWorkCounter counter;
+            hold.process_group(frames.frame(f++), c.channels, frames.bins());
+            per_hop.push_back(counter.delta().trig);
+        } while (hold.engage_pending());
+        REQUIRE(hold.is_latched());
+        // Once staging completes, held hops are transcendental-free again.
+        pulp::signal::rt::RtWorkCounter counter;
+        hold.process_group(frames.frame(f++), c.channels, frames.bins());
+        CHECK(counter.delta().trig == 0);
+    };
+
+    SECTION("control: an unstaged latch builds every rotor in one frame group") {
+        std::vector<std::uint64_t> per_hop;
+        run(0, per_hop);
+        REQUIRE(per_hop.size() == 1);
+        // One atan2 (frequency) and one polar (rotor) per bin.
+        CHECK(per_hop[0] == 2u * static_cast<std::uint64_t>(bins));
+    }
+
+    SECTION("staged: at most engage_bins_per_hop bins per frame group") {
+        constexpr int kChunk = 512;
+        std::vector<std::uint64_t> per_hop;
+        run(kChunk, per_hop);
+        CHECK(per_hop.size() == static_cast<size_t>((bins + kChunk - 1) / kChunk));
+        std::uint64_t total = 0;
+        for (const auto t : per_hop) {
+            CHECK(t <= 2u * kChunk);
+            total += t;
+        }
+        CHECK(total == 2u * static_cast<std::uint64_t>(bins));
+    }
+}
+
+TEST_CASE("FreezeHold rotor phasors keep unit modulus and their offsets over 1e6 hops",
+          "[signal][freeze]") {
+    FreezeHold::Config config;
+    config.fft_size = 256;
+    config.channels = 2;
+    config.analysis_hop = 64;
+    config.capture_frames = 2;
+    config.phase_jitter = 0.0f;
+    config.synthesis = FreezeHoldSynthesis::rotor;
+    FreezeHold hold;
+    hold.prepare(config);
+    ToneFrames tones(config.fft_size, 2, config.analysis_hop);
+    constexpr int kBin = 37;
+    constexpr double kOffset = 1.1;
+    constexpr double kOffsetBins = 0.23;
+    for (long f = 0; f < 3; ++f) {
+        if (f == 2) hold.set_frozen(true);
+        hold.process_group(tones.tone(kBin, f, kOffset, kOffsetBins), 2, tones.bins());
+    }
+    REQUIRE(hold.is_latched());
+    const double start = hold.held_phases(0)[kBin];
+    const double omega = hold.instantaneous_frequency()[kBin];
+    REQUIRE_THAT(omega, WithinAbs(2.0 * kPi * (kBin + kOffsetBins) / config.fft_size, 1e-7));
+
+    constexpr long kHops = 1000000;
+    hold.advance_hold(static_cast<int>(kHops));
+
+    // Modulus: the rendered frame carries the held magnitude to -120 dB.
+    ToneFrames rendered(config.fft_size, 2, config.analysis_hop);
+    REQUIRE(hold.write_hold(rendered.frames(), 2, rendered.bins()));
+    const double mag = hold.held_magnitudes(0)[kBin];
+    for (int ch = 0; ch < 2; ++ch) {
+        const double modulus = std::abs(rendered.channel(ch)[kBin]) / mag;
+        INFO("channel " << ch << " modulus " << modulus);
+        CHECK(std::abs(modulus - 1.0) < 1e-6);
+    }
+    // Inter-channel offset and accumulated rotation.
+    const double offset = wrap(hold.held_phases(1)[kBin] - hold.held_phases(0)[kBin]);
+    CHECK_THAT(offset, WithinAbs(kOffset, 1e-6));
+    const double expected = wrap(start + std::fmod(omega * config.analysis_hop * kHops, 2.0 * kPi));
+    CHECK(std::abs(wrap(hold.held_phases(0)[kBin] - expected)) < 1e-6);
+}
+
+TEST_CASE("FreezeHold energy-weighted frequency follows the content that dominates a bin",
+          "[signal][freeze]") {
+    // A bin loud at one frequency for most of the window and faint at another
+    // in the newest frames — the leakage of a later sound. The newest-frame
+    // estimate takes the faint content's frequency; the energy-weighted one
+    // keeps the dominant content's.
+    auto config = small_config(1);
+    config.capture_frames = 32;
+    config.phase_jitter = 0.0f;
+    constexpr int kBin = 60;
+    constexpr double kLoud = 0.3;   // bin offset of the dominant content
+    constexpr double kFaint = -0.4; // bin offset of the newest, faint content
+    const double hop = config.analysis_hop;
+    const auto omega = [&](double offset) {
+        return 2.0 * kPi * (kBin + offset) / config.fft_size;
+    };
+    const auto estimate = [&](FreezeHoldFrequency frequency) {
+        auto c = config;
+        c.frequency = frequency;
+        FreezeHold hold;
+        hold.prepare(c);
+        std::vector<std::complex<float>> frame(static_cast<size_t>(c.fft_size / 2 + 1));
+        std::complex<float>* ptrs[] = {frame.data()};
+        double phase = 0.0;
+        for (long f = 0; f < 32; ++f) {
+            const bool faint = f >= 26;
+            phase = wrap(phase + omega(faint ? kFaint : kLoud) * hop);
+            std::fill(frame.begin(), frame.end(), std::complex<float>{});
+            frame[kBin] = std::polar(faint ? 0.01f : 1.0f, static_cast<float>(phase));
+            if (f == 31) hold.set_frozen(true);
+            hold.process_group(ptrs, 1, static_cast<int>(frame.size()));
+        }
+        REQUIRE(hold.is_latched());
+        return hold.instantaneous_frequency()[kBin];
+    };
+    const double newest = estimate(FreezeHoldFrequency::newest);
+    const double weighted = estimate(FreezeHoldFrequency::energy_weighted);
+    INFO("newest " << newest << ", weighted " << weighted << ", dominant " << omega(kLoud)
+                   << ", faint " << omega(kFaint));
+    // Control: the default estimate really is the faint, newest content's.
+    CHECK_THAT(newest, WithinAbs(omega(kFaint), 1e-6));
+    // Within a hundredth of a bin of the dominant content.
+    CHECK_THAT(weighted, WithinAbs(omega(kLoud), 0.01 * 2.0 * kPi / config.fft_size));
+}
+
+TEST_CASE("FreezeHold long hold across a change keeps the older sound audible",
+          "[signal][freeze][spectral-mask-processor]") {
+    // Chord A for 3 s, chord B after; freeze 0.4 s after the change with a
+    // 2 s hold, so most of the window is chord A. With the newest-frame
+    // frequency, chord A's bins rotate at chord B's leakage frequencies and
+    // their frames cancel: chord A is barely heard. With the energy-weighted
+    // frequency it plays at its own pitches and near its captured level.
+    constexpr double kSr = 48000.0;
+    constexpr int kFft = 8192;
+    constexpr int kHop = 512;
+    constexpr double kChordA[] = {261.63, 329.63, 392.00, 523.25};
+    constexpr double kChordB[] = {369.99, 466.16, 554.37, 739.99};
+    constexpr double kAmp = 0.12;
+    constexpr double kChange = 3.0;
+    constexpr double kFreezeAt = kChange + 0.4;
+    constexpr int kLength = static_cast<int>((kFreezeAt + 2.0) * kSr);
+
+    std::vector<float> input(static_cast<size_t>(kLength));
+    for (int i = 0; i < kLength; ++i) {
+        const double t = i / kSr;
+        double v = 0.0;
+        for (const double f : t < kChange ? kChordA : kChordB)
+            v += kAmp * std::sin(2.0 * kPi * f * t);
+        input[static_cast<size_t>(i)] = static_cast<float>(v);
+    }
+
+    // Least-squares amplitude of a known frequency over a window.
+    const auto tone_amplitude = [&](const std::vector<float>& x, int start, int n, double hz) {
+        double ss = 0, cc = 0, sc = 0, xs = 0, xc = 0;
+        for (int i = start; i < start + n; ++i) {
+            const double s = std::sin(2.0 * kPi * hz * i / kSr);
+            const double c = std::cos(2.0 * kPi * hz * i / kSr);
+            const double v = x[static_cast<size_t>(i)];
+            ss += s * s; cc += c * c; sc += s * c; xs += v * s; xc += v * c;
+        }
+        const double det = ss * cc - sc * sc;
+        const double a = (xs * cc - xc * sc) / det;
+        const double b = (xc * ss - xs * sc) / det;
+        return std::hypot(a, b);
+    };
+
+    const auto render = [&](FreezeHoldFrequency frequency) {
+        SpectralMaskProcessorConfig config;
+        config.frame.fft_size = kFft;
+        config.frame.analysis_hop = kHop;
+        config.frame.channels = 1;
+        config.frame.max_block = 512;
+        config.frame.window = WindowFunction::Type::hann;
+        config.sample_rate = static_cast<float>(kSr);
+        SpectralMaskProcessor processor;
+        REQUIRE(processor.prepare(config));
+        ScheduledFreezeStage stage;
+        FreezeHold::Config hold_config;
+        hold_config.fft_size = kFft;
+        hold_config.channels = 1;
+        hold_config.analysis_hop = kHop;
+        hold_config.sample_rate = kSr;
+        hold_config.capture_seconds = 2.0;
+        hold_config.frequency = frequency;
+        stage.hold.prepare(hold_config);
+        // Frame f completes at input sample kFft + f * kHop.
+        const long freeze_frame = std::lround((kFreezeAt * kSr - kFft) / kHop);
+        stage.schedule = {{freeze_frame, true}};
+        processor.set_pre_mask_stage(&stage);
+        std::vector<float> output(static_cast<size_t>(kLength));
+        for (int pos = 0; pos < kLength; pos += 480) {
+            const int n = std::min(480, kLength - pos);
+            const float* in[] = {input.data() + pos};
+            float* out[] = {output.data() + pos};
+            REQUIRE(processor.process(in, out, n));
+        }
+        REQUIRE(stage.hold.is_latched());
+        const int from = static_cast<int>((kFreezeAt + 0.5) * kSr) + processor.latency_samples();
+        const int count = static_cast<int>(0.8 * kSr);
+        REQUIRE(from + count <= kLength);
+        double a = 0.0;
+        for (const double f : kChordA) a += tone_amplitude(output, from, count, f);
+        return a / (4.0 * kAmp);
+    };
+
+    const double newest = render(FreezeHoldFrequency::newest);
+    const double weighted = render(FreezeHoldFrequency::energy_weighted);
+    INFO("chord A heard at " << 20.0 * std::log10(newest + 1e-12) << " dB (newest) and "
+                             << 20.0 * std::log10(weighted + 1e-12)
+                             << " dB (energy-weighted) against the input");
+    // Control: the default reproduces the defect.
+    CHECK(newest < 0.25);
+    CHECK(weighted > 0.25);
+}
+
+TEST_CASE("FreezeHold rotor hold survives a snapshot round trip",
+          "[signal][freeze][state]") {
+    auto config = small_config(2);
+    config.synthesis = FreezeHoldSynthesis::rotor;
+    config.engage_bins_per_hop = 128;
+    ToneFrames tones(config.fft_size, 2, config.analysis_hop);
+    FreezeHold source;
+    source.prepare(config);
+    FreezeHoldSnapshot image;
+    REQUIRE(image.prepare(config.fft_size, config.channels, config.analysis_hop));
+
+    long f = 0;
+    for (; f < 8; ++f) source.process_group(tones.tone(50, f, 0.4), 2, tones.bins());
+    source.set_frozen(true);
+    source.process_group(tones.tone(50, f++, 0.4), 2, tones.bins());
+    REQUIRE(source.engage_pending());
+    REQUIRE_FALSE(source.snapshot(image)); // staging incomplete
+    for (; f < 40; ++f) source.process_group(tones.tone(50, f, 0.4), 2, tones.bins());
+    REQUIRE_FALSE(source.engage_pending());
+    REQUIRE(source.snapshot(image));
+    REQUIRE(image.valid());
+
+    FreezeHold restored;
+    restored.prepare(config);
+    REQUIRE(restored.stage_restore(image, FreezeRestoreEngage::immediate));
+    ToneFrames a(config.fft_size, 2, config.analysis_hop);
+    ToneFrames b(config.fft_size, 2, config.analysis_hop);
+    FreezeHold reference = source;
+    for (long g = 0; g < 20; ++g) {
+        reference.process_group(a.tone(50, f + g, 0.4), 2, a.bins());
+        restored.process_group(b.tone(200, f + g, 0.1), 2, b.bins());
+        if (restored.engage_pending()) continue;
+        for (int ch = 0; ch < 2; ++ch) {
+            INFO("frame " << g << " channel " << ch);
+            CHECK(std::abs(a.channel(ch)[50] - b.channel(ch)[50]) < 1e-5f);
+        }
+    }
+}
+
+TEST_CASE("FreezeHold peak-lobe phase lock keeps short-term level stationary from the start",
+          "[signal][freeze][spectral-mask-processor]") {
+    // A pad whose partials come in slightly detuned pairs, so each partial's
+    // main lobe holds two components and its bins carry different
+    // increments, over a faint noise bed. Unlocked, the hold starts with the
+    // latched frame's coherent lobes and each bin then drifts at its own
+    // frequency: the level moves while the hold is already audible. Locked,
+    // each lobe rotates at its peak's frequency and the other bins start at
+    // random phases, so the first held frames already have the level the
+    // hold settles to.
+    constexpr double kSr = 48000.0;
+    constexpr int kFft = 8192;
+    constexpr int kHop = 512;
+    constexpr double kNotes[] = {220.0, 277.18, 329.63, 440.0};
+    constexpr double kDetune = 1.003;
+    constexpr double kAmp = 0.08;
+    constexpr double kFreezeAt = 1.0;
+    constexpr int kLength = static_cast<int>((kFreezeAt + 3.0) * kSr);
+
+    std::vector<float> input(static_cast<size_t>(kLength));
+    std::uint64_t noise = 0x51a7u;
+    for (int i = 0; i < kLength; ++i) {
+        const double t = i / kSr;
+        double v = 0.0;
+        for (const double f : kNotes)
+            v += kAmp * (std::sin(2.0 * kPi * f * t) + std::sin(2.0 * kPi * f * kDetune * t + 1.0));
+        noise ^= noise << 13; noise ^= noise >> 7; noise ^= noise << 17;
+        v += 0.004 * (static_cast<double>(noise >> 11) / 9007199254740992.0 * 2.0 - 1.0);
+        input[static_cast<size_t>(i)] = static_cast<float>(v);
+    }
+
+    struct Profile {
+        double early_db = 0.0;   // level of the first 0.5 s of pure hold, against settled
+        double worst_db = 0.0;   // worst 50 ms window over the whole hold, against settled
+        double settled_db = 0.0; // level of the last second
+    };
+    const auto render = [&](FreezeHoldPhaseLock lock) {
+        SpectralMaskProcessorConfig config;
+        config.frame.fft_size = kFft;
+        config.frame.analysis_hop = kHop;
+        config.frame.channels = 1;
+        config.frame.max_block = 512;
+        config.frame.window = WindowFunction::Type::hann;
+        config.sample_rate = static_cast<float>(kSr);
+        SpectralMaskProcessor processor;
+        REQUIRE(processor.prepare(config));
+        ScheduledFreezeStage stage;
+        FreezeHold::Config hold_config;
+        hold_config.fft_size = kFft;
+        hold_config.channels = 1;
+        hold_config.analysis_hop = kHop;
+        hold_config.phase_lock = lock;
+        stage.hold.prepare(hold_config);
+        const long freeze_frame = std::lround((kFreezeAt * kSr - kFft) / kHop);
+        stage.schedule = {{freeze_frame, true}};
+        processor.set_pre_mask_stage(&stage);
+        std::vector<float> output(static_cast<size_t>(kLength));
+        for (int pos = 0; pos < kLength; pos += 480) {
+            const int n = std::min(480, kLength - pos);
+            const float* in[] = {input.data() + pos};
+            float* out[] = {output.data() + pos};
+            REQUIRE(processor.process(in, out, n));
+        }
+        REQUIRE(stage.hold.is_latched());
+        // The first frame whose synthesis window is entirely pure hold.
+        const int pure = kFft + static_cast<int>(freeze_frame + hold_config.crossfade_frames) * kHop
+                       + processor.latency_samples();
+        const int window = static_cast<int>(0.05 * kSr);
+        Profile profile;
+        const int settled_from = kLength - static_cast<int>(kSr);
+        profile.settled_db = window_rms_db(output, settled_from, kLength - settled_from);
+        profile.early_db = window_rms_db(output, pure, static_cast<int>(0.5 * kSr))
+                         - profile.settled_db;
+        for (int s = pure; s + window <= kLength; s += window / 2) {
+            const double d = window_rms_db(output, s, window) - profile.settled_db;
+            if (std::abs(d) > std::abs(profile.worst_db)) profile.worst_db = d;
+        }
+        return profile;
+    };
+
+    const auto unlocked = render(FreezeHoldPhaseLock::none);
+    const auto locked = render(FreezeHoldPhaseLock::peak_lobe);
+    INFO("first 0.5 s against the settled level: unlocked " << unlocked.early_db
+         << " dB, locked " << locked.early_db << " dB; worst 50 ms window: unlocked "
+         << unlocked.worst_db << " dB, locked " << locked.worst_db << " dB");
+    // Control: without the lock the hold starts measurably above the level it
+    // settles to (it decoheres while audible).
+    CHECK(unlocked.early_db > 0.75);
+    CHECK(std::abs(locked.early_db) < 0.25);
+    // Short windows still beat (detuned pairs), but around a fixed level.
+    CHECK(std::abs(locked.worst_db) < 1.0);
 }
