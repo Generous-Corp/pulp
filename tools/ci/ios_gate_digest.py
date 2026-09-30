@@ -64,7 +64,6 @@ import subprocess
 import sys
 import io
 import urllib.parse
-import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -234,20 +233,27 @@ def lookup(repository: str, token: str, digest: str, fetch=None) -> dict:
             "created_at": src.get("created_at"), "candidates": len(live)}
 
 
+def _receipt_http():
+    """protected_merge_receipt.py owns the credential-safe GitHub transport:
+    an artifact archive redirects to blob storage, which refuses a forwarded
+    token with 401, so every receipt reader goes through that one opener."""
+    here = str(Path(__file__).resolve().parent.parent / "scripts")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import protected_merge_receipt  # type: ignore
+    return protected_merge_receipt
+
+
 def _fetch_json(url: str, token: str) -> dict:
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - fixed GitHub host
-        return json.load(resp)
+    return _receipt_http().api_json(url, token)
 
 
 def _download(url: str, token: str) -> bytes:
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"})
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - GitHub API / blob redirect
-        return resp.read(1024 * 1024 + 1)
+    return _receipt_http().download_archive(url, token, 1024 * 1024)
+
+
+def describe_lookup_error(exc: BaseException) -> str:
+    return _receipt_http().describe_lookup_error(exc)
 
 
 def _check_trusted(repository: str, digest: str, artifact: dict, run: dict, archive: bytes) -> str | None:
@@ -294,14 +300,17 @@ def trusted_lookup(repository: str, token: str, digest: str, fetch=None, downloa
     page = fetch(url, token)
     live = [a for a in page.get("artifacts", []) if a.get("name") == name and not a.get("expired")]
     live.sort(key=lambda a: a.get("created_at") or "", reverse=True)
-    refusals = []
+    refusals, lookup_errors = [], []
     for art in live[:MAX_CANDIDATES]:
         run_id = (art.get("workflow_run") or {}).get("id")
         try:
             run = fetch(f"https://api.github.com/repos/{repository}/actions/runs/{run_id}", token)
             archive = download(art["archive_download_url"], token)
         except Exception as exc:  # noqa: BLE001 - one bad candidate never skips anything
-            refusals.append(f"run {run_id}: {exc}")
+            # A request that failed says nothing about the receipt. Keep it
+            # apart from trust refusals so the run reports a broken lookup
+            # instead of "no trusted receipt".
+            lookup_errors.append(f"run {run_id}: {describe_lookup_error(exc)}")
             continue
         why = _check_trusted(repository, digest, art, run, archive)
         if why is None:
@@ -310,7 +319,20 @@ def trusted_lookup(repository: str, token: str, digest: str, fetch=None, downloa
                     "candidates": len(live)}
         refusals.append(f"run {run_id}: {why}")
     return {"found": bool(live), "trusted": False, "digest": digest, "source_run_id": None,
-            "candidates": len(live), "refusals": refusals}
+            "candidates": len(live), "refusals": refusals, "lookup_errors": lookup_errors}
+
+
+def untrusted_reason(hit: dict | None) -> str:
+    """Why a lookup produced no trusted receipt, keeping a failed request
+    distinct from an absent or refused receipt."""
+    hit = hit or {}
+    if hit.get("lookup_errors"):
+        first = hit["lookup_errors"][0].split(": ", 1)[-1]
+        return (f"receipt lookup failed: {first} "
+                f"({len(hit['lookup_errors'])} of {hit.get('candidates', 0)} candidate(s))")
+    if not hit.get("candidates"):
+        return "no matching receipt for this digest"
+    return "no trusted PASS receipt for this digest"
 
 
 def is_control(run_id: int | None, event: str | None) -> bool:
@@ -332,7 +354,8 @@ def decide(mode: str, event: str | None, run_id: int | None, hit: dict | None) -
                 "reason": "digest lookup disabled"}
     if not trusted:
         return {"action": "run", "verdict": "run", "mode": mode, "source_run_id": None,
-                "reason": "no trusted PASS receipt for this digest"}
+                "reason": untrusted_reason(hit),
+                "lookup_failed": bool(hit and hit.get("lookup_errors"))}
     if mode == "shadow":
         return {"action": "run", "verdict": "would_skip", "mode": mode, "source_run_id": src,
                 "reason": f"shadow mode; digest passed in run {src}"}
@@ -348,17 +371,27 @@ def summary_line(decision: dict, digest: str) -> str:
     if decision["action"] == "skip":
         return (f"- iOS compile gate: **SKIPPED** — input digest `{short}` passed in trusted run "
                 f"{decision['source_run_id']} (`ios_gate_digest.py`, mode {decision['mode']})\n")
-    return (f"- iOS compile gate: ran — {decision['reason']} (digest `{short}`, "
+    reason = f"**{decision['reason']}**" if decision.get("lookup_failed") else decision["reason"]
+    return (f"- iOS compile gate: ran — {reason} (digest `{short}`, "
             f"mode {decision['mode']})\n")
 
 
 def note(verdict: str, digest: str, event: str | None, source_run_id: int | None,
-         mode: str = "shadow") -> str:
+         mode: str = "shadow", lookup_error: str | None = None) -> str:
     """The annotation line the proxies read. Always a `notice`: the note never
-    fails a job (a skip is a decision of the Build step, not of the note)."""
+    fails a job (a skip is a decision of the Build step, not of the note).
+    `lookup_error` is set only when the receipt lookup itself failed."""
     record = {"schema": SCHEMA, "mode": mode, "verdict": verdict, "digest": digest,
               "event": event, "source_run_id": source_run_id}
+    if lookup_error:
+        record["lookup_error"] = lookup_error
     return f"::notice title=ios-gate-shadow::{json.dumps(record, sort_keys=True)}"
+
+
+def lookup_warning(reason: str) -> str:
+    """A `warning` annotation for a failed receipt lookup: the gate still runs,
+    but a lookup that cannot succeed must not read as a cache miss."""
+    return f"::warning title=ios-gate-receipt-lookup::{reason}"
 
 
 def cmd_decide(a: argparse.Namespace) -> int:
@@ -375,12 +408,21 @@ def cmd_decide(a: argparse.Namespace) -> int:
             hit = trusted_lookup(a.repository, a.token, digest)
             for why in hit.get("refusals", []):
                 print(f"iOS gate receipt refused: {why}", file=sys.stderr)
+            for why in hit.get("lookup_errors", []):
+                print(f"iOS gate receipt lookup failed: {why}", file=sys.stderr)
         decision = decide(a.mode, a.event, a.run_id, hit)
     except Exception as exc:  # noqa: BLE001 - the lookup is never the gate
         print(f"iOS gate digest: deciding to run ({exc})", file=sys.stderr)
-        decision["reason"] = f"lookup failed ({exc}); running the gate"
+        if digest:  # the digest was computed, so it is the lookup that failed
+            decision.update(verdict="run", lookup_failed=True,
+                            reason=f"receipt lookup failed: {describe_lookup_error(exc)}")
+        else:
+            decision["reason"] = f"digest unavailable ({exc}); running the gate"
+    if decision.get("lookup_failed"):
+        print(lookup_warning(decision["reason"]))
     if digest and decision.get("verdict"):
-        print(note(decision["verdict"], digest, a.event, decision.get("source_run_id"), decision["mode"]))
+        print(note(decision["verdict"], digest, a.event, decision.get("source_run_id"), decision["mode"],
+                   decision["reason"] if decision.get("lookup_failed") else None))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:

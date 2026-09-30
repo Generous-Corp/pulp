@@ -289,8 +289,9 @@ default branch's copy with base-repo permissions: never check out
 
 **Where main's evidence comes from without a build.** The merge_group run whose
 head sha is main's tip (`source: head-sha`), judged by its **required gate
-jobs** — the names in `.shipyard/config.toml` `[governance]
-required_status_checks`, i.e. `macos` — never by the run conclusion, and read at
+jobs** — the jobs in that build.yml run named by `.shipyard/config.toml`
+`[governance] required_status_checks`, i.e. `macos` (the list's other contexts
+come from other workflows and select no job) — never by the run conclusion, and read at
 any run status because a group lands as soon as its required checks pass while
 advisory legs may still run. If that run's gate is not evidence (a reused
 receipt, still running), an earlier merge group that built the same tree is
@@ -1857,7 +1858,13 @@ decide` finds a PASS receipt (`ios-gate-ok-<digest>`) for the exact input
 digest written by a TRUSTED run: this repo's `build.yml`, `merge_group` or
 same-repository `pull_request`, marker naming the same digest and run
 (decisions contract row 23). One run id in ten and every schedule/push run is
-a control that runs anyway; any lookup error runs it. `pulp-ios-gate-shadow/v1`
+a control that runs anyway; any lookup error runs it, and says so: a failed
+request reads `receipt lookup failed: <status>` (summary, an
+`ios-gate-receipt-lookup` warning, and `lookup_error` in the notice), never
+"no trusted receipt". Receipt artifacts must be downloaded through
+`protected_merge_receipt.download_archive()`: the archive URL redirects to blob
+storage, and plain `urllib.urlopen` forwards the Bearer token, which the blob
+host rejects with 401 on every download. `pulp-ios-gate-shadow/v1`
 notices record `skipped` / `control_run` / `would_skip` / `run`, then
 `ran_ok` / `ran_failed`. A `control_run` or `would_skip` followed by
 `ran_failed` means the input set missed a file: set the repository variable
@@ -5205,11 +5212,20 @@ skipped run as a pass.
 alongside `.github/rulesets/main-protection.json`. Two hard rules:
 
 - **The declared required checks must match the LIVE GitHub ruleset, not what
-  we wish we enforced.** Live `main` requires exactly two contexts: `macos` and
-  `Enforce version & skill sync`. Both the `[governance]
-  required_status_checks` list in `.shipyard/config.toml` AND the
-  `required_status_checks` array in `main-protection.json` are pinned to that
-  two-context set. `[branch_protection."main"] require_strict_status = true`
+  we wish we enforced.** Live `main` requires six contexts: `macos`,
+  `Enforce version & skill sync`, `Build + prove + (owner-gated) deploy`,
+  `Vellum freeze`, `Vellum trusted freeze` and `drift-fast`. Both the
+  `[governance] required_status_checks` list in `.shipyard/config.toml` AND the
+  `required_status_checks` array in `main-protection.json` name that full set;
+  `base-poison-detector-selftest` fails when the two disagree. The list must be
+  the WHOLE contract: `shipyard governance apply` PUTs exactly it to branch
+  protection, so a partial list silently drops required checks. A reader that
+  judges only part of it narrows it itself — the base-poison detector reads
+  build.yml runs, where only `macos` names a job; the landing watchdog reads
+  commit statuses as well as check runs, because `Vellum trusted freeze`
+  reaches a PR head as a status from a `pull_request_target` run and a
+  check-run-only reader calls it absent on every PR.
+  `[branch_protection."main"] require_strict_status = true`
   mirrors the ruleset's `strict_required_status_checks_policy`. Before editing
   either, run `shipyard governance diff` — a clean run prints
   `OK main: no changes`; any other output means the checked-in intent has
@@ -5220,8 +5236,7 @@ alongside `.github/rulesets/main-protection.json`. Two hard rules:
   lane would wedge every merge — without adding signal. This is why the ruleset
   was trimmed from four contexts to two: so nobody can "fix drift" by pushing a
   config that flips the advisory lanes blocking. `test_ruleset_drift_config.py`
-  asserts the two-context required set; keep it and the two config surfaces in
-  lockstep.
+  pins the required set; keep it and the two config surfaces in lockstep.
 
 ## PR Review Thread Hygiene
 

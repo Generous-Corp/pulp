@@ -1,6 +1,7 @@
 {
   "_comment": "Captured from Generous-Corp/pulp on 2026-09-13, the six-hour wedge. PR #8277 was opened by the Shipyard App, had no pull_request run at all, and sat BLOCKED on a `macos` context that was never going to appear. Two workflow runs were queued/pending with zero jobs, holding the concurrency group. Timestamps are relative markers rewritten by the test to the run's own clock; the shapes are real.",
-  "required_contexts": ["macos", "Build + prove + (owner-gated) deploy"],
+  "_comment_statuses": "`Vellum trusted freeze` reaches a pull request's head as a commit STATUS (published by a pull_request_target run), not a check run, so it sits in each case's `statuses`. The other five are check runs. Every context but the one each case is about is green, so each case still produces exactly the finding it was captured for when replayed against the full required set.",
+  "required_contexts": ["macos", "Enforce version & skill sync", "Build + prove + (owner-gated) deploy", "Vellum freeze", "Vellum trusted freeze", "drift-fast"],
   "pull_requests": [
     {
       "pr": {
@@ -10,7 +11,13 @@
         "user": {"type": "Bot", "login": "shipyard-local"}
       },
       "check_runs": [
-        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"},
+        {"name": "Enforce version & skill sync", "status": "completed", "conclusion": "success"},
+        {"name": "Vellum freeze", "status": "completed", "conclusion": "success"},
+        {"name": "drift-fast", "status": "completed", "conclusion": "success"}
+      ],
+      "statuses": [
+        {"context": "Vellum trusted freeze", "state": "success", "created_at": "REPLACE_OLD"}
       ],
       "runs": [
         {"id": 34738145833, "name": "Build and Test", "status": "queued", "created_at": "REPLACE_OLD", "jobs_total_count": 0},
@@ -26,21 +33,33 @@
       },
       "check_runs": [
         {"name": "macos", "status": "queued", "started_at": "REPLACE_OLD"},
-        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"},
+        {"name": "Enforce version & skill sync", "status": "completed", "conclusion": "success"},
+        {"name": "Vellum freeze", "status": "completed", "conclusion": "success"},
+        {"name": "drift-fast", "status": "completed", "conclusion": "success"}
+      ],
+      "statuses": [
+        {"context": "Vellum trusted freeze", "state": "success", "created_at": "REPLACE_OLD"}
       ],
       "runs": []
     },
     {
       "pr": {
         "number": 8281,
-        "_comment": "The CONTROL. A healthy PR: both required contexts green on the head SHA. If this one ever produces a finding, the classifier has started flagging everything and every finding above is worthless.",
+        "_comment": "The CONTROL. A healthy PR: every required context green on the head SHA. If this one ever produces a finding, the classifier has started flagging everything and every finding above is worthless.",
         "updated_at": "REPLACE_OLD",
         "head": {"sha": "1111222233334444555566667777888899990000"},
         "user": {"type": "User", "login": "danielraffel"}
       },
       "check_runs": [
         {"name": "macos", "status": "completed", "conclusion": "success"},
-        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"}
+        {"name": "Build + prove + (owner-gated) deploy", "status": "completed", "conclusion": "success"},
+        {"name": "Enforce version & skill sync", "status": "completed", "conclusion": "success"},
+        {"name": "Vellum freeze", "status": "completed", "conclusion": "success"},
+        {"name": "drift-fast", "status": "completed", "conclusion": "success"}
+      ],
+      "statuses": [
+        {"context": "Vellum trusted freeze", "state": "success", "created_at": "REPLACE_OLD"}
       ],
       "runs": []
     }

@@ -27,6 +27,7 @@ Run:
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -36,12 +37,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import test_receipts_shadow as trs  # noqa: E402
+from test_protected_merge_receipt import BlobRedirectServer  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
            "GIT_COMMITTER_EMAIL": "t@t", "PATH": "/usr/bin:/bin:/opt/homebrew/bin"}
@@ -324,20 +328,48 @@ class StorageTests(unittest.TestCase):
         archives[6] = receipt_zip(99)          # receipt names another run
         archives[5] = receipt_zip(5, name="x")  # unexpected layout
         fetch, download = self.world(runs, archives)
-        got, refused = trs.load_receipts("O/R", "t", exclude_run="7", fetch=fetch, download=download)
+        got, refused, failed = trs.load_receipts("O/R", "t", exclude_run="7", fetch=fetch, download=download)
         self.assertEqual([r["run_id"] for r in got], ["1"])
         self.assertEqual(len(refused), 5)
-        got, _ = trs.load_receipts("O/R", "t", exclude_run=None, fetch=fetch, download=download, lookback=1)
+        self.assertEqual(failed, [])
+        got, _, _ = trs.load_receipts("O/R", "t", exclude_run=None, fetch=fetch, download=download, lookback=1)
         self.assertEqual([r["run_id"] for r in got], ["7"])
 
     def test_the_read_budget_stops_reading(self) -> None:
         runs = {r: run_rec(r) for r in range(1, 6)}
         fetch, download = self.world(runs, {r: receipt_zip(r) for r in runs})
         ticks = iter(range(0, 1000, 50))
-        got, refused = trs.load_receipts("O/R", "t", None, fetch=fetch, download=download,
-                                         budget_secs=120, clock=lambda: next(ticks))
+        got, refused, _ = trs.load_receipts("O/R", "t", None, fetch=fetch, download=download,
+                                            budget_secs=120, clock=lambda: next(ticks))
         self.assertLess(len(got), 5)
         self.assertIn("read budget", refused[-1])
+
+    def test_a_401_download_is_a_failed_lookup_not_a_refusal(self) -> None:
+        runs = {1: run_rec(1), 2: run_rec(2)}
+        fetch, _ = self.world(runs, {})
+
+        def download(url, token):
+            err = urllib.error.HTTPError(url, 401, "Server failed to authenticate the request", {}, io.BytesIO())
+            self.addCleanup(err.close)
+            raise err
+        got, refused, failed = trs.load_receipts("O/R", "t", None, fetch=fetch, download=download)
+        self.assertEqual((got, refused), ([], []))
+        self.assertEqual(failed, ["run 2: HTTP 401 Server failed to authenticate the request",
+                                  "run 1: HTTP 401 Server failed to authenticate the request"])
+        self.assertEqual(trs.lookup_failure(failed),
+                         "receipt lookup failed: HTTP 401 Server failed to authenticate the request (2 request(s))")
+
+    def test_the_default_download_follows_the_blob_redirect_without_the_token(self) -> None:
+        with BlobRedirectServer(receipt_zip(4)) as server:
+            arts = [{"name": trs.ARTIFACT_NAME, "expired": False, "created_at": "2026-09-14T00:00:00Z",
+                     "workflow_run": {"id": 4}, "archive_download_url": server.archive_url}]
+
+            def fetch(url, token):
+                return {"artifacts": arts} if "/actions/artifacts?" in url else run_rec(4)
+            got, refused, failed = trs.load_receipts("O/R", "tok", None, fetch=fetch)
+            self.assertEqual((refused, failed), ([], []))
+            self.assertEqual([r["run_id"] for r in got], ["4"])
+            self.assertEqual(server.blob_saw_authorization, [False])
 
 
 class CliTests(unittest.TestCase):
@@ -374,6 +406,33 @@ class CliTests(unittest.TestCase):
             self.assertEqual(sorted(keys), sorted(t["name"] for t in w.inventory()))
             self.assertIn(keys["A case one"]["key"], receipt["passed"])
             self.assertEqual(keys["B case"]["kind"], "binary")
+
+    def test_a_failed_lookup_is_a_warning_and_named_in_the_verdict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            w = World(Path(tmp))
+            w.script_inputs = {}
+            sel = Path(tmp) / "selected.json"
+            sel.write_text(json.dumps({"tests": w.inventory()}))
+            junit = Path(tmp) / "j.xml"
+            junit.write_text('<testsuite><testcase name="A case one" time="1"/></testsuite>')
+            out, summary = Path(tmp) / "r" / "test-receipts.json", Path(tmp) / "summary.md"
+            failed = ["run 3: HTTP 401 Server failed to authenticate the request"]
+            stdout = io.StringIO()
+            with mock.patch.object(trs, "load_receipts", return_value=([], [], failed)), \
+                    contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                rc = trs.main(["trs", "run", "--build-dir", str(w.build), "--source-root", str(w.src),
+                               "--repository", "O/R", "--merge-sha", "HEAD", "--junit", str(junit),
+                               "--selected-json", str(sel), "--run-id", "55", "--receipts-out", str(out),
+                               "--summary", str(summary), "--toolchain-id", "tc", "--token", "t"])
+            self.assertEqual(rc, 0)
+            lines = stdout.getvalue().splitlines()
+            warning = next(l for l in lines if l.startswith(f"::warning title={trs.TITLE}-lookup::"))
+            self.assertIn("receipt lookup failed: HTTP 401", warning)
+            notice = next(l for l in lines if l.startswith(f"::notice title={trs.TITLE}::"))
+            verdict = json.loads(notice.split("::", 2)[2])
+            self.assertEqual(verdict["lookup_errors"], 1)
+            self.assertIn("receipt lookup failed: HTTP 401", verdict["lookup_error"])
+            self.assertIn("receipt lookup failed: HTTP 401", summary.read_text())
 
     def test_unreadable_inputs_give_no_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
