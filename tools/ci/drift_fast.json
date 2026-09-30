@@ -4,6 +4,12 @@
   "ctest_labels": [
     "pr-fast"
   ],
+  "workflow_preconditions": [
+    {
+      "step": "tools/scripts/hydrate_gpu_provenance_commits.py",
+      "why": "gpu-probe-historical-v1-acceptance (pr-fast) walks commits outside the depth-2 event checkout and raises ShallowCheckoutError without them; before this step ran it failed all 21 merge groups from 2026-09-29 09:41Z to 22:12Z while macos passed each one"
+    }
+  ],
   "tests": [
     {
       "name": "consumption-census-drift",

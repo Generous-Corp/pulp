@@ -22,7 +22,8 @@ when a label selects nothing or when ctest ran a different number of tests
 than were selected.
 
 ``check`` is the static contract: the manifest parses, names no test twice,
-and the workflow still calls ``run`` on both pull_request and merge_group.
+the workflow still calls ``run`` on both pull_request and merge_group, and it
+runs every ``workflow_preconditions`` step before that call.
 """
 
 from __future__ import annotations
@@ -65,6 +66,11 @@ def manifest_problems(data: dict[str, Any]) -> list[str]:
     tests = data.get("tests", [])
     if not isinstance(labels, list) or not all(isinstance(x, str) and x for x in labels):
         problems.append("ctest_labels must be a list of non-empty strings")
+    preconditions = data.get("workflow_preconditions", [])
+    if not isinstance(preconditions, list) or not all(
+        isinstance(x, dict) and x.get("step") and x.get("why") for x in preconditions
+    ):
+        problems.append("workflow_preconditions entries need a 'step' and a 'why'")
     if not isinstance(tests, list) or not tests:
         problems.append("tests must be a non-empty list")
         return problems
@@ -218,8 +224,31 @@ def verdict(returncode: int, output: str, expected: int) -> int:
     return 0
 
 
+def precondition_problems(data: dict[str, Any], text: str, name: str) -> list[str]:
+    """A step the selection needs must run before the driver, or the lane goes red on the runner.
+
+    A selected test that passes on the gate but needs something the hosted
+    checkout lacks fails every run here without a real drift, which is a false
+    alarm, not a catch. The manifest names each such step and the workflow must
+    invoke it ahead of ``drift_fast.py run``.
+    """
+    problems: list[str] = []
+    # A step named only in a comment does not run.
+    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    run_at = text.find("tools/ci/drift_fast.py run")
+    for entry in data.get("workflow_preconditions", []):
+        step = entry.get("step", "") if isinstance(entry, dict) else ""
+        at = text.find(step) if step else -1
+        if at < 0:
+            problems.append(f"{name}: never runs precondition {step}")
+        elif run_at >= 0 and at > run_at:
+            problems.append(f"{name}: runs precondition {step} after tools/ci/drift_fast.py run")
+    return problems
+
+
 def check(args: argparse.Namespace) -> int:
-    problems = manifest_problems(load_manifest(pathlib.Path(args.manifest)))
+    data = load_manifest(pathlib.Path(args.manifest))
+    problems = manifest_problems(data)
     workflow = pathlib.Path(args.workflow)
     text = workflow.read_text(encoding="utf-8") if workflow.exists() else ""
     if not text:
@@ -233,6 +262,7 @@ def check(args: argparse.Namespace) -> int:
             problems.append(f"{workflow.name}: never calls tools/ci/drift_fast.py run")
         if not re.search(r"^\s+name:\s*drift-fast\s*$", text, re.MULTILINE):
             problems.append(f"{workflow.name}: no job named drift-fast")
+        problems.extend(precondition_problems(data, text, workflow.name))
     for p in problems:
         print(f"drift-fast: {p}", file=sys.stderr)
     if problems:
