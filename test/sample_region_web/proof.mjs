@@ -37,6 +37,20 @@ function catalog(params, wam, name) {
   check(near(wam ? p.minValue : p.min, -0.99) && near(wam ? p.maxValue : p.max, 0.99)
     && near(wam ? p.defaultValue : p.default, 0.5), `${name} range/default`);
 }
+async function parameterInfo(wam, name) {
+  // The worklet posts parameter metadata asynchronously after it becomes
+  // ready. A second WAM instance in the same OfflineAudioContext can reach its
+  // first suspension before that message crosses the port; wait for the
+  // contract we are about to assert instead of treating that scheduling race
+  // as a catalog defect.
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const params = await wam.getParameterInfo();
+    if (params.length > 0) return params;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  throw new Error(`${name} parameter metadata timed out`);
+}
 async function clapInstance(kind) {
   const host = await new WebClapHost().instantiate(await bytes(`/${kind}/module.wasm`));
   const plugin = host.createPlugin(0).init().activate(RATE, 1, 512);
@@ -100,7 +114,7 @@ async function renderWam(kind, restored = null) {
     await timeout(stops[stage], 'offline suspension');
     check(!processorError, `WAM ${kind} stage ${stage} processor remained live`);
     if (wam._lastError) throw new Error(wam._lastError);
-    params = await wam.getParameterInfo();
+    params = await parameterInfo(wam, `WAM ${kind}`);
     if (kind === 'region') {
       catalog(params, true, `WAM stage ${stage}`);
       check(wam.latencySamples === 0, 'WAM zero latency');
