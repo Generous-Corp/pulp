@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  captureStableFrameWithHiddenPaint,
   captureStableScreenshot,
   freezeAndMeasureDocumentExtent,
   freezeDynamicTime,
@@ -143,6 +144,61 @@ test("default screenshot horizon drains a late full-page compositor", async () =
 
   assert.equal(screenshot.toString(), "settled");
   assert.equal(calls, 32);
+});
+
+test("a frame that hid nothing is the accepted frame, with no new horizon",
+  async () => {
+  let calls = 0;
+  const cdp = {
+    async call() {
+      calls += 1;
+      return { data: Buffer.from("replacement").toString("base64") };
+    },
+  };
+  const accepted = Buffer.from("accepted");
+
+  const frame = await captureStableFrameWithHiddenPaint(cdp, {}, accepted, 0);
+
+  assert.equal(frame, accepted);
+  assert.equal(calls, 0);
+});
+
+test("a frame that hid paint, or cannot say, observes its own horizon",
+  async () => {
+  for (const hiddenCount of [2, undefined, null, "0"]) {
+    let calls = 0;
+    const cdp = {
+      async call(method) {
+        assert.equal(method, "Page.captureScreenshot");
+        calls += 1;
+        return { data: Buffer.from("plate").toString("base64") };
+      },
+    };
+
+    const frame = await captureStableFrameWithHiddenPaint(
+      cdp, {}, Buffer.from("accepted"), hiddenCount);
+
+    assert.equal(frame.toString(), "plate", `hidden count ${hiddenCount}`);
+    assert.equal(calls, 32, `hidden count ${hiddenCount}`);
+  }
+});
+
+test("a hidden-paint frame gets one fresh horizon when the first misses its tail",
+  async () => {
+  let calls = 0;
+  const cdp = {
+    async call() {
+      const frame = calls < 32 ? `moving-${calls}` : "plate";
+      calls += 1;
+      return { data: Buffer.from(frame).toString("base64") };
+    },
+  };
+
+  const frame = await captureStableFrameWithHiddenPaint(
+    cdp, {}, Buffer.from("accepted"), 1);
+
+  assert.equal(frame.toString(), "plate");
+  assert.equal(calls, 64);
 });
 
 test("final capture extent rejects content wider or taller than the axis budget",

@@ -205,7 +205,9 @@ leaves the lane.
 
 When the repository variable `PULP_CLASSIFY_WIDE_NON_NATIVE` is `1`, one more
 step, **Wide non-native tier**, runs `tools/ci/wide_non_native_checks.json`
-through the same runner (after installing PyYAML for `tools_registry_check.py`).
+through the same runner (after installing PyYAML for `tools_registry_check.py`;
+the install goes through `tools/ci/net-retry.sh`, three attempts spaced 20 s
+and 40 s apart, so a PyPI blip does not fail this required context).
 Those are the macOS gate's repository scanners that read `tools/**` without
 naming files; they must run here because `build.yml`'s `classify` job may then
 skip the native matrix for a tooling-only change. Unset, the step is skipped.

@@ -231,11 +231,16 @@ function runInstallScenario(dir, env) {
     fs.writeFileSync(fakeNpm, FAKE_NPM, "utf8");
     const inputPath = mkFixture(dir, "export class Solo { }");
     const outputPath = path.join(dir, "out.js");
+    // These scenarios exercise the online install path, so an inherited
+    // PULP_OFFLINE_BUILD (CI sets it job-wide) must not turn them into the
+    // offline refusal that test_bundle_threejs_offline.mjs covers.
+    const baseEnv = { ...process.env };
+    delete baseEnv.PULP_OFFLINE_BUILD;
     const result = spawnSync(process.execPath,
         [path.join(dir, "bundle_threejs_for_jsc.mjs"), "--input", inputPath, "--output", outputPath], {
             encoding: "utf8",
             env: {
-                ...process.env,
+                ...baseEnv,
                 PULP_BUNDLE_THREEJS_NPM_JS: fakeNpm,
                 PULP_BUNDLE_THREEJS_NPM_ATTEMPTS: "3",
                 PULP_BUNDLE_THREEJS_NPM_BACKOFF_MS: "0",

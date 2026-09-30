@@ -364,6 +364,6 @@ jobs:
         if: vars.PULP_CLASSIFY_WIDE_NON_NATIVE == '1'
         timeout-minutes: 15
         run: |
-          python3 -m pip install --quiet 'PyYAML==6.0.2'
+          tools/ci/net-retry.sh python3 -m pip install --quiet 'PyYAML==6.0.2'
           python3 tools/ci/source_selftests.py run \
             --manifest tools/ci/wide_non_native_checks.json --min-count 7

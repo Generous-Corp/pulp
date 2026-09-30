@@ -38,9 +38,19 @@ export async function waitAtMost(promise, milliseconds) {
 
 // How long a launch waits for its lifecycle guardian to publish custody. The
 // guardian is a fresh Node process that must start, verify the browser's
-// identity and write its readiness marker; on a loaded machine that alone has
-// overrun 1.5 seconds, and a missed deadline tears down a healthy launch.
-const GUARDIAN_CUSTODY_TIMEOUT_MS = 5000;
+// identity and write its readiness marker, so its start-up time scales with
+// the machine's load: a fixed budget has been overrun at 1.5 and then at 5
+// seconds, and a missed budget tears down a healthy launch. The wait already
+// fails at once when the guardian exits, so a separate short timer protects
+// nothing; custody therefore shares the launch's own deadline, the one the
+// DevTools endpoint wait uses, and never waits less than this floor.
+export const GUARDIAN_CUSTODY_MIN_TIMEOUT_MS = 5000;
+
+export function guardianCustodyTimeoutMs(launchTimeoutMs) {
+  return Number.isFinite(launchTimeoutMs)
+    ? Math.max(GUARDIAN_CUSTODY_MIN_TIMEOUT_MS, launchTimeoutMs)
+    : GUARDIAN_CUSTODY_MIN_TIMEOUT_MS;
+}
 
 const OWNER_MARKER = ".pulp-browser-owner-v1.json";
 const GUARDIAN_READY = ".pulp-browser-guardian-ready";
@@ -358,7 +368,7 @@ export async function resolveOwnedBrowserIdentity(
     : "browser launch identity could not be read before the probe deadline");
 }
 
-async function startBrowserGuardian(child, profileDir) {
+async function startBrowserGuardian(child, profileDir, launchTimeoutMs) {
   const browserIdentity = await resolveOwnedBrowserIdentity(child, profileDir);
   await writeOwnershipMarker(profileDir, child.pid, browserIdentity);
   const custody = {
@@ -386,7 +396,7 @@ async function startBrowserGuardian(child, profileDir) {
   guardian.unref();
   guardian.stdin?.unref?.();
   const readyPath = path.join(profileDir, GUARDIAN_READY);
-  const deadline = Date.now() + GUARDIAN_CUSTODY_TIMEOUT_MS;
+  const deadline = Date.now() + guardianCustodyTimeoutMs(launchTimeoutMs);
   while (Date.now() < deadline) {
     if (guardian.exitCode !== null) {
       throw new Error("browser lifecycle guardian exited before custody");
@@ -678,7 +688,7 @@ export async function launchBrowser(
     stderr += `\nbrowser launch failed (${error?.code ?? "spawn-error"})`;
   });
   try {
-    await startBrowserGuardian(child, profileDir);
+    await startBrowserGuardian(child, profileDir, timeoutMs);
     const endpoint = await waitForDevToolsPort(profileDir, child, timeoutMs);
     return { child, endpoint, stderr: () => stderr };
   } catch (error) {

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260930-browser-capture-load-deadline-watch",
+  "created_at": "2026-09-30T06:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest"
+  ],
+  "rationale": "Record a browser-capture robustness fix that crosses the design-source-ingest and design-output-and-packaging families through their tools/import-design/** selectors, the chromium-authoring-frontend family through tools/import-design/**/*browser*, and design-source-ingest again through .agents/skills/import-design/**. In tools/import-design/browser_capture, captureStableFrameWithHiddenPaint reuses the already-accepted stable frame when the page reports zero hidden elements instead of running a second identical screenshot horizon, and guardian custody during browser launch now shares the launch deadline (5 s floor) instead of a fixed 5 s wait; settle and browser_process node tests cover both, and the import-design skill documents the behaviour. Capture output bytes, DesignIR, rendering, codegen, fixtures and thresholds are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-browser-capture-node-unit",
+    "pulp-browser-capture-node-integration"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

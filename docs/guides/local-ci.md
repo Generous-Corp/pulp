@@ -1539,6 +1539,45 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Build-time Node dependencies are installed before the build, never inside it
+
+The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
+iOS AUv3 POST_BUILD command inside the iOS compile gate and as the
+`pulp_bundle_threejs_for_jsc_smoke` ctest. It loads esbuild from
+`tools/scripts/node_modules`, and when that is absent its default is to run
+`npm install` on the spot. That is convenient in a local checkout and wrong in
+the required gate: an ephemeral VM starts without `node_modules`, so every gate
+run made a compile depend on `registry.npmjs.org`, and a DNS blip
+(`getaddrinfo ENOTFOUND registry.npmjs.org`) failed the `macos` check as an
+iOS compile error (exit 65) three times between 2026-09-27 and 2026-09-29, on
+three different hosts.
+
+`build.yml` now splits the two:
+
+1. The build job sets `PULP_OFFLINE_BUILD=1`. Under it the bundler refuses a
+   missing esbuild with exit 3 and a message naming
+   `npm ci --prefix tools/scripts`, instead of fetching. Any value other than
+   empty, `0`, `false`, `no` or `off` counts. Local builds leave it unset and
+   keep the one-time install.
+2. The **Install build-time Node dependencies** step, ahead of **Build**, runs
+   `npm ci --prefix tools/scripts --prefer-offline` from the committed
+   `package-lock.json` with three attempts spaced 20 s and 40 s apart
+   (`PULP_NPM_RETRY_DELAY_SECS`). It first loads the installed esbuild, checks
+   its version against the lockfile and runs one transform (which starts the
+   platform binary), and stops there with no registry contact when that works.
+   It succeeds only when the same probe passes after the install. Without
+   `node` on `PATH` it does nothing, because CMake then registers neither the
+   bundle step nor its tests.
+
+A registry outage now fails that step, after its retries, with a message that
+says so, rather than surfacing twenty minutes later as a compile failure. No
+tartci host mount carries an npm cache today, so `--prefer-offline` only helps
+where the runner's own `~/.npm` persists; an npm cache mount analogous to
+`TARTCI_PIP_WHEELHOUSE` would remove the registry from the gate entirely.
+`tools/scripts/test_node_build_deps_step.py` runs the step's real script
+against a stub registry, and `pulp_bundle_threejs_for_jsc_offline` proves the
+bundler never launches npm under `PULP_OFFLINE_BUILD`.
+
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 **Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
@@ -1924,8 +1963,10 @@ reported on.
 **Where main's evidence comes from without a build.** The merge_group run whose
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
 method that run tested exactly the commit on main. It is judged by its
-**required gate jobs** — the job names in `.shipyard/config.toml`
-`[governance] required_status_checks`, i.e. `macos` — never by the run's
+**required gate jobs** — the jobs in that build.yml run named by
+`.shipyard/config.toml` `[governance] required_status_checks`, i.e. `macos`
+(the list's other contexts are produced by other workflows and select no job
+here) — never by the run's
 conclusion, which also folds in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
 Linux failure into a fake batch streak. The tip's run is read at any status,
@@ -2243,12 +2284,34 @@ tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
 way CI does; without a base it compares every entry, and entries whose
 recorded path embeds a build-directory name report as stale.
 
-**It is advisory.** `drift-fast` is not a required status check, so a red run
-does not block a merge group. Requiring it is a ruleset change on `main`
-(adding `drift-fast` to the required status checks), which also turns every
-drift-only batch into a fail-in-minutes ejection instead of a
-fail-after-the-build one. That is an owner decision; this workflow does not
-make it.
+**It is required.** `drift-fast` is a required status check on `main`, so a red
+run blocks the pull request and ejects the merge group, in minutes rather than
+after the ~20-minute `macos` build. It was promoted after 18 consecutive green
+`merge_group` runs with no false alarm, following two environment fixes that
+removed its only false alarms: the bounded GPU-provenance hydration above
+(`gpu-probe-historical-v1-acceptance` raised `ShallowCheckoutError` on the
+depth-2 checkout), and `consumption-census-drift-description` comparing only
+header roots the checkout actually provisions. The one caveat: in that window no merge group was genuinely drifted,
+so it has not yet shown a true catch at the merge-group stage; its pull-request
+runs have caught real drift (`skip-not-pass-lint`, `script-test-inputs-drift`)
+on heads that were then fixed before queueing.
+
+Because it is required, it must report on every event it can see. A required
+check that never reports holds a pull request on "Expected — Waiting for
+status" forever. So the workflow triggers on every `pull_request` to `main`
+(drafts included, no `paths:` or `paths-ignore:` filter) and on every
+`merge_group`, and its job carries no job-level `if:`. `tools/ci/drift_fast.py
+check` fails if either invariant is broken, and `drift-fast-selftest` runs it.
+Step-level `if:` is fine: it skips a step, never the job. A pull request from a
+fork needs a maintainer's approval before any workflow runs, which holds every
+required check equally; see the `contrib-intake` skill.
+
+Live enforcement is classic branch protection, not a ruleset; the checked-in
+`.github/rulesets/main-protection.json` and `.shipyard/config.toml`
+`[governance]` mirror it, and `base-poison-detector-selftest` fails when those
+two disagree. `[governance]` is the full six-context contract, because
+`shipyard governance apply` pushes exactly that list to branch protection.
+Removing it again is the reverse `required_status_checks` edit.
 
 ## A green `macos` check does not always mean the suite ran
 
@@ -3973,7 +4036,7 @@ hours with 34 PRs open and nothing merging while every check was green.)
    is read from branch protection at runtime, not hardcoded; if the token cannot
    read protection rules it falls back to the complete documented `main` set:
    `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
-   deploy`, `Vellum trusted freeze`, and `Vellum freeze`.
+   deploy`, `Vellum trusted freeze`, `Vellum freeze`, and `drift-fast`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -6330,10 +6393,10 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **five**
+workflow that produces it. Branch protection on `main` requires **six**
 contexts, and the tool's built-in default reads only `build.yml` — which left
-four of them `no_producer`: not checked, and reported as a warning that reads
-identically to a clean result. `.shipyard/config.toml` therefore names all five
+the others `no_producer`: not checked, and reported as a warning that reads
+identically to a clean result. `.shipyard/config.toml` therefore names all six
 producers explicitly:
 
 | required context | producing workflow |
@@ -6343,8 +6406,9 @@ producers explicitly:
 | `Build + prove + (owner-gated) deploy` | `wclap-cloudflare.yml` |
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
+| `drift-fast` | `drift-fast.yml` |
 
-None of the five is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,
@@ -6432,7 +6496,20 @@ jobs** for 15 minutes (the concurrency-holder signature, which reads exactly
 like runner saturation and is not). It opens, edits and closes one issue
 labelled `ci-landing-wedge`, and writes nothing else.
 
-Budget: 1 call plus at most 3 per open PR, every 30 minutes, on
+A required context counts as present when the head carries it as a check run
+**or** a commit status: `Vellum trusted freeze` reaches a pull request's head
+as a status posted by a `pull_request_target` run, so a check-run-only reader
+would call it absent on every pull request. The required set is
+`[governance] required_status_checks`, all six contexts.
+
+Every tick first replays `tools/scripts/fixtures/landing_watchdog_wedge.json`
+against that set as a negative control; it must fire (`absent`, `unassigned`,
+`zero_jobs`) and must not flag the fixture's healthy pull request. The replay
+rewrites the fixture's `REPLACE_OLD` timestamps against the current clock; read
+raw, every age is zero and the control cannot fire.
+
+Budget: 1 call plus 3 per open PR (check runs, combined status, workflow runs),
+plus one jobs probe per pending run (at most 3), every 30 minutes, on
 `GITHUB_TOKEN`'s own per-repository bucket.
 
 ### Both detectors report their own failure
@@ -6557,9 +6634,36 @@ Two more downloads followed the same pattern and are now fetched up front:
   reset (exit 56), the two that actually happened. It now passes
   `--retry-all-errors` and keeps the SHA-256 check.
 
-`tools/scripts/test_build_fetch_resilience.py` runs the cargo step's real
-script against a stub `cargo`, checks the step precedes every cargo consumer,
-and rejects any `curl` in the build job that lacks `--retry-all-errors`.
+- **ccache (macOS).** The gate VM golden bakes ccache, yet `brew install ccache`
+  still reached the Homebrew API and one failed attempt failed the gate. The
+  step now uses an installed ccache as is and only installs when it is absent,
+  with three attempts spaced 20 s and 40 s apart
+  (`PULP_BREW_RETRY_DELAY_SECS`) and a `brew update` before each retry.
+- **pip and git in the other required contexts.** `vellum-freeze-check.yml`,
+  `vellum-trusted-gate.yml` and `version-skill-check.yml` install PyYAML and
+  fetch commits. Each such command runs through `tools/ci/net-retry.sh`
+  (`PULP_NET_RETRY_ATTEMPTS`, default 3; `PULP_NET_RETRY_DELAY_SECS`, default
+  20, multiplied by the attempt number), which wraps only the network command
+  and returns its exit status after the last attempt. The trusted merge-group
+  job keeps an inline loop instead, because it runs the protected base
+  commit's tools, which can predate a helper the workflow file names.
+
+`tools/scripts/test_build_fetch_resilience.py` runs the cargo and ccache steps'
+real scripts against stub `cargo` and `brew`, drives `net-retry.sh` with a
+failing stub, checks the cargo step precedes every cargo consumer, rejects any
+`curl` in the build job that lacks `--retry-all-errors`, and rejects a pip
+install or git fetch/clone in those three required workflows that neither goes
+through `net-retry.sh` nor sits in a step with its own retry loop.
+
+**A deleted merge-queue branch is a notice, not a fetch failure.**
+`hydrate_gpu_provenance_commits.py` fetches the event ref first. On a
+`merge_group` run that is `gh-readonly-queue/...`, which GitHub deletes when it
+drops or re-forms the group while the run keeps going, so git answers
+`couldn't find remote ref`. The script reports that as a
+`::notice::... merge group gone` line and falls back to the event commit. Every
+other fetch error, including any other error on the queue branch, is still a
+`bounded fetch failed` warning, and unresolved or non-ancestor provenance still
+fails the step.
 
 ## Protected-validation receipt reuse
 

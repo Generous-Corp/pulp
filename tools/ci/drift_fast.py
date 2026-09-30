@@ -12,7 +12,7 @@ they run after a ~20-minute build. None of them needs that build.
 plus individual registrations (``tests``). ``run`` resolves that selection
 against a configured build tree and runs it with ctest, so SKIP_RETURN_CODE,
 PASS_REGULAR_EXPRESSION, TIMEOUT and RESOURCE_LOCK behave exactly as on the
-gate. The advisory hosted ``drift-fast`` job
+gate. The required hosted ``drift-fast`` job
 (``.github/workflows/drift-fast.yml``) is its caller.
 
 It reports, rather than hides, what it could not check: a listed test this
@@ -258,6 +258,16 @@ def check(args: argparse.Namespace) -> int:
         for event in ("pull_request", "merge_group"):
             if not re.search(rf"^\s+{event}:", on_block, re.MULTILINE):
                 problems.append(f"{workflow.name}: does not trigger on {event}")
+        # drift-fast is a required status check. A required check whose run is
+        # filtered out or whose job is skipped never reports, and the pull
+        # request waits on "Expected" forever, so the trigger must not filter
+        # by path and the job must not be conditional.
+        for key in ("paths", "paths-ignore"):
+            if re.search(rf"^\s+{key}:", on_block, re.MULTILINE):
+                problems.append(f"{workflow.name}: filters its trigger with {key}:")
+        jobs_block = text.split("\njobs:", 1)[1] if "\njobs:" in text else ""
+        if re.search(r"^    if:", jobs_block, re.MULTILINE):
+            problems.append(f"{workflow.name}: a job-level if: can skip the required check")
         if "tools/ci/drift_fast.py run" not in text:
             problems.append(f"{workflow.name}: never calls tools/ci/drift_fast.py run")
         if not re.search(r"^\s+name:\s*drift-fast\s*$", text, re.MULTILINE):

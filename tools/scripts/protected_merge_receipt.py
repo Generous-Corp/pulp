@@ -46,6 +46,17 @@ POLICY_PATHS = (
 # `source-selftest` tests run on the required `Enforce version & skill sync`
 # context for every merge group, receipt or not.
 REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab|source-selftest"
+# A change that needs a `slow-affected` proof runs the same selection with the
+# `slow` alternative anchored to `^slow$` (tools/ci/ctest_gate_args.label_exclude
+# with affected_slow). An anchored alternative matches a subset of the labels
+# the unanchored one does, so that run excludes fewer tests: it executed every
+# test the plain selection would, plus the proof. It is equally full
+# validation, and the classifier makes the same choice for the merge group,
+# whose tree and base a receipt must match exactly.
+ACCEPTED_LABEL_EXCLUDES = frozenset({
+    REQUIRED_LABEL_EXCLUDE,
+    "|".join("^slow$" if part == "slow" else part for part in REQUIRED_LABEL_EXCLUDE.split("|")),
+})
 MIN_SELECTED_PERCENT = 80
 SELECTION_KEYS = ("label_exclude", "exclude_regex", "label_include", "include_regex")
 VALIDATION_KEYS = (
@@ -379,7 +390,7 @@ def check_validation(record: Any) -> None:
     _require_exact_keys(selection, SELECTION_KEYS, "receipt selection")
     if selection["label_include"] or selection["include_regex"]:
         raise ReceiptError("receipt records a narrowed test tier, not full validation")
-    if selection["label_exclude"] != REQUIRED_LABEL_EXCLUDE:
+    if selection["label_exclude"] not in ACCEPTED_LABEL_EXCLUDES:
         raise ReceiptError("receipt excludes a different label set than the merge group runs")
     for key in ("selected_digest", "results_digest"):
         value = record[key]

@@ -146,6 +146,23 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("does not trigger on merge_group", out)
 
+    def test_workflow_with_path_filter_fails(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
+            "  merge_group:\n", "    paths: ['core/**']\n  merge_group:\n"
+        )
+        rc, out = self.check(text)
+        self.assertEqual(rc, 1)
+        self.assertIn("filters its trigger with paths:", out)
+
+    def test_workflow_with_conditional_job_fails(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
+            "    runs-on: ubuntu-latest\n",
+            "    if: github.event_name == 'merge_group'\n    runs-on: ubuntu-latest\n",
+        )
+        rc, out = self.check(text)
+        self.assertEqual(rc, 1)
+        self.assertIn("job-level if:", out)
+
     def test_workflow_not_calling_run_fails(self):
         text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
             "tools/ci/drift_fast.py run", "true"

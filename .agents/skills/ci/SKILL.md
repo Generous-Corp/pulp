@@ -13,8 +13,8 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
-The hosted `drift-fast` workflow selects the historical GPU-probe acceptance
-test from a depth-2 checkout. Keep its bounded
+The hosted `drift-fast` workflow is a required status check. It selects the
+historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 `hydrate_gpu_provenance_commits.py` step after checkout and before configure;
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
@@ -289,8 +289,9 @@ default branch's copy with base-repo permissions: never check out
 
 **Where main's evidence comes from without a build.** The merge_group run whose
 head sha is main's tip (`source: head-sha`), judged by its **required gate
-jobs** — the names in `.shipyard/config.toml` `[governance]
-required_status_checks`, i.e. `macos` — never by the run conclusion, and read at
+jobs** — the jobs in that build.yml run named by `.shipyard/config.toml`
+`[governance] required_status_checks`, i.e. `macos` (the list's other contexts
+come from other workflows and select no job) — never by the run conclusion, and read at
 any run status because a group lands as soon as its required checks pass while
 advisory legs may still run. If that run's gate is not evidence (a reused
 receipt, still running), an earlier merge group that built the same tree is
@@ -877,7 +878,7 @@ ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
 branch is allowed. Needing a new third-party package means adding it to the lock
 (and the wheelhouse), not to the check.
 
-### `drift-fast` catches tree-reading drift before the build, advisory only
+### `drift-fast` catches tree-reading drift before the build, and is required
 
 The hosted `drift-fast` job (`.github/workflows/drift-fast.yml`) configures the
 tip-plus-head tree without building and runs `tools/ci/drift_fast.json`'s
@@ -885,8 +886,14 @@ selection (the `pr-fast` tier plus `wide-non-native-selftest`, the census,
 tools-registry, rack, lane-contract and scheduling checks) in a few minutes.
 When a merge group ejects on one of those, its `drift-fast` run on the same
 group should already name the test, minutes earlier; read it before the
-`macos` log. It is NOT
-required, so it never blocks by itself, and on its Linux configure the census
+`macos` log. It IS
+required (classic branch protection, mirrored in the checked-in ruleset and
+`[governance]`), so a red run blocks the PR and ejects the group by itself.
+Never add a `paths:` filter to its trigger or a job-level `if:`: a required
+check that does not report holds every PR on "Expected" forever, and
+`drift_fast.py check` fails on either. Its one open caveat is that no merge
+group has yet been genuinely drifted since it went green, so its merge-group
+true-catch rate is unproven. On its Linux configure the census
 comparison skips (only `darwin-arm64` profiles are recorded) and
 `ios-compile-gate-legs` is not registered; both print as `NOT CHECKED`. A new
 tree-reading check that can pass from a configure alone belongs in the
@@ -1690,6 +1697,24 @@ exports `CARGO_NET_OFFLINE=true`. The Chrome download uses
 `test_build_fetch_resilience.py` fails on a `curl` in the build job without
 `--retry-all-errors`, so a new unretried download cannot creep back in.
 
+**Required workflows retry pip and git through `tools/ci/net-retry.sh`.** The
+same test fails on a `pip install` or `git fetch`/`git clone` in
+`vellum-freeze-check.yml`, `vellum-trusted-gate.yml` or `version-skill-check.yml`
+that neither goes through the helper nor sits in a step with its own
+`for attempt` loop. Wrap only the network command, never a check whose failure
+is a verdict. Watch out: a job that checks out a different commit than the
+workflow file came from (the trusted merge-group job checks out
+`merge_group.base_sha`) cannot call a helper this PR adds, because the base
+commit predates it; the first merge group would fail with `No such file`. Keep
+such retries inline. The macOS ccache step uses an installed ccache (the gate
+golden bakes it) and never calls `brew install` then.
+
+**A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
+`hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
+to the event commit; only other fetch errors print `bounded fetch failed`.
+Before attributing a hydrate-step red to a vanished queue branch, check that the
+run's workflow commit carries the event-commit fallback at all.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
@@ -1705,6 +1730,22 @@ The general shape, worth reaching for whenever a lane's health depends on
 something being installed: pair the provisioning step with one non-skippable
 test that asserts the provisioning worked. The install step reports that it ran;
 only the test reports that it landed.
+
+**Build-time npm is installed before the build (`PULP_OFFLINE_BUILD`).** The
+Three.js bundler used to `npm install` esbuild mid-build whenever
+`tools/scripts/node_modules` was absent, which on an ephemeral gate VM is every
+run; a `getaddrinfo ENOTFOUND registry.npmjs.org` then red the required `macos`
+check as an iOS compile gate exit 65 (3 jobs, 2026-09-27..29, m1/m3/m5). The
+build job now sets `PULP_OFFLINE_BUILD=1` (bundler exits 3 naming
+`npm ci --prefix tools/scripts` instead of fetching) and the **Install
+build-time Node dependencies** step runs `npm ci` from the lockfile with three
+spaced attempts before **Build**. An npm error in that step is the registry or
+the guest's egress, not the diff. Any new build step or ctest that fetches must
+follow the same split: provision in a retried step, refuse under
+`PULP_OFFLINE_BUILD`. Known remaining in-build fetches: cargo (Rust CLI build
+and `pulp-rust-*` cargo ctests pull crates) and the iOS gate's Skia simulator
+slice (`fetch_skia_for_release.py`, which retries transient download errors
+itself but is fetched fresh into the gate build tree each run).
 
 ## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
 
@@ -5153,11 +5194,20 @@ skipped run as a pass.
 alongside `.github/rulesets/main-protection.json`. Two hard rules:
 
 - **The declared required checks must match the LIVE GitHub ruleset, not what
-  we wish we enforced.** Live `main` requires exactly two contexts: `macos` and
-  `Enforce version & skill sync`. Both the `[governance]
-  required_status_checks` list in `.shipyard/config.toml` AND the
-  `required_status_checks` array in `main-protection.json` are pinned to that
-  two-context set. `[branch_protection."main"] require_strict_status = true`
+  we wish we enforced.** Live `main` requires six contexts: `macos`,
+  `Enforce version & skill sync`, `Build + prove + (owner-gated) deploy`,
+  `Vellum freeze`, `Vellum trusted freeze` and `drift-fast`. Both the
+  `[governance] required_status_checks` list in `.shipyard/config.toml` AND the
+  `required_status_checks` array in `main-protection.json` name that full set;
+  `base-poison-detector-selftest` fails when the two disagree. The list must be
+  the WHOLE contract: `shipyard governance apply` PUTs exactly it to branch
+  protection, so a partial list silently drops required checks. A reader that
+  judges only part of it narrows it itself — the base-poison detector reads
+  build.yml runs, where only `macos` names a job; the landing watchdog reads
+  commit statuses as well as check runs, because `Vellum trusted freeze`
+  reaches a PR head as a status from a `pull_request_target` run and a
+  check-run-only reader calls it absent on every PR.
+  `[branch_protection."main"] require_strict_status = true`
   mirrors the ruleset's `strict_required_status_checks_policy`. Before editing
   either, run `shipyard governance diff` — a clean run prints
   `OK main: no changes`; any other output means the checked-in intent has
@@ -5168,8 +5218,7 @@ alongside `.github/rulesets/main-protection.json`. Two hard rules:
   lane would wedge every merge — without adding signal. This is why the ruleset
   was trimmed from four contexts to two: so nobody can "fix drift" by pushing a
   config that flips the advisory lanes blocking. `test_ruleset_drift_config.py`
-  asserts the two-context required set; keep it and the two config surfaces in
-  lockstep.
+  pins the required set; keep it and the two config surfaces in lockstep.
 
 ## PR Review Thread Hygiene
 
@@ -8565,6 +8614,7 @@ by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf
 - `Build + prove + (owner-gated) deploy`
 - `Vellum freeze` — `.github/workflows/vellum-freeze-check.yml`
 - `Vellum trusted freeze` — status posted by `.github/workflows/vellum-trusted-gate.yml`
+- `drift-fast` — `.github/workflows/drift-fast.yml` (hosted, configure-only drift checks)
 
 `vellum-routing-contract` is a separate evidence-producing check. It executes
 the closed repository-qualified Pulp/Vellum router suite on relevant PRs and on
@@ -8638,7 +8688,8 @@ ghapp api repos/Generous-Corp/pulp/branches/main/protection \
 ```
 
 which today returns `macos`, `Enforce version & skill sync`, `Build + prove +
-(owner-gated) deploy`, `Vellum trusted freeze`, and `Vellum freeze`. Never
+(owner-gated) deploy`, `Vellum trusted freeze`, `Vellum freeze`, and
+`drift-fast`. Never
 describe a check as non-blocking, or propose deleting it, on ruleset evidence
 alone.
 
