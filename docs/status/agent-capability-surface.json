@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 98,
+  "inventory_version": 99,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 497,
-    "reviewed_headers": 216,
-    "legacy_unreviewed_headers": 281,
+    "reviewed_headers": 217,
+    "legacy_unreviewed_headers": 280,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 118,
       "capability_support": 44,
-      "infrastructure": 52,
-      "legacy_unreviewed": 281,
+      "infrastructure": 53,
+      "legacy_unreviewed": 280,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 10,
-        "legacy_unreviewed_headers": 103,
+        "reviewed_headers": 11,
+        "legacy_unreviewed_headers": 102,
         "unsupported_headers": 0
       },
       "midi": {
@@ -1116,11 +1116,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/workgroup.hpp",
-      "fingerprint": "sha256:225bd04e5a5925d031f1f0222824b116ab8ed413c6b127b98b1b687522d091ee",
+      "fingerprint": "sha256:2cfc5c887f50347ec462cf53f6ca1e35977e2f819ec1b2fc037f03281bce2cd6",
       "include": "pulp/audio/workgroup.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Audio scheduling infrastructure used by the GPU-audio worker; no agent capability entrypoint."
     },
     {
       "domain": "audio",
