@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260930-view-header-include-trim-watch",
+  "created_at": "2026-09-30T21:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record an include-hygiene change that crosses the render-assets-and-backends family through its core/view/** selector. core/view/include/pulp/view/auto_ui.hpp and inspector.hpp no longer include widgets.hpp, which neither uses; auto_ui.cpp, inspector.cpp and inspector_window.hpp, which do use widget types, include it directly. Declarations, rendering, widget behavior and every public type are unchanged; only which translation units recompile on a widgets.hpp edit changes. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-group-script-view"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
