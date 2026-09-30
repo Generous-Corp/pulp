@@ -1,0 +1,107 @@
+{
+  "id": "signal-freeze-hold-bounded-callback-cost",
+  "title": "Spectral freeze with a bounded per-callback cost and stationary long holds",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "aef439c8-6b64-4a5c-b1f4-9d6837251686",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/freeze_hold.hpp",
+    "core/signal/include/pulp/signal/staged_transition.hpp",
+    "test/test_freeze_hold.cpp",
+    "test/test_staged_transition.cpp",
+    "docs/status/sequencer-exposure/rows/signal-freeze-hold-bounded-callback-cost.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
+      "needles": [
+        "FreezeHoldSynthesis synthesis = FreezeHoldSynthesis::polar;",
+        "FreezeHoldFrequency frequency = FreezeHoldFrequency::newest;",
+        "FreezeHoldAverage average = FreezeHoldAverage::at_latch;",
+        "FreezeHoldPhaseLock phase_lock = FreezeHoldPhaseLock::none;",
+        "bool engage_pending() const"
+      ]
+    },
+    {
+      "path": "core/signal/include/pulp/signal/staged_transition.hpp",
+      "needles": [
+        "class StagedTransition {",
+        "static constexpr int due_steps(int total, std::int64_t elapsed,"
+      ]
+    },
+    {
+      "path": "test/test_freeze_hold.cpp",
+      "needles": [
+        "FreezeHold running average makes latch cost independent of capture length",
+        "FreezeHold rotor synthesis performs no transcendental per held hop",
+        "FreezeHold long hold across a change keeps the older sound audible",
+        "FreezeHold peak-lobe phase lock keeps short-term level stationary from the start"
+      ]
+    },
+    {
+      "path": "test/test_staged_transition.cpp",
+      "needles": [
+        "StagedTransition runs each step once, in order, when due"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "Pulp::signal installs both headers through the per-subsystem include install. FreezeHold gains opt-in Config fields (rotor synthesis, staged engage, running-sum averaging, energy-weighted frequency, peak-lobe phase lock) whose defaults render bit-identically, and StagedTransition is the reusable schedule for spreading bounded transition work across callbacks. Both are in-process audio-owner primitives with allocation-free audio paths.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
+          "needles": [
+            "int engage_bins_per_hop = 0;"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/staged_transition.hpp",
+          "needles": [
+            "class StagedTransition {"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The cost modes and the staging helper are streaming audio-owner primitives composed inside a processor; they add no offline Timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The primitives are consumed by processors and add no MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No Product A control surface is added; a product chooses the hold's Config at prepare and drives the hold from its audio thread."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "freeze_hold.hpp and staged_transition.hpp are recorded in the public-surface ledger as reviewed infrastructure with no capability key of their own.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capability-surface.json",
+          "needles": [
+            "pulp/signal/staged_transition.hpp"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
