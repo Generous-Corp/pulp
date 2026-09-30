@@ -15,6 +15,11 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <os/object.h>
+#include <os/workgroup.h>
+#endif
+
 using namespace pulp::gpu_audio;
 using pulp::audio::BufferView;
 
@@ -721,6 +726,39 @@ TEST_CASE("GpuAudioTransport background worker drains the pipeline", "[gpu_audio
     t.release();
     REQUIRE_FALSE(t.is_prepared());
 }
+
+#if defined(__APPLE__)
+TEST_CASE("GpuAudioTransport can opt its worker into an Audio Workgroup",
+          "[gpu_audio][transport][workgroup][rt-safety]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 16;
+    auto* workgroup = os_workgroup_parallel_create("pulp-gpu-audio-worker", nullptr);
+    REQUIRE(workgroup != nullptr);
+
+    GainNode node(CH, BS, 2.0f, MissPolicy::CpuFallback, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = RING,
+                                      .run_worker_thread = true,
+                                      .wake_on_write = true,
+                                      .audio_workgroup = reinterpret_cast<void*>(workgroup),
+                                      .join_audio_workgroup = true}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    GpuAudioTransport::Stats observed;
+    do {
+        observed = transport.stats();
+        if (observed.worker_workgroup_joined || observed.worker_workgroup_join_failures > 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    const bool adoption_observed =
+        observed.worker_workgroup_joined || observed.worker_workgroup_join_failures > 0;
+    CHECK(adoption_observed);
+    transport.release();
+    os_release(workgroup);
+}
+#endif
 
 TEST_CASE("GpuAudioTransport resyncs the wet timeline after a miss", "[gpu_audio][transport]") {
     // A miss emits a substitute (dry) block for its timeline slot; when the worker
