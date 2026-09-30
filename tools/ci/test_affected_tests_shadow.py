@@ -166,6 +166,32 @@ class AffectedSetTests(unittest.TestCase):
         self.assertEqual(r["selected"], 2, r)
         self.assertEqual(r["script_undeclared"], 2)
 
+    def compiled(self, changed, data):
+        return ats.compute(self.fx.build, self.fx.src, ats.parse_build_ninja(self.fx.ninja),
+                           ats.parse_ninja_deps(self.fx.deps), self.fx.inventory, changed, [],
+                           self.fx.script_inputs, data)
+
+    def test_declared_compiled_data_selects_its_executable_by_its_inputs(self) -> None:
+        data = {"pulp-test-a": {"kind": "compiled", "data": "declared",
+                                "inputs": ["test/fixtures/a", "tools/templates/*/ui/main.js"]}}
+        # Both A cases, plus the undeclared check-script (a test/ data file is
+        # script surface for a test with no list entry).
+        r = self.compiled(["test/fixtures/a/clip.wav"], data)
+        self.assertEqual((r["selected"], r["compiled_selected_by_data"]), (3, 2), r)
+        r = self.compiled(["tools/templates/gain/ui/main.js"], data)       # a declared glob
+        self.assertEqual(r["compiled_selected_by_data"], 2, r)
+        r = self.compiled(["test/fixtures/b/other.wav"], data)             # a fixture it does not read
+        self.assertEqual(r["compiled_selected_by_data"], 0, r)
+        r = self.compiled([ats.SCRIPT_INPUTS_LIST], data)                  # the list itself moved
+        self.assertEqual(r["compiled_selected_by_data"], 2, r)
+
+    def test_undeclared_compiled_data_is_never_skipped(self) -> None:
+        data = {"pulp-test-b": {"kind": "compiled", "data": "undeclared", "inputs": []}}
+        r = self.compiled(["docs/guide.md"], data)                         # nothing any graph reads
+        self.assertEqual(r["selected"], 1, r)
+        self.assertEqual(r["compiled_data_undeclared"], 1, r)
+        self.assertEqual(self.compiled(["docs/guide.md"], {})["selected"], 0)
+
     def test_failures_outside_the_selection_are_counted_by_name(self) -> None:
         r, _ = self.selected(["core/a.cpp"], failed=["A: one", "B: one", "check-script"])
         self.assertEqual(r["failed_outside_selection"], 2)

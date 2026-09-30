@@ -24,8 +24,9 @@ add_executable(pulp-test-cli-kit-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
 target_include_directories(pulp-test-cli-kit-commands PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/tools/cli ${CMAKE_BINARY_DIR}/tools/cli)
+pulp_test_data(pulp-test-cli-kit-commands
+    PATHS fixtures/packages tools/kits/pulp-package.schema.json)
 target_compile_definitions(pulp-test-cli-kit-commands PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     PULP_FAKE_SCREENSHOT_TOOL="$<TARGET_FILE:pulp-fake-screenshot-tool>")
 add_dependencies(pulp-test-cli-kit-commands pulp-fake-screenshot-tool)
 target_link_libraries(pulp-test-cli-kit-commands PRIVATE
@@ -42,8 +43,7 @@ add_executable(pulp-test-cli-content-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
 target_include_directories(pulp-test-cli-content-commands PRIVATE
     ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/tools/cli ${CMAKE_BINARY_DIR}/tools/cli)
-target_compile_definitions(pulp-test-cli-content-commands PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-content-commands PATHS fixtures/packages/basic-content-pack)
 target_link_libraries(pulp-test-cli-content-commands PRIVATE
     pulp::platform pulp::runtime pulp::state pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-content-commands)

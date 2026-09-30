@@ -144,13 +144,13 @@ pulp_add_test_suite(pulp-test-bridged-t-resonator GROUP pulp-test-group-dsp-rt-s
     LIBRARIES pulp::signal
     TIMEOUT 300)
 
-# PULP_SOURCE_DIR locates examples/modal-specs/, which the test loads as real
-# on-disk spec files rather than string literals.
+# The test loads examples/modal-specs/ as real on-disk spec files rather than
+# string literals.
 pulp_add_test_suite(pulp-test-modal-spec
     SOURCES test_modal_spec.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal-modal-spec
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     TIMEOUT 300)
+pulp_test_data(pulp-test-modal-spec PATHS examples/modal-specs)
 
 # Header-only metric over caller-supplied render callbacks; its fixtures are
 # source-owned resonators, so it needs no plugin and no library.

@@ -31,7 +31,21 @@ change under test reaches (its diff touches the test's entry script or an
 old/new input); other drift is reported as advisory. `--full` compares every
 entry.
 
-Exit codes: 0 in sync (or written); 1 drift (`--check`); 2 inventory unreadable.
+Compiled tests are folded into the same list under `executables`, one
+`kind: compiled` entry per test executable that reads the checkout at run
+time. Configure writes the evidence (tools/cmake/PulpTestData.cmake): every
+test executable's sources, the definitions that point into the checkout, and
+a `<exe>.inputs.json` per `pulp_test_data()` declaration. A source that names
+PULP_SOURCE_DIR, test/fixtures, or one of its executable's checkout
+definitions reads data; without a declaration covering it the executable is
+`data: undeclared` and a selector must never skip it. `--check` also holds a
+ratchet: a source that is undeclared here but was not undeclared in the base
+list fails, so the undeclared backlog can only shrink.
+
+  script_test_inputs.py --build-dir <dir> --data-summary   # compiled data counts, JSON
+
+Exit codes: 0 in sync (or written); 1 drift or a new undeclared source
+(`--check`); 2 inventory unreadable.
 """
 from __future__ import annotations
 
@@ -321,6 +335,94 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | 
     return {"kind": kind, "entry": entry_rel, "inputs": rels}
 
 
+TEST_DATA_DIR = Path("test") / "test-data"
+# Text in a compiled test source that means it opens files from the checkout.
+DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
+    """The data-read signals a source's text carries: the fixed ones plus the
+    names of its executable's definitions that point into the checkout."""
+    try:
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    hits = [sig for sig in DATA_SIGNALS if sig in text]
+    for name in defines:
+        if name not in hits and re.search(r"\b%s\b" % re.escape(name), text):
+            hits.append(name)
+    return hits
+
+
+def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
+    """`kind: compiled` entries from the configure-time evidence, or None when
+    the build directory carries none (a tree configured before the helper)."""
+    if build_dir is None:
+        return None
+    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json")
+    if index is None:
+        return None
+    out = {}
+    for exe, rec in sorted((index.get("executables") or {}).items()):
+        decl = _read_json(build_dir / TEST_DATA_DIR / f"{exe}.inputs.json") or {}
+        declared_sources = set(decl.get("sources") or [])
+        defines = list(rec.get("tree_defines") or [])
+        reading = {src for src in rec.get("sources") or [] if source_signals(root, src, defines)}
+        data_sources = reading | declared_sources
+        if not data_sources:
+            continue
+        undeclared = sorted(reading - declared_sources)
+        out[exe] = {"kind": "compiled", "data": "undeclared" if undeclared else "declared",
+                    "inputs": sorted(set(decl.get("inputs") or [])),
+                    "sources": sorted(data_sources), "undeclared_sources": undeclared}
+    return out
+
+
+def data_summary(root: Path, build_dir: Path | None) -> dict | None:
+    """The data-manifest proxy: executables with a declaration over those that
+    read PULP_SOURCE_DIR, plus the wider undeclared count."""
+    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json") if build_dir else None
+    entries = compiled_entries(root, build_dir)
+    if index is None or entries is None:
+        return None
+    psd = sorted(exe for exe, rec in (index.get("executables") or {}).items()
+                 if any("PULP_SOURCE_DIR" in source_signals(root, s, []) for s in rec.get("sources") or []))
+    with_manifest = sorted(exe for exe in psd if entries.get(exe, {}).get("inputs"))
+    return {"executables": len(index.get("executables") or {}),
+            "reading_pulp_source_dir": len(psd), "reading_pulp_source_dir_with_manifest": len(with_manifest),
+            "data_reading": len(entries),
+            "declared": sum(1 for e in entries.values() if e["data"] == "declared"),
+            "undeclared": sum(1 for e in entries.values() if e["data"] == "undeclared"),
+            "undeclared_sources": sorted({s for e in entries.values() for s in e["undeclared_sources"]})}
+
+
+def undeclared_sources(doc: dict) -> set[str]:
+    return {s for e in (doc.get("executables") or {}).values() for s in e.get("undeclared_sources") or []}
+
+
+def base_list(root: Path, base: str | None) -> dict | None:
+    """The list as the base ref has it, or None when the base predates
+    compiled entries (then the checked-in list is the baseline)."""
+    if not base:
+        return None
+    proc = subprocess.run(["git", "-C", str(root), "show", f"{base}:{DEFAULT_LIST.as_posix()}"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None
+    try:
+        doc = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    return doc if "executables" in doc else None
+
+
 def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
     tests = {}
     excluded = outside_gate_profile(inventory, root)
@@ -334,7 +436,11 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         rec = inputs_for(t, root, build_dir)
         if rec is not None:
             tests[name] = rec
-    return {"schema": SCHEMA, "tests": dict(sorted(tests.items()))}
+    doc = {"schema": SCHEMA, "tests": dict(sorted(tests.items()))}
+    compiled = compiled_entries(root, build_dir)
+    if compiled is not None:
+        doc["executables"] = compiled
+    return doc
 
 
 def load_inventory(build_dir: str | None, inventory_json: str | None) -> dict | None:
@@ -362,6 +468,14 @@ def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
         elif ci[name] != rec:
             paths |= set(ci[name].get("inputs") or []) | {ci[name].get("entry") or ""}
             problems.append(("stale entry", name, paths - {""}))
+    ce = checked_in.get("executables") or {}
+    for name, rec in (current.get("executables") or {}).items():
+        paths = set(rec.get("sources") or []) | set(rec.get("inputs") or [])
+        if name not in ce:
+            problems.append(("missing compiled entry", name, paths))
+        elif ce[name] != rec:
+            paths |= set(ce[name].get("sources") or []) | set(ce[name].get("inputs") or [])
+            problems.append(("stale compiled entry", name, paths))
     return problems
 
 
@@ -414,6 +528,7 @@ def main(argv: list[str]) -> int:
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
+    mode.add_argument("--data-summary", action="store_true", help="print the compiled-test data counts as JSON")
     a = ap.parse_args(argv[1:])
     if not a.build_dir and not a.inventory_json:
         ap.error("--build-dir or --inventory-json is required")
@@ -423,6 +538,14 @@ def main(argv: list[str]) -> int:
     if inventory is None:
         return 2
     build_dir = Path(a.build_dir).resolve() if a.build_dir else None
+    if a.data_summary:
+        summary = data_summary(root, build_dir)
+        if summary is None:
+            print("script-test-inputs: no compiled-test evidence under the build directory "
+                  f"({TEST_DATA_DIR.as_posix()}); reconfigure it", file=sys.stderr)
+            return 2
+        print(json.dumps(summary, indent=1, sort_keys=True))
+        return 0
     current = build_list(inventory, root, build_dir)
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
@@ -463,9 +586,34 @@ def main(argv: list[str]) -> int:
         if kind == "missing from list":
             entry = current["tests"][name].get("entry") or ""
             return bool(entry) and entry in changed
+        if kind == "missing compiled entry":
+            return bool(set(current["executables"][name].get("sources") or []) & changed)
         return touched_by(changed, paths)
     blocking = [pr for pr in problems if owns(*pr)]
     advisory = [pr for pr in problems if pr not in blocking]
+    # The undeclared-data ratchet: a source that reads the checkout without a
+    # declaration and is not in the base list's backlog. It is this change's
+    # when the change edits that source, or edits the test tree's CMake while
+    # the executable was already listed (a dropped declaration). An executable
+    # the base list never saw and whose source this change leaves alone is
+    # another configuration's (a Linux-only test against a macOS-written list):
+    # reported, not blocking.
+    if "executables" in current:
+        baseline = base_list(root, base) or checked_in
+        known = undeclared_sources(baseline)
+        listed = set(baseline.get("executables") or {})
+        cmake_touched = changed is not None and any(
+            f.startswith("test/") and (f.endswith(".cmake") or f.endswith("CMakeLists.txt"))
+            or f == "tools/cmake/PulpTestData.cmake" for f in changed)
+        for exe, rec in sorted(current["executables"].items()):
+            for src in rec["undeclared_sources"]:
+                if src in known:
+                    continue
+                item = ("new undeclared data source", f"{exe}: {src}", {src})
+                if changed is None or src in changed or (exe in listed and cmake_touched):
+                    blocking.append(item)
+                else:
+                    advisory.append(item)
     scope = f"diff-scoped against {base}" if base else "full compare (no base resolved)"
     if advisory:
         print(f"script-test-inputs: note: {len(advisory)} entr{'y' if len(advisory) == 1 else 'ies'} drifted from "
@@ -481,6 +629,12 @@ def main(argv: list[str]) -> int:
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  {kind}: {name}")
+        if any(kind == "new undeclared data source" for kind, _, _ in blocking):
+            print("A compiled test source reads the checkout (it names PULP_SOURCE_DIR, test/fixtures, or a\n"
+                  "definition pointing into the checkout) without declaring what it reads. Declare it next to\n"
+                  "its registration in test/cmake/*_tests.cmake:\n"
+                  "  pulp_test_data(<suite> PATHS <repo-relative files, dirs or globs>)\n"
+                  "then regenerate the list. Undeclared tests can never be skipped by a selector.")
         print(fix)
         if advisory_here():
             # The enforcement point is the PULL-REQUEST HEAD, where the pr-fast

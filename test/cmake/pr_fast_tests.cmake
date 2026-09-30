@@ -59,6 +59,13 @@ set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120)
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")
+# pulp_test_data() (tools/cmake/PulpTestData.cmake) writes the configure-time
+# evidence the list folds in for compiled tests; this configures a throwaway
+# project and reads what it wrote.
+add_test(NAME pulp-test-data-cmake-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_pulp_test_data_cmake.py")
+set_tests_properties(pulp-test-data-cmake-selftest PROPERTIES TIMEOUT 300)
 
 # Every Python script a registered ctest runs must import only what the gate
 # VM's Python has: the standard library plus the pinned visual-analysis lock the
