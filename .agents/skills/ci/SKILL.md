@@ -1858,7 +1858,13 @@ decide` finds a PASS receipt (`ios-gate-ok-<digest>`) for the exact input
 digest written by a TRUSTED run: this repo's `build.yml`, `merge_group` or
 same-repository `pull_request`, marker naming the same digest and run
 (decisions contract row 23). One run id in ten and every schedule/push run is
-a control that runs anyway; any lookup error runs it. `pulp-ios-gate-shadow/v1`
+a control that runs anyway; any lookup error runs it, and says so: a failed
+request reads `receipt lookup failed: <status>` (summary, an
+`ios-gate-receipt-lookup` warning, and `lookup_error` in the notice), never
+"no trusted receipt". Receipt artifacts must be downloaded through
+`protected_merge_receipt.download_archive()`: the archive URL redirects to blob
+storage, and plain `urllib.urlopen` forwards the Bearer token, which the blob
+host rejects with 401 on every download. `pulp-ios-gate-shadow/v1`
 notices record `skipped` / `control_run` / `would_skip` / `run`, then
 `ran_ok` / `ran_failed`. A `control_run` or `would_skip` followed by
 `ran_failed` means the input set missed a file: set the repository variable
