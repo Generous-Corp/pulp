@@ -282,7 +282,7 @@ catch_discover_tests(pulp-test-render-scenario)
 # `performance` label.
 pulp_add_test_suite(pulp-test-transition-cost
     SOURCES test_transition_cost.cpp test_transition_cost_timing.cpp
-    LIBRARIES pulp-audio-test-support
+    LIBRARIES pulp-audio-test-support pulp::signal-fft-backend
     TEST_SPEC "~[performance]")
 catch_discover_tests(pulp-test-transition-cost
     TEST_SPEC "[performance]"
