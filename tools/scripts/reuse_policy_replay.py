@@ -396,10 +396,13 @@ def pair_status(group: dict | None) -> str:
     ctest = group.get("ctest") or {}
     if group.get("build_failed"):
         return "build_failed"
-    if not ctest:
-        return "no_suite"  # no native input, or the suite job never ran
-    if not ctest.get("complete"):
-        return "incomplete"
+    if ctest.get("log_unavailable"):
+        return "log_expired"
+    if not ctest.get("ran"):
+        return "no_suite"  # no native input, a cancelled leg, or the job never reached ctest
+    if not ctest.get("complete") and not ctest.get("failed"):
+        return "incomplete"  # cut off mid-run with nothing failed yet: no ground truth
+    # A run stopped on a failure is ground truth for that failure.
     return "scored"
 
 

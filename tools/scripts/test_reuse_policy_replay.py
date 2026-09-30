@@ -48,7 +48,7 @@ def group(**kw) -> dict:
     run = {"run_id": "g1", "run_kind": "merge_group", "pr": 1, "head_sha": "h1", "group_sha": "m1",
            "checkout_sha": "m1", "checkout_parents": ["b2", "h1"], "base_sha": "b2", "merge_tree": "t2",
            "runner_image": None, "created_at": "2026-09-29T12:00:00Z",
-           "ctest": {"complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
+           "ctest": {"ran": True, "complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
     run.update(kw)
     return run
 
@@ -113,6 +113,14 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["false_skip_rows"][0]["test_id"], "skills-doc-sync")
         self.assertEqual(result["flake_skips"], 0)
         self.assertEqual(result["verdict"], "UNSAFE: false skips")
+
+    def test_a_run_stopped_on_a_failure_is_scored(self):
+        stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
+                             tests={"g1": [t("a", "fail", 2)]})
+        self.assertEqual(rpr.score(stopped, "inert-drift")["false_skips"], 1)
+        cut = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 0}), head()], [pair()],
+                         tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(cut, "inert-drift")["statuses"], {"incomplete": 1})
 
     def test_timeout_is_a_failure(self):
         result = rpr.score(corpus([t("slow-one", "timeout", 2)]), "inert-drift")
@@ -245,6 +253,12 @@ class ParseTests(unittest.TestCase):
         self.assertIs(self.parse(issued)["receipt_issued"], True)
         refused = "2026-09-30T19:20:00.0000000Z ##[warning]selection too narrow — the merge group will validate in full\n"
         self.assertIs(self.parse(refused)["receipt_issued"], False)
+
+    def test_a_verbatim_repeated_line_is_not_a_retry(self):
+        line = "2026-09-30T19:10:16.5818700Z     4/5 Test     #6: a test whose name says Failed ....   Passed    1.00 sec\n"
+        self.assertIn(line, LOG)
+        tests = {x["test_id"]: x for x in rrc.parse_job_log(LOG.replace(line, line + line).splitlines())["tests"]}
+        self.assertEqual(tests["a test whose name says Failed"]["attempts"], 1)
 
     def test_log_without_ctest_is_not_complete(self):
         p = rrc.parse_job_log(LOG.splitlines()[:2])

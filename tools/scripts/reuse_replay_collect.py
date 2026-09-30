@@ -54,7 +54,7 @@ GATE_ARGS_RE = re.compile(_TS + r"ctest gate args: label_exclude=(?P<exclude>\S*
 RECEIPT_ISSUED_RE = re.compile(_TS + r"##\[notice\]exact-tree receipt for [0-9a-f]{40} on base [0-9a-f]{40}")
 RECEIPT_NOT_ISSUED_RE = re.compile(_TS + r"##\[warning\].* the merge group will validate in full")
 # Bump when parse_job_log's output changes, so cached parses are redone.
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 
 
 def outcome_of(status: str) -> str:
@@ -88,12 +88,15 @@ def parse_job_log(lines: Iterable[str]) -> dict:
             expect_sha = True
             continue
         if CTEST_START_RE.match(line):
-            current = {"tests": {}, "summary": None, "total": None}
+            current = {"tests": {}, "summary": None, "total": None, "seen": set()}
             sessions.append(current)
             continue
         if current is not None:
             match = TEST_LINE_RE.match(line)
             if match:
+                if line in current["seen"]:
+                    continue  # the job log repeats a block verbatim; a retry has its own timestamp
+                current["seen"].add(line)
                 num = int(match.group("num"))
                 rec = current["tests"].get(num)
                 if rec is None:
