@@ -81,20 +81,23 @@ public:
     /// Leave on the joining thread and restore any scoped Mach scheduling change.
     /// @return False if restoration failed; state is retained so leave can be retried.
     bool leave() {
-        if (!joined_) return true;
+        if (!joined_)
+            return true;
 
 #if defined(__APPLE__)
         if (workgroup_) {
             os_workgroup_leave(workgroup_, &token_);
         } else if (priority_thread_ != MACH_PORT_NULL) {
-            const auto result = previous_constraint_is_default_
-                ? thread_policy_set(priority_thread_, THREAD_EXTENDED_POLICY,
-                                    reinterpret_cast<thread_policy_t>(&previous_extended_),
-                                    THREAD_EXTENDED_POLICY_COUNT)
-                : thread_policy_set(priority_thread_, THREAD_TIME_CONSTRAINT_POLICY,
-                                    reinterpret_cast<thread_policy_t>(&previous_constraint_),
-                                    THREAD_TIME_CONSTRAINT_POLICY_COUNT);
-            if (result != KERN_SUCCESS) return false;
+            const auto result =
+                previous_constraint_is_default_
+                    ? thread_policy_set(priority_thread_, THREAD_EXTENDED_POLICY,
+                                        reinterpret_cast<thread_policy_t>(&previous_extended_),
+                                        THREAD_EXTENDED_POLICY_COUNT)
+                    : thread_policy_set(priority_thread_, THREAD_TIME_CONSTRAINT_POLICY,
+                                        reinterpret_cast<thread_policy_t>(&previous_constraint_),
+                                        THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+            if (result != KERN_SUCCESS)
+                return false;
             mach_port_deallocate(mach_task_self(), priority_thread_);
             priority_thread_ = MACH_PORT_NULL;
         }
@@ -121,11 +124,9 @@ public:
         policy.preemptible = TRUE;
 
         const auto thread = mach_thread_self();
-        kern_return_t result = thread_policy_set(
-            thread,
-            THREAD_TIME_CONSTRAINT_POLICY,
-            reinterpret_cast<thread_policy_t>(&policy),
-            THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+        kern_return_t result = thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY,
+                                                 reinterpret_cast<thread_policy_t>(&policy),
+                                                 THREAD_TIME_CONSTRAINT_POLICY_COUNT);
 
         mach_port_deallocate(mach_task_self(), thread);
         return result == KERN_SUCCESS;
@@ -163,16 +164,15 @@ private:
         priority_thread_ = mach_thread_self();
         auto count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
         previous_constraint_is_default_ = FALSE;
-        auto result = thread_policy_get(
-            priority_thread_, THREAD_TIME_CONSTRAINT_POLICY,
-            reinterpret_cast<thread_policy_t>(&previous_constraint_), &count,
-            &previous_constraint_is_default_);
+        auto result = thread_policy_get(priority_thread_, THREAD_TIME_CONSTRAINT_POLICY,
+                                        reinterpret_cast<thread_policy_t>(&previous_constraint_),
+                                        &count, &previous_constraint_is_default_);
         if (result == KERN_SUCCESS && previous_constraint_is_default_) {
             count = THREAD_EXTENDED_POLICY_COUNT;
             boolean_t get_default = FALSE;
-            result = thread_policy_get(
-                priority_thread_, THREAD_EXTENDED_POLICY,
-                reinterpret_cast<thread_policy_t>(&previous_extended_), &count, &get_default);
+            result = thread_policy_get(priority_thread_, THREAD_EXTENDED_POLICY,
+                                       reinterpret_cast<thread_policy_t>(&previous_extended_),
+                                       &count, &get_default);
         }
         // Never change a policy we cannot subsequently restore.
         if (result != KERN_SUCCESS || !set_realtime_priority()) {
