@@ -1564,7 +1564,14 @@ transitions and cases present in only one artifact. Same-name duplicates are
 compared as status-count groups, never guessed per case. CI publishes the v2
 JSON beside the original XML in each non-Windows `ctest-logs-<key>`. Exit 0 means the observation is
 readable, even when tests failed or skipped; exit 2 means unavailable/incomplete
-evidence, not a CTest verdict. Empty reports never claim that every test ran. No
+evidence, not a CTest verdict. Empty reports never claim that every test ran.
+A leg whose full suite was skipped (a pull-request head on the fast tier, a
+build that stopped first) has no `ctest.junit.xml` by design; the step then
+passes `--fallback <ctest-pr-fast.junit.xml> --not-run-reason ...`, so it
+observes the fast tier's report or records `observation: not_run` with the
+reason and exits 0. Before that, every fast-tier PR head carried a red
+`exit code 2` annotation that meant nothing. A suite that ran and left no
+report still exits 2. No
 test is executed, provisioned, or selected by this helper.
 
 Four things bite when touching this:

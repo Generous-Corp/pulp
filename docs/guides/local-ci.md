@@ -4543,6 +4543,13 @@ python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
   --baseline /tmp/known-good/ctest.junit.xml --json
 ```
 
+On a leg whose full suite was skipped (a pull-request head that ran only the
+fast tier, or a build that stopped before ctest) there is no `ctest.junit.xml`
+by design. The CI step then passes `--fallback` with the fast tier's
+`ctest-pr-fast.junit.xml` and `--not-run-reason`: it observes the fast tier's
+report when one exists and otherwise records `observation: not_run` with the
+reason and exits 0. A suite that ran and left no report still exits 2.
+
 CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
 `ctest-logs-<key>` artifact. Download two artifacts when investigating a change;
 the JSON is the ready-to-read single-run projection, while `--baseline` over the
