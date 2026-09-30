@@ -1910,6 +1910,30 @@ inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
 identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
 binary only means zero hits, but a missed runtime input means a false skip.
 
+## Compiled tests declare runtime data with `pulp_test_data()`
+
+A compiled test that opens checkout files at run time (fixtures, schemas,
+scripts it shells out to) reads inputs no build edge records, so a result
+keyed on build inputs alone would reuse a verdict whose data changed.
+Declare the reads next to the registration in `test/cmake/*_tests.cmake`:
+`pulp_test_data(<suite-or-exe> PATHS <repo-relative files, dirs, globs>)`
+(`tools/cmake/PulpTestData.cmake`). It defines `PULP_SOURCE_DIR` for that
+suite's sources (grouped members: only their own sources), so drop the
+`COMPILE_DEFINITIONS PULP_SOURCE_DIR=...` it replaces, and every path must
+match something at configure or configure fails. The generator folds the
+configure evidence into the same `test/ctest_script_inputs.json` under
+`executables` (`kind: compiled`); regenerate it as for script tests.
+A source that names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition
+pointing into the checkout, with no declaration covering it, marks its
+executable `data: undeclared` (the shadow selects it on every change). The
+pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
+undeclared source (one not undeclared in the base list); the backlog can only
+shrink. Declare only what the code opens: a test that hands the whole
+checkout to a CLI subprocess or doctor walk is not boundable and stays
+undeclared. Declaring a subset is worse than not declaring, because it
+makes an unsound key look sound. Count with
+`script_test_inputs.py --build-dir <dir> --data-summary`.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the

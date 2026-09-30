@@ -849,8 +849,8 @@ pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
 # default macOS lane in milliseconds — no Xcode / iOS SDK required, so it
 # closes the gap the slow `cmake-ios-auv3-configure` test left behind for
 # validation.
-pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_add_test_suite(pulp-test-widget-bridge-no-gpu-gates)
+pulp_test_data(pulp-test-widget-bridge-no-gpu-gates PATHS core/view/src/widget_bridge.cpp)
 
 # Widget bridge — runtime-import handlers.
 pulp_add_test_suite(pulp-test-widget-bridge-runtime-import GROUP pulp-test-group-view-widgets LIBRARIES pulp::view)
@@ -861,10 +861,10 @@ pulp_add_test_suite(pulp-test-widget-bridge-param-binding GROUP pulp-test-group-
 
 # `pulp create` UI scripts loaded through the real bridge: the gain template's
 # meter binds natively to a value channel and its readout has a pinned width.
-# Reads the scripts from the source tree, so it carries its own definition.
+# Reads the scripts from the source tree, so it declares them as its data.
 pulp_add_test_suite(pulp-test-template-ui-scripts
-    LIBRARIES pulp::view pulp::state
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    LIBRARIES pulp::view pulp::state)
+pulp_test_data(pulp-test-template-ui-scripts PATHS tools/templates/*/ui/main.js)
 
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /

@@ -863,6 +863,17 @@ test only when one of its inputs changed; a test without an entry (nested
 cmake builds, tests with no command) keeps the fail-closed "any script surface
 changed" rule.
 
+Compiled tests declare the checkout files they open at run time with
+`pulp_test_data(<suite> PATHS ...)` next to their registration
+(`tools/cmake/PulpTestData.cmake`); configure writes
+`<build>/test/test-data/<exe>.inputs.json` plus an index of every test
+executable's sources, and the generator folds them into the same list under
+`executables` (`kind: compiled`). An executable with a source that reads the
+checkout (names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition pointing
+into the checkout) but no declaration is `data: undeclared`: the shadow
+selects it on every change, and `script-test-inputs-drift` fails a pull
+request that adds a new undeclared source, so the backlog only shrinks.
+
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
 `tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and

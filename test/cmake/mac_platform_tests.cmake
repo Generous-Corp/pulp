@@ -27,8 +27,9 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_SKIA)
     )
     target_include_directories(pulp-test-mac-platform-harness PRIVATE
         ${CMAKE_SOURCE_DIR}/external/miniz)
-    target_compile_definitions(pulp-test-mac-platform-harness PRIVATE
-        PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    # The ELYSIUM cases read design fixtures from the planning submodule and
+    # skip when it is not checked out.
+    pulp_test_data(pulp-test-mac-platform-harness PATHS planning)
     catch_discover_tests(pulp-test-mac-platform-harness)
 endif()
 
