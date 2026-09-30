@@ -159,6 +159,14 @@ LEGACY_SIGNAL_VOCABULARY_EXCLUSIONS = {
 # explicit reviewed classifications or a capability binding above.
 REVIEWED_HEADERS: list[dict[str, Any]] = [
     {
+        "include": "pulp/audio/workgroup.hpp",
+        "fingerprint": "sha256:e696902515507a5a444feb4aa94335fc92b896a894e2e548aa7466221e934f60",
+        "disposition": "infrastructure",
+        "capability_keys": [],
+        "rationale": "Audio scheduling infrastructure used by the GPU-audio worker; no agent capability entrypoint.",
+    },
+
+    {
         "include": "pulp/midi/message.hpp",
         "fingerprint": "sha256:3b3e65207b2467e835cade6fd5ed82d9c22c5ac5515715528cb85dcdf62ee716",
         "disposition": "infrastructure",
