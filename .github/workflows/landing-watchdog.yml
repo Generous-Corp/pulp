@@ -37,6 +37,8 @@ permissions:
   contents: read
   issues: write
   pull-requests: read
+  # `Vellum trusted freeze` reaches a pull request's head as a commit status.
+  statuses: read
 
 jobs:
   watch:

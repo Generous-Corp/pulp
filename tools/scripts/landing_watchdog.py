@@ -44,9 +44,11 @@ open pull requests it scanned must match the number the API listed, and the
 required-context list must be non-empty. If either fails the job **fails**,
 loudly, instead of reporting a clean result it did not measure.
 
-Budget: 1 call to list open PRs, then at most 3 per PR, once every 30 minutes,
-on ``GITHUB_TOKEN``'s own per-repository bucket. At ten open PRs that is about
-62 calls an hour, and never more than one in flight.
+Budget: 1 call to list open PRs, then 3 per PR (check runs, the combined
+commit status, workflow runs) plus one jobs probe for each of at most 3 pending
+runs, once every 30 minutes, on ``GITHUB_TOKEN``'s own per-repository bucket.
+At ten open PRs with nothing pending that is about 62 calls an hour, and never
+more than one in flight.
 """
 
 from __future__ import annotations
@@ -173,9 +175,43 @@ def required_contexts(config_path: str) -> list[str]:
     return [str(entry) for entry in contexts if str(entry).strip()]
 
 
+def status_records(statuses: list[dict]) -> list[dict]:
+    """Commit statuses, reshaped as the check-run records ``classify_pr`` reads.
+
+    A required context is not always a check run. ``Vellum trusted freeze`` is
+    published on a pull request's head as a commit **status** by a
+    ``pull_request_target`` run (the check run of that name exists only on
+    merge-group commits), so a reader of check runs alone reports it absent on
+    every pull request. The combined-status payload already carries only the
+    latest status per context; ``pending`` is the one state still in flight.
+    """
+    records: list[dict] = []
+    for status in statuses:
+        context = status.get("context") or ""
+        if not context:
+            continue
+        state = (status.get("state") or "").lower()
+        records.append(
+            {
+                "name": context,
+                "status": "in_progress" if state == "pending" else "completed",
+                "conclusion": None if state == "pending" else state,
+                "started_at": status.get("created_at"),
+                "created_at": status.get("created_at"),
+            }
+        )
+    return records
+
+
 def classify_pr(pr: dict, check_runs: list[dict], runs: list[dict],
-                contexts: list[str], now: datetime) -> list[dict]:
-    """Findings for one pull request. Pure: every input is passed in."""
+                contexts: list[str], now: datetime,
+                statuses: list[dict] | None = None) -> list[dict]:
+    """Findings for one pull request. Pure: every input is passed in.
+
+    ``statuses`` are the head's commit statuses (combined-status ``statuses``
+    array). A required context satisfied by either a check run or a status is
+    present.
+    """
     findings: list[dict] = []
     head_sha = pr.get("head", {}).get("sha", "")
     number = pr.get("number")
@@ -184,7 +220,7 @@ def classify_pr(pr: dict, check_runs: list[dict], runs: list[dict],
     author_type = pr.get("user", {}).get("type", "")
 
     by_name: dict[str, dict] = {}
-    for run in check_runs:
+    for run in [*check_runs, *status_records(statuses or [])]:
         name = run.get("name", "")
         # Keep the most advanced record per name: a completed check outranks a
         # queued one with the same name.
@@ -343,6 +379,12 @@ def fetch_state(api: Api, contexts: list[str], now: datetime, run_limit: int = 3
         except urllib.error.HTTPError:
             checks = []
         try:
+            statuses = api.get(
+                f"/repos/{api.repo}/commits/{head_sha}/status?per_page=100"
+            ).get("statuses", [])
+        except urllib.error.HTTPError:
+            statuses = []
+        try:
             raw_runs = api.get(
                 f"/repos/{api.repo}/actions/runs?head_sha={head_sha}&per_page=20"
             ).get("workflow_runs", [])
@@ -360,7 +402,7 @@ def fetch_state(api: Api, contexts: list[str], now: datetime, run_limit: int = 3
             except urllib.error.HTTPError:
                 run["jobs_total_count"] = -1
             runs.append(run)
-        findings.extend(classify_pr(pr, checks, runs, contexts, now))
+        findings.extend(classify_pr(pr, checks, runs, contexts, now, statuses))
     return recent, findings
 
 
@@ -391,10 +433,22 @@ def sync_issue(api: Api, findings: list[dict], body: str) -> str:
     return "no findings, no open issue"
 
 
+#: What a fixture's ``REPLACE_OLD`` timestamp marker means: old enough to be
+#: past every threshold above.
+REPLAY_OLD_MINS = 180
+
+
 def replay(path: str, now: datetime, contexts: list[str]) -> list[dict]:
-    """Run the classifier over a captured fixture, with no network at all."""
+    """Run the classifier over a captured fixture, with no network at all.
+
+    The fixture's ``REPLACE_OLD`` markers are rewritten against ``now``. Left
+    unparsed they read as "just now", every age is zero, nothing crosses a
+    threshold, and the replay reports no findings for a captured wedge.
+    """
     with open(path, "r", encoding="utf-8") as handle:
-        fixture = json.load(handle)
+        raw = handle.read()
+    old = (now - timedelta(minutes=REPLAY_OLD_MINS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fixture = json.loads(raw.replace("REPLACE_OLD", old))
     findings: list[dict] = []
     for case in fixture["pull_requests"]:
         findings.extend(
@@ -404,6 +458,7 @@ def replay(path: str, now: datetime, contexts: list[str]) -> list[dict]:
                 case.get("runs", []),
                 contexts or fixture.get("required_contexts", []),
                 now,
+                case.get("statuses", []),
             )
         )
     return findings

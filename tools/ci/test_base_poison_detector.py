@@ -401,6 +401,77 @@ class RequiredGateTests(unittest.TestCase):
         self.assertEqual(bp.required_contexts(missing), bp.FALLBACK_REQUIRED_CONTEXTS)
 
 
+RULESET = pathlib.Path(__file__).resolve().parents[2] / ".github" / "rulesets" / "main-protection.json"
+# The contexts other workflows produce. None of them is a job in build.yml.
+NON_BUILD_CONTEXTS = (
+    "Enforce version & skill sync",
+    "Build + prove + (owner-gated) deploy",
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "drift-fast",
+)
+FULL_CONTRACT = ("macos", *NON_BUILD_CONTEXTS)
+
+
+def ruleset_contexts() -> set[str]:
+    data = json.loads(RULESET.read_text(encoding="utf-8"))
+    return {
+        check["context"]
+        for rule in data.get("rules", [])
+        if rule.get("type") == "required_status_checks"
+        for check in rule.get("parameters", {}).get("required_status_checks", [])
+        if check.get("context")
+    }
+
+
+class GovernanceContractTests(unittest.TestCase):
+    """`[governance] required_status_checks` is the full required-check contract.
+
+    `shipyard governance apply` pushes that list to branch protection, so a list
+    shorter than the ruleset mirror would silently drop required checks. And the
+    detector reads the same list, so it must stay correct when the list names
+    contexts build.yml does not produce.
+    """
+
+    def test_governance_equals_the_checked_in_ruleset(self) -> None:
+        try:
+            import tomllib  # noqa: F401
+        except ImportError:  # Python < 3.11
+            self.skipTest("tomllib unavailable; cannot read .shipyard/config.toml")
+        governance = bp.required_contexts()
+        self.assertNotEqual(governance, bp.FALLBACK_REQUIRED_CONTEXTS, "config was not read")
+        self.assertEqual(len(governance), len(set(governance)), governance)
+        self.assertEqual(
+            set(governance),
+            ruleset_contexts(),
+            ".shipyard/config.toml [governance] required_status_checks must equal "
+            "the contexts in .github/rulesets/main-protection.json",
+        )
+
+    def test_the_ruleset_reader_sees_the_required_contexts(self) -> None:
+        # Positive control for the equality above: a reader returning nothing
+        # would make an empty governance list look aligned.
+        self.assertIn("macos", ruleset_contexts())
+        self.assertGreater(len(ruleset_contexts()), 1)
+
+    def test_contexts_from_other_workflows_select_no_build_job(self) -> None:
+        names = [j["name"] for j in bp.gate_jobs(GREEN_GATE_RED_ADVISORY, FULL_CONTRACT)]
+        self.assertEqual(names, ["macos"])
+
+    def test_the_full_contract_judges_a_green_gate_green(self) -> None:
+        self.assertEqual(
+            bp.judge_gate(GREEN_GATE_RED_ADVISORY, FULL_CONTRACT), (bp.EXECUTED, "success")
+        )
+
+    def test_the_full_contract_judges_a_red_gate_red(self) -> None:
+        jobs = [job("macos", "failure", FAILED_TEST_STEPS), job("Linux (x64) [github-hosted]", "success")]
+        self.assertEqual(bp.judge_gate(jobs, FULL_CONTRACT), (bp.EXECUTED, "failure"))
+
+    def test_the_full_contract_keeps_the_descriptive_macos_fallback(self) -> None:
+        jobs = [job("macOS (ARM64) [local]", "failure", FAILED_TEST_STEPS)]
+        self.assertEqual(bp.judge_gate(jobs, FULL_CONTRACT), (bp.EXECUTED, "failure"))
+
+
 class FakeGitHub:
     """Serves `gh api` reads from fixtures keyed by path prefix."""
 
@@ -510,6 +581,19 @@ class MainTipObservationTests(unittest.TestCase):
         lookups = [p for p in fake.paths if f"head_sha={TIP}" in p]
         self.assertTrue(lookups, fake.paths)
         self.assertIn("event=merge_group", lookups[0])
+
+    def test_a_green_tip_is_healthy_under_the_configured_contract(self) -> None:
+        """Read the real `[governance]` list, as `main()` does: the contexts it
+        names that build.yml does not produce must not turn a green tip unproven."""
+        from unittest import mock
+
+        fake = FakeGitHub([tip_run("12")], {"12": GREEN_GATE_RED_ADVISORY})
+        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
+            bp, "artifact_failing_tests", return_value=()
+        ):
+            main, tip = bp.observe_main("o/r", required=bp.required_contexts())
+        verdict = bp.detect(main, [], tip_sha=tip)
+        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
 
     def test_the_signal_carries_the_tip_sha(self) -> None:
         fake = FakeGitHub([tip_run("11")], {"11": GREEN_GATE_RED_ADVISORY})
