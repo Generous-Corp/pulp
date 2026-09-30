@@ -402,6 +402,59 @@ def changed_files(root: Path, base: str) -> set[str]:
     return {f for f in out.split() if f}
 
 
+# Files whose edit can change what the generator records: the scripts it walks.
+SCRIPT_SUFFIXES = (".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs")
+
+
+def touch_reasons(root: Path, base: str, list_path: Path | None = None) -> list[str]:
+    """Why a change since ``base`` can put the checked-in list out of date, or [].
+
+    Answerable without a configured build, so a caller can decide whether a
+    configure is worth paying for. A change can introduce drift only by editing
+    the list itself, a declared entry or input file, a script under a declared
+    input directory, or a CMake file that registers tests (a new or re-pointed
+    script test). A C++ or data edit under a directory input cannot change what
+    the generator records, so it is not a reason.
+    """
+    changed = changed_files(root, base)
+    # Uncommitted edits count too: gates.sh is often run before the commit.
+    wt = subprocess.run(["git", "-C", str(root), "diff", "--name-only", "HEAD"],
+                        capture_output=True, text=True)
+    changed |= {f for f in wt.stdout.split() if f} if wt.returncode == 0 else set()
+    list_path = list_path or root / DEFAULT_LIST
+    rel_list = _rel(list_path, root) or DEFAULT_LIST.as_posix()
+    try:
+        checked_in = json.loads(list_path.read_text(encoding="utf-8")).get("tests", {})
+    except (OSError, json.JSONDecodeError, AttributeError):
+        checked_in = {}
+    files: dict[str, str] = {}
+    dirs: dict[str, str] = {}
+    for name, rec in sorted(checked_in.items()):
+        for p in [rec.get("entry") or "", *(rec.get("inputs") or [])]:
+            if not p or p.startswith(BINARY_DIR_TOKEN):
+                continue
+            (dirs if (root / p).is_dir() else files).setdefault(p.rstrip("/"), name)
+    reasons = []
+    for f in sorted(changed):
+        under = next((d for d in dirs if f.startswith(d + "/")), None)
+        if f == rel_list:
+            reasons.append(f"{f} (the list itself; regenerate it with --write, never hand-edit it)")
+        elif f in files:
+            reasons.append(f"{f} (declared input of {files[f]})")
+        elif under and f.endswith(SCRIPT_SUFFIXES):
+            reasons.append(f"{f} (script under {under}/, declared by {dirs[under]})")
+        elif f.endswith(("CMakeLists.txt", ".cmake")):
+            path = root / f
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+            # A deleted CMake file may have removed a registration.
+            if f.startswith("test/") or "add_test(" in text or not path.exists():
+                reasons.append(f"{f} (CMake that can register tests)")
+    return reasons
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[2]))

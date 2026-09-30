@@ -41,6 +41,9 @@
 #     written reason and an owner, and no allowlist entry outlives its raise)
 #   - ctest label-exclusion (no Catch2 suite is registered only behind a label
 #     that both the required gate and the coverage lane drop)
+#   - script-test inputs (test/ctest_script_inputs.json matches the ctest
+#     inventory for scripts the diff touches; configures build-gate, no
+#     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -471,6 +474,27 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     else
         echo "  deps-audit self-tests: ok" >&2
     fi
+fi
+
+# ── 7a-inputs. script-test inputs list (configures build-gate if needed) ──
+# `script-test-inputs-drift` reads the ctest inventory, so without a configured
+# build it used to be NOT CHECKED here and a stale or hand-edited
+# test/ctest_script_inputs.json surfaced only on the PR head. When the diff can
+# drift the list, this lane reuses a current build or configures `build-gate`
+# (configure only, no compile) and runs the diff-scoped check; a diff that
+# cannot drift it costs nothing. It runs before the pr-fast lane below so that
+# lane finds the configured build too. PULP_GATES_NO_CONFIGURE=1 keeps it
+# NOT CHECKED instead of configuring.
+if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
+    echo "" >&2
+    echo "▸ script-test inputs list (diff-scoped; configures build-gate when the diff can drift it)" >&2
+    sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
+    if ! "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
+        fail=1
+    fi
+    grep -v "^NOT CHECKED locally: " "$sti_log" >&2
+    sed -n "s/^\(NOT CHECKED locally: .*\)/[script-inputs] \1/p" "$sti_log" >>"$not_checked_log"
+    rm -f "$sti_log"
 fi
 
 # ── 7a-src. Python contract suites the diff can reach ─────────────────────

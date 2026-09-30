@@ -2271,6 +2271,13 @@ cmake -S . -B build-drift -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMP
 PULP_SCRIPT_INPUTS_BASE=origin/main python3 tools/ci/drift_fast.py run --build-dir build-drift
 ```
 
+`tools/scripts/gates.sh` does the configure half on its own for the one check
+most often broken by hand: when the diff can drift
+`test/ctest_script_inputs.json` and no current Ninja build exists, it
+configures `build-gate` (no compile) and runs the diff-scoped
+`script-test-inputs-drift` check, printing the `--write` command on drift.
+`PULP_GATES_NO_CONFIGURE=1` opts out and reports the check NOT CHECKED.
+
 On a warm M-series host this is about 60 s of configure plus about 40 s of
 tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
 way CI does; without a base it compares every entry, and entries whose
