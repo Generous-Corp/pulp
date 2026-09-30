@@ -2274,7 +2274,11 @@ configures exactly as the gate does (`Release`, examples off, GPU on) and does
 not build. Before configuring, it runs
 `tools/scripts/hydrate_gpu_provenance_commits.py` because the historical GPU
 probe acceptance registration walks commits outside the depth-2 event
-checkout. `tools/ci/drift_fast.py run` then runs the selection named in
+checkout. Without it that test raises `ShallowCheckoutError` on every run, a
+red check the `macos` gate never shares, so `tools/ci/drift_fast.json` lists the
+step under `workflow_preconditions` (each with a `why`) and
+`tools/ci/drift_fast.py check` fails when the workflow does not invoke it ahead
+of the driver. `tools/ci/drift_fast.py run` then runs the selection named in
 `tools/ci/drift_fast.json`: every member of `ctest_labels` (today the whole
 `pr-fast` tier, 99 tests) plus the listed registrations outside it, through
 ctest itself, so `SKIP_RETURN_CODE`, pass regexes, timeouts and resource locks
@@ -2304,7 +2308,11 @@ to each other.
 
 Adding a test: append it to `tools/ci/drift_fast.json` with a `why`. It must
 pass from a configure alone; a test that needs a built binary does not belong
-here.
+here. A red `drift-fast` should mean the same tree fails `macos` too. When a
+test is red only on this Ubuntu checkout (a shallow history, an Apple-only SDK
+clone the gate has and this runner lacks), fix its Linux precondition or name
+the step it needs under `workflow_preconditions`; do not let the lane carry a
+standing false alarm.
 
 Local reproduction (configure only; no compile):
 
@@ -2313,6 +2321,13 @@ Local reproduction (configure only; no compile):
 cmake -S . -B build-drift -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
 PULP_SCRIPT_INPUTS_BASE=origin/main python3 tools/ci/drift_fast.py run --build-dir build-drift
 ```
+
+`tools/scripts/gates.sh` does the configure half on its own for the one check
+most often broken by hand: when the diff can drift
+`test/ctest_script_inputs.json` and no current Ninja build exists, it
+configures `build-gate` (no compile) and runs the diff-scoped
+`script-test-inputs-drift` check, printing the `--write` command on drift.
+`PULP_GATES_NO_CONFIGURE=1` opts out and reports the check NOT CHECKED.
 
 On a warm M-series host this is about 60 s of configure plus about 40 s of
 tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
@@ -2624,6 +2639,19 @@ answers "did this merge actually run tests?" directly. A refusal carries the
 protected-base verifier's own reason (for example "receipt selection covers too
 little of the built test inventory"). The notes are rendered by the checked-out
 script after the protected-base verifier has decided; they never decide.
+
+A receipt stands in for the group's whole suite, including the
+`slow-affected` proofs (such as `agent-capability-installed-sdk`) that the
+change classifier admits for some changes. The receipt's signed selection
+records whether they ran: the anchored `^slow$` label set means they did. The
+reuse step passes the group's own classification to the verifier as
+`--affected-slow-required` (an empty classifier output counts as `true`), but
+only when the protected-base verifier accepts that flag. A group that requires
+the proofs while the receipt's run skipped them is reported as a
+`::notice::protected receipt: merge group requires the slow-affected proofs
+...` line on an otherwise successful reuse. The verifier does not refuse on it,
+so those notices give the would-refuse count to read before refusal is
+switched on.
 
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the

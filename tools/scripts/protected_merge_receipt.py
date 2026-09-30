@@ -51,12 +51,12 @@ REQUIRED_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab|source-s
 # with affected_slow). An anchored alternative matches a subset of the labels
 # the unanchored one does, so that run excludes fewer tests: it executed every
 # test the plain selection would, plus the proof. It is equally full
-# validation, and the classifier makes the same choice for the merge group,
-# whose tree and base a receipt must match exactly.
-ACCEPTED_LABEL_EXCLUDES = frozenset({
-    REQUIRED_LABEL_EXCLUDE,
-    "|".join("^slow$" if part == "slow" else part for part in REQUIRED_LABEL_EXCLUDE.split("|")),
-})
+# validation. The selection is part of the signed validation record, so it is
+# also the receipt's record of whether the proofs ran.
+AFFECTED_SLOW_LABEL_EXCLUDE = "|".join(
+    "^slow$" if part == "slow" else part for part in REQUIRED_LABEL_EXCLUDE.split("|")
+)
+ACCEPTED_LABEL_EXCLUDES = frozenset({REQUIRED_LABEL_EXCLUDE, AFFECTED_SLOW_LABEL_EXCLUDE})
 MIN_SELECTED_PERCENT = 80
 SELECTION_KEYS = ("label_exclude", "exclude_regex", "label_include", "include_regex")
 VALIDATION_KEYS = (
@@ -499,6 +499,29 @@ def _require_exact_keys(value: dict[str, Any], expected: Iterable[str], label: s
         raise ReceiptError(f"{label} fields do not match schema")
 
 
+def ran_affected_slow_proofs(validation: dict[str, Any]) -> bool:
+    """Whether the recorded selection admitted the `slow-affected` proofs."""
+    return validation["selection"]["label_exclude"] == AFFECTED_SLOW_LABEL_EXCLUDE
+
+
+def _check_affected_slow_proofs(validation: dict[str, Any], args: argparse.Namespace) -> None:
+    """Compare the proofs the receipt ran with the proofs the merge group needs.
+
+    A receipt replaces the group's whole macOS suite, so a group whose
+    classification requires the `slow-affected` proofs cannot reuse a run that
+    did not execute them. That happens when the group's classifier falls back
+    to requiring them (an unresolvable base) while the head's did not. The
+    mismatch is reported on stderr and does not refuse the receipt.
+    """
+    required = getattr(args, "affected_slow_required", None)
+    if required == "true" and not ran_affected_slow_proofs(validation):
+        print(
+            "protected receipt: merge group requires the slow-affected proofs "
+            "but the receipt's run did not execute them (not enforced)",
+            file=sys.stderr,
+        )
+
+
 def verify_receipt(receipt: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     _require_exact_keys(
         receipt,
@@ -520,6 +543,7 @@ def verify_receipt(receipt: dict[str, Any], args: argparse.Namespace) -> dict[st
     if receipt["target"] != args.target:
         raise ReceiptError("target identity changed")
     check_validation(receipt["validation"])
+    _check_affected_slow_proofs(receipt["validation"], args)
     if not str(receipt["run_id"]).isdigit() or not str(receipt["run_attempt"]).isdigit():
         raise ReceiptError("workflow run identity is malformed")
 
@@ -850,6 +874,10 @@ def _parser() -> argparse.ArgumentParser:
 
     verify = subparsers.add_parser("verify", parents=[common])
     verify.add_argument("--group-sha", required=True)
+    verify.add_argument(
+        "--affected-slow-required", choices=("true", "false"),
+        help="whether the merge group's classification requires the slow-affected proofs",
+    )
     verify.add_argument("--receipt", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
 
