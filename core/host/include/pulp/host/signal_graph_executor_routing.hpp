@@ -2,6 +2,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
+#include <pulp/host/custom_node_events.hpp>
 #include <pulp/host/graph_types.hpp>
 #include <pulp/host/parameter_event_queue.hpp>
 #include <pulp/host/plugin_slot.hpp>
@@ -136,6 +137,13 @@ struct CustomBindingContext {
     // `process`. Its non-empty state mirrors the node's resolved
     // GraphNode::transport_sensitive, so binding and partition stay consistent.
     CustomNodeTransportProcessFn process_transport;
+    // Event-aware callback for a Custom node whose type reads events. When set,
+    // the binding invokes this instead of `process`/`process_transport` and hands
+    // it the node's gathered inbound MIDI; empty == event-unaware node. A COPY of
+    // the resolved callback, mirroring `process`. Registration refuses a type
+    // that declares both this and a transport callback, so the dispatch ladder
+    // has no ambiguous case.
+    CustomNodeEventProcessFn process_events;
 };
 
 // A SignalGraph translated into the canonical GraphRuntimeExecutor's routing
@@ -259,6 +267,7 @@ struct ExecutorSnapshotBinders {
     // transport-sensitive (consistent with GraphNode::transport_sensitive
     // resolved at compile).
     std::function<const CustomNodeTransportProcessFn*(NodeId)> custom_transport_for;
+    std::function<const CustomNodeEventProcessFn*(NodeId)> custom_event_for;
     // Prepare-stable intrinsic latency for a resolved Custom node, resolved from
     // CustomNodeType once at compile/prepare (the caller has already evaluated
     // it at the snapshot's sample rate). Empty, or a non-positive result, means

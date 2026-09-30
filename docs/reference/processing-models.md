@@ -89,6 +89,53 @@ A `CustomNodeType` can be stateless (just a `process` callback) or stateful
 nodes follow the same threading contract as `PluginSlot`: lifecycle calls on the
 UI/main thread, `process_instance` on the audio thread and real-time-safe.
 
+#### Reading MIDI from a custom node
+
+A custom node can consume the MIDI routed to it. The graph has always gathered
+each node's inbound events before it dispatches on node kind, which is how a
+`Processor` node sees them; a `CustomNodeType` reaches the same scratch by
+declaring an event-aware callback instead of the plain one:
+
+```cpp
+#include <pulp/host/custom_node_events.hpp>
+
+CustomNodeType gate;
+gate.type_id = "myplugin.midi_gate";
+gate.num_input_ports = 1;
+gate.num_output_ports = 1;
+gate.create  = []() -> void* { return new MyGate(); };
+gate.destroy = [](void* p) { delete static_cast<MyGate*>(p); };
+gate.process_instance_events =
+    [](void* p, audio::BufferView<float>& out,
+       const audio::BufferView<const float>& in, int frames,
+       const CustomNodeEventBlock& events) {
+        if (events.in != nullptr)
+            for (const auto& ev : *events.in)
+                if (ev.is_note_on()) static_cast<MyGate*>(p)->note_on(ev);
+        /* ... write out ... */
+    };
+graph.register_custom_node_type(gate);           // then connect_midi(source, node)
+```
+
+`process_events` is the stateless form. Three things are worth knowing before
+you reach for either:
+
+* **A null `events.in` means "no events this block"** and is not an error — the
+  graph only allocates an event port when the compiled graph carries MIDI, so an
+  audio-only graph hands the callback nothing. Treat null and empty the same.
+* **Emission is not available yet.** `CustomNodeEventBlock::out` exists so that
+  adding it later is not a breaking change, but it is always null today. What is
+  outstanding is evidence rather than safety: emitted events need to be proved
+  identical on the graph's two execution paths, with overflow reported the same
+  way on each and nothing leaking into a later block.
+* **Registration refuses incoherent combinations** rather than degrading
+  quietly. A stateful event callback needs `create` *and* `destroy`; an
+  event-aware type cannot also be `lowerable`, because the bake layer has no
+  event plane and a lowered node would run silently MIDI-less; and it cannot
+  also declare a transport callback, because the two would have no defined
+  dispatch precedence. `consumes_events()` reports whether a type declares the
+  lane, and `custom_node_types()` mirrors it as `consumes_events`.
+
 ### If you are building a node editor
 
 The graph is designed to be the model under an editor, so the pieces an editor
