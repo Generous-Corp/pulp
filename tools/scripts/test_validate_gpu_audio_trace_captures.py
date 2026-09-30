@@ -209,6 +209,22 @@ class GpuAudioTraceSqlTests(unittest.TestCase):
                                         "pulp_gpu_audio_blocks ORDER BY sequence").fetchall(),
                          [(0, None), (1, None)])
 
+    def test_unresolved_physical_ownership_rejects_otherwise_complete_lifecycle(self) -> None:
+        self.add("ownership", physical_release_complete=0, unresolved_channel_count=1)
+        self.require_unqualified()
+        self.assertIn("unresolved_physical_ownership",
+                      [row[0] for row in self.rows("lifecycle_violations")])
+        self.assertIn("unresolved_physical_ownership",
+                      [row[0] for row in self.rows("full_lifecycle_issues")])
+
+    def test_malformed_ownership_disclosure_is_not_clean_release(self) -> None:
+        row = self.add("ownership", physical_release_complete=1, unresolved_channel_count=1)
+        self.require_unqualified()
+        self.arguments[row]["debug.unresolved_channel_count"] = 0
+        self.assertEqual(self.rows("full_lifecycle_generations"), [(10, 7, 1)])
+        del self.arguments[row]["debug.physical_release_complete"]
+        self.require_unqualified()
+
     def test_missing_terminal_is_detected_even_when_delivery_remains(self) -> None:
         self.db.execute("DELETE FROM slice WHERE name = 'gpu.audio.terminal' AND id = 4")
         self.require_unqualified()

@@ -25,6 +25,8 @@ class SharedIoConvolutionExecutor {
 
     // One-shot allocation. Use fence_and_reprime() for a later stream epoch so
     // prepare can never invalidate a callback-held span by reallocating it.
+    // Sequence zero starts with known zero history; a nonzero first sequence
+    // conservatively retains the same history recovery as fence_and_reprime().
     bool prepare(const Config&, std::uint64_t epoch, std::uint64_t first_sequence);
     bool record_terminal(std::uint64_t epoch, std::uint64_t sequence, Terminal,
                          std::span<const float> interleaved_time,

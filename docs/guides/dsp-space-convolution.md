@@ -51,3 +51,32 @@ budget-aware hosts; normal plugins do not need to schedule partitions themselves
 
 The [complete advanced DSP API](../reference/advanced-dsp-api.md#space-and-convolution)
 lists every method on both processors.
+
+## Shared GPU convolution trace
+
+The experimental `GpuConvolver` and `GpuConvolutionReverb` routes accept an
+optional trace configuration before `prepare()`:
+
+```cpp
+pulp::gpu_audio::GpuConvolverTraceConfig trace;
+trace.enabled = true;
+trace.capture_admissions = true;
+trace.success_stride = 1;
+
+pulp::gpu_audio::GpuConvolutionReverbConfig config;
+config.gpu_enabled = true;
+config.trace = trace;
+pulp::gpu_audio::GpuConvolutionReverb reverb(config);
+// prepare() runs with audio stopped.
+reverb.prepare();
+```
+
+The callback only publishes fixed-size records to bounded SPSC queues. It does
+not allocate, lock, wait, or call Perfetto. The transport worker emits the
+`gpu.audio.session`, admission, terminal, delivery, and counter events through
+the host's active Pulp trace session. It is the sole live queue consumer and
+the node's final close drains any records that remain;
+release the route before stopping the host's trace owner and verify the flushed
+trace. Each lane receives its own engine ID, while `(generation, sequence)`
+identifies a block within that lane and terminal GPU and delivered-audio
+dispositions remain separate.

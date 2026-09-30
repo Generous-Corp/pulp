@@ -138,6 +138,13 @@ set(PULP_GPU_AUDIO_VELLUM_D15_RELEASE_ELIGIBLE
 # does not promise realtime scheduling or deadline determinism.
 set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO
     "@PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO@")
+set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA "@PULP_GPU_AUDIO_CAPABILITY_SCHEMA@")
+# Producer facts, not consumer switches: changing a consumer cache option cannot
+# enable a path in this precompiled archive. Runtime preparation can still fail.
+set(PULP_GPU_AUDIO_SHARED_CONVOLVER_ENABLED
+    "@PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER@")
+set(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF_ENABLED
+    "@PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF@")
 if(PULP_GPU_AUDIO_HAS_VELLUM_D15)
     set(_pulp_gpu_audio_vellum_runtime
         "${PULP_SDK_LIBRARY_DIR}/${PULP_GPU_AUDIO_VELLUM_RUNTIME_NAME}")

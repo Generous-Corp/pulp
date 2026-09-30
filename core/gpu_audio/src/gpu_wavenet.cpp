@@ -6,6 +6,7 @@
 #include "detail/shared_io_program_session.hpp"
 #endif
 
+#include <chrono>
 #include <cstring>
 #include <utility>
 #include <vector>
@@ -17,6 +18,8 @@ struct GpuWaveNetSession::Impl {
     std::unique_ptr<detail::SharedIoProgramSession> session;
 #endif
     std::uint32_t block_size = 0;
+    GpuWaveNetCompletionPolicy completion_policy = GpuWaveNetCompletionPolicy::ProcessEvents;
+    bool completion_policy_supported = true;
 };
 
 GpuWaveNetSession::GpuWaveNetSession(std::unique_ptr<Impl> impl) noexcept
@@ -81,8 +84,15 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
             return result;
         }
 
+        auto policy = detail::DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::WaitAny)
+            policy = detail::DawnSharedIoProvider::CompletionPolicy::WaitAny;
+        if (config.completion_policy == GpuWaveNetCompletionPolicy::TimedWaitAny)
+            policy = detail::DawnSharedIoProvider::CompletionPolicy::TimedWaitAny;
         auto created = detail::DawnSharedIoProvider::create(
-            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA});
+            {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+             .completion_policy = policy,
+             .completion_wait_ns = config.completion_wait_ns});
         if (!created.provider) {
             result.error = GpuWaveNetSessionError::ProviderUnavailable;
             return result;
@@ -95,6 +105,11 @@ GpuWaveNetSession::CreateResult GpuWaveNetSession::create(const Config& config) 
 
         auto impl = std::make_unique<Impl>();
         impl->block_size = config.descriptor.block_size;
+        // Preserve both sides of the capability contract: callers can inspect
+        // what they requested, while support reports the provider's actual
+        // policy after any backend fallback.
+        impl->completion_policy = config.completion_policy;
+        impl->completion_policy_supported = created.provider->completion_policy() == policy;
         impl->session = std::make_unique<detail::SharedIoProgramSession>();
         const auto bytes = static_cast<std::size_t>(config.descriptor.block_size) * sizeof(float);
         if (!impl->session->prepare({std::move(created.provider), std::move(program)},
@@ -130,6 +145,14 @@ std::uint32_t GpuWaveNetSession::block_size() const noexcept {
     return impl_ ? impl_->block_size : 0;
 }
 
+GpuWaveNetCompletionPolicy GpuWaveNetSession::completion_policy() const noexcept {
+    return impl_ ? impl_->completion_policy : GpuWaveNetCompletionPolicy::ProcessEvents;
+}
+
+bool GpuWaveNetSession::completion_policy_supported() const noexcept {
+    return impl_ && impl_->completion_policy_supported;
+}
+
 bool GpuWaveNetSession::submit_block(std::span<const float> input, std::uint64_t sequence,
                                      std::uint64_t deadline_ns) noexcept {
 #if !defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
@@ -158,6 +181,21 @@ std::size_t GpuWaveNetSession::service(std::uint64_t now_ns) noexcept {
         return impl_->session->service(now_ns);
 #else
     (void)now_ns;
+#endif
+    return 0;
+}
+
+std::size_t GpuWaveNetSession::service_until(std::uint64_t deadline_ns) noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (prepared()) {
+        const auto now =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count());
+        return impl_->session->service_until(now, deadline_ns);
+    }
+#else
+    (void)deadline_ns;
 #endif
     return 0;
 }

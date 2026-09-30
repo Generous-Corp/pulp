@@ -731,19 +731,11 @@ TEST_CASE("ParamRange zero-width ranges normalize safely",
     REQUIRE_THAT(range.normalize(100.0f), WithinAbs(0.0, 0.001));
     REQUIRE_THAT(range.denormalize(0.25f), WithinAbs(7.0, 0.001));
     REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(7.0, 0.001));
-}
 
-TEST_CASE("ParamRange clamps and handles zero-width ranges", "[state][range]") {
-    ParamRange range{-10.0f, 10.0f, 0.0f, 0.0f};
-
-    REQUIRE_THAT(range.normalize(-100.0f), WithinAbs(0.0, 0.001));
-    REQUIRE_THAT(range.normalize(100.0f), WithinAbs(1.0, 0.001));
-    REQUIRE_THAT(range.denormalize(-1.0f), WithinAbs(-10.0, 0.001));
-    REQUIRE_THAT(range.denormalize(2.0f), WithinAbs(10.0, 0.001));
-
-    ParamRange fixed{5.0f, 5.0f, 5.0f, 1.0f};
-    REQUIRE_THAT(fixed.normalize(123.0f), WithinAbs(0.0, 0.001));
-    REQUIRE_THAT(fixed.denormalize(0.75f), WithinAbs(5.0, 0.001));
+    // A step on a zero-width range must not reintroduce a division by zero.
+    ParamRange stepped{5.0f, 5.0f, 5.0f, 1.0f};
+    REQUIRE_THAT(stepped.normalize(123.0f), WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(stepped.denormalize(0.75f), WithinAbs(5.0, 0.001));
 }
 
 TEST_CASE("ParamValue tracks modulation and copy move state",

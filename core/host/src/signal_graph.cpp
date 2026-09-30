@@ -173,12 +173,6 @@ bool custom_type_matches_node_shape(const CustomNodeType& type,
         && type.num_output_ports == node.num_output_ports;
 }
 
-std::string custom_node_key(std::string_view type_id, int version) {
-    std::string key(type_id);
-    key.push_back('\x1f');
-    key += std::to_string(version);
-    return key;
-}
 
 bool metadata_equal(const SampleKernelMetadata& lhs, const SampleKernelMetadata& rhs) noexcept {
     return lhs.category == rhs.category && lhs.parameter == rhs.parameter &&
@@ -233,7 +227,8 @@ bool custom_types_equal_for_idempotency(const CustomNodeType& lhs,
         !same_function(lhs.process_transport, rhs.process_transport) ||
         !same_function(lhs.process_instance_transport, rhs.process_instance_transport) ||
         !same_function(lhs.process_instance_baked_param, rhs.process_instance_baked_param) ||
-        !same_function(lhs.latency_samples, rhs.latency_samples)) {
+        !same_function(lhs.latency_samples, rhs.latency_samples) ||
+        !same_function(lhs.latency_samples_for_block, rhs.latency_samples_for_block)) {
         return false;
     }
     for (std::size_t i = 0; i < lhs.baked_params.size(); ++i) {
@@ -723,6 +718,7 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
     // This preserves the historical one-argument replacement behavior without
     // leaving a stale descriptor paired with different callbacks.
     sample_kernel_types_.erase(key);
+    custom_node_diagnostics_.erase(key);
     custom_node_types_[key] = std::move(type);
     // M6 (2.2b): any registry change bumps the generation so a reinit-free swap
     // compiled against an older generation is rejected (a re-register rebinds
@@ -2699,10 +2695,14 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 // Evaluated once here, off the audio thread, at the graph's own
                 // rate, and clamped into the declared range — the value is not
                 // knowable at registration, so this is where it gets checked.
-                if (cg->custom_processors.contains(n.id) && type->latency_samples) {
+                if (cg->custom_processors.contains(n.id) &&
+                    (type->latency_samples_for_block || type->latency_samples)) {
+                    const int latency =
+                        type->latency_samples_for_block
+                            ? type->latency_samples_for_block(sample_rate, max_block_size)
+                            : type->latency_samples(sample_rate);
                     cg->custom_latency_samples[n.id] =
-                        std::clamp(type->latency_samples(sample_rate), 0,
-                                   CustomNodeType::kMaxLatencySamples);
+                        std::clamp(latency, 0, CustomNodeType::kMaxLatencySamples);
                 }
                 // Bake-layer param injection: if the type declared baked_params
                 // and a param-aware process, bind a closure that captures the

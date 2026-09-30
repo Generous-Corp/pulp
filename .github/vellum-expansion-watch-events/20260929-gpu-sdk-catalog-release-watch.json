@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260929-gpu-sdk-catalog-release-watch",
+  "created_at": "2026-09-29T23:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a release-workflow-only change that crosses the design-output-and-packaging selector through .github/workflows/release-cli.yml. The Apple-Silicon SDK release now enables the explicit GPU convolution host realization so its installed Forge catalog advertises the capability that downstream Forge consumers validate. No Vellum source, renderer, importer, asset, capture path, or authority boundary changes.",
+  "tests": [
+    "test_release_workflow_test_step.py",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

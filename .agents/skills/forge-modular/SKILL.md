@@ -20,10 +20,11 @@ and everything that includes them) include `<pulp/simd/simd.hpp>`. A build
 that lists include directories by hand must list `core/simd/include` next to
 `core/signal/include`, or it fails with a missing header. It needs no library:
 without pulp-simd's compile definitions the header supplies the scalar kernels
-inline (`pulp::simd::active_backend_name == "inline-scalar"`). Three lists carry it
+inline (`pulp::simd::active_backend_name == "inline-scalar"`). Four lists carry it
 for this pack and must move together: `examples/forge-modular/CMakeLists.txt`
 (both include blocks), the consumed-input status list in `package.sh`, and
-the toolchain tree list in `tools/rack/install_toolchain.sh`. A pack that
+the toolchain tree list in `tools/rack/install_toolchain.sh`, and the generator's
+`INCLUDES` in `tools/rack/generate.py` (preflight and syntax compilation). A pack that
 misses it fails at the compiler after the model has already been called.
 
 ## A run that fails still has to hand something over

@@ -95,6 +95,7 @@ if(NOT COMMAND target_copy_webgpu_binaries)
                     "${_pulp_webgpu_runtime}"
                     $<TARGET_FILE_DIR:${target}>
                 COMMENT "Copying WebGPU runtime next to ${target}"
+                VERBATIM
             )
 
             if(APPLE)
@@ -130,6 +131,7 @@ if(NOT COMMAND target_copy_webgpu_binaries)
                     "${SKIA_ICUDTL_FILE}"
                     $<TARGET_FILE_DIR:${target}>
                 COMMENT "Copying Skia ICU runtime data next to ${target}"
+                VERBATIM
             )
         endif()
     endfunction()

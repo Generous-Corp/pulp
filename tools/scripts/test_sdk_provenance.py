@@ -125,6 +125,150 @@ class SdkProvenanceTests(unittest.TestCase):
             0o644,
         )
 
+    def install_gpu_audio_capabilities(self, *, shared=True, exact=True, convolver=True):
+        facts = {"shared_provider": shared, "shared_convolver": convolver,
+                 "exact_provider_proof": exact}
+        cache = self.build / "CMakeCache.txt"
+        with cache.open("a") as stream:
+            stream.write("PULP_GPU_AUDIO_CAPABILITY_SCHEMA:INTERNAL=1\n")
+            for key, (name, _) in provenance.GPU_AUDIO_CAPABILITIES.items():
+                stream.write(f"{name}:BOOL={'ON' if facts[key] else 'OFF'}\n")
+        config = self.prefix / "lib/cmake/Pulp/PulpConfig.cmake"
+        config.parent.mkdir(parents=True)
+        config.write_text('set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA "1")\n' + "\n".join(
+            f'set({exported} "{"ON" if facts[key] else "OFF"}")'
+            for key, (_, exported) in provenance.GPU_AUDIO_CAPABILITIES.items()
+        ))
+        (self.prefix / "lib/libpulp-gpu-audio.a").write_bytes(b"gpu audio fixture")
+        return facts
+
+    def test_gpu_audio_capabilities_bind_installed_config_and_archive(self):
+        facts = self.install_gpu_audio_capabilities()
+        marker = self.marker()
+        self.assertEqual(marker["gpu_audio"]["capabilities"], facts)
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(provenance.verify_release_marker(
+            self.prefix, expected_platform="darwin-arm64", expected_source_sha=self.sha), marker)
+        for path in marker["gpu_audio"]["files"]:
+            with self.subTest(path=path):
+                member = self.prefix / path
+                original = member.read_bytes()
+                member.write_bytes(original + b"\nchanged")
+                with self.assertRaisesRegex(provenance.ProvenanceError, "capability integrity"):
+                    provenance.verify_release_marker(
+                        self.prefix, expected_platform="darwin-arm64", expected_source_sha=self.sha)
+                member.write_bytes(original)
+
+    def test_modern_gpu_audio_disabled_sdk_remains_eligible(self):
+        facts = self.install_gpu_audio_capabilities(shared=False, exact=False, convolver=False)
+        for platform in ("darwin-arm64", "linux-x64", "windows-x64"):
+            with self.subTest(platform=platform):
+                if platform.startswith("windows"):
+                    for member in ("pulp-view-script", "pulp-gpu-audio"):
+                        (self.prefix / f"lib/{member}.lib").write_bytes(b"Windows fixture")
+                marker = self.marker(platform=platform)
+                self.assertEqual(marker["gpu_audio"]["capabilities"], facts)
+                provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+                self.assertTrue(provenance.verify_release_marker(
+                    self.prefix, expected_platform=platform, expected_source_sha=self.sha)["distribution_eligible"])
+
+    def test_intel_shared_provider_without_arm_authentication_is_valid(self):
+        facts = self.install_gpu_audio_capabilities(exact=False, convolver=False)
+        marker = self.marker(platform="darwin-x64")
+        self.assertEqual(marker["gpu_audio"]["capabilities"], facts)
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        self.assertEqual(provenance.verify_release_marker(
+            self.prefix, expected_platform="darwin-x64", expected_source_sha=self.sha), marker)
+
+    def test_gpu_audio_modern_receipt_cannot_be_deleted(self):
+        self.install_gpu_audio_capabilities()
+        marker = self.marker()
+        del marker["gpu_audio"]
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        with self.assertRaisesRegex(provenance.ProvenanceError, "missing GPU-audio capability receipt"):
+            provenance.verify_release_marker(
+                self.prefix, expected_platform="darwin-arm64", expected_source_sha=self.sha)
+
+    def test_gpu_audio_boolean_strings_and_partial_tuple_are_rejected(self):
+        self.install_gpu_audio_capabilities()
+        for value in ("false", 1, None):
+            marker = self.marker()
+            marker["gpu_audio"]["capabilities"]["shared_provider"] = value
+            provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+            with self.subTest(value=value), self.assertRaisesRegex(provenance.ProvenanceError, "capability facts"):
+                provenance.verify_release_marker(
+                    self.prefix, expected_platform="darwin-arm64", expected_source_sha=self.sha)
+        marker = self.marker()
+        del marker["gpu_audio"]["capabilities"]["shared_provider"]
+        provenance.write_atomically(self.prefix / "sdk-provenance.json", marker)
+        with self.assertRaisesRegex(provenance.ProvenanceError, "capability facts"):
+            provenance.verify_release_marker(
+                self.prefix, expected_platform="darwin-arm64", expected_source_sha=self.sha)
+
+    def test_gpu_audio_unsupported_or_partial_installed_schema_rejected(self):
+        self.install_gpu_audio_capabilities()
+        config = self.prefix / "lib/cmake/Pulp/PulpConfig.cmake"
+        original = config.read_text()
+        for replacement in ('set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA "2")',
+                            'set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA)'):
+            with self.subTest(replacement=replacement):
+                config.write_text(original.replace('set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA "1")', replacement))
+                with self.assertRaisesRegex(provenance.ProvenanceError, "unsupported installed"):
+                    self.marker()
+        config.write_text(original)
+
+    def test_installed_template_exports_producer_facts_over_consumer_cache(self):
+        template = (SCRIPT.parents[1] / "cmake/PulpConfig.cmake.in").read_text()
+        section = template.split('set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO', 1)[1].split(
+            'if(PULP_GPU_AUDIO_HAS_VELLUM_D15)', 1)[0]
+        section = 'set(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO' + section
+        for key, (producer, _) in provenance.GPU_AUDIO_CAPABILITIES.items():
+            section = section.replace('@' + producer + '@', 'ON')
+        section = section.replace('@PULP_GPU_AUDIO_CAPABILITY_SCHEMA@', '1')
+        script = self.root / 'exports.cmake'
+        exports = [value[1] for value in provenance.GPU_AUDIO_CAPABILITIES.values()]
+        script.write_text('\n'.join(f'set({name} OFF CACHE BOOL "consumer spoof")' for name in exports)
+                          + '\n' + section + '\n'
+                          + '\n'.join(f'if(NOT {name})\nmessage(FATAL_ERROR "wrong producer fact")\nendif()' for name in exports))
+        result = subprocess.run(['cmake', '-P', str(script)], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_gpu_audio_missing_modern_cache_schema_rejected(self):
+        self.install_gpu_audio_capabilities()
+        cache = self.build / "CMakeCache.txt"
+        cache.write_text(cache.read_text().replace("PULP_GPU_AUDIO_CAPABILITY_SCHEMA:INTERNAL=1\n", ""))
+        with self.assertRaisesRegex(provenance.ProvenanceError, "missing GPU-audio producer"):
+            self.marker()
+
+    def test_gpu_audio_rejects_unauthenticated_convolver(self):
+        self.install_gpu_audio_capabilities(exact=False)
+        with self.assertRaisesRegex(provenance.ProvenanceError, "authenticated shared provider"):
+            self.marker()
+
+    def test_gpu_audio_rejects_exact_proof_on_intel(self):
+        self.install_gpu_audio_capabilities()
+        with self.assertRaisesRegex(provenance.ProvenanceError, "darwin-arm64"):
+            self.marker(platform="darwin-x64")
+
+    def test_gpu_audio_rejects_installed_config_disagreement(self):
+        self.install_gpu_audio_capabilities()
+        path = self.prefix / "lib/cmake/Pulp/PulpConfig.cmake"
+        path.write_text(path.read_text().replace('ENABLED "ON"', 'ENABLED "OFF"'))
+        with self.assertRaisesRegex(provenance.ProvenanceError, "capability mismatch"):
+            self.marker()
+
+    def test_gpu_audio_missing_modern_fact_is_not_false(self):
+        self.install_gpu_audio_capabilities()
+        path = self.build / "CMakeCache.txt"
+        path.write_text(path.read_text().replace("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF:BOOL=ON\n", ""))
+        with self.assertRaisesRegex(provenance.ProvenanceError, "missing"):
+            self.marker()
+
+    def test_old_gpu_audio_flags_without_schema_remain_unknown(self):
+        with (self.build / "CMakeCache.txt").open("a") as stream:
+            stream.write("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF:BOOL=OFF\n")
+        self.assertNotIn("gpu_audio", self.marker())
+
     def test_traced_build_cannot_mint_release_provenance(self) -> None:
         # Control: the fixture mints a marker cleanly with tracing off, so the
         # rejection below is caused by the flag and not by a broken fixture.

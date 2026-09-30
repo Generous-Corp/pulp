@@ -118,6 +118,7 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->next_connection_identity_ = owner.next_connection_identity_;
     candidate_->custom_node_types_ = owner.custom_node_types_;
     candidate_->sample_kernel_types_ = owner.sample_kernel_types_;
+    candidate_->custom_node_diagnostics_ = owner.custom_node_diagnostics_;
     candidate_->sample_region_definitions_ = owner.sample_region_definitions_;
     candidate_->sample_region_parameter_binding_ = owner.sample_region_parameter_binding_;
     sample_region_parameter_binding_ = owner.sample_region_parameter_binding_;
@@ -357,6 +358,7 @@ bool SignalGraph::PreparedTopologyEdit::unregister_custom_node_type(std::string_
             return false;
         candidate_->custom_node_types_.erase(found);
         candidate_->sample_kernel_types_.erase(key);
+        candidate_->custom_node_diagnostics_.erase(key);
         ++candidate_->custom_registry_generation_;
         candidate_->invalidate_live_locked_();
         return true;
@@ -381,6 +383,7 @@ std::size_t SignalGraph::PreparedTopologyEdit::prune_unused_custom_node_types() 
          it != candidate_->custom_node_types_.end();) {
         if (used.count(it->first) == 0) {
             candidate_->sample_kernel_types_.erase(it->first);
+            candidate_->custom_node_diagnostics_.erase(it->first);
             it = candidate_->custom_node_types_.erase(it);
             ++removed;
         } else {
@@ -1422,6 +1425,7 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->next_connection_identity_ = candidate_->next_connection_identity_;
     owner_->custom_node_types_ = std::move(candidate_->custom_node_types_);
     owner_->sample_kernel_types_ = std::move(candidate_->sample_kernel_types_);
+    owner_->custom_node_diagnostics_ = std::move(candidate_->custom_node_diagnostics_);
     owner_->sample_region_definitions_ = std::move(candidate_->sample_region_definitions_);
     owner_->sample_region_parameter_binding_ = candidate_->sample_region_parameter_binding_;
     owner_->sample_region_proof_block_size_ = candidate_->sample_region_proof_block_size_;

@@ -20,6 +20,9 @@ struct SharedIoConvolutionProgramSpec {
     std::uint32_t logical_frames = 0;
     std::uint32_t ir_length = 0;
     std::span<const float> normalized_ir_spectrum;
+    // Nonzero selects immutable-mask WOLA using this prepared FFT graph.
+    std::uint32_t spectral_hop = 0;
+    bool spectral_per_hop_gains = false;
 };
 
 class DawnSharedIoProvider final : public SharedIoArenaProvider {
@@ -59,6 +62,9 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         NativeOutputOom,
         ConvolutionPrepareAfterScopesFailure,
         ConvolutionSubmitAfterScopesFailure,
+        CancelReadbackMapping,
+        RetireAfterReadbackSuccess,
+        FirstDrainFailure,
     };
 
     struct Options {
@@ -74,6 +80,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         // Each serialized wait is capped at one millisecond.
         // Values above std::chrono::nanoseconds::max().count() fail closed.
         std::uint64_t completion_wait_ns = 0;
+        // Private matched-storage experiment; production remains imported.
+        StorageKind storage_kind = StorageKind::ImportedHostPointer;
     };
 
     struct CreateResult {
@@ -83,6 +91,9 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     };
 
     struct Stats {
+        std::uint64_t runtime_write_buffer_calls = 0;
+        std::uint64_t runtime_copy_buffer_calls = 0;
+        std::uint64_t runtime_map_async_calls = 0;
         std::uint64_t slots_created = 0;
         std::uint64_t slots_destroyed = 0;
         std::uint64_t allocations = 0;
@@ -142,7 +153,13 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     std::uint64_t proc_table_install_count() const noexcept;
     Stats stats() const noexcept;
     CompletionPolicy completion_policy() const noexcept;
+    void service_until(std::uint64_t deadline_ns) noexcept override;
     AdapterIdentity adapter_identity() const;
+    std::string dawn_revision() const;
+    // Quiescent only: no slots/programs/futures; failed device cannot be reused.
+    bool reconfigure_storage_kind(StorageKind kind) noexcept;
+    StorageKind storage_kind() const noexcept;
+    std::uint64_t device_owner_generation() const noexcept;
 
     bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
                                  std::span<const SlotBufferHandle> slots) noexcept;

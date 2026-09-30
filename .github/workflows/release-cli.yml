@@ -1202,6 +1202,19 @@ jobs:
             unset SKIA_DIR
             EXTRA_ARCH="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DPULP_RUST_CLI_TARGET=x86_64-apple-darwin"
           fi
+          # Compile explicit shared-audio opt-in only for the authenticated
+          # Apple-Silicon SDK. Auto remains staged; this is not a runtime default.
+          GPU_AUDIO_FLAGS=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=OFF
+            -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=OFF)
+          if [ "${{ matrix.platform }}" = "darwin-arm64" ]; then
+            GPU_AUDIO_FLAGS=(-DPULP_GPU_AUDIO_EXACT_PROVIDER_PROOF=ON
+              -DPULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER=ON
+              # The arm64 SDK is the authenticated Apple-Silicon GPU-audio
+              # consumer SDK. Export the opt-in host realization in its
+              # Forge catalog so downstreams can fail closed on the same
+              # capability they link.
+              -DPULP_HOST_ENABLE_GPU_CONVOLUTION=ON)
+          fi
           INSPECTOR="-DPULP_ENABLE_INSPECTOR=OFF"
           if python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); raise SystemExit(0 if v(sys.argv[1]) >= v(sys.argv[2]) else 1)' "${RELEASE_TAG#v}" "0.772.0"; then
             INSPECTOR="-DPULP_ENABLE_INSPECTOR=ON"
@@ -1217,6 +1230,7 @@ jobs:
             -DPULP_REQUIRE_GPU_FOR_SDK=ON \
             -DPULP_BUILD_WEBVIEW=ON \
             $INSPECTOR \
+            "${GPU_AUDIO_FLAGS[@]}" \
             $EXTRA_ARCH
           jobs="${NUMBER_OF_PROCESSORS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
           echo "SDK build parallelism: --parallel ${jobs}"

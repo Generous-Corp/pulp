@@ -25,6 +25,25 @@ if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
     include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
 endif()
 
+# Post-build commands in this file run through the shell of whatever generator
+# is in use, and a bundle path carries the user's PLUGIN_NAME verbatim — spaces,
+# parentheses, apostrophes and all ("Spectr Freeze (dev)"). Every such command
+# therefore passes VERBATIM and never relies on shell syntax: without VERBATIM
+# CMake escapes a space but not a parenthesis, so the Ninja/Makefile link step
+# that the command is appended to fails with a shell syntax error.
+#
+# A bundle's Contents/PkgInfo is written by copying a fixed file generated here
+# rather than by `echo ... > path`, since a redirect is shell syntax that
+# VERBATIM would quote into a literal argument. The file holds the package
+# declaration plus a trailing newline, byte-identical to what `cmake -E echo`
+# wrote before.
+function(_pulp_bundle_pkginfo_file out_var declaration)
+    set(_path "${CMAKE_BINARY_DIR}/pulp-bundle-pkginfo/${declaration}.pkginfo")
+    string(REPLACE "?" "_" _path "${_path}")
+    file(CONFIGURE OUTPUT "${_path}" CONTENT "${declaration}\n" @ONLY)
+    set(${out_var} "${_path}" PARENT_SCOPE)
+endfunction()
+
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
@@ -109,10 +128,12 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
 
     # Write PkgInfo so Finder treats the .vst3 as an opaque bundle (not a folder)
     if(APPLE)
+        _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
         add_custom_command(TARGET ${target}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "BNDL????" >
+            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
                 "$<TARGET_BUNDLE_DIR:${target}_VST3>/Contents/PkgInfo"
             COMMENT "Writing PkgInfo into ${name}.vst3 bundle"
+            VERBATIM
         )
     endif()
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_VST3)
@@ -139,6 +160,7 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
                 "${CMAKE_CURRENT_SOURCE_DIR}/moduleinfo.json"
                 "${CMAKE_BINARY_DIR}/VST3/${name}.vst3/Contents/Resources/moduleinfo.json"
             COMMENT "Copying moduleinfo.json into ${name}.vst3 bundle"
+            VERBATIM
         )
     endif()
 
@@ -237,10 +259,12 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
         # leaving the package declaration as the only signal. A bundle that
         # reads as a folder can be browsed into and dragged apart in Finder,
         # and never renders a bundle icon.
+        _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
         add_custom_command(TARGET ${target}_CLAP POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "BNDL????" >
+            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
                 "$<TARGET_BUNDLE_DIR:${target}_CLAP>/Contents/PkgInfo"
             COMMENT "Writing PkgInfo into ${name}.clap bundle"
+            VERBATIM
         )
     endif()
 
@@ -382,10 +406,12 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AAX"
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.aax"
         )
+        _pulp_bundle_pkginfo_file(_pkginfo "TDMwPTul")
         add_custom_command(TARGET ${target}_AAX POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "TDMwPTul" >
+            COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
                 "$<TARGET_BUNDLE_DIR:${target}_AAX>/Contents/PkgInfo"
             COMMENT "Writing PkgInfo into ${name}.aaxplugin bundle"
+            VERBATIM
         )
     else()
         set_target_properties(${target}_AAX PROPERTIES
@@ -513,10 +539,12 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     endif()
 
     # Write PkgInfo so Finder treats the .component as an opaque bundle (not a folder)
+    _pulp_bundle_pkginfo_file(_pkginfo "BNDL????")
     add_custom_command(TARGET ${target}_AU POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "BNDL????" >
+        COMMAND ${CMAKE_COMMAND} -E copy "${_pkginfo}"
             "$<TARGET_BUNDLE_DIR:${target}_AU>/Contents/PkgInfo"
         COMMENT "Writing PkgInfo into ${name}.component bundle"
+        VERBATIM
     )
 
     # Runtime sidecars: the wgpu runtime, the Apple @loader_path rpath, and

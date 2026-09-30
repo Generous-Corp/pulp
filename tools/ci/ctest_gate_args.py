@@ -27,6 +27,14 @@ The lanes, and why they differ:
   required check means. A head that is READY TO LAND also runs the full suite,
   as evidence rather than as a gate: see ``pr_suite`` below.
 
+A per-change proof such as ``agent-capability-installed-sdk`` carries the
+``slow-affected`` label. Every lane's unanchored ``slow`` exclusion matches it,
+so it stays out of every suite by default. When the change classifier requires
+it, the gate lane anchors that one alternative to ``^slow$``: the proof then
+runs inside the main suite, started first by its COST (see
+``tools/scripts/ctest_scheduling_policy.py``), instead of alone in a step after
+the suite drains.
+
 The label set is a separate axis: `performance`, `bench` and `quality-lab` are
 relative-timing tests that are robust to steady load but not to the load
 VARIANCE of a host running concurrent build VMs. They are excluded wherever the
@@ -57,6 +65,8 @@ FULL_LABEL_EXCLUDE = "validation"
 # stand in for them.
 GATE_EVENTS = frozenset({"pull_request", "workflow_dispatch", "merge_group"})
 
+AFFECTED_SLOW_LABEL = "slow-affected"
+
 STOP_ON_FAILURE_FLAG = "--stop-on-failure"
 
 
@@ -64,10 +74,17 @@ def _norm(value: str | None) -> str:
     return (value or "").strip()
 
 
-def label_exclude(event_name: str, runner_os: str) -> str:
-    """The ctest ``-LE`` value for this lane."""
+def label_exclude(event_name: str, runner_os: str, affected_slow: bool = False) -> str:
+    """The ctest ``-LE`` value for this lane.
+
+    ``affected_slow`` admits the ``slow-affected`` proofs on a gate lane by
+    anchoring the ``slow`` alternative, which otherwise matches them too.
+    """
     event = _norm(event_name)
     if event in GATE_EVENTS:
+        if affected_slow:
+            return "|".join("^slow$" if part == "slow" else part
+                            for part in GATE_LABEL_EXCLUDE.split("|"))
         return GATE_LABEL_EXCLUDE
     # A push builds macOS on the same shared Studios that serve the required
     # gate, so it inherits the gate's timing-test exclusions. Linux and Windows
@@ -188,9 +205,9 @@ def probe_pr_suite(
         return "fast", f"pull request state unavailable ({reason})"
 
 
-def decide(event_name: str, runner_os: str) -> dict[str, str]:
+def decide(event_name: str, runner_os: str, affected_slow: bool = False) -> dict[str, str]:
     return {
-        "label_exclude": label_exclude(event_name, runner_os),
+        "label_exclude": label_exclude(event_name, runner_os, affected_slow),
         "stop_on_failure": stop_on_failure(event_name),
     }
 
@@ -200,6 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event-name", required=True)
     parser.add_argument("--runner-os", default="")
     parser.add_argument("--format", choices=("shell", "json"), default="shell")
+    parser.add_argument(
+        "--affected-slow", default="false",
+        help="`true` admits the slow-affected proofs the change classifier "
+        "requires (its agent_capability_installed_sdk_required output); any "
+        "other value keeps them excluded",
+    )
     parser.add_argument(
         "--pr-suite",
         action="store_true",
@@ -224,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             decision = {"pr_suite": suite, "pr_suite_reason": reason}
     else:
-        decision = decide(args.event_name, args.runner_os)
+        decision = decide(args.event_name, args.runner_os,
+                          _norm(args.affected_slow).lower() == "true")
     if args.format == "json":
         print(json.dumps(decision, sort_keys=True))
         return 0

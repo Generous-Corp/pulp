@@ -127,11 +127,12 @@ still runs `source-selftest`, a Linux or Windows push excludes only
 ### Affected slow proofs
 
 `agent-capability-installed-sdk` installs Pulp and builds an independent
-consumer for every exported capability and typed binding. It runs as its own
-step on the required macOS job, where it measures a median 129 s (n=17,
-range 104-174 s); charging that to every unrelated PR made a meaningful share
-of the required test phase one irrelevant proof. It carries
-`slow;agent-capability-installed-sdk` and is restored by `build.yml` only when
+consumer for every exported capability and typed binding. It measures a median
+129 s (n=17, range 104-174 s) on the required macOS job; charging that to every
+unrelated PR made a meaningful share of the required test phase one irrelevant
+proof. It carries `slow-affected;agent-capability-installed-sdk`: every lane's
+unanchored `slow` exclusion also matches that label, and `build.yml` restores it
+only when
 the exact diff touches the capability skill, installed manifest/schemas,
 capability history, registry/generator, compile projection, CMake target/export
 definitions, or their tests. The restored run executes on the required macOS
@@ -139,6 +140,15 @@ job and the parallel Linux matrix leg so platform-specific exports retain their
 pre-merge proof; even an otherwise skip-safe selected documentation change
 allocates those jobs. Relevant changes therefore still fail before merge, while unrelated PRs
 and merge groups do not pay its cost. An unknown diff fails closed and runs it.
+
+When restored, it runs inside the main suite rather than as a step after it:
+`ctest_gate_args.py --affected-slow true` anchors the gate's `slow` exclusion to
+`^slow$`, which admits `slow-affected`. It is a long test in
+`tools/scripts/ctest_scheduling_policy.py` (COST 200, PROCESSORS 2, since it
+builds its consumer at -j2), so ctest starts it first beside the parallel phase.
+As a separate step it ran alone for 2.1-2.7 min after the suite in 23 of 52
+merge groups, on a VM it used two cores of. Only a fast-tier pull-request head,
+which runs no full suite, still runs it as its own step.
 
 Read that selector honestly before treating it as narrow: the pattern list in
 `tools/scripts/classify_changes.py` includes a bare `*.cmake` / `**/*.cmake`,

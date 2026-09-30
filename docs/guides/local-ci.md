@@ -2226,7 +2226,10 @@ build that none of them needs.
 `pull_request` (the `refs/pull/N/merge` tree) and every `merge_group`, both of
 which are the tip combined with the head. The job bootstraps dependencies,
 configures exactly as the gate does (`Release`, examples off, GPU on) and does
-not build. `tools/ci/drift_fast.py run` then runs the selection named in
+not build. Before configuring, it runs
+`tools/scripts/hydrate_gpu_provenance_commits.py` because the historical GPU
+probe acceptance registration walks commits outside the depth-2 event
+checkout. `tools/ci/drift_fast.py run` then runs the selection named in
 `tools/ci/drift_fast.json`: every member of `ctest_labels` (today the whole
 `pr-fast` tier, 99 tests) plus the listed registrations outside it, through
 ctest itself, so `SKIP_RETURN_CODE`, pass regexes, timeouts and resource locks
@@ -4349,8 +4352,9 @@ YAML:
     `pulp-test-events-timer-helpers` (race + timer hammers; also covered
     under sanitizer.yml's TSan lane)
   - `agent-capability-installed-sdk` (roughly 12 minutes to install the SDK and
-    compile/run every exported capability and typed binding). The classifier
-    restores this exact test on the parallel macOS and Linux matrix legs for capability manifest,
+    compile/run every exported capability and typed binding; label
+    `slow-affected`). The classifier restores this exact test into the main
+    ctest run (started first by its COST, `ctest_gate_args.py --affected-slow`) on the parallel macOS and Linux matrix legs for capability manifest,
     schema, history, registry/generator, vocabulary, CMake target/export,
     install-rule, and compile-test changes. A selected documentation-only
     surface still allocates the native job; unknown diffs run it fail-closed,

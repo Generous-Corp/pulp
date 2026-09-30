@@ -63,6 +63,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     ring_blocks_ = config.ring_blocks;
     miss_policy_ = desc.miss_policy;
     const auto realtime_path = detail::realtime_gpu_node_path(node);
+    if (!realtime_path.active() && detail::requires_realtime_gpu_path(node)) {
+        release();
+        return false;
+    }
     if (realtime_path.active()) {
         realtime_gpu_context_ = realtime_path.context;
         realtime_gpu_process_ = realtime_path.process;
@@ -115,9 +119,20 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     blocks_owed_ = 0;
     last_block_ns_.store(0, std::memory_order_relaxed);
     avg_block_ns_.store(0, std::memory_order_relaxed);
+    delivery_gpu_.store(0, std::memory_order_relaxed);
+    delivery_worker_.store(0, std::memory_order_relaxed);
+    delivery_fallback_.store(0, std::memory_order_relaxed);
+    delivery_silence_.store(0, std::memory_order_relaxed);
+    delivery_passthrough_.store(0, std::memory_order_relaxed);
+    delivery_priming_.store(0, std::memory_order_relaxed);
+    delivery_invalid_.store(0, std::memory_order_relaxed);
     // Wake-on-write only matters when we own the worker thread; when the caller
     // drives pump() there is nothing waiting on the semaphore to wake.
     wake_on_write_ = config.wake_on_write && config.run_worker_thread;
+    audio_workgroup_ = config.audio_workgroup;
+    join_audio_workgroup_ = config.join_audio_workgroup && config.run_worker_thread;
+    worker_workgroup_joined_.store(false, std::memory_order_relaxed);
+    worker_workgroup_join_failures_.store(0, std::memory_order_relaxed);
     prepared_ = true;
 
     if (config.run_worker_thread) {
@@ -139,6 +154,21 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
 }
 
 void GpuAudioTransport::worker_loop() noexcept {
+    audio::AudioWorkgroup workgroup;
+    bool joined_workgroup = false;
+#if defined(__APPLE__)
+    if (join_audio_workgroup_ && audio_workgroup_ != nullptr) {
+        workgroup.set_workgroup(reinterpret_cast<os_workgroup_t>(audio_workgroup_));
+        joined_workgroup = workgroup.join_from_audio_thread();
+        if (joined_workgroup) {
+            worker_workgroup_joined_.store(true, std::memory_order_release);
+        } else {
+            worker_workgroup_join_failures_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+#else
+    (void)joined_workgroup;
+#endif
     while (worker_running_.load(std::memory_order_acquire)) {
         // Yield while an offline (synchronous) render owns the node — process_offline
         // pumps inline. The mutex serializes node access for the brief window where
@@ -158,6 +188,8 @@ void GpuAudioTransport::worker_loop() noexcept {
     }
     std::lock_guard<std::mutex> lock(pump_mutex_);
     pump(); // final drain of any input left at stop
+    if (joined_workgroup)
+        worker_workgroup_joined_.store(false, std::memory_order_release);
 }
 
 void GpuAudioTransport::reset_staged_transport_state() noexcept {
@@ -199,6 +231,9 @@ void GpuAudioTransport::release() noexcept {
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
+    audio_workgroup_ = nullptr;
+    join_audio_workgroup_ = false;
+    worker_workgroup_joined_.store(false, std::memory_order_release);
     channels_ = block_size_ = latency_blocks_ = ring_blocks_ = 0;
     prepared_ = false;
 }
@@ -225,11 +260,15 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
                                                   std::uint64_t sequence, bool input_valid,
                                                   std::uint64_t callback_start_ns) noexcept {
     if (realtime_gpu_process_ != nullptr) {
-        process_shared(input, output, n, sequence, input_valid, callback_start_ns);
+        process_shared(input, output, n, sequence, input_valid, callback_start_ns, true);
         return;
     }
 
     const auto publish_delivery = [&](std::uint8_t disposition) noexcept {
+        record_delivery(input_valid ? disposition
+                                    : static_cast<std::uint8_t>(
+                                          detail::SharedIoDeliveryDisposition::InvalidRejected),
+                        true);
         if (input_valid && trial_observer_ != nullptr) {
             const auto callback_end_ns = monotonic_now_ns();
             publish_trial_delivery(sequence, disposition, callback_start_ns, callback_end_ns,
@@ -331,7 +370,8 @@ void GpuAudioTransport::process_realtime_position(const audio::BufferView<const 
 void GpuAudioTransport::process_shared(const audio::BufferView<const float>& input,
                                        audio::BufferView<float>& output, std::uint32_t n,
                                        std::uint64_t sequence, bool input_valid,
-                                       std::uint64_t callback_start_ns) noexcept {
+                                       std::uint64_t callback_start_ns,
+                                       bool count_delivery) noexcept {
     using detail::SharedIoDeliveryDisposition;
     if (miss_policy_ == MissPolicy::CpuFallback)
         node_->prime_fallback(input, n);
@@ -367,6 +407,8 @@ void GpuAudioTransport::process_shared(const audio::BufferView<const float>& inp
     const auto result_visible_ns = monotonic_now_ns();
     realtime_gpu_delivered_(realtime_gpu_context_, sequence, static_cast<std::uint8_t>(delivered),
                             callback_end_ns, result_visible_ns);
+    if (count_delivery)
+        record_delivery(static_cast<std::uint8_t>(delivered), false);
     if (wake_on_write_)
         wake_sem_.release();
 }
@@ -414,7 +456,7 @@ void GpuAudioTransport::process_offline_position(const audio::BufferView<const f
             realtime_gpu_fenced_for_offline_ = realtime_gpu_fence_(realtime_gpu_context_);
         // A failed barrier retains its owner and stays CPU-only. The same
         // continuously primed fallback carries the RT/offline timeline.
-        process_shared(input, output, n, sequence, input_valid, monotonic_now_ns());
+        process_shared(input, output, n, sequence, input_valid, monotonic_now_ns(), false);
         return;
     }
 
@@ -533,6 +575,44 @@ void GpuAudioTransport::pump(uint32_t max_blocks) noexcept {
     }
 }
 
+void GpuAudioTransport::record_delivery(std::uint8_t disposition, bool worker_output) noexcept {
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+    using D = detail::SharedIoDeliveryDisposition;
+    switch (static_cast<D>(disposition)) {
+    case D::GpuDelivered:
+        (worker_output ? delivery_worker_ : delivery_gpu_).fetch_add(1, std::memory_order_relaxed);
+        break;
+    case D::CpuFallbackDelivered:
+        delivery_fallback_.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case D::SilenceDelivered:
+        delivery_silence_.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case D::PassthroughDelivered:
+        delivery_passthrough_.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case D::Priming:
+        delivery_priming_.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case D::InvalidRejected:
+    case D::None:
+        delivery_invalid_.fetch_add(1, std::memory_order_relaxed);
+        break;
+    }
+}
+
+GpuAudioTransport::DeliverySnapshot GpuAudioTransport::delivery_snapshot() const noexcept {
+    return {
+        delivery_gpu_.load(std::memory_order_relaxed),
+        delivery_worker_.load(std::memory_order_relaxed),
+        delivery_fallback_.load(std::memory_order_relaxed),
+        delivery_silence_.load(std::memory_order_relaxed),
+        delivery_passthrough_.load(std::memory_order_relaxed),
+        delivery_priming_.load(std::memory_order_relaxed),
+        delivery_invalid_.load(std::memory_order_relaxed),
+    };
+}
+
 GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     Stats s;
     s.produced_blocks = produced_blocks_.load(std::memory_order_relaxed);
@@ -541,6 +621,9 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.resynced_blocks = resynced_blocks_.load(std::memory_order_relaxed);
     s.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     s.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;
+    s.worker_workgroup_joined = worker_workgroup_joined_.load(std::memory_order_acquire);
+    s.worker_workgroup_join_failures =
+        worker_workgroup_join_failures_.load(std::memory_order_relaxed);
     return s;
 }
 

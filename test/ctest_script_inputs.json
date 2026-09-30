@@ -620,6 +620,16 @@
    ],
    "kind": "shell"
   },
+  "cmake-forge-catalog-install": {
+   "entry": "test/cmake/test_forge_catalog_install.py",
+   "inputs": [
+    "docs/status/forge-catalog.json",
+    "test/cmake/test_forge_catalog_install.py",
+    "tools/cmake/PulpForgeCatalogInstall.cmake",
+    "tools/cmake/PulpInstallRules.cmake"
+   ],
+   "kind": "python"
+  },
   "cmake-ios-auv3-configure": {
    "entry": "test/cmake/test_ios_auv3_configure.sh",
    "inputs": [
@@ -1325,7 +1335,9 @@
    "entry": "tools/scripts/test_gpu_audio_provider_identity.py",
    "inputs": [
     "external/skia-build",
+    "tools/deps",
     "tools/deps/manifest.json",
+    "tools/scripts",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/test_gpu_audio_provider_identity.py"
    ],
@@ -2929,6 +2941,7 @@
     "tools/ci/source_selftests.py",
     "tools/ci/test_pr_head_affected_tests.py",
     "tools/ci/wide_non_native_checks.json",
+    "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
     "tools/deps/manifest.json",
     "tools/motion/visual/requirements.lock",
@@ -3637,6 +3650,7 @@
     "core/runtime",
     "core/signal",
     "core/signal/include/pulp/signal",
+    "core/simd",
     "core/state",
     "core/timebase",
     "core/timebase/include/pulp/timebase",
@@ -3897,6 +3911,7 @@
     "core/platform",
     "core/runtime",
     "core/signal",
+    "core/simd",
     "core/state",
     "core/timebase",
     "tools/rack/acid_behavior.py",
@@ -4529,6 +4544,7 @@
   "test-receipts-shadow-selftest": {
    "entry": "tools/ci/test_test_receipts_shadow.py",
    "inputs": [
+    ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
@@ -4991,6 +5007,7 @@
     "tools/scripts/test_build_combined_installer.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_configure_check_cache.py",
+    "tools/scripts/test_consumption_census.py",
     "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
     "tools/scripts/test_gpu_probe_acceptance.py",
     "tools/scripts/test_gpu_test_resource_locks.py",

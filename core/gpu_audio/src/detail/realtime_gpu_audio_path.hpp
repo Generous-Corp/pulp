@@ -42,6 +42,8 @@ struct RealtimeGpuNodePath {
 };
 
 RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept;
+// Concrete SDK nodes that cannot fall back to the untyped legacy FIFO.
+bool requires_realtime_gpu_path(GpuAudioNode* node) noexcept;
 
 // Returns a provider only when the concrete private path can establish its
 // identity. Generic/test hooks deliberately return Unknown.

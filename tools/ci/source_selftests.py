@@ -61,7 +61,8 @@ ATTEMPTS = 2
 # keep running on the pull request head, where the source-selftest exclusion
 # would silently drop it.
 INCOMPATIBLE_LABELS = frozenset(
-    {"pr-fast", "validation", "slow", "performance", "bench", "quality-lab"}
+    {"pr-fast", "validation", "slow", "slow-affected", "performance", "bench",
+     "quality-lab"}
 )
 ALLOWED_PROPERTIES = frozenset(
     {"LABELS", "PROCESSORS", "RESOURCE_LOCK", "TIMEOUT", "WORKING_DIRECTORY"}

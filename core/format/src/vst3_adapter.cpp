@@ -953,6 +953,7 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // flag and skips touching this (now-destroyed) instance.
     drain_alive_ = std::make_shared<std::atomic<bool>>(true);
     poll_active_ = std::make_shared<std::atomic<bool>>(false);
+    deferred_delivery_posted_ = std::make_shared<std::atomic<bool>>(false);
 
     return kResultOk;
 }
@@ -1376,44 +1377,52 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
 // idle tick is one relaxed atomic load and an early return.
 namespace { constexpr int kRestartPollIntervalMs = 33; }
 
-// Main-thread drain of the deferred host callbacks. process() only accumulates
-// pending restart flags into restart_publisher_ (RT-safe), and a Processor only
-// raises an atomic state-dirty flag; both host callbacks fire here, off the
-// audio thread. Called from the paced poll tick and from main-thread host
-// entrypoints (setActive / getLatencySamples / getTailSamples / getState).
-void PulpVst3Processor::drain_pending_restart() {
+// Host callbacks (restartComponent / setDirty) are never delivered from inside
+// a host-initiated call. process() only accumulates pending restart flags into
+// restart_publisher_ (RT-safe), and a Processor only raises an atomic
+// state-dirty flag. A host entrypoint that notices pending work requests a
+// coalesced one-shot main-thread post; the post runs after the host call has
+// returned, so the host no longer holds the lock it took around that call.
+void PulpVst3Processor::schedule_host_notifications(InlineFallback fallback) {
     // Nothing pending — cheap early-out (two acquire atomic loads).
     if (!restart_publisher_.dispatch_armed() && !(processor_ && processor_->state_dirty_pending()))
         return;
 
-    // If a main-thread backend is registered, only deliver when we are
-    // genuinely on the main thread. When no backend is registered, VST3's
-    // threading contract says these entrypoints run on the host's UI/main
-    // thread, so delivery is safe; we degrade to delivering directly.
-    if (pulp::events::MainThreadDispatcher::has_backend() &&
-        !pulp::events::MainThreadDispatcher::is_main_thread()) {
-        // We are not on the main thread (e.g. a host that calls a query from a
-        // worker). Arrange a one-shot main-thread post. call_async may allocate
-        // / lock, which is fine here because this never runs on the audio
-        // thread. The lambda is lifetime-safe: it captures the shared alive
-        // flag and only touches `this` while the flag is true (terminate()
-        // clears it before the component is destroyed).
+    if (deferred_delivery_posted_ && drain_alive_) {
+        // One queued post covers every pending edge; a later entrypoint in the
+        // same burst has nothing to add.
+        if (deferred_delivery_posted_->exchange(true, std::memory_order_acq_rel))
+            return;
+        // The lambda is lifetime-safe: it captures the shared alive flag and
+        // only touches `this` while the flag is true (terminate() clears it
+        // before the component is destroyed).
         auto alive = drain_alive_;
-        pulp::events::MainThreadDispatcher::call_async([this, alive] {
-            if (alive && alive->load(std::memory_order_acquire))
+        auto posted = deferred_delivery_posted_;
+        const bool accepted = pulp::events::MainThreadDispatcher::call_async([this, alive, posted] {
+            posted->store(false, std::memory_order_release);
+            if (alive->load(std::memory_order_acquire))
                 deliver_pending_host_notifications();
         });
-        return;
+        if (accepted)
+            return;
+        deferred_delivery_posted_->store(false, std::memory_order_release);
     }
 
-    deliver_pending_host_notifications();
+    // No main-thread dispatcher accepted the post (Windows / Linux hosts with
+    // no registered backend). VST3 runs these entrypoints on the host's UI
+    // thread, so a state-free query may still deliver inline to keep
+    // notifications flowing; an activation transition never does — the flags
+    // stay latched for the next query or poll tick.
+    if (fallback == InlineFallback::allowed)
+        deliver_pending_host_notifications();
 }
 
 void PulpVst3Processor::deliver_pending_restart() {
     auto* handler = getComponentHandler();
     restart_publisher_.poll_main_thread([handler](int32 flags) {
         // restartComponent is a host callback: may lock / allocate / re-enter.
-        // Safe here because this only ever runs on the main thread.
+        // Safe here because this only runs at a main-thread safe point outside
+        // any host-initiated call.
         if (handler) handler->restartComponent(flags);
     });
 }
@@ -1431,14 +1440,22 @@ void PulpVst3Processor::deliver_pending_dirty() {
     // v1 interface return null here and the edge is dropped.
     Steinberg::FUnknownPtr<Steinberg::Vst::IComponentHandler2> handler2(getComponentHandler());
     // A host callback: may lock / allocate / re-enter. Safe here because this
-    // only ever runs on the main thread.
+    // only runs at a main-thread safe point outside any host-initiated call.
     if (handler2)
         handler2->setDirty(true);
 }
 
 void PulpVst3Processor::deliver_pending_host_notifications() {
+    // A host may call back into the plug-in from inside restartComponent (a
+    // synchronous deactivate/reactivate on kReloadComponent, a latency
+    // re-query on kLatencyChanged). Those nested entrypoints must not deliver
+    // again.
+    if (delivering_host_notifications_)
+        return;
+    delivering_host_notifications_ = true;
     deliver_pending_restart();
     deliver_pending_dirty();
+    delivering_host_notifications_ = false;
 }
 
 void PulpVst3Processor::start_restart_poll() {
@@ -1482,10 +1499,17 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
         mpe_.reset();
         note_id_map_clear();
     }
-    // Activation transitions run on the main thread — flush any restart the
-    // audio thread accumulated, and start/stop the paced poll so a mid-stream
-    // change while active is delivered without an incidental host query.
-    drain_pending_restart();
+    // Hosts deactivate and reactivate while holding their processing lock, so
+    // a restart the audio thread accumulated is never delivered from inside
+    // this call. On activation it is posted for delivery once the host call
+    // returns. On deactivation it stays latched: a restart delivered to a
+    // component the host has just deactivated can make a host that services
+    // it synchronously reactivate the component behind its own back, and the
+    // host re-reads latency and tail when it activates again anyway.
+    // Start/stop the paced poll so a mid-stream change while active is
+    // delivered without an incidental host query.
+    if (state)
+        schedule_host_notifications(InlineFallback::forbidden);
     if (poll_active_) {
         if (state) {
             start_restart_poll();
@@ -1497,10 +1521,11 @@ tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
 }
 
 uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
-    // Host re-queries latency on the main thread after a restart; flush any
-    // pending restart notification first so the report and the host's PDC
-    // refresh stay in step. (Belt-and-suspenders alongside the paced poll.)
-    drain_pending_restart();
+    // A host queries latency on the main thread, sometimes while holding its
+    // processing lock (e.g. inside its own prepare). Schedule any pending
+    // restart for delivery after this call rather than calling back into the
+    // host from inside it. (Belt-and-suspenders alongside the paced poll.)
+    schedule_host_notifications(InlineFallback::allowed);
     if (!processor_) return 0;
     // VST3 reports latency as unsigned, so a negative latency_samples()
     // would wrap to a huge value without the host-quirk clamp. When the
@@ -1511,8 +1536,8 @@ uint32 PLUGIN_API PulpVst3Processor::getLatencySamples() {
 
 uint32 PLUGIN_API PulpVst3Processor::getTailSamples() {
     // Same rationale as getLatencySamples: a host re-queries the tail on the
-    // main thread after a kReloadComponent restart, so flush here.
-    drain_pending_restart();
+    // main thread after a kReloadComponent restart.
+    schedule_host_notifications(InlineFallback::allowed);
     if (!processor_) return 0;
     auto tail = processor_->descriptor().tail_samples;
     if (tail < 0) return Steinberg::Vst::kInfiniteTail;
@@ -2252,10 +2277,10 @@ void PulpVst3Processor::process_publish_restart_flags() {
         if (processor_->consume_tail_changed_flag())    flags |= kReloadComponent;
         // note_pending() is the only thing the audio thread does here: an
         // atomic OR plus an exchange, no allocation and no lock. The matching
-        // restartComponent(flags) host callback is delivered later by
-        // drain_pending_restart() on the main thread (driven by the main-thread
-        // host entrypoints getLatencySamples / getTailSamples / setActive,
-        // which a host re-queries after a latency/tail change). Calling
+        // restartComponent(flags) host callback is delivered later on the main
+        // thread, outside any host call: by the paced poll tick, or by a
+        // one-shot post that the main-thread host entrypoints (setActive /
+        // getLatencySamples / getTailSamples / getState) request. Calling
         // call_async here is deliberately avoided — it allocates and locks.
         restart_publisher_.note_pending(flags);
     }
@@ -2704,9 +2729,9 @@ tresult PLUGIN_API PulpVst3Processor::setParamNormalized(ParamID id, ParamValue 
 }
 
 tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
-    // getState runs on the main thread — another opportunity to flush a
+    // getState runs on the main thread — another opportunity to schedule a
     // pending restart (alongside the paced poll and the latency/tail queries).
-    drain_pending_restart();
+    schedule_host_notifications(InlineFallback::allowed);
     if (!processor_) return kResultFalse;
     auto data = plugin_state_io::serialize(store_, *processor_);
     int32 written;

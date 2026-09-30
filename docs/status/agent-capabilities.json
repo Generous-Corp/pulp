@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 58,
+  "manifest_revision": 59,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -14473,6 +14473,7 @@
               "prepare(const Config& config)",
               "process(const SampleType* const* input, SampleType* const* output, int num_samples)",
               "reset()",
+              "set_effective_frame_observer(void* context, EffectiveFrameObserver observer)",
               "publish_layout(const Layout& layout)",
               "publish_table(const Table& table)",
               "set_layout_rt(const Layout& layout)",
@@ -14482,8 +14483,7 @@
               "set_wet_source_stage(WetSourceStage* stage)",
               "wet_source_stage()",
               "set_mix(SampleType mix)",
-              "set_mix_ramp_samples(int samples)",
-              "set_mix_curve(MixCurve curve)"
+              "set_mix_ramp_samples(int samples)"
             ],
             "enums": []
           }

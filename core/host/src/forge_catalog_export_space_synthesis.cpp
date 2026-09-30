@@ -8,8 +8,17 @@
 namespace pulp::host::forge_catalog_export_detail {
 
 void append_space_synthesis(Nodes& nodes) {
-    add(nodes, space::convolution::descriptor(),
-        {realization("default", space::convolution::catalog_probe_node())});
+    // The GPU realization is an additive mode on the existing convolution
+    // family, so both modes share one semantic descriptor and registration.
+    auto convolution_descriptor = space::convolution::descriptor();
+    std::vector<ForgeCatalogExportRealization> convolution_realizations{
+        realization("default", space::convolution::catalog_probe_node())};
+#if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+    convolution_descriptor = space::convolution::descriptor_with_gpu();
+    convolution_realizations.emplace_back(realization(
+        "gpu", space::convolution::make_gpu_convolution_reverb_node({{{1.0f}}, 48000.0})));
+#endif
+    add(nodes, std::move(convolution_descriptor), std::move(convolution_realizations));
     add(nodes, space::nonlin_ambience::descriptor(),
         {realization("default", space::nonlin_ambience::make_nonlin_ambience_node())});
     add(nodes, space::cabinet::descriptor(),

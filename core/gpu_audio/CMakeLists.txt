@@ -26,7 +26,10 @@ file(GLOB _pulp_gpu_audio_public_headers CONFIGURE_DEPENDS
 target_sources(pulp-gpu-audio
     PRIVATE
         src/gpu_audio_transport.cpp
+        src/gpu_convolution_reverb.cpp
         src/gpu_wavenet.cpp
+        src/gpu_spectral_mask.cpp
+        src/gpu_wavenet_realtime_node.cpp
         src/detail/realtime_gpu_audio_path.cpp
         src/detail/shared_io_arena.cpp
         src/detail/dawn_submission_tracker.cpp
@@ -41,6 +44,10 @@ target_sources(pulp-gpu-audio
 )
 
 target_compile_features(pulp-gpu-audio PUBLIC cxx_std_20)
+
+# Marks the producer capability tuple understood by official SDK provenance.
+set(PULP_GPU_AUDIO_CAPABILITY_SCHEMA 1 CACHE INTERNAL
+    "GPU-audio installed capability metadata schema" FORCE)
 
 set(PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER OFF CACHE BOOL
     "Enable the experimental shared-I/O realtime path inside GpuConvolver")
@@ -219,3 +226,7 @@ else()
     target_sources(pulp-gpu-audio PRIVATE src/gpu_convolver_no_render.cpp)
     target_link_libraries(pulp-gpu-audio PUBLIC pulp::signal)
 endif()
+
+# Provider authentication is needed in installed SDK builds even when tests are off.
+include("${PROJECT_SOURCE_DIR}/tools/cmake/PulpGpuAudioProviderIdentity.cmake")
+pulp_gpu_audio_configure_provider_identity(pulp-gpu-audio)

@@ -73,6 +73,9 @@ struct SharedIoTransferCounters {
 };
 static_assert(std::is_trivially_copyable_v<SharedIoTransferCounters>);
 
+// Shared by all producer families in one linked runtime. Zero is reserved.
+std::uint64_t next_shared_io_trace_engine_id() noexcept;
+
 struct SharedIoTraceRecord {
     SharedIoTraceKind kind = SharedIoTraceKind::Terminal;
     std::uint64_t next_generation = 0;
@@ -93,6 +96,8 @@ struct SharedIoTraceRecord {
     bool output_eligible = false;
     std::uint64_t gpu_elapsed_ns = 0;
     bool gpu_elapsed_available = false;
+    // Actual callback ingress, not an intended schedule or GPU timestamp.
+    std::uint64_t callback_ingress_ns = 0;
     std::uint64_t callback_start_ns = 0;
     std::uint64_t callback_end_ns = 0;
     std::uint64_t result_visible_ns = 0;
@@ -263,12 +268,33 @@ struct SharedIoTraceDrainResult {
     std::uint32_t emission_attempts = 0;
 };
 
+// Private diagnostic observer. Called only by the sole drain consumer, never
+// by callback producers. Its lifetime must cover every drain, including release.
+struct SharedIoTraceOwnership {
+    std::uint64_t engine_id = 0;
+    std::uint64_t generation = 0;
+    bool physical_release_complete = false;
+    std::uint32_t unresolved_channel_count = 0;
+};
+struct SharedIoTraceDrainObserver {
+    void* context = nullptr;
+    void (*record)(void*, std::uint64_t, const SharedIoTraceRecord&) noexcept = nullptr;
+    void (*admission)(void*, std::uint64_t, const SharedIoTraceAdmission&) noexcept = nullptr;
+    void (*ownership)(void*, const SharedIoTraceOwnership&) noexcept = nullptr;
+};
+
+// Final failed-release disclosure. No per-sequence terminal or retirement is
+// implied. Call after quiescent draining, before destroying the recorder.
+void emit_shared_io_unresolved_ownership(
+    const SharedIoTraceOwnership&, const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
+
 // Non-RT diagnostic thread ONLY, including when the producer becomes a future
 // realtime auxiliary worker. This is the sole Perfetto edge for these records.
 // Counters are approximate cumulative snapshots; no per-block timing is
 // inferred from the independent "latest sample" atomics.
-SharedIoTraceDrainResult drain_shared_io_trace(SharedIoTraceRecorder& recorder,
-                                               const SharedIoTelemetrySnapshot& telemetry,
-                                               std::uint32_t budget = 256) noexcept;
+SharedIoTraceDrainResult
+drain_shared_io_trace(SharedIoTraceRecorder& recorder, const SharedIoTelemetrySnapshot& telemetry,
+                      std::uint32_t budget = 256,
+                      const SharedIoTraceDrainObserver* observer = nullptr) noexcept;
 
 } // namespace pulp::gpu_audio::detail

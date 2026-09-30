@@ -646,3 +646,34 @@ work. Report the gap; do not report a timing verdict.
 The same discipline is written up at more length in the `trace-analysis`
 skill under "A declared category is not a populated one" — keep the two in
 step if either changes.
+
+## WaveNet admission, delivery, and unresolved ownership
+
+For `pulp_gpu_audio_blocks.sql`, correlate `(upid, engine_id, generation, sequence)`.
+Match actual drained admissions to exactly one GPU terminal, with no duplicate or
+orphan identities. Callback eligibility/delivery is separate: fallback can occur
+without GPU admission, and a published GPU result need not have been delivered.
+Use `gpu_reason` for the GPU result and `delivery_reason` for the callback decision.
+A known submission failure remains `submission_rejected` after teardown; a stale
+result retains its recovery cause, including `input_saturated`, `device_lost`,
+`teardown`, or `invalid_callback`. A `deadline_exceeded` callback reason establishes
+that no usable due result was available, not why it was unavailable.
+
+`callback_ingress_ns` is observed callback entry, not the intended schedule.
+`ingress_to_worker_ns` measures admission delay after that observation;
+`worker_to_observed_ns` includes provider work and completion servicing. Missing
+scheduled/encode/submit/GPU timestamps stay unavailable. Do not label either span
+GPU execution time or infer scheduler latency from it alone.
+
+`gpu.audio.ownership` is a non-sequence event. If destruction cannot establish
+physical release, it records `physical_release_complete=false` and
+`unresolved_channel_count`, the number of channel releases that returned false.
+It does not assert a GPU terminal or retirement. The SQL must report
+`unresolved_physical_ownership` and reject complete-lifecycle acceptance even if
+all block identities otherwise close. A failed release followed by a successful
+retry must not produce this final unresolved-ownership disclosure. Require the
+canonical validator's zero-loss checks as well as identity closure; aggregate
+counters or an empty trace cannot substitute for actual records.
+
+See `docs/guides/gpu-audio-wavenet-trace.md` for the capture contract and current
+physical NAM measurement boundaries.

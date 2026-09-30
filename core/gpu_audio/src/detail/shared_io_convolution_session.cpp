@@ -199,7 +199,8 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
     if (!plan_.prepare(*provider_,
                        {.slots = config.slots,
                         .input_bytes_per_slot = *bytes,
-                        .output_bytes_per_slot = *bytes},
+                        .output_bytes_per_slot = *bytes,
+                        .storage_kind = config.storage_kind},
                        std::move(pair.program))) {
         // A failed arena transaction may still be physically live. Retain the
         // provider and let explicit release()/destruction retry its barrier.
@@ -211,8 +212,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
     }
     config_ = config;
     if (config_.trace.enabled && config_.trace.engine_id == 0) {
-        static std::atomic<std::uint64_t> next_engine{1};
-        config_.trace.engine_id = next_engine.fetch_add(1, std::memory_order_relaxed);
+        config_.trace.engine_id = next_shared_io_trace_engine_id();
         if (config_.trace.engine_id == 0)
             config_.trace.enabled = false;
     }
@@ -526,22 +526,21 @@ bool SharedIoConvolutionSession::fence_and_reprime() noexcept {
     return true;
 }
 
-bool SharedIoConvolutionSession::release() noexcept {
+std::unique_ptr<SharedIoArenaProvider> SharedIoConvolutionSession::release_to_owner() noexcept {
     if (!prepared_) {
         if (!plan_.release())
-            return false;
+            return {};
         terminal_.clear();
-        provider_.reset();
-        return true;
+        return std::move(provider_);
     }
     // Stop callbacks before this boundary. Harvest physical terminal results
     // before arena release consumes its terminal inbox internally.
     if (!drain_quiescent())
-        return false;
+        return {};
     ServiceResult drained;
     (void)drain_completions(0, drained);
     if (!plan_.release())
-        return false;
+        return {};
     for (const auto& slot : trace_slots_)
         if (slot.active)
             trace_terminal(slot.token, SharedIoGpuTerminalDisposition::CancelledTeardown,
@@ -550,8 +549,12 @@ bool SharedIoConvolutionSession::release() noexcept {
     prepared_ = false;
     failed_ = false;
     terminal_.clear();
-    provider_.reset();
-    return true;
+    return std::move(provider_);
+}
+
+bool SharedIoConvolutionSession::release() noexcept {
+    auto owner = release_to_owner();
+    return !provider_ && !plan_.prepared();
 }
 
 } // namespace pulp::gpu_audio::detail

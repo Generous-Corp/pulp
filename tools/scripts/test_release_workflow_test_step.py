@@ -409,6 +409,15 @@ class ReleaseCliLinuxNoWebView(unittest.TestCase):
             "CLI and SDK release configure steps.",
         )
 
+    def test_arm64_sdk_exports_gpu_convolution_catalog(self) -> None:
+        """The Apple-Silicon GPU SDK must advertise its opt-in host route."""
+        self.assertIn(
+            "-DPULP_HOST_ENABLE_GPU_CONVOLUTION=ON",
+            self.text,
+            "darwin-arm64 SDK releases must generate the GPU Forge catalog "
+            "consumed by Forge's fail-closed GPU capability gate.",
+        )
+
     def test_gpu_release_builds_ship_direct_renderer_doctor_probe(self) -> None:
         workflow = yaml.safe_load(self.text)
         steps = {step.get("name"): step for step in

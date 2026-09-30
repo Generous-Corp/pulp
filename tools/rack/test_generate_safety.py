@@ -266,6 +266,15 @@ class ToolchainHeaderClosureSafety(SdkIsolatedTestCase):
             self.assertEqual([], duplicate)
             self.assertEqual(completed, unchanged)
 
+    def test_current_curated_dsp_headers_resolve_with_generator_include_roots(self) -> None:
+        root = HERE.parent.parent
+        self.assertEqual([], generate.missing_public_header_dependencies(str(root)))
+        # Prove the check catches the real SIMD dependency, not an empty registry.
+        without_simd = [path for path in generate.INCLUDES if path != "core/simd"]
+        with mock.patch.object(generate, "INCLUDES", without_simd):
+            missing = generate.missing_public_header_dependencies(str(root))
+        self.assertTrue(any("pulp/simd/simd.hpp" in path for path in missing), missing)
+
     def test_curated_dsp_transitive_headers_must_ship_before_provider_use(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

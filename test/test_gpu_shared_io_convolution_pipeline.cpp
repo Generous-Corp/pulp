@@ -18,9 +18,12 @@ std::array<float, 16> terminal(float a, float b, float c = 0.f, float d = 0.f) {
     return {a, 0.f, b, 0.f, c, 0.f, d, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f};
 }
 
-void prepare(P& pipeline, std::uint32_t ir_length = 7) {
+void prepare(P& pipeline, std::uint32_t ir_length = 7, bool recovery = false) {
     REQUIRE(pipeline.prepare(
-        {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 8, .ir_length = ir_length}, 7));
+        {.capacity = 8, .channels = 1, .block_size = 2, .fft_size = 8, .ir_length = ir_length},
+        recovery ? 6 : 7));
+    if (recovery)
+        REQUIRE(pipeline.fence_and_reprime(7));
 }
 
 P::Callback callback(P& pipeline, std::array<float, 2>& output) {
@@ -31,10 +34,30 @@ P::Callback callback(P& pipeline, std::array<float, 2>& output) {
 }
 } // namespace
 
-TEST_CASE("shared convolution pipeline shares stamped sequence through callback and OLA",
+TEST_CASE("cold shared convolution publishes its first block after only declared lead",
           "[gpu_audio][shared_io][pipeline]") {
     P pipeline;
     prepare(pipeline);
+    CHECK(pipeline.valid_from_sequence() == 0);
+    std::array<float, 2> output;
+    callback(pipeline, output);
+    REQUIRE(output == zero);
+    REQUIRE(pipeline.record_terminal({7, 0}, P::Terminal::Success, terminal(1, 2, 3)));
+    REQUIRE(pipeline.drain_terminals() == 1);
+    callback(pipeline, output);
+    REQUIRE(output == zero);
+    REQUIRE(pipeline.record_terminal({7, 1}, P::Terminal::Success, terminal(4, 5)));
+    REQUIRE(pipeline.drain_terminals() == 1);
+    CHECK(callback(pipeline, output).stamp.sequence == 2);
+    CHECK(output == std::array<float, 2>{1.f, 2.f});
+    CHECK(callback(pipeline, output).stamp.sequence == 3);
+    CHECK(output == std::array<float, 2>{7.f, 5.f});
+}
+
+TEST_CASE("shared convolution pipeline shares stamped sequence through callback and OLA",
+          "[gpu_audio][shared_io][pipeline]") {
+    P pipeline;
+    prepare(pipeline, 7, true);
     // q = ceil((7 - 1) / 2) = 3. The bridge lead only delays consumption;
     // full-tail recovery still needs three CPU-fallback blocks after reset.
     CHECK(pipeline.valid_from_sequence() == 3);
@@ -77,7 +100,7 @@ TEST_CASE("shared convolution pipeline shares stamped sequence through callback 
 TEST_CASE("shared convolution pipeline mutation control catches a missing recovery block",
           "[gpu_audio][shared_io][pipeline][mutation-control]") {
     P pipeline;
-    prepare(pipeline);
+    prepare(pipeline, 7, true);
     REQUIRE(pipeline.record_terminal({7, 0}, P::Terminal::Success, terminal(1, 2, 3)));
     REQUIRE(pipeline.drain_terminals() == 1);
     REQUIRE(pipeline.record_terminal({7, 1}, P::Terminal::Success, terminal(4, 5)));

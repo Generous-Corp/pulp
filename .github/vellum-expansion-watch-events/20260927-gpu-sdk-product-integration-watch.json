@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260927-gpu-sdk-product-integration-watch",
+  "created_at": "2026-09-27T23:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "The GPU SDK product-integration change crosses the design-output-and-packaging selector through generated capability and SDK catalog metadata. It adds no importer, DesignIR schema, generated design output, renderer, package authority, release workflow, Vellum artifact, or ownership transition. The remaining paths are shared-memory GPU-audio transport, lifecycle, tracing, provider identity, downstream consumer tests, and documentation. This is registered as watch-only so selector coverage remains explicit while authority stays unchanged.",
+  "tests": [
+    "installed SDK GPU-audio lifecycle consumer",
+    "GPU-audio provider identity and capability manifest checks",
+    "DSP capability registry freshness check",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

@@ -390,11 +390,16 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-forge-catalog-json PROPERTIES
         PASS_REGULAR_EXPRESSION "\"schema\": \"pulp.forge-catalog.v1\"")
 
-    add_test(NAME cli-forge-catalog-check
-        COMMAND pulp-cli forge catalog export --check
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(cli-forge-catalog-check PROPERTIES
-        PASS_REGULAR_EXPRESSION "Forge catalog snapshot is current")
+    if(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+        include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake")
+        pulp_add_generated_forge_catalog_check()
+    else()
+        add_test(NAME cli-forge-catalog-check
+            COMMAND pulp-cli forge catalog export --check
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_tests_properties(cli-forge-catalog-check PROPERTIES
+            PASS_REGULAR_EXPRESSION "Forge catalog snapshot is current")
+    endif()
 
     add_test(NAME cli-forge-help
         COMMAND pulp-cli forge

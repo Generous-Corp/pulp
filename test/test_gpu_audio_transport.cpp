@@ -15,6 +15,11 @@
 #include <thread>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <os/object.h>
+#include <os/workgroup.h>
+#endif
+
 using namespace pulp::gpu_audio;
 using pulp::audio::BufferView;
 
@@ -337,6 +342,10 @@ RealtimeGpuNodePath realtime_gpu_node_path(GpuAudioNode* node) noexcept {
     if (auto* hook = dynamic_cast<test_detail::RealtimeHookNode*>(node))
         return hook->path();
     return {};
+}
+
+bool requires_realtime_gpu_path(GpuAudioNode*) noexcept {
+    return false;
 }
 
 GpuAudioProvider realtime_gpu_provider(GpuAudioNode*) noexcept {
@@ -717,6 +726,38 @@ TEST_CASE("GpuAudioTransport background worker drains the pipeline", "[gpu_audio
     t.release();
     REQUIRE_FALSE(t.is_prepared());
 }
+
+#if defined(__APPLE__)
+TEST_CASE("GpuAudioTransport can opt its worker into an Audio Workgroup",
+          "[gpu_audio][transport][workgroup][rt-safety]") {
+    constexpr uint32_t CH = 1, BS = 32, L = 2, RING = 16;
+    auto* workgroup = os_workgroup_parallel_create("pulp-gpu-audio-worker", nullptr);
+    REQUIRE(workgroup != nullptr);
+
+    GainNode node(CH, BS, 2.0f, MissPolicy::CpuFallback, L);
+    REQUIRE(node.prepare());
+    GpuAudioTransport transport;
+    REQUIRE(transport.prepare(&node, {.ring_blocks = RING,
+                                      .run_worker_thread = true,
+                                      .wake_on_write = true,
+                                      .audio_workgroup = reinterpret_cast<void*>(workgroup),
+                                      .join_audio_workgroup = true}));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    GpuAudioTransport::Stats observed;
+    do {
+        observed = transport.stats();
+        if (observed.worker_workgroup_joined || observed.worker_workgroup_join_failures > 0)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+
+    REQUIRE(observed.worker_workgroup_joined);
+    CHECK(observed.worker_workgroup_join_failures == 0);
+    transport.release();
+    os_release(workgroup);
+}
+#endif
 
 TEST_CASE("GpuAudioTransport resyncs the wet timeline after a miss", "[gpu_audio][transport]") {
     // A miss emits a substitute (dry) block for its timeline slot; when the worker
@@ -1172,4 +1213,128 @@ TEST_CASE("GpuAudioTransport private realtime miss uses the declared miss policy
     REQUIRE(node.realtime_calls == 1);
     REQUIRE(node.process_block_calls == 0);
     REQUIRE(t.stats().miss_blocks == 1);
+}
+
+namespace {
+std::uint64_t delivery_total(const GpuAudioTransport::DeliverySnapshot& s) {
+    return s.gpu_blocks + s.worker_output_blocks + s.cpu_fallback_blocks + s.silence_blocks +
+           s.passthrough_blocks + s.priming_blocks + s.invalid_blocks;
+}
+} // namespace
+
+TEST_CASE("GpuAudioTransport public delivery snapshot counts selected callback output",
+          "[gpu_audio][transport][delivery-snapshot]") {
+    for (auto policy : {MissPolicy::CpuFallback, MissPolicy::Silence, MissPolicy::PassthroughDry}) {
+        RealtimeHookNode node(1, 32, policy);
+        REQUIRE(node.prepare());
+        GpuAudioTransport t;
+        REQUIRE(t.prepare(&node, {8}));
+        Block input(1, 32), output(1, 32);
+        input.fill(3.0f);
+        auto in = input.cview();
+        auto out = output.view();
+        std::size_t allocations;
+        {
+            pulp::test::RtAllocationProbe probe;
+            t.process(in, out, 32);
+            allocations = probe.allocation_count();
+        }
+        CHECK(allocations == 0);
+        CHECK(output.storage[0][0] == 1003.0f);
+        CHECK(t.delivery_snapshot().gpu_blocks == 1);
+        node.realtime_status = detail::kRealtimeGpuPriming;
+        t.process(in, out, 32);
+        CHECK(output.storage[0][0] == 0.0f);
+        CHECK(t.delivery_snapshot().priming_blocks == 1);
+        node.realtime_status = detail::kRealtimeGpuMissed;
+        t.process(in, out, 32);
+        const auto selected = t.delivery_snapshot();
+        CHECK(selected.cpu_fallback_blocks == (policy == MissPolicy::CpuFallback ? 1u : 0u));
+        CHECK(selected.silence_blocks == (policy == MissPolicy::Silence ? 1u : 0u));
+        CHECK(selected.passthrough_blocks == (policy == MissPolicy::PassthroughDry ? 1u : 0u));
+        CHECK(output.storage[0][0] == (policy == MissPolicy::CpuFallback ? -3.0f
+                                       : policy == MissPolicy::Silence   ? 0.0f
+                                                                         : 3.0f));
+        node.realtime_status = detail::kRealtimeGpuReady;
+        t.process(in, out, 16);
+        CHECK(output.storage[0][0] == 0.0f);
+        const auto invalid = t.delivery_snapshot();
+        CHECK(invalid.invalid_blocks == 1);
+        CHECK(invalid.gpu_blocks == 1);
+        CHECK(invalid.worker_output_blocks == 0);
+        CHECK(delivery_total(invalid) == 4);
+        t.process_offline(in, out, 32);
+        CHECK(delivery_total(t.delivery_snapshot()) == 4);
+        t.release();
+        t.process(in, out, 32);
+        CHECK(delivery_total(t.delivery_snapshot()) == 4);
+        CHECK_FALSE(t.prepare(nullptr, {8}));
+        CHECK(delivery_total(t.delivery_snapshot()) == 4);
+        REQUIRE(t.prepare(&node, {8}));
+        CHECK(delivery_total(t.delivery_snapshot()) == 0);
+    }
+}
+
+TEST_CASE("GpuAudioTransport ring output never claims GPU execution or stale delivery",
+          "[gpu_audio][transport][delivery-snapshot]") {
+    GainNode node(1, 32, 2.0f, MissPolicy::PassthroughDry, 1);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+    Block input(1, 32), output(1, 32);
+    input.fill(3.0f);
+    auto in = input.cview();
+    auto out = output.view();
+    t.process(in, out, 32);
+    CHECK(t.delivery_snapshot().priming_blocks == 1);
+    t.process(in, out, 32);
+    t.pump(1);
+    t.process(in, out, 32);
+    CHECK(output.storage[0][0] == 3.0f);
+    CHECK(t.delivery_snapshot().worker_output_blocks == 0);
+    CHECK(t.delivery_snapshot().passthrough_blocks == 2);
+    t.pump();
+    t.process(in, out, 32);
+    CHECK(output.storage[0][0] == 6.0f);
+    CHECK(t.delivery_snapshot().worker_output_blocks == 1);
+    CHECK(t.delivery_snapshot().gpu_blocks == 0);
+    t.process(in, out, 16);
+    CHECK(t.delivery_snapshot().invalid_blocks == 1);
+    CHECK(delivery_total(t.delivery_snapshot()) == 5);
+    t.process_offline(in, out, 32);
+    CHECK(delivery_total(t.delivery_snapshot()) == 5);
+}
+
+TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",
+          "[gpu_audio][transport][delivery-snapshot]") {
+    RealtimeHookNode node(1, 32, MissPolicy::CpuFallback);
+    REQUIRE(node.prepare());
+    GpuAudioTransport t;
+    REQUIRE(t.prepare(&node, {8}));
+    Block input(1, 32), output(1, 32);
+    auto in = input.cview();
+    auto out = output.view();
+    std::atomic<bool> done{false};
+    std::atomic<bool> monotonic{true};
+    std::atomic<bool> timed_out{false};
+    std::thread reader([&] {
+        std::uint64_t previous = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+            const auto current = t.delivery_snapshot().gpu_blocks;
+            if (current < previous)
+                monotonic.store(false, std::memory_order_relaxed);
+            previous = current;
+        }
+        timed_out.store(!done.load(std::memory_order_acquire));
+    });
+    for (int i = 0; i < 10000; ++i)
+        t.process(in, out, 32);
+    done.store(true, std::memory_order_release);
+    reader.join();
+    CHECK_FALSE(timed_out.load());
+    CHECK(monotonic.load());
+    CHECK(t.delivery_snapshot().gpu_blocks == 10000);
+    CHECK(delivery_total(t.delivery_snapshot()) == 10000);
 }

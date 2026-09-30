@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 96,
+  "inventory_version": 100,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,21 +43,21 @@
   ],
   "counts": {
     "public_headers": 497,
-    "reviewed_headers": 215,
-    "legacy_unreviewed_headers": 282,
+    "reviewed_headers": 217,
+    "legacy_unreviewed_headers": 280,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 118,
       "capability_support": 44,
-      "infrastructure": 51,
-      "legacy_unreviewed": 282,
+      "infrastructure": 53,
+      "legacy_unreviewed": 280,
       "unsupported_capability": 2
     },
     "by_domain": {
       "audio": {
         "public_headers": 113,
-        "reviewed_headers": 9,
-        "legacy_unreviewed_headers": 104,
+        "reviewed_headers": 11,
+        "legacy_unreviewed_headers": 102,
         "unsupported_headers": 0
       },
       "midi": {
@@ -401,11 +401,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/load_measurer.hpp",
-      "fingerprint": "sha256:75f64718a84bbf884e6818eb3bfcff157da9d566231f79966656ab470f8a6aa3",
+      "fingerprint": "sha256:268b2aa45e278f04876fa0f5590a36523d35ee13882d37f89c2890b8d4321253",
       "include": "pulp/audio/load_measurer.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Real-time callback load telemetry used by host and format adapters. The AudioWorklet profile explicitly disables the unavailable clock while preserving the no-op measurement contract; this is shared runtime infrastructure rather than an independently advertised generator capability."
     },
     {
       "domain": "audio",
@@ -1116,11 +1116,11 @@
     {
       "domain": "audio",
       "source": "core/audio/include/pulp/audio/workgroup.hpp",
-      "fingerprint": "sha256:225bd04e5a5925d031f1f0222824b116ab8ed413c6b127b98b1b687522d091ee",
+      "fingerprint": "sha256:e696902515507a5a444feb4aa94335fc92b896a894e2e548aa7466221e934f60",
       "include": "pulp/audio/workgroup.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Audio scheduling infrastructure used by the GPU-audio worker; no agent capability entrypoint."
     },
     {
       "domain": "audio",
@@ -1134,7 +1134,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/custom_node_type.hpp",
-      "fingerprint": "sha256:c290d8321ca4432c27569f23513a667ef27f0c9a550013ba21a6c256547bb6f1",
+      "fingerprint": "sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add",
       "include": "pulp/host/custom_node_type.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1200,7 +1200,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d",
+      "fingerprint": "sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -4330,7 +4330,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
-      "fingerprint": "sha256:b48f9daf1117deb88cfd71a66c5b1c3d398c38c3481a3309e69745e65e545cdb",
+      "fingerprint": "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a",
       "include": "pulp/signal/spectral_mask_processor.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
