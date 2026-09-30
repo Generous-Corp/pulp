@@ -2701,11 +2701,9 @@ records whether they ran: the anchored `^slow$` label set means they did. The
 reuse step passes the group's own classification to the verifier as
 `--affected-slow-required` (an empty classifier output counts as `true`), but
 only when the protected-base verifier accepts that flag. A group that requires
-the proofs while the receipt's run skipped them is reported as a
-`::notice::protected receipt: merge group requires the slow-affected proofs
-...` line on an otherwise successful reuse. The verifier does not refuse on it,
-so those notices give the would-refuse count to read before refusal is
-switched on.
+the proofs while the receipt's run skipped them is refused with "merge group
+requires the slow-affected proofs but the receipt's run did not execute them",
+and a verifier given no requirement treats the proofs as required.
 
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the
