@@ -44,6 +44,7 @@ constexpr std::uint32_t kRate = 48'000;
 // Longer campaigns need an explicit lossless drain/statistics contract.
 constexpr std::uint32_t kBlocks = 64;
 constexpr std::uint32_t kLead = 2;
+constexpr std::uint64_t kGeneration = 1;
 constexpr auto kWait = std::chrono::seconds(15);
 
 struct DeliveryCapture {
@@ -65,14 +66,16 @@ void capture_delivery(void* context, std::uint64_t sequence, std::uint8_t dispos
     auto& record = capture->records[index];
     record = {};
     record.kind = pulp::gpu_audio::detail::SharedIoTraceKind::Delivery;
-    record.generation = 1;
+    record.generation = kGeneration;
     record.sequence = sequence;
     record.output_eligible = true;
-    record.delivery = static_cast<pulp::gpu_audio::detail::SharedIoDeliveryDisposition>(disposition);
+    record.delivery =
+        static_cast<pulp::gpu_audio::detail::SharedIoDeliveryDisposition>(disposition);
     record.callback_start_ns = callback_start_ns;
     record.callback_end_ns = callback_end_ns;
     record.result_visible_ns = visible_ns;
-    record.callback_timing_available = callback_start_ns != 0 && callback_end_ns >= callback_start_ns &&
+    record.callback_timing_available = callback_start_ns != 0 &&
+                                       callback_end_ns >= callback_start_ns &&
                                        visible_ns >= callback_end_ns;
 }
 
@@ -120,9 +123,9 @@ TrialAudio make_input() {
         for (std::uint32_t channel = 0; channel < kChannels; ++channel)
             for (std::uint32_t frame = 0; frame < kFrames; ++frame) {
                 const auto absolute = static_cast<double>(block * kFrames + frame);
-                input[block][channel * kFrames + frame] = static_cast<float>(
-                    0.21 * std::sin(0.017 * absolute + channel * 0.41) +
-                    0.07 * std::cos(0.071 * absolute + channel * 0.19));
+                input[block][channel * kFrames + frame] =
+                    static_cast<float>(0.21 * std::sin(0.017 * absolute + channel * 0.41) +
+                                       0.07 * std::cos(0.071 * absolute + channel * 0.19));
             }
     input[0][0] += 0.73f;
     input[3][kFrames + 7] -= 0.31f;
@@ -145,8 +148,9 @@ TrialAudio make_oracle(const TrialAudio& input, const std::vector<float>& ir) {
                     const auto source_index = output_index - tap;
                     const auto source_block_index = source_index / kFrames;
                     const auto source_frame = source_index % kFrames;
-                    sum += static_cast<double>(input[source_block_index]
-                                                   [channel * kFrames + source_frame]) * ir[tap];
+                    sum += static_cast<double>(
+                               input[source_block_index][channel * kFrames + source_frame]) *
+                           ir[tap];
                 }
                 expected[block][channel * kFrames + frame] = static_cast<float>(sum);
             }
@@ -187,8 +191,9 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
     if (!node.set_provider_policy(GpuConvolver::ProviderPolicy::SharedRequired))
         return result;
     pulp::gpu_audio::detail::GpuConvolverTrialConfig trial_config;
-    trial_config.requested_path = pulp::gpu_audio::detail::SharedIoRequest::RequireSharedHostPointer;
-    trial_config.generation = 1;
+    trial_config.requested_path =
+        pulp::gpu_audio::detail::SharedIoRequest::RequireSharedHostPointer;
+    trial_config.generation = kGeneration;
     trial_config.enable_trace = true;
     trial_config.capture_admissions = true;
     trial_config.capture_callback_timing = true;
@@ -213,7 +218,7 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
     }
     DeliveryCapture capture;
     if (!pulp::gpu_audio::configure_gpu_audio_transport_trial_observer(transport, &capture,
-                                                                        capture_delivery)) {
+                                                                       capture_delivery)) {
         transport.release();
         device->close();
         return result;
@@ -238,7 +243,7 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
 
     std::array<float, kChannels * kFrames> input_storage{};
     std::array<const float*, kChannels> input_ptrs{input_storage.data(),
-                                                    input_storage.data() + kFrames};
+                                                   input_storage.data() + kFrames};
     std::array<float*, kChannels> output_ptrs{};
     std::atomic<std::uint64_t> callback_count{0};
     std::atomic<std::uint64_t> completed_callbacks{0};
@@ -249,7 +254,7 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
     std::array<float, kBlocks> oracle_errors{};
     std::atomic<bool> callback_overflow{false};
     auto callback = [&](const BufferView<const float>&, BufferView<float>& output,
-                       const pulp::audio::CallbackContext&) {
+                        const pulp::audio::CallbackContext&) {
         const auto start = now_ns();
         const auto ordinal = callback_count.fetch_add(1, std::memory_order_relaxed);
         if (output.num_channels() != kChannels || output.num_samples() != kFrames) {
@@ -258,7 +263,8 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
             return;
         }
         if (ordinal < input_blocks.size())
-            std::copy(input_blocks[ordinal].begin(), input_blocks[ordinal].end(), input_storage.begin());
+            std::copy(input_blocks[ordinal].begin(), input_blocks[ordinal].end(),
+                      input_storage.begin());
         else
             std::fill(input_storage.begin(), input_storage.end(), 0.0f);
         for (std::uint32_t ch = 0; ch < kChannels && ch < output.num_channels(); ++ch)
@@ -288,8 +294,9 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
             std::fill_n(output.channel_ptr(ch), kFrames, 0.0f);
         const auto duration = now_ns() - start;
         auto old = callback_max_ns.load(std::memory_order_relaxed);
-        while (old < duration && !callback_max_ns.compare_exchange_weak(
-                                      old, duration, std::memory_order_relaxed)) {}
+        while (old < duration &&
+               !callback_max_ns.compare_exchange_weak(old, duration, std::memory_order_relaxed)) {
+        }
         if (ordinal < callback_durations.size())
             callback_durations[ordinal] = duration;
         else
@@ -333,10 +340,10 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
         result.oracle_max_error = std::max(result.oracle_max_error, oracle_errors[i]);
     }
     if (result.callbacks > 0 && !callback_overflow.load(std::memory_order_relaxed)) {
-        std::vector<std::uint64_t> durations(callback_durations.begin(),
-                                             callback_durations.begin() +
-                                                 std::min<std::uint64_t>(result.callbacks,
-                                                                         callback_durations.size()));
+        std::vector<std::uint64_t> durations(
+            callback_durations.begin(),
+            callback_durations.begin() +
+                std::min<std::uint64_t>(result.callbacks, callback_durations.size()));
         std::sort(durations.begin(), durations.end());
         result.callback_p99_ns = durations[(durations.size() * 99) / 100];
     }
@@ -358,7 +365,7 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
     std::unordered_set<std::uint64_t> delivery_sequences;
     bool delivery_ids_unique = true;
     const auto delivery_count = std::min<std::size_t>(capture.count.load(std::memory_order_acquire),
-                                                       capture.records.size());
+                                                      capture.records.size());
     for (std::size_t i = 0; i < delivery_count; ++i) {
         if (!delivery_sequences.insert(capture.records[i].sequence).second)
             delivery_ids_unique = false;
@@ -375,20 +382,20 @@ ModeResult run_mode(bool use_workgroup, const TrialAudio& input_blocks, const Tr
 
 void emit(const ModeResult& result) {
     std::cout << "{\"schema\":\"pulp.gpu-audio.coreaudio-workgroup-ab.v1\","
-              << "\"mode\":\"" << result.mode << "\",\"opened\":"
-              << (result.opened ? "true" : "false") << ",\"started\":"
-              << (result.started ? "true" : "false") << ",\"callback_workgroup_available\":"
+              << "\"mode\":\"" << result.mode
+              << "\",\"opened\":" << (result.opened ? "true" : "false")
+              << ",\"started\":" << (result.started ? "true" : "false")
+              << ",\"callback_workgroup_available\":"
               << (result.callback_workgroup_available ? "true" : "false")
               << ",\"worker_joined\":" << (result.worker_joined ? "true" : "false")
               << ",\"worker_join_failures\":" << result.worker_join_failures
-              << ",\"callbacks\":" << result.callbacks << ",\"produced_blocks\":"
-              << result.produced << ",\"miss_blocks\":" << result.misses
+              << ",\"callbacks\":" << result.callbacks << ",\"produced_blocks\":" << result.produced
+              << ",\"miss_blocks\":" << result.misses
               << ",\"delivery_records\":" << result.delivery_records
               << ",\"terminal_records\":" << result.terminal_records
               << ",\"identity_valid\":" << (result.identity_valid ? "true" : "false")
               << ",\"actual_buffer_size\":" << result.actual_buffer_size
-              << ",\"lead_blocks\":" << kLead
-              << ",\"oracle_checked\":" << result.oracle_checked
+              << ",\"lead_blocks\":" << kLead << ",\"oracle_checked\":" << result.oracle_checked
               << ",\"oracle_mismatches\":" << result.oracle_mismatches
               << ",\"oracle_max_error\":" << result.oracle_max_error
               << ",\"callback_p99_ns\":" << result.callback_p99_ns
@@ -399,16 +406,18 @@ void emit(const ModeResult& result) {
         const auto duration_json = [](const SharedIoTraceRecord& value,
                                       pulp::gpu_audio::detail::SharedIoTraceStage begin,
                                       pulp::gpu_audio::detail::SharedIoTraceStage end) {
-            const auto duration = pulp::gpu_audio::detail::shared_io_trace_duration(value, begin, end);
-            std::string text = duration.available ?
-                                   (std::string{"{\"availability\":\"available\",\"value_ns\":"} +
-                                    std::to_string(duration.ns) + "}")
-                                                  : "{\"availability\":\"unavailable\"}";
+            const auto duration =
+                pulp::gpu_audio::detail::shared_io_trace_duration(value, begin, end);
+            std::string text = duration.available
+                                   ? (std::string{"{\"availability\":\"available\",\"value_ns\":"} +
+                                      std::to_string(duration.ns) + "}")
+                                   : "{\"availability\":\"unavailable\"}";
             return text;
         };
         std::cout << "{\"schema\":\"pulp.gpu-audio.coreaudio-workgroup-ab.v1\","
                   << "\"record_kind\":\"block\",\"mode\":\"" << result.mode
-                  << "\",\"sequence\":" << record.sequence << ",\"gpu_timestamps\":{"
+                  << "\",\"sequence\":" << record.sequence
+                  << ",\"gpu_timestamps\":{"
                      "\"availability\":\"unavailable\"},\"phases\":{\"scheduled_to_completion\":"
                   << duration_json(record, pulp::gpu_audio::detail::SharedIoTraceStage::Scheduled,
                                    pulp::gpu_audio::detail::SharedIoTraceStage::CompletionObserved)
@@ -449,8 +458,8 @@ int main() {
         !workgroup.worker_joined || workgroup.worker_join_failures != 0 ||
         ordinary.callbacks < kBlocks || workgroup.callbacks < kBlocks ||
         ordinary.terminal_records == 0 || workgroup.terminal_records == 0 ||
-        !ordinary.identity_valid || !workgroup.identity_valid ||
-        ordinary.oracle_mismatches != 0 || workgroup.oracle_mismatches != 0)
+        !ordinary.identity_valid || !workgroup.identity_valid || ordinary.oracle_mismatches != 0 ||
+        workgroup.oracle_mismatches != 0)
         return 1;
     return 0;
 #endif
