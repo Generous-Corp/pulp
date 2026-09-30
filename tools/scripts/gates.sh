@@ -90,6 +90,8 @@ COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
+HFG="$ROOT/tools/scripts/header_fanout_guard.py"
+HFG_CFG="$ROOT/tools/scripts/header_fanout_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
@@ -317,6 +319,15 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "▸ hotspot-size guard" >&2
     if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
             --require-ceiling-reduction; then
+        fail=1
+    fi
+fi
+
+# ── 6a. header fan-out guard ────────────────────────────────────────────────
+if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
+    echo "" >&2
+    echo "▸ header fan-out guard (no new umbrella include of a tracked header)" >&2
+    if ! "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report; then
         fail=1
     fi
 fi

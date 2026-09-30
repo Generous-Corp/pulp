@@ -2566,6 +2566,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    a false pass); raising is not. So: never raise it, always lower it when you
    shrink. A PR that both grows one hotspot and shrinks another needs a
    `Hotspot-Grow:` trailer *and* a `max_loc` reduction.
+2b4. **Header fan-out grew?** The `header-fanout` gate
+   (`header_fanout_guard.py`, ledger `header_fanout_guard.json`) counts the
+   translation units whose `#include` closure holds each tracked header, from the
+   static include graph at HEAD vs the merge-base. It fails when THIS PR pushed a
+   tracked header over its `max_tus` ceiling, and the failure names the new
+   include edge. The usual cause is an umbrella include: a widely included header
+   that now includes a heavy one. Fix it by including the heavy header in the
+   `.cpp` or narrower header that uses it, or by forward-declaring. A deliberate
+   widening takes `Fanout-Grow: <path> reason="..."`. The count is TUs, not
+   executables. Most of a core header's *executable* reach is static-library
+   membership: a `.cpp` in `libpulp-audio.a` including it relinks everything that
+   links the library. Include hygiene cannot move that, so read link reach with
+   `--build-dir build` before attributing it to includes.
 2c. **Is a RED check even your fault?** Before investigating a failing check,
    run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
    check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —

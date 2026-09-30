@@ -193,6 +193,14 @@ invariants over Pulp's own source, both hard-failing:
 
 It also runs in the pre-push `gates.sh`, so a violation is caught before the push.
 
+The **header fan-out guard** (`header_fanout_guard.py`, ledger
+`header_fanout_guard.json`) runs in the same workflow, `gates.sh`, and the
+pre-push hook. It counts the translation units whose static `#include` closure
+contains each tracked header. A tracked header over its `max_tus` ceiling fails
+only when the PR grew it relative to the merge-base, which is the same
+rebase-stable rule the hotspot guard uses. A `Fanout-Grow: <path|all> reason="..."`
+trailer authorizes deliberate growth.
+
 The workflow's last step, **Source-only selftests**, runs every registration
 listed in `tools/ci/source_selftests.json` with
 `tools/ci/source_selftests.py run --min-count 130`. Those are Python ctests that

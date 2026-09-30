@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "_comment": "Header fan-out ledger for header_fanout_guard.py. max_tus is a REFERENCE ceiling on the number of translation units whose include closure contains the header (static #include graph at the checked ref), set to the measured count plus headroom (10%, at least 10) so new direct users pass. A header over its ceiling is a violation only when THIS range grew it (head vs merge-base) and no `Fanout-Grow: <path|all> reason=\"...\"` trailer authorizes it, so the gate stays rebase-stable like hotspot_size_guard.json. The failure a ceiling catches is an umbrella include: one new include edge from a widely included header that pulls hundreds of existing translation units in. When a cut shrinks a header's fan-out, lower its ceiling in the same change to keep the gain. Regenerate candidates with `header_fanout_guard.py --top 40`.",
+  "headers": [
+    {
+      "path": "core/runtime/include/pulp/runtime/triple_buffer.hpp",
+      "max_tus": 1108,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/rectangle_list.hpp",
+      "max_tus": 1055,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/affine_transform.hpp",
+      "max_tus": 1054,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/path.hpp",
+      "max_tus": 1016,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/text_utf8.hpp",
+      "max_tus": 1014,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/scene_recording.hpp",
+      "max_tus": 1011,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/recording_canvas.hpp",
+      "max_tus": 1011,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/canvas_capability.hpp",
+      "max_tus": 1011,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/canvas/include/pulp/canvas/canvas.hpp",
+      "max_tus": 1011,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/audio/include/pulp/audio/buffer.hpp",
+      "max_tus": 974,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/state/include/pulp/state/parameter.hpp",
+      "max_tus": 952,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/theme.hpp",
+      "max_tus": 933,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/state/include/pulp/state/state_migration.hpp",
+      "max_tus": 907,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/state/include/pulp/state/store.hpp",
+      "max_tus": 906,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/state/include/pulp/state/listener_token.hpp",
+      "max_tus": 906,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/geometry.hpp",
+      "max_tus": 901,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/value_source.hpp",
+      "max_tus": 876,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/input_events.hpp",
+      "max_tus": 876,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/motion.hpp",
+      "max_tus": 875,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/motion_preferences.hpp",
+      "max_tus": 869,
+      "note": "Top-20 compile fan-out"
+    },
+    {
+      "path": "core/view/include/pulp/view/view.hpp",
+      "max_tus": 857,
+      "note": "Most-edited core header; every include of it recompiles hundreds of TUs"
+    },
+    {
+      "path": "core/view/include/pulp/view/widgets.hpp",
+      "max_tus": 308,
+      "note": "Frequently edited widget declarations; include it where a widget type is used, never from a general header"
+    },
+    {
+      "path": "core/view/include/pulp/view/widget_bridge.hpp",
+      "max_tus": 301,
+      "note": "Frequently edited JS bridge; reached mainly through scripted_ui.hpp"
+    },
+    {
+      "path": "core/format/include/pulp/format/processor.hpp",
+      "max_tus": 640,
+      "note": "Plugin authoring contract; frequently edited"
+    },
+    {
+      "path": "core/timeline/include/pulp/timeline/model.hpp",
+      "max_tus": 301,
+      "note": "Frequently edited timeline document model"
+    },
+    {
+      "path": "core/render/include/pulp/render/skia_surface.hpp",
+      "max_tus": 50,
+      "note": "Skia surface wrapper; only render/view backends and GPU tests need it"
+    },
+    {
+      "path": "core/signal/include/pulp/signal/freeze_hold.hpp",
+      "max_tus": 41,
+      "note": "Time-stretch internals; its wide executable reach is libpulp-audio membership, not includes"
+    },
+    {
+      "path": "core/audio/include/pulp/audio/load_measurer.hpp",
+      "max_tus": 181,
+      "note": "Reached by most host TUs through signal_graph_runtime.hpp"
+    }
+  ]
+}
