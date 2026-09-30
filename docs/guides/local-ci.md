@@ -6549,9 +6549,36 @@ Two more downloads followed the same pattern and are now fetched up front:
   reset (exit 56), the two that actually happened. It now passes
   `--retry-all-errors` and keeps the SHA-256 check.
 
-`tools/scripts/test_build_fetch_resilience.py` runs the cargo step's real
-script against a stub `cargo`, checks the step precedes every cargo consumer,
-and rejects any `curl` in the build job that lacks `--retry-all-errors`.
+- **ccache (macOS).** The gate VM golden bakes ccache, yet `brew install ccache`
+  still reached the Homebrew API and one failed attempt failed the gate. The
+  step now uses an installed ccache as is and only installs when it is absent,
+  with three attempts spaced 20 s and 40 s apart
+  (`PULP_BREW_RETRY_DELAY_SECS`) and a `brew update` before each retry.
+- **pip and git in the other required contexts.** `vellum-freeze-check.yml`,
+  `vellum-trusted-gate.yml` and `version-skill-check.yml` install PyYAML and
+  fetch commits. Each such command runs through `tools/ci/net-retry.sh`
+  (`PULP_NET_RETRY_ATTEMPTS`, default 3; `PULP_NET_RETRY_DELAY_SECS`, default
+  20, multiplied by the attempt number), which wraps only the network command
+  and returns its exit status after the last attempt. The trusted merge-group
+  job keeps an inline loop instead, because it runs the protected base
+  commit's tools, which can predate a helper the workflow file names.
+
+`tools/scripts/test_build_fetch_resilience.py` runs the cargo and ccache steps'
+real scripts against stub `cargo` and `brew`, drives `net-retry.sh` with a
+failing stub, checks the cargo step precedes every cargo consumer, rejects any
+`curl` in the build job that lacks `--retry-all-errors`, and rejects a pip
+install or git fetch/clone in those three required workflows that neither goes
+through `net-retry.sh` nor sits in a step with its own retry loop.
+
+**A deleted merge-queue branch is a notice, not a fetch failure.**
+`hydrate_gpu_provenance_commits.py` fetches the event ref first. On a
+`merge_group` run that is `gh-readonly-queue/...`, which GitHub deletes when it
+drops or re-forms the group while the run keeps going, so git answers
+`couldn't find remote ref`. The script reports that as a
+`::notice::... merge group gone` line and falls back to the event commit. Every
+other fetch error, including any other error on the queue branch, is still a
+`bounded fetch failed` warning, and unresolved or non-ancestor provenance still
+fails the step.
 
 ## Protected-validation receipt reuse
 

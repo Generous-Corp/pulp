@@ -1690,6 +1690,24 @@ exports `CARGO_NET_OFFLINE=true`. The Chrome download uses
 `test_build_fetch_resilience.py` fails on a `curl` in the build job without
 `--retry-all-errors`, so a new unretried download cannot creep back in.
 
+**Required workflows retry pip and git through `tools/ci/net-retry.sh`.** The
+same test fails on a `pip install` or `git fetch`/`git clone` in
+`vellum-freeze-check.yml`, `vellum-trusted-gate.yml` or `version-skill-check.yml`
+that neither goes through the helper nor sits in a step with its own
+`for attempt` loop. Wrap only the network command, never a check whose failure
+is a verdict. Watch out: a job that checks out a different commit than the
+workflow file came from (the trusted merge-group job checks out
+`merge_group.base_sha`) cannot call a helper this PR adds, because the base
+commit predates it; the first merge group would fail with `No such file`. Keep
+such retries inline. The macOS ccache step uses an installed ccache (the gate
+golden bakes it) and never calls `brew install` then.
+
+**A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
+`hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
+to the event commit; only other fetch errors print `bounded fetch failed`.
+Before attributing a hydrate-step red to a vanished queue branch, check that the
+run's workflow commit carries the event-commit fallback at all.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it

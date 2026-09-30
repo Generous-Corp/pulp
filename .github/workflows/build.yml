@@ -1474,13 +1474,30 @@ jobs:
         if: runner.os == 'macOS'
         run: brew update --quiet || echo "brew update failed; install steps retry"
 
+      # The gate VM golden bakes ccache, and `brew install` of an installed
+      # formula still reaches the Homebrew API, so an installed ccache is used
+      # as is. Hosted runners install it with 3 spaced attempts; a brew update
+      # before each retry recovers the stale-config case described above.
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ccache || {
-            brew update
-            brew install ccache
-          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "ccache already installed: $(ccache --version | head -n 1)"
+            exit 0
+          fi
+          delay="${PULP_BREW_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if brew install ccache; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::brew install ccache attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+              brew update --quiet || true
+            fi
+          done
+          echo "::error::brew install ccache failed after 3 attempts"
+          exit 1
 
       - name: Install ccache (Windows)
         if: runner.os == 'Windows'

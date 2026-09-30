@@ -94,6 +94,21 @@ def event_ref_candidates(event_ref: str, event_sha: str = "") -> list[str]:
     return candidates
 
 
+QUEUE_REF_PREFIX = "refs/heads/gh-readonly-queue/"
+
+
+def merge_group_gone(candidate: str, output: str) -> bool:
+    """True when a fetch failed only because the merge queue deleted its branch.
+
+    GitHub deletes `gh-readonly-queue/...` when it drops or re-forms a merge
+    group, while runs started for that group keep going. A missing queue
+    branch is therefore a statement about the group's lifetime, not a fetch
+    failure: the event commit candidate still reaches the same history. Any
+    other ref, and any other error on this ref, stays a fetch failure.
+    """
+    return candidate.startswith(QUEUE_REF_PREFIX) and "couldn't find remote ref" in output
+
+
 def offline_git_env() -> dict[str, str]:
     """Git environment that answers from local objects or not at all.
 
@@ -289,6 +304,7 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
     # rewrites the shallow boundary. Object presence therefore does not prove
     # ancestry; always reconnect the exact event history when Git says the
     # repository is shallow.
+    group_gone = False
     if shallow:
         event_ref = os.environ.get("GITHUB_REF", "")
         if not event_ref.startswith("refs/"):
@@ -305,7 +321,16 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
             )
             if completed.returncode == 0:
                 break
-            failures.append(f"{candidate}: {(completed.stderr or completed.stdout).strip()}")
+            output = (completed.stderr or completed.stdout).strip()
+            if merge_group_gone(candidate, output):
+                group_gone = True
+                print(
+                    f"::notice::gpu-provenance-hydration: merge group gone: "
+                    f"{candidate} was deleted by the merge queue (the group was "
+                    "dropped or re-formed); falling back to the event commit"
+                )
+                continue
+            failures.append(f"{candidate}: {output}")
         else:
             # Every candidate was unfetchable. That is a statement about
             # AVAILABILITY, not about the provenance: GitHub deletes
@@ -324,7 +349,13 @@ def hydrate(root: pathlib.Path, remote: str) -> tuple[int, int]:
                 )
     unresolved = [revision for revision in revisions if not is_commit(root, revision)]
     if unresolved:
-        raise HydrationError(f"GPU provenance commits remain unresolved: {unresolved}")
+        context = (
+            "; the merge group this run validated is gone, so its result no "
+            "longer gates a merge" if group_gone else ""
+        )
+        raise HydrationError(
+            f"GPU provenance commits remain unresolved: {unresolved}{context}"
+        )
     non_ancestors = [
         revision for revision in revisions
         if subprocess.run(

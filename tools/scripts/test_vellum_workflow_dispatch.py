@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -167,6 +168,11 @@ def _run(
         (binp / "python3").write_text(FAKE_PYTHON)
         for tool in ("gh", "git", "python3"):
             (binp / tool).chmod(0o755)
+        # Steps run from the workspace root and call repository helpers by
+        # relative path; stage the real retry helper where the step expects it.
+        helper = Path(tmp) / "tools/ci/net-retry.sh"
+        helper.parent.mkdir(parents=True)
+        shutil.copy2(REPO_ROOT / "tools/ci/net-retry.sh", helper)
 
         body = Path(tmp) / "step.sh"
         body.write_text(script)
