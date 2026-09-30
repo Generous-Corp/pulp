@@ -158,8 +158,8 @@ class LauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             rc, argv, folder = self.run_launcher(tmp, "main.o", "-o", "out", "-Wl,-force_load,lib.a")
             files = sorted(p.name for p in folder.iterdir())
-            objects = next(folder.glob("*.objects")).read_text()
-            args = next(folder.glob("*.args")).read_text().splitlines()
+            objects = next(p for p in folder.iterdir() if p.suffix == ".objects").read_text()
+            args = next(p for p in folder.iterdir() if p.suffix == ".args").read_text().splitlines()
         self.assertEqual(rc, 0)
         self.assertEqual(argv[:4], ["main.o", "-o", "out", "-Wl,-force_load,lib.a"])
         self.assertTrue(argv[4].startswith("-Wl,-map,"))

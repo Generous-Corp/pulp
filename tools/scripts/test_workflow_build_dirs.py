@@ -136,7 +136,7 @@ class WorkflowBuildDirTests(unittest.TestCase):
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn(
-            "cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)",
+            "cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_RECORD_LINK_MAPS=ON)",
             text,
         )
         self.assertIn(
