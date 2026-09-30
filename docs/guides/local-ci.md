@@ -913,10 +913,16 @@ When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
 it failed on at least two other heads in the last 24 hours (other runs'
-`ctest-logs-macos` artifacts) and passes on main's latest merge-group run,
-Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing; the job still fails.
-Read `exonerated_only` failures ÷ merge-group failures, with `unique_cause`
-> 0 and the base-red streak count unchanged as controls.
+`ctest-logs-macos` artifacts) and passes on main's tip, judged by the tip's
+required gate job, Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing;
+the job still fails. Main evidence that was not actually read (a tip whose
+gate did not execute the suite, a failing-test list that could not be
+downloaded, a red gate that named no test) is "main unknown" and never
+exonerates, and a deterministic test (label `pr-fast`, or named in
+`tools/ci/drift_fast.json`) is never eligible. Read `exonerated_only`
+failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
+which must be 1, with `unique_cause` > 0 and the base-red streak count
+unchanged as controls.
 
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
