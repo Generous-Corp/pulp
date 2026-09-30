@@ -54,6 +54,13 @@ class SharedIoConvolutionSession {
         bool fenced = false;
     };
 
+    struct ProviderDiagnostics {
+        std::uint32_t configured_slots = 0;
+        std::uint32_t available_slots = 0;
+        std::uint64_t provider_starved = 0;
+        bool fenced = false;
+    };
+
     SharedIoConvolutionSession() = default;
     // Destruction attempts release(). If the provider cannot prove its drain,
     // the arena quarantines the prepared program and storage rather than
@@ -124,6 +131,13 @@ class SharedIoConvolutionSession {
     const SharedIoComputePlan::Telemetry& telemetry() const noexcept {
         return plan_.telemetry();
     }
+    // Quiescent only, after callback and service threads are stopped/joined.
+    // Starvation counts service attempts with ingress waiting and no free
+    // physical slot, not missed audio blocks or GPU execution time.
+    ProviderDiagnostics provider_diagnostics() const noexcept {
+        const auto available = plan_.available_slots();
+        return {config_.slots, static_cast<std::uint32_t>(available), provider_starved_, fenced()};
+    }
     SharedIoTelemetrySnapshot trace_telemetry() const noexcept {
         return trace_telemetry_.snapshot();
     }
@@ -166,6 +180,7 @@ class SharedIoConvolutionSession {
     std::unique_ptr<SharedIoArenaProvider> provider_;
     SharedIoComputePlan plan_;
     SharedIoConvolutionPipeline pipeline_;
+    std::uint64_t provider_starved_ = 0;
     struct TraceSlot {
         SharedIoSlotLedger::SlotToken token;
         SharedIoTraceRecord record;

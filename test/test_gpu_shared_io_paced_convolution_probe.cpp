@@ -145,6 +145,7 @@ int run(Config config) {
     }
     const auto transport_stats = transport.stats();
     transport.release();
+    const auto provider_diagnostics = node.provider_diagnostics();
 
     if (config.corrupt_output)
         output[0][static_cast<std::size_t>(config.warmup + config.lead) * config.frames] += 1.0f;
@@ -222,8 +223,11 @@ int run(Config config) {
                   "\"timing_scope\":\"external_callback_envelope\",\"sample_rate_hz\":"
                << sample_rate << ",\"channels\":" << channels << ",\"ir_frames\":" << ir.size()
                << ",\"frames\":" << config.frames << ",\"lead_blocks\":" << config.lead
-               << ",\"provider_slots\":2,\"warmup_blocks\":" << config.warmup
-               << ",\"measured_blocks\":" << config.blocks
+               << ",\"provider_slots\":" << provider_diagnostics.configured_slots
+               << ",\"provider_available_slots\":" << provider_diagnostics.available_slots
+               << ",\"provider_starved\":" << provider_diagnostics.provider_starved
+               << ",\"provider_fenced\":" << (provider_diagnostics.fenced ? "true" : "false")
+               << ",\"warmup_blocks\":" << config.warmup << ",\"measured_blocks\":" << config.blocks
                << ",\"total_callbacks\":" << total_blocks
                << ",\"measured_miss_counter_delta\":" << measured_misses
                << ",\"callback_overruns\":" << callback_overruns

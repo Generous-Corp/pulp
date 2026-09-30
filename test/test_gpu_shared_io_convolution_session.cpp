@@ -317,10 +317,17 @@ TEST_CASE("shared convolution session keeps completion chronology and retained i
     callback(fixture.session, b, output);
     // The second ingress stays claimed while the sole physical slot is busy.
     CHECK(fixture.session.service(11).submitted == 0);
+    const auto busy = fixture.session.provider_diagnostics();
+    CHECK(busy.configured_slots == 1);
+    CHECK(busy.available_slots == 0);
+    CHECK(busy.provider_starved == 1);
+    CHECK_FALSE(busy.fenced);
     fixture.provider->complete_sequence(0);
     CHECK(fixture.session.service(12).submitted == 1);
     fixture.provider->complete_sequence(1);
     fixture.session.service(13);
+    CHECK(fixture.session.provider_diagnostics().available_slots == 1);
+    CHECK(fixture.session.provider_diagnostics().provider_starved == 1);
     callback(fixture.session, b, output); // consumes sequence zero
     CHECK(output == a);
     callback(fixture.session, b, output); // consumes sequence one
@@ -581,6 +588,10 @@ TEST_CASE("shared session ingress saturation remains CPU-only until a quiescent 
         callback(fixture.session, a, output);
     CHECK(fixture.session.recovery_reason() == SharedIoRecoveryReason::InputSaturated);
     CHECK(fixture.session.service(1).submitted == 0);
+    const auto saturated = fixture.session.provider_diagnostics();
+    CHECK(saturated.fenced);
+    CHECK(saturated.provider_starved == 0);
+    CHECK(saturated.available_slots == saturated.configured_slots);
     CHECK(fixture.state->submits == 0);
     const auto cpu = callback(fixture.session, b, output);
     CHECK(cpu.stamp.epoch == 0);

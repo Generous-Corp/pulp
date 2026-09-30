@@ -211,6 +211,7 @@ bool SharedIoConvolutionSession::prepare(ProviderPair pair, Config config) {
         return false;
     }
     config_ = config;
+    provider_starved_ = 0;
     if (config_.trace.enabled && config_.trace.engine_id == 0) {
         config_.trace.engine_id = next_shared_io_trace_engine_id();
         if (config_.trace.engine_id == 0)
@@ -364,8 +365,11 @@ bool SharedIoConvolutionSession::submit_available(ServiceResult& result) noexcep
             }
         } admission{pipeline_};
         auto input = plan_.acquire_input(pending_ingress_->stamp().sequence, 0);
-        if (!input)
+        if (!input) {
+            if (plan_.available_slots() == 0)
+                ++provider_starved_;
             return true; // retain the bridge lease until a physical slot retires.
+        }
         const auto submit = SharedIoComputePlan::SubmitToken{input->token, 0};
         trace_admit(input->token);
         trace_stage(input->token, SharedIoTraceStage::EncodeBegin);

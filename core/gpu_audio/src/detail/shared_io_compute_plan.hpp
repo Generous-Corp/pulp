@@ -89,6 +89,9 @@ class SharedIoComputePlan {
     const Telemetry& telemetry() const noexcept {
         return telemetry_;
     }
+    std::size_t available_slots() const noexcept {
+        return arena_.available_slots();
+    }
 
   private:
     struct Pending {

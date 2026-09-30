@@ -83,6 +83,17 @@ bool GpuConvolver::configure_trace(const GpuConvolverTraceConfig& config) noexce
     return true;
 }
 
+GpuConvolver::ProviderDiagnostics GpuConvolver::provider_diagnostics() const noexcept {
+#if defined(PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO)
+    if (shared_io_ && shared_io_->session) {
+        const auto diagnostics = shared_io_->session->provider_diagnostics();
+        return {diagnostics.configured_slots, diagnostics.available_slots,
+                diagnostics.provider_starved, diagnostics.fenced};
+    }
+#endif
+    return {};
+}
+
 namespace detail {
 bool configure_gpu_convolver_trial(GpuConvolver& convolver,
                                    const GpuConvolverTrialConfig& config) noexcept {

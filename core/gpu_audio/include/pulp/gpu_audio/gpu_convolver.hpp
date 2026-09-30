@@ -67,6 +67,12 @@ bool drain_gpu_convolver_trial_records(GpuConvolver&, std::vector<SharedIoTraceR
 /// round-trip for a single stereo pair.
 class GpuConvolver : public GpuAudioNode {
   public:
+    struct ProviderDiagnostics {
+        std::uint32_t configured_slots = 0;
+        std::uint32_t available_slots = 0;
+        std::uint64_t provider_starved = 0;
+        bool fenced = false;
+    };
     /// Host-thread selection for the provider used during the next prepare().
     /// Auto preserves staged/CPU execution even when shared support is compiled.
     /// SharedRequired explicitly opts into the authenticated shared Dawn path.
@@ -103,6 +109,9 @@ class GpuConvolver : public GpuAudioNode {
     /// host-thread operation and fails after preparation. The transport worker
     /// remains the sole live queue consumer; final close drains any remainder.
     bool configure_trace(const GpuConvolverTraceConfig& config) noexcept;
+    /// Quiescent diagnostic only: stop callbacks and join the transport worker
+    /// before reading. Does not alter scheduling or ownership.
+    ProviderDiagnostics provider_diagnostics() const noexcept;
 
     GpuAudioNodeDescriptor descriptor() const override;
     bool prepare() override;
