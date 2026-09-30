@@ -7,7 +7,6 @@
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
-#include <pulp/view/value_source.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/view_effect.hpp>
 #include <functional>
@@ -30,6 +29,7 @@ class WidgetPainter;     // pulp/view/widget_painter.hpp — pluggable paint del
 class WidgetMetrics;     // pulp/view/widget_metrics.hpp — pluggable sizing delegate
 class SelectableText;    // pulp/view/selectable_text.hpp — cross-widget text selection
 class FrameClockBinding; // pulp/view/value_source_binding.hpp
+class MeterSource; class ScalarSource; struct MeterFrame; // pulp/view/value_source.hpp
 struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-source bindings
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
