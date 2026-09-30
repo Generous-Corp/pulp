@@ -95,6 +95,9 @@ def cmd_measure(a: argparse.Namespace) -> int:
     record["our_binaries"] = len(ours["files"])
     receipt_path = Path(a.work_dir) / "head-receipt.json"
     Path(a.work_dir).mkdir(parents=True, exist_ok=True)
+    # The per-test receipts instrument reuses these hashes instead of reading
+    # every test binary a second time.
+    (Path(a.work_dir) / "our-identity.json").write_text(json.dumps(ours, sort_keys=True), encoding="utf-8")
     artifact_name = f"protected-validation-macos-{head}-{base}"
     dl = subprocess.run([sys.executable, str(HERE.parent / "scripts" / "protected_merge_receipt.py"), "download",
                          "--repository", a.repository, "--target", "macos", "--token", a.token,

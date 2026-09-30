@@ -1,0 +1,72 @@
+{
+  "id": "signal-spectral-mask-effective-frame-observer",
+  "title": "Stopped-install effective spectral frame observer for GPU session matching",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "gpu-audio-effective-frame-observer-20260927",
+  "owned_paths": [
+    "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+    "test/test_spectral_mask_processor.cpp",
+    "docs/status/sequencer-exposure/rows/signal-spectral-mask-effective-frame-observer.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+      "needles": [
+        "set_effective_frame_observer",
+        "Successful prepare removes the observer; reset preserves it"
+      ]
+    },
+    {
+      "path": "test/test_spectral_mask_processor.cpp",
+      "needles": [
+        "set_effective_frame_observer"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public Pulp::signal header contains the observer API; this pending source disposition does not establish an installed artifact, plugin execution or release. Install/remove requires a stopped owner; the callback borrows the effective table and receives a successful-frame ordinal, not stream identity or host sample chronology.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
+          "needles": [
+            "using EffectiveFrameObserver",
+            "set_effective_frame_observer"
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_spectral_mask_processor.cpp",
+          "needles": [
+            "set_effective_frame_observer"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "An audio-owner frame observation callback is not an offline timeline command."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No timeline MCP operation is introduced by this source seam."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This stopped-install C++ integration callback has no remote operation. Per-frame invocation belongs to the audio owner, not the broker; products retain their existing parameter controls."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "The existing signal.spectral-mask-processor design capability remains unchanged. The runtime observation hook is not a new generator-facing algorithm or remote control operation; its reviewed header fingerprint is refreshed in the surface inventory."
+    }
+  }
+}

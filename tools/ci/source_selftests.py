@@ -61,7 +61,8 @@ ATTEMPTS = 2
 # keep running on the pull request head, where the source-selftest exclusion
 # would silently drop it.
 INCOMPATIBLE_LABELS = frozenset(
-    {"pr-fast", "validation", "slow", "performance", "bench", "quality-lab"}
+    {"pr-fast", "validation", "slow", "slow-affected", "performance", "bench",
+     "quality-lab"}
 )
 ALLOWED_PROPERTIES = frozenset(
     {"LABELS", "PROCESSORS", "RESOURCE_LOCK", "TIMEOUT", "WORKING_DIRECTORY"}
@@ -587,8 +588,67 @@ def unusable_build_reason(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -
     if generator != "Ninja":
         return f"generator is {generator or 'unknown'}, not Ninja"
     if build_is_stale(build, repo):
-        return "configured before the test manifests last changed"
+        return "configured before its CMake inputs last changed"
     return ""
+
+
+CENSUS_FILE = pathlib.Path("docs") / "status" / "consumption-profiles.json"
+CENSUS_FACTS = "consumption-census-facts.json"
+
+
+def census_mismatch(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT,
+                    ) -> tuple[str, list[str]] | None:
+    """(profile, differences) when ``build`` is not the build the census measured.
+
+    The consumption census records, per profile, the build scope it was
+    measured under (tests on, examples off). A local build with the same
+    feature switches but another scope gets the census's profile key and a
+    different link closure, so its drift checks fail on a pristine main. The
+    census itself cannot tell those apart; the lane can, from the recorded
+    scope. Returns None when the build matches, or the census does not record
+    this build's profile at all (the census then reports that itself).
+    """
+    facts_path = build / CENSUS_FACTS
+    census_path = repo / CENSUS_FILE
+    if not facts_path.is_file() or not census_path.is_file():
+        return None
+    sys.path.insert(0, str(repo / "tools" / "scripts"))
+    try:
+        import consumption_census as census
+        facts = json.loads(facts_path.read_text(encoding="utf-8"))
+        document = json.loads(census_path.read_text(encoding="utf-8"))
+        key = census.profile_key(facts)
+    except Exception:  # noqa: BLE001 - an unreadable census is the census's own verdict
+        return None
+    finally:
+        sys.path.pop(0)
+    recorded = document.get("profiles", {}).get(key)
+    if not isinstance(recorded, dict):
+        return None
+    current = facts.get("features", {})
+    diffs = [f"{name}={current.get(name, 'unset')} (profile {value})"
+             for name, value in sorted(recorded.get("build_scope", {}).items())
+             if current.get(name) != value]
+    return (key, diffs) if diffs else None
+
+
+def reads_census_build(entry: dict[str, Any]) -> bool:
+    """A test that compares a configured build against the consumption census."""
+    argv = entry.get("argv", [])
+    return "--build-dir" in argv and any("consumption_census" in a for a in argv)
+
+
+def set_aside_census_tests(entries: list[dict[str, Any]], build: pathlib.Path,
+                           repo: pathlib.Path = REPO_ROOT) -> dict[str, str]:
+    """Remove census tests a non-profile build cannot judge; name → why."""
+    mismatch = census_mismatch(build, repo)
+    if not mismatch:
+        return {}
+    profile, diffs = mismatch
+    why = f"build config ≠ census profile {profile}: {', '.join(diffs)}"
+    aside = {e["name"]: why for e in entries if reads_census_build(e)}
+    entries[:] = [e for e in entries if e["name"] not in aside]
+    return aside
 
 
 def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
@@ -619,22 +679,55 @@ def choose_build_dir(repo: pathlib.Path = REPO_ROOT,
         else:
             usable.append(candidate)
     if usable:
-        chosen = max(usable, key=lambda d: (d / "CTestTestfile.cmake").stat().st_mtime)
+        # Prefer a build the consumption census measured (the gate's scope), so
+        # its drift checks run instead of being set aside as NOT CHECKED.
+        chosen = max(usable, key=lambda d: (census_mismatch(d, repo) is None,
+                                            (d / "CTestTestfile.cmake").stat().st_mtime))
         note = f"most recently configured of {len(usable)} usable"
+        if census_mismatch(chosen, repo) is None and len(usable) > 1:
+            note = f"matches the census profile; newest such of {len(usable)} usable"
         if rejected:
             note += "; passed over " + ", ".join(rejected)
         return chosen.resolve(), note
     return None, ", ".join(rejected) or "no build*/CMakeCache.txt in the checkout"
 
 
+def cmake_inputs(build: pathlib.Path, repo: pathlib.Path) -> list[pathlib.Path]:
+    """The checkout files CMake read to configure ``build`` (a Ninja build).
+
+    Ninja's regeneration rule lists every file whose change re-runs CMake;
+    those under the checkout are what a build's registrations and link graph
+    were computed from.
+    """
+    try:
+        text = (build / "build.ninja").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    root = str(repo.resolve()) + os.sep
+    for line in text.replace("$\n", "").splitlines():
+        if line.startswith("build build.ninja") and ": RERUN_CMAKE" in line:
+            implicit = line.split(" | ", 1)[1].split(" || ")[0] if " | " in line else ""
+            paths = [p.replace("$ ", " ") for p in re.split(r"(?<!\$) ", implicit) if p]
+            return [pathlib.Path(p) for p in paths if p.startswith(root)]
+    return []
+
+
 def build_is_stale(build: pathlib.Path, repo: pathlib.Path = REPO_ROOT) -> bool:
-    """A configured build older than any test manifest registers an old tier."""
+    """A build configured before its CMake inputs last changed is stale.
+
+    Its test registrations and link graph describe another tree: a build
+    configured from one checkout and read after switching to another reports
+    the other tree's census closure (the inspect-protocol 19↔23 flip), and an
+    old configure registers an old tier. Every checkout file CMake read counts,
+    not only the test manifests.
+    """
     stamp = build / "CTestTestfile.cmake"
     if not stamp.is_file():
         return False
     configured = stamp.stat().st_mtime
-    manifests = [repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
-    return any(m.is_file() and m.stat().st_mtime > configured for m in manifests)
+    inputs = cmake_inputs(build, repo) or [
+        repo / "test" / "CMakeLists.txt", *(repo / "test").rglob("*.cmake")]
+    return any(m.is_file() and m.stat().st_mtime > configured for m in inputs)
 
 
 def ctest_label_entries_from_build(
@@ -1174,11 +1267,13 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"source-selftests: build dir: {build} ({why})", flush=True)
             stale = build is not None and build_is_stale(build)
             if stale:
-                print(f"source-selftests: {build} was configured before the test manifests "
+                print(f"source-selftests: {build} was configured before its CMake inputs "
                       "last changed; reading the members from the manifests instead", flush=True)
             if build and not stale and (build / "CTestTestfile.cmake").is_file():
                 entries = ctest_label_entries_from_build(args.ctest_label, build.resolve())
                 origin = f"the configured build {build}"
+                for name, why in set_aside_census_tests(entries, build).items():
+                    print(f"source-selftests: NOT CHECKED locally: {name} ({why})", flush=True)
             else:
                 entries, not_checked = ctest_label_entries_from_source(args.ctest_label)
                 origin = "the CMake manifests"

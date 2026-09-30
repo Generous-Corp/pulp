@@ -65,6 +65,8 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
     auto& session = *result.session;
     CHECK(session.prepared());
     CHECK(session.block_size() == fixture.descriptor().block_size);
+    CHECK(session.completion_policy() == GpuWaveNetCompletionPolicy::ProcessEvents);
+    CHECK(session.completion_policy_supported());
 
     const std::array<float, 2> input{1.0f, 2.0f};
     std::array<float, 2> output{0.0f, 0.0f};
@@ -86,4 +88,48 @@ TEST_CASE("public WaveNet session reports provider capability without exposing d
     CHECK(output[0] == Catch::Approx(0.0f).margin(1.0e-5));
     CHECK(output[1] == Catch::Approx(std::tanh(0.5f)).margin(1.0e-5));
     REQUIRE(session.release());
+}
+
+TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
+          "[gpu_audio][wavenet][completion]") {
+    Fixture fixture;
+    const auto result =
+        GpuWaveNetSession::create({.descriptor = fixture.descriptor(),
+                                   .weights = fixture.weights,
+                                   .slots = 2,
+                                   .completion_policy = GpuWaveNetCompletionPolicy::TimedWaitAny,
+                                   .completion_wait_ns = 500'000});
+    if (!result.session) {
+        CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
+        return;
+    }
+    CHECK(result.session->prepared());
+    CHECK(result.session->completion_policy() == GpuWaveNetCompletionPolicy::TimedWaitAny);
+    CHECK(result.session->completion_policy_supported());
+    const std::array<float, 2> input{1.0f, 2.0f};
+    std::array<float, 2> output{0.0f, 0.0f};
+    REQUIRE(result.session->submit_block(input, 1));
+    // This test verifies that the explicit non-realtime policy is accepted and
+    // serviced. It is not a realtime deadline test. Merge-group runners can be
+    // occupied by unrelated jobs, so give the asynchronous Dawn callback a
+    // bounded but deliberately generous observation window.
+    const auto wait_for_completion = [&](std::uint64_t sequence) {
+        const auto deadline =
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                           std::chrono::steady_clock::now().time_since_epoch())
+                                           .count()) +
+            250'000'000;
+        std::optional<GpuWaveNetBlockResult> completion;
+        for (int attempt = 0; attempt < 500 && !completion; ++attempt) {
+            result.session->service_until(deadline);
+            completion = result.session->receive(output);
+        }
+        CHECK(completion.has_value());
+        if (completion)
+            CHECK(completion->sequence == sequence);
+    };
+    wait_for_completion(1);
+    REQUIRE(result.session->submit_block(input, 2));
+    wait_for_completion(2);
+    CHECK(result.session->release());
 }

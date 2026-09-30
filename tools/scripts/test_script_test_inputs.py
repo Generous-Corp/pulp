@@ -20,6 +20,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -75,6 +76,84 @@ class Repo:
         ]}
 
 
+class ProfileIndependenceTests(unittest.TestCase):
+    """`--write` must not depend on the local configure: the gate builds with
+    examples OFF, and its build directory has no fixed name."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.repo = Repo(self.tmp)
+
+    def inventory_with_example(self, keep_root: Path | None = None) -> dict:
+        r = str(self.repo.root)
+        inv = self.repo.inventory()
+        write(self.repo.root, "examples/pulp-gain/CMakeLists.txt", "add_test(auval-PulpGain ...)\n")
+        write(self.repo.root, "tools/ci/run_auval.py", "x = 1\n")
+        inv["backtraceGraph"] = {"files": [f"{r}/examples/pulp-gain/CMakeLists.txt", f"{r}/test/cmake/quality_tests.cmake"],
+                                 "nodes": [{"file": 0}, {"file": 1}, {"parent": 1}]}
+        inv["tests"] += [
+            {"name": "auval-PulpGain", "command": ["/usr/bin/python3", f"{r}/tools/ci/run_auval.py"], "properties": [], "backtrace": 0},
+            {"name": "auval-helper-selftest", "command": ["/usr/bin/python3", f"{r}/tools/ci/run_auval.py"], "properties": [], "backtrace": 2},
+        ]
+        return inv
+
+    def test_example_registered_tests_are_excluded_so_an_examples_on_build_writes_the_gate_list(self) -> None:
+        inv = self.inventory_with_example()
+        with_examples = sti.build_list(inv, self.repo.root)
+        self.assertNotIn("auval-PulpGain", with_examples["tests"])
+        self.assertIn("auval-helper-selftest", with_examples["tests"], "a test registered from test/ is not an example")
+        gate_only = dict(inv, tests=[t for t in inv["tests"] if t["name"] != "auval-PulpGain"])
+        self.assertEqual(json.dumps(with_examples, indent=1, sort_keys=True),
+                         json.dumps(sti.build_list(gate_only, self.repo.root), indent=1, sort_keys=True))
+        self.assertEqual(sti.outside_gate_profile(inv, self.repo.root), {"auval-PulpGain"})
+
+    def test_the_census_profile_decides_the_scope(self) -> None:
+        inv = self.inventory_with_example()
+        write(self.repo.root, "docs/status/consumption-profiles.json", json.dumps(
+            {"profiles": {"darwin-a": {"build_scope": {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "ON"}}}}))
+        self.assertEqual(sti.gate_build_scope(self.repo.root)["PULP_BUILD_EXAMPLES"], "ON")
+        self.assertIn("auval-PulpGain", sti.build_list(inv, self.repo.root)["tests"])
+        write(self.repo.root, "docs/status/consumption-profiles.json", "not json")
+        self.assertEqual(sti.gate_build_scope(self.repo.root), sti.GATE_BUILD_SCOPE)
+
+    def test_an_entry_generated_into_the_build_tree_records_a_token_not_the_directory_name(self) -> None:
+        lists = {}
+        for name in ("build-gate", "bld"):
+            build = self.tmp / name
+            write(build, "test/run_mutation_control.py", "import sys\n")
+            inv = self.repo.inventory()
+            inv["tests"].append({"name": "mutation-control", "properties": [],
+                                 "command": ["/usr/bin/python3", f"{build}/test/run_mutation_control.py", f"{build}/test/pulp-test-x"]})
+            lists[name] = json.dumps(sti.build_list(inv, self.repo.root, build), indent=1, sort_keys=True)
+        self.assertEqual(lists["build-gate"], lists["bld"])
+        entry = json.loads(lists["bld"])["tests"]["mutation-control"]
+        self.assertEqual(entry["entry"], "${CMAKE_BINARY_DIR}/test/run_mutation_control.py")
+        self.assertNotIn("bld", lists["bld"])
+        self.assertNotIn("build-gate", lists["build-gate"])
+
+    def test_write_from_two_build_directories_is_byte_identical_through_the_cli(self) -> None:
+        outs = {}
+        for name in ("build-gate", "elsewhere"):
+            build = self.tmp / name
+            write(build, "test/run_mutation_control.py", "import sys\n")
+            inv = self.inventory_with_example()
+            inv["tests"].append({"name": "mutation-control", "properties": [],
+                                 "command": ["/usr/bin/python3", f"{build}/test/run_mutation_control.py"]})
+            inv_path = build / "inv.json"; inv_path.write_text(json.dumps(inv), encoding="utf-8")
+            out = build / "list.json"
+            proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(self.repo.root), "--build-dir", str(build),
+                                   "--inventory-json", str(inv_path), "--list", str(out), "--write"],
+                                  capture_output=True, text=True, timeout=60, env=tool_env(event=None, strict=False))
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("excluded 1 test(s) registered from examples/", proc.stdout)
+            outs[name] = out.read_bytes()
+        self.assertEqual(outs["build-gate"], outs["elsewhere"])
+        self.assertIn(b"${CMAKE_BINARY_DIR}/test/run_mutation_control.py", outs["elsewhere"])
+        self.assertNotIn(b"auval-PulpGain", outs["elsewhere"])
+
+
 class BuildListTests(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -115,12 +194,27 @@ class BuildListTests(unittest.TestCase):
                 self.assertFalse(p.startswith("/"), p)
 
 
+def tool_env(*, event: str | None, strict: bool) -> dict[str, str]:
+    """Every case pins the event environment the script reads, so the selftest
+    gives the same verdict inside a pull-request job, a merge-group job (where
+    the runner exports GITHUB_EVENT_NAME=merge_group and the script would
+    otherwise go advisory under a case that expects a block), and a shell."""
+    env = {k: v for k, v in os.environ.items() if k not in ("GITHUB_EVENT_NAME", "PULP_SCRIPT_INPUTS_STRICT")}
+    if event is not None:
+        env["GITHUB_EVENT_NAME"] = event
+    if strict:
+        env["PULP_SCRIPT_INPUTS_STRICT"] = "1"
+    return env
+
+
 class CheckModeTests(unittest.TestCase):
-    def run_tool(self, repo: Repo, *args: str, inventory: dict | None = None) -> subprocess.CompletedProcess[str]:
+    def run_tool(self, repo: Repo, *args: str, inventory: dict | None = None,
+                 event: str = "pull_request", strict: bool = False) -> subprocess.CompletedProcess[str]:
         inv = repo.build / "inv.json"
         inv.write_text(json.dumps(inventory or repo.inventory()), encoding="utf-8")
         return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
-                               "--inventory-json", str(inv), *args], capture_output=True, text=True, timeout=60)
+                               "--inventory-json", str(inv), *args], capture_output=True, text=True, timeout=60,
+                              env=tool_env(event=event, strict=strict))
 
     def test_write_then_check_is_clean_then_drifts_on_a_new_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,12 +326,31 @@ class CheckModeTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertIn("missing from list: linux-only", proc.stdout)   # advisory, not blocking
 
+    def test_merge_group_reports_blocking_drift_as_a_warning_and_exits_0(self) -> None:
+        """The pull-request head is the enforcement point; a merge group must
+        never eject a batch over a stale generated list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            write(repo.root, "tools/scripts/extra.py", "z = 1\n")
+            write(repo.root, "tools/scripts/alpha_lib.py", "import extra\nDATA = 'docs/status/alpha.yaml'\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr edits a listed input")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref", event="merge_group")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("::warning title=script-test inputs stale (advisory in a merge group)::", proc.stdout)
+            self.assertIn("stale entry: alpha", proc.stdout)
+            strict = self.run_tool(repo, "--check", "--base", "base-ref", event="merge_group", strict=True)
+            self.assertEqual(strict.returncode, 1, strict.stdout)
+            head = self.run_tool(repo, "--check", "--base", "base-ref", event="pull_request")
+            self.assertEqual(head.returncode, 1, head.stdout)
+
     def test_unreadable_inventory_exits_2(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp))
             proc = subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root),
                                    "--inventory-json", str(repo.build / "absent.json"), "--check"],
-                                  capture_output=True, text=True, timeout=60)
+                                  capture_output=True, text=True, timeout=60, env=tool_env(event="merge_group", strict=False))
             self.assertEqual(proc.returncode, 2)
 
 

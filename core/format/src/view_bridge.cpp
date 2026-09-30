@@ -4,6 +4,7 @@
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/view.hpp>
 
 namespace pulp::format {
@@ -121,6 +122,14 @@ bool ViewBridge::open(std::string* error) {
         uses_auto_ui_ = !instance.uses_script_ui;
     }
     view_raw_ = view_.get();
+
+    // Tell the scripted editor where it lives, so a document can keep its
+    // plain-key global shortcuts standalone-only (see EditorHostKind).
+    if (auto* session = scripted_ui()) {
+        session->set_host_kind(
+            processor_.editor_host_kind() == EditorHostKind::standalone
+                ? "standalone" : "plugin");
+    }
 
     // Install the runtime host surfaces on the fresh tree. Without this,
     // View::host_params() is null for every view Pulp itself builds, and an

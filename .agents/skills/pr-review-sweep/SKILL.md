@@ -87,6 +87,18 @@ prompt block. They are signal, not gospel.
 - **Ship the test.** Every correctness fix lands with the Catch2 / `cargo test`
   case that would have caught it. "It compiles" is not the acceptance criterion.
 
+## Reporting the PR's state after a sweep
+
+- Quote the required-check state from `shipyard landing --pr <n>` (its verdict
+  line where it prints one) or the head's `statusCheckRollup`, read at the time
+  of the claim, with the head SHA. Do not summarize from memory.
+- Never call a failure a flake, infra, "not a code failure", or "still in
+  progress" while a required check is red on the current head, or when the same
+  test failed on an earlier head of the PR. A repeat is a code signal.
+- If the PR is armed or queued, push only real fixes; do not rebase it or merge
+  `main` into it (the queue does that, and moving the head cancels the running
+  gate). The `ci` skill has the full rules.
+
 ## Timing traps
 
 - **Reviews are asynchronous.** Opening the PR does not mean the review has run.

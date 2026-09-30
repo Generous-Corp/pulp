@@ -19,6 +19,7 @@ bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
     try {
         for (auto* queue : {&ingress_, &egress_}) {
             queue->stamps.resize(config.capacity);
+            queue->callback_ingress_ns.assign(config.capacity, 0);
             queue->samples.assign(count * config.capacity, 0.f);
         }
     } catch (...) {
@@ -34,7 +35,8 @@ bool SharedIoStampedBridge::prepare(Config config, std::uint64_t epoch,
 }
 
 SharedIoStampedBridge::Publication
-SharedIoStampedBridge::publish(Queue& queue, Stamp stamp, std::span<const float> samples) noexcept {
+SharedIoStampedBridge::publish(Queue& queue, Stamp stamp, std::span<const float> samples,
+                               std::uint64_t ingress_ns) noexcept {
     const auto write = queue.write.load(std::memory_order_relaxed);
     if (write == kNoLease)
         return Publication::CounterExhausted;
@@ -42,6 +44,7 @@ SharedIoStampedBridge::publish(Queue& queue, Stamp stamp, std::span<const float>
         return Publication::DroppedFull;
     const auto position = write % capacity_;
     queue.stamps[position] = stamp;
+    queue.callback_ingress_ns[position] = ingress_ns;
     std::copy(samples.begin(), samples.end(), queue.samples.begin() + position * sample_count_);
     queue.write.store(write + 1, std::memory_order_release);
     return Publication::Published;
@@ -58,6 +61,7 @@ std::optional<SharedIoStampedBridge::Lease> SharedIoStampedBridge::acquire(Queue
     lease.queue_ = &queue;
     lease.cursor_ = read;
     lease.stamp_ = queue.stamps[read % capacity_];
+    lease.callback_ingress_ns_ = queue.callback_ingress_ns[read % capacity_];
     lease.samples_ = {queue.samples.data() + (read % capacity_) * sample_count_, sample_count_};
     return lease;
 }
@@ -104,7 +108,7 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint6
     }
     if (current_.epoch == 0)
         return {current_, Admission::CpuOnly};
-    const auto result = publish(ingress_, current_, samples);
+    const auto result = publish(ingress_, current_, samples, callback_start_ns_);
     if (result != Publication::Published)
         request_recovery(SharedIoRecoveryReason::InputSaturated);
     return {current_, result == Publication::Published ? Admission::Accepted : Admission::Full};
@@ -313,7 +317,7 @@ bool SharedIoStampedBridge::complete_callback_delivery(const Callback& callback,
             record.delivery_reason = SharedIoFallbackReason::CompletionFailed;
             break;
         case SharedIoRecoveryReason::InvalidCallback:
-            record.delivery_reason = SharedIoFallbackReason::SequenceGap;
+            record.delivery_reason = SharedIoFallbackReason::InvalidCallback;
             break;
         case SharedIoRecoveryReason::OfflineFence:
             record.delivery_reason = SharedIoFallbackReason::Teardown;

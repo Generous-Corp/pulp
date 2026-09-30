@@ -42,6 +42,13 @@ std::size_t SharedIoProgramSession::service(std::uint64_t now_ns) noexcept {
     return plan_.drain(now_ns);
 }
 
+std::size_t SharedIoProgramSession::service_until(std::uint64_t now_ns,
+                                                  std::uint64_t deadline_ns) noexcept {
+    if (!prepared_ || !provider_)
+        return 0;
+    return plan_.drain_until(now_ns, deadline_ns);
+}
+
 std::optional<SharedIoProgramSession::Completion>
 SharedIoProgramSession::pop_completion() noexcept {
     if (!prepared_)
@@ -74,7 +81,18 @@ bool SharedIoProgramSession::reprime_when_quiescent() noexcept {
     return plan_.reprime_when_quiescent();
 }
 
+std::unique_ptr<SharedIoArenaProvider> SharedIoProgramSession::release_to_owner() noexcept {
+    if (!plan_.release())
+        return {};
+    prepared_ = false;
+    return std::move(provider_);
+}
+
 bool SharedIoProgramSession::release() noexcept {
+    return release({});
+}
+
+bool SharedIoProgramSession::release(ReleaseObserver observer) noexcept {
     if (!provider_ && !plan_.prepared()) {
         prepared_ = false;
         return true;
@@ -82,6 +100,8 @@ bool SharedIoProgramSession::release() noexcept {
     if (!plan_.release())
         return false;
     prepared_ = false;
+    if (provider_ && observer.observe)
+        observer.observe(observer.context, *provider_);
     provider_.reset();
     return true;
 }

@@ -1,0 +1,98 @@
+name: Drift fast
+
+# Advisory, hosted pre-check for the tree-reading drift tests that fail most
+# merge groups on the required `macos` gate: census, script-inputs,
+# tools-registry and lane-contract drift, and the wide-non-native replay. They
+# read the checkout and the configured test graph, never a compiled binary, so
+# a configure alone is enough to run them. On `macos` they run after a
+# ~20-minute build; here they report in minutes on a hosted runner.
+#
+# The selection is data, not YAML: tools/ci/drift_fast.json names whole ctest
+# labels plus individual registrations, and tools/ci/drift_fast.py resolves it
+# against the configured tree. A listed test this configuration does not
+# register (Apple-only registrations on this Linux configure) is printed as
+# NOT CHECKED, and so is one that skips — the Linux configure's census profile
+# is not recorded, so the census drift comparison itself skips here and still
+# runs on `macos`.
+#
+# ADVISORY: this context is not a required status check. Making it required is
+# a ruleset change, not a workflow change. See docs/guides/local-ci.md.
+
+on:
+  pull_request:
+    branches: [main, 'develop/**']
+  merge_group:
+
+# A new push supersedes the pull-request run. A merge group's ref is unique per
+# group, so its runs never share a concurrency domain and none is cancelled.
+concurrency:
+  group: drift-fast-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  drift-fast:
+    name: drift-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PULP_BUILD_DIR: build-linux
+    steps:
+      # pull_request checks out refs/pull/N/merge and merge_group checks out
+      # the group's own commit: both are the tip combined with the head, which
+      # is the tree the drift exists in. Depth 2 keeps HEAD^1 (the base) for
+      # the diff-scoped script-inputs check.
+      - uses: actions/checkout@v5
+        with:
+          lfs: false
+          fetch-depth: 2
+
+      # script-test-inputs-drift scopes its check to the diff against
+      # origin/$GITHUB_BASE_REF on a pull request; pin that ref to the event's
+      # base commit. A merge group scopes against HEAD^1 instead.
+      - name: Fetch pull-request base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+${BASE_SHA}:refs/remotes/origin/${BASE_REF}"
+
+      # The historical GPU-probe acceptance check is selected by drift_fast.py
+      # and walks commits outside the depth-2 event checkout. Reconnect the
+      # bounded provenance history before configuring so a shallow hosted clone
+      # cannot turn this advisory diagnostic into a deterministic red check.
+      - name: Hydrate bounded GPU provenance commits
+        shell: bash
+        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+
+      - name: Install Linux dependencies
+        uses: ./.github/actions/install-linux-build-deps
+
+      # Restore only: main's Linux build leg publishes this cache, and this job
+      # uses the same key and path so its configure reuses those sources. It
+      # never saves.
+      - name: Restore FetchContent sources
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ github.workspace }}/${{ env.PULP_BUILD_DIR }}/_deps
+          key: ${{ runner.os }}-linux-fetchcontent-${{ hashFiles('setup.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-linux-fetchcontent-
+
+      - name: Bootstrap repository dependencies
+        timeout-minutes: 10
+        run: ./setup.sh --ci --deps-only
+
+      # The gate's own configure (Release, examples off, GPU on), minus the
+      # build. The GPU stays on so the registered test graph is the gate's.
+      - name: Configure (no build)
+        run: |
+          cmake -S . -B "$PULP_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF
+
+      - name: Run drift checks
+        run: |
+          python3 tools/ci/drift_fast.py run --build-dir "$PULP_BUILD_DIR"

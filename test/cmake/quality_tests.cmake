@@ -168,9 +168,16 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_capability_installed_sdk.py"
             ${_pulp_agent_capability_installed_args})
+    # `slow-affected`: every lane's `slow` exclusion also matches it, and the
+    # gate admits it into the main suite when the change classifier requires
+    # it (tools/ci/ctest_gate_args.py). A COST starts it first beside the
+    # parallel phase rather than alone after it; it builds its consumer at -j2,
+    # which PROCESSORS declares (tools/scripts/ctest_scheduling_policy.py).
     set_tests_properties(agent-capability-installed-sdk PROPERTIES
-        LABELS "slow;agent-capability-installed-sdk"
-        RESOURCE_LOCK agent-capability-manifest-source)
+        LABELS "slow-affected;agent-capability-installed-sdk"
+        RESOURCE_LOCK agent-capability-manifest-source
+        COST 200
+        PROCESSORS 2)
     unset(_pulp_agent_capability_installed_args)
     unset(_pulp_agent_capability_instrumentation_compile_flags)
     unset(_pulp_agent_capability_instrumentation_link_flags)
@@ -178,9 +185,9 @@ if(Python3_Interpreter_FOUND)
     # independent source, executable, isolation check, and process run for every
     # capability row and typed binding. The timeout retains headroom for cold
     # SDK installation and platform-specific linker variance. Keep it out of
-    # the ordinary PR corpus via the `slow` label; build.yml restores it on the
-    # required macOS leg when an installed-capability surface actually changes,
-    # and nightly-full-build still runs the complete unfiltered inventory.
+    # the ordinary PR corpus via the `slow-affected` label; build.yml restores
+    # it on the required macOS leg when an installed-capability surface actually
+    # changes, and nightly-full-build still runs the complete unfiltered inventory.
     set_tests_properties(agent-capability-installed-sdk PROPERTIES TIMEOUT 1200)
 
     add_test(NAME control-authoring-examples
@@ -646,10 +653,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_binary_identity_shadow.py")
         set_tests_properties(binary-identity-shadow-selftest PROPERTIES TIMEOUT 120)
-        # The one merge-group step that runs all three shadow instruments.
+        # The one merge-group step that runs all four shadow instruments.
         add_test(NAME merge-group-shadows-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_merge_group_shadows.py")
         set_tests_properties(merge-group-shadows-selftest PROPERTIES TIMEOUT 180)
+        # Per-test content-hash receipts (key derivation, always-run rules,
+        # trusted reads), reported in shadow by merge-group macos jobs.
+        add_test(NAME test-receipts-shadow-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_test_receipts_shadow.py")
+        set_tests_properties(test-receipts-shadow-selftest PROPERTIES TIMEOUT 120)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

@@ -396,7 +396,12 @@ int main(int argc, char** argv) {
         else
             corrupt_revision(receipt.native_dawn_revision);
     }
-    const bool has_exact_expectation = receipt.expected_dawn_revision != "unknown";
+    // An empty expectation is intentional for non-exact fixture builds. Treat
+    // it like the historical "unknown" sentinel: verify that the linked
+    // provider is internally self-consistent, while reserving an explicit
+    // non-empty revision for manifest-bound exact-provider builds.
+    const bool has_exact_expectation =
+        !receipt.expected_dawn_revision.empty() && receipt.expected_dawn_revision != "unknown";
     const bool expected_matches =
         !has_exact_expectation || receipt.header_dawn_revision == receipt.expected_dawn_revision;
     const bool runtime_versions_match =

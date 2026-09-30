@@ -15,6 +15,15 @@ if(NOT Python3_Interpreter_FOUND)
     return()
 endif()
 
+# The advisory hosted drift-fast lane (.github/workflows/drift-fast.yml) runs
+# tools/ci/drift_fast.json's selection against a configured, unbuilt tree. Its
+# selftest covers the driver and holds that manifest and the workflow to each
+# other. Registered here, before the labelling below, because it is itself a
+# source-selftest lane member.
+add_test(NAME drift-fast-selftest
+    COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_drift_fast.py")
+
 set(_pulp_source_selftest_manifest "${CMAKE_SOURCE_DIR}/tools/ci/source_selftests.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${_pulp_source_selftest_manifest}")

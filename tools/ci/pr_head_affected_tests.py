@@ -55,6 +55,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
 
 import affected_targets  # noqa: E402
 import changed_surface_inventory as inventory  # noqa: E402
+import cmake_registration_impact as registration_impact  # noqa: E402
 
 SCHEMA = "pulp-pr-head-affected-tests/v1"
 DEFAULT_BUDGET_SECS = 600
@@ -76,6 +77,15 @@ PATH_FAMILIES = (
      re.compile(r"^(tools/(ci/wide_non_native_checks\.json|scripts/(classify_changes|wide_non_native)\.py)"
                 r"|test/(CMakeLists\.txt|.*\.cmake))$"),
      re.compile(r"^wide-non-native-selftest$")),
+    # The GPU-audio provider probes compare their compiled-in Dawn/Skia identity
+    # with the pinned provider. That identity is produced at configure time by
+    # CMake and the identity script and read back through target properties or
+    # definitions, so no source dependency links a producer edit to the probes.
+    ("gpu-audio-provider-identity",
+     re.compile(r"^(core/gpu_audio/CMakeLists\.txt|tools/cmake/PulpGpuAudioProvider\w*\.cmake"
+                r"|tools/scripts/gpu_audio_provider_identity\.py|tools/deps/manifest\.json"
+                r"|test/cmake/verify_gpu_audio_provider\w*\.cmake)$"),
+     re.compile(r"^pulp-gpu-(audio-provider-identity|host-mapped-pointer-|dawn-shared-io-provider-)")),
 )
 
 
@@ -85,8 +95,62 @@ def diff_paths(base: str, head: str, repo: Path = REPO_ROOT) -> list[str]:
     return [os.path.normpath(p) for p in out.splitlines() if p]
 
 
+def changed_lines(base: str, head: str, paths: list[str],
+                  repo: Path = REPO_ROOT) -> dict[str, tuple[set[int], list[str]]]:
+    """Per path: the head-side lines each hunk touches, and the removed lines.
+
+    A pure deletion touches the lines on either side of where it was.
+    """
+    if not paths:
+        return {}
+    out = subprocess.run(["git", "diff", "-U0", "--no-renames", base, head, "--", *paths],
+                         cwd=repo, capture_output=True, text=True, check=True).stdout
+    changes: dict[str, tuple[set[int], list[str]]] = {}
+    current: tuple[set[int], list[str]] | None = None
+    for row in out.splitlines():
+        if row.startswith("+++ "):
+            name = row[4:]
+            current = None if name == "/dev/null" else changes.setdefault(
+                os.path.normpath(name[2:] if name.startswith("b/") else name), (set(), []))
+            continue
+        if row.startswith("--- ") or current is None:
+            continue
+        hunk = _HUNK.match(row)
+        if hunk:
+            start, count = int(hunk.group(1)), int(hunk.group(2) or 1)
+            current[0].update(range(start, start + count) if count else (start, start + 1))
+        elif row.startswith("-"):
+            current[1].append(row[1:])
+    return changes
+
+
 def is_non_test_path(path: str) -> bool:
     return path.startswith(NON_TEST_PREFIXES) or path.endswith(NON_TEST_SUFFIXES)
+
+
+def source_lane_contract_tests(paths: list[str], names: list[str],
+                               root: Path = REPO_ROOT) -> list[str]:
+    """The source-selftest lane's own contract tests, when the diff edits a lane entry.
+
+    The lane contract reads every entry's script (it rejects platform gates and
+    third-party imports), so editing any script in tools/ci/source_selftests.json
+    can break it without touching the lane itself.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import source_selftests as lane
+        entries = lane.load_manifest(root / "tools" / "ci" / "source_selftests.json")
+        # entry_sources resolves both `{repo}/x.py` and `-m unittest <module>` entries.
+        scripts = {src.resolve().relative_to(root.resolve()).as_posix()
+                   for e in entries for src in lane.entry_sources(e, root)}
+    except Exception:  # noqa: BLE001 - an unreadable manifest is the lane's own failure
+        return []
+    finally:
+        sys.path.pop(0)
+    scripts |= {"tools/ci/source_selftests.json", "tools/ci/source_selftests.py"}
+    if not any(p in scripts for p in paths):
+        return []
+    return [n for n in names if n.startswith("source-selftest-lane-")]
 
 
 def family_tests(paths: list[str], names: list[str]) -> dict[str, list[str]]:
@@ -112,6 +176,111 @@ def inventory_tests(build: Path) -> dict[str, set[str]]:
     return tests
 
 
+_UNOWNED = re.compile(r"^(?:source not owned by any configured target|"
+                      r"header without an owning target): (.+)$")
+_HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
+SCRIPT_INPUTS_LIST = Path("test") / "ctest_script_inputs.json"
+
+
+def script_input_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
+    """Script-driven ctests whose declared inputs the diff touches.
+
+    test/ctest_script_inputs.json records what each script test reads (its
+    imports, fixtures, the files it parses), which the build graph cannot see.
+    """
+    try:
+        document = json.loads((root / SCRIPT_INPUTS_LIST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    picked = []
+    for name, entry in sorted((document.get("tests") or {}).items()):
+        inputs = [i.rstrip("/") for i in entry.get("inputs") or []]
+        if any(p == i or p.startswith(i + "/") for p in paths for i in inputs):
+            picked.append(name)
+    return picked
+
+
+def own_tests(build: Path, root: Path, paths: list[str]) -> list[str]:
+    """Tests run by the programs whose own sources the diff edits.
+
+    A pull request that edits a test file, or the source of a probe program a
+    test runs, is the likeliest to break that test, and the projection loses it
+    when the rest of the diff is too wide to focus. Only executables that
+    compile an edited source count, not every library dependent.
+    """
+    if not inventory.codemodel_reply_available(build):
+        return []
+    model = inventory.load_codemodel_targets(build)
+    edited = {p for p in paths if os.path.splitext(p)[1] in inventory.SOURCE_EXTENSIONS}
+    owners = {t.name for t in model.targets.values()
+              if t.type == "EXECUTABLE" and edited & set(t.sources)}
+    artifacts = {os.path.normpath(a) for t in model.targets.values() if t.name in owners
+                 for a in t.artifacts}
+    entries = inventory.load_projection_ctest_entries(build) or []
+    return sorted({e.name for e in entries
+                   if any(os.path.normpath(c) in artifacts for c in e.command)})
+
+
+def registration_tests(build: Path, paths: list[str], root: Path = REPO_ROOT,
+                       changes: dict[str, tuple[set[int], list[str]]] | None = None
+                       ) -> list[str]:
+    """Tests whose registration the diff edits.
+
+    Editing a registration changes a test's command, properties, build flags
+    or the variables they read, and none of that reaches the test through a
+    source dependency. `cmake_registration_impact` names the tests and targets
+    the edited lines reach (with no `changes`, every line of an edited `test/`
+    CMake file counts); a target's tests are the ctest entries that run it.
+    """
+    edited = [p for p in paths if p.startswith("test/")
+              and (p.endswith(".cmake") or p.endswith("CMakeLists.txt"))]
+    if not edited:
+        return []
+    names: set[str] = set()
+    targets: set[str] = set()
+    for rel in edited:
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if changes is None:
+            touched, removed = set(range(1, text.count("\n") + 2)), []
+        else:
+            touched, removed = changes.get(rel, (set(), []))
+        reached = registration_impact.impact(text, touched, removed)
+        names |= reached.tests
+        targets |= reached.targets
+    if targets and inventory.codemodel_reply_available(build):
+        model = inventory.load_codemodel_targets(build)
+        artifacts = {os.path.normpath(a) for t in model.targets.values()
+                     if t.name in targets for a in t.artifacts}
+        for entry in inventory.load_projection_ctest_entries(build) or []:
+            if any(os.path.normpath(c) in artifacts for c in entry.command):
+                names.add(entry.name)
+    return sorted(names)
+
+
+def script_reference_tests(paths: list[str], root: Path = REPO_ROOT) -> list[str]:
+    """Script-driven ctests the gates.sh lanes would select for this diff.
+
+    The same rules: the script itself changed, it loads a changed module
+    through repo imports, its source names a changed file, or it walks a
+    directory the diff changed something in.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import source_selftests as lane
+        entries = lane.python_ctest_entries(root)
+        # No lane-file rule: editing the lane runner is a reason to run the
+        # whole lane locally, not every script test on a pull-request head.
+        return sorted(e["name"] for e in lane.select_for_changes(entries, paths, root,
+                                                                 lane_files=()))
+    except Exception:  # noqa: BLE001 - a helper that cannot read the tree selects nothing
+        return []
+    finally:
+        sys.path.pop(0)
+
+
 def project(build: Path, root: Path, paths: list[str]) -> inventory.Selection:
     """`pulp affected`'s projection of these paths onto the configured build.
 
@@ -130,28 +299,63 @@ def project(build: Path, root: Path, paths: list[str]) -> inventory.Selection:
     headers = {f for f in changed if os.path.splitext(f)[1] in inventory.HEADER_EXTENSIONS}
     deps_db = inventory.header_owners(build, model, headers)
     tests = inventory.load_projection_ctest_entries(build)
-    return inventory.project_affected(model, changed, deleted, deps_db, tests,
-                                      inventory.DEFAULT_PROJECTION_THRESHOLD, [], families)
+    # The development loop builds everything when one changed source has no
+    # owning target, which is right for a build. Here it would throw away every
+    # other file's tests, so an unowned file is set aside and the rest are
+    # projected: that can only add tests the fallback would have dropped.
+    set_aside: list[str] = []
+    while True:
+        selection = inventory.project_affected(
+            model, changed, deleted, deps_db, tests,
+            inventory.DEFAULT_PROJECTION_THRESHOLD, [], families)
+        unowned = _UNOWNED.match(selection.reason) if selection.mode == "all" else None
+        if not unowned or unowned.group(1) not in changed or len(set_aside) >= 200:
+            break
+        set_aside.append(unowned.group(1))
+        changed = [p for p in changed if p != unowned.group(1)]
+    if set_aside and selection.mode == "focused":
+        selection.reason += f" (set aside {len(set_aside)} unowned file(s))"
+    return selection
 
 
 def select(build: Path, paths: list[str], names: dict[str, set[str]],
-           root: Path = REPO_ROOT) -> dict:
+           root: Path = REPO_ROOT,
+           changes: dict[str, tuple[set[int], list[str]]] | None = None) -> dict:
     """The extra tests for this diff, and why."""
     plan: dict = {"changed": len(paths), "mode": "none", "reason": "", "families": {},
                   "tests": []}
     if not paths:
         plan["reason"] = "the diff is empty"
         return plan
+    chosen: list[str] = []
+    # Declared script inputs are exact, so they apply even where the build
+    # projection does not (a docs/status file a census test parses).
+    inputs = script_input_tests(paths, root)
+    plan["script_inputs"] = len(inputs)
+    chosen.extend(inputs)
+    scripts = script_reference_tests(paths, root)
+    plan["script_references"] = len(scripts)
+    chosen.extend(scripts)
+    registered = registration_tests(build, paths, root, changes)
+    plan["registrations"] = len(registered)
+    chosen.extend(registered)
     if all(is_non_test_path(p) for p in paths):
         plan["reason"] = "docs, skills, workflows or planning only"
-        return plan
-    chosen: list[str] = []
-    selection = project(build, root, paths)
-    plan["mode"] = selection.mode
-    plan["reason"] = selection.reason
-    if selection.mode == "focused":
-        chosen.extend(selection.tests)
+    else:
+        selection = project(build, root, paths)
+        plan["mode"] = selection.mode
+        plan["reason"] = selection.reason
+        if selection.mode == "focused":
+            chosen.extend(selection.tests)
+        else:
+            # Too wide to focus: still run what the diff edits directly.
+            own = own_tests(build, root, paths)
+            plan["own_tests"] = len(own)
+            chosen.extend(own)
     families = family_tests(paths, sorted(names))
+    lane_tests = source_lane_contract_tests(paths, sorted(names), root)
+    if lane_tests:
+        families["source-selftest-lane"] = lane_tests
     plan["families"] = {k: len(v) for k, v in families.items()}
     for tests in families.values():
         chosen.extend(tests)
@@ -277,12 +481,14 @@ def main(argv: list[str] | None = None) -> int:
     build = args.build_dir.resolve()
     try:
         paths = diff_paths(args.base, args.head)
+        changes = changed_lines(args.base, args.head,
+                              [p for p in paths if p.startswith("test/")])
         names = inventory_tests(build)
     except (subprocess.CalledProcessError, OSError, json.JSONDecodeError) as exc:
         print(f"pr-head-affected-tests: cannot read the diff or the ctest inventory: {exc}",
               file=sys.stderr)
         return 2
-    plan = select(build, paths, names)
+    plan = select(build, paths, names, changes=changes)
     print(f"pr-head-affected-tests: {len(plan['tests'])} extra test(s); mode={plan['mode']} "
           f"({plan['reason']}); families={plan['families']}", flush=True)
     if args.dry_run:

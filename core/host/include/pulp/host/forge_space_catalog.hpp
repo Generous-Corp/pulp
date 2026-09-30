@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstring>
+#include <pulp/host/custom_node_diagnostics.hpp>
+#include <type_traits>
+
 // Space — bake-layer catalog nodes.
 //
 // The home for the reverb / room family. Two members today, a third landing
@@ -113,6 +117,16 @@
 
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
+
+#if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+#ifndef PULP_GPU_CONVOLUTION_TRACE_CONFIG_API
+// Public SDK feature marker.  Forge consumers can use this to pass the
+// optional trace configuration while remaining source-compatible with older
+// SDKs whose GPU factory only accepted the IR and policy arguments.
+#define PULP_GPU_CONVOLUTION_TRACE_CONFIG_API 1
+#endif
+#include <pulp/gpu_audio/gpu_convolution_reverb.hpp>
+#endif
 
 #include <pulp/signal/nonlin_ambience.hpp>
 #include <pulp/signal/speaker_cabinet.hpp>
@@ -325,11 +339,169 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
     return t;
 }
 
+#if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+
+inline constexpr const char* kGpuTypeId = "space.convolution_reverb_gpu";
+
+inline int gpu_internal_block_size(int max_block) noexcept {
+    if (max_block <= 0)
+        return 0;
+    std::uint64_t quantum = 1u;
+    while (quantum < static_cast<std::uint64_t>(max_block))
+        quantum <<= 1u;
+    if (quantum > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        return 0;
+    return static_cast<int>(quantum);
+}
+
+struct GpuInstance {
+    std::unique_ptr<gpu_audio::GpuConvolutionReverb> engine;
+    std::uint64_t preparation_generation = 0;
+};
+
+// Fixed POD schema. Lane counters count transport quanta, not arbitrary host
+// callbacks. Both mono lanes stay separate; worker output is not GPU delivery.
+inline constexpr std::uint64_t kGpuDiagnosticSchema = 0x4750554352560001ULL;
+enum class GpuDiagnosticCounterUnit : std::uint8_t { TransportQuantum = 1 };
+struct GpuConvolutionDiagnostics {
+    std::uint32_t schema_version = 1;
+    std::uint32_t lane_count = 2;
+    gpu_audio::GpuConvolutionReverbReport report{};
+    GpuDiagnosticCounterUnit delivery_counter_unit = GpuDiagnosticCounterUnit::TransportQuantum;
+};
+inline CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics() {
+    return {
+        kGpuTypeId, 1, kGpuDiagnosticSchema, sizeof(GpuConvolutionDiagnostics),
+        [](const void* opaque, std::span<std::byte> output, std::uint64_t& generation) noexcept {
+            const auto& instance = *static_cast<const GpuInstance*>(opaque);
+            if (!instance.engine || !instance.engine->prepared())
+                return CustomNodeDiagnosticAvailability::NotPrepared;
+            const GpuConvolutionDiagnostics value{1, 2, instance.engine->report()};
+            static_assert(std::is_trivially_copyable_v<GpuConvolutionDiagnostics>);
+            if (output.size() != sizeof(value))
+                return CustomNodeDiagnosticAvailability::SchemaMismatch;
+            std::memcpy(output.data(), &value, sizeof(value));
+            generation = instance.preparation_generation;
+            return CustomNodeDiagnosticAvailability::Available;
+        }};
+}
+
+/// Construct the opt-in GPU realization.  It deliberately accepts only the
+/// one/two-channel asset shapes admitted by Forge: two concrete authenticated
+/// mono lanes preserve dual-mono identity, while a four-cell true-stereo IR
+/// remains on the CPU realization until a channel-matrix GPU node exists.
+inline CustomNodeType
+make_gpu_convolution_reverb_node(ImpulseResponse ir, IrPolicy policy = {},
+                                 gpu_audio::GpuConvolverTraceConfig trace = {}) {
+    if (!valid_impulse_response(ir) || ir.channels.size() > 2u || policy.true_stereo)
+        throw std::invalid_argument("GPU convolution requires a one- or two-channel dual-mono IR");
+    auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
+
+    CustomNodeType t;
+    t.type_id = kGpuTypeId;
+    t.version = 1;
+    t.num_input_ports = 2;
+    t.num_output_ports = 2;
+    t.default_name = "GPU Convolution Reverb";
+    // This route owns live authenticated transports and is intentionally not
+    // lowerable into a baked artifact.  The CPU realization remains the stable
+    // default for offline/baked graphs.
+    t.lowerable = false;
+    t.create = []() -> void* { return new GpuInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<GpuInstance*>(p); };
+    t.prepare = [shared, policy, trace](void* p, double sr, int max_block) {
+        auto* instance = static_cast<GpuInstance*>(p);
+        ++instance->preparation_generation;
+        const int internal_block = gpu_internal_block_size(max_block);
+        if (!std::isfinite(sr) || sr <= 0.0 || max_block <= 0 ||
+            sr > static_cast<double>(std::numeric_limits<std::uint32_t>::max()) ||
+            internal_block <= 0)
+            throw std::runtime_error("invalid GPU convolution prepare geometry");
+        gpu_audio::GpuConvolutionReverbConfig config;
+        config.block_size = static_cast<std::uint32_t>(internal_block);
+        config.sample_rate = static_cast<std::uint32_t>(std::lround(sr));
+        config.impulse_response_sample_rate = shared->sample_rate;
+        config.impulse_response = shared->channels;
+        config.normalize = policy.normalize;
+        config.tail_trim_db = policy.tail_trim_db;
+        config.tail_fade_ms = policy.tail_fade_ms;
+        config.resample_taps_per_phase = policy.resample_taps_per_phase;
+        config.gpu_enabled = true;
+        config.trace = trace;
+        instance->engine = std::make_unique<gpu_audio::GpuConvolutionReverb>(std::move(config));
+        if (!instance->engine->prepare())
+            throw std::runtime_error("authenticated GPU convolution provider unavailable");
+    };
+    t.process_instance = [](void* p, audio::BufferView<float>& out,
+                            const audio::BufferView<const float>& in, int n) {
+        auto* instance = static_cast<GpuInstance*>(p);
+        if (!instance->engine) {
+            out.clear();
+            return;
+        }
+        instance->engine->process(in, out, static_cast<std::uint32_t>(std::max(0, n)));
+    };
+    t.baked_params.push_back({kIrGainDb, static_cast<float>(Engine::kIrGainDbMin),
+                              static_cast<float>(Engine::kIrGainDbMax),
+                              static_cast<float>(Engine::kIrGainDbDefault)});
+    t.baked_params.push_back({kPredelayMs, static_cast<float>(Engine::kPredelayMsMin),
+                              static_cast<float>(Engine::kPredelayMsMax),
+                              static_cast<float>(Engine::kPredelayMsDefault)});
+    t.baked_params.push_back(
+        {kWetPercent, 0.0f, 100.0f, static_cast<float>(Engine::kWetPercentDefault)});
+    t.baked_params.push_back(
+        {kDryPercent, 0.0f, 100.0f, static_cast<float>(Engine::kDryPercentDefault)});
+    t.baked_params.push_back({kWidthPercent, static_cast<float>(Engine::kWidthPercentMin),
+                              static_cast<float>(Engine::kWidthPercentMax),
+                              static_cast<float>(Engine::kWidthPercentDefault)});
+    t.baked_params.push_back({kLowcutHz, static_cast<float>(Engine::kLowcutHzMin),
+                              static_cast<float>(Engine::kLowcutHzMax),
+                              static_cast<float>(Engine::kLowcutHzDefault)});
+    t.baked_params.push_back({kHighcutHz, static_cast<float>(Engine::kHighcutHzMin),
+                              static_cast<float>(Engine::kHighcutHzMax),
+                              static_cast<float>(Engine::kHighcutHzDefault)});
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto* instance = static_cast<GpuInstance*>(p);
+        if (!instance->engine) {
+            out.clear();
+            return;
+        }
+        instance->engine->set_ir_gain_db(params.value_at(kIrGainDb, 0));
+        instance->engine->set_predelay_ms(params.value_at(kPredelayMs, 0));
+        instance->engine->set_wet_percent(params.value_at(kWetPercent, 0));
+        instance->engine->set_dry_percent(params.value_at(kDryPercent, 0));
+        instance->engine->set_width_percent(params.value_at(kWidthPercent, 0));
+        instance->engine->set_lowcut_hz(params.value_at(kLowcutHz, 0));
+        instance->engine->set_highcut_hz(params.value_at(kHighcutHz, 0));
+        instance->engine->process(in, out, static_cast<std::uint32_t>(std::max(0, n)));
+    };
+    t.latency_samples_for_block = [](double, int max_block) {
+        const int internal_block = gpu_internal_block_size(max_block);
+        if (internal_block <= 0 || internal_block > CustomNodeType::kMaxLatencySamples / 3)
+            return 0;
+        return 3 * internal_block;
+    };
+    return t;
+}
+
+#endif
+
 /// Construct the metadata/audit realization without making the central
 /// registry know how to synthesize this asset-backed family's required input.
 inline CustomNodeType catalog_probe_node() {
     return make_convolution_reverb_node({{{1.0f}}, 48000.0});
 }
+
+#if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
+inline ForgeNodeDescriptor descriptor();
+inline ForgeNodeDescriptor descriptor_with_gpu() {
+    auto d = descriptor();
+    d.realizations.emplace_back("gpu", kGpuTypeId);
+    return d;
+}
+#endif
 
 inline ForgeNodeDescriptor descriptor() {
     return {"convolution_reverb", "Convolution Reverb", "Applies a supplied impulse response with stereo wet-path shaping.",

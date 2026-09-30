@@ -14,21 +14,10 @@ The lanes, and why they differ:
   the waste: every batch inherits the break, every lane pays it, and each
   re-formed batch pays it again. So the queue stops at the first failure.
 
-* ``push`` to main is the DESIGNATED detector and diagnostic. It is the only
-  lane that would run the whole macOS suite on a commit actually on main, so it
-  must report every failing test rather than the first one. Stopping early here
-  would trade the one complete signal in the system for a few minutes.
-
-  In practice it reports nothing. Every non-proof event shares the
-  ``build-<github.ref>`` concurrency group, so all pushes to main land in one
-  domain; ``cancel-in-progress`` is false there, and GitHub holds at most ONE
-  run pending per group, cancelling the previously pending one when the next
-  merge arrives. Measured over the 60 most recent pushes to main: 58 completed,
-  55 dispatched no job at all, and 0 executed the macOS suite (the same query
-  over ``merge_group`` returned 31 of 55). The label and stop-on-failure rules
-  below are still the right ones for that lane whenever it does run; they are
-  not what makes it observable. ``tools/ci/base_poison_detector.py`` derives
-  main's health from evidence that already exists instead of waiting for it.
+* ``push`` to main runs only the GitHub-hosted Linux and Windows legs, which
+  publish the shared caches; it has no macOS leg. It reports every failing test
+  rather than the first. main's macOS health is the merge group's required
+  ``macos`` job on the same commit, read by ``tools/ci/base_poison_detector.py``.
 
 * The gate events also exclude ``source-selftest``: registrations that read
   only the checkout, which the build-free required ``Enforce version & skill
@@ -38,11 +27,18 @@ The lanes, and why they differ:
   required check means. A head that is READY TO LAND also runs the full suite,
   as evidence rather than as a gate: see ``pr_suite`` below.
 
+A per-change proof such as ``agent-capability-installed-sdk`` carries the
+``slow-affected`` label. Every lane's unanchored ``slow`` exclusion matches it,
+so it stays out of every suite by default. When the change classifier requires
+it, the gate lane anchors that one alternative to ``^slow$``: the proof then
+runs inside the main suite, started first by its COST (see
+``tools/scripts/ctest_scheduling_policy.py``), instead of alone in a step after
+the suite drains.
+
 The label set is a separate axis: `performance`, `bench` and `quality-lab` are
 relative-timing tests that are robust to steady load but not to the load
 VARIANCE of a host running concurrent build VMs. They are excluded wherever the
-suite runs on the shared self-hosted macOS gate hosts, which now includes the
-push lane, and retained on the steady GitHub-hosted Linux and Windows runners.
+suite runs on the shared self-hosted macOS gate hosts, and retained on the steady GitHub-hosted Linux and Windows runners.
 """
 from __future__ import annotations
 
@@ -58,7 +54,7 @@ from typing import Any, Callable
 SHARED_HOST_LABEL_EXCLUDE = "validation|slow|performance|bench|quality-lab"
 # Source-only Python selftests (tools/ci/source_selftests.json). The required
 # `Enforce version & skill sync` context runs them without a build, so the gate
-# events drop them; `push` keeps them as the macOS detector.
+# events drop them; `push` keeps them.
 SOURCE_SELFTEST_LABEL = "source-selftest"
 # Label set for the gate events.
 GATE_LABEL_EXCLUDE = f"{SHARED_HOST_LABEL_EXCLUDE}|{SOURCE_SELFTEST_LABEL}"
@@ -69,6 +65,8 @@ FULL_LABEL_EXCLUDE = "validation"
 # stand in for them.
 GATE_EVENTS = frozenset({"pull_request", "workflow_dispatch", "merge_group"})
 
+AFFECTED_SLOW_LABEL = "slow-affected"
+
 STOP_ON_FAILURE_FLAG = "--stop-on-failure"
 
 
@@ -76,10 +74,17 @@ def _norm(value: str | None) -> str:
     return (value or "").strip()
 
 
-def label_exclude(event_name: str, runner_os: str) -> str:
-    """The ctest ``-LE`` value for this lane."""
+def label_exclude(event_name: str, runner_os: str, affected_slow: bool = False) -> str:
+    """The ctest ``-LE`` value for this lane.
+
+    ``affected_slow`` admits the ``slow-affected`` proofs on a gate lane by
+    anchoring the ``slow`` alternative, which otherwise matches them too.
+    """
     event = _norm(event_name)
     if event in GATE_EVENTS:
+        if affected_slow:
+            return "|".join("^slow$" if part == "slow" else part
+                            for part in GATE_LABEL_EXCLUDE.split("|"))
         return GATE_LABEL_EXCLUDE
     # A push builds macOS on the same shared Studios that serve the required
     # gate, so it inherits the gate's timing-test exclusions. Linux and Windows
@@ -200,9 +205,9 @@ def probe_pr_suite(
         return "fast", f"pull request state unavailable ({reason})"
 
 
-def decide(event_name: str, runner_os: str) -> dict[str, str]:
+def decide(event_name: str, runner_os: str, affected_slow: bool = False) -> dict[str, str]:
     return {
-        "label_exclude": label_exclude(event_name, runner_os),
+        "label_exclude": label_exclude(event_name, runner_os, affected_slow),
         "stop_on_failure": stop_on_failure(event_name),
     }
 
@@ -212,6 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--event-name", required=True)
     parser.add_argument("--runner-os", default="")
     parser.add_argument("--format", choices=("shell", "json"), default="shell")
+    parser.add_argument(
+        "--affected-slow", default="false",
+        help="`true` admits the slow-affected proofs the change classifier "
+        "requires (its agent_capability_installed_sdk_required output); any "
+        "other value keeps them excluded",
+    )
     parser.add_argument(
         "--pr-suite",
         action="store_true",
@@ -236,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             decision = {"pr_suite": suite, "pr_suite_reason": reason}
     else:
-        decision = decide(args.event_name, args.runner_os)
+        decision = decide(args.event_name, args.runner_os,
+                          _norm(args.affected_slow).lower() == "true")
     if args.format == "json":
         print(json.dumps(decision, sort_keys=True))
         return 0

@@ -555,7 +555,8 @@ private:
     // Marshals IComponentHandler::restartComponent off the audio thread.
     // process() OR-accumulates latency/tail restart flags into this publisher
     // (RT-safe); the actual host callback fires on the main thread via
-    // drain_pending_restart(). See vst3_restart_publisher.hpp for the contract.
+    // deliver_pending_restart() at a main-thread safe point outside any host
+    // call. See vst3_restart_publisher.hpp for the contract.
     detail::Vst3RestartPublisher restart_publisher_;
 
     // Liveness/lifetime token shared with every main-thread lambda this adapter
@@ -571,23 +572,52 @@ private:
     // change is delivered without depending on an incidental host query.
     std::shared_ptr<std::atomic<bool>> poll_active_;
 
-    // Main-thread drain of the two deferred host callbacks this adapter owns:
+    // Deferred delivery of the two host callbacks this adapter owns:
     // restart_publisher_ (componentHandler->restartComponent(flags)) and the
     // Processor's state-dirty flag (IComponentHandler2::setDirty). Neither may
-    // be called from process().
-    // Driven by (a) a paced self-rescheduling poll on the host main thread while
-    // the component is active and (b) main-thread host entrypoints the adapter
-    // already receives (getLatencySamples / getTailSamples / setActive / getState).
-    // When a MainThreadDispatcher backend reports we are off the main thread, the
-    // call is marshaled there. All paths run off the audio thread only.
-    void drain_pending_restart();
+    // be called from process(), and neither may be called from inside a
+    // host-initiated call (setActive / getLatencySamples / getTailSamples /
+    // getState): hosts invoke those while holding their own processing lock,
+    // and a host that services restartComponent synchronously (deactivating
+    // and reactivating the component on kReloadComponent, retaking that same
+    // non-recursive lock) deadlocks if the plug-in calls back into it
+    // re-entrantly.
+    //
+    // Delivery therefore only happens at a main-thread safe point outside any
+    // host call: (a) the paced self-rescheduling poll tick while active, and
+    // (b) a coalesced one-shot main-thread post that host entrypoints request
+    // via schedule_host_notifications(). The post runs after the host call has
+    // returned and released its locks.
+    enum class InlineFallback : std::uint8_t {
+        // The entrypoint may deliver inline when no main-thread dispatcher can
+        // accept a post (Windows / Linux hosts without a registered backend).
+        // Only state-free queries allow this; it keeps notifications flowing
+        // on those platforms, and a re-entrancy guard still refuses a nested
+        // delivery.
+        allowed,
+        // Never deliver inline, even without a dispatcher: the entrypoint is a
+        // host activation transition, where hosts hold their processing lock.
+        // The flags stay latched for the next safe delivery point.
+        forbidden,
+    };
+    void schedule_host_notifications(InlineFallback fallback);
     void deliver_pending_restart();
     // Delivers the Processor's state-dirty edge as IComponentHandler2::setDirty.
     // Main-thread only; a host that predates IComponentHandler2, or that does not
     // implement it, simply drops the edge (the flag is still consumed).
     void deliver_pending_dirty();
     // Both of the above, in order. Every main-thread delivery path calls this.
+    // Guarded against re-entry: a host that calls back into the plug-in from
+    // inside restartComponent/setDirty cannot trigger a nested delivery.
     void deliver_pending_host_notifications();
+
+    // True while a one-shot main-thread delivery post is queued, so a burst of
+    // host entrypoint calls coalesces into one post. Cleared by the post
+    // itself before it delivers. Main-thread only after initialize().
+    std::shared_ptr<std::atomic<bool>> deferred_delivery_posted_;
+    // True while deliver_pending_host_notifications() is calling into the
+    // host. Main-thread only.
+    bool delivering_host_notifications_ = false;
 
     // Start / stop the paced main-thread poll loop. start is idempotent; stop
     // relies on poll_active_ going false so the next scheduled tick does not

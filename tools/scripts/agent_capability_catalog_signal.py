@@ -341,7 +341,7 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelConfig',
                 target='Pulp::host',
-                header_fingerprint='sha256:c290d8321ca4432c27569f23513a667ef27f0c9a550013ba21a6c256547bb6f1',
+                header_fingerprint='sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add',
             ),
             binding(
                 role='kernel_descriptor',
@@ -349,7 +349,7 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelDescriptor',
                 target='Pulp::host',
-                header_fingerprint='sha256:c290d8321ca4432c27569f23513a667ef27f0c9a550013ba21a6c256547bb6f1',
+                header_fingerprint='sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add',
             ),
             binding(
                 role='graph',
@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d',
+                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d',
+                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d',
+                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -1966,7 +1966,8 @@ EXPORTS = [
         key="signal.spectral-mask-processor", domain="signal",
         summary=(
             "Streaming WOLA spectral masking with race-free frame-boundary publication, "
-            "mask interpolation, and latency-aligned dry/wet mixing."
+            "mask interpolation, latency-aligned dry/wet mixing, and optional "
+            "time-domain wet-source and frame-domain pre-mask source stages."
         ),
         rt_class="mixed",
         lifecycle={
@@ -2005,7 +2006,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
+                    "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a"
                 ),
             ),
             binding(
@@ -2014,7 +2015,7 @@ EXPORTS = [
                 qualified_name="pulp::signal::SpectralMaskProcessorConfigT<float>",
                 target="Pulp::signal",
                 header_fingerprint=(
-                    "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0"
+                    "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a"
                 ),
             ),
         ],

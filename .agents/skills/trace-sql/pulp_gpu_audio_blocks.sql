@@ -13,6 +13,8 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.sequence') AS INT) AS sequence,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.next_generation') AS INT) AS next_generation,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.quiescent') AS INT) AS quiescent,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.physical_release_complete') AS INT) AS physical_release_complete,
+  CAST(EXTRACT_ARG(s.arg_set_id, 'debug.unresolved_channel_count') AS INT) AS unresolved_channel_count,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.gpu_work_admitted') AS INT) AS gpu_work_admitted,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.output_eligible') AS INT) AS output_eligible,
   CAST(EXTRACT_ARG(s.arg_set_id, 'debug.lead_blocks') AS INT) AS lead_blocks,
@@ -40,6 +42,9 @@ SELECT s.id AS slice_id, s.ts, s.name, s.dur, t.upid,
   EXTRACT_ARG(s.arg_set_id, 'debug.delivery_reason') AS delivery_reason,
   EXTRACT_ARG(s.arg_set_id, 'debug.cpu_clock') AS cpu_clock,
   EXTRACT_ARG(s.arg_set_id, 'debug.event_time') AS event_time,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.callback_ingress_ns') AS INT), -1) AS callback_ingress_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.ingress_to_worker_ns') AS INT), -1) AS ingress_to_worker_ns,
+  NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.worker_to_observed_ns') AS INT), -1) AS worker_to_observed_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.admission_ns') AS INT), -1) AS admission_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.encode_ns') AS INT), -1) AS encode_ns,
   NULLIF(CAST(EXTRACT_ARG(s.arg_set_id, 'debug.submit_call_ns') AS INT), -1) AS submit_call_ns,
@@ -110,6 +115,7 @@ SELECT i.*, COALESCE(d.ts, t.ts) AS ts,
          AS output_eligible,
        t.gpu_terminal, t.gpu_reason, t.outcome, d.delivery, d.delivery_reason,
        COALESCE(NULLIF(d.delivery_reason, 'none'), t.gpu_reason) AS reason,
+       t.callback_ingress_ns, t.ingress_to_worker_ns, t.worker_to_observed_ns,
        t.admission_ns, t.encode_ns, t.submit_call_ns, t.pre_submit_ns,
        t.submit_to_observed_ns, t.scheduled_to_observed_ns,
        t.gpu_elapsed_available, t.gpu_elapsed_ns
@@ -132,13 +138,13 @@ UNION ALL
 SELECT 'invalid_event_identity' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_events
 WHERE upid IS NULL OR engine_id IS NULL OR engine_id <= 0
    OR generation IS NULL OR generation <= 0 OR schema IS NOT 2 OR dur < 0
-   OR (name != 'gpu.audio.session' AND name != 'gpu.audio.counters'
+   OR (name != 'gpu.audio.session' AND name != 'gpu.audio.counters' AND name != 'gpu.audio.ownership'
        AND (sequence IS NULL OR sequence < 0))
 UNION ALL
 SELECT 'unknown_event' AS issue, upid, engine_id, generation FROM pulp_gpu_audio_events
 WHERE name NOT IN ('gpu.audio.session', 'gpu.audio.admission', 'gpu.audio.terminal',
                    'gpu.audio.eligible', 'gpu.audio.delivery', 'gpu.audio.recovery',
-                   'gpu.audio.counters')
+                   'gpu.audio.counters', 'gpu.audio.ownership')
 UNION ALL
 SELECT 'missing_session_for_event' AS issue, e.upid, e.engine_id, e.generation FROM pulp_gpu_audio_events e
 WHERE NOT EXISTS (SELECT 1 FROM pulp_gpu_audio_sessions s
@@ -268,7 +274,11 @@ WHERE delivery = 'gpu_delivered' AND NOT EXISTS (
     AND t.outcome = 'success')
 UNION ALL
 SELECT 'invalid_recovery' AS violation, upid, engine_id, generation, sequence FROM pulp_gpu_audio_recoveries
-WHERE next_generation IS NULL OR next_generation <= generation OR quiescent IS NOT 1;
+WHERE next_generation IS NULL OR next_generation <= generation OR quiescent IS NOT 1
+UNION ALL
+SELECT 'unresolved_physical_ownership' AS violation, upid, engine_id, generation, NULL AS sequence
+FROM pulp_gpu_audio_events WHERE name = 'gpu.audio.ownership'
+  AND (physical_release_complete IS NOT 1 OR unresolved_channel_count IS NOT 0);
 
 CREATE OR REPLACE PERFETTO VIEW pulp_gpu_audio_admission_violations AS
 SELECT CASE violation WHEN 'missing_gpu_terminal' THEN 'missing_terminal_for_admission'

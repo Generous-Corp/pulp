@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.879.0
+    VERSION 0.881.2
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -90,12 +90,8 @@ option(PULP_CHANGED_SURFACE_INVENTORY_TARGET
        OFF)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF
-       "Require the GPU-audio probe to use the manifest-pinned Skia/Dawn generation"
+       "Require GPU-audio library and probes to use the manifest-pinned Skia/Dawn generation"
        OFF)
-if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_BUILD_TESTS)
-    message(FATAL_ERROR
-        "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_BUILD_TESTS=ON")
-endif()
 if(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF AND NOT PULP_ENABLE_GPU)
     message(FATAL_ERROR
         "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF requires PULP_ENABLE_GPU=ON")
@@ -660,6 +656,7 @@ endif()
 # modules.
 if(PULP_BUILD_TESTS)
     add_subdirectory(test/fixtures/native_ui_link_floor)
+    add_subdirectory(test/fixtures/bundle_name_quoting)
 endif()
 
 # ── CPU-only GPU-probe contract model (desktop tooling) ───────────────────
@@ -904,6 +901,11 @@ endif()
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # Shared SDK install/export rules live in tools/cmake/PulpInstallRules.cmake.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstallRules.cmake)
+
+# Build-specific Forge metadata is separate from the statically audited public
+# header install surface. The catalog module installs only share/pulp JSON.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpForgeCatalogInstall.cmake)
+pulp_install_forge_catalog()
 
 # ── Linux fontconfig post-pass ──────────────────────────────────────────
 # GNU ld processes static archives left-to-right and won't re-scan.

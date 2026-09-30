@@ -16,6 +16,13 @@ by the verifier:
 - a source consumer written against the old installed SDK surface, including a
   positional `CustomNodeType` initializer and existing C ABI entry point.
 
+The frozen `CustomNodeType` size is 544 bytes in this generation. The increase
+from the original 512-byte C0 receipt is intentional: Pulp now carries the
+block-aware `latency_samples_for_block` callback used by downstream GPU audio
+consumers such as Forge. The compatibility gate records this as a reviewed
+source-layout change while continuing to protect the C ABI and virtual-method
+prefix.
+
 Run the complete positive and deliberate-perturbation matrix with:
 
 ```sh

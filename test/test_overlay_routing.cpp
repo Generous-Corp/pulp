@@ -1950,3 +1950,123 @@ TEST_CASE("a hidden overlay is not a hover target", "[view][overlay][hover]") {
     REQUIRE(pulp::view::hover_target_at(root, UpwardMenuScene::kTopRow) == scene.plot);
     scene.menu->release_overlay();
 }
+
+// ── Passive pointer input (wheel / pinch) resolves through open overlays ─────
+//
+// A press and a hover over an open overlay resolve inside it; a wheel used the
+// plain tree hit test and reached whatever the overlay covers. The scene is the
+// one the hover tests use: a menu that opens upward from a bottom rail and
+// escapes the tree hit test, so the plot answers the tree for its top row.
+
+namespace {
+
+struct WheelCounts {
+    int plot = 0;
+    int row = 0;
+};
+
+void count_wheels(UpwardMenuScene& scene, WheelCounts& counts) {
+    scene.plot->on_dom_wheel_event = [&counts](const pulp::view::MouseEvent&, bool) {
+        ++counts.plot;
+    };
+    scene.top_label->on_dom_wheel_event = [&counts](const pulp::view::MouseEvent&, bool) {
+        ++counts.row;
+    };
+}
+
+}  // namespace
+
+TEST_CASE("a wheel over an open overlay lands inside it, not on the view beneath",
+          "[view][overlay][wheel]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    WheelCounts counts;
+    count_wheels(scene, counts);
+
+    // Control: with nothing claimed the tree hit test answers and the plot
+    // receives the wheel, so a zero below is a re-route, not a lost event.
+    pulp::view::deliver_mouse_wheel(root, UpwardMenuScene::kTopRow, 0.0f, 3.0f, {});
+    REQUIRE(counts.plot == 1);
+    REQUIRE(counts.row == 0);
+
+    scene.menu->claim_overlay();
+    scene.menu->set_overlay_consumes_outside_click(true);
+    pulp::view::deliver_mouse_wheel(root, UpwardMenuScene::kTopRow, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 1);
+    CHECK(counts.row == 1);
+
+    // A non-modal popover leaves the rest of the screen live: outside it, the
+    // plot still scrolls, exactly as before.
+    pulp::view::deliver_mouse_wheel(root, {600.0f, 400.0f}, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 2);
+    // Passive input never dismisses.
+    CHECK(root.interaction().active_overlay == scene.menu);
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("a wheel outside an open modal dialog reaches nothing behind it",
+          "[view][overlay][wheel][modal]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    WheelCounts counts;
+    count_wheels(scene, counts);
+    scene.menu->set_access_role(View::AccessRole::dialog);
+    scene.menu->claim_overlay();
+    scene.menu->set_overlay_consumes_outside_click(true);
+
+    const Point behind{600.0f, 400.0f};
+    const auto route = pulp::view::route_passive_pointer(root, behind);
+    CHECK(route.blocked);
+    CHECK(route.target == nullptr);
+    pulp::view::deliver_mouse_wheel(root, behind, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 0);
+
+    // Inside the dialog the wheel still works.
+    pulp::view::deliver_mouse_wheel(root, UpwardMenuScene::kTopRow, 0.0f, 3.0f, {});
+    CHECK(counts.row == 1);
+
+    // Closed, the plot responds to the same gesture again.
+    scene.menu->release_overlay();
+    pulp::view::deliver_mouse_wheel(root, behind, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 1);
+}
+
+TEST_CASE("a hidden modal overlay blocks no passive input",
+          "[view][overlay][wheel][modal]") {
+    OverlayGuard g;
+    UpwardMenuScene scene;
+    auto& root = scene.root;
+    WheelCounts counts;
+    count_wheels(scene, counts);
+    scene.menu->set_access_role(View::AccessRole::dialog);
+    scene.menu->claim_overlay();
+    scene.menu->set_visible(false);
+
+    pulp::view::deliver_mouse_wheel(root, {600.0f, 400.0f}, 0.0f, 3.0f, {});
+    CHECK(counts.plot == 1);
+    CHECK_FALSE(pulp::view::route_passive_pointer(root, {600.0f, 400.0f}).blocked);
+    scene.menu->release_overlay();
+}
+
+TEST_CASE("root_overlay_owns_keyboard ignores a declared popover that is hidden",
+          "[view][overlay][escape][keyboard]") {
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto overlay_owned = std::make_unique<TestView>();
+    auto* overlay = overlay_owned.get();
+    overlay->set_bounds({100.0f, 100.0f, 200.0f, 120.0f});
+    root.add_child(std::move(overlay_owned));
+    overlay->claim_overlay();
+    overlay->set_overlay_consumes_outside_click(true);
+    // Control: shown, it holds the keyboard.
+    REQUIRE(pulp::view::root_overlay_owns_keyboard(root));
+
+    // A popover that stays mounted while closed keeps its claim. Holding the
+    // DAW keyboard for it is the plug-in stealing Musical Typing.
+    overlay->set_visible(false);
+    CHECK_FALSE(pulp::view::root_overlay_owns_keyboard(root));
+    overlay->release_overlay();
+}

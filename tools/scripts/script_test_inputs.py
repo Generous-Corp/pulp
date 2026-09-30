@@ -48,6 +48,15 @@ SCHEMA = "pulp-ctest-script-inputs/v1"
 DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
 UNDECLARABLE_EXES = ("cmake", "ninja", "make", "ctest", "xcodebuild", "cargo")
+# An entry script that lives in the build tree (a configure-generated runner)
+# is recorded under this token, never under the build directory's name, so
+# a list written from `build-gate`, `build`, or a directory outside the
+# checkout is byte-identical.
+BINARY_DIR_TOKEN = "${CMAKE_BINARY_DIR}"
+CENSUS_PROFILES = Path("docs") / "status" / "consumption-profiles.json"
+# The gate configures with these switches (build.yml); the consumption census
+# records the same scope per measured profile and is read first.
+GATE_BUILD_SCOPE = {"PULP_BUILD_TESTS": "ON", "PULP_BUILD_EXAMPLES": "OFF"}
 # Prefixes a literal string must start with to count as a repository path.
 REPO_PREFIXES = ("tools/", "test/", "hooks/", ".githooks/", ".github/", "docs/", "ship/",
                  "core/", "examples/", "templates/", "inspect/", "experimental/", "cmake/", "external/")
@@ -82,6 +91,52 @@ def is_tracked(rel: str, tracked: set[str]) -> bool:
         return True
     prefix = rel.rstrip("/") + "/"
     return rel not in (".", "") and any(t.startswith(prefix) for t in tracked)
+
+
+def gate_build_scope(root: Path) -> dict[str, str]:
+    """The build scope the list must reflect: the switches the census recorded
+    for its measured profiles (they agree), else the gate's own configure."""
+    try:
+        doc = json.loads((root / CENSUS_PROFILES).read_text(encoding="utf-8"))
+        scopes = [p.get("build_scope") for p in doc.get("profiles", {}).values() if isinstance(p, dict)]
+        scopes = [sc for sc in scopes if isinstance(sc, dict) and sc]
+        if scopes and all(sc == scopes[0] for sc in scopes):
+            return dict(scopes[0])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        pass
+    return dict(GATE_BUILD_SCOPE)
+
+
+def registered_from(test: dict, inventory: dict) -> str | None:
+    """The CMake file whose add_test registered this test, from the ctest
+    json-v1 backtrace graph; None for a test that carries no backtrace."""
+    graph = inventory.get("backtraceGraph") or {}
+    nodes, files = graph.get("nodes") or [], graph.get("files") or []
+    idx = test.get("backtrace")
+    if not isinstance(idx, int) or idx >= len(nodes):
+        return None
+    node = nodes[idx]
+    while "file" not in node and isinstance(node.get("parent"), int) and node["parent"] < len(nodes):
+        node = nodes[node["parent"]]
+    f = node.get("file")
+    return files[f] if isinstance(f, int) and f < len(files) else None
+
+
+def outside_gate_profile(inventory: dict, root: Path, scope: dict[str, str] | None = None) -> set[str]:
+    """Tests a configure with PULP_BUILD_EXAMPLES=ON registers from examples/
+    that the gate (examples OFF) never lists. Filtering by where the
+    registration lives, not by the local cache, makes `--write` from an
+    examples-ON build byte-identical to one from the gate's configure."""
+    scope = gate_build_scope(root) if scope is None else scope
+    if scope.get("PULP_BUILD_EXAMPLES", "OFF") != "OFF":
+        return set()
+    examples = (root / "examples").resolve()
+    out = set()
+    for t in inventory.get("tests", []):
+        src = registered_from(t, inventory)
+        if src and _rel(Path(src), examples) is not None:
+            out.add(t.get("name", ""))
+    return out
 
 
 class Walker:
@@ -220,7 +275,7 @@ def classify(command: list[str], root: Path) -> tuple[str, Path | None, list[str
     return "undeclarable", None, []
 
 
-def inputs_for(test: dict, root: Path) -> dict | None:
+def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | None:
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
     wd = Path(props.get("WORKING_DIRECTORY") or root)
     kind, entry, args = classify(test.get("command") or [], root)
@@ -247,7 +302,8 @@ def inputs_for(test: dict, root: Path) -> dict | None:
         kind = "python"
     if not entry.is_absolute():
         entry = wd / entry
-    if not w._in_repo(entry):
+    generated = _rel(entry, build_dir) if build_dir else None
+    if generated is None and not w._in_repo(entry):
         return None
     if kind == "python":
         w.walk_python(entry, search, seen)
@@ -261,19 +317,21 @@ def inputs_for(test: dict, root: Path) -> dict | None:
                 seen.add(cand)
     tracked = tracked_paths(root)
     rels = sorted({r for r in (_rel(p, root) for p in seen) if r and r != "." and is_tracked(r, tracked)})
-    return {"kind": kind, "entry": _rel(entry, root), "inputs": rels}
+    entry_rel = f"{BINARY_DIR_TOKEN}/{generated}" if generated is not None else _rel(entry, root)
+    return {"kind": kind, "entry": entry_rel, "inputs": rels}
 
 
-def build_list(inventory: dict, root: Path) -> dict:
+def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> dict:
     tests = {}
+    excluded = outside_gate_profile(inventory, root)
     for t in inventory.get("tests", []):
         name = t.get("name", "")
-        if not name or name.endswith("_NOT_BUILT"):
+        if not name or name.endswith("_NOT_BUILT") or name in excluded:
             continue
         cmd = t.get("command") or []
         if cmd and _rel(Path(cmd[0]), root) is None and not os.path.basename(cmd[0]).startswith(INTERPRETERS):
             continue  # a compiled test binary or a tool outside the repo: the graph owns it
-        rec = inputs_for(t, root)
+        rec = inputs_for(t, root, build_dir)
         if rec is not None:
             tests[name] = rec
     return {"schema": SCHEMA, "tests": dict(sorted(tests.items()))}
@@ -309,6 +367,15 @@ def drift(current: dict, checked_in: dict) -> list[tuple[str, str, set[str]]]:
 
 def touched_by(changed: set[str], paths: set[str]) -> bool:
     return any(f == p or f.startswith(p.rstrip("/") + "/") for f in changed for p in paths)
+
+
+def advisory_here() -> bool:
+    """A merge group reports drift but never fails on it; a pull-request head
+    (or a local run) blocks. Overridable for tests and for a deliberate
+    blocking run in a group: PULP_SCRIPT_INPUTS_STRICT=1."""
+    if os.environ.get("PULP_SCRIPT_INPUTS_STRICT") == "1":
+        return False
+    return os.environ.get("GITHUB_EVENT_NAME") == "merge_group"
 
 
 def resolve_base(root: Path, explicit: str | None) -> str | None:
@@ -355,7 +422,8 @@ def main(argv: list[str]) -> int:
     inventory = load_inventory(a.build_dir, a.inventory_json)
     if inventory is None:
         return 2
-    current = build_list(inventory, root)
+    build_dir = Path(a.build_dir).resolve() if a.build_dir else None
+    current = build_list(inventory, root, build_dir)
     total_scripts = sum(1 for t in inventory.get("tests", []) if t.get("command") and
                         os.path.basename(t["command"][0]).startswith(INTERPRETERS))
     if a.write:
@@ -363,6 +431,13 @@ def main(argv: list[str]) -> int:
         list_path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n", encoding="utf-8")
         print(f"script-test-inputs: wrote {len(current['tests'])} declared tests "
               f"(of {total_scripts} interpreter-driven entries) to {list_path}")
+        excluded = outside_gate_profile(inventory, root)
+        if excluded:
+            print(f"script-test-inputs: excluded {len(excluded)} test(s) registered from examples/: "
+                  f"the gate configures with PULP_BUILD_EXAMPLES=OFF and never lists them")
+        if build_dir is None:
+            print("script-test-inputs: note: no --build-dir, so an entry generated into a build tree "
+                  f"could not be recorded as {BINARY_DIR_TOKEN}; pass --build-dir alongside --inventory-json")
         return 0
     try:
         checked_in = json.loads(list_path.read_text(encoding="utf-8"))
@@ -400,12 +475,27 @@ def main(argv: list[str]) -> int:
             print(f"  {kind}: {name}")
     if blocking:
         build_hint = a.build_dir or "<configured build dir>"
+        fix = ("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
+               f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
+               f"  git add {DEFAULT_LIST.as_posix()}")
         print(f"script-test-inputs: {len(blocking)} drift problem(s) in scripts this change touches ({scope}).")
         for kind, name, _ in blocking[:40]:
             print(f"  {kind}: {name}")
-        print("Fix: regenerate the list from a configure of THIS tree and commit it:\n"
-              f"  python3 tools/scripts/script_test_inputs.py --build-dir {build_hint} --write\n"
-              f"  git add {DEFAULT_LIST.as_posix()}")
+        print(fix)
+        if advisory_here():
+            # The enforcement point is the PULL-REQUEST HEAD, where the pr-fast
+            # tier runs on every push and the author sees the verdict. A merge
+            # group is too late and too expensive: it ejects the whole batch,
+            # and a PR whose head ran before this check existed gets no earlier
+            # signal. A stale entry today only informs the shadow selector, so
+            # the group reports and lets the PR land; the next push to any PR
+            # touching those scripts is blocked until the list is regenerated.
+            # If a GATING selector ever consumes this list, drop this advisory
+            # branch: a stale list would then skip real tests in the group.
+            names = ", ".join(name for _, name, _ in blocking[:10])
+            print(f"::warning title=script-test inputs stale (advisory in a merge group)::{names} — "
+                  f"regenerate with script_test_inputs.py --write on the next push")
+            return 0
         return 1
     print(f"script-test-inputs: OK, {len(current['tests'])} declared tests in sync for this change "
           f"({scope}; {total_scripts} interpreter-driven entries)")

@@ -13,13 +13,15 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CAPTURE_DEADLINE_MS,
+  captureCaseTimeout,
   execute,
   installedBrowser,
   rgbaPixel,
 } from "./capture_integration_support.mjs";
 
 test("real browser interactions capture a same-document secondary screen",
-  { timeout: 20000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -87,7 +89,7 @@ test("real browser interactions capture a same-document secondary screen",
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const screenshot = await readFile(path.join(output, "browser.png"));
@@ -122,7 +124,7 @@ test("real browser interactions capture a same-document secondary screen",
   });
 
 test("real browser clicks pass decorative overlays and use exposed target points",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -166,7 +168,7 @@ test("real browser clicks pass decorative overlays and use exposed target points
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const screenshot = await readFile(path.join(output, "browser.png"));
@@ -178,7 +180,7 @@ test("real browser clicks pass decorative overlays and use exposed target points
   });
 
 test("real browser context-click captures the rendered context menu",
-  { timeout: 30000 }, async (context) => {
+  { timeout: captureCaseTimeout() }, async (context) => {
     const browser = await installedBrowser();
     if (!browser) {
       context.skip("no compatible system browser is installed");
@@ -225,7 +227,7 @@ test("real browser context-click captures the rendered context menu",
         "--initial-width", "160",
         "--initial-height", "120",
         "--dpr", "2",
-        "--timeout-ms", "15000",
+        "--timeout-ms", String(CAPTURE_DEADLINE_MS),
       ], { maxBuffer: 1024 * 1024 });
 
       const screenshot = await readFile(path.join(output, "browser.png"));

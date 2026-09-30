@@ -559,6 +559,15 @@ if(PULP_PYTHON3_FOR_TESTS)
         set_tests_properties(prepush-refresh-push PROPERTIES
             LABELS "tooling;hooks"
             TIMEOUT 180)
+        # An auto-merge-armed or queued PR re-based onto main by hand (same PR
+        # diff, newer main base) gets an advisory hint; a content change, an
+        # unarmed PR, a failing or hanging lookup, and the override stay silent.
+        add_test(NAME prepush-queue-rebase-hint
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_queue_rebase_hint.py)
+        set_tests_properties(prepush-queue-rebase-hint PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 120)
         # The advisory diff-scoped clang-format gate must never report a missing
         # binary as a formatting failure. Asserts the pre-push, gates.sh and CI
         # wiring keep exit 3 (infrastructure) apart from exit 1 (verdict) and pin
@@ -1137,3 +1146,14 @@ add_test(NAME cmake-bundle-build-info-contract
 set_tests_properties(cmake-bundle-build-info-contract PROPERTIES
     LABELS "cmake;ship"
     TIMEOUT 60)
+
+# Verify installed metadata follows the enabled runtime catalog, including
+# producer failure and a CPU-only exporter negative control.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME cmake-forge-catalog-install
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_forge_catalog_install.py"
+            --source "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cmake-forge-catalog-install PROPERTIES
+        LABELS "cmake;host;sdk" TIMEOUT 180)
+endif()

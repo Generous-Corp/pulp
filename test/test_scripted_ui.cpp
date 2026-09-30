@@ -1000,3 +1000,34 @@ TEST_CASE("ScriptedUiSwapUnit applies + rolls back a UI swap via apply_live_swap
         REQUIRE(session.script_path() == ui_a);   // rolled back to the pre-swap UI
     }
 }
+
+TEST_CASE("ScriptedUiSession keeps its declared host kind across a reload",
+          "[view][scripted-ui][hotreload][keyboard]") {
+    const auto temp_dir = make_temp_dir("pulp-scripted-ui-host-kind");
+    const auto script_path = temp_dir / "main.js";
+    // The first render reads it, so a document can decide its shortcut policy
+    // before anything is drawn.
+    write_text(script_path, "createLabel('kind', hostKind(), '');");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    StateStore store;
+    ScriptedUiSession session(root, store, {.script_path = script_path});
+    CHECK(session.host_kind() == "unknown");
+    session.set_host_kind("plugin");
+
+    const auto rendered_kind = [&session] {
+        auto* label = dynamic_cast<Label*>(session.bridge()->widget("kind"));
+        REQUIRE(label != nullptr);
+        return label->text();
+    };
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    CHECK(rendered_kind() == "plugin");
+
+    // A reload builds a new realm and a new bridge; the declaration survives.
+    REQUIRE(session.reload(&error));
+    CHECK(session.bridge()->host_kind() == "plugin");
+    CHECK(rendered_kind() == "plugin");
+}

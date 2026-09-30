@@ -296,6 +296,74 @@ def _cache_bool(build_dir: Path, name: str) -> bool:
     return value in {"ON", "TRUE"}
 
 
+# Optional for historical SDKs. When present, bind producer capabilities to the
+# installed config/archive rather than trusting consumer CMake cache switches.
+GPU_AUDIO_CAPABILITIES = {
+    "shared_provider": ("PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO", "PULP_GPU_AUDIO_HAS_DAWN_SHARED_IO"),
+    "shared_convolver": ("PULP_GPU_AUDIO_ENABLE_EXPERIMENTAL_SHARED_IO_CONVOLVER", "PULP_GPU_AUDIO_SHARED_CONVOLVER_ENABLED"),
+    "exact_provider_proof": ("PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF", "PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF_ENABLED"),
+}
+
+
+def _installed_gpu_audio_capability_schema(prefix: Path) -> bool:
+    config = prefix / "lib/cmake/Pulp/PulpConfig.cmake"
+    if not config.exists():
+        return False
+    text = _read_text(config)
+    if "PULP_GPU_AUDIO_CAPABILITY_SCHEMA" not in text:
+        return False
+    matches = re.findall(r'set\(\s*PULP_GPU_AUDIO_CAPABILITY_SCHEMA\s+"([^"\n]+)"\s*\)', text)
+    if matches != ["1"]:
+        raise ProvenanceError("unsupported installed GPU-audio capability schema")
+    return True
+
+
+def _gpu_audio_capability_receipt(prefix: Path, platform: str,
+                                  capabilities: dict[str, bool]) -> dict[str, object]:
+    if set(capabilities) != set(GPU_AUDIO_CAPABILITIES) or any(
+        type(value) is not bool for value in capabilities.values()
+    ):
+        raise ProvenanceError("invalid GPU-audio capability facts")
+    if capabilities["shared_convolver"] and not (
+        capabilities["shared_provider"] and capabilities["exact_provider_proof"]
+    ):
+        raise ProvenanceError("shared convolver requires an authenticated shared provider")
+    if capabilities["exact_provider_proof"] and (
+        platform != "darwin-arm64" or not capabilities["shared_provider"]
+    ):
+        raise ProvenanceError("exact GPU-audio provider proof requires darwin-arm64 shared provider")
+    if not _installed_gpu_audio_capability_schema(prefix):
+        raise ProvenanceError("missing installed GPU-audio capability schema")
+    config = Path("lib/cmake/Pulp/PulpConfig.cmake")
+    text = _read_text(prefix / config)
+    for key, (_, exported) in GPU_AUDIO_CAPABILITIES.items():
+        matches = re.findall(r'set\(\s*' + exported + r'\s+"(ON|OFF|TRUE|FALSE)"\s*\)', text)
+        if len(matches) != 1 or (matches[0] in {"ON", "TRUE"}) != capabilities[key]:
+            raise ProvenanceError(f"installed SDK capability mismatch: {exported}")
+    archive = Path("lib/pulp-gpu-audio.lib" if platform.startswith("windows-")
+                   else "lib/libpulp-gpu-audio.a")
+    return {"schema": "pulp.sdk-gpu-audio-capabilities.v1",
+            "capabilities": capabilities,
+            "files": {p.as_posix(): _sha256(prefix / p) for p in (config, archive)}}
+
+
+def _build_gpu_audio_capability_receipt(prefix: Path, build_dir: Path,
+                                        platform: str) -> dict[str, object] | None:
+    # Compatibility helpers also stamp old tags. Absent schema means unknown,
+    # even if an older producer already knew some of these individual flags.
+    cache = _read_text(build_dir / "CMakeCache.txt")
+    schema = re.search(r"(?m)^PULP_GPU_AUDIO_CAPABILITY_SCHEMA:INTERNAL=(.+)$", cache)
+    if not schema:
+        if _installed_gpu_audio_capability_schema(prefix):
+            raise ProvenanceError("missing GPU-audio producer capability schema")
+        return None
+    if schema.group(1).strip() != "1":
+        raise ProvenanceError("unsupported GPU-audio producer capability schema")
+    capabilities = {key: _cache_bool(build_dir, name)
+                    for key, (name, _) in GPU_AUDIO_CAPABILITIES.items()}
+    return _gpu_audio_capability_receipt(prefix, platform, capabilities)
+
+
 def _git(repo: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -402,6 +470,9 @@ def build_release_marker(
             "tracing": False,
         },
     }
+    gpu_audio = _build_gpu_audio_capability_receipt(prefix, build_dir, platform)
+    if gpu_audio is not None:
+        marker["gpu_audio"] = gpu_audio
     if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
         marker["integrity"] = build_integrity(prefix, platform)
     verify_installed_build_info(
@@ -480,6 +551,16 @@ def verify_release_marker(
         expected_features["tracing"] = False
     if features != expected_features:
         raise ProvenanceError(f"{path}: release feature contract is unsafe")
+    if _installed_gpu_audio_capability_schema(prefix) and "gpu_audio" not in marker:
+        raise ProvenanceError("missing GPU-audio capability receipt")
+    if "gpu_audio" in marker:
+        gpu_audio = marker["gpu_audio"]
+        if not isinstance(gpu_audio, dict) or not isinstance(gpu_audio.get("capabilities"), dict):
+            raise ProvenanceError("invalid GPU-audio capability receipt")
+        if gpu_audio != _gpu_audio_capability_receipt(
+            prefix, expected_platform, gpu_audio["capabilities"]
+        ):
+            raise ProvenanceError("GPU-audio capability integrity mismatch")
     if _version_tuple(version) >= INTEGRITY_SDK_FLOOR:
         verify_integrity(prefix, expected_platform, marker.get("integrity"))
     if _read_text(prefix / "version.txt") != version:

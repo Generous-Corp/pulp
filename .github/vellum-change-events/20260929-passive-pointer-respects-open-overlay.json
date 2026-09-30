@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "event_id": "20260929-passive-pointer-respects-open-overlay",
+  "kind": "change",
+  "created_at": "2026-09-29T10:00:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A mouse wheel or pinch over an open overlay now resolves through the root's open overlay stack before the tree hit test, so a wheel over a dialog scrolls the dialog and a wheel outside a modal dialog reaches nothing behind it. The retained-ui-kernel touch is confined to deliver_mouse_wheel in pointer_dispatch.cpp, which asks the new read-only route_passive_pointer verb (declared beside route_press_to_active_overlay in overlay_dismissal.hpp) for its target and returns early when a modal overlay blocks the point; with no open overlay the unchanged tree hit test answers. A passive pointer never dismisses; press routing, dismissal, paint, and layout are unchanged. The overlay stack and its routing verbs are Pulp's own popover/dialog model with no counterpart framework behavior to backport, so this is recorded pulp-only.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-overlay-routing"
+  ],
+  "disposition": "pulp-only"
+}

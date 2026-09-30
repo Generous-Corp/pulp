@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -319,6 +320,117 @@ class GpuAudioProviderIdentityTest(unittest.TestCase):
             bound = fixture.run("bind")
             self.assertEqual(bound.returncode, 1)
             self.assertEqual(json.loads(bound.stdout)["reason"], "provider_generation_invalid")
+
+
+@unittest.skipUnless(shutil.which("cmake"), "CMake is required")
+class ProductionProviderCmakeTests(unittest.TestCase):
+    """Exercise production initialization without rendering tests or a GPU."""
+
+    def configure(self, root: Path, *, tests: bool, arch: str = "arm64",
+                  mutate: str = "", exact: bool = True) -> tuple[subprocess.CompletedProcess, ProviderFixture, Path]:
+        fixture = ProviderFixture(root / "provider")
+        source = root / "source"
+        scripts = source / "tools/scripts"
+        scripts.mkdir(parents=True)
+        for filename in ("gpu_audio_provider_identity.py", "fetch_skia_for_release.py"):
+            shutil.copyfile(SCRIPT.with_name(filename), scripts / filename)
+        deps = source / "tools/deps"
+        deps.mkdir()
+        shutil.copyfile(fixture.manifest, deps / "manifest.json")
+        fixture.manifest = deps / "manifest.json"
+        if mutate == "header":
+            fixture.header.write_text("untrusted header")
+        elif mutate == "library":
+            fixture.library.write_bytes(b"untrusted archive")
+        elif mutate == "manifest":
+            manifest = json.loads(fixture.manifest.read_text())
+            manifest["dependencies"][0]["determinism"]["built_dawn"] = "f" * 40
+            fixture.manifest.write_text(json.dumps(manifest))
+        helper = SCRIPT.parents[1] / "cmake/PulpGpuAudioProviderIdentity.cmake"
+        (source / "dummy.c").write_text("int gpu_audio_fixture;\n")
+        (source / "CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.20)
+project(ProviderIdentityFixture LANGUAGES C)
+set(APPLE TRUE)
+set(CMAKE_OSX_ARCHITECTURES "{arch}")
+set(PULP_HAS_SKIA TRUE)
+set(PULP_GPU_AUDIO_EXACT_PROVIDER_PROOF {"TRUE" if exact else "FALSE"})
+set(PULP_BUILD_TESTS {"ON" if tests else "OFF"})
+set(SKIA_DIR "{fixture.skia}")
+set(SKIA_INCLUDE_DIRS "{fixture.header.parent.parent}")
+set(DAWN_LIBRARY "{fixture.library}")
+add_library(pulp-gpu-audio STATIC dummy.c)
+include("{helper}")
+pulp_gpu_audio_configure_provider_identity(pulp-gpu-audio)
+get_target_property(identity pulp-gpu-audio PULP_PROVIDER_expected_dawn_sha)
+get_target_property(definitions pulp-gpu-audio COMPILE_DEFINITIONS)
+file(WRITE "${{CMAKE_BINARY_DIR}}/selected.txt" "${{identity}}\\n${{definitions}}")
+''')
+        build = root / "build"
+        result = subprocess.run(["cmake", "-S", str(source), "-B", str(build)],
+                                text=True, capture_output=True)
+        return result, fixture, build
+
+    def test_tests_disabled_and_enabled_have_identical_production_identity(self):
+        selected = []
+        for tests in (False, True):
+            with tempfile.TemporaryDirectory() as temporary:
+                result, _, build = self.configure(Path(temporary), tests=tests)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                selected.append((build / "selected.txt").read_text())
+                self.assertIn(DAWN_SHA, selected[-1])
+                self.assertIn("PULP_GPU_AUDIO_EXPECTED_DAWN_SHA=", selected[-1])
+                self.assertTrue((build / "gpu-audio-provider-identity/configure.json").exists())
+        self.assertEqual(selected[0], selected[1])
+
+    def test_nonexact_identity_is_empty_independently_of_test_registration(self):
+        selected = []
+        for tests in (False, True):
+            with tempfile.TemporaryDirectory() as temporary:
+                result, _, build = self.configure(Path(temporary), tests=tests, exact=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                selected.append((build / "selected.txt").read_text())
+                self.assertNotIn(DAWN_SHA, selected[-1])
+                self.assertNotIn("unknown", selected[-1])
+                self.assertIn('PULP_GPU_AUDIO_EXPECTED_DAWN_SHA=""', selected[-1])
+                self.assertFalse((build / "gpu-audio-provider-identity/configure.json").exists())
+        self.assertEqual(selected[0], selected[1])
+
+    def test_nonexact_intel_and_universal_do_not_request_arm_provider_proof(self):
+        for arch in ("x86_64", "arm64;x86_64"):
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory() as temporary:
+                result, _, build = self.configure(
+                    Path(temporary), tests=False, arch=arch, exact=False)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                selected = (build / "selected.txt").read_text()
+                self.assertIn('PULP_GPU_AUDIO_EXPECTED_DAWN_SHA=""', selected)
+                self.assertNotIn(DAWN_SHA, selected)
+                self.assertFalse((build / "gpu-audio-provider-identity").exists())
+
+    def test_tests_disabled_rejects_provider_mismatch(self):
+        for mutation in ("header", "library", "manifest"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                result, _, _ = self.configure(Path(temporary), tests=False, mutate=mutation)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("exact-provider validation failed", result.stderr)
+
+    def test_tests_disabled_rejects_non_thin_arm64(self):
+        for arch in ("x86_64", "arm64;x86_64"):
+            with self.subTest(arch=arch), tempfile.TemporaryDirectory() as temporary:
+                result, _, _ = self.configure(Path(temporary), tests=False, arch=arch)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("thin Apple-Silicon macOS target", " ".join(result.stderr.split()))
+
+    def test_prelink_validates_without_tests_and_refuses_later_drift(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, fixture, build = self.configure(Path(temporary), tests=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            command = ["cmake", "--build", str(build), "--target", "pulp-gpu-audio-provider-prelink"]
+            valid = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+            fixture.replace_with_authenticated_provider_at_same_dawn_revision()
+            stale = subprocess.run(command, text=True, capture_output=True)
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn("configured_provider_identity_stale", stale.stdout + stale.stderr)
 
 
 if __name__ == "__main__":

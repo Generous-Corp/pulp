@@ -77,6 +77,21 @@ if [ -f "$REFRESH_PUSH_CHECK" ]; then
     unset _refresh_rc
 fi
 
+# ── Queue-rebase hint (advisory, never blocks) ─────────────────────────────
+# The merge queue tests an auto-merge-armed or queued PR on top of current
+# main, so re-basing one by hand only cancels its running `macos` gate. When
+# the push carries the same PR diff on a newer main base (a rebase, or a merge
+# of main that refresh-push above does not already cover) and the branch's PR
+# is armed or queued, this prints a short hint. Runs before PULP_SKIP_PREPUSH
+# because a post-rebase force-push is the case it targets. The GitHub lookup
+# happens only after the local check matches, is bounded to 3s, and fails
+# silently. PULP_ALLOW_QUEUE_REBASE=1 silences it.
+QUEUE_REBASE_HINT="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
+if [ -f "$QUEUE_REBASE_HINT" ]; then
+    printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
+        "${PYTHON:-python3}" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
+fi
+
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
     echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
     exit 0

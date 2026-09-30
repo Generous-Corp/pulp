@@ -303,6 +303,15 @@ the final transition frame.
   wet, and any dry signal is delayed to match the WOLA path.
 - Inspection: `latency_samples()`, `maximum_tail_samples()`, `num_bins()`,
   `channels()`, `retained_bytes()`.
+- Source stages (non-owning, audio-owner thread, survive `prepare()`/`reset()`,
+  one pointer test when unset): `set_wet_source_stage()` installs a
+  `SpectralWetSourceStage` that writes the block the wet path analyzes (a loop
+  or granular source replacing the input before the STFT);
+  `set_pre_mask_stage()` installs a `SpectralPreMaskStage` that rewrites each
+  analysis frame group before the mask (a spectral freeze such as
+  `FreezeHold`). The dry path always carries the live input, and the live mask
+  keeps acting on whatever either stage produced. `process_frame()` never runs
+  the pre-mask stage.
 
 After preparation, audio processing, frame processing, reset, mix updates, and
 table publication allocate no memory. Layout compilation remains a control-side
@@ -311,6 +320,43 @@ values fail closed or are ignored without changing the last valid control state.
 The installed example at
 `tools/validation/sdk-smoke/spectral_mask_processor_probe.cpp` compiles and runs
 stereo nonadjacent islands and exact total mute against a staged SDK.
+
+### `FreezeHold`
+
+`FreezeHold` (`freeze_hold.hpp`) is the spectral hold at the head of a frame
+chain: it averages the magnitudes of the last `capture_frames` consecutive
+analysis frames and advances each bin at its instantaneous frequency plus a
+bounded random walk, preserving the inter-channel phase offsets.
+
+- Engage: `set_frozen()`. A freeze latches only once the capture window is full
+  (live passes until then — it never mutes). A release is committed: the old
+  hold fades out even if a freeze is requested again during the fade, and the
+  capture window restarts at the release, so the next hold contains only input
+  analyzed after it.
+- Fade position: `engage_progress()` (0 live … 1 hold; linear on engage,
+  equal-power on release), `is_latched()`, `is_releasing()`.
+- Timing: frame counts by default; with `Config::sample_rate > 0` the seconds
+  fields apply instead. `FreezeHoldReferenceTiming` holds the values that
+  reproduce the frame-count defaults at a 512-sample hop and 48 kHz (capture
+  85.3 ms of hop grid, crossfade 64 ms, a 0.1452 rad/√s random walk).
+  `set_capture_frames()` / `set_capture_seconds()` change the hold length for
+  the next latch within the preallocated `max_capture_frames` /
+  `max_capture_seconds`.
+- Transport: `clear_history()` forgets captured input but keeps a playing hold;
+  `reset()` drops everything.
+- Pipeline: `held_magnitudes()`, `held_phases()`, `instantaneous_frequency()`,
+  `write_hold()` (pure hold render, no live mix), `advance_hold()`, and
+  `rewind_hold_phases()` let a consumer render and align the hold itself.
+- Recall: `snapshot()` copies the held state into a prepared
+  `FreezeHoldSnapshot`; `write_bytes()` / `read_bytes()` convert it to a
+  versioned, size-checked little-endian image (about 131 KB for a stereo
+  8192-point hold); `stage_restore()` hands it to the audio thread from one
+  other thread and is adopted at the next frame group (`crossfade`,
+  `immediate`, or `as_captured`). A geometry or known-sample-rate mismatch is
+  refused so the caller can drop the capture and re-arm.
+
+Everything after `prepare()` is allocation-free; all members except
+`stage_restore()` and `restore_pending()` belong to the audio owner.
 
 ### Orthonormal mid/side and stereo width
 

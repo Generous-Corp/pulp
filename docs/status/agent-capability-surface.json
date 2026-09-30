@@ -1,7 +1,7 @@
 {
   "$schema": "agent-capability-surface.schema.json",
   "schema": "pulp.agent-capability-surface.v1",
-  "inventory_version": 95,
+  "inventory_version": 97,
   "fingerprint_algorithm": "sha256-file-bytes",
   "coverage_state": "partial",
   "roots": [
@@ -43,14 +43,14 @@
   ],
   "counts": {
     "public_headers": 497,
-    "reviewed_headers": 214,
-    "legacy_unreviewed_headers": 283,
+    "reviewed_headers": 215,
+    "legacy_unreviewed_headers": 282,
     "unsupported_headers": 2,
     "by_disposition": {
       "capability_entrypoint": 118,
       "capability_support": 44,
-      "infrastructure": 50,
-      "legacy_unreviewed": 283,
+      "infrastructure": 51,
+      "legacy_unreviewed": 282,
       "unsupported_capability": 2
     },
     "by_domain": {
@@ -86,8 +86,8 @@
       },
       "signal": {
         "public_headers": 273,
-        "reviewed_headers": 125,
-        "legacy_unreviewed_headers": 148,
+        "reviewed_headers": 126,
+        "legacy_unreviewed_headers": 147,
         "unsupported_headers": 2
       },
       "timebase": {
@@ -1134,7 +1134,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/custom_node_type.hpp",
-      "fingerprint": "sha256:c290d8321ca4432c27569f23513a667ef27f0c9a550013ba21a6c256547bb6f1",
+      "fingerprint": "sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add",
       "include": "pulp/host/custom_node_type.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -1200,7 +1200,7 @@
     {
       "domain": "signal",
       "source": "core/host/include/pulp/host/signal_graph_runtime.hpp",
-      "fingerprint": "sha256:496fe972e35ef658fee935911104f23fd63d07c3d09fe342f22b6c494f2ad44d",
+      "fingerprint": "sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd",
       "include": "pulp/host/signal_graph_runtime.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [
@@ -3239,11 +3239,11 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/freeze_hold.hpp",
-      "fingerprint": "sha256:6df0729c6ab67878ef59c06d980e3113366f93a50f1f01a24486e0b884c039c2",
+      "fingerprint": "sha256:ddf7a96e008201b2a4da6255ee593152f5d3ef0d86ea58d1a35d0b95b0c259ea",
       "include": "pulp/signal/freeze_hold.hpp",
-      "disposition": "legacy_unreviewed",
+      "disposition": "infrastructure",
       "capability_keys": [],
-      "rationale": "Frozen public surface with no reviewed machine-readable capability claim."
+      "rationale": "Spectral hold stage composed at the head of a frame chain: inside RealtimePitchTimeProcessor, or as a SpectralMaskProcessor pre-mask stage. It is a frame-domain building block with its own recall image, not a standalone generator DSP claim; its engage, timing, pipeline, and snapshot contract is covered by test/test_freeze_hold.cpp."
     },
     {
       "domain": "signal",
@@ -4330,7 +4330,7 @@
     {
       "domain": "signal",
       "source": "core/signal/include/pulp/signal/spectral_mask_processor.hpp",
-      "fingerprint": "sha256:322800ed271065a445d0040f3e2b8305884476f3e70fce49787f718e87a709e0",
+      "fingerprint": "sha256:2a1aabaeb58cb73c19644c2aa6f5f7cb960e88aab0632ae79488c080d260267a",
       "include": "pulp/signal/spectral_mask_processor.hpp",
       "disposition": "capability_entrypoint",
       "capability_keys": [

@@ -180,7 +180,7 @@ def plugin_dir() -> str:
     import patch as patch_mod
     return patch_mod.rack_plugin_dir()
 
-INCLUDES = ["core/signal", "core/format", "core/audio", "core/state",
+INCLUDES = ["core/signal", "core/simd", "core/format", "core/audio", "core/state",
             "core/platform", "core/runtime", "core/timebase"]
 
 # Where an installed toolchain lives. Nothing under Application Support is
