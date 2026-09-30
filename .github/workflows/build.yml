@@ -1377,6 +1377,15 @@ jobs:
       # for this repo — they're downloaded from a mirror by setup.sh's
       # bootstrap step (`./setup.sh --ci --deps-only` below). Skipping
       # checkout's LFS pull is therefore safe.
+      # The reuse replay record (end of this job) leaves out any test report
+      # older than this moment: a self-hosted runner keeps its build directory
+      # between jobs. The event payload file is no clock for this; the runner
+      # rewrites it for every step.
+      - name: Mark job start for the reuse replay record
+        if: runner.os == 'macOS' && matrix.key == 'macos'
+        continue-on-error: true
+        shell: bash
+        run: echo "REUSE_RECORD_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v5
         with:
           lfs: false
@@ -2795,7 +2804,7 @@ jobs:
             --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
-            --build-outcome "$BUILD_OUTCOME" --not-before "$GITHUB_EVENT_PATH" \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" \
             --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then

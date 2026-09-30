@@ -41,7 +41,7 @@ Sources, never log scraping:
 
     reuse_record.py write --out-dir D [--build-dir B --source-root S]
         [--suite NAME=JUNIT_FILE_OR_DIR[,attempts=LOG][,repeat]]...
-        [--selected-json I] [--identity-json F] [--test-keys F] [--not-before F]
+        [--selected-json I] [--identity-json F] [--test-keys F] [--not-before-epoch T]
         [--build-outcome O] [--context KEY=VALUE]... [--no-suite-reason TEXT]
 
 Context (run, kind, pr, shas) comes from the Actions environment and the
@@ -548,7 +548,10 @@ def cmd_write(a: argparse.Namespace) -> int:
     image = runner_image(env)
     problems: list[str] = []
 
-    not_before = Path(a.not_before).stat().st_mtime if a.not_before and Path(a.not_before).exists() else None
+    not_before = float(a.not_before_epoch) if (a.not_before_epoch or "").isdigit() else None
+    if suites and not_before is None:
+        problems.append("no job start time: reports left in the build directory by an earlier job "
+                        "cannot be told apart from this job's")
     ran = {c["test_id"] for s in suites for f in suite_files(s["path"], not_before)[0] for c in junit_cases(f)}
     identity: dict = {"schema": SCHEMA, "executables": {}, "closure_files": {}, "unresolved_executables": 0}
     by_test: dict[str, str] = {}
@@ -568,6 +571,10 @@ def cmd_write(a: argparse.Namespace) -> int:
         keys = {n: (v.get("key") if isinstance(v, dict) else v) for n, v in raw.items()}
 
     records, summary = build_records(ctx, image["digest"], suites, by_test, keys, not_before)
+    for name, info in summary.items():
+        if info["reports"] == 0:
+            problems.append(f"suite {name} ran but left no report from this job "
+                            f"({info['stale_reports']} older report(s) ignored)")
     tests_path = out / "tests.jsonl"
     with tests_path.open("w", encoding="utf-8") as fh:
         for r in records:
@@ -616,7 +623,7 @@ def main(argv: list[str]) -> int:
     w.add_argument("--selected-json")
     w.add_argument("--identity-json", help="binary_identity_shadow's our-identity.json, to avoid rehashing")
     w.add_argument("--test-keys", help="test_receipts_shadow --keys-out file (per-test output keys)")
-    w.add_argument("--not-before", help="ignore reports older than this file (the job's event payload)")
+    w.add_argument("--not-before-epoch", help="ignore reports last written before this time (the job's start)")
     w.add_argument("--build-outcome", default=None)
     w.add_argument("--context", action="append", default=[],
                    help="KEY=VALUE recorded under job.json `steps` (e.g. ctest=failure)")

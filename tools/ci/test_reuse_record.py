@@ -284,7 +284,7 @@ class CliTests(unittest.TestCase):
             proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", str(out),
                                    "--build-dir", str(build), "--source-root", str(tmp),
                                    "--suite", f"full={DATA / 'ctest.junit.xml'},attempts={DATA / 'LastTest.full.log'},repeat",
-                                   "--suite", f"pr-fast={tmp}/absent.xml",
+                                   "--not-before-epoch", "0",
                                    "--selected-json", str(sel), "--test-keys", str(keys),
                                    "--build-outcome", "success", "--context", "ctest=failure"],
                                   capture_output=True, text=True, timeout=120, env=env)
@@ -295,12 +295,45 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(records), 8)
         self.assertEqual({r["executable"] for r in records}, {"<build>/t"})
         self.assertEqual({r["test_id"]: r["output_key"] for r in records if r["output_key"]}, {"bad": "k1"})
-        self.assertEqual((job["schema"], job["run_kind"], job["steps"], job["suites"]["pr-fast"]["tests"]),
-                         (rr.SCHEMA, "push", {"ctest": "failure"}, 0))
+        self.assertEqual((job["schema"], job["run_kind"], job["steps"], job["suites"]["full"]["tests"]),
+                         (rr.SCHEMA, "push", {"ctest": "failure"}, 8))
         self.assertEqual(job["bytes"]["tests_jsonl"] > 0, True)
         self.assertEqual(list(identity["executables"]), ["<build>/t"])
         note = next(l for l in proc.stdout.splitlines() if l.startswith(f"::notice title={rr.TITLE}::"))
         self.assertEqual(json.loads(note.split("::", 2)[2])["tests"], 8)
+        self.assertNotIn("::warning", proc.stdout)
+
+
+    def run_write(self, tmp: str, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write",
+                               "--out-dir", f"{tmp}/out", *extra],
+                              capture_output=True, text=True, timeout=60,
+                              env={**os.environ, "GITHUB_EVENT_NAME": "push"})
+
+    def test_a_suite_that_ran_but_left_only_older_reports_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "j.xml"
+            report.write_text('<testsuite><testcase name="old" status="run"/></testsuite>')
+            os.utime(report, (1_000_000, 1_000_000))
+            proc = self.run_write(tmp, "--suite", f"pr-fast={report}", "--not-before-epoch", "2000000")
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((job["suites"]["pr-fast"]["tests"], job["suites"]["pr-fast"]["stale_reports"]), (0, 1))
+        self.assertIn("::warning title=reuse-record incomplete::suite pr-fast ran but left no report", proc.stdout)
+
+    def test_without_a_job_start_time_the_record_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "j.xml"
+            report.write_text('<testsuite><testcase name="t" status="run"/></testsuite>')
+            proc = self.run_write(tmp, "--suite", f"pr-fast={report}", "--not-before-epoch", "")
+        self.assertIn("::warning title=reuse-record incomplete::no job start time", proc.stdout)
+
+    def test_an_alias_job_with_no_suite_writes_an_empty_record_quietly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = self.run_write(tmp, "--no-suite-reason", "no suite: alias")
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+            lines = (Path(tmp) / "out" / "tests.jsonl").read_text()
+        self.assertEqual((proc.returncode, job["no_suite_reason"], lines), (0, "no suite: alias", ""))
         self.assertNotIn("::warning", proc.stdout)
 
 
@@ -348,6 +381,12 @@ class WorkflowContractTests(unittest.TestCase):
         for block in announce:
             self.assertIn("steps.reuse_record_upload.outcome != 'success'", block)
             self.assertIn("::warning title=reuse-record NOT written::", block)
+
+    def test_the_job_start_is_marked_before_any_suite_runs_and_passed_to_the_record(self) -> None:
+        mark = self.text.index('REUSE_RECORD_JOB_START=$(date +%s)')
+        for step in ("id: pr_fast_tests", "id: pr_affected_tests", "id: ctest\n"):
+            self.assertLess(mark, self.text.index(step), step)
+        self.assertIn('--not-before-epoch "${REUSE_RECORD_JOB_START:-}"', self.text)
 
     def test_the_full_run_keeps_its_last_test_log_before_the_listing_rewrites_it(self) -> None:
         keep = self.text.index('"$evidence_dir/LastTest.full.log"')
