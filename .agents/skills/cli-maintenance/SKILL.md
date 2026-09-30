@@ -279,6 +279,17 @@ INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
 
+### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
+
+`read_opt_in_shipyard_targets()` (`tools/cli/cli_sdk.cpp`) reports a target as
+opt-in only when `default = false` sits directly under `[targets.<name>]`. A
+header with a second dot (`[targets.mac.changed_surface_selection]`) is a
+sub-table and resets the scan; a `default` key there, or inside any other
+table, is not the target's. The CLI has no TOML parser, so keep the check that
+narrow rather than widening it to any `default` line. The shell-out assertion in
+`test_cli_shellout_pr.cpp` reads the checkout's real config, so it moves with
+`.shipyard/config.toml`: making `mac` default again fails that test on purpose.
+
 ### A CLI shell-out suite's build edge lives in `tools/cli/CMakeLists.txt`
 
 `add_subdirectory(test)` runs before `add_subdirectory(tools/cli)`, so a

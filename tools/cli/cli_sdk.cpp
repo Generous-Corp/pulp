@@ -795,6 +795,37 @@ std::string read_pinned_shipyard_version(const fs::path& root) {
     return {};
 }
 
+std::vector<std::string> read_opt_in_shipyard_targets(const fs::path& root) {
+    std::ifstream f(root / ".shipyard" / "config.toml");
+    if (!f) return {};
+    std::vector<std::string> out;
+    std::string target;  // non-empty only inside a `[targets.<name>]` table
+    std::string line;
+    while (std::getline(f, line)) {
+        if (auto hash = line.find('#'); hash != std::string::npos) line.erase(hash);
+        auto t = trim(line);
+        if (t.empty()) continue;
+        if (t.front() == '[') {
+            target.clear();
+            const std::string prefix = "[targets.";
+            if (t.rfind(prefix, 0) == 0 && t.back() == ']') {
+                auto name = t.substr(prefix.size(), t.size() - prefix.size() - 1);
+                // `[targets.mac.changed_surface_selection]` is a sub-table.
+                if (!name.empty() && name.find('.') == std::string::npos) target = name;
+            }
+            continue;
+        }
+        if (target.empty()) continue;
+        auto eq = t.find('=');
+        if (eq == std::string::npos) continue;
+        if (trim(t.substr(0, eq)) == "default" && trim(t.substr(eq + 1)) == "false" &&
+            std::find(out.begin(), out.end(), target) == out.end()) {
+            out.push_back(target);
+        }
+    }
+    return out;
+}
+
 static std::string parse_shipyard_version_output(std::string out) {
     for (char& c : out) {
         if (c == ',' || c == '(' || c == ')') c = ' ';

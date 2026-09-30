@@ -196,6 +196,11 @@ TEST_CASE("pulp status reports shipyard version and pin health",
             != std::string::npos);
     REQUIRE(status.stdout_output.find("(" + pinned + ") pinned " + pinned)
             != std::string::npos);
+    // The checkout's `.shipyard/config.toml` makes the local mac lane opt-in;
+    // status must name it rather than leave it silently absent.
+    REQUIRE(status.stdout_output.find(
+                "  mac: opt-in, not run (GitHub required checks decide)")
+            != std::string::npos);
 }
 #endif
 

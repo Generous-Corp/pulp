@@ -5787,7 +5787,10 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 then print `validation: delegated` (`--json`: `"verdict_owner":
 "required-checks"`) without queueing a job or writing ship-state. That is
 success, not a wedge: the required GitHub checks decide, and a Pulp PR with no
-ship-state is expected. Run the local Debug + examples + full-ctest lane only
+ship-state is expected. `pulp status`, `shipyard status`, `ship-state
+list/show`, `landing` and `doctor` print
+`mac: opt-in, not run (GitHub required checks decide)`; "the mac lane never ran"
+is therefore not a break to diagnose. Run the local Debug + examples + full-ctest lane only
 when you want it: `shipyard pr --target mac`, `shipyard ship --pr <n> --target
 mac`, or `shipyard run --targets mac`. It became opt-in on 2026-09-30 (decisions
 contract row #9) after failing 64 of 64 runs in a week at about 42 host-hours on

@@ -621,8 +621,12 @@ ctest run, on the Mac that runs `shipyard`. It is **opt-in**
 find the PR and arm auto-merge, then leave the verdict to the required GitHub
 checks (`[governance] required_status_checks`) and print
 `validation: delegated`. Nothing is queued and no ship-state is written, so a
-missing ship-state for a Pulp PR is expected, not an orphan. Request the lane
-explicitly when you want it:
+missing ship-state for a Pulp PR is expected, not an orphan. The lane is never
+silently absent: `pulp status`, `shipyard status`, `shipyard ship-state
+list/show`, `shipyard landing` and `shipyard doctor` all print
+`mac: opt-in, not run (GitHub required checks decide)`, and Shipyard never
+probes it, counts it in landability, or reports it as a validation gap unless
+it is requested. Request the lane explicitly when you want it:
 
 ```bash
 shipyard pr --target mac                  # push/open/arm, then also run the local lane
