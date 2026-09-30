@@ -1074,6 +1074,19 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
 }
 
 - (BOOL)isFlipped { return NO; }
+// A press that lands while the editor's window is not key must still act on the
+// control under it. AppKit withholds that press from any view answering NO here
+// (NSView's default), so the first click after the user touched anything else
+// in the DAW -- the track list, the transport, another plug-in -- only made the
+// editor window key, and the retry somewhere else on the control worked. That
+// reads as a control that responds on one part of it and not another. A DAW
+// editor is an instrument surface, not a document window: the click is the
+// interaction. The standalone PulpView keeps AppKit's default on purpose (see
+// window_host_mac.mm), so this is scoped to the two plug-in host views.
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    (void)event;
+    return YES;
+}
 // Document shortcuts are offered through key equivalents without borrowing
 // first responder. Native text/navigation interactions borrow it temporarily;
 // unconsumed keyDown events still return to the DAW's responder chain.
@@ -1908,6 +1921,13 @@ private:
     // Holds raw AppKit drag motion between presented frames. Ordering rules and
     // the fail-safe live in the shared type, not here.
     pulp::view::HostDragCoalescer _dragCoalescer;
+}
+
+// A press in a non-key editor window acts on the control under it. See
+// PulpPluginView::acceptsFirstMouse:.
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    (void)event;
+    return YES;
 }
 
 // Match the CPU host's bounded responder ownership and consume-or-forward routing.
