@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="8"
+	failures="2"
+	disabled="1"
+	skipped="2"
+	hostname=""
+	time="2"
+	timestamp="2026-09-30T12:37:43"
+	>
+	<testcase name="ok" classname="ok" time="0.00457754" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="flaky" classname="flaky" time="0.00456092" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="bad" classname="bad" time="0.00476283" status="fail">
+		<failure message="Failed"/>
+		<properties/>
+		<system-out>boom
+</system-out>
+	</testcase>
+	<testcase name="skip" classname="skip" time="0.00462346" status="notrun">
+		<skipped message="SKIP_RETURN_CODE=77"/>
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="slow" classname="slow" time="1.04319" status="fail">
+		<failure message="Timeout"/>
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="off" classname="off" time="0" status="disabled">
+		<properties/>
+		<system-out>Disabled</system-out>
+	</testcase>
+	<testcase name="rxskip" classname="rxskip" time="0.00554196" status="notrun">
+		<skipped message="SKIP_REGULAR_EXPRESSION_MATCHED"/>
+		<properties/>
+		<system-out>SKIPME
+</system-out>
+	</testcase>
+	<testcase name="quoted &quot;name&quot; &amp; &lt;x&gt;" classname="quoted &quot;name&quot; &amp; &lt;x&gt;" time="0.00583683" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+</testsuite>

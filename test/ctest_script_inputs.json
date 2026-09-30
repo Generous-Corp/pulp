@@ -4151,6 +4151,20 @@
    ],
    "kind": "shell"
   },
+  "reuse-record-selftest": {
+   "entry": "tools/ci/test_reuse_record.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    "test/ctest_script_inputs.json",
+    "tools/ci/reuse_record.py",
+    "tools/ci/test_reuse_record.py",
+    "tools/ci/testdata/reuse_record",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
+   ],
+   "kind": "python"
+  },
   "runner-topology-selftest": {
    "entry": "tools/scripts/test_runner_topology_check.py",
    "inputs": [

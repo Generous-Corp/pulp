@@ -17,8 +17,10 @@ per instrument: identity and affected tests need a successful build and the
 ctest inventory; exoneration runs only when ctest's outcome was failure;
 receipts run whenever ctest ran (passed or failed) and write
 `<work-dir>/test-receipts.json`, which the workflow uploads as the
-`test-receipts-macos` artifact. Binary identity runs first and leaves its
-per-binary hashes in `<work-dir>/our-identity.json` so receipts do not hash
+`test-receipts-macos` artifact, and every entry's key to
+`<work-dir>/test-keys.json`, which the per-job reuse record carries. Binary
+identity runs first and leaves its per-binary hashes in
+`<work-dir>/our-identity.json` so neither receipts nor the reuse record hash
 the test binaries twice.
 
     merge_group_shadows.py run --build-dir B --source-root S --repository O/R \\
@@ -92,7 +94,8 @@ def plan(a: argparse.Namespace) -> list[tuple[str, str, list[str]] | tuple[str, 
                        "--repository", a.repository, "--merge-sha", a.merge_sha, "--token", a.token,
                        "--junit", a.junit, "--selected-json", a.selected_json, "--run-id", a.run_id,
                        "--receipts-out", os.path.join(a.work_dir, "test-receipts.json"),
-                       "--identity-json", os.path.join(a.work_dir, "our-identity.json")]))
+                       "--identity-json", os.path.join(a.work_dir, "our-identity.json"),
+                       "--keys-out", os.path.join(a.work_dir, "test-keys.json")]))
     else:
         steps.append(("test-receipts", "test_receipts_shadow", None))
     return steps

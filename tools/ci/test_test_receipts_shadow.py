@@ -356,7 +356,8 @@ class CliTests(unittest.TestCase):
                                    "--build-dir", str(w.build), "--source-root", str(w.src),
                                    "--repository", "O/R", "--merge-sha", "HEAD", "--junit", str(junit),
                                    "--selected-json", str(sel), "--run-id", "55", "--receipts-out", str(out),
-                                   "--summary", str(summary), "--toolchain-id", "tc"],
+                                   "--summary", str(summary), "--toolchain-id", "tc",
+                                   "--keys-out", str(Path(tmp) / "keys.json")],
                                   capture_output=True, text=True, timeout=120, env=env)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             receipt = json.loads(out.read_text())
@@ -367,6 +368,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual((verdict["schema"], verdict["would_skip"], verdict["receipt_runs"]),
                              (trs.SCHEMA, 0, 0))
             self.assertIn("Per-test receipts (shadow)", summary.read_text())
+            # Every entry is listed with its key, passed or failed; the passing
+            # one's key is the receipt's.
+            keys = json.loads((Path(tmp) / "keys.json").read_text())
+            self.assertEqual(sorted(keys), sorted(t["name"] for t in w.inventory()))
+            self.assertIn(keys["A case one"]["key"], receipt["passed"])
+            self.assertEqual(keys["B case"]["kind"], "binary")
 
     def test_unreadable_inputs_give_no_verdict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

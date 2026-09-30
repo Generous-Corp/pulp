@@ -2385,6 +2385,13 @@ jobs:
           ctest_exit=0
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j"$ctest_jobs" --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
           printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          # LastTest.log is ctest's only per-execution record of the --repeat
+          # retries, and every later ctest call in this build directory (the
+          # listing just below included) replaces it. Keep this run's. ctest
+          # replaces the file by rename, so a hard link keeps the old contents.
+          ln -f "$PULP_BUILD_DIR/Testing/Temporary/LastTest.log" "$evidence_dir/LastTest.full.log" 2>/dev/null \
+            || cp "$PULP_BUILD_DIR/Testing/Temporary/LastTest.log" "$evidence_dir/LastTest.full.log" 2>/dev/null \
+            || true
           # Inventory of what that selection covers: a listing, not a run, so
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
@@ -2705,6 +2712,10 @@ jobs:
         run: |
           set +e
           tdir="$PULP_BUILD_DIR/Testing/Temporary"
+          # The suite's own LastTest.log, kept by the test step; the one in the
+          # build directory now holds only the last ctest call's block.
+          lastlog="$RUNNER_TEMP/ctest-evidence/LastTest.full.log"
+          [ -s "$lastlog" ] || lastlog="$tdir/LastTest.log"
           {
             echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
             if [ -f "$tdir/LastTestsFailed.log" ]; then
@@ -2712,7 +2723,7 @@ jobs:
               echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
               echo "### Failing assertions (from LastTest.log)"
               echo '```'
-              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60 || true
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$lastlog" 2>/dev/null | head -60 || true
               echo '```'
             else
               echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
@@ -2743,6 +2754,76 @@ jobs:
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
+
+      # Replay history for test-result reuse: one record per test (outcome,
+      # attempts, duration, executable) plus each executable's digest and
+      # runtime closure, written from ctest's own result files by
+      # tools/ci/reuse_record.py and kept 90 days. The JUnit artifact above
+      # expires in 7, and per-binary digests otherwise exist only where a
+      # receipt was issued. Recording only: nothing reads it to decide a run,
+      # and every step here is continue-on-error. A job that should carry a
+      # record and does not says so in a `reuse-record NOT written` warning.
+      # A suite is passed only when its step ran in this job, so a report left
+      # in the build directory by an earlier run is never recorded as this one.
+      - name: Record per-test results for reuse replay (macOS)
+        id: reuse_record
+        if: ${{ !cancelled() && runner.os == 'macOS' && matrix.key == 'macos' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CTEST_OUTCOME: ${{ steps.ctest.outcome }}
+          PR_FAST_OUTCOME: ${{ steps.pr_fast_tests.outcome }}
+          PR_AFFECTED_OUTCOME: ${{ steps.pr_affected_tests.outcome }}
+        run: |
+          set -uo pipefail
+          b="$GITHUB_WORKSPACE/$PULP_BUILD_DIR"
+          ev="$RUNNER_TEMP/ctest-evidence"
+          shadows="$RUNNER_TEMP/merge-group-shadows"
+          out="$RUNNER_TEMP/reuse-record"
+          suites=()
+          case "$CTEST_OUTCOME" in success|failure) suites+=(--suite "full=$b/ctest.junit.xml,attempts=$ev/LastTest.full.log,repeat") ;; esac
+          case "$PR_FAST_OUTCOME" in success|failure) suites+=(--suite "pr-fast=$b/ctest-pr-fast.junit.xml") ;; esac
+          case "$PR_AFFECTED_OUTCOME" in success|failure) suites+=(--suite "pr-affected=$b/pr-affected-junit,repeat") ;; esac
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$out" \
+            --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
+            --selected-json "$ev/selected.json" \
+            --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
+            --build-outcome "$BUILD_OUTCOME" --not-before "$GITHUB_EVENT_PATH" \
+            --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
+            --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc; this job's per-test replay history is lost"
+            exit 1
+          fi
+          size="$(du -sk "$out" | cut -f1)"
+          echo "reuse-record: ${size} KiB uncompressed in $out"
+          echo "Reuse replay record: ${size} KiB uncompressed (artifact \`reuse-record-macos\`)." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Upload reuse replay record (macOS)
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          # One artifact per run attempt: a re-run keeps the failed attempt's
+          # record, which is the flake evidence a replay most needs.
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record (macOS)
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && steps.reuse_record_upload.outcome != 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::the record was built but its upload failed; this job's per-test replay history is lost"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -3125,6 +3206,60 @@ jobs:
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
           fi
+      # A `macos` check that ran no suite still belongs in the replay history
+      # (receipt reuse and skip-safe groups are what a policy's coverage is
+      # measured against), so it writes a record with no tests and says why.
+      # Recording only: every step is continue-on-error and runs after the
+      # verdict above.
+      - name: Check out the reuse record writer
+        if: ${{ !cancelled() }}
+        id: reuse_record_checkout
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/reuse_record.py
+          sparse-checkout-cone-mode: false
+
+      - name: Record that no suite ran, for reuse replay
+        id: reuse_record
+        if: ${{ !cancelled() && steps.reuse_record_checkout.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          NO_SUITE_REASON: 'no suite: macos alias job (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }})'
+        run: |
+          set -uo pipefail
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$RUNNER_TEMP/reuse-record" \
+            --source-root "$GITHUB_WORKSPACE" --no-suite-reason "$NO_SUITE_REASON" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$RUNNER_TEMP/reuse-record/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc"
+            exit 1
+          fi
+
+      - name: Upload reuse replay record
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record
+        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
@@ -3188,6 +3323,60 @@ jobs:
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
           fi
+      # A `macos` check that ran no suite still belongs in the replay history
+      # (receipt reuse and skip-safe groups are what a policy's coverage is
+      # measured against), so it writes a record with no tests and says why.
+      # Recording only: every step is continue-on-error and runs after the
+      # verdict above.
+      - name: Check out the reuse record writer
+        if: ${{ !cancelled() }}
+        id: reuse_record_checkout
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/reuse_record.py
+          sparse-checkout-cone-mode: false
+
+      - name: Record that no suite ran, for reuse replay
+        id: reuse_record
+        if: ${{ !cancelled() && steps.reuse_record_checkout.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          NO_SUITE_REASON: 'no suite: macos merge-group bootstrap (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }} receipt_reused=${{ needs.protected-receipt-reuse.outputs.macos_reused }})'
+        run: |
+          set -uo pipefail
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$RUNNER_TEMP/reuse-record" \
+            --source-root "$GITHUB_WORKSPACE" --no-suite-reason "$NO_SUITE_REASON" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$RUNNER_TEMP/reuse-record/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc"
+            exit 1
+          fi
+
+      - name: Upload reuse replay record
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record
+        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   linux:
     needs: [build, classify]

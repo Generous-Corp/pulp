@@ -897,6 +897,23 @@ failed in the same run): it must stay 0 over a long window, and binary
 identity must approach 100%, before enforcement is proposed as a contract
 amendment.
 
+Every `macos` job, pull-request head and merge group alike, also uploads a
+**reuse replay record** (`tools/ci/reuse_record.py`, artifact
+`reuse-record-macos`, or `reuse-record-macos-attempt-N` on a re-run, kept 90
+days): `tests.jsonl` with one record per test (run and pull request, head,
+base and merge tree, suite, outcome, attempts, duration, executable, runner
+image fingerprint, and the per-test receipt key where the merge-group shadow
+computed one), `identity.json` with each executable's sha256 and the
+digest of its runtime closure (the non-system dylibs and frameworks it loads,
+a script's interpreter), and `job.json` with the context and sizes. Outcomes
+come from ctest's JUnit report and attempts from its `LastTest.log`, which the
+test step keeps as `LastTest.full.log` because any later ctest call in the
+build directory replaces it. An alias `macos` job that ran no suite uploads a
+record with no tests and the reason. It is history for scoring reuse policies
+offline and decides nothing; a job that should carry one and does not warns
+`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
+completed `macos` jobs.
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether

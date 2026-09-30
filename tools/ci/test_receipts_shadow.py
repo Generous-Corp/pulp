@@ -55,7 +55,7 @@ Proxies read from the annotation (`pulp-test-receipts-shadow/v1`):
 
     test_receipts_shadow.py run --build-dir B --source-root S --repository O/R \\
         --merge-sha SHA --token T --junit J --selected-json I --run-id N \\
-        --receipts-out F [--identity-json F] [--summary F]
+        --receipts-out F [--identity-json F] [--keys-out F] [--summary F]
 """
 from __future__ import annotations
 
@@ -535,6 +535,11 @@ def cmd_run(a: argparse.Namespace) -> int:
     receipt = build_receipt(a.run_id, a.merge_sha, {n: k for n, (k, _) in keys.items()}, results)
     Path(a.receipts_out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.receipts_out).write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
+    if a.keys_out:
+        # Every entry's key or unkeyable reason, passed or not: the per-job
+        # reuse record (tools/ci/reuse_record.py) carries it as output_key.
+        Path(a.keys_out).write_text(json.dumps({n: {"key": k, "kind": kind} for n, (k, kind) in keys.items()},
+                                               sort_keys=True), encoding="utf-8")
     prior, refusals = [], []
     if a.token:
         try:
@@ -574,6 +579,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     r.add_argument("--receipts-out", required=True)
     r.add_argument("--identity-json", default=None)
+    r.add_argument("--keys-out", default=None, help="write every entry's key (or unkeyable kind) here")
     r.add_argument("--summary", default=None)
     r.add_argument("--toolchain-id", default=None, help="override the probed toolchain identity (tests)")
     r.set_defaults(func=cmd_run)
