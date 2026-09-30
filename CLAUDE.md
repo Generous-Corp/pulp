@@ -286,6 +286,14 @@ start fresh and old/new bindings cannot execute concurrently. See
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
+When changing sample-region documentation or public examples, keep the guide,
+reference pages, module index, capability-control projections, and installed
+consumer example aligned. The focused documentation check is
+`tools/check-docs.sh`; pair it with the processing-model terminology lint and
+the installed `sample-region-allpass` consumer validation. A green docs check
+does not establish graph reachability or format portability; those claims still
+require the packet's independent runtime receipts.
+
 ### Scripted plugin UIs — read the checklist BEFORE you write the UI
 
 Load the [`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill before writing or changing a JS/scripted editor with
