@@ -13,8 +13,8 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
-The hosted `drift-fast` workflow selects the historical GPU-probe acceptance
-test from a depth-2 checkout. Keep its bounded
+The hosted `drift-fast` workflow is a required status check. It selects the
+historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 `hydrate_gpu_provenance_commits.py` step after checkout and before configure;
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
@@ -877,7 +877,7 @@ ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
 branch is allowed. Needing a new third-party package means adding it to the lock
 (and the wheelhouse), not to the check.
 
-### `drift-fast` catches tree-reading drift before the build, advisory only
+### `drift-fast` catches tree-reading drift before the build, and is required
 
 The hosted `drift-fast` job (`.github/workflows/drift-fast.yml`) configures the
 tip-plus-head tree without building and runs `tools/ci/drift_fast.json`'s
@@ -885,8 +885,14 @@ selection (the `pr-fast` tier plus `wide-non-native-selftest`, the census,
 tools-registry, rack, lane-contract and scheduling checks) in a few minutes.
 When a merge group ejects on one of those, its `drift-fast` run on the same
 group should already name the test, minutes earlier; read it before the
-`macos` log. It is NOT
-required, so it never blocks by itself, and on its Linux configure the census
+`macos` log. It IS
+required (classic branch protection, mirrored in the checked-in ruleset and
+`[governance]`), so a red run blocks the PR and ejects the group by itself.
+Never add a `paths:` filter to its trigger or a job-level `if:`: a required
+check that does not report holds every PR on "Expected" forever, and
+`drift_fast.py check` fails on either. Its one open caveat is that no merge
+group has yet been genuinely drifted since it went green, so its merge-group
+true-catch rate is unproven. On its Linux configure the census
 comparison skips (only `darwin-arm64` profiles are recorded) and
 `ios-compile-gate-legs` is not registered; both print as `NOT CHECKED`. A new
 tree-reading check that can pass from a configure alone belongs in the
@@ -8583,6 +8589,7 @@ by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf
 - `Build + prove + (owner-gated) deploy`
 - `Vellum freeze` — `.github/workflows/vellum-freeze-check.yml`
 - `Vellum trusted freeze` — status posted by `.github/workflows/vellum-trusted-gate.yml`
+- `drift-fast` — `.github/workflows/drift-fast.yml` (hosted, configure-only drift checks)
 
 `vellum-routing-contract` is a separate evidence-producing check. It executes
 the closed repository-qualified Pulp/Vellum router suite on relevant PRs and on
@@ -8656,7 +8663,8 @@ ghapp api repos/Generous-Corp/pulp/branches/main/protection \
 ```
 
 which today returns `macos`, `Enforce version & skill sync`, `Build + prove +
-(owner-gated) deploy`, `Vellum trusted freeze`, and `Vellum freeze`. Never
+(owner-gated) deploy`, `Vellum trusted freeze`, `Vellum freeze`, and
+`drift-fast`. Never
 describe a check as non-blocking, or propose deleting it, on ruleset evidence
 alone.
 

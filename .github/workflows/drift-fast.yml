@@ -1,6 +1,6 @@
 name: Drift fast
 
-# Advisory, hosted pre-check for the tree-reading drift tests that fail most
+# Required, hosted pre-check for the tree-reading drift tests that fail most
 # merge groups on the required `macos` gate: census, script-inputs,
 # tools-registry and lane-contract drift, and the wide-non-native replay. They
 # read the checkout and the configured test graph, never a compiled binary, so
@@ -15,8 +15,13 @@ name: Drift fast
 # is not recorded, so the census drift comparison itself skips here and still
 # runs on `macos`.
 #
-# ADVISORY: this context is not a required status check. Making it required is
-# a ruleset change, not a workflow change. See docs/guides/local-ci.md.
+# REQUIRED: `drift-fast` is a required status check on `main` (branch
+# protection; mirrored in .github/rulesets/main-protection.json). A required
+# check that never reports holds a pull request on "Expected" forever, so this
+# workflow must report on every pull_request and merge_group it can see: no
+# `paths:`/`paths-ignore:` filter on the trigger and no job-level `if:`.
+# `tools/ci/drift_fast.py check` (drift-fast-selftest) enforces both. Step-level
+# `if:` is fine; it skips a step, never the job. See docs/guides/local-ci.md.
 
 on:
   pull_request:
@@ -63,7 +68,7 @@ jobs:
       # The historical GPU-probe acceptance check is selected by drift_fast.py
       # and walks commits outside the depth-2 event checkout. Reconnect the
       # bounded provenance history before configuring so a shallow hosted clone
-      # cannot turn this advisory diagnostic into a deterministic red check.
+      # cannot turn this required check into a deterministic red one.
       - name: Hydrate bounded GPU provenance commits
         shell: bash
         run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
