@@ -538,6 +538,32 @@ tools:
   availability: always
   skill: ci
   docs: guides/local-ci.md
+- name: reuse-policy-replay
+  path: tools/scripts/reuse_policy_replay.py
+  category: build-speed
+  use_when: Before any test-result reuse policy (receipt reuse across base drift, per-test or per-executable
+    skips) goes live, or when changing one, its key, or a fail-closed rule — replay it over merge-queue
+    history and read its false skips, which must be 0.
+  invocation: python3 tools/scripts/reuse_policy_replay.py collect --since <ISO> --out <corpus>; then
+    python3 tools/scripts/reuse_policy_replay.py score --corpus <corpus> [--policy whole-receipt|inert-drift|inert-drift-inputs]
+    [--receipt-source derived|observed]; `score --scenarios tools/scripts/fixtures/reuse_policy_replay`
+    scores the named incident scenarios.
+  inputs: build.yml merge_group and pull_request runs from the GitHub API (job logs, 90-day retention),
+    the receipt-decision annotations, check-runs on each PR head, and a local clone for commit parents
+    and tree diffs; `score` reads only the neutral JSONL corpus `collect` writes.
+  outputs: Per policy — benefit (skipped test-seconds ÷ group test-seconds, median/p90/pooled), FALSE
+    SKIPS (group tests that failed after until-pass:2 that the policy would have skipped) with each
+    one named, flake-skips, coverage, build_failed, and replay-vs-recorded reuse decisions; `--json`.
+    `score` exits 1 on any false skip.
+  caveat: Replays with TODAY's classify_changes.py and today's required-context list, and reads required
+    contexts as check-runs completed before the group, so an old head's eligibility is approximate. History
+    records no runner image (null on both sides, so no image check applies), no per-executable keys (key
+    policies are unevaluable there) and no exoneration verdicts (every final failure counts as real). A build-failed group is excluded from test scoring; `build_failures_skipped`
+    lists the ones a build-skipping policy would have skipped. `collect` exits 1 when it finds no merge
+    groups or no head pairs (a broken instrument, not an empty history).
+  availability: always
+  skill: ci
+  docs: guides/local-ci.md
 - name: build-time-report
   path: tools/scripts/build_time_report.py
   category: build-speed
