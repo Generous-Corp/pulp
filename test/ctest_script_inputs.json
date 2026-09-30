@@ -5000,6 +5000,7 @@
     "tools/scripts/test_build_combined_installer.py",
     "tools/scripts/test_classify_changes.py",
     "tools/scripts/test_configure_check_cache.py",
+    "tools/scripts/test_consumption_census.py",
     "tools/scripts/test_gpu_first_visible_a3_role_producers.py",
     "tools/scripts/test_gpu_probe_acceptance.py",
     "tools/scripts/test_gpu_test_resource_locks.py",

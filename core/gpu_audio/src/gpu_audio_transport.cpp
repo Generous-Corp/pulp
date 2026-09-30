@@ -129,6 +129,10 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     // Wake-on-write only matters when we own the worker thread; when the caller
     // drives pump() there is nothing waiting on the semaphore to wake.
     wake_on_write_ = config.wake_on_write && config.run_worker_thread;
+    audio_workgroup_ = config.audio_workgroup;
+    join_audio_workgroup_ = config.join_audio_workgroup && config.run_worker_thread;
+    worker_workgroup_joined_.store(false, std::memory_order_relaxed);
+    worker_workgroup_join_failures_.store(0, std::memory_order_relaxed);
     prepared_ = true;
 
     if (config.run_worker_thread) {
@@ -150,6 +154,21 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
 }
 
 void GpuAudioTransport::worker_loop() noexcept {
+    audio::AudioWorkgroup workgroup;
+    bool joined_workgroup = false;
+#if defined(__APPLE__)
+    if (join_audio_workgroup_ && audio_workgroup_ != nullptr) {
+        workgroup.set_workgroup(reinterpret_cast<os_workgroup_t>(audio_workgroup_));
+        joined_workgroup = workgroup.join_from_audio_thread();
+        if (joined_workgroup) {
+            worker_workgroup_joined_.store(true, std::memory_order_release);
+        } else {
+            worker_workgroup_join_failures_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+#else
+    (void)joined_workgroup;
+#endif
     while (worker_running_.load(std::memory_order_acquire)) {
         // Yield while an offline (synchronous) render owns the node — process_offline
         // pumps inline. The mutex serializes node access for the brief window where
@@ -169,6 +188,8 @@ void GpuAudioTransport::worker_loop() noexcept {
     }
     std::lock_guard<std::mutex> lock(pump_mutex_);
     pump(); // final drain of any input left at stop
+    if (joined_workgroup)
+        worker_workgroup_joined_.store(false, std::memory_order_release);
 }
 
 void GpuAudioTransport::reset_staged_transport_state() noexcept {
@@ -210,6 +231,9 @@ void GpuAudioTransport::release() noexcept {
     trial_observer_ = nullptr;
     callback_sequence_ = 0;
     realtime_gpu_fenced_for_offline_ = false;
+    audio_workgroup_ = nullptr;
+    join_audio_workgroup_ = false;
+    worker_workgroup_joined_.store(false, std::memory_order_release);
     channels_ = block_size_ = latency_blocks_ = ring_blocks_ = 0;
     prepared_ = false;
 }
@@ -597,6 +621,9 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.resynced_blocks = resynced_blocks_.load(std::memory_order_relaxed);
     s.last_block_us = last_block_ns_.load(std::memory_order_relaxed) / 1000.0;
     s.avg_block_us = avg_block_ns_.load(std::memory_order_relaxed) / 1000.0;
+    s.worker_workgroup_joined = worker_workgroup_joined_.load(std::memory_order_acquire);
+    s.worker_workgroup_join_failures =
+        worker_workgroup_join_failures_.load(std::memory_order_relaxed);
     return s;
 }
 

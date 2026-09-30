@@ -11,7 +11,7 @@
 // importable offline host validates the shared design (the worklet's inlined ABI
 // is guarded against drift by the package parity test).
 
-import { WebClapHost } from "./wclap-host.mjs";
+import { WebClapHost, WebClapPlugin } from "./wclap-host.mjs";
 
 let failed = 0;
 const ok = (cond, msg) => { console.log(`${cond ? "  ok  " : "FAIL  "}${msg}`); if (!cond) failed++; };
@@ -101,6 +101,27 @@ host._mainThreadCallbackPending = false;
 host.call(host.u32(h + 44), h); // request_callback
 eq(host._mainThreadCallbackPending, true, "request_callback → sets pending main-thread flag");
 host.call(host.u32(h + 40), h); // request_process (no-op, must not throw)
+
+// ── 8. WebClapPlugin.reset() dispatches the CLAP reset lifecycle callback at
+// the canonical wasm32 plugin vtable offset, and remains chainable.
+const pluginPtr = malloc(48);
+let resetPtr = 0;
+let resetCalls = 0;
+resetPtr = host._addFn("i->", (ptr) => {
+  eq(ptr, pluginPtr, "plugin.reset() forwards the exact plugin pointer");
+  ok(isAudio() === 1 && isMain() === 0, "plugin.reset() has the audio-thread role");
+  resetCalls++;
+});
+host.setU32(pluginPtr + 32, resetPtr);
+const plugin = new WebClapPlugin(host, pluginPtr, { id: "test", name: "Test", count: 0 });
+eq(plugin.reset(), plugin, "plugin.reset() is chainable");
+eq(resetCalls, 1, "plugin.reset() invokes the CLAP reset callback once");
+ok(isMain() === 1, "plugin.reset() restores the calling thread role");
+host.setU32(pluginPtr + 32, host._addFn("i->", () => { throw new Error("reset trap"); }));
+let resetTrapped = false;
+try { plugin.reset(); } catch (error) { resetTrapped = error.message === "reset trap"; }
+ok(resetTrapped, "plugin.reset() propagates a callback trap");
+ok(isMain() === 1, "plugin.reset() restores the thread role after a trap");
 
 console.log(failed ? `\n${failed} check(s) FAILED` : "\nAll WebCLAP host-extension checks passed.");
 process.exit(failed ? 1 : 0);
