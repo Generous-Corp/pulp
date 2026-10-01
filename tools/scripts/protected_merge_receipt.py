@@ -505,20 +505,18 @@ def ran_affected_slow_proofs(validation: dict[str, Any]) -> bool:
 
 
 def _check_affected_slow_proofs(validation: dict[str, Any], args: argparse.Namespace) -> None:
-    """Compare the proofs the receipt ran with the proofs the merge group needs.
+    """Refuse a receipt that skipped proofs the merge group needs.
 
     A receipt replaces the group's whole macOS suite, so a group whose
     classification requires the `slow-affected` proofs cannot reuse a run that
     did not execute them. That happens when the group's classifier falls back
-    to requiring them (an unresolvable base) while the head's did not. The
-    mismatch is reported on stderr and does not refuse the receipt.
+    to requiring them (an unresolvable base) while the head's did not. An
+    unstated requirement is treated as required.
     """
     required = getattr(args, "affected_slow_required", None)
-    if required == "true" and not ran_affected_slow_proofs(validation):
-        print(
-            "protected receipt: merge group requires the slow-affected proofs "
-            "but the receipt's run did not execute them (not enforced)",
-            file=sys.stderr,
+    if required != "false" and not ran_affected_slow_proofs(validation):
+        raise ReceiptError(
+            "merge group requires the slow-affected proofs but the receipt's run did not execute them"
         )
 
 
