@@ -1,0 +1,80 @@
+{
+  "id": "dspx-01-descriptor-registry",
+  "title": "DSPX-01 descriptor and registry contract",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "dspx01-descriptor-registry-20261001-codex",
+  "owned_paths": [
+    "core/host/include/pulp/host/custom_node_type.hpp",
+    "core/host/include/pulp/host/sample_region_proof.hpp",
+    "test/test_dspx01_descriptor_registry.cpp",
+    "docs/guides/dspx01-descriptor-registry.md"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/custom_node_type.hpp",
+      "needles": ["struct CustomNodeType {", "bool is_valid_registration() const noexcept"]
+    },
+    {
+      "path": "core/host/include/pulp/host/sample_region_proof.hpp",
+      "needles": ["struct SampleRegionProof {", "SampleRegionParserProof prove_sample_region_parser_shape"]
+    },
+    {
+      "path": "test/test_dspx01_descriptor_registry.cpp",
+      "needles": ["DSPX-01 custom descriptors register and reach graph topology"]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The descriptor and proof types are public host headers and are checked by the focused host contract test.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_type.hpp",
+          "needles": ["struct CustomNodeType {", "struct SampleKernelDescriptor {"]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/sample_region_proof.hpp",
+          "needles": ["struct SampleRegionProof {"]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "DSPX-01 defines design-time descriptors and registry admission; it does not add a timeline operation."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "DSPX-01 defines no offline MCP operation."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "Descriptor registration is an in-process authoring operation; no live product control route is claimed by this packet."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The public descriptor vocabulary is discoverable through the existing signal.custom-node-events and signal.sample-region capability projections.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": ["\"key\": \"signal.custom-node-events\"", "\"key\": \"signal.sample-region\""]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
