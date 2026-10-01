@@ -1039,6 +1039,11 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
         result.reason = "completion_wait_ns_out_of_range";
         return result;
     }
+    if (options.enable_timestamps && options.storage_kind == StorageKind::ImportedHostPointer) {
+        result.availability = Availability::Unsupported;
+        result.reason = "timestamps_require_staged_storage";
+        return result;
+    }
     try {
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))
