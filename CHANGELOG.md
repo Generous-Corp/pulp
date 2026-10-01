@@ -9,6 +9,24 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08860"></a>
+## [0.886.0] - 2026-10-01
+
+- release/version bump ([#9166](https://github.com/Generous-Corp/pulp/pull/9166))
+- ci/reuse replay history fixes ([#9160](https://github.com/Generous-Corp/pulp/pull/9160))
+- ci/reuse record links ([#9151](https://github.com/Generous-Corp/pulp/pull/9151))
+- fix/changelog bump verifier adopts changelog ([#9153](https://github.com/Generous-Corp/pulp/pull/9153))
+- ci/delete pr gate settle ([#9150](https://github.com/Generous-Corp/pulp/pull/9150))
+- fix/ctest nonruns fast tier ([#9152](https://github.com/Generous-Corp/pulp/pull/9152))
+- feature/freezehold staged latch ([#9155](https://github.com/Generous-Corp/pulp/pull/9155))
+- build/header fanout ([#9133](https://github.com/Generous-Corp/pulp/pull/9133))
+- release/version bump ([#9159](https://github.com/Generous-Corp/pulp/pull/9159))
+- ci/metrics gate cost config ([#9157](https://github.com/Generous-Corp/pulp/pull/9157))
+- fix/installer relocatable key macos27 ([#9149](https://github.com/Generous-Corp/pulp/pull/9149))
+- ci/detector all required contexts ([#9134](https://github.com/Generous-Corp/pulp/pull/9134))
+- chore/delete merge steward ([#9136](https://github.com/Generous-Corp/pulp/pull/9136))
+- ci/reuse policy replay ([#9142](https://github.com/Generous-Corp/pulp/pull/9142))
+
 <a id="v08850"></a>
 ## [0.885.0] - 2026-09-30
 
@@ -9336,6 +9354,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.886.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.886.0
 [0.885.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.885.0
 [0.884.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.884.1
 [0.884.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.884.0
