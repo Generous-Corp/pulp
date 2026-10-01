@@ -103,7 +103,7 @@ if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
       exit 0
     fi
     if [ -n "${STUB_FLOOR_GRANT:-}" ]; then
-      printf '{"ok":true,"floor":true,"qos":"background","lease":{"floor":true,'
+      printf '{"ok":true,"floor":true,"qos":"%s","lease":{"floor":true,' "${STUB_FLOOR_QOS:-background}"
       printf '"lease_size_cores":%s,"requested_cores":%s}}\n' "${STUB_FLOOR_GRANT}" "$cores"
       exit 0
     fi
@@ -262,6 +262,20 @@ class GovernedBuildTests(unittest.TestCase):
     def test_agent_floor_lease_runs_at_background_qos(self) -> None:
         r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
                       STUB_FLOOR_GRANT=str(self.AGENT_FLOOR))
+        self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+
+    def test_agent_floor_runs_at_the_granted_utility_qos(self) -> None:
+        """A host with agent_floor_qos = "utility" gets a utility clamp, not -b."""
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR), STUB_FLOOR_QOS="utility",
+                      PULP_TARTCI_TASKPOLICY="0")
+        self.assertIn("TASKPOLICY=-c", r.stdout, r.stderr)
+        self.assertNotIn("TASKPOLICY=-b", r.stdout, r.stderr)
+        self.assertIn("(utility QoS)", r.stderr)
+
+    def test_agent_floor_unknown_qos_falls_back_to_background(self) -> None:
+        r = self._run(STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+                      STUB_FLOOR_GRANT=str(self.AGENT_FLOOR), STUB_FLOOR_QOS="realtime")
         self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
 
     def test_agent_floor_ignores_the_taskpolicy_opt_out(self) -> None:
