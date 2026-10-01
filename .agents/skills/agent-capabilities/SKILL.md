@@ -588,6 +588,50 @@ sequence rather than one checklist. Make all four edits before running it:
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
 
+### Reset the generated artifacts to the base BEFORE `--write`
+
+`previous` is the **on-disk** `docs/status/agent-capabilities.json`, not the base
+ref. So a tree where a previous `--write` partially succeeded, or where
+`rederive` has reset some artifacts and not others, makes the gate compare
+against a state that never existed. The symptom is a pair of contradictory
+verdicts across consecutive runs on an unchanged diff:
+
+```
+agent-capabilities: INVALID: <key> changed without a contract_version increase
+agent-capabilities: INVALID: new capability must start at contract version 1.0: <key>
+```
+
+Both cannot be true. Reading either as the real constraint sends you to invent a
+version number. The fix is to make `previous` the base again and write once:
+
+```sh
+git checkout origin/main -- docs/status/agent-capabilities.json \
+    docs/status/agent-capability-surface.json \
+    tools/agent-capabilities/contract-history.json \
+    test/test_agent_capability_compile.cpp
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+### Dropping `contract-history.json` is safe for a NEW capability, not for a changed one
+
+Dropping the ~18k-line history snapshot keeps a capability PR reviewable, and it
+is correct when you are only *introducing* a capability. It is **wrong** on a
+change that moves an existing capability's `contract_version`: `--check` reads
+the history as its new-capability oracle, so without an entry the capability
+reads as new on every subsequent run and `must start at contract version 1.0`
+can never be satisfied — the version is then unbumpable.
+
+Test it rather than assume: run `--check` with the snapshot retained and again
+with it dropped. If the dropped run fails `must start at contract version 1.0`,
+the snapshot is load-bearing for your change and has to ship.
+
+One rule worth knowing before you reach for a version bump at all:
+`_binding_identity` (`agent_capability_evolution.py`) excludes
+`header_fingerprint`, and `bindings` is popped before the non-binding
+comparison — so repointing a digest is NOT a contract change. Any edit to a
+non-binding field such as `output_domain` IS, and the gate classifies every such
+edit as breaking, so the MAJOR moves, never the minor.
+
 ### History stores prior snapshots; the current artifacts store the new contract
 
 `agent_capability_rederive.py` first restores the generated manifest, surface and

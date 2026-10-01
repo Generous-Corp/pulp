@@ -194,8 +194,9 @@ bool custom_binding(fmt::ProcessBlock& block,
     // transport-unaware `process` runs, byte-for-byte as before.
     // An event-aware node runs first. Registration refuses a type declaring both
     // an event and a transport callback, so this cannot shadow transport. The
-    // node's out buffer is cleared before dispatch and `out` is withheld, so the
-    // callback cannot disturb the drop accounting the executor reads afterwards.
+    // node's out buffer is cleared before dispatch and then handed over, so
+    // whatever the callback emits is the whole of this block's output and the
+    // executor's post-process drop check reads only the callback's own appends.
     if (cctx != nullptr && cctx->process_events) {
         if (ctx.node_midi_out != nullptr) {
             // Fully, matching the per-node clear a plugin node gets: a partial
@@ -205,7 +206,7 @@ bool custom_binding(fmt::ProcessBlock& block,
             ctx.node_midi_out->clear_sysex();
             if (auto* ump = ctx.node_midi_out->ump()) ump->clear();
         }
-        const CustomNodeEventBlock events{ctx.node_midi_in, nullptr};
+        const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};
         cctx->process_events(out, in, static_cast<int>(frames), events);
         return true;
     }

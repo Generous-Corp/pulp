@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 62,
+  "manifest_revision": 63,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -2997,6 +2997,17 @@
       "key": "signal.custom-node-events",
       "domain": "signal",
       "status": "experimental",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
+      "evolution": {
+        "state": "active",
+        "introduced_in": {
+          "major": 1,
+          "minor": 0
+        }
+      },
       "summary": "A Custom graph node reads the inbound MIDI the graph already gathered for it.",
       "rt_class": "audio",
       "lifecycle": {
@@ -3015,7 +3026,7 @@
         "transport_history": "irrelevant"
       },
       "input_domain": "the node's gathered inbound MIDI for the block, which may be absent",
-      "output_domain": "audio written by the registered callback; event emission is not available",
+      "output_domain": "audio written by the registered callback, plus any MIDI it emits into the block's output buffer",
       "units": [
         "samples"
       ],
@@ -3052,18 +3063,7 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
-      "evolution": {
-        "state": "active",
-        "introduced_in": {
-          "major": 1,
-          "minor": 0
-        }
-      },
-      "contract_digest": "sha256:2bc6215b4f488232639f93702555883b885a01c888b61085f4a54abfc0e3276e"
+      "contract_digest": "sha256:97c094fef1bac10348470e3cde7b28f02616a816aab5037c28a926ef8acefcb2"
     },
     {
       "key": "signal.de-esser",

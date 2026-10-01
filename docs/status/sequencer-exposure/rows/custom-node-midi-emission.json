@@ -1,0 +1,111 @@
+{
+  "id": "custom-node-midi-emission",
+  "title": "A Custom graph node emits MIDI through its event block's out buffer",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "3e966852-b5fa-42e1-862b-6c0579414c9d",
+  "owned_paths": [
+    "core/host/include/pulp/host/custom_node_events.hpp",
+    "docs/status/sequencer-exposure/rows/custom-node-midi-emission.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/custom_node_events.hpp",
+      "needles": [
+        "midi::MidiBuffer* out = nullptr;",
+        "`out` is the node's own MIDI output buffer"
+      ]
+    },
+    {
+      "path": "core/host/src/signal_graph_executor_routing.cpp",
+      "needles": [
+        "const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};"
+      ]
+    },
+    {
+      "path": "core/host/src/signal_graph_reference_walk.cpp",
+      "needles": [
+        "const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};"
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_executor_parity.cpp",
+      "needles": [
+        "emitting custom node parity",
+        "emitting custom node overflow parity",
+        "emitted events do not leak into a later block",
+        "Translated routing binder resolves an emitting event-aware custom node"
+      ]
+    },
+    {
+      "path": "docs/reference/processing-models.md",
+      "needles": [
+        "**Emission goes through `events.out`.**"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "custom_node_events.hpp is installed by the per-subsystem header loop in tools/cmake/PulpInstallRules.cmake, which appends `host` whenever the pulp-host target exists and installs the tree FILES_MATCHING \"*.hpp\". The emission lane adds no new symbol: the field an SDK consumer writes is CustomNodeEventBlock::out, which that header already declared and installed, so what this slice delivers to an installed consumer is the field becoming non-null at run time plus the contract documented on it. Measured against that install loop rather than assumed.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_events.hpp",
+          "needles": [
+            "midi::MidiBuffer* out = nullptr;",
+            "nullable on exactly the same terms as `in`"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)",
+            "install(DIRECTORY \"${_inc_dir}/pulp/\""
+          ]
+        },
+        {
+          "kind": "test",
+          "path": "test/test_signal_graph_executor_parity.cpp",
+          "needles": [
+            "emitting custom node parity",
+            "routed.acquire_routed_only_execution();"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler changes. A Custom node type is registered from C++ against a SignalGraph; the offline timeline CLI neither registers node types nor reaches this callback, so there is nothing for it to expose."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes, for the same reason as the CLI: no MCP surface registers a CustomNodeType."
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "A musician cannot reach this, and the blocker is inherited rather than introduced here. Emission is an authoring capability for code that builds a graph; the route that would put it in a product is the Forge CustomNodeType pack, which requires a lowerable entry because packs register before bake(), while registration refuses a lowerable event-aware type and the baked binder carries no event binder at all. So the bake layer needs an event plane before a pack entry is expressible — the same first dependency the inbound lane recorded.",
+      "dependencies": [
+        "baked-graph-event-plane",
+        "forge-custom-node-type-pack"
+      ],
+      "owner": "sequencer-control-closure"
+    },
+    "design_time_agent_manifest": {
+      "disposition": "gap",
+      "rationale": "An agent reading the installed capability manifest cannot discover emission. Measured, not assumed: agent_capability_manifest.py --check passes on this base over 112 keys and 499 public headers, and custom_node_events.hpp appears in none of them — core/host/include/pulp/host is not a PUBLIC_ROOT, so a host header is fingerprinted only when named in the host-header tuple, and the control confirms the instrument is live (custom_node_type.hpp IS catalog-bound there). The emission contract therefore reaches an agent only once that header is tracked and a capability key describes the lane; both are surface-policy decisions this slice does not take.",
+      "dependencies": [
+        "custom-node-event-capability-key",
+        "host-header-surface-tracking"
+      ],
+      "owner": "sequencer-control-closure"
+    }
+  }
+}
