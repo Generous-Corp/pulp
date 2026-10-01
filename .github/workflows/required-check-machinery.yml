@@ -4,10 +4,11 @@ name: Required-check machinery
 # GitHub Actions workflow, and a pull request's merge group runs the workflow
 # YAML that pull request carries, so a change to those workflows, to the
 # receipt-reuse decision, or to the rulesets decides its own required checks.
-# Repository policy accepts that; this posts a status naming the files so the
-# reviewer sees it. pull_request_target runs this definition and the checked-out
-# script from protected main: the pull request's copy of both is never run, and
-# its head is only diffed.
+# Repository policy accepts that; this posts a check run naming the files so
+# the reviewer sees it: `neutral` when flagged, `success` when not.
+# pull_request_target runs this definition and the checked-out script from
+# protected main: the pull request's copy of both is never run, and its head is
+# only diffed.
 
 on:
   pull_request_target:
@@ -16,7 +17,7 @@ on:
 
 permissions:
   contents: read
-  statuses: write
+  checks: write
 
 concurrency:
   group: required-check-machinery-${{ github.event.pull_request.number }}
@@ -40,32 +41,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          STATUS_REPOSITORY: ${{ github.repository }}
-          STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          post() {
-            gh api --method POST "repos/$STATUS_REPOSITORY/statuses/$PR_HEAD" \
-              -f state="$1" -f context='Required-check machinery (advisory)' \
-              -f description="$2" -f target_url="$STATUS_TARGET" >/dev/null
-          }
+          contexts="$RUNNER_TEMP/required-contexts.json"
+          # The live required contexts. Reading branch protection needs
+          # administration access a workflow token may not have; when it cannot
+          # be read the report counts every workflow file instead.
+          context_args=(--contexts-unavailable)
+          if gh api "repos/$REPOSITORY/branches/main/protection/required_status_checks" \
+              --jq '.contexts' > "$contexts" 2>/dev/null; then
+            context_args=(--contexts-file "$contexts")
+          fi
           report="$RUNNER_TEMP/required-check-machinery.json"
           # Data only: the head is fetched for diffing and never checked out.
-          if ! git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/remotes/origin/pr-head" \
-              || ! python3 tools/scripts/required_check_machinery.py \
-                --repo . --diff HEAD "$PR_HEAD" > "$report"; then
-            post error "could not compute the changed files; see the run log"
-            exit 0
-          fi
+          git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/remotes/origin/pr-head"
+          python3 tools/scripts/required_check_machinery.py --repo . \
+            "${context_args[@]}" --diff HEAD "$PR_HEAD" > "$report"
           description="$(jq -r .description "$report")"
+          summary="$(jq -r '
+            (if .required_checks_read then "" else
+              "Required checks could not be read, so every workflow file is counted.\n\n" end)
+            + "Required checks are only as trustworthy as this pull request'"'"'s own workflow YAML. "
+            + "This report is visibility, not enforcement.\n\n"
+            + ([.flagged | to_entries[] | "- `\(.key)`: \(.value | join(", "))"] | join("\n"))
+          ' "$report")"
           {
             echo "### Required-check machinery (advisory)"
             echo
             echo "$description"
             echo
-            jq -r '.flagged | to_entries[] | "- `\(.key)`: \(.value | join(", "))"' "$report"
+            echo "$summary"
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$(jq '.flagged | length' "$report")" -gt 0 ]; then
+          if [ "$(jq -r .conclusion "$report")" = neutral ]; then
             echo "::warning title=Required-check machinery (advisory)::$description. Required checks are only as trustworthy as this pull request's own workflow YAML; review these files."
           fi
-          post success "$description"
+          jq -n --arg head "$PR_HEAD" --arg url "$RUN_URL" --arg title "$description" \
+            --arg summary "$summary" --arg conclusion "$(jq -r .conclusion "$report")" '{
+              name: "Required-check machinery (advisory)", head_sha: $head,
+              status: "completed", conclusion: $conclusion, details_url: $url,
+              output: {title: $title, summary: $summary}
+            }' | gh api --method POST "repos/$REPOSITORY/check-runs" --input - >/dev/null

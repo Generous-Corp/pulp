@@ -2738,10 +2738,13 @@ What CI does instead is make it visible. `required-check-machinery.yml` runs on
 `pull_request_target`, so its definition and its script
 (`tools/scripts/required_check_machinery.py`) come from protected `main`. The
 pull request's head is fetched only to diff it. It posts the advisory, never
-required, status `Required-check machinery (advisory)` with the description
-`touches required-check machinery: <files>` or
-`touches no required-check machinery`, and the run summary lists each flagged
-file with its reason:
+required, check run `Required-check machinery (advisory)`: conclusion `neutral`
+titled `touches required-check machinery: <files>` when anything is flagged,
+`success` titled `touches no required-check machinery` otherwise, so a flagged
+pull request is visibly different without reading as a failure to chase. The
+check's summary and the run summary list each flagged file with its reason, and
+a flagged run also emits a `::warning`. If the report cannot be computed the
+job fails and posts no check run.
 
 | Reason | Paths |
 |---|---|
@@ -2749,8 +2752,12 @@ file with its reason:
 | `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
 | `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
 
-A required context with no mapped producer widens the report to every workflow
-file. Treat a flagged pull request as one whose required checks it can grade
+The required contexts come from the live branch protection when the workflow
+token can read it. When it cannot (reading branch protection needs
+administration access, which a workflow token does not normally have), or the
+list is empty, every `.github/workflows` and `.github/actions` file is counted
+and the check's summary says so. A required context with no mapped producer
+widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
 itself, and review those files before it is enqueued.
 
 ## A2T evidence receipts get a nonterminal required-job attestation

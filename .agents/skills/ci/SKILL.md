@@ -695,9 +695,11 @@ decides whether it runs. Pinning a context to the Shipyard App does not fix it
 either, because that App's key is a repo secret that merge_group jobs can read.
 Only an org-level required workflow or required code-owner review would close
 it. By Daniel's decision on 2026-09-30 neither is used, and the risk is visible
-instead: the advisory `Required-check machinery (advisory)` status
+instead: the advisory `Required-check machinery (advisory)` check run
 (`required-check-machinery.yml`, `pull_request_target`, protected-main
-definition) names every changed file that can decide a required check. Do not
+definition) names every changed file that can decide a required check, with
+conclusion `neutral` when it flags anything. A workflow token usually cannot
+read branch protection, so in practice it counts every workflow file. Do not
 propose an in-workflow "unforgeable" gate; read that status and review the
 named files.
 
