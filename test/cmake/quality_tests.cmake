@@ -1159,6 +1159,19 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
             ${_changed_surface_policy_args})
+        add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
+        # The generated script families in .shipyard/config.toml must match
+        # test/ctest_script_inputs.json and the tree. The selector is declared
+        # for the macOS target only, and the script-inputs list is written
+        # from the macOS configuration.
+        if(APPLE)
+            add_test(NAME changed-surface-script-families-drift COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/changed_surface_script_families.py"
+                --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+            set_tests_properties(changed-surface-script-families-drift PROPERTIES
+                TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endif()
     endif()
 
     # Affected-target selector behind the focused `pulp build/dev/loop/test`

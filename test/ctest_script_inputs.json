@@ -1009,12 +1009,15 @@
    "inputs": [
     "core/platform/include/pulp/platform/child_process.hpp",
     "core/signal/include/pulp/signal/signal.hpp",
+    "docs/status",
     "docs/status/dsp-capabilities.json",
     "docs/status/forge-catalog.json",
     "docs/status/sequencer-exposure.json",
     "test/CMakeLists.txt",
     "test/cmake/native_component_tests.cmake",
     "test/cmake/quality_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
     "test/fixtures/child_process_input_fixture.cpp",
     "test/test_child_process.cpp",
     "test/test_child_process_standard_input.cpp",
@@ -1022,6 +1025,7 @@
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/cmake/toolchains/macos-arm64-osxcross.cmake",
     "tools/import-design/browser_capture/security.mjs",
     "tools/rack/generate.py",
@@ -1029,9 +1033,43 @@
     "tools/rack/provenance_check.py",
     "tools/rack/test_acid_preflight.py",
     "tools/rack/test_generate_safety.py",
+    "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_policy.py",
-    "tools/scripts/test_runner_topology_check.py"
+    "tools/scripts/test_runner_topology_check.py",
+    "tools/scripts/version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-script-families-drift": {
+   "entry": "tools/scripts/changed_surface_script_families.py",
+   "inputs": [
+    "docs/status",
+    "test/fixtures",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-script-families-selftest": {
+   "entry": "tools/scripts/test_changed_surface_script_families.py",
+   "inputs": [
+    "core/view/src/widgets.cpp",
+    "docs/status",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "tools/cli/cmd_run.cpp",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/docs_noise_lint.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/skills_doc_check.py"
    ],
    "kind": "python"
   },

@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import changed_surface_inventory as inventory
+import changed_surface_script_families as script_families
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -329,11 +330,15 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "tools/rack/patch.py",
             "tools/rack/provenance_check.py",
             "tools/rack/test_acid_preflight.py",
-            ".agents/skills/forge-app-delivery/SKILL.md",
         ]
         for path in neighboring_paths:
             with self.subTest(path=path):
                 self.assertNotEqual(disposition(self.policy, path), "bounded")
+        # A neighboring skill doc selects through the skill-doc readers, never
+        # through the Rack generator's tests.
+        self.assertFalse(
+            matches(".agents/skills/forge-app-delivery/SKILL.md", family["paths"])
+        )
 
         self.assertEqual(
             selection_mode(self.policy, family["paths"]),
@@ -352,13 +357,18 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "CMakeLists.txt",
             "test/CMakeLists.txt",
             "test/cmake/native_component_tests.cmake",
-            "tools/scripts/test_runner_topology_check.py",
         }
         for path in topology_paths:
             with self.subTest(path=path):
                 self.assertEqual(disposition(self.policy, path), "test_topology")
 
         self.assertNotIn("test/**", self.policy["test_topology_paths"])
+        # A Python test script's body is not registration; its edits select
+        # the ctests that run it through the generated families.
+        self.assertFalse(
+            matches("tools/scripts/test_runner_topology_check.py",
+                    self.policy["test_topology_paths"])
+        )
         self.assertIn("test/cmake/**", self.policy["test_topology_paths"])
         self.assertEqual(
             disposition(self.policy, "tools/scripts/test_changed_surface_policy.py"),
@@ -375,6 +385,60 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(
             disposition(mutated, "test/cmake/native_component_tests.cmake"),
             "test_topology",
+        )
+
+    def generated_families(self) -> list[dict]:
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        start = text.index(script_families.BEGIN)
+        end = text.index(script_families.END)
+        block = tomllib.loads(text[start:end].replace(
+            script_families.FAMILY_TABLE, "[[families]]"))
+        return block.get("families", [])
+
+    def test_policy_prose_does_not_force_full_validation(self) -> None:
+        self.assertNotIn(".agents/skills/ci/SKILL.md", self.policy["policy_paths"])
+        self.assertEqual(disposition(self.policy, ".agents/skills/ci/SKILL.md"), "bounded")
+        for path in [
+            "tools/scripts/changed_surface_script_families.py",
+            "test/ctest_script_inputs.json",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "selector_policy")
+
+    def test_generated_script_families_are_exact_and_carry_whole_tree_tests(self) -> None:
+        generated = self.generated_families()
+        names = {family["name"] for family in generated}
+        self.assertIn("script-surface-whole-tree", names)
+        self.assertIn("agent-skill-docs", names)
+        whole_tree = next(f for f in generated if f["name"] == "script-surface-whole-tree")
+        self.assertTrue(whole_tree["tests"])
+        self.assertTrue(all(
+            script_families.WHOLE_TREE_NAME_RE.search(test) for test in whole_tree["tests"]))
+        covered = set(whole_tree["paths"])
+        for family in generated:
+            with self.subTest(family=family["name"]):
+                self.assertEqual(family["risk_class"], "low")
+                self.assertIn("pulp-cli", family["build_targets"])
+                self.assertTrue(set(family["paths"]) <= covered)
+                for path in family["paths"]:
+                    # Literal paths only: a pattern could map a script the
+                    # generator excluded.
+                    self.assertTrue(path == script_families.SKILL_DOC_PATTERN
+                                    or not any(c in path for c in "*?["), path)
+
+    def test_scripts_native_code_runs_stay_full(self) -> None:
+        # The CLI runs these scripts, so no ctest input list can bound them.
+        for path in [
+            "tools/scripts/dsp_capability_registry.py",
+            "tools/scripts/version_bump_check.py",
+            "tools/scripts/generate_widget_bridge_api.py",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "unknown_full")
+        self.assertEqual(
+            selection_mode(self.policy, [".agents/skills/ci/SKILL.md",
+                                         "tools/scripts/version_bump_check.py"]),
+            "full",
         )
 
     def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
