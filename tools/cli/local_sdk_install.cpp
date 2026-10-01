@@ -462,7 +462,7 @@ fs::path ensure_dev_profile_sdk(const fs::path& repo_root, bool tracing) {
     const int jobs = lease.jobs() > 0 ? lease.jobs() : resolve_local_build_jobs();
     std::string install_cmd = "cmake --build " + shell_quote(active_build_dir) +
                               " --target install --parallel " + std::to_string(jobs);
-    install_cmd = apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos()), jobs,
+    install_cmd = apply_agent_build_watchdog(apply_agent_build_qos(install_cmd, lease.qos(), lease.floor()), jobs,
                                              lease.active());
     if (run_with_spinner(install_cmd, "Building " + profile + " SDK") != 0) {
         remove_staging(staging_prefix, active_build_dir);
