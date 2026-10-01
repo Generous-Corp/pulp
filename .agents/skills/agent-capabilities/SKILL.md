@@ -615,30 +615,33 @@ resolver cannot silently compare against an older merge base. The checker's
 protected-base prefix and evolution rules remain authoritative; never repair
 history by rewriting or deleting protected entries.
 
-### A new `core/host` header cannot be tracked without widening a named tuple
+### A new `core/host` header is invisible until it is NAMED
 
 `core/host/include/pulp/host` is **not** one of `PUBLIC_ROOTS`. Every other
 domain is discovered by `rglob`, so a new public header there is fingerprinted
 the moment it exists; a **host** header reaches the surface only if it is listed
-in `SAMPLE_REGION_HOST_HEADERS` by name.
+by name in `REVIEWED_HOST_HEADERS` (`agent_capability_surface.py`), whose records
+carry `REVIEWED_HOST_DOMAIN` (`host`).
 
-The consequence is easy to miss and reads as success: adding a new installed
-header under `core/host/include` leaves `--check` reporting `fresh`, because the
-surface never saw it. The header is public and unguarded — a later byte change to
-it trips nothing.
+The consequence is easy to miss because it reads as success: adding an installed
+header under `core/host/include` leaves `--check` reporting `fresh`, since the
+surface never saw it. The header ships public and unguarded, and a later byte
+change to it trips nothing. **Add it to the tuple in the same slice that adds the
+header.**
 
-A `REVIEWED_HEADERS` row does not rescue it. `discover_headers()` builds the
-`current` map first, and `REVIEWED_HEADERS` is validated *against* that map, so a
-row for an undiscovered host header fails `reviewed public header is missing`
-rather than registering it. The only way to track one is to add it to
-`SAMPLE_REGION_HOST_HEADERS` — which also stamps its domain as `signal`,
-mislabeling anything that is not sample-region work.
+Two further rules, both learned by getting them wrong:
 
-So a host-side vocabulary header ships untracked unless that tuple is
-deliberately widened (or renamed to mean "reviewed host headers"). Treat
-widening it as a surface-policy change owned by this skill, not something a
-feature slice does in passing — and state the gap rather than letting a `fresh`
-check imply coverage.
+* **A `REVIEWED_HEADERS` row cannot rescue an undiscovered header.**
+  `discover_headers()` builds the `current` map first, and `REVIEWED_HEADERS` is
+  validated *against* that map, so a row for a host header missing from the tuple
+  fails `reviewed public header is missing` rather than registering it. Name it in
+  the tuple first; only then does a row (or a catalog binding) resolve.
+* **Do not rglob the host root to avoid naming things.** Every host header would
+  surface at once, each then failing as an unclassified public header until
+  someone gave it a disposition. The tuple is deliberate, not an oversight.
+
+If the header is bound by a capability in a catalog module, it needs no reviewed
+row at all — see the next section.
 
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 

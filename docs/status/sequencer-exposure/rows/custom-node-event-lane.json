@@ -6,7 +6,9 @@
   "claim_id": "38fb9dd6-52e6-4782-8471-94202535d26b",
   "owned_paths": [
     "core/host/include/pulp/host/signal_graph_runtime.hpp",
-    "docs/status/sequencer-exposure/rows/custom-node-event-lane.json"
+    "docs/status/agent-capability-surface.schema.json",
+    "docs/status/sequencer-exposure/rows/custom-node-event-lane.json",
+    "tools/scripts/agent_capability_surface.py"
   ],
   "evidence": [
     {
@@ -93,13 +95,31 @@
       "owner": "sequencer-control-closure"
     },
     "design_time_agent_manifest": {
-      "disposition": "gap",
-      "rationale": "The installed capability manifest carries no key for a Custom node reading events, so an agent reading the manifest cannot discover it. The supporting header custom_node_events.hpp is additionally untracked by the capability surface: core/host/include/pulp/host is not one of PUBLIC_ROOTS, so a host header is fingerprinted only when named in SAMPLE_REGION_HOST_HEADERS, and naming it there would stamp its domain as `signal`. Widening or renaming that tuple is a surface-policy decision this slice does not take.",
-      "dependencies": [
-        "custom-node-event-capability-key",
-        "host-header-surface-tracking"
+      "disposition": "exposed",
+      "rationale": "The generated manifest publishes signal.custom-node-events with typed bindings for the event block and the node type, plus operational probes, so an agent reading the installed manifest can discover that a Custom graph node consumes events. The supporting header custom_node_events.hpp is also tracked by the surface now that the reviewed-host table names it and carries its own host domain.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"signal.custom-node-events\""
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "tools/scripts/agent_capability_surface.py",
+          "needles": [
+            "REVIEWED_HOST_HEADERS",
+            "'pulp/host/custom_node_events.hpp'"
+          ]
+        }
       ],
-      "owner": "sequencer-control-closure"
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
     }
   }
 }

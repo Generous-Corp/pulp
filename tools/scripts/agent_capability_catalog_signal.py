@@ -856,6 +856,43 @@ EXPORTS = [
                        "operation": "member_call", "member": "reset", "arguments": ""}],
     ),
     capability(
+        key="signal.custom-node-events", domain="signal",
+        status="experimental",
+        summary="A Custom graph node reads the inbound MIDI the graph already gathered for it.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control", "process": "audio",
+                   "reset": "audio", "release": "control"},
+        state_model="Whatever the registered type's own instance carries; the lane itself holds none.",
+        seed_model="none",
+        # not_promised, not bit_exact: the observable output of this lane is
+        # whatever the registrant's own callback writes, so the graph cannot
+        # promise repeatability on its behalf. What the graph does guarantee is
+        # that the routed path and the reference walk deliver the same events.
+        determinism={"repeatability": "not_promised", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="the node's gathered inbound MIDI for the block, which may be absent",
+        output_domain="audio written by the registered callback; event emission is not available",
+        units=["samples"],
+        latency="declared by the registered type", tail="zero",
+        scheduling="block-synchronous",
+        bindings=[
+            binding(role="event_block", kind="cpp_type",
+                    include="pulp/host/custom_node_events.hpp",
+                    qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host",
+                    header_fingerprint="sha256:14d2127f4a9baa9474b56c18984539c8f0d2dcf293e5f5fe59624da6be940dd3"),
+            binding(role="node_type", kind="cpp_type",
+                    include="pulp/host/custom_node_type.hpp",
+                    qualified_name="pulp::host::CustomNodeType", target="Pulp::host",
+                    header_fingerprint="sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068"),
+        ],
+        _link_probes=[
+            {"role": "event_block", "binding": "pulp::host::CustomNodeEventBlock",
+             "operation": "construct", "arguments": ""},
+            {"role": "node_type", "binding": "pulp::host::CustomNodeType",
+             "operation": "member_call", "member": "consumes_events", "arguments": ""},
+        ],
+    ),
+    capability(
         key="signal.stochastic-sources", domain="signal",
         summary="Seeded dust, LFSR, tilted continuous noise, and velvet-noise grid sources.",
         rt_class="mixed",

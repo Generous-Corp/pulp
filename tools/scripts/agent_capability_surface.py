@@ -65,8 +65,25 @@ PUBLIC_ROOTS = (
     },
 )
 
-# Exact reviewed sample-region authoring closure; never scan the whole host root.
-SAMPLE_REGION_HOST_HEADERS = ('pulp/host/signal_graph.hpp', 'pulp/host/signal_graph_runtime.hpp', 'pulp/host/signal_graph_prepared_topology_edit.hpp', 'pulp/host/custom_node_type.hpp', 'pulp/host/sample_region_authoring.hpp', 'pulp/host/sample_region_proof.hpp', 'pulp/host/sample_region_parameters.hpp')
+# Exact reviewed host closure; never scan the whole host root. core/host is
+# deliberately absent from PUBLIC_ROOTS: rglob-discovering it would surface every
+# host header at once, each one then failing as an unclassified public header
+# until someone gave it a disposition. So a host header is reviewed only by being
+# named here — which means a new installed host header is UNTRACKED until it is
+# added, and `--check` stays green while it is.
+REVIEWED_HOST_HEADERS = (
+    'pulp/host/signal_graph.hpp',
+    'pulp/host/signal_graph_runtime.hpp',
+    'pulp/host/signal_graph_prepared_topology_edit.hpp',
+    'pulp/host/custom_node_type.hpp',
+    'pulp/host/custom_node_events.hpp',
+    'pulp/host/sample_region_authoring.hpp',
+    'pulp/host/sample_region_proof.hpp',
+    'pulp/host/sample_region_parameters.hpp',
+)
+# The reviewed-host table is its own domain. It was previously recorded as
+# `signal`, which mislabeled anything here that is not sample-region work.
+REVIEWED_HOST_DOMAIN = 'host'
 
 DISPOSITIONS = {
     "capability_entrypoint",
@@ -129,11 +146,12 @@ def discover_headers(root: pathlib.Path) -> dict[str, dict[str, str]]:
                 "source": path.relative_to(root).as_posix(),
                 "fingerprint": file_fingerprint(path),
             }
-    for include in SAMPLE_REGION_HOST_HEADERS:
+    for include in REVIEWED_HOST_HEADERS:
         path = root / "core/host/include" / include
         if not path.is_file():
-            raise RuntimeError(f"reviewed sample-region header is missing: {path}")
-        headers[include] = {"domain": "signal", "source": path.relative_to(root).as_posix(),
+            raise RuntimeError(f"reviewed host header is missing: {path}")
+        headers[include] = {"domain": REVIEWED_HOST_DOMAIN,
+                            "source": path.relative_to(root).as_posix(),
                             "fingerprint": file_fingerprint(path)}
     return headers
 
@@ -320,8 +338,8 @@ def build_surface_document(
 
     counts = {name: 0 for name in sorted(DISPOSITIONS)}
     by_domain: dict[str, dict[str, int]] = {}
-    for public_root in PUBLIC_ROOTS:
-        by_domain[public_root["domain"]] = {
+    for domain in [root_["domain"] for root_ in PUBLIC_ROOTS] + [REVIEWED_HOST_DOMAIN]:
+        by_domain[domain] = {
             "public_headers": 0,
             "reviewed_headers": 0,
             "legacy_unreviewed_headers": 0,
