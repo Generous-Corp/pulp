@@ -104,6 +104,9 @@ pulp_add_test_suite(pulp-test-font-woff2 GROUP pulp-test-group-canvas-text
         PULP_TEST_INTER_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf"
         PULP_TEST_JOST_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/Jost-Regular.ttf"
         PULP_TEST_JETBRAINS_FIXTURE="${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf")
+pulp_test_data(pulp-test-font-woff2 NO_DEFINE
+    PATHS packages/pulp-web-player/src/theme/inter.woff2 external/fonts/Inter-Regular.ttf
+        external/fonts/Jost-Regular.ttf external/fonts/JetBrainsMono-Regular.ttf)
 
 # Color-font predicate on ResolvedFont.
 # Gated on PULP_HAS_SKIA — the predicate returns false without a real

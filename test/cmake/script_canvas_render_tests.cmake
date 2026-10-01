@@ -41,6 +41,11 @@ pulp_add_test_suite(pulp-test-view-bridge GROUP pulp-test-group-script-format
     TEST_SPEC "[lifecycle]"
     TEST_PREFIX "lifecycle::"
     LABELS lifecycle)
+pulp_test_data(pulp-test-view-bridge NO_DEFINE
+    PATHS core/format/include/pulp/format/clap_entry.hpp core/format/src/vst3_plug_view.cpp
+        core/format/src/au_view_controller_mac.mm core/format/src/au_view_controller_ios.mm
+        core/format/src/au_v2_cocoa_view.mm core/format/src/aax_effect_gui.cpp
+        core/format/src/standalone.cpp)
 
 # Script engine tests (legacy API)
 pulp_add_test_suite(pulp-test-script GROUP pulp-test-group-script-view
@@ -84,6 +89,7 @@ pulp_add_test_suite(pulp-test-theme GROUP pulp-test-group-script-view
 # iOS-only behavior is gated inside the test.
 pulp_add_test_suite(pulp-test-threejs-resources GROUP pulp-test-group-script-view
     LIBRARIES pulp::view)
+pulp_test_data(pulp-test-threejs-resources NONE)
 
 # Node-based smoke test for the IIFE bundler. Only registered when
 # Node.js is on PATH — desktop CI hosts have it,
@@ -222,6 +228,8 @@ pulp_add_test_suite(pulp-test-canvas-fonts GROUP pulp-test-group-canvas
         # Deterministic variable font (wght axis 300-800) for the variable-font
         # weight-instancing regression tests. Test-only; not in bundled_blobs().
         "PULP_TEST_VARIABLE_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/FunnelDisplay-VariableFont_wght.ttf\"")
+pulp_test_data(pulp-test-canvas-fonts NO_DEFINE
+    PATHS external/fonts/Inter-Regular.ttf external/fonts/FunnelDisplay-VariableFont_wght.ttf)
 
 # CSS gradient strings judged by the pixels they produce. Every defect this
 # covers was a value the parser ACCEPTED and painted wrong, so a string

@@ -1959,7 +1959,14 @@ pointing into the checkout, with no declaration covering it, marks its
 executable `data: undeclared` (the shadow selects it on every change). The
 pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
 undeclared source (one not undeclared in the base list); the backlog can only
-shrink. Declare only what the code opens: a test that hands the whole
+shrink. A test that reaches its data through its own definition
+(`PULP_REPO_ROOT`, a fixture-dir macro, `__FILE__`, a walk up from its
+working directory) declares with `NO_DEFINE` so its flags stay identical;
+`SOURCES` narrows a declaration to some of an executable's sources (a group
+or multi-source target), and `NONE` records a reviewed source whose
+`test/fixtures` text is only a comment or a temp-staged fixture. A test that
+spawns the `pulp` / import-design CLI or a compiler against the checkout
+stays undeclared: the child's reads are not the test's to bound. Declare only what the code opens: a test that hands the whole
 checkout to a CLI subprocess or doctor walk is not boundable and stays
 undeclared. Declaring a subset is worse than not declaring, because it
 makes an unsound key look sound. Count with

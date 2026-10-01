@@ -10,17 +10,26 @@
 #     pulp_test_data(pulp-test-modal-spec PATHS examples/modal-specs)
 #
 # pulp_test_data(<suite-or-executable>
-#     PATHS <repo-relative path or glob> ...   # files, directories, or globs
-#     [DEFINE <macro>]                         # default PULP_SOURCE_DIR
+#     PATHS <repo-relative path or glob> ... | NONE
+#     [SOURCES <source> ...]                   # default: all of the suite's
+#     [DEFINE <macro> | NO_DEFINE]             # default DEFINE PULP_SOURCE_DIR
 # )
 #
-# It defines <macro> as the checkout root for the suite's sources (the
+# It defines <macro> as the checkout root for the declaring sources (the
 # COMPILE_DEFINITIONS PULP_SOURCE_DIR=... it replaces) and records the paths.
+# NO_DEFINE records the paths and leaves the target's own definitions alone,
+# for a test that reaches its data through another definition (a fixture
+# directory, PULP_REPO_ROOT) or by walking up from its working directory.
+# NONE records a reviewed source that opens nothing in the checkout at run
+# time, so text that merely names test/fixtures (a comment, a staged temp
+# fixture) does not leave its executable undeclared.
 # Every path must match something in the checkout at configure time, so a
 # typo or a moved fixture fails the configure instead of declaring nothing.
 #
 # The suite argument is either a pulp_add_test_suite name (grouped or not;
 # only that member's sources are declared) or any executable target.
+# SOURCES narrows the declaration to some of those sources, for an executable
+# whose other sources read data the declaration does not cover.
 #
 # At the end of the test directory two artifacts are written under
 # ${CMAKE_BINARY_DIR}/test/test-data/:
@@ -71,12 +80,18 @@ function(_pulp_test_data_json_list out)
 endfunction()
 
 function(pulp_test_data NAME)
-    cmake_parse_arguments(D "" "DEFINE" "PATHS" ${ARGN})
+    cmake_parse_arguments(D "NONE;NO_DEFINE" "DEFINE" "PATHS;SOURCES" ${ARGN})
     if(D_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "pulp_test_data(${NAME}): unparsed arguments: ${D_UNPARSED_ARGUMENTS}")
     endif()
-    if(NOT D_PATHS)
-        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS is required")
+    if(D_NONE AND D_PATHS)
+        message(FATAL_ERROR "pulp_test_data(${NAME}): NONE and PATHS are exclusive")
+    endif()
+    if(NOT D_PATHS AND NOT D_NONE)
+        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS (or NONE) is required")
+    endif()
+    if(D_NO_DEFINE AND D_DEFINE)
+        message(FATAL_ERROR "pulp_test_data(${NAME}): DEFINE and NO_DEFINE are exclusive")
     endif()
     if(NOT D_DEFINE)
         set(D_DEFINE PULP_SOURCE_DIR)
@@ -105,6 +120,18 @@ function(pulp_test_data NAME)
                             "of that name; call it after the suite is declared")
     endif()
 
+    if(D_SOURCES)
+        set(_narrowed "")
+        foreach(_s IN LISTS D_SOURCES)
+            get_filename_component(_a "${_s}" ABSOLUTE)
+            if(NOT _a IN_LIST _sources)
+                message(FATAL_ERROR "pulp_test_data(${NAME}): '${_s}' is not one of its sources")
+            endif()
+            list(APPEND _narrowed "${_a}")
+        endforeach()
+        set(_sources "${_narrowed}")
+    endif()
+
     foreach(_p IN LISTS D_PATHS)
         if(IS_ABSOLUTE "${_p}" OR _p MATCHES "(^|/)\\.\\.(/|$)")
             message(FATAL_ERROR "pulp_test_data(${NAME}): '${_p}' must be relative to the checkout root")
@@ -124,7 +151,9 @@ function(pulp_test_data NAME)
     # A grouped member's definition goes on its own sources, so the macro
     # never leaks into its neighbours' translation units; a standalone
     # executable takes it target-wide, as its COMPILE_DEFINITIONS did.
-    if(_exe STREQUAL NAME)
+    if(D_NO_DEFINE OR D_NONE)
+        # The target keeps its own definitions.
+    elseif(_exe STREQUAL NAME AND NOT D_SOURCES)
         target_compile_definitions(${_exe} PRIVATE "${D_DEFINE}=\"${CMAKE_SOURCE_DIR}\"")
     else()
         set_property(SOURCE ${_sources} APPEND PROPERTY

@@ -136,6 +136,7 @@ add_library(pulp-reload-probe MODULE fixtures/reload_probe.cpp)
 set_target_properties(pulp-reload-probe PROPERTIES
     PREFIX "" POSITION_INDEPENDENT_CODE ON)
 pulp_add_test_suite(pulp-test-reload-library LIBRARIES pulp::format)
+pulp_test_data(pulp-test-reload-library NONE)
 add_dependencies(pulp-test-reload-library pulp-reload-probe)
 target_compile_definitions(pulp-test-reload-library PRIVATE
     RELOAD_PROBE_PATH="$<TARGET_FILE:pulp-reload-probe>")

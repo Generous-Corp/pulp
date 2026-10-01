@@ -11,6 +11,9 @@ add_executable(pulp-test-cli-import-detect
     test_cli_import_detect.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp
 )
+pulp_test_data(pulp-test-cli-import-detect NO_DEFINE
+    SOURCES test_cli_import_detect.cpp
+    PATHS compat.json test/fixtures/imports)
 target_include_directories(pulp-test-cli-import-detect PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/import-design
