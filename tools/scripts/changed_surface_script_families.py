@@ -25,8 +25,12 @@ unmapped, and the selector falls back to the full suite, when:
 `.agents/skills/*/SKILL.md` maps to the declared script tests whose inputs
 name the skills tree. Whole-tree tests (drift, lint, registry, sync, guard,
 census, inventory and probe checks, the same names the test-receipt shadow
-always runs) are added through one family whose paths are every mapped path,
-so any bounded script or skill change also runs them.
+always runs) and environment-bound tests (a RESOURCE_LOCK, or a gpu,
+browser-capture or audio-device label) are added through families whose paths
+are every mapped path, so any bounded script or skill change also runs them.
+Both sets are taken from the declared script tests, which exist in every
+configuration; an undeclared environment-bound test reads nothing a mapped
+script can reach without naming it.
 
     changed_surface_script_families.py --build-dir <dir> --write   # rewrite the block
     changed_surface_script_families.py --build-dir <dir> --check   # drift check
@@ -76,6 +80,9 @@ WHOLE_TREE_NAME_RE = re.compile(r"drift|census|registry|sync|guard|lint|inventor
 NATIVE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".mm", ".m", ".swift",
                    ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts")
 CMAKE_SUFFIXES = (".cmake", "CMakeLists.txt")
+# Labels that tie a test to a shared host resource (the reuse replay's
+# environment rule, plus audio devices).
+ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture", "audio-device"})
 # Build-tree directories that hold example executables and plugin bundles.
 EXAMPLE_PRODUCT_ROOTS = frozenset({"examples", "AU", "AUv3", "CLAP", "VST3", "LV2"})
 # Prose and workflow files name scripts without executing them in a ctest.
@@ -235,9 +242,29 @@ def generate(root: Path, tests: list[dict], model: inventory.CodeModel) -> list[
         if not whole_tree or set(whole_tree) & blocked_readers:
             raise GenerationError("whole-tree tests are missing or cannot run bounded; "
                                   "refusing to bound script changes")
+        env_bound = sorted(n for n in declared if n in environment_bound(tests))
+        if set(env_bound) & blocked_readers:
+            raise GenerationError("environment-bound tests cannot run bounded: "
+                                  + ", ".join(sorted(set(env_bound) & blocked_readers)))
         covered = sorted({p for f in families for p in f["paths"]})
         families.append(_family("script-surface-whole-tree", covered, whole_tree, products))
+        if env_bound:
+            families.append(_family("script-surface-environment-bound", covered, env_bound, products))
     return families
+
+
+def environment_bound(tests: list[dict]) -> set[str]:
+    """Tests whose outcome depends on a shared host resource rather than on
+    their inputs: a RESOURCE_LOCK, or a gpu, browser-capture or audio-device
+    label. Their failures cannot be predicted from a diff, so a bounded run
+    always includes them."""
+    bound = set()
+    for test in tests:
+        props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
+        labels = props.get("LABELS") or []
+        if props.get("RESOURCE_LOCK") or ENVIRONMENT_LABELS & set(labels):
+            bound.add(test["name"])
+    return bound
 
 
 def _digest(readers: Iterable[str]) -> str:
@@ -266,7 +293,8 @@ def _toml_list(key: str, values: list[str]) -> list[str]:
 def render(families: list[dict[str, Any]]) -> str:
     lines = [BEGIN,
              "# Do not edit by hand. Regenerate after test/ctest_script_inputs.json or a",
-             "# script's callers change; `changed-surface-script-families-drift` checks it."]
+             "# script's callers change; `changed-surface-script-families-drift` checks it.",
+             "# Resolve a merge conflict in this block by regenerating, never by hand."]
     for family in families:
         lines += ["", FAMILY_TABLE, f"name = {json.dumps(family['name'])}"]
         lines += _toml_list("paths", family["paths"])
@@ -320,7 +348,8 @@ def main(argv: list[str]) -> int:
             config_path.write_text(updated, encoding="utf-8")
         return 0
     if updated == config_text:
-        print("changed-surface script families: OK")
+        print(f"changed-surface script families: OK, {config_text[config_text.find(BEGIN):].count(FAMILY_TABLE)} "
+              f"generated families checked against {args.build_dir}")
         return 0
     fix = ("regenerate with\n  python3 tools/scripts/changed_surface_script_families.py "
            "--build-dir <dir> --write")

@@ -56,6 +56,10 @@ TIER_MANIFEST = "tools/ci/wide_non_native_checks.json"
 # The Shipyard config runs scripts as validation commands, so it blocks like any
 # other referrer, except where it only lists them in the changed-surface
 # families that tools/scripts/changed_surface_script_families.py generates.
+# The exemption holds only because `changed-surface-script-families-drift`
+# owns that block: anything hand-written between the markers is drift. Do not
+# relax that check without removing this exemption; the widening replay floor
+# in test_wide_non_native.py depends on it.
 SHIPYARD_CONFIG = ".shipyard/config.toml"
 SELECTOR_BLOCK_BEGIN = "# BEGIN GENERATED changed-surface script families"
 SELECTOR_BLOCK_END = "# END GENERATED changed-surface script families"

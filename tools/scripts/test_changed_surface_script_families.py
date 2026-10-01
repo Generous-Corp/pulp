@@ -19,8 +19,10 @@ BUILD = "/b"
 
 
 def ctest(name: str, *command: str, labels: list[str] | None = None,
-          fixtures: list[str] | None = None) -> dict:
+          fixtures: list[str] | None = None, lock: list[str] | None = None) -> dict:
     properties = [{"name": "WORKING_DIRECTORY", "value": "/repo"}]
+    if lock:
+        properties.append({"name": "RESOURCE_LOCK", "value": lock})
     if labels:
         properties.append({"name": "LABELS", "value": labels})
     if fixtures:
@@ -59,11 +61,11 @@ class FamilyFixture(unittest.TestCase):
 
     def script_test(self, name: str, entry: str, inputs: list[str] | None = None,
                     labels: list[str] | None = None, command: list[str] | None = None,
-                    fixtures: list[str] | None = None) -> None:
+                    fixtures: list[str] | None = None, lock: list[str] | None = None) -> None:
         self.declared[name] = {"entry": entry, "inputs": sorted(set((inputs or []) + [entry])),
                                "kind": "python"}
         self.tests.append(ctest(name, *(command or ["python3", entry]), labels=labels,
-                                fixtures=fixtures))
+                                fixtures=fixtures, lock=lock))
 
     def generate(self, *targets: tuple[str, str]) -> dict[str, dict]:
         self.write("test/ctest_script_inputs.json",
@@ -188,6 +190,32 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertTrue(families.BEGIN.startswith(wide_non_native.SELECTOR_BLOCK_BEGIN))
         self.assertEqual(families.END, wide_non_native.SELECTOR_BLOCK_END)
         self.assertEqual(str(families.CONFIG), wide_non_native.SHIPYARD_CONFIG)
+
+    def test_environment_bound_tests_ride_along_with_every_mapped_change(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        self.write("tools/scripts/browser_unit.mjs", "")
+        self.script_test("browser-unit", "tools/scripts/browser_unit.mjs", labels=["browser-capture"])
+        self.write("tools/scripts/locked.py", "")
+        self.script_test("locked-selftest", "tools/scripts/locked.py", lock=["browser"])
+        self.write("tools/scripts/plain.py", "")
+        self.script_test("plain-selftest", "tools/scripts/plain.py", labels=["node"])
+        generated = self.generate()
+        env = generated["script-surface-environment-bound"]
+        self.assertEqual(env["tests"], ["browser-unit", "locked-selftest"])
+        self.assertEqual(env["paths"], generated["script-surface-whole-tree"]["paths"])
+        self.assertIn("tools/scripts/test_a.py", env["paths"])
+
+    def test_environment_bound_test_that_cannot_run_bounded_refuses(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        self.write("tools/scripts/gpu_device.py", "")
+        self.script_test("gpu-device-selftest", "tools/scripts/gpu_device.py", labels=["gpu"],
+                         fixtures=["device"])
+        with self.assertRaises(families.GenerationError):
+            self.generate()
 
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
