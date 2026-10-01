@@ -12,6 +12,7 @@ from pathlib import Path
 
 import changed_surface_inventory as inventory
 import changed_surface_script_families as families
+import wide_non_native
 
 
 BUILD = "/b"
@@ -182,6 +183,11 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.assertEqual(skills["paths"], [".agents/skills/*/SKILL.md"])
         self.assertEqual(skills["tests"], ["skills-doc-sync"])
         self.assertIn(".agents/skills/*/SKILL.md", generated["script-surface-whole-tree"]["paths"])
+
+    def test_markers_match_what_the_gate_widening_treats_as_selection_only(self) -> None:
+        self.assertTrue(families.BEGIN.startswith(wide_non_native.SELECTOR_BLOCK_BEGIN))
+        self.assertEqual(families.END, wide_non_native.SELECTOR_BLOCK_END)
+        self.assertEqual(str(families.CONFIG), wide_non_native.SHIPYARD_CONFIG)
 
     def test_no_whole_tree_test_refuses_to_bound_anything(self) -> None:
         self.write("tools/scripts/test_alone.py", "")
