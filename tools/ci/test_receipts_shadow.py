@@ -551,8 +551,12 @@ def cmd_run(a: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 - no receipts is a verdict of zero hits, stated
             lookup_errors.append(f"listing: {pmr.describe_lookup_error(exc)}")
     for why in refusals[:10]:
+        # Refusal reasons contain only public CI receipt metadata, never tokens.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"test-receipts shadow: receipt refused: {why}", file=sys.stderr)
     for why in lookup_errors[:10]:
+        # Lookup diagnostics contain only public CI metadata, never tokens.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"test-receipts shadow: receipt lookup failed: {why}", file=sys.stderr)
     if lookup_errors:
         print(f"::warning title={TITLE}-lookup::{lookup_failure(lookup_errors)}")

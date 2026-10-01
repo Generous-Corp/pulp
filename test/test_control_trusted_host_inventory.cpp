@@ -94,6 +94,7 @@ class Fixture {
     }
     void write_manifest(std::string_view bytes) const {
         std::ofstream output(sidecar(), std::ios::binary | std::ios::trunc);
+        // codeql[cpp/cleartext-storage-file] -- this is a public test fixture, not a secret.
         output << bytes;
 #ifndef _WIN32
         output.close();
