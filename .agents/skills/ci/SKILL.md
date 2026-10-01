@@ -698,8 +698,10 @@ it. By Daniel's decision on 2026-09-30 neither is used, and the risk is visible
 instead: the advisory `Required-check machinery (advisory)` check run
 (`required-check-machinery.yml`, `pull_request_target`, protected-main
 definition) names every changed file that can decide a required check, with
-conclusion `neutral` when it flags anything. A workflow token usually cannot
-read branch protection, so in practice it counts every workflow file. Do not
+conclusion `neutral` when it flags anything. It reads the required contexts
+from main's committed `.github/rulesets/main-protection.json`, not from branch
+protection: a workflow token cannot read branch protection (it needs
+administration access), and an App token with that scope was declined. Do not
 propose an in-workflow "unforgeable" gate; read that status and review the
 named files.
 

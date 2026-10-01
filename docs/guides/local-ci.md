@@ -2855,13 +2855,18 @@ job fails and posts no check run.
 | `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
 | `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
 
-The required contexts come from the live branch protection when the workflow
-token can read it. When it cannot (reading branch protection needs
-administration access, which a workflow token does not normally have), or the
-list is empty, every `.github/workflows` and `.github/actions` file is counted
-and the check's summary says so. A required context with no mapped producer
-widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
-itself, and review those files before it is enqueued.
+The required contexts come from protected main's committed
+`.github/rulesets/main-protection.json`, which a pull request cannot change for
+its own report and which needs no administration access to read. It is kept
+equal to the live required checks by the ruleset drift workflow
+(`ruleset-drift-check.yml`, with `tools/scripts/test_ruleset_drift_config.py`
+pinning the expected contexts) and to Shipyard's `[governance]` list by
+`tools/ci/test_base_poison_detector.py`. If the file is missing or malformed, or
+lists no required checks, every `.github/workflows` and `.github/actions` file
+is counted and the check's summary says so. A required context with no mapped
+producer widens the report the same way. Treat a flagged pull request as one
+whose required checks it can grade itself, and review those files before it is
+enqueued.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 

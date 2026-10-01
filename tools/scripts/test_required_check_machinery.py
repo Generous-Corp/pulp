@@ -135,43 +135,38 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(len(shown.split(", ")) + dropped, 12)
 
 
-class LiveContextsTest(unittest.TestCase):
-    """An unreadable live required-context list fails closed to every workflow."""
+class CommittedRulesetTest(unittest.TestCase):
+    """A missing or malformed committed ruleset fails closed to every workflow."""
 
-    def setUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.dir = Path(self.temp.name)
+    FILES = [".github/workflows/release-cli.yml", ".github/workflows/build.yml", "docs/x.md"]
 
-    def run_cli(self, *extra: str) -> dict:
-        done = subprocess.run(
-            [sys.executable, str(HERE / "required_check_machinery.py"), "--repo", str(ROOT),
-             *extra, "--files", ".github/workflows/release-cli.yml", "docs/x.md"],
-            check=True, capture_output=True, text=True)
-        return json.loads(done.stdout)
+    def repo_with(self, ruleset: str | None) -> Path:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        repo = Path(temp.name)
+        if ruleset is not None:
+            (repo / ".github" / "rulesets").mkdir(parents=True)
+            (repo / rcm.RULESET).write_text(ruleset, encoding="utf-8")
+        return repo
 
-    def test_unreadable_or_empty_contexts_count_every_workflow(self) -> None:
-        empty = self.dir / "empty.json"
-        empty.write_text("[]", encoding="utf-8")
-        garbage = self.dir / "garbage.json"
-        garbage.write_text("<html>403</html>", encoding="utf-8")
-        for extra in (("--contexts-unavailable",), ("--contexts-file", str(empty)),
-                      ("--contexts-file", str(garbage)),
-                      ("--contexts-file", str(self.dir / "missing.json"))):
-            with self.subTest(extra=extra):
-                result = self.run_cli(*extra)
-                self.assertEqual(result["flagged"], {
-                    ".github/workflows/release-cli.yml": ["workflow (required checks unreadable)"]})
-                self.assertFalse(result["required_checks_read"])
-                self.assertEqual(result["conclusion"], "neutral")
+    def test_unusable_ruleset_counts_every_workflow(self) -> None:
+        no_required = json.dumps({"rules": [{"type": "merge_queue", "parameters": {}}]})
+        wrong_shape = json.dumps({"rules": [{"type": "required_status_checks",
+                                             "parameters": {"required_status_checks": [{}]}}]})
+        for name, text in (("missing", None), ("not json", "<html>"), ("not an object", "[]"),
+                           ("no required checks", no_required), ("wrong shape", wrong_shape)):
+            with self.subTest(name):
+                repo = self.repo_with(text)
+                self.assertEqual(rcm.required_contexts(repo), [])
+                flagged = rcm.classify(self.FILES, repo)
+                self.assertEqual(sorted(flagged), self.FILES[:2][::-1])
+                self.assertIn("workflow (required checks unreadable)",
+                              flagged[".github/workflows/release-cli.yml"])
 
-    def test_readable_contexts_use_the_producer_mapping(self) -> None:
-        live = self.dir / "live.json"
-        live.write_text(json.dumps(rcm.required_contexts(ROOT)), encoding="utf-8")
-        result = self.run_cli("--contexts-file", str(live))
-        self.assertEqual(result["flagged"], {})
-        self.assertTrue(result["required_checks_read"])
-        self.assertEqual(result["conclusion"], "success")
+    def test_committed_ruleset_selects_the_mapped_producers(self) -> None:
+        repo = self.repo_with((ROOT / rcm.RULESET).read_text(encoding="utf-8"))
+        self.assertEqual(rcm.required_contexts(repo), rcm.required_contexts(ROOT))
+        self.assertEqual(list(rcm.classify(self.FILES, repo)), [".github/workflows/build.yml"])
 
 
 class WorkflowStepTest(unittest.TestCase):
@@ -184,18 +179,10 @@ class WorkflowStepTest(unittest.TestCase):
     STUB_GH = """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
-log = os.environ["GH_LOG"]
-if "check-runs" in " ".join(args):
-    with open(log, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(json.load(sys.stdin)) + "\\n")
-    sys.exit(0)
-if "protection/required_status_checks" in " ".join(args):
-    contexts = os.environ.get("GH_CONTEXTS")
-    if contexts is None:
-        sys.exit(1)
-    print(contexts)
-    sys.exit(0)
-sys.exit(2)
+with open(os.environ["GH_LOG"], "a", encoding="utf-8") as handle:
+    payload = json.load(sys.stdin) if "check-runs" in " ".join(args) else None
+    handle.write(json.dumps({"args": args, "payload": payload}) + "\\n")
+sys.exit(0 if payload is not None else 2)
 """
 
     @staticmethod
@@ -248,60 +235,57 @@ sys.exit(2)
             git(work, "checkout", "-q", "main")
         (self.root / "step.sh").write_text(self.step_script(), encoding="utf-8")
 
-    def run_step(self, number: int, head: str, contexts: str | None) -> dict:
-        runner_temp = self.root / f"rt-{number}-{contexts is not None}"
+    def run_step(self, number: int, head: str, ruleset: str | None = None) -> dict:
+        runner_temp = self.root / f"rt-{number}-{ruleset is None}"
         runner_temp.mkdir()
         log = runner_temp / "gh.log"
+        committed = self.work / rcm.RULESET
+        if ruleset is not None:
+            committed.write_text(ruleset, encoding="utf-8")
+            self.addCleanup(git, self.work, "checkout", "-q", "--", rcm.RULESET)
         env = dict(os.environ, PATH=self.path, GH_TOKEN="unused", GH_LOG=str(log),
                    PR_NUMBER=str(number), PR_HEAD=head, REPOSITORY="example/repo",
                    RUN_URL="https://example.invalid/run", RUNNER_TEMP=str(runner_temp),
                    GITHUB_STEP_SUMMARY=str(runner_temp / "summary.md"))
-        env.pop("GH_CONTEXTS", None)
-        if contexts is not None:
-            env["GH_CONTEXTS"] = contexts
         done = subprocess.run(["bash", "-e", str(self.root / "step.sh")], cwd=self.work,
                               env=env, capture_output=True, text=True, timeout=60)
+        if ruleset is not None:
+            git(self.work, "checkout", "-q", "--", rcm.RULESET)
         self.assertEqual(done.returncode, 0, done.stderr)
-        posted = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(len(posted), 1)
-        self.assertEqual(posted[0]["name"], CONTEXT)
-        self.assertEqual(posted[0]["head_sha"], head)
-        posted[0]["stdout"] = done.stdout
-        return posted[0]
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        # The only API call is the check-run post: no branch-protection read.
+        self.assertEqual([c["args"][-3:] for c in calls],
+                         [["repos/example/repo/check-runs", "--input", "-"]])
+        posted = calls[0]["payload"]
+        self.assertEqual(posted["name"], CONTEXT)
+        self.assertEqual(posted["head_sha"], head)
+        posted["stdout"] = done.stdout
+        return posted
 
     def test_flagged_pull_request_renders_neutral(self) -> None:
-        live = json.dumps(rcm.required_contexts(ROOT))
-        for contexts in (live, None):
-            with self.subTest(contexts_readable=contexts is not None):
-                check = self.run_step(1, self.heads[".github/workflows/build.yml"], contexts)
-                self.assertEqual(check["conclusion"], "neutral")
-                self.assertEqual(check["output"]["title"],
-                                 "touches required-check machinery: build.yml")
-                self.assertIn("visibility, not enforcement", check["output"]["summary"])
-                self.assertIn("::warning title=Required-check machinery", check["stdout"])
+        check = self.run_step(1, self.heads[".github/workflows/build.yml"])
+        self.assertEqual(check["conclusion"], "neutral")
+        self.assertEqual(check["output"]["title"], "touches required-check machinery: build.yml")
+        self.assertIn("visibility, not enforcement", check["output"]["summary"])
+        self.assertIn("::warning title=Required-check machinery", check["stdout"])
 
     def test_unflagged_pull_request_renders_success(self) -> None:
-        check = self.run_step(2, self.heads["docs/guides/local-ci.md"],
-                              json.dumps(rcm.required_contexts(ROOT)))
+        check = self.run_step(2, self.heads["docs/guides/local-ci.md"])
         self.assertEqual(check["conclusion"], "success")
         self.assertEqual(check["output"]["title"], "touches no required-check machinery")
+        self.assertNotIn("could not", check["output"]["summary"])
         self.assertNotIn("::warning", check["stdout"])
 
-    def test_live_contexts_decide_whether_another_workflow_is_flagged(self) -> None:
-        # A workflow that posts no required check is flagged only when the
-        # required checks could not be read.
+    def test_committed_ruleset_decides_whether_another_workflow_is_flagged(self) -> None:
+        # A workflow that posts no required check is flagged only when main's
+        # committed ruleset cannot be read.
         head = self.heads[".github/workflows/release-cli.yml"]
-        readable = self.run_step(3, head, json.dumps(rcm.required_contexts(ROOT)))
-        self.assertEqual(readable["conclusion"], "success")
-        unreadable = self.run_step(3, head, None)
-        self.assertEqual(unreadable["conclusion"], "neutral")
-        self.assertEqual(unreadable["output"]["title"],
+        self.assertEqual(self.run_step(3, head)["conclusion"], "success")
+        broken = self.run_step(3, head, ruleset="{")
+        self.assertEqual(broken["conclusion"], "neutral")
+        self.assertEqual(broken["output"]["title"],
                          "touches required-check machinery: release-cli.yml")
-
-    def test_unreadable_required_checks_are_named_in_the_summary(self) -> None:
-        check = self.run_step(2, self.heads["docs/guides/local-ci.md"], None)
-        self.assertEqual(check["conclusion"], "success")
-        self.assertIn("could not be read", check["output"]["summary"])
+        self.assertIn("lists no readable required checks", broken["output"]["summary"])
 
 
 class WorkflowContractTest(unittest.TestCase):
