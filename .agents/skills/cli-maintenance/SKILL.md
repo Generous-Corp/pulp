@@ -342,6 +342,24 @@ rebuild. Keep the two sides in step:
   `EXCLUDED_*` filter constants from the projection side: they are pinned by
   `.shipyard/changed-surface-inventory.json`.
 
+### A tartci capacity denial retries for the agent floor; its QoS is mandatory
+
+`TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`) answers a
+`leases acquire` exit 75 for a **background-class** build
+(`PULP_BUILD_CLASS=background`) by retrying the same request with
+`--allow-floor`. An interactive build (the default) never takes the floor: it
+runs at normal QoS because someone is waiting on it. A
+host whose fleet profile sets `agent_floor_cores` grants a smaller lease that no
+other lease pays for; the lease then reports `floor()`, the granted size as
+`jobs()`, and the granted `qos()` (`utility` or `background`, per the host's
+`agent_floor_qos`). Every build call site passes `lease.floor()` as the
+`required` argument of `apply_agent_build_qos`, so a floor build runs under
+`taskpolicy -c utility` / `-b` even with `PULP_TARTCI_TASKPOLICY=0`: the QoS is
+the condition of the grant, not a preference. A new build-shaped command must
+do the same, or it will run a floor grant at default QoS and take CPU the host
+never agreed to give. A grant larger than the request, or one without a
+`lease_size_cores`, is released and treated as the original denial.
+
 ## Adding a CLI Command — Full Checklist
 
 ### 1. Implement in CLI source

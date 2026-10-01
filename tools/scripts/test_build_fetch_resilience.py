@@ -479,6 +479,51 @@ class ChromeArtifactCache(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("source=network", proc.stdout)
         self.assertTrue(self.calls.exists())
+BREW_UPDATE_STEP = "brew update (macOS)"
+
+
+class MacosBrewUpdateStep(unittest.TestCase):
+    """The update runs only when a later step will actually `brew install`."""
+
+    def _run(self, present: tuple[str, ...]) -> tuple[subprocess.CompletedProcess, list[str]]:
+        script = _step(BREW_UPDATE_STEP)["run"]
+        with tempfile.TemporaryDirectory() as tmp:
+            bindir = Path(tmp) / "bin"
+            bindir.mkdir()
+            calls = Path(tmp) / "calls"
+            _failing_stub(bindir, "brew", calls, 0, counted="update")
+            for tool in present:
+                _stub(bindir, tool, "exit 0\n")
+            proc = subprocess.run(
+                ["bash", "-e", "-c", script],
+                env={"PATH": f"{bindir}:/usr/bin:/bin"},
+                capture_output=True, text=True, timeout=60,
+            )
+            recorded = calls.read_text().splitlines() if calls.exists() else []
+            return proc, [call.split("|", 1)[1] for call in recorded]
+
+    def test_baked_tools_skip_the_update(self) -> None:
+        proc, calls = self._run(("ccache", "ninja"))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("skipping brew update", proc.stdout)
+
+    def test_a_missing_tool_still_updates(self) -> None:
+        for present in (("ccache",), ("ninja",), ()):
+            with self.subTest(present=present):
+                proc, calls = self._run(present)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(calls, ["update|--quiet|"])
+
+    def test_every_brew_install_is_guarded_by_the_update_skip(self) -> None:
+        guard = set(re.findall(r"command -v (\w+)", _step(BREW_UPDATE_STEP)["run"]))
+        installed = set()
+        for step in _build_steps():
+            installed.update(re.findall(r"brew install (\w+)", step.get("run") or ""))
+        # The control: the scan must see the installs it exists to police.
+        self.assertTrue({"ccache", "ninja"} <= installed, installed)
+        self.assertEqual(installed - guard, set(),
+                         "a step installs with brew a tool the update skip does not check")
 
 
 if __name__ == "__main__":

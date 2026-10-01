@@ -1,0 +1,42 @@
+{
+  "cmake": {
+    "generator": {
+      "multiConfig": false,
+      "name": "Ninja"
+    },
+    "paths": {
+      "cmake": "/opt/homebrew/bin/cmake",
+      "cpack": "/opt/homebrew/bin/cpack",
+      "ctest": "/opt/homebrew/bin/ctest",
+      "root": "/opt/homebrew/share/cmake"
+    },
+    "version": {
+      "isDirty": false,
+      "major": 4,
+      "minor": 3,
+      "patch": 3,
+      "string": "4.3.3",
+      "suffix": ""
+    }
+  },
+  "objects": [
+    {
+      "jsonFile": "codemodel-v2-23a7e23b3cebf5c38ebf.json",
+      "kind": "codemodel",
+      "version": {
+        "major": 2,
+        "minor": 10
+      }
+    }
+  ],
+  "reply": {
+    "codemodel-v2": {
+      "jsonFile": "codemodel-v2-23a7e23b3cebf5c38ebf.json",
+      "kind": "codemodel",
+      "version": {
+        "major": 2,
+        "minor": 10
+      }
+    }
+  }
+}

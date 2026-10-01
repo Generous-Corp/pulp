@@ -1488,9 +1488,21 @@ jobs:
       # install step below already retries with its own `brew update`,
       # which is what actually recovers the stale-config case, so
       # swallowing the exit code here costs no coverage.
+      #
+      # Only a later `brew install` needs a fresh Homebrew config, and the
+      # macOS steps below install only ccache and ninja, each only when it is
+      # absent. The gate VM golden bakes both, so there the update installs
+      # nothing and only costs a portable-ruby and API download on every job.
+      # Skip it when both tools are already on PATH; any runner missing one
+      # still updates first, exactly as before.
       - name: brew update (macOS)
         if: runner.os == 'macOS'
-        run: brew update --quiet || echo "brew update failed; install steps retry"
+        run: |
+          if command -v ccache >/dev/null 2>&1 && command -v ninja >/dev/null 2>&1; then
+            echo "ccache and ninja are installed, so Homebrew has nothing to install; skipping brew update"
+            exit 0
+          fi
+          brew update --quiet || echo "brew update failed; install steps retry"
 
       # The gate VM golden bakes ccache, and `brew install` of an installed
       # formula still reaches the Homebrew API, so an installed ccache is used
@@ -2837,7 +2849,7 @@ jobs:
             --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
-            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members --codemodel \
             --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then

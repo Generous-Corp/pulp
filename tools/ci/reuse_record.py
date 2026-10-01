@@ -22,6 +22,10 @@ in the neutral record the replay harness reads:
                      receipt) and the runtime closure it loads (transitive
                      Mach-O dylib/framework linkage, a script's interpreter),
                      each member with its own sha256
+    codemodel-<sha>.json
+                     per CMake target, digests of its sources, compile groups,
+                     link line and ctest registrations from the file-API
+                     codemodel (tools/ci/codemodel_digest.py), with --codemodel
     link-members-<sha>.json
                      per executable, the archive members its link pulled and
                      which archives it loads whole (tools/ci/link_members.py),
@@ -595,6 +599,25 @@ def cmd_write(a: argparse.Namespace) -> int:
     identity_path = out / "identity.json"
     identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")), encoding="utf-8")
 
+    codemodel = None
+    if a.codemodel and build_dir:
+        import codemodel_digest as cmd_digest
+
+        try:
+            import protected_merge_receipt as pmr
+
+            registrations = pmr.ctest_inventory(build_dir).get("tests", [])
+            doc = cmd_digest.digest_targets(build_dir, source_root or build_dir, registrations)
+            name = f"codemodel-{ctx['merge_sha'] or 'unknown'}.json"
+            (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            codemodel = {"file": name, "targets": len(doc["targets"]),
+                         "executables": sum(1 for t in doc["targets"].values() if t["type"] == "EXECUTABLE"),
+                         "with_tests": sum(1 for t in doc["targets"].values() if t["tests"]),
+                         "tests_unmatched": doc["tests_unmatched"],
+                         "bytes": (out / name).stat().st_size}
+        except Exception as exc:  # noqa: BLE001 - results are still worth writing
+            problems.append(f"codemodel digest unavailable: {exc}")
+
     link_members = None
     if a.link_members and build_dir:
         import link_members as lm
@@ -627,10 +650,12 @@ def cmd_write(a: argparse.Namespace) -> int:
                      "unresolved_executables": identity["unresolved_executables"],
                      "output_keys": sum(1 for r in records if r["output_key"])},
         "link_members": link_members,
+        "codemodel": codemodel,
         "problems": problems,
     }
     job["bytes"] = {"tests_jsonl": tests_path.stat().st_size, "identity_json": identity_path.stat().st_size,
-                    "link_members": link_members["bytes"] if link_members else 0}
+                    "link_members": link_members["bytes"] if link_members else 0,
+                    "codemodel": codemodel["bytes"] if codemodel else 0}
     job["seconds"] = round(time.monotonic() - t0, 1)
     (out / "job.json").write_text(json.dumps(job, sort_keys=True, indent=1), encoding="utf-8")
 
@@ -638,6 +663,7 @@ def cmd_write(a: argparse.Namespace) -> int:
             "suites": {k: v["tests"] for k, v in summary.items()},
             "executables": job["identity"]["executables"], "bytes": sum(job["bytes"].values()),
             "linked": link_members["executables"] if link_members else None,
+            "codemodel_targets": codemodel["targets"] if codemodel else None,
             "runner_image": image["digest"], "seconds": job["seconds"]}
     print(f"::notice title={TITLE}::{json.dumps(note, sort_keys=True)}")
     for p in problems:
@@ -661,6 +687,8 @@ def main(argv: list[str]) -> int:
     w.add_argument("--build-outcome", default=None)
     w.add_argument("--identity-scope", choices=("all", "ran"), default="all",
                    help="hash every registered test executable (default) or only those that ran")
+    w.add_argument("--codemodel", action="store_true",
+                   help="digest every CMake codemodel target (tools/ci/codemodel_digest.py) into codemodel-<sha>.json")
     w.add_argument("--link-members", action="store_true",
                    help="collect <build>/link-members (tools/ci/link_members.py) into link-members-<sha>.json")
     w.add_argument("--context", action="append", default=[],

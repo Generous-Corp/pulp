@@ -573,6 +573,127 @@ TEST_CASE("governance tier is Tier 1 when a tartci host-profile succeeds") {
 }
 #endif
 
+TEST_CASE("agent-floor grants carry their size and qos") {
+    const auto utility = parse_tartci_floor_grant(
+        R"({"ok":true,"floor":true,"qos":"utility","lease":{"floor":true,"lease_size_cores":10,"requested_cores":12}})",
+        12);
+    REQUIRE(utility.ok);
+    REQUIRE(utility.floor);
+    REQUIRE(utility.cores == 10);
+    REQUIRE(utility.qos == "utility");
+
+    // A floor grant from a tartci that predates the qos knob means background.
+    const auto legacy = parse_tartci_floor_grant(
+        R"({"ok":true,"floor":true,"lease":{"lease_size_cores":6}})", 12);
+    REQUIRE(legacy.ok);
+    REQUIRE(legacy.qos == "background");
+    REQUIRE(parse_tartci_floor_grant(
+                R"({"ok":true,"floor":true,"qos":"realtime","lease":{"lease_size_cores":6}})", 12)
+                .qos
+            == "background");
+
+    // The retry may land an ordinary grant: no floor, no qos override.
+    const auto ordinary = parse_tartci_floor_grant(
+        R"({"ok":true,"floor":false,"qos":null,"lease":{"lease_size_cores":8}})", 12);
+    REQUIRE(ordinary.ok);
+    REQUIRE_FALSE(ordinary.floor);
+    REQUIRE(ordinary.qos.empty());
+
+    // A grant this caller cannot size, or one above the request, is a denial.
+    REQUIRE_FALSE(parse_tartci_floor_grant(
+        R"({"ok":true,"floor":true,"lease":{"lease_size_cores":40}})", 12).ok);
+    REQUIRE_FALSE(parse_tartci_floor_grant(R"({"ok":true,"floor":true,"lease":{}})", 12).ok);
+    REQUIRE_FALSE(parse_tartci_floor_grant(R"({"ok":false,"reason":"capacity_exceeded"})", 12).ok);
+    REQUIRE_FALSE(parse_tartci_floor_grant("not json", 12).ok);
+}
+
+TEST_CASE("utility qos and required floor qos wrap the build command") {
+    ScopedEnvVar taskpolicy_disabled("PULP_TARTCI_TASKPOLICY", "0");
+#ifdef __APPLE__
+    REQUIRE(apply_agent_build_qos("cmake --build build", "utility")
+            == "cmake --build build");
+    REQUIRE(apply_agent_build_qos("cmake --build build", "utility", true)
+            == "taskpolicy -c utility cmake --build build");
+    REQUIRE(apply_agent_build_qos("cmake --build build", "background", true)
+            == "taskpolicy -b cmake --build build");
+#else
+    REQUIRE(apply_agent_build_qos("cmake --build build", "utility", true)
+            == "cmake --build build");
+#endif
+}
+
+#ifndef _WIN32
+TEST_CASE("a denied background build takes the agent-floor lease instead of failing") {
+    auto root = fs::temp_directory_path()
+        / ("pulp-tartci-floor-test-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    const auto script = root / "tartci";
+    const auto log = root / "calls.log";
+    {
+        std::ofstream out(script);
+        out << R"SH(#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_TARTCI_LOG:?}"
+if [ "${1:-}" = "host-profile" ]; then
+  printf 'PULP_BUILD_JOBS=12\nTARTCI_AGENT_QOS=normal\n'
+  exit 0
+fi
+case "$*" in
+  *"leases acquire"*"--allow-floor"*)
+    [ "${FAKE_FLOOR:-}" = "1" ] || { echo '{"ok":false,"reason":"capacity_exceeded"}'; exit 75; }
+    echo '{"ok":true,"floor":true,"qos":"utility","lease":{"floor":true,"lease_size_cores":10,"requested_cores":12}}'
+    exit 0 ;;
+  *"leases acquire"*)
+    echo '{"ok":false,"reason":"capacity_exceeded"}'
+    exit 75 ;;
+esac
+echo '{"ok":true}'
+)SH";
+    }
+    fs::permissions(script, fs::perms::owner_all, fs::perm_options::replace);
+
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+    ScopedEnvVar fake_log("FAKE_TARTCI_LOG", log.string());
+    ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", "1");
+    ScopedEnvVar no_nested("PULP_TARTCI_LEASE_HELD", std::nullopt);
+    ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+    TartciAgentLeaseRequest req{root, "pulp-build", false};
+
+    {
+        // An interactive build (the default class) never takes the floor.
+        ScopedEnvVar interactive("PULP_BUILD_CLASS", std::nullopt);
+        ScopedEnvVar floor_on("FAKE_FLOOR", "1");
+        auto lease = TartciAgentBuildLease::acquire(req);
+        REQUIRE_FALSE(lease.ok());
+        REQUIRE(lease.exit_code() == 75);
+        REQUIRE(read_file(log).find("--allow-floor") == std::string::npos);
+    }
+    ScopedEnvVar background_class("PULP_BUILD_CLASS", "background");
+    {
+        ScopedEnvVar floor_on("FAKE_FLOOR", "1");
+        auto lease = TartciAgentBuildLease::acquire(req);
+        REQUIRE(lease.ok());
+        REQUIRE(lease.active());
+        REQUIRE(lease.floor());
+        REQUIRE(lease.jobs() == 10);
+        REQUIRE(lease.qos() == "utility");
+    }
+    {
+        // Knob off: the retry is denied too, and the build keeps today's denial.
+        ScopedEnvVar floor_off("FAKE_FLOOR", "0");
+        auto lease = TartciAgentBuildLease::acquire(req);
+        REQUIRE_FALSE(lease.ok());
+        REQUIRE(lease.exit_code() == 75);
+        REQUIRE_FALSE(lease.floor());
+    }
+    const auto calls = read_file(log);
+    REQUIRE(calls.find("--cores 12 --priority build") != std::string::npos);
+    REQUIRE(calls.find("--allow-floor") != std::string::npos);
+    REQUIRE(calls.find("leases release") != std::string::npos);
+    fs::remove_all(root);
+}
+#endif
+
 namespace {
 
 // A class-aware fake tartci: host-profile advertises the governor schema and

@@ -5,6 +5,7 @@
 #include "shell_redirect.hpp"
 
 #include <pulp/runtime/system.hpp>
+#include <choc/text/choc_JSON.h>
 
 #include <algorithm>
 #include <chrono>
@@ -330,15 +331,59 @@ std::string tartci_agent_lease_id(const TartciAgentLeaseRequest& req) {
     return "pulp-agent-build-" + std::to_string(getpid()) + "-" + std::to_string(tick);
 }
 
-std::string apply_agent_build_qos(const std::string& command, const std::string& qos) {
+std::string apply_agent_build_qos(const std::string& command, const std::string& qos,
+                                  bool required) {
 #ifdef __APPLE__
-    if (qos == "background" && !env_false("PULP_TARTCI_TASKPOLICY")) {
+    if (!required && env_false("PULP_TARTCI_TASKPOLICY")) {
+        return command;
+    }
+    if (qos == "background") {
         return "taskpolicy -b " + command;
+    }
+    if (qos == "utility") {
+        return "taskpolicy -c utility " + command;
     }
 #else
     (void)qos;
+    (void)required;
 #endif
     return command;
+}
+
+TartciFloorGrant parse_tartci_floor_grant(const std::string& json, int requested_cores) {
+    TartciFloorGrant grant;
+    try {
+        auto body = choc::json::parse(json);
+        if (!body.isObject() || !body.hasObjectMember("ok") || !body["ok"].getWithDefault(false)) {
+            return grant;
+        }
+        if (!body.hasObjectMember("lease") || !body["lease"].isObject()) {
+            return grant;
+        }
+        auto lease = body["lease"];
+        if (!lease.hasObjectMember("lease_size_cores")) {
+            return grant;
+        }
+        const auto size = lease["lease_size_cores"].getWithDefault<int64_t>(0);
+        // A grant this caller cannot size, or one larger than it asked for, must
+        // not run unbounded: treat it as a denial.
+        if (size < 1 || size > requested_cores) {
+            return grant;
+        }
+        grant.cores = static_cast<int>(size);
+        grant.floor = body.hasObjectMember("floor") && body["floor"].getWithDefault(false);
+        if (grant.floor) {
+            // A tartci that predates configurable floor QoS always meant background.
+            std::string qos = body.hasObjectMember("qos") && body["qos"].isString()
+                                  ? std::string(body["qos"].getString())
+                                  : "background";
+            grant.qos = qos == "utility" ? "utility" : "background";
+        }
+        grant.ok = true;
+    } catch (...) {
+        grant = {};
+    }
+    return grant;
 }
 
 std::string apply_build_dir_lock(const std::string& command,
@@ -549,6 +594,7 @@ TartciAgentBuildLease& TartciAgentBuildLease::operator=(TartciAgentBuildLease&& 
     active_ = other.active_;
     exit_code_ = other.exit_code_;
     jobs_ = other.jobs_;
+    floor_ = other.floor_;
     error_ = std::move(other.error_);
     tartci_bin_ = std::move(other.tartci_bin_);
     lease_id_ = std::move(other.lease_id_);
@@ -693,6 +739,30 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     }
 
     auto acquired = capture_command(cmd);
+    if (acquired.exit_code == 75 && background) {
+        // A background build denied for capacity. A host with
+        // `agent_floor_cores` set answers the same request with --allow-floor by
+        // granting a smaller lease at a lower QoS that no other lease pays for.
+        // Interactive builds never take the floor: someone is waiting on them,
+        // and the floor's QoS is the condition of its grant. Knob off (75 again),
+        // a tartci too old to know the flag (argparse 2), or an unusable grant
+        // keeps the denial.
+        auto retry = capture_command(cmd + " --allow-floor");
+        if (retry.exit_code == 0) {
+            const auto grant = parse_tartci_floor_grant(retry.output, lease.jobs_);
+            if (grant.ok) {
+                lease.jobs_ = grant.cores;
+                if (grant.floor) {
+                    lease.floor_ = true;
+                    lease.qos_ = grant.qos;
+                }
+                acquired = std::move(retry);
+            } else {
+                (void)run(shell_quote(tartci) + " leases release --id "
+                          + shell_quote(lease.lease_id_) + " --json" + output_to_null());
+            }
+        }
+    }
     if (acquired.exit_code != 0) {
         lease.ok_ = false;
         lease.exit_code_ = acquired.exit_code;

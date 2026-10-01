@@ -1307,6 +1307,15 @@
    ],
    "kind": "python"
   },
+  "codemodel-digest-selftest": {
+   "entry": "tools/ci/test_codemodel_digest.py",
+   "inputs": [
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/test_codemodel_digest.py",
+    "tools/ci/testdata/codemodel_digest"
+   ],
+   "kind": "python"
+  },
   "codex-review-signal-selftest": {
    "entry": "tools/scripts/test_codex_review_signal.sh",
    "inputs": [
@@ -4808,9 +4817,12 @@
     ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
     "test/ctest_script_inputs.json",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
     "tools/ci/reuse_record.py",
+    "tools/ci/test_codemodel_digest.py",
     "tools/ci/test_reuse_record.py",
+    "tools/ci/testdata/codemodel_digest",
     "tools/ci/testdata/reuse_record",
     "tools/scripts/classify_changes.py",
     "tools/scripts/protected_merge_receipt.py"

@@ -343,7 +343,7 @@ int cmd_build(const std::vector<std::string>& args) {
     pulp_debug("cmd_build: run build (cmake --build)");
     int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
         apply_build_dir_lock(
-            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos()),
+            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos(), lease.floor()),
                                        lease.jobs(),
                                        lease.active()),
             project_root, build_dir),

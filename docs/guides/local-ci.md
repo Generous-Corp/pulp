@@ -963,7 +963,12 @@ the link arguments under `<build>/link-members/` (the map, megabytes of
 symbol table, is deleted). The linked bytes are identical with and without
 it. `link-members-<sha>.json` in the record then lists, per executable, the
 archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`).
+force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+(`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
+source list, compile groups, link line and the ctest registrations that run
+its artifact, read from the file-API codemodel reply the configure step
+requests, with build and source roots written as `<build>/` and `<src>/` so
+the same configuration digests identically on every VM.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
@@ -1566,6 +1571,12 @@ here removes a flake without removing any coverage.
 
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
+
+The update itself is skipped when `ccache` and `ninja` are both already on
+PATH, which is every tartci gate VM (the golden bakes both). Nothing later in
+the job runs `brew install` there, so the update only downloaded a portable
+Ruby and the Homebrew API data on every gate job. A runner missing either tool
+(Namespace, GitHub-hosted) still updates before installing.
 
 ## Repository history and pinned archives from the tartci host cache
 
@@ -2727,11 +2738,9 @@ records whether they ran: the anchored `^slow$` label set means they did. The
 reuse step passes the group's own classification to the verifier as
 `--affected-slow-required` (an empty classifier output counts as `true`), but
 only when the protected-base verifier accepts that flag. A group that requires
-the proofs while the receipt's run skipped them is reported as a
-`::notice::protected receipt: merge group requires the slow-affected proofs
-...` line on an otherwise successful reuse. The verifier does not refuse on it,
-so those notices give the would-refuse count to read before refusal is
-switched on.
+the proofs while the receipt's run skipped them is refused with "merge group
+requires the slow-affected proofs but the receipt's run did not execute them",
+and a verifier given no requirement treats the proofs as required.
 
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the

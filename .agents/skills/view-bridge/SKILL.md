@@ -872,6 +872,38 @@ standalone window host emits, so one query covers both. The plug-in hosts still
 emit no `frame` / `paint` / `gpu_acquire` spans, so a trace cannot profile their
 frame loop; these counters are pointer-path evidence only.
 
+## A press into a non-key editor window must reach the control (first mouse)
+
+AppKit hands a mouse-down in a window that is not key to the view only when
+that view answers YES to `-acceptsFirstMouse:`; NSView answers NO. A DAW keeps
+its own windows key most of the time, so a plug-in host view that keeps the
+default swallows the first click after any interaction elsewhere in the host:
+the press only makes the editor window key. The user's retry lands, usually on
+a different part of the control, so the report reads as a geometric dead zone
+("the button only works on its top half") even though every point of the
+control resolves correctly. Both plug-in host views (`PulpPluginView`,
+`PulpGpuPluginView`) return YES. The standalone `PulpView` keeps NO on purpose
+(an inspect surface should not act on an activating click), so do not
+"unify" the two.
+
+Why view-tree tests cannot see it: `simulate_click`, `deliver_mouse_down`, and
+calling `-mouseDown:` on the NSView directly all run after AppKit has already
+decided whether the view gets the event. The only instrument that can measure
+this is a press sent through `-[NSWindow sendEvent:]` while ANOTHER window is
+key (`test_plugin_view_host_first_mouse_macos.mm`). Assert that the editor
+window really is not key before the press. If that precondition does not hold,
+the test measures nothing.
+
+Also worth knowing when hunting "part of a control is dead": `View::hit_test`
+descends into an `overflow: visible` child only within +/-500px of the child's
+own box. A popover that paints farther than that from the element it hangs off
+(e.g. a tall menu opening upward from a footer trigger) is unreachable through
+a bare root `hit_test`. Presses still work, because `route_press_to_active_overlay`
+hit-tests from the overlay itself (`overlay_contains` measures the true painted
+extent), but anything that resolves through the root alone does not. A sweep
+that resolves presses has to route through the open overlay the way the hosts
+do, or it will report menu rows as dead when they are not.
+
 ## Common pitfalls
 
 1. **Forgetting `notify_attached()` after a successful attach.** The

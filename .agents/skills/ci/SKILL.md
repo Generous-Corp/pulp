@@ -2070,6 +2070,12 @@ the first target (and before FetchContent). The launcher must exit with the
 linker's status and fall back to the plain command whenever it cannot write
 its record: recording may never fail a link.
 
+`codemodel-<sha>.json` digests only named codemodel fields: never hash a raw
+target record, whose `backtrace` indices move whenever an unrelated line of
+CMake moves. A ctest registration belongs to the target whose artifact is its
+`command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
+compiled test is missing and only script tests (owned by no target) appear.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
@@ -8927,6 +8933,13 @@ the macOS `Install ccache (macOS)` step within minutes of each other
 because Namespace's runner image had drifted past the freshness
 window the brew preamble enforces. Adding `brew update --quiet`
 once unblocks the whole queue.
+
+`brew update (macOS)` now returns early when `ccache` and `ninja` are both on
+PATH: the only `brew install` calls in the macOS job are for those two tools,
+each guarded by `command -v`, so on a gate VM (both baked) the update bought
+nothing. Keep the guard in sync if a later step adds another `brew install`:
+that step's tool must join the `command -v` list, or a stale-config runner
+will fail its install.
 
 ## SignalGraph Phase 0 learnings (PR #153)
 
