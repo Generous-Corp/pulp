@@ -384,6 +384,18 @@ def _drop_receipt_churn(repo: Path) -> None:
         return
 
 
+def _failure_tail(error: BaseException, limit: int = 5) -> str:
+    """The last few lines a failed regenerator wrote, for the bump's log."""
+    if isinstance(error, subprocess.CalledProcessError):
+        raw = error.stderr or error.stdout or b""
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+        lines = [line for line in text.strip().splitlines() if line.strip()]
+        if not lines:
+            return f" (exit {error.returncode}, no output)"
+        return f" (exit {error.returncode}): " + " | ".join(lines[-limit:])
+    return f" ({error})"
+
+
 def _refresh_derived(repo: Path) -> list[str]:
     """Regenerate files that embed a version, returning those that changed.
 
@@ -404,13 +416,15 @@ def _refresh_derived(repo: Path) -> list[str]:
             continue
         try:
             subprocess.run(command, cwd=repo, check=True, capture_output=True)
-        except (subprocess.CalledProcessError, OSError):
+        except (subprocess.CalledProcessError, OSError) as error:
             # Best-effort, but never silent: a stale derived file after a bump
             # is only diagnosable if the run log names which regenerator did
-            # not run.
+            # not run AND why. The regenerator's output is captured, so without
+            # its last lines here the cause is lost with the process.
             print(
                 f"version-at-land: derived regenerator failed, leaving "
-                f"{', '.join(paths)} stale: {' '.join(command)}",
+                f"{', '.join(paths)} stale: {' '.join(command)}"
+                f"{_failure_tail(error)}",
                 file=sys.stderr,
             )
             continue
