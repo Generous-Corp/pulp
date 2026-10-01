@@ -2194,7 +2194,13 @@ live on m3/m5/m1, layered in tiers:
   which does NOT go through the `pulp` CLI — is routed through
   `tools/ci/governed-build.sh`, which acquires a lease, bounds `-j`, and releases
   on exit (falling back to the Tier-0 bound, never failing the build, when tartci
-  is absent or the lease is denied).
+  is absent or the lease is denied). Builds carry a class, `PULP_BUILD_CLASS`:
+  `interactive` (the default — `pulp build`, manual and release builds; normal
+  QoS, never `taskpolicy -b`, may take a partial lease or wait briefly for one,
+  and may borrow idle gate-reserved cores the gate preempts) or `background`
+  (set on every `.shipyard/config.toml` stage; capped at the host's background
+  share, role QoS, agent floor). Each host's knobs live in one file,
+  `~/.config/tartci/governor.toml`: `tartci governor show|set|explain`.
 - **Tier 2 — Orchard fleet VM placement (shadow phase).** Presence of a
   configured fleet endpoint (`TARTCI_ORCHARD_URL`); wired but placing nothing yet.
 

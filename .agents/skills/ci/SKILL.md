@@ -1079,6 +1079,19 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### Governed builds have a class: validations are `background`, everything else `interactive`
+
+`PULP_BUILD_CLASS=background` is set on every `.shipyard/config.toml` stage that
+calls `governed-build.sh`; anything else (a `pulp build`, a manual
+`governed-build.sh`, a release build) runs `interactive`: normal QoS always,
+partial lease or a short local wait instead of the background-QoS floor. Do not
+drop the prefix from a new Shipyard stage — a validation running `interactive`
+competes with the person waiting on their own build, which is the exact
+2026-09-30 MacBook incident (two validations held the whole non-gate budget and
+an awaited Spectr build ran background-throttled). Read a host's knobs with
+`tartci governor show`; `tartci governor explain` says what each class would get
+now, which is the first thing to run when a build reports a small `-j`.
+
 ### The pre-push coverage build skips itself on a starved host: a skip, not a pass
 
 On a host whose cores are leased to gate VMs, `governed-build.sh` pins a build at
