@@ -648,7 +648,11 @@ export async function launchBrowser(
     "--disable-default-apps",
     "--disable-domain-reliability",
     "--disable-extensions",
-    "--disable-features=AutofillServerCommunication,MediaRouter,OptimizationHints,Translate",
+    // MacAppCodeSignClone: branded macOS Chrome copies its whole app bundle
+    // into the per-user temp dir at launch and deletes it only on an orderly
+    // exit, so every capture torn down by signal left ~1.4 GB behind. Chrome
+    // takes one --disable-features value; keep every disabled feature here.
+    "--disable-features=AutofillServerCommunication,MacAppCodeSignClone,MediaRouter,OptimizationHints,Translate",
     // Software composition avoids partially assembled full-page headless
     // tiles without forcing imported WebGL/Three.js into SwiftShader.
     "--disable-gpu-compositing",

@@ -85,7 +85,10 @@ def render(css, w=W, h=H):
             f"background:{css}}}\n"
             "</style><div id=g></div>")
     subprocess.run(
+        # MacAppCodeSignClone: Chrome otherwise copies its app bundle into the
+        # per-user temp dir and leaves it behind whenever it does not exit cleanly.
         [CHROME, "--headless", "--disable-gpu", "--no-sandbox",
+         "--disable-features=MacAppCodeSignClone",
          f"--screenshot={shot}", f"--window-size={w},{h}", "--hide-scrollbars",
          "--force-device-scale-factor=1", "file://" + page],
         capture_output=True, check=True)
