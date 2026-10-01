@@ -288,6 +288,17 @@ class DriftCheckTest(FamilyFixture):
         finally:
             inventory.codemodel_reply_available = saved
 
+    def test_drift_report_names_the_paths_that_moved(self) -> None:
+        self.add_whole_tree()
+        self.write("tools/scripts/test_a.py", "")
+        self.script_test("a-selftest", "tools/scripts/test_a.py")
+        current = families.render(list(self.generate().values()))
+        stale = current.replace('"a-selftest"', '"old-selftest"')
+        self.assertIn("tools/scripts/test_a.py: readers +['a-selftest'] -['old-selftest']",
+                      families.describe_drift(stale, current))
+        self.assertIn("tools/scripts/test_a.py: newly mapped",
+                      families.describe_drift(f"{families.BEGIN}\n{families.END}\n", current))
+
     def test_drift_without_a_base_is_a_full_blocking_check(self) -> None:
         self.assertEqual(self.check(None), 1)
 

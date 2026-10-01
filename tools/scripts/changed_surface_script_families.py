@@ -360,11 +360,43 @@ def main(argv: list[str]) -> int:
               f"none of its inputs; the next change to a mapped surface must {fix}")
         return 0
     print(f"changed-surface script families drifted in {CONFIG}; {fix}", file=sys.stderr)
+    for line in describe_drift(config_text, block)[:12]:
+        print(f"  {line}", file=sys.stderr)
     if script_test_inputs.advisory_here():
         print("::warning title=changed-surface script families stale (advisory in a merge group)::"
               "regenerate on the next push")
         return 0
     return 1
+
+
+def describe_drift(config_text: str, block: str) -> list[str]:
+    """Which mapped paths a regeneration would add, drop or move."""
+    def mapping(text: str) -> dict[str, set[str]]:
+        import tomllib
+        start = text.find(BEGIN)
+        end = text.find(END, start)
+        if start < 0 or end < 0:
+            return {}
+        try:
+            body = tomllib.loads(text[start:end].replace(FAMILY_TABLE, "[[families]]"))
+        except tomllib.TOMLDecodeError:
+            return {}
+        owners: dict[str, set[str]] = {}
+        for family in body.get("families", []):
+            for path in family["paths"]:
+                owners.setdefault(path, set()).update(family["tests"])
+        return owners
+    old, new = mapping(config_text), mapping(block)
+    lines = []
+    for path in sorted(set(old) | set(new)):
+        if path not in new:
+            lines.append(f"{path}: no longer mapped")
+        elif path not in old:
+            lines.append(f"{path}: newly mapped")
+        elif old[path] != new[path]:
+            added, dropped = sorted(new[path] - old[path]), sorted(old[path] - new[path])
+            lines.append(f"{path}: readers +{added[:3]} -{dropped[:3]}")
+    return lines
 
 
 def blocks_on(path: str) -> bool:
