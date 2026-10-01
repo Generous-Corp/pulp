@@ -22,8 +22,7 @@ catch_discover_tests(pulp-test-forge-modulation-catalog-contracts)
 # header and scans the source include tree so both omitted new packs and stale
 # removed packs fail closed.
 add_executable(pulp-test-forge-catalog-index test_forge_catalog_index.cpp)
-target_compile_definitions(pulp-test-forge-catalog-index
-    PRIVATE PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-forge-catalog-index PATHS core/host/include/pulp/host)
 target_link_libraries(pulp-test-forge-catalog-index
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-catalog-index)

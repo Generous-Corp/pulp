@@ -472,28 +472,396 @@ class GovernanceContractTests(unittest.TestCase):
         self.assertEqual(bp.judge_gate(jobs, FULL_CONTRACT), (bp.EXECUTED, "failure"))
 
 
-class FakeGitHub:
-    """Serves `gh api` reads from fixtures keyed by path prefix."""
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
+import queue_batch_attribute as attributor  # noqa: E402
 
-    def __init__(self, tip_runs: list[dict], jobs: dict[str, list[dict]],
-                 failing: tuple[str, ...] = ()) -> None:
-        self.tip_runs = tip_runs
-        self.jobs = jobs
-        self.failing = failing
+
+# Which workflow produces each required context (`[landability] workflows`).
+CONTEXT_WORKFLOW = {
+    "macos": ".github/workflows/build.yml",
+    "Enforce version & skill sync": ".github/workflows/version-skill-check.yml",
+    "Build + prove + (owner-gated) deploy": ".github/workflows/wclap-cloudflare.yml",
+    "Vellum freeze": ".github/workflows/vellum-freeze-check.yml",
+    "Vellum trusted freeze": ".github/workflows/vellum-trusted-gate.yml",
+    "drift-fast": ".github/workflows/drift-fast.yml",
+}
+WORKFLOWS = tuple(dict.fromkeys(CONTEXT_WORKFLOW.values()))
+ALL_GREEN = {name: "success" for name in FULL_CONTRACT}
+
+# A real `ctest-logs-macos` member: merge_group run 36545528395 (2026-09-29),
+# artifact 11023836286, Testing/Temporary/LastTestsFailed.log, byte for byte.
+REAL_MACOS_LAST_TESTS_FAILED = (
+    "18273:materialized paint keeps the full host frame around an authored panel\n"
+)
+
+# A real excerpt of the `drift-fast` job log from merge_group run 36590722705
+# (main 4e0e8354, 2026-09-29, the fourteen-hour required-context red). The job
+# uploads no ctest artifact, so this block is the only record of what failed.
+REAL_DRIFT_FAST_LOG = """\
+2026-09-29T15:35:33.6196453Z  40/104 Test #1333: gpu-probe-historical-v1-acceptance ..........................***Failed    0.14 sec
+2026-09-29T15:35:33.6328426Z 104/104 Test #1617: wide-non-native-selftest ....................................   Passed   30.75 sec
+2026-09-29T15:35:33.6328776Z 
+2026-09-29T15:35:33.6328885Z 98% tests passed, 2 tests failed out of 104
+2026-09-29T15:35:33.6339022Z \t1604 - consumption-census-negative-contract (Skipped)
+2026-09-29T15:35:33.6339670Z 
+2026-09-29T15:35:33.6339760Z The following tests FAILED:
+2026-09-29T15:35:33.6340081Z \t1333 - gpu-probe-historical-v1-acceptance (Failed)       pr-fast
+2026-09-29T15:35:33.6340529Z \t1603 - consumption-census-drift-description (Failed)     pr-fast
+2026-09-29T15:35:33.6340959Z drift-fast: NOT CHECKED (skipped): consumption-census-drift
+2026-09-29T15:35:33.6342888Z drift-fast: FAILED
+"""
+DRIFT_TESTS = ("gpu-probe-historical-v1-acceptance", "consumption-census-drift-description")
+
+
+def _zip(members: dict[str, str]) -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, text in members.items():
+            archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+class FakeGitHub:
+    """Serves `gh api` reads for merge-group heads from per-head fixtures.
+
+    Each head gets one merge_group run per producing workflow. build.yml's jobs
+    come from the jobs endpoint (with steps); every other context is a check run
+    in its workflow run's check suite; statuses come from the combined status.
+    """
+
+    def __init__(self, tip: str = TIP) -> None:
+        self.tip = tip
+        self.runs: list[dict] = []
+        self.jobs: dict[str, list[dict]] = {}
+        self.check_runs: dict[str, list[dict]] = {}
+        self.statuses: dict[str, list[dict]] = {}
+        self.artifacts: dict[str, str] = {}  # run id -> LastTestsFailed.log text
+        self.logs: dict[str, str] = {}  # run id -> drift-fast job log text
         self.paths: list[str] = []
+        self._next = 1000
+
+    def head(
+        self,
+        sha: str,
+        contexts: dict[str, str],
+        macos_steps: list[dict] | None = None,
+        created_at: str = "2026-09-29T04:59:00Z",
+        statuses: dict[str, str] | None = None,
+        extra_build_jobs: list[dict] | None = None,
+        push_check_runs: list[dict] | None = None,
+    ) -> dict[str, str]:
+        """Add a head; returns context -> run id."""
+        run_ids: dict[str, str] = {}
+        by_workflow: dict[str, dict] = {}
+        for context, conclusion in contexts.items():
+            path = CONTEXT_WORKFLOW[context]
+            run = by_workflow.get(path)
+            if run is None:
+                self._next += 1
+                run = {
+                    "id": self._next,
+                    "path": path,
+                    "head_sha": sha,
+                    "head_branch": f"gh-readonly-queue/main/pr-9{self._next}-{'b' * 40}",
+                    "status": "completed" if conclusion else "in_progress",
+                    "conclusion": conclusion or None,
+                    "check_suite_id": 50_000 + self._next,
+                    "created_at": created_at,
+                }
+                by_workflow[path] = run
+                self.runs.append(run)
+            run_ids[context] = str(run["id"])
+            if path == bp.BUILD_WORKFLOW:
+                steps = macos_steps
+                if steps is None:
+                    steps = FAILED_TEST_STEPS if conclusion == "failure" else EXECUTED_STEPS
+                self.jobs.setdefault(str(run["id"]), []).append(
+                    job(context, conclusion, steps)
+                )
+            else:
+                self.check_runs.setdefault(sha, []).append(
+                    {
+                        "id": self._next * 10,
+                        "name": context,
+                        "status": "completed" if conclusion else "in_progress",
+                        "conclusion": conclusion or None,
+                        "check_suite": {"id": run["check_suite_id"]},
+                    }
+                )
+        build = by_workflow.get(bp.BUILD_WORKFLOW)
+        if build is not None:
+            self.jobs[str(build["id"])].extend(
+                extra_build_jobs
+                if extra_build_jobs is not None
+                else [job("Linux (x64) [github-hosted]", "failure")]
+            )
+        self.check_runs.setdefault(sha, []).extend(push_check_runs or [])
+        self.statuses[sha] = [
+            {"context": name, "state": state} for name, state in (statuses or {}).items()
+        ]
+        return run_ids
 
     def gh(self, path: str, jq: str | None = None) -> str | None:
         self.paths.append(path)
         if path.endswith("/commits/main"):
-            return f"{TIP}\ttree-{TIP}"
-        if "/actions/workflows/build.yml/runs?" in path:
-            if f"head_sha={TIP}" in path:
-                return json.dumps({"workflow_runs": self.tip_runs})
-            return json.dumps({"workflow_runs": []})
+            return f"{self.tip}\ttree-{self.tip}"
+        match = re.search(r"/commits/([0-9a-f]+)/check-runs", path)
+        if match:
+            return json.dumps({"check_runs": self.check_runs.get(match.group(1), [])})
+        match = re.search(r"/commits/([0-9a-f]+)/status", path)
+        if match:
+            return json.dumps({"statuses": self.statuses.get(match.group(1), [])})
+        match = re.search(r"/commits/([0-9a-f]+)$", path)
+        if match:
+            return f"tree-{match.group(1)}"
         match = re.search(r"/actions/runs/(\d+)/jobs", path)
         if match:
             return json.dumps({"jobs": self.jobs.get(match.group(1), [])})
+        match = re.search(r"/actions/runs/(\d+)/artifacts", path)
+        if match:
+            return "7" + match.group(1) if match.group(1) in self.artifacts else ""
+        if "/actions/runs?" in path:
+            head = re.search(r"head_sha=([0-9a-f]+)", path)
+            runs = [r for r in self.runs if not head or r["head_sha"] == head.group(1)]
+            runs = sorted(runs, key=lambda r: (r["created_at"], r["id"]), reverse=True)
+            if "page=2" in path:
+                runs = []
+            return json.dumps({"workflow_runs": runs})
         return None
+
+    def gh_bytes(self, path: str) -> bytes | None:
+        match = re.search(r"/artifacts/7(\d+)/zip", path)
+        if not match or match.group(1) not in self.artifacts:
+            return None
+        return _zip({bp.LAST_TESTS_FAILED_MEMBER: self.artifacts[match.group(1)]})
+
+    def run_log_zip(self, repo: str, run_id: str) -> bytes | None:
+        text = self.logs.get(str(run_id))
+        return _zip({"0_drift-fast.txt": text, "drift-fast/system.txt": ""}) if text else None
+
+    def patched(self):
+        from contextlib import ExitStack
+        from unittest import mock
+
+        stack = ExitStack()
+        stack.enter_context(mock.patch.object(bp, "gh", self.gh))
+        stack.enter_context(mock.patch.object(bp, "gh_bytes", self.gh_bytes))
+        stack.enter_context(mock.patch.object(attributor, "run_log_zip", self.run_log_zip))
+        return stack
+
+
+def detect_live(fake: FakeGitHub, required=FULL_CONTRACT, batch_limit: int = 12,
+                min_streak: int = 2) -> bp.Verdict:
+    with fake.patched():
+        main, tip = bp.observe_main("o/r", required=required, workflows=WORKFLOWS)
+        batches = bp.observe_batches("o/r", batch_limit, required, WORKFLOWS)
+    return bp.detect(main, batches, min_streak=min_streak, tip_sha=tip)
+
+
+class MainTipObservationTests(unittest.TestCase):
+    """main's tip is judged by EVERY required context on its own merge group."""
+
+    def test_all_green_is_healthy(self) -> None:
+        """Control: every required context green and the suite ran."""
+        fake = FakeGitHub()
+        fake.head(TIP, ALL_GREEN)
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
+        self.assertEqual(len(verdict.main_contexts), len(FULL_CONTRACT))
+        self.assertEqual(verdict.main_evidence_source, bp.SOURCE_HEAD_SHA)
+        self.assertIn(TIP[:12], verdict.reason)
+
+    def test_advisory_red_does_not_redden_a_green_tip(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, ALL_GREEN)  # the build run also carries a red hosted Linux leg
+        self.assertEqual(detect_live(fake).status, bp.STATUS_HEALTHY)
+
+    def test_drift_fast_red_with_macos_green_is_red_and_names_drift_fast(self) -> None:
+        """The 2026-09-29 shape: `macos` green on main's tip, the required
+        `drift-fast` red for fourteen hours. Judging macos alone read healthy."""
+        fake = FakeGitHub()
+        runs = fake.head(TIP, {**ALL_GREEN, "drift-fast": "failure"})
+        fake.logs[runs["drift-fast"]] = REAL_DRIFT_FAST_LOG
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.status, bp.STATUS_SUSPECTED, verdict.reason)
+        self.assertTrue(verdict.main_observed)
+        self.assertEqual(verdict.main_failing_contexts, ("drift-fast",))
+        self.assertEqual(verdict.main_run_id, runs["drift-fast"])
+        self.assertEqual(set(verdict.tests), set(DRIFT_TESTS))
+        self.assertIn("drift-fast", verdict.reason)
+        payload = bp.signal(verdict)
+        self.assertEqual(payload["main_failing_contexts"], ["drift-fast"])
+        states = {c["context"]: c["state"] for c in payload["main_contexts"]}
+        self.assertEqual(states["macos"], "success")
+        self.assertEqual(states["drift-fast"], "failure")
+
+    def test_a_red_context_is_red_even_when_macos_reused_a_receipt(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, {**ALL_GREEN, "Vellum freeze": "failure"},
+                  macos_steps=RECEIPT_REUSE_JOB)
+        verdict = detect_live(fake)
+        self.assertTrue(verdict.main_observed)
+        self.assertEqual(verdict.main_failing_contexts, ("Vellum freeze",))
+        self.assertIn("named no ctest", verdict.reason)
+
+    def test_vellum_trusted_freeze_is_read_from_a_commit_status(self) -> None:
+        """`Vellum trusted freeze` can reach a commit as a STATUS, not a job."""
+        contexts = {k: v for k, v in ALL_GREEN.items() if k != "Vellum trusted freeze"}
+        fake = FakeGitHub()
+        fake.head(TIP, contexts, statuses={"Vellum trusted freeze": "failure"})
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.main_failing_contexts, ("Vellum trusted freeze",))
+        source = {c.context: c.source for c in verdict.main_contexts}
+        self.assertEqual(source["Vellum trusted freeze"], bp.SOURCE_STATUS)
+
+        green = FakeGitHub()
+        green.head(TIP, contexts, statuses={"Vellum trusted freeze": "success"})
+        self.assertEqual(detect_live(green).status, bp.STATUS_HEALTHY)
+
+    def test_a_missing_required_context_is_unproven_never_healthy(self) -> None:
+        contexts = {k: v for k, v in ALL_GREEN.items() if k != "drift-fast"}
+        fake = FakeGitHub()
+        fake.head(TIP, contexts)
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN, verdict.reason)
+        self.assertIn("drift-fast missing", verdict.reason)
+
+    def test_a_still_running_context_is_unproven(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, {**ALL_GREEN, "Build + prove + (owner-gated) deploy": ""})
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN, verdict.reason)
+        self.assertIn("pending", verdict.reason)
+
+    def test_a_push_check_run_on_the_landed_commit_is_not_the_gate(self) -> None:
+        """After landing, push runs add check runs to the same commit. Only the
+        merge_group runs' check suites are read."""
+        contexts = {k: v for k, v in ALL_GREEN.items() if k != "drift-fast"}
+        fake = FakeGitHub()
+        fake.head(TIP, contexts, push_check_runs=[{
+            "id": 1, "name": "drift-fast", "status": "completed",
+            "conclusion": "success", "check_suite": {"id": 1}}])
+        self.assertEqual(detect_live(fake).status, bp.STATUS_UNPROVEN)
+
+    def test_red_macos_names_its_tests_from_the_real_artifact(self) -> None:
+        fake = FakeGitHub()
+        runs = fake.head(TIP, {**ALL_GREEN, "macos": "failure"})
+        fake.artifacts[runs["macos"]] = REAL_MACOS_LAST_TESTS_FAILED
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.main_failing_contexts, ("macos",))
+        self.assertEqual(
+            verdict.tests,
+            ("materialized paint keeps the full host frame around an authored panel",),
+        )
+
+    def test_no_merge_group_run_for_the_tip_is_unproven(self) -> None:
+        """An admin or direct push lands no merge group: nothing tested the tip."""
+        verdict = detect_live(FakeGitHub())
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
+        self.assertFalse(verdict.main_observed)
+        self.assertEqual(verdict.main_head_sha, TIP)
+        self.assertIn("no merge_group run", verdict.reason)
+
+    def test_a_receipt_reuse_green_on_the_tip_is_unproven(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, ALL_GREEN, macos_steps=RECEIPT_REUSE_JOB)
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
+        self.assertIn("macos success-but-not-executed", verdict.reason)
+
+    def test_the_tip_is_looked_up_by_sha_on_merge_group_for_every_workflow(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, ALL_GREEN)
+        detect_live(fake)
+        lookups = [p for p in fake.paths if f"head_sha={TIP}" in p]
+        self.assertTrue(lookups, fake.paths)
+        self.assertIn("event=merge_group", lookups[0])
+        self.assertNotIn("/workflows/", lookups[0])
+
+    def test_macos_only_fallback_contract_keeps_working(self) -> None:
+        fake = FakeGitHub()
+        fake.head(TIP, {"macos": "success"})
+        verdict = detect_live(fake, required=bp.FALLBACK_REQUIRED_CONTEXTS)
+        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
+
+    def test_the_configured_contract_and_workflows_are_all_six(self) -> None:
+        try:
+            import tomllib  # noqa: F401
+        except ImportError:  # Python < 3.11
+            self.skipTest("tomllib unavailable")
+        self.assertEqual(set(bp.required_contexts()), set(CONTEXT_WORKFLOW))
+        self.assertEqual(set(bp.required_workflows()), set(WORKFLOWS))
+
+
+# Merge-group heads on 2026-09-29, newest first, while main carried the
+# `drift-fast` red: each batch's `macos` passed and its `drift-fast` failed.
+STREAK_HEADS = [
+    "3c4646ca8d943e8665b02db23aa2d880f538a5be",
+    "f8f01a01ddfd15dc1b45ae3f2bdb71aff6e38571",
+    "4e0e8354bfb26f8ade335364dbff9ff2b3be10be",
+    "f8a1ca5a6e7eb4ba8e200d48dd9d50ac27fdeec4",
+    "99b92cd5a4dfe985e354bce5a5f9cf1bfe0bfdd7",
+]
+GREEN_HEAD = "365c6baa06e49bc9e741c24fcf4d31e772e3141f"
+
+
+class BatchStreakTests(unittest.TestCase):
+    """The streak is measured over every required context of each batch."""
+
+    def _fake(self, tip_red: bool = True) -> FakeGitHub:
+        fake = FakeGitHub(tip=STREAK_HEADS[2])
+        for index, sha in enumerate(STREAK_HEADS):
+            runs = fake.head(sha, {**ALL_GREEN, "drift-fast": "failure"},
+                             created_at=f"2026-09-29T15:{40 - index:02d}:00Z")
+            fake.logs[runs["drift-fast"]] = REAL_DRIFT_FAST_LOG
+        if not tip_red:
+            fake.tip = GREEN_HEAD
+        fake.head(GREEN_HEAD, ALL_GREEN, created_at="2026-09-29T11:44:00Z")
+        return fake
+
+    def test_the_0929_drift_fast_streak_is_measured(self) -> None:
+        verdict = detect_live(self._fake())
+        self.assertEqual(verdict.streak.length, len(STREAK_HEADS), verdict.reason)
+        self.assertEqual(verdict.streak.heads, tuple(STREAK_HEADS))
+        self.assertEqual(verdict.streak.shared_contexts, ("drift-fast",))
+        self.assertEqual(set(verdict.streak.shared_tests), set(DRIFT_TESTS))
+        self.assertEqual(verdict.status, bp.STATUS_POISONED, verdict.reason)
+        payload = bp.signal(verdict)
+        self.assertEqual(payload["batch_streak"], len(STREAK_HEADS))
+        self.assertEqual(payload["batch_streak_contexts"], ["drift-fast"])
+
+    def test_judged_by_macos_alone_the_same_history_has_no_streak(self) -> None:
+        """The negative control: the old macos-only reading of this exact
+        history sees every batch pass, which is how 09-29 read streak 0."""
+        verdict = detect_live(self._fake(), required=bp.FALLBACK_REQUIRED_CONTEXTS)
+        self.assertEqual(verdict.streak.length, 0)
+        self.assertEqual(verdict.status, bp.STATUS_HEALTHY)
+
+    def test_a_green_batch_breaks_the_streak(self) -> None:
+        fake = self._fake()
+        fake.head("a" * 40, ALL_GREEN, created_at="2026-09-29T15:38:30Z")
+        verdict = detect_live(fake)
+        self.assertEqual(verdict.streak.length, 2)
+
+    def test_a_streak_needs_min_streak_batches(self) -> None:
+        verdict = detect_live(self._fake(), batch_limit=2, min_streak=3)
+        self.assertEqual(verdict.streak.length, 2)
+        self.assertEqual(verdict.status, bp.STATUS_SUSPECTED)
+        self.assertEqual(verdict.proof, bp.PROOF_MAIN_ONLY)
+
+    def test_a_batch_with_a_green_gate_breaks_the_streak(self) -> None:
+        """The old run-conclusion reading made every batch a failure because
+        advisory Linux failed, so the "streak" was a Linux artifact."""
+        from unittest import mock
+
+        with mock.patch.object(
+            bp, "_jobs", return_value=GREEN_GATE_RED_ADVISORY
+        ), mock.patch.object(bp, "artifact_failing_tests", return_value=()):
+            seen = bp.observe("o/r", tip_run("12", conclusion="failure"), "batch", REQUIRED)
+        self.assertTrue(seen.passed)
 
 
 def tip_run(run_id: str, conclusion: str = "failure", status: str = "completed") -> dict:
@@ -507,118 +875,14 @@ def tip_run(run_id: str, conclusion: str = "failure", status: str = "completed")
     }
 
 
-class MainTipObservationTests(unittest.TestCase):
-    """main's tip is judged by its own merge_group run's required gate."""
-
-    def _verdict(self, fake: FakeGitHub) -> bp.Verdict:
-        from unittest import mock
-
-        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
-            bp, "artifact_failing_tests", return_value=fake.failing
-        ):
-            main, tip = bp.observe_main("o/r", required=REQUIRED)
-            return bp.detect(main, [], tip_sha=tip)
-
-    def test_green_gate_with_red_advisory_is_healthy(self) -> None:
-        fake = FakeGitHub([tip_run("36523704313")],
-                          {"36523704313": GREEN_GATE_RED_ADVISORY})
-        verdict = self._verdict(fake)
-        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
-        self.assertEqual(verdict.main_run_id, "36523704313")
-        self.assertEqual(verdict.main_head_sha, TIP)
-        self.assertEqual(verdict.main_evidence_source, bp.SOURCE_HEAD_SHA)
-        self.assertIn(TIP[:12], verdict.reason)
-
-    def test_green_gate_reads_healthy_while_the_run_is_still_in_progress(self) -> None:
-        fake = FakeGitHub([tip_run("7", conclusion=None, status="in_progress")],
-                          {"7": [job("macos", "success"), job("Linux (x64) [github-hosted]", None)]})
-        self.assertEqual(self._verdict(fake).status, bp.STATUS_HEALTHY)
-
-    def test_red_gate_is_red_and_names_its_tests(self) -> None:
-        fake = FakeGitHub([tip_run("8")],
-                          {"8": [job("macos", "failure", FAILED_TEST_STEPS),
-                                 job("Linux (x64) [github-hosted]", "success")]},
-                          failing=("rack-generator-safety",))
-        verdict = self._verdict(fake)
-        self.assertEqual(verdict.status, bp.STATUS_SUSPECTED)
-        self.assertEqual(verdict.proof, bp.PROOF_MAIN_ONLY)
-        self.assertTrue(verdict.main_observed)
-        self.assertEqual(verdict.main_conclusion, "failure")
-        self.assertEqual(verdict.tests, ("rack-generator-safety",))
-
-    def test_red_gate_plus_a_streak_is_poisoned(self) -> None:
-        from unittest import mock
-
-        fake = FakeGitHub([tip_run("8")], {"8": [job("macos", "failure", FAILED_TEST_STEPS)]},
-                          failing=SHARED)
-        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
-            bp, "artifact_failing_tests", return_value=fake.failing
-        ):
-            main, tip = bp.observe_main("o/r", required=REQUIRED)
-        verdict = bp.detect(main, LIVE_STREAK, tip_sha=tip)
-        self.assertEqual(verdict.status, bp.STATUS_POISONED)
-        self.assertEqual(verdict.tests, tuple(sorted(SHARED)))
-
-    def test_no_merge_group_run_for_the_tip_is_unproven(self) -> None:
-        """An admin or direct push lands no merge group: nothing tested the tip."""
-        verdict = self._verdict(FakeGitHub([], {}))
-        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
-        self.assertFalse(verdict.main_observed)
-        self.assertEqual(verdict.main_head_sha, TIP)
-        self.assertIn(TIP[:12], verdict.reason)
-        self.assertIn("no merge_group run", verdict.reason)
-
-    def test_a_receipt_reuse_green_on_the_tip_is_unproven(self) -> None:
-        fake = FakeGitHub([tip_run("9", conclusion="success")],
-                          {"9": [job("macos", "success", RECEIPT_REUSE_JOB)]})
-        verdict = self._verdict(fake)
-        self.assertEqual(verdict.status, bp.STATUS_UNPROVEN)
-        self.assertEqual(verdict.main_run_id, "9")
-
-    def test_the_tip_is_looked_up_by_sha_on_merge_group(self) -> None:
-        fake = FakeGitHub([tip_run("10")], {"10": GREEN_GATE_RED_ADVISORY})
-        self._verdict(fake)
-        lookups = [p for p in fake.paths if f"head_sha={TIP}" in p]
-        self.assertTrue(lookups, fake.paths)
-        self.assertIn("event=merge_group", lookups[0])
-
-    def test_a_green_tip_is_healthy_under_the_configured_contract(self) -> None:
-        """Read the real `[governance]` list, as `main()` does: the contexts it
-        names that build.yml does not produce must not turn a green tip unproven."""
-        from unittest import mock
-
-        fake = FakeGitHub([tip_run("12")], {"12": GREEN_GATE_RED_ADVISORY})
-        with mock.patch.object(bp, "gh", fake.gh), mock.patch.object(
-            bp, "artifact_failing_tests", return_value=()
-        ):
-            main, tip = bp.observe_main("o/r", required=bp.required_contexts())
-        verdict = bp.detect(main, [], tip_sha=tip)
-        self.assertEqual(verdict.status, bp.STATUS_HEALTHY, verdict.reason)
-
-    def test_the_signal_carries_the_tip_sha(self) -> None:
-        fake = FakeGitHub([tip_run("11")], {"11": GREEN_GATE_RED_ADVISORY})
-        payload = bp.signal(self._verdict(fake))
-        self.assertEqual(payload["main_head_sha"], TIP)
-        self.assertEqual(payload["status"], bp.STATUS_HEALTHY)
-        self.assertEqual(payload["main_run_id"], "11")
-
-
-class BatchStreakGateTests(unittest.TestCase):
-    def test_a_batch_with_a_green_gate_breaks_the_streak(self) -> None:
-        """The old run-conclusion reading made every batch a failure because
-        advisory Linux failed, so the "streak" was a Linux artifact."""
-        from unittest import mock
-
-        with mock.patch.object(
-            bp, "_jobs", return_value=GREEN_GATE_RED_ADVISORY
-        ), mock.patch.object(bp, "artifact_failing_tests", return_value=()):
-            seen = bp.observe("o/r", tip_run("12", conclusion="failure"), "batch", REQUIRED)
-        self.assertTrue(seen.passed)
-
-
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
-
-import queue_batch_attribute as attributor  # noqa: E402
+class LogFailingTestsTests(unittest.TestCase):
+    def test_the_real_drift_fast_log_names_its_failures(self) -> None:
+        fake = FakeGitHub()
+        fake.logs["5"] = REAL_DRIFT_FAST_LOG
+        with fake.patched():
+            self.assertEqual(bp.log_failing_tests("o/r", "5", "drift-fast"), DRIFT_TESTS)
+            self.assertEqual(bp.log_failing_tests("o/r", "5", "another-job"), ())
+            self.assertEqual(bp.log_failing_tests("o/r", "6", "drift-fast"), ())
 
 
 class DecisiveFixPrTests(unittest.TestCase):
@@ -742,7 +1006,8 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIsNotNone(perms, "no top-level permissions: the token defaults wide")
         grants = dict(line.strip().split(":", 1) for line in perms.group(1).splitlines())
         self.assertEqual({k: v.strip() for k, v in grants.items()},
-                         {"actions": "read", "contents": "read", "pull-requests": "read"})
+                         {"actions": "read", "checks": "read", "contents": "read",
+                          "pull-requests": "read", "statuses": "read"})
         self.assertNotRegex(self.detector_code, r"(?m)^[ \t]+permissions:")  # no job widening
 
     def test_the_detector_group_is_shared_and_never_cancels_in_progress(self) -> None:
@@ -809,7 +1074,8 @@ class WorkflowWiringTests(unittest.TestCase):
     def test_the_failing_test_source_is_the_artifact_not_the_job_log(self) -> None:
         """`ghapp api .../jobs/<id>/logs` refuses escape sequences and returns
         99 bytes, so a log scrape silently yields NO failing tests -- which
-        reads as "the failure was not a test failure".
+        reads as "the failure was not a test failure". A context with no
+        artifact is read through the attributor's RUN-log zip instead.
 
         Comment text is stripped first: the prohibition has to be explained in
         the module, and a raw substring scan would trip over the explanation.
@@ -820,6 +1086,7 @@ class WorkflowWiringTests(unittest.TestCase):
             line.split("#", 1)[0] for line in source.splitlines()
         )
         self.assertNotIn("/logs", code, "the detector reads a job log again")
+        self.assertIn("attributor.run_log_zip(", code)
 
 
 if __name__ == "__main__":

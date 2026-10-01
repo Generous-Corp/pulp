@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260930-compiled-test-data-declarations-watch",
+  "created_at": "2026-09-30T18:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a test-registration change that crosses design-source-ingest through test/cmake/cli_import_tool_tests.cmake and visual-proof-harness through test/cmake/view_widget_bridge_tests.cmake. In both manifests a COMPILE_DEFINITIONS PULP_SOURCE_DIR line is replaced by pulp_test_data(<suite> PATHS ...), which defines the same macro and declares the checkout files the test reads (tools/scripts/build_migration_index.py; core/view/src/widget_bridge.cpp and tools/templates/*/ui/main.js). Test sources, capture, rendering, DesignIR, fixtures and thresholds are unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-data-cmake-selftest",
+    "script-test-inputs-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

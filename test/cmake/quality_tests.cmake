@@ -648,6 +648,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
         set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # Reuse-policy replay over merge-queue history: false skips, flake-skips,
+        # benefit, coverage, and the named incident scenarios.
+        add_test(NAME reuse-policy-replay-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_reuse_policy_replay.py")
+        set_tests_properties(reuse-policy-replay-selftest PROPERTIES TIMEOUT 120)
         # Cross-VM test-binary identity measurement (per-binary receipt reuse
         # precondition), annotated by merge-group macos jobs after the build.
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}

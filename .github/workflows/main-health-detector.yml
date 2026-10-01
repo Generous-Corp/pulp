@@ -2,11 +2,12 @@ name: Base health detector
 
 # WHY THIS IS NOT PART OF `Build and Test`. main's health is already measured
 # there, by the merge queue: the queue lands with the MERGE method, so the
-# commit on main IS the merge-group head, and that merge_group run's required
-# `macos` job tested main's exact commit. This workflow reads that job by main's
-# tip sha (see tools/ci/base_poison_detector.py) and publishes a verdict, so it
-# costs a few API reads and no gate lane. A push-to-main run carries no macOS
-# leg and is not an observation.
+# commit on main IS the merge-group head, and that merge group's runs tested
+# main's exact commit. This workflow reads EVERY required status context on
+# main's tip sha -- the jobs of every workflow in `[landability] workflows`,
+# plus the commit's statuses -- (see tools/ci/base_poison_detector.py) and
+# publishes a verdict, so it costs API reads and no gate lane. A push-to-main
+# run carries no macOS leg and is not an observation.
 
 # It REPORTS ONLY. Acting on the signal - pausing re-forming batches,
 # prioritising the fix - is Shipyard's side and is not wired here.
@@ -50,10 +51,15 @@ concurrency:
   group: main-health-detector
   cancel-in-progress: false
 
+# `checks` reads the required-context jobs of the non-build workflows in one
+# check-runs call per commit; `statuses` reads a context published as a commit
+# status (`Vellum trusted freeze` on a pull request's head).
 permissions:
   actions: read
+  checks: read
   contents: read
   pull-requests: read
+  statuses: read
 
 jobs:
   triage:

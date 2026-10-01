@@ -30,6 +30,11 @@ input the graph cannot see:
 - a script-driven test WITHOUT an entry is affected whenever any changed file
   lies outside the compiled tree (`tools/`, `test/` non-C++, `hooks/`,
   `.github/`, `docs/status/`, `ship/`, ...), because its inputs are unknown;
+- a compiled test whose executable has a `kind: compiled` entry in the same
+  list is also affected when one of its declared data inputs changed
+  (`pulp_test_data()`, globs allowed); an executable marked
+  `data: undeclared` reads the checkout without a declaration and is always
+  affected;
 - a changed file that no edge reads and that is not under a known non-input
   prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test.
 
@@ -43,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import fnmatch
 import json
 import os
 import re
@@ -187,6 +193,22 @@ def classify_changes(files: list[str]) -> dict:
     return {"cmake_changed": cmake, "scripts_changed": scripts}
 
 
+def load_compiled_data(source_root: Path) -> dict[str, dict]:
+    """`kind: compiled` entries (per test executable) from the same list:
+    `data: undeclared` executables read the checkout without a declaration."""
+    try:
+        doc = json.loads((source_root / SCRIPT_INPUTS_LIST).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(doc.get("executables") or {})
+
+
+def executable_name(test: dict) -> str:
+    cmd = test.get("command") or []
+    base = os.path.basename(cmd[0]) if cmd else ""
+    return base[:-4] if base.endswith(".exe") else base
+
+
 def load_script_inputs(source_root: Path) -> dict[str, list[str]]:
     try:
         doc = json.loads((source_root / SCRIPT_INPUTS_LIST).read_text(encoding="utf-8"))
@@ -200,13 +222,20 @@ def declared_hit(inputs: list[str], changed: list[str]) -> bool:
         for i in inputs:
             if f == i or f.startswith(i.rstrip("/") + "/"):
                 return True
+            # A declared glob (`tools/templates/*/ui/main.js`) matches by
+            # pattern, and a directory glob covers everything beneath a match.
+            if any(c in i for c in "*?[") and (fnmatch.fnmatchcase(f, i) or any(
+                    fnmatch.fnmatchcase("/".join(f.split("/")[:n]), i) for n in range(1, f.count("/") + 1))):
+                return True
     return False
 
 
 def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, changed: list[str],
-            failed: list[str], script_inputs: dict[str, list[str]] | None = None) -> dict:
+            failed: list[str], script_inputs: dict[str, list[str]] | None = None,
+            compiled_data: dict[str, dict] | None = None) -> dict:
     g = Graph(build_dir, edges, deps)
     script_inputs = script_inputs or {}
+    compiled_data = compiled_data or {}
     # The list itself changed: every declared test's inputs may have moved.
     list_changed = SCRIPT_INPUTS_LIST in changed
     tests = inventory.get("tests", [])
@@ -226,9 +255,16 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
               "empty diff" if not changed else "graph")
     selected = []
     declared = undeclared = sel_declared = sel_undeclared = 0
+    data_undeclared = sel_data_declared = 0
     for t in tests:
         name = t.get("name", "")
         binary = is_binary_test(t, build_dir)
+        data = compiled_data.get(executable_name(t)) if binary else None
+        if data and data.get("data") != "declared":
+            # Reads the checkout without a declaration: never skippable.
+            data_undeclared += 1
+            selected.append(name)
+            continue
         if not binary:
             if name in script_inputs:
                 declared += 1
@@ -240,6 +276,9 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
         ins = test_inputs(t, build_dir, source_root)
         if ins & aff:
             selected.append(name)
+        elif data and (list_changed or declared_hit(list(data.get("inputs") or []), changed)):
+            selected.append(name)
+            sel_data_declared += 1
         elif not binary and name in script_inputs:
             if list_changed or declared_hit(script_inputs[name], changed):
                 selected.append(name)
@@ -256,6 +295,7 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             "failed_outside_selection": len(outside), "failed_outside_names": outside[:50],
             "script_declared": declared, "script_undeclared": undeclared,
             "script_selected_declared": sel_declared, "script_selected_undeclared": sel_undeclared,
+            "compiled_data_undeclared": data_undeclared, "compiled_selected_by_data": sel_data_declared,
             **flags}
 
 
@@ -285,7 +325,7 @@ def main(argv: list[str]) -> int:
         print(f"affected-tests shadow: no verdict, input unreadable: {exc}", file=sys.stderr)
         return 2
     result = compute(build_dir, source_root, edges, parse_ninja_deps(deps_text), inventory, changed, failed,
-                     load_script_inputs(source_root))
+                     load_script_inputs(source_root), load_compiled_data(source_root))
     result["event"] = a.event
     print(f"affected-tests shadow: would select {result['selected']} of {result['total']} tests "
           f"({result['reason']}); failed outside selection: {result['failed_outside_selection']}")

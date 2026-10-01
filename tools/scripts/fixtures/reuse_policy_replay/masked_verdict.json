@@ -1,0 +1,281 @@
+{
+ "schema": "pulp-reuse-replay-scenario/v1",
+ "name": "masked verdict",
+ "what_happened": "receipts were never issued because the issuer's failure was hidden by continue-on-error, and a run-level conclusion was flipped by an advisory lane",
+ "cases": [
+  {
+   "label": "full suite green but a required context red on the head: no receipt, coverage drops",
+   "policy": "whole-receipt",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": false
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "b",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "evaluable_pairs": 0,
+    "coverage": 0.0,
+    "skipped_groups": 0
+   }
+  },
+  {
+   "label": "issuer never published (observed receipts): no receipt, coverage drops",
+   "policy": "whole-receipt",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": false,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "b",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "evaluable_pairs": 0,
+    "coverage": 0.0,
+    "skipped_groups": 0
+   },
+   "options": {
+    "receipt_source": "observed"
+   }
+  },
+  {
+   "label": "control: the same head with green contexts is reused (benefit 100%)",
+   "policy": "whole-receipt",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "g1",
+      "run_kind": "merge_group",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": "m1",
+      "checkout_sha": "m1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T12:00:00Z",
+      "ctest": {
+       "complete": true,
+       "failed": 0
+      },
+      "build_failed": false,
+      "observed_decision": null
+     },
+     {
+      "run_id": "p1",
+      "run_kind": "pr_head",
+      "pr": 1,
+      "head_sha": "h1",
+      "group_sha": null,
+      "checkout_sha": "r1",
+      "checkout_parents": [
+       "b1",
+       "h1"
+      ],
+      "base_sha": "b1",
+      "merge_tree": "t1",
+      "runner_image": null,
+      "created_at": "2026-09-29T11:00:00Z",
+      "ctest": {
+       "complete": true,
+       "full_suite": true,
+       "failed": 0
+      },
+      "receipt_issued": true,
+      "required_contexts_green": true
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 1,
+      "head_sha": "h1",
+      "group_run_id": "g1",
+      "stacked": false,
+      "heads": [
+       {
+        "run_id": "p1",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ]
+     }
+    ],
+    "tests": {
+     "g1": [
+      {
+       "test_id": "a",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "b",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "evaluable_pairs": 1,
+    "coverage": 1.0,
+    "skipped_groups": 1,
+    "benefit_median": 1.0
+   }
+  }
+ ]
+}

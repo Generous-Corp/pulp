@@ -562,8 +562,8 @@ add_executable(pulp-test-cross-platform-audio-golden
     test_cross_platform_audio_golden.cpp)
 target_link_libraries(pulp-test-cross-platform-audio-golden
     PRIVATE pulp::audio pulp::signal Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-cross-platform-audio-golden PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cross-platform-audio-golden
+    PATHS test/fixtures/audio/cross_platform_signal_chain.wav)
 target_compile_options(pulp-test-cross-platform-audio-golden PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:strict>)
@@ -586,8 +586,8 @@ catch_discover_tests(pulp-test-negative-path)
 # iOS foundation tests (platform detection, safe area geometry, touch events,
 # AUv3 HostApp template shape).
 pulp_add_test_suite(pulp-test-ios-foundation GROUP pulp-test-group-app-view
-    LIBRARIES pulp::view pulp::platform
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    LIBRARIES pulp::view pulp::platform)
+pulp_test_data(pulp-test-ios-foundation PATHS templates/ios-auv3/HostApp/ContentView.swift)
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
@@ -972,5 +972,5 @@ pulp_add_test_suite(pulp-test-widget-metrics GROUP pulp-test-group-app-view
 # they annotate, in both directions. Carries the negative controls that prove
 # the audit fails closed on a grown, shrunk, or mislabelled catalog node.
 pulp_add_test_suite(pulp-test-forge-descriptor-audit GROUP pulp-test-group-app-host
-    LIBRARIES pulp::host
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    LIBRARIES pulp::host)
+pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.json)

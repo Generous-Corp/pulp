@@ -1177,6 +1177,33 @@ class RefreshDerivedTest(unittest.TestCase):
         self.assertFalse((self.repo / "ledger-regenerator-ran").exists(),
                          "the regenerator ran against a repo with no ledger")
 
+    def test_refreshes_the_changelog_when_a_version_moves(self):
+        # The changelog lands with the bump rather than in a post-tag PR of its
+        # own, so a bump that skips it leaves CHANGELOG.md behind the tags.
+        changelog = self.repo / "CHANGELOG.md"
+        changelog.write_text("# Changelog\n\nSTALE\n")
+        self._install_regenerator("pass\n")
+        bindir = self.repo.parent / f"{self.repo.name}-bin"
+        bindir.mkdir()
+        shim = bindir / "shipyard"
+        shim.write_text(
+            "#!/bin/sh\n"
+            '[ "$1 $2" = "changelog regenerate" ] || exit 64\n'
+            "printf '# Changelog\\n\\n## [0.5.1]\\n' > CHANGELOG.md\n"
+        )
+        shim.chmod(0o755)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{bindir}{os.pathsep}{old_path}"
+        try:
+            plan = [val.Assignment(surface="plugin", level="patch",
+                                   current="0.5.0", assigned="0.5.1")]
+            edited = val._write_plan(self.repo, CONFIG, plan)
+        finally:
+            os.environ["PATH"] = old_path
+            shutil.rmtree(bindir)
+        self.assertIn("CHANGELOG.md", edited)
+        self.assertIn("## [0.5.1]", changelog.read_text())
+
     def test_a_failing_regenerator_does_not_abort_the_bump(self):
         # The bot is the single writer for versions; a wedged bot stops every
         # release. A broken regenerator must degrade to the old stale-file

@@ -240,6 +240,11 @@ Tracking issue title: `Auto-release workflow failed — RELEASES BLOCKED`.
 One issue, edited in place, auto-closed on recovery — mirrors the #475
 close-path pattern used by the orphan-branch and deps-drift sweeps.
 
+`auto-release.yml` only tags. `CHANGELOG.md` is not a release artifact these
+layers watch: it is rendered in the version-bump commit, so a failed render
+cannot block a tag, and the next bump retries it (see
+[versioning.md § Release pipeline](versioning.md#release-pipeline--how-changelogmd-and-the-release-page-are-produced)).
+
 ## Layer 3 — Release cadence check (invariant)
 
 **File:** `.github/workflows/release-cadence-check.yml`

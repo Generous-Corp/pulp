@@ -9,15 +9,25 @@ culprit in turn.
 
 WHERE MAIN'S OWN HEALTH COMES FROM. The queue lands with the MERGE method, so
 the commit on main IS the merge-group head: the merge_group run on main's tip
-sha already built and tested main's exact commit. Its required `macos` job --
-not the run -- is the observation. The run's own conclusion also folds in
-advisory legs (hosted Linux fails routinely), so reading it called a green tip
-red. A push-to-main run carries no macOS leg; it was designated the detector
-once and, stuck behind a runner selector nothing served, never produced one
+sha already built and tested main's exact commit. The observation is EVERY
+required status context on that commit (`[governance] required_status_checks`),
+gathered from every workflow that produces one (`[landability] workflows`) plus
+the commit's statuses -- the job that owns each context, never a run's
+conclusion. A run's conclusion folds in advisory legs (hosted Linux fails
+routinely), so reading it called a green tip red; and judging one context
+alone missed a fourteen-hour red of the required `drift-fast` context while
+`macos` stayed green. A push-to-main run carries no macOS leg and is not an
 observation.
 
 When the tip has no merge_group run (an admin or direct push) main's health is
-`unproven`, never inferred.
+`unproven`, never inferred. A required context that is still running or never
+reported leaves it `unproven` too; one that failed makes it red whatever the
+others say.
+
+A batch is judged the same way, so a batch counts toward a streak when ANY
+required context failed on it, and its failing tests come from wherever that
+context records them: the `ctest-logs-macos` artifact for `macos`, the job's own
+log for a context (such as `drift-fast`) that uploads no artifact.
 
 TWO RULES THIS DELIBERATELY REFUSES TO IMPLEMENT, because both were measured
 unsafe and both look convincing:
@@ -100,9 +110,83 @@ EVIDENCE_CONCLUSIONS = frozenset({"success", "failure"})
 _FIX_PR_MIN_STRENGTH = 100
 
 
+# The one required context whose green means "the test suite ran": its job's
+# steps are classified, so a receipt-reuse green that ran nothing is not
+# evidence. Every other context is a job (or status) whose conclusion is its
+# whole answer.
+SUITE_CONTEXT = "macos"
+
+SOURCE_JOB = "job"
+SOURCE_STATUS = "status"
+SOURCE_MISSING = "missing"
+
+
+@dataclass(frozen=True)
+class ContextResult:
+    """One required status context on one commit."""
+
+    context: str
+    conclusion: str  # success | failure | cancelled | skipped | "" (running / absent)
+    source: str = SOURCE_JOB  # job | status | missing
+    execution: str = ""  # only for SUITE_CONTEXT
+    run_id: str = ""
+    failing_tests: tuple[str, ...] = ()
+
+    @property
+    def is_suite(self) -> bool:
+        return self.context == SUITE_CONTEXT
+
+    @property
+    def failed(self) -> bool:
+        """A red this context genuinely reported about the tree.
+
+        The suite context additionally has to have run the suite: a macos
+        failure before ctest (a build that never reached the Test step) is
+        classified by `gate_suite_executed` and is not treated as evidence here,
+        exactly as before.
+        """
+        if (self.conclusion or "").strip().lower() != "failure":
+            return False
+        return not self.is_suite or self.execution == EXECUTED
+
+    @property
+    def passed(self) -> bool:
+        if (self.conclusion or "").strip().lower() != "success":
+            return False
+        return not self.is_suite or self.execution == EXECUTED
+
+    @property
+    def state(self) -> str:
+        """A one-word label for reasons and the summary table."""
+        if self.source == SOURCE_MISSING:
+            return "missing"
+        if self.failed:
+            return "failure"
+        if self.passed:
+            return "success"
+        if self.is_suite and (self.conclusion or "") == "success":
+            return f"success-but-{self.execution or NOT_EXECUTED}"
+        return self.conclusion or "pending"
+
+    def as_json(self) -> dict:
+        return {
+            "context": self.context,
+            "state": self.state,
+            "conclusion": self.conclusion or None,
+            "source": self.source,
+            "run_id": self.run_id or None,
+            "tests": list(self.failing_tests),
+        }
+
+
 @dataclass(frozen=True)
 class SuiteObservation:
-    """One run's answer to "did the macOS suite run here, and what failed?"."""
+    """One commit's answer to "did every required context report, and what failed?".
+
+    Built from `contexts` when the per-context read is available. The legacy
+    single-gate shape (no contexts) keeps its old meaning: `conclusion` and
+    `execution` of the macOS gate alone.
+    """
 
     run_id: str
     lane: str  # "main" | "batch"
@@ -115,15 +199,24 @@ class SuiteObservation:
     # How a `main` observation was obtained: "head-sha" is the merge_group run
     # on main's tip itself; "tree-identity" is the same tree validated earlier.
     source: str = ""
+    contexts: tuple[ContextResult, ...] = ()
+
+    @property
+    def failing_contexts(self) -> tuple[str, ...]:
+        return tuple(c.context for c in self.contexts if c.failed)
 
     @property
     def is_evidence(self) -> bool:
-        """True only when a job genuinely ran the suite and reported a result.
+        """True only when the commit's required gate genuinely reported a result.
 
-        Both halves are load-bearing. A three-step receipt-reuse green reports
-        `success` without running anything, and a cancelled run reports nothing
-        about the tree at all.
+        A red on ANY required context is evidence on its own: a drift check that
+        failed says the tree is broken whatever the suite is still doing. A
+        green needs every required context green AND the suite to have run: a
+        three-step receipt-reuse green reports `success` without running
+        anything, and a cancelled or still-running context reports nothing.
         """
+        if self.contexts:
+            return self.failed or self.passed
         return (
             self.execution == EXECUTED
             and (self.conclusion or "").strip().lower() in EVIDENCE_CONCLUSIONS
@@ -131,11 +224,25 @@ class SuiteObservation:
 
     @property
     def failed(self) -> bool:
+        if self.contexts:
+            return any(c.failed for c in self.contexts)
         return self.is_evidence and self.conclusion.strip().lower() == "failure"
 
     @property
     def passed(self) -> bool:
+        if self.contexts:
+            return all(c.passed for c in self.contexts)
         return self.is_evidence and self.conclusion.strip().lower() == "success"
+
+    def unresolved(self) -> str:
+        """Why a non-evidence observation is not evidence, context by context."""
+        if not self.contexts:
+            return (
+                f"its required gate reads {self.conclusion or 'pending'} with "
+                f"suite execution {self.execution}"
+            )
+        waiting = [f"{c.context} {c.state}" for c in self.contexts if not c.passed]
+        return "required context(s) not yet green: " + ", ".join(waiting)
 
 
 @dataclass
@@ -147,6 +254,10 @@ class Streak:
     run_ids: tuple[str, ...] = ()
     distinct_bases: tuple[str, ...] = ()
     skipped_non_evidence: int = 0
+    # The required contexts every batch in the streak failed, and the batch
+    # heads it spans. Both are empty for legacy single-gate observations.
+    shared_contexts: tuple[str, ...] = ()
+    heads: tuple[str, ...] = ()
 
 
 def failure_streak(batches: list[SuiteObservation]) -> Streak:
@@ -165,8 +276,10 @@ def failure_streak(batches: list[SuiteObservation]) -> Streak:
     length = 0
     run_ids: list[str] = []
     bases: list[str] = []
+    heads: list[str] = []
     skipped = 0
     shared: frozenset[str] | None = None
+    shared_ctx: frozenset[str] | None = None
     for observation in batches:
         if observation.passed:
             break
@@ -175,16 +288,22 @@ def failure_streak(batches: list[SuiteObservation]) -> Streak:
             continue
         length += 1
         run_ids.append(observation.run_id)
+        if observation.head_sha and observation.head_sha not in heads:
+            heads.append(observation.head_sha)
         if observation.base_sha and observation.base_sha not in bases:
             bases.append(observation.base_sha)
         names = frozenset(observation.failing_tests)
         shared = names if shared is None else (shared & names)
+        failing = frozenset(observation.failing_contexts)
+        shared_ctx = failing if shared_ctx is None else (shared_ctx & failing)
     return Streak(
         length=length,
         shared_tests=tuple(sorted(shared or frozenset())),
         run_ids=tuple(run_ids),
         distinct_bases=tuple(bases),
         skipped_non_evidence=skipped,
+        shared_contexts=tuple(sorted(shared_ctx or frozenset())),
+        heads=tuple(heads),
     )
 
 
@@ -200,6 +319,9 @@ class Verdict:
     main_evidence_source: str = ""
     # The main commit the verdict is about, whether or not it was observed.
     main_head_sha: str = ""
+    # Every required context on main's tip, and the ones that failed there.
+    main_contexts: tuple[ContextResult, ...] = ()
+    main_failing_contexts: tuple[str, ...] = ()
     streak: Streak = field(default_factory=Streak)
     min_streak: int = DEFAULT_MIN_STREAK
     reason: str = ""
@@ -236,8 +358,10 @@ def detect(
         verdict.main_conclusion = main.conclusion
         verdict.main_evidence_source = main.source
         verdict.main_observed = main.is_evidence
+        verdict.main_contexts = main.contexts
         if main.is_evidence:
             verdict.main_failing_tests = tuple(sorted(set(main.failing_tests)))
+            verdict.main_failing_contexts = main.failing_contexts
 
     if not verdict.main_observed:
         tip = f" {verdict.main_head_sha[:12]}" if verdict.main_head_sha else ""
@@ -249,10 +373,8 @@ def detect(
             )
         else:
             reason = (
-                f"run {main.run_id} on main's tip{tip} is not evidence yet: its "
-                f"required gate reads {main.conclusion or 'pending'} with suite "
-                f"execution {main.execution}, so the base's own health is "
-                "unmeasured"
+                f"run {main.run_id} on main's tip{tip} is not evidence yet: "
+                f"{main.unresolved()}, so the base's own health is unmeasured"
             )
         if streak.length >= min_streak and streak.shared_tests:
             verdict.status = STATUS_SUSPECTED
@@ -270,10 +392,17 @@ def detect(
 
     if main.passed:
         verdict.status = STATUS_HEALTHY
-        verdict.reason = (
-            f"run {main.run_id} executed the macOS suite on main's tip "
-            f"{verdict.main_head_sha[:12]} and its required gate passed"
-        )
+        if main.contexts:
+            verdict.reason = (
+                f"all {len(main.contexts)} required context(s) passed on main's "
+                f"tip {verdict.main_head_sha[:12]}, and run {main.run_id} "
+                "executed the macOS suite"
+            )
+        else:
+            verdict.reason = (
+                f"run {main.run_id} executed the macOS suite on main's tip "
+                f"{verdict.main_head_sha[:12]} and its required gate passed"
+            )
         return verdict
 
     named = tuple(sorted(set(verdict.main_failing_tests) & set(streak.shared_tests)))
@@ -282,7 +411,7 @@ def detect(
         verdict.proof = PROOF_MAIN_AND_STREAK
         verdict.tests = named
         verdict.reason = (
-            f"main's own suite failed {', '.join(named)} in run {main.run_id}, and "
+            f"main's own gate failed {', '.join(named)} in run {main.run_id}, and "
             f"the same test(s) failed in {streak.length} consecutive executed "
             "batches. Every batch re-formed over this base inherits it."
         )
@@ -291,17 +420,22 @@ def detect(
     verdict.status = STATUS_SUSPECTED
     verdict.proof = PROOF_MAIN_ONLY
     verdict.tests = verdict.main_failing_tests
+    where = (
+        f"required context(s) {', '.join(verdict.main_failing_contexts)} failed "
+        f"on main's tip {verdict.main_head_sha[:12]} (run {main.run_id})"
+        if verdict.main_failing_contexts
+        else f"main's own suite failed in run {main.run_id}"
+    )
     if not verdict.main_failing_tests:
         verdict.reason = (
-            f"run {main.run_id} failed on main but named no ctest, so the "
-            "failure is a configure, build or link error and no test can be "
+            f"{where} but named no ctest, so the failure is a configure, build "
+            "or link error (or a check that is not a ctest) and no test can be "
             "named for it"
         )
     else:
         verdict.reason = (
-            f"main's own suite failed in run {main.run_id}, but the failure is "
-            f"not yet shared by {min_streak} consecutive executed batches "
-            f"(streak {streak.length})"
+            f"{where}, but the failure is not yet shared by {min_streak} "
+            f"consecutive executed batches (streak {streak.length})"
         )
     return verdict
 
@@ -342,6 +476,10 @@ def signal(
         "batch_streak_runs": list(verdict.streak.run_ids),
         "batch_streak_distinct_bases": list(verdict.streak.distinct_bases),
         "batch_non_evidence_skipped": verdict.streak.skipped_non_evidence,
+        "batch_streak_contexts": list(verdict.streak.shared_contexts),
+        "batch_streak_heads": list(verdict.streak.heads),
+        "main_failing_contexts": list(verdict.main_failing_contexts),
+        "main_contexts": [c.as_json() for c in verdict.main_contexts],
         "min_streak": verdict.min_streak,
         "candidate_fix_pr": candidate_fix_pr,
         "likely_culprits": [
@@ -377,6 +515,15 @@ def render(payload: dict) -> tuple[list[str], str]:
         REQUIRED_SOURCE_FALLBACK: "**macos only**: branch protection was unreadable, "
         "so every other required context went unjudged",
     }.get(source, str(source))
+    contexts_row = (
+        "; ".join(
+            f"{entry['context']}: {entry['state']}"
+            for entry in payload.get("main_contexts") or []
+        )
+        or "—"
+    ).replace("|", chr(92) + "|")
+    shared_ctx = payload.get("batch_streak_contexts") or []
+    streak_ctx = f", every batch failed {', '.join(shared_ctx)}" if shared_ctx else ""
     md = [
         "### Base health",
         "",
@@ -390,7 +537,11 @@ def render(payload: dict) -> tuple[list[str], str]:
         f"({payload['main_conclusion'] or 'unobserved'}"
         f"{', via ' + payload['main_evidence_source'] if payload['main_evidence_source'] else ''}) |",
         f"| main tip | {(payload.get('main_head_sha') or '')[:12] or 'unknown'} |",
-        f"| batch streak | {payload['batch_streak']} (min {payload['min_streak']}) |",
+        f"| failing context(s) on main | "
+        f"{', '.join(payload.get('main_failing_contexts') or []) or '—'} |",
+        f"| required contexts on main | {contexts_row} |",
+        f"| batch streak | {payload['batch_streak']} (min {payload['min_streak']})"
+        f"{streak_ctx} |",
         f"| candidate fix PR | {('#%d' % fix) if fix else '—'} |",
         f"| likely culprit PR | {culprits} |",
         f"| required contexts judged | {required_row} |",
@@ -491,29 +642,51 @@ FALLBACK_REQUIRED_CONTEXTS = ("macos",)
 def required_contexts(config: Path = SHIPYARD_CONFIG) -> tuple[str, ...]:
     """The required status checks, from `[governance] required_status_checks`.
 
-    That list mirrors the live ruleset, and only the jobs it names decide
+    That list mirrors the live ruleset, and only the contexts it names decide
     whether main is healthy: an advisory leg's red never ejects a batch and
     must never redden the base.
 
-    It is the whole contract, so it also names contexts other workflows
-    produce (`drift-fast`, the Vellum freezes, the WebCLAP job). This detector
-    reads only build.yml runs, where those names match no job and select
-    nothing; the gate it judges is build.yml's share of the contract. It does
-    not treat a context missing from a build.yml run as missing evidence.
+    It is the whole contract, so it names contexts several workflows produce
+    (`drift-fast`, the Vellum freezes, the WebCLAP job, the version gate) as
+    well as build.yml's `macos`. Every one of them is judged: a required
+    context that failed ejects the batch exactly as a red `macos` does.
     """
+    names = _config_list("governance", "required_status_checks", config)
+    return names or FALLBACK_REQUIRED_CONTEXTS
+
+
+BUILD_WORKFLOW = ".github/workflows/build.yml"
+# Only the workflow that owns `macos` can be named when the config cannot be
+# read, matching the macos-only required fallback.
+FALLBACK_WORKFLOWS = (BUILD_WORKFLOW,)
+
+
+def required_workflows(config: Path = SHIPYARD_CONFIG) -> tuple[str, ...]:
+    """Every workflow that produces a required context, from `[landability] workflows`.
+
+    Shipyard's landability preflight reads the same list, so the detector looks
+    for a required context in exactly the workflows the landing path expects
+    to request it from.
+    """
+    names = _config_list("landability", "workflows", config)
+    if not names:
+        return FALLBACK_WORKFLOWS
+    return names if BUILD_WORKFLOW in names else (BUILD_WORKFLOW, *names)
+
+
+def _config_list(table: str, key: str, config: Path) -> tuple[str, ...]:
     try:
         import tomllib
     except ImportError:  # Python < 3.11
-        return FALLBACK_REQUIRED_CONTEXTS
+        return ()
     try:
         data = tomllib.loads(config.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return FALLBACK_REQUIRED_CONTEXTS
-    names = (data.get("governance") or {}).get("required_status_checks")
+        return ()
+    names = (data.get(table) or {}).get(key)
     if not isinstance(names, list):
-        return FALLBACK_REQUIRED_CONTEXTS
-    cleaned = tuple(n.strip() for n in names if isinstance(n, str) and n.strip())
-    return cleaned or FALLBACK_REQUIRED_CONTEXTS
+        return ()
+    return tuple(n.strip() for n in names if isinstance(n, str) and n.strip())
 
 
 def gate_jobs(jobs: list[dict], required: tuple[str, ...]) -> list[dict]:
@@ -653,24 +826,294 @@ def newest_run(runs: list[dict]) -> dict | None:
     return max(runs, key=lambda r: ((r.get("created_at") or ""), int(r.get("id") or 0)))
 
 
-def observe_main_by_head_sha(
-    repo: str, tip_sha: str, required: tuple[str, ...] | None = None
-) -> SuiteObservation | None:
-    """The merge_group run whose head IS main's tip, judged by its required gate.
+def judge_contexts(
+    jobs: list[dict],
+    statuses: list[dict],
+    required: tuple[str, ...],
+) -> tuple[ContextResult, ...]:
+    """Every required context on one commit, from its jobs first and statuses second.
 
-    Under the MERGE method the landing commit is the group commit, so this run
-    tested exactly what is on main. Read at any run status: the queue lands a
-    group as soon as its REQUIRED checks pass, while advisory legs may still be
-    running. None when no merge_group run exists for the tip.
+    A job named exactly as a context owns it; for `macos` the descriptive matrix
+    leg is the fallback owner, and its steps decide whether the suite ran. A
+    context no job owns is read from the commit's statuses (`Vellum trusted
+    freeze` is published as a status on a pull request's head). A context
+    neither carries is `missing`, which is not evidence either way.
     """
-    if not tip_sha:
-        return None
-    run = newest_run(
-        _runs(repo, "merge_group", 10, head_sha=tip_sha, completed_only=False)
+    by_status: dict[str, dict] = {}
+    for status in statuses:
+        context = (status.get("context") or "").strip()
+        if context and context not in by_status:
+            by_status[context] = status
+    results: list[ContextResult] = []
+    for context in required:
+        owned = [j for j in jobs if (j.get("name") or "").strip() == context]
+        if not owned and context == SUITE_CONTEXT:
+            owned = [
+                j for j in jobs if MACOS_JOB_RE.match((j.get("name") or "").strip())
+            ]
+        if owned:
+            leg = [(j.get("conclusion") or "").strip().lower() for j in owned]
+            if "failure" in leg:
+                conclusion = "failure"
+                pick = owned[leg.index("failure")]
+            elif all(c == "success" for c in leg):
+                conclusion = "success"
+                pick = owned[0]
+            else:
+                conclusion = next((c for c in leg if c and c != "success"), "")
+                pick = owned[0]
+            results.append(
+                ContextResult(
+                    context=context,
+                    conclusion=conclusion,
+                    source=SOURCE_JOB,
+                    execution=_execution(owned) if context == SUITE_CONTEXT else "",
+                    run_id=str(pick.get("run_id") or ""),
+                )
+            )
+            continue
+        status = by_status.get(context)
+        if status is not None:
+            state = (status.get("state") or "").strip().lower()
+            conclusion = {"success": "success", "failure": "failure", "error": "failure"}.get(
+                state, ""
+            )
+            results.append(
+                ContextResult(
+                    context=context,
+                    conclusion=conclusion,
+                    source=SOURCE_STATUS,
+                    # A status says nothing about a test step, so a green one
+                    # for the suite context cannot prove the suite ran.
+                    execution=NOT_EXECUTED if context == SUITE_CONTEXT else "",
+                )
+            )
+            continue
+        results.append(ContextResult(context=context, conclusion="", source=SOURCE_MISSING))
+    return tuple(results)
+
+
+def _json(path: str) -> dict:
+    raw = gh(path)
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _workflow_path(run: dict) -> str:
+    # The runs API can suffix a path with `@ref` for a reusable/dynamic run.
+    return (run.get("path") or "").split("@", 1)[0].strip()
+
+
+def merge_group_runs(
+    repo: str, head_sha: str = "", pages: int = 1, before: str = ""
+) -> list[dict]:
+    """merge_group runs of EVERY workflow, newest first (one call per page).
+
+    `before` (an ISO timestamp) replays the history as it stood then.
+    """
+    runs: list[dict] = []
+    for page in range(1, max(pages, 1) + 1):
+        query = f"event=merge_group&per_page=100&page={page}"
+        if head_sha:
+            query += f"&head_sha={head_sha}"
+        if before:
+            query += f"&created=<{before}"
+        batch = _json(f"repos/{repo}/actions/runs?{query}").get("workflow_runs") or []
+        runs.extend(batch)
+        if len(batch) < 100:
+            break
+    return runs
+
+
+def producing_runs(runs: list[dict], workflows: tuple[str, ...]) -> dict[str, dict]:
+    """The newest run of each context-producing workflow among `runs`."""
+    wanted = set(workflows)
+    newest: dict[str, dict] = {}
+    for run in runs:
+        path = _workflow_path(run)
+        if path not in wanted:
+            continue
+        held = newest.get(path)
+        if held is None or newest_run([held, run]) is run:
+            newest[path] = run
+    return newest
+
+
+def heads_newest_first(runs: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Group runs by head sha, newest head first (by its newest run)."""
+    grouped: dict[str, list[dict]] = {}
+    for run in runs:
+        head = (run.get("head_sha") or "").strip()
+        if head:
+            grouped.setdefault(head, []).append(run)
+    return sorted(
+        grouped.items(),
+        key=lambda item: max((r.get("created_at") or "") for r in item[1]),
+        reverse=True,
     )
-    if run is None:
+
+
+def head_jobs(repo: str, head_sha: str, by_path: dict[str, dict]) -> list[dict]:
+    """The jobs that can own a required context on one merge-group head.
+
+    build.yml's jobs come from the jobs API, because `macos` needs its steps to
+    tell an executed suite from a receipt reuse. Every other producing workflow
+    is read in ONE check-runs call for the commit (an Actions job IS a check
+    run), kept only when its check suite belongs to one of those merge_group
+    runs -- so a push run on the same landed commit is never read as the gate.
+    """
+    jobs: list[dict] = []
+    build = by_path.get(BUILD_WORKFLOW)
+    if build is not None:
+        for entry in _jobs(repo, str(build.get("id"))):
+            jobs.append({**entry, "run_id": build.get("id"), "workflow": BUILD_WORKFLOW})
+    suites = {
+        run.get("check_suite_id"): (path, run)
+        for path, run in by_path.items()
+        if path != BUILD_WORKFLOW and run.get("check_suite_id")
+    }
+    if suites:
+        payload = _json(f"repos/{repo}/commits/{head_sha}/check-runs?per_page=100")
+        for check in payload.get("check_runs") or []:
+            owner = suites.get((check.get("check_suite") or {}).get("id"))
+            if owner is None:
+                continue
+            path, run = owner
+            jobs.append(
+                {
+                    "name": check.get("name"),
+                    "conclusion": check.get("conclusion"),
+                    "status": check.get("status"),
+                    "id": check.get("id"),
+                    "run_id": run.get("id"),
+                    "workflow": path,
+                }
+            )
+    return jobs
+
+
+def commit_statuses(repo: str, sha: str) -> list[dict]:
+    """The latest status per context on a commit (combined-status payload)."""
+    return _json(f"repos/{repo}/commits/{sha}/status?per_page=100").get("statuses") or []
+
+
+def log_failing_tests(repo: str, run_id: str, job_name: str) -> tuple[str, ...]:
+    """ctest's "The following tests FAILED" block from one job's log.
+
+    For a context that uploads no ctest artifact (`drift-fast` runs ctest over a
+    configured tree and publishes nothing), the job log is the only record of
+    which tests failed. The RUN log zip is read, because the per-job endpoint is
+    withheld by `ghapp` for carrying terminal escapes; the attributor's own
+    unpacking and ctest-block parser are reused rather than restated.
+    """
+    try:
+        import queue_batch_attribute as attributor
+    except ImportError:
+        return ()
+    archive = attributor.run_log_zip(repo, run_id)
+    if not archive:
+        return ()
+    text = attributor.unpack_job_logs(archive).get(job_name, "")
+    return tuple(dict.fromkeys(attributor.parse_failing_tests(text)))
+
+
+def context_failing_tests(repo: str, result: ContextResult) -> tuple[str, ...]:
+    if not result.failed or not result.run_id:
+        return ()
+    if result.is_suite:
+        return artifact_failing_tests(repo, result.run_id)
+    if result.source != SOURCE_JOB:
+        return ()
+    return log_failing_tests(repo, result.run_id, result.context)
+
+
+def observe_head(
+    repo: str,
+    head_sha: str,
+    lane: str,
+    required: tuple[str, ...],
+    workflows: tuple[str, ...],
+    runs: list[dict] | None = None,
+    source: str = "",
+) -> SuiteObservation | None:
+    """Every required context on one merge-group head. None when no producing
+    workflow ran a merge_group for it."""
+    if not head_sha:
         return None
-    return observe(repo, run, "main", required, source=SOURCE_HEAD_SHA)
+    if runs is None:
+        runs = merge_group_runs(repo, head_sha=head_sha)
+    by_path = producing_runs(
+        [r for r in runs if (r.get("head_sha") or "").strip() == head_sha], workflows
+    )
+    if not by_path:
+        return None
+    judged = judge_contexts(
+        head_jobs(repo, head_sha, by_path), commit_statuses(repo, head_sha), required
+    )
+    contexts = tuple(
+        ContextResult(
+            context=c.context,
+            conclusion=c.conclusion,
+            source=c.source,
+            execution=c.execution,
+            run_id=c.run_id,
+            failing_tests=context_failing_tests(repo, c),
+        )
+        for c in judged
+    )
+    failing = tuple(dict.fromkeys(t for c in contexts if c.failed for t in c.failing_tests))
+    primary = by_path.get(BUILD_WORKFLOW) or newest_run(list(by_path.values())) or {}
+    first_red = next((c for c in contexts if c.failed), None)
+    suite = next((c for c in contexts if c.is_suite), None)
+    if first_red is not None:
+        conclusion = "failure"
+    elif all(c.passed for c in contexts):
+        conclusion = "success"
+    else:
+        conclusion = next(
+            (c.conclusion for c in contexts if c.conclusion and c.conclusion != "success"),
+            "",
+        )
+    return SuiteObservation(
+        run_id=str((first_red.run_id if first_red and first_red.run_id else primary.get("id")) or ""),
+        lane=lane,
+        conclusion=conclusion,
+        execution=suite.execution if suite is not None else EXECUTED,
+        failing_tests=failing,
+        base_sha=_base_sha(primary),
+        head_sha=head_sha,
+        created_at=(primary.get("created_at") or ""),
+        source=source,
+        contexts=contexts,
+    )
+
+
+def observe_main_by_head_sha(
+    repo: str,
+    tip_sha: str,
+    required: tuple[str, ...] | None = None,
+    workflows: tuple[str, ...] | None = None,
+) -> SuiteObservation | None:
+    """Every required context on the merge group whose head IS main's tip.
+
+    Under the MERGE method the landing commit is the group commit, so its
+    merge_group runs tested exactly what is on main. Read at any run status:
+    the queue lands a group as soon as its REQUIRED checks pass, while advisory
+    legs may still be running. None when no merge_group run exists for the tip.
+    """
+    return observe_head(
+        repo,
+        tip_sha,
+        "main",
+        required or required_contexts(),
+        workflows or required_workflows(),
+        source=SOURCE_HEAD_SHA,
+    )
 
 
 def observe_main_by_tree(
@@ -678,6 +1121,9 @@ def observe_main_by_tree(
     tree: str,
     limit: int = 20,
     required: tuple[str, ...] | None = None,
+    workflows: tuple[str, ...] | None = None,
+    runs: list[dict] | None = None,
+    skip_head: str = "",
 ) -> SuiteObservation | None:
     """A main observation from an earlier merge group that built the same TREE.
 
@@ -687,36 +1133,73 @@ def observe_main_by_tree(
     """
     if not tree:
         return None
-    for run in _runs(repo, "merge_group", limit):
-        head = (run.get("head_sha") or "").strip()
-        if not head or _tree_sha(repo, head) != tree:
+    runs = runs if runs is not None else merge_group_runs(repo)
+    for head, head_runs in heads_newest_first(runs)[:limit]:
+        if head == skip_head or _tree_sha(repo, head) != tree:
             continue
-        seen = observe(repo, run, "main", required, source=SOURCE_TREE_IDENTITY)
-        if seen.is_evidence:
+        seen = observe_head(
+            repo,
+            head,
+            "main",
+            required or required_contexts(),
+            workflows or required_workflows(),
+            runs=head_runs,
+            source=SOURCE_TREE_IDENTITY,
+        )
+        if seen is not None and seen.is_evidence:
             return seen
     return None
 
 
 def observe_main(
-    repo: str, limit: int = 20, required: tuple[str, ...] | None = None
+    repo: str,
+    limit: int = 20,
+    required: tuple[str, ...] | None = None,
+    workflows: tuple[str, ...] | None = None,
+    tip: tuple[str, str] | None = None,
+    runs: list[dict] | None = None,
 ) -> tuple[SuiteObservation | None, str]:
     """main's health and the tip it is about: the tip's own merge group first,
-    tree identity second. A tip run that is not yet evidence is still returned
-    when nothing better exists, so the verdict names the run it is waiting on."""
-    tip_sha, tree = main_head(repo)
-    direct = observe_main_by_head_sha(repo, tip_sha, required)
+    tree identity second. A tip observation that is not yet evidence is still
+    returned when nothing better exists, so the verdict names what it waits on.
+    `tip` pins (sha, tree) for a read-only replay of an earlier main."""
+    tip_sha, tree = tip if tip is not None else main_head(repo)
+    direct = observe_main_by_head_sha(repo, tip_sha, required, workflows)
     if direct is not None and direct.is_evidence:
         return direct, tip_sha
-    return observe_main_by_tree(repo, tree, limit, required) or direct, tip_sha
+    return (
+        observe_main_by_tree(repo, tree, limit, required, workflows, runs, tip_sha)
+        or direct,
+        tip_sha,
+    )
 
 
 def observe_batches(
-    repo: str, limit: int = 12, required: tuple[str, ...] | None = None
+    repo: str,
+    limit: int = 12,
+    required: tuple[str, ...] | None = None,
+    workflows: tuple[str, ...] | None = None,
+    runs: list[dict] | None = None,
 ) -> list[SuiteObservation]:
-    return [
-        observe(repo, run, "batch", required)
-        for run in _runs(repo, "merge_group", limit)
-    ]
+    """The newest `limit` merge-group heads, each judged on every required context.
+
+    Heads with no completed producing run yet are left out: they cost reads
+    and can only be non-evidence.
+    """
+    required = required or required_contexts()
+    workflows = workflows or required_workflows()
+    runs = runs if runs is not None else merge_group_runs(repo, pages=2)
+    observations: list[SuiteObservation] = []
+    for head, head_runs in heads_newest_first(runs):
+        if len(observations) >= limit:
+            break
+        producing = producing_runs(head_runs, workflows)
+        if not any((r.get("status") or "") == "completed" for r in producing.values()):
+            continue
+        seen = observe_head(repo, head, "batch", required, workflows, runs=head_runs)
+        if seen is not None:
+            observations.append(seen)
+    return observations
 
 
 def decisive_fix_pr(attribution) -> int | None:
@@ -808,6 +1291,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--main-limit", type=int, default=20)
     parser.add_argument("--output", default="", help="write the signal JSON here")
     parser.add_argument(
+        "--tip-sha",
+        default="",
+        help="judge this commit as main's tip instead of main's current head "
+        "(read-only replay of an earlier state)",
+    )
+    parser.add_argument(
+        "--before",
+        default="",
+        help="read batch history created before this ISO timestamp (replay)",
+    )
+    parser.add_argument(
         "--name-fix-pr",
         action="store_true",
         help="also look for the open pull request that decisively owns the test, "
@@ -832,10 +1326,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     required = required_contexts()
-    main_observation, tip_sha = observe_main(args.repo, args.main_limit, required)
+    workflows = required_workflows()
+    tip = None
+    history = None
+    if args.tip_sha:
+        tip = (args.tip_sha, _tree_sha(args.repo, args.tip_sha))
+    if args.before:
+        history = merge_group_runs(args.repo, pages=2, before=args.before)
+    main_observation, tip_sha = observe_main(
+        args.repo, args.main_limit, required, workflows, tip=tip, runs=history
+    )
     verdict = detect(
         main_observation,
-        observe_batches(args.repo, args.batch_limit, required),
+        observe_batches(args.repo, args.batch_limit, required, workflows, runs=history),
         min_streak=args.min_streak,
         tip_sha=tip_sha,
     )

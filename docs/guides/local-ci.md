@@ -863,6 +863,17 @@ test only when one of its inputs changed; a test without an entry (nested
 cmake builds, tests with no command) keeps the fail-closed "any script surface
 changed" rule.
 
+Compiled tests declare the checkout files they open at run time with
+`pulp_test_data(<suite> PATHS ...)` next to their registration
+(`tools/cmake/PulpTestData.cmake`); configure writes
+`<build>/test/test-data/<exe>.inputs.json` plus an index of every test
+executable's sources, and the generator folds them into the same list under
+`executables` (`kind: compiled`). An executable with a source that reads the
+checkout (names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition pointing
+into the checkout) but no declaration is `data: undeclared`: the shadow
+selects it on every change, and `script-test-inputs-drift` fails a pull
+request that adds a new undeclared source, so the backlog only shrinks.
+
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
 `tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and
@@ -944,10 +955,16 @@ When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
 it failed on at least two other heads in the last 24 hours (other runs'
-`ctest-logs-macos` artifacts) and passes on main's latest merge-group run,
-Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing; the job still fails.
-Read `exonerated_only` failures ÷ merge-group failures, with `unique_cause`
-> 0 and the base-red streak count unchanged as controls.
+`ctest-logs-macos` artifacts) and passes on main's tip, judged by the tip's
+required gate job, Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing;
+the job still fails. Main evidence that was not actually read (a tip whose
+gate did not execute the suite, a failing-test list that could not be
+downloaded, a red gate that named no test) is "main unknown" and never
+exonerates, and a deterministic test (label `pr-fast`, or named in
+`tools/ci/drift_fast.json`) is never eligible. Read `exonerated_only`
+failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
+which must be 1, with `unique_cause` > 0 and the base-red streak count
+unchanged as controls.
 
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
@@ -1995,7 +2012,7 @@ four hours whatever the cron says, longer than a batch's lifetime. A
 `workflow_run` job runs the default branch's copy of the workflow with
 base-repository permissions, so the detector checks out only the default branch
 (never the triggering run's head) and its token is read-only (`actions`,
-`contents`, `pull-requests`). It runs on the preamble Linux runner,
+`checks`, `contents`, `pull-requests`, `statuses`). It runs on the preamble Linux runner,
 draws no macOS gate host, and **reports only** — pausing a re-forming batch or
 prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
@@ -2003,37 +2020,65 @@ superseded tick loses nothing, because the next one reads main's *current* head,
 which is strictly more relevant than the head the cancelled tick would have
 reported on.
 
-**Where main's evidence comes from without a build.** The merge_group run whose
+**Where main's evidence comes from without a build.** The merge group whose
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
-method that run tested exactly the commit on main. It is judged by its
-**required gate jobs** — the jobs in that build.yml run named by
-`.shipyard/config.toml` `[governance] required_status_checks`, i.e. `macos`
-(the list's other contexts are produced by other workflows and select no job
-here) — never by the run's
+method its runs tested exactly the commit on main. It is judged on **every
+required status context** — `.shipyard/config.toml` `[governance]
+required_status_checks` (six contexts: `macos`, `Enforce version & skill sync`,
+`Build + prove + (owner-gated) deploy`, `Vellum freeze`, `Vellum trusted
+freeze`, `drift-fast`) — gathered from the merge_group runs of every workflow in
+`[landability] workflows`: build.yml's jobs through the jobs API (their steps
+tell an executed `macos` suite from a reused receipt), the other workflows'
+jobs through one `commits/<sha>/check-runs` read kept to those runs' check
+suites (so a push run on the landed commit is never read as the gate), and the
+commit's statuses for a context published as a status. Never by a run's
 conclusion, which also folds in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. The tip's run is read at any status,
-because a group lands as soon as its required checks pass while advisory legs
-may still be running. When the tip's gate is not evidence (a reused receipt, or
-still running), an earlier merge group whose head tree equals main's tree is
-used instead (`tree-identity`): the tree determines what was built. When the
-tip has no merge_group run at all (an admin or direct push), the verdict is
-`unproven` and its reason names the tip. The signal says which source it used
-and carries `main_head_sha`.
+Linux failure into a fake batch streak. And never by `macos` alone: on
+2026-09-29 the required `drift-fast` context was red on main for about fourteen
+hours while `macos` stayed green, the macos-only detector read `healthy`
+throughout, and every batch that failed `drift-fast` read as a pass, so the
+batch streak stayed 0. Replaying tip `31e644ed61b2` read-only now reports
+`poisoned` (`drift-fast` failed `gpu-probe-historical-v1-acceptance` on main and
+in 5 consecutive batches).
 
-Failing test names are read from the `ctest-logs-macos` **artifact**
-(`Testing/Temporary/LastTestsFailed.log`), never from a job log:
+The tip is `healthy` only when every required context is present and green and
+`macos` executed the suite; a context that failed makes it red whatever the
+others say; a context still running or never reported leaves it `unproven`, and
+its reason names the context. The tip's runs are read at any status, because a
+group lands as soon as its required checks pass while advisory legs may still
+be running. When the tip is not evidence (a reused receipt, still running), an
+earlier merge group whose head tree equals main's tree is used instead
+(`tree-identity`): the tree determines what was built. When the tip has no
+merge_group run at all (an admin or direct push), the verdict is `unproven` and
+its reason names the tip. The signal says which source it used and carries
+`main_head_sha`. Batches are judged the same way, newest head first, so a batch
+counts toward the streak when any required context failed on it.
+
+Failing test names come from wherever the failing context records them: for
+`macos`, the `ctest-logs-macos` **artifact**
+(`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
+artifact (`drift-fast`), the ctest "The following tests FAILED" block of its
+job, read from the **run** log zip. Never the per-job log endpoint:
 `ghapp api .../actions/jobs/<id>/logs` refuses any response carrying terminal
 escape sequences and returns a short refusal instead, so a log scrape silently
 yields no failing tests — which reads as "the failure was not a test failure".
+
+Replay an earlier state read-only with `--tip-sha <sha>` (judge that commit as
+main's tip) and `--before <ISO time>` (batch history as it stood then).
 
 **The signal.** A `::notice title=base-poison-signal::` annotation carrying one
 line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
-`main_evidence_source`, `main_head_sha`, `main_failing_tests`, `batch_streak`,
-`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
-`likely_culprits`, `required_contexts_source`, `reason`.
+`main_evidence_source`, `main_head_sha`, `main_failing_tests`,
+`main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
+source, run_id, tests}` per required context), `batch_streak`,
+`batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
+`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`required_contexts_source`, `reason`. Fields are only ever added under
+`base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
+`safe_to_pause_queue`.
 
 `likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
 whose presence separates the merge groups that failed a test from the ones that
@@ -2046,10 +2091,10 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 
 | `status` | Means | `safe_to_pause_queue` |
 |---|---|---|
-| `healthy` | a job that genuinely ran the suite on main's tree passed | false |
-| `unproven` | no such job exists — main's health is unmeasured | false |
-| `suspected` | a streak, or a main failure naming no test | false |
-| `poisoned` | main's own suite failed a test that a streak of consecutive executed batches also failed | **true** |
+| `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
+| `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
+| `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
+| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
@@ -2194,34 +2239,6 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
-## The Shipyard merge steward uses one repository-scoped writer
-
-`.github/workflows/shipyard-merge-steward.yml` is the single logical,
-model-free controller for exact-head PR reconciliation and native merge-queue
-enrollment. M1, M3, and M5 may supply fenced recovery capacity after their
-canaries pass; they must not run independent mutating queue loops.
-
-The steward mints a one-repository GitHub App installation token. Queue
-enrollment requires both `permission-merge-queues: write` and
-`permission-contents: write`: the first grants queue management, while the
-second gives the actor the repository write access GitHub requires to enqueue a
-pull request. Downscoping contents to read fails closed with `Resource not
-accessible by integration` even when the App installation itself owns both
-permissions. Keep the token repository-scoped, retain the exact-head guard, and
-never replace this pair with a personal credential or an admin-merge bypass.
-
-Recovery dispatch must follow TartCI's disposable JIT lifecycle. The controller
-queues one exact-head job on `shipyard-recovery-pool`; it does **not** wait for
-an already-online idle recovery runner. TartCI runners do not exist until a
-matching job is queued, so a pre-dispatch runner census creates a deadlock. An
-eligible M3, M5, or M1 supervisor boots a disposable VM, registers a one-job
-runner whose name starts with `shipyard-recovery-m3-`,
-`shipyard-recovery-m5-`, or `shipyard-recovery-m1-`, and GitHub assigns the
-single queued job. The workflow derives the actual worker from that fenced
-name before checkout; an ordinary CI label or an unknown name fails closed.
-The pending exact-head status remains the durable obligation while every Mac
-is offline, so its age alone never creates a duplicate model invocation.
-
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is
@@ -2359,7 +2376,7 @@ required check equally; see the `contrib-intake` skill.
 Live enforcement is classic branch protection, not a ruleset; the checked-in
 `.github/rulesets/main-protection.json` and `.shipyard/config.toml`
 `[governance]` mirror it, and `base-poison-detector-selftest` fails when those
-two disagree. `[governance]` is the full six-context contract, because
+two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
 `shipyard governance apply` pushes exactly that list to branch protection.
 Removing it again is the reverse `required_status_checks` edit.
 
@@ -3829,10 +3846,8 @@ reread confirms the same status, head, event, and workflow. It applies the same
 age thresholds. Push, merge-group, workflow-dispatch, and unrelated workflow
 runs are excluded: they have separate concurrency/merge-stall semantics. A
 zero-job finding points first to an older non-terminal run on the same ref
-holding the workflow concurrency group, not to Tart capacity. The merge steward
-independently cancels bounded superseded-head runs; this alert remains the
-off-fleet backstop when a current-head run is stranded or that cleanup has not
-converged.
+holding the workflow concurrency group, not to Tart capacity. This alert is the
+off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
 degraded sweep suppresses alarms and cannot create, update, reopen, or close the
@@ -6077,31 +6092,12 @@ refreshed. The guard only takes effect on hosts where `shipyard guards status`
 shows `branch-refresh-guard` current. A local `git merge origin/main && git
 push` bypasses it, so do not merge `main` into a PR unless it conflicts.
 
-## Steward auto-handoff is PAUSED (2026-09-07)
+## Steward auto-handoff stays off
 
-`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`. Normally it
-is `true`, making PR creation and durable steward ownership one operation.
-
-It is paused because since 2026-08-31 the handoff rejects every agent-run
-`shipyard pr` against this repo, **after the branch is pushed**, with
-`--workstream-id must be a canonical GEN-style handle`. Two guards combine to
-make that unavoidable here: Shipyard synthesizes the fallback id as `{repo}#{pr}`
-preserving case and its escape hatch requires an already-lowercase slug (this
-repo is `Generous-Corp/pulp`), and even lowercased the hatch is refused once an
-agent route is detected — `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID` are set in
-every agent shell. Deterministic, not flaky.
-
-While paused, new PRs are not steward-managed: `runner steward` marks them
-`shipyard:unmanaged` and will not queue, re-run, cancel or recovery-signal them.
-That is the pre-2026-08-14 landing path — `shipyard ship` validates and merges on
-its own, and ship/queue/watch never consult the managed label. The recovery
-worker goes idle rather than broken.
-
-**Do not pass `--workstream-id` while this is paused**, or the fleet splits into
-managed and unmanaged PRs, which is worse than either state alone.
-
-Restore by setting `auto_handoff = true` once Shipyard's validator accepts a
-mixed-case slug from an agent shell.
+`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`, and nothing
+reads a handoff receipt: Pulp removed its repository-wide steward workflow and
+recovery worker, and PRs land through the native merge queue. Do not pass
+`shipyard pr --workstream-id`; it opts one PR into the same unread handoff.
 
 ## Troubleshooting
 
