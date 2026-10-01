@@ -2779,7 +2779,7 @@ jobs:
             --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
-            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members --codemodel \
             --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
