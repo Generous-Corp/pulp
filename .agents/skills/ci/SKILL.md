@@ -7002,7 +7002,10 @@ still select full validation. Top-level `tools/scripts/*.py` and
 also adds the whole-tree drift/lint/sync tests; a script native code, shell or
 CMake names stays full. After regenerating the script-inputs list, regenerate
 the block with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
-blocks the next change to a script or skill doc. Neither this skill nor
+blocks the next change to a script or skill doc. A test whose outcome follows
+host load, the toolchain or host state rather than its inputs belongs in the
+`environment-bound` ctest label: the generator then runs it with every bounded
+script or skill change. Neither this skill nor
 `tools/scripts/test_*.py` forces full validation any more; CMake and
 `test/cmake/**` still do. Documentation
 under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`, and
