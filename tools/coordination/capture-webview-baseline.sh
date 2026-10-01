@@ -83,9 +83,12 @@ log "Rendering $EDITOR_HTML in Chrome headless at ${WIDTH}x${HEIGHT}…"
 # --force-device-scale-factor=2 to match the @2x scale pulp-screenshot uses
 # so the diff math compares like-for-like resolutions. --hide-scrollbars
 # avoids the right-edge scrollbar polluting the pixel comparison.
+# MacAppCodeSignClone stops Chrome copying its app bundle into the per-user
+# temp dir, which it leaves behind whenever it does not exit cleanly.
 "$CHROME" \
   --headless=new \
   --disable-gpu \
+  --disable-features=MacAppCodeSignClone \
   --hide-scrollbars \
   --force-device-scale-factor=2 \
   --window-size="${WIDTH},${HEIGHT}" \

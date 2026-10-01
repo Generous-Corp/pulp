@@ -409,7 +409,10 @@ class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             clone = Path(temporary) / "older-clean-clone"
             CONTRACT.subprocess.run(
-                ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(clone)],
+                # --shared borrows ROOT's object store instead of copying it:
+                # a --no-hardlinks copy of this repository is ~20 GiB, takes
+                # minutes, and a killed run left it whole in TMPDIR.
+                ["git", "clone", "--quiet", "--shared", str(ROOT), str(clone)],
                 check=True,
             )
             CONTRACT.subprocess.run(
