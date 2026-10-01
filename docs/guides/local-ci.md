@@ -934,6 +934,37 @@ failed in the same run): it must stay 0 over a long window, and binary
 identity must approach 100%, before enforcement is proposed as a contract
 amendment.
 
+Every `macos` job, pull-request head and merge group alike, also uploads a
+**reuse replay record** (`tools/ci/reuse_record.py`, artifact
+`reuse-record-macos`, or `reuse-record-macos-attempt-N` on a re-run, kept 90
+days): `tests.jsonl` with one record per test (run and pull request, head,
+base and merge tree, suite, outcome, attempts, duration, executable, runner
+image fingerprint, and the per-test receipt key where the merge-group shadow
+computed one), `identity.json` with each executable's sha256 and the
+digest of its runtime closure (the non-system dylibs and frameworks it loads,
+a script's interpreter), and `job.json` with the context and sizes. Outcomes
+come from ctest's JUnit report and attempts from its `LastTest.log`, which the
+test step keeps as `LastTest.full.log` because any later ctest call in the
+build directory replaces it. An alias `macos` job that ran no suite uploads a
+record with no tests and the reason. It is history for scoring reuse policies
+offline and decides nothing; a job that should carry one and does not warns
+`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
+completed `macos` jobs.
+
+The record hashes every registered test executable, not only those the job
+ran, so a fast-tier pull-request head's hashes are there for the merge
+group's **binary-identity shadow**, which reads the head's reuse record when
+the head issued no receipt (annotation field `source: reuse-record`). The
+macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
+(`tools/cmake/PulpLinkMaps.cmake`): every link runs through
+`tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
+linker's status, and for an executable keeps only the map's object list and
+the link arguments under `<build>/link-members/` (the map, megabytes of
+symbol table, is deleted). The linked bytes are identical with and without
+it. `link-members-<sha>.json` in the record then lists, per executable, the
+archive members its link pulled, with `whole` set on archives the link line
+force-loads (`-force_load`, `-all_load`, `-ObjC`).
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether

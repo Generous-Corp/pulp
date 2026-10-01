@@ -2036,6 +2036,27 @@ groups at ~100% identical, no design may assume two VMs link the same bytes;
 a differing path names the linker input to normalise (embedded path, UUID,
 timestamp) before any per-binary reuse is proposed.
 
+## Per-test replay history lives in `reuse-record-macos`, not `ctest-logs-macos`
+
+`ctest-logs-macos` expires in 7 days, and its `LastTest.log` is NOT the suite's:
+every ctest call after the run (the `--show-only` listing, the GPU-adapter
+probe) replaces that file, so the artifact holds only the last probe's block.
+For outcome, attempts, duration and executable per test over 90 days, read the
+`reuse-record-macos` artifact (`tests.jsonl`, `identity.json`, `job.json`;
+`tools/ci/reuse_record.py`), which every `macos` job writes. `attempts` is null
+where a `--repeat` suite left no log (the pull-request affected-test batches),
+never guessed as 1. A missing record announces itself as `reuse-record NOT
+written`; count those annotations before calling the record complete.
+
+Link maps (`-DPULP_RECORD_LINK_MAPS=ON`) run through a linker launcher, so
+two traps apply. `add_custom_command(TARGET ... POST_BUILD)` cannot attach to
+a target from another directory, which is why the map is post-processed by
+the launcher rather than a post-build step; and a launcher is copied into a
+target when it is defined, so `PulpLinkMaps.cmake` must be included before
+the first target (and before FetchContent). The launcher must exit with the
+linker's status and fall back to the plain command whenever it cannot write
+its record: recording may never fail a link.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`

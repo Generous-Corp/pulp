@@ -3271,6 +3271,18 @@
    ],
    "kind": "python"
   },
+  "link-members-selftest": {
+   "entry": "tools/ci/test_link_members.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/link-members-launcher.sh",
+    "tools/ci/link_members.py",
+    "tools/ci/test_link_members.py",
+    "tools/ci/testdata/link_members/pulp-test-state.map",
+    "tools/cmake/PulpLinkMaps.cmake"
+   ],
+   "kind": "python"
+  },
   "linux-runner-group-selftest": {
    "entry": "tools/ci/test_verify_linux_runner_group.py",
    "inputs": [
@@ -4783,6 +4795,21 @@
     "tools/scripts/test_wide_non_native.py",
     "tools/scripts/wide_non_native.py",
     "tools/testing"
+   ],
+   "kind": "python"
+  },
+  "reuse-record-selftest": {
+   "entry": "tools/ci/test_reuse_record.py",
+   "inputs": [
+    ".github/rulesets/main-protection.json",
+    ".github/workflows/build.yml",
+    "test/ctest_script_inputs.json",
+    "tools/ci/link_members.py",
+    "tools/ci/reuse_record.py",
+    "tools/ci/test_reuse_record.py",
+    "tools/ci/testdata/reuse_record",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/protected_merge_receipt.py"
    ],
    "kind": "python"
   },
