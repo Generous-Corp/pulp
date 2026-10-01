@@ -1,0 +1,44 @@
+# Path: /work/build/test/pulp-test-state
+# Arch: arm64
+# Object files:
+[  0] linker synthesized
+[  1] CMakeFiles/pulp-test-state.dir/test_state.cpp.o
+[  2] CMakeFiles/pulp-test-state.dir/harness/rt_allocation_probe.cpp.o
+[  3] ../core/state/libpulp-state.a(store.cpp.o)
+[  4] ../core/state/libpulp-state.a(state_migration.cpp.o)
+[  5] ../core/events/libpulp-events.a(event_loop.cpp.o)
+[  6] ../core/events/libpulp-events.a(main_thread_dispatcher.cpp.o)
+[  7] ../_deps/catch2-build/src/libCatch2Maind.a(catch_main.cpp.o)
+[  8] /SDK/System/Library/Frameworks/Foundation.framework/Foundation.tbd
+[  9] /SDK/System/Library/Frameworks/CoreServices.framework/CoreServices.tbd
+[ 10] /SDK/System/Library/Frameworks/UserNotifications.framework/UserNotifications.tbd
+[ 11] ../core/runtime/libpulp-runtime.a(scoped_no_alloc.cpp.o)
+[ 12] /SDK/System/Library/Frameworks/Cocoa.framework/Cocoa.tbd
+[ 13] /SDK/System/Library/Frameworks/UniformTypeIdentifiers.framework/UniformTypeIdentifiers.tbd
+[ 14] /SDK/usr/lib/libbsm.tbd
+[ 15] /SDK/System/Library/Frameworks/Security.framework/Security.tbd
+[ 16] /SDK/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation.tbd
+[106] /SDK/usr/lib/libc++.tbd
+[107] /SDK/usr/lib/libSystem.tbd
+[108] /SDK/usr/lib/system/libcompiler_rt.tbd
+[109] /SDK/usr/lib/system/libdyld.tbd
+[110] /SDK/usr/lib/system/libsystem_c.tbd
+[111] /SDK/usr/lib/system/libsystem_kernel.tbd
+[112] /SDK/usr/lib/system/libsystem_m.tbd
+[113] /SDK/usr/lib/system/libsystem_malloc.tbd
+[114] /SDK/usr/lib/system/libsystem_pthread.tbd
+[115] /SDK/usr/lib/system/libsystem_trace.tbd
+[116] /SDK/usr/lib/system/libunwind.tbd
+[ 90] ../fonts/libpulp-fonts.a(inter_regular.cpp.o)
+[ 91] ../fonts/libpulp-fonts.a(inter_bold.cpp.o)
+# Sections:
+# Address	Size    	Segment	Section
+0x100003350	0x001F5458	__TEXT	__text
+0x1001F87A8	0x0000666C	__TEXT	__stubs
+0x1001FEE14	0x00000008	__TEXT	__init_offsets
+0x1001FEE1C	0x000172F8	__TEXT	__gcc_except_tab
+0x100216114	0x0000C18D	__TEXT	__cstring
+0x1002222B0	0x0000820A	__TEXT	__const
+# Symbols:
+# Address	Size    	File  Name
+0x100003350	0x00000010	[  3] __ZN4pulp5state5Store3getEv

@@ -1,5 +1,6 @@
 #include <pulp/view/auto_ui.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/widgets.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

@@ -14,6 +14,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as dt
 import gzip
+import http.client
 import json
 import os
 import re
@@ -54,7 +55,7 @@ GATE_ARGS_RE = re.compile(_TS + r"ctest gate args: label_exclude=(?P<exclude>\S*
 RECEIPT_ISSUED_RE = re.compile(_TS + r"##\[notice\]exact-tree receipt for [0-9a-f]{40} on base [0-9a-f]{40}")
 RECEIPT_NOT_ISSUED_RE = re.compile(_TS + r"##\[warning\].* the merge group will validate in full")
 # Bump when parse_job_log's output changes, so cached parses are redone.
-PARSER_VERSION = 2
+PARSER_VERSION = 4
 
 
 def outcome_of(status: str) -> str:
@@ -88,12 +89,15 @@ def parse_job_log(lines: Iterable[str]) -> dict:
             expect_sha = True
             continue
         if CTEST_START_RE.match(line):
-            current = {"tests": {}, "summary": None, "total": None}
+            current = {"tests": {}, "summary": None, "total": None, "seen": set()}
             sessions.append(current)
             continue
         if current is not None:
             match = TEST_LINE_RE.match(line)
             if match:
+                if line in current["seen"]:
+                    continue  # the job log repeats a block verbatim; a retry has its own timestamp
+                current["seen"].add(line)
                 num = int(match.group("num"))
                 rec = current["tests"].get(num)
                 if rec is None:
@@ -219,11 +223,25 @@ class GitHub:
         with self._request(url, "application/vnd.github+json") as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def job_log_lines(self, job_id: int) -> Iterator[str]:
+    def job_log_lines(self, job_id: int) -> list[str]:
+        """The whole job log, or TruncatedLog when the body is shorter than
+        its declared length. Iterating a response that drops mid-stream just
+        ends early, and a log cut off mid-ctest parses as a plausible short
+        run (no receipt, an incomplete suite) rather than as an error."""
         url = f"{API}/repos/{self.repository}/actions/jobs/{job_id}/logs"
         with self._request(url, "application/vnd.github+json") as resp:
-            for raw in resp:
-                yield raw.decode("utf-8", "replace").rstrip("\r\n")
+            try:
+                body = resp.read()
+            except http.client.IncompleteRead as err:
+                raise TruncatedLog(f"job {job_id}: {len(err.partial)} bytes before the stream ended") from err
+            declared = resp.headers.get("Content-Length")
+            if declared is not None and int(declared) != len(body):
+                raise TruncatedLog(f"job {job_id}: {len(body)} of {declared} bytes")
+        return body.decode("utf-8", "replace").splitlines()
+
+
+class TruncatedLog(RuntimeError):
+    """A job log arrived shorter than the length the server declared."""
 
 
 def _days(since: dt.datetime, until: dt.datetime) -> Iterator[str]:
@@ -293,15 +311,26 @@ class Collector:
 
     def parsed_log(self, job_id: int) -> dict:
         def fetch() -> dict:
-            try:
-                return parse_job_log(self.gh.job_log_lines(job_id))
-            except urllib.error.HTTPError as err:
-                if err.code not in (404, 410):
-                    raise
-                # Expired past the log retention window: nothing is known.
-                return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
-                        "receipt_issued": None}
-        return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+            for attempt in range(4):
+                try:
+                    return parse_job_log(self.gh.job_log_lines(job_id))
+                except urllib.error.HTTPError as err:
+                    if err.code not in (404, 410):
+                        raise
+                    # Expired past the log retention window: nothing is known.
+                    return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                            "receipt_issued": None}
+                except (TruncatedLog, ConnectionError, TimeoutError, urllib.error.URLError):
+                    if attempt == 3:
+                        raise  # never cache a partial log as if it were the run
+                    time.sleep(2 ** attempt)
+            raise AssertionError("unreachable")
+        try:
+            return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+        except TruncatedLog:
+            # Unknown for this collect, and not cached, so the next one retries.
+            return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                    "receipt_issued": None}
 
     def decision(self, job_id: int) -> str | None:
         def fetch() -> list:
@@ -318,10 +347,11 @@ class Collector:
                 verdict = note.get("verdict")
         return verdict
 
-    def required_contexts_green(self, head_sha: str, required: tuple[str, ...],
-                                as_of: str | None = None) -> bool | None:
-        """Every required context other than macos green on the head, reading
-        only check-runs that had completed by `as_of` (the group's creation)."""
+    def required_contexts(self, head_sha: str, required: tuple[str, ...],
+                          as_of: str | None = None) -> dict[str, list[str]] | None:
+        """The required contexts other than macos that were red, and those with
+        no completed check-run, on the head as of `as_of` (the group's
+        creation). None when the head's check-runs cannot be read."""
         def fetch() -> list:
             rows, page = [], 1
             while True:
@@ -342,13 +372,16 @@ class Collector:
                 continue
             if name and (name not in latest or str(cr.get("completed_at") or "") >= str(latest[name].get("completed_at") or "")):
                 latest[name] = cr
+        out: dict[str, list[str]] = {"red": [], "absent": []}
         for context in required:
             if context == "macos":
                 continue  # the full-suite ctest facts stand in for the head's own macos check
             cr = latest.get(context)
-            if cr is None or cr.get("conclusion") not in GREEN_CONCLUSIONS:
-                return False
-        return True
+            if cr is None:
+                out["absent"].append(context)
+            elif cr.get("conclusion") not in GREEN_CONCLUSIONS:
+                out["red"].append(context)
+        return out
 
     def merged_at(self, since: dt.datetime) -> dict[int, str | None]:
         """merged_at per closed pull request updated since `since`."""
@@ -496,9 +529,10 @@ class Collector:
         parsed = self.parsed_log(job["id"]) if job else {"checkout_sha": None, "ctest": {}, "tests": [],
                                                            "receipt_issued": None}
         checkout = parsed["checkout_sha"]
-        if checkout is None and job is None and kind == "merge_group":
-            # No suite ran (reused, or no native input): the group's commit is
-            # still exactly the run's own head.
+        if checkout is None and kind == "merge_group":
+            # The job never checked out (reused, no native input, cancelled
+            # before checkout, log expired): the group's commit is still
+            # exactly the run's own head, and no suite ran on it.
             checkout = run["head_sha"]
         commit = self.commit(checkout)
         record = {
@@ -513,7 +547,10 @@ class Collector:
             "base_sha": commit["parents"][0] if commit and commit["parents"] else None,
             "merge_tree": commit["tree"] if commit else None,
             "ctest": parsed["ctest"], "receipt_issued": parsed["receipt_issued"],
-            "build_failed": bool(job and job["conclusion"] == "failure" and not parsed["ctest"].get("ran")),
+            # A build failure got as far as checking out and never reached ctest;
+            # a job that failed before checkout (a cancelled leg) ran nothing.
+            "build_failed": bool(job and job["conclusion"] == "failure" and parsed["checkout_sha"]
+                                 and not parsed["ctest"].get("ran")),
             "required_contexts_green": None, "observed_decision": None,
         }
         if kind == "merge_group":
@@ -535,11 +572,14 @@ class Collector:
                 by_head.setdefault(run["head_sha"], []).append(run)
 
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            jobs_done = list(pool.map(lambda g: self.jobs(g["id"]), groups))
-        del jobs_done
+            for _ in pool.map(lambda g: self.jobs(g["id"]) and None, groups):
+                pass
         group_logs = [self.ctest_job(self.jobs(g["id"])) for g in groups]
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            list(pool.map(lambda j: self.parsed_log(j["id"]) if j else None, group_logs))
+            # Warm the log cache only; keeping the parses would hold every
+            # run's per-test rows in memory at once.
+            for _ in pool.map(lambda j: j and self.parsed_log(j["id"]) and None, group_logs):
+                pass
         self.prime_commits([self.parsed_log(j["id"])["checkout_sha"] for j in group_logs if j]
                             + [g["head_sha"] for g in groups])
 
@@ -611,11 +651,15 @@ class Collector:
                         hits = self.declared_input_hits(group, drift)
                     elif drift == []:
                         hits = []
-                green = None
+                contexts = None
                 if record["ctest"].get("complete") and record["ctest"].get("failed") == 0:
-                    green = self.required_contexts_green(record["head_sha"], required, group["created_at"])
-                head_rows.append({"run_id": run_id, "drift_files": drift, "drift_source": source,
-                                  "drift_declared_input_hits": hits, "required_contexts_green": green})
+                    contexts = self.required_contexts(record["head_sha"], required, group["created_at"])
+                head_rows.append({
+                    "run_id": run_id, "drift_files": drift, "drift_source": source,
+                    "drift_declared_input_hits": hits,
+                    "required_contexts_green": None if contexts is None else not (contexts["red"] or contexts["absent"]),
+                    "required_contexts_red": None if contexts is None else contexts["red"],
+                    "required_contexts_absent": None if contexts is None else contexts["absent"]})
             return {"schema": PAIR_SCHEMA, "pr": group["pr"], "head_sha": group["head_sha"],
                     "group_run_id": group["run_id"], "heads": head_rows,
                     "stacked": _stacked(group, queue_commits, merged_at, self)}
@@ -693,3 +737,171 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
     return pmr.required_contexts_from_ruleset(repo / ".github" / "rulesets" / "main-protection.json")
 
 
+
+
+# --------------------------------------------------------------------------
+# Tier-1a source keys reconstructed from git and a build graph
+# --------------------------------------------------------------------------
+#
+# A per-executable source key matches the PR head's when nothing the
+# executable is built from changed between the head run's tree and the
+# group's tree. Recorded keys do not exist for history, so the replay
+# reconstructs the verdict: the drift (files that differ between the two
+# checkouts) is propagated through a Ninja graph (sources, headers via the
+# recorded deps, archives, links) to the executables it rebuilds. A script
+# test is keyed on its own entry in test/ctest_script_inputs.json. Three
+# variants are written per pair:
+#
+#   per-entry    a compiled test runs when one of its executables is
+#                rebuilt or one of its sources drifted; a script test runs
+#                when its own entry changed or a declared input drifted.
+#   strict-data  per-entry, plus fail-closed rules for what keys cannot
+#                see yet: any drifted runtime data file (no compiled test
+#                declares the data it reads) or CMake file runs every
+#                compiled test; whole-tree tests (drift, lint, registry,
+#                census, probe, ...) and tests whose registration names a
+#                shared host resource (a RESOURCE_LOCK, or a gpu or
+#                browser-capture label) always run; and a script test is
+#                skippable only when it is labelled `hermetic`. This is the
+#                variant to ship.
+#   list-level   per-entry, except a script test also runs whenever the
+#                list file itself changed. A negative control: it must read
+#                lower than per-entry.
+#
+# A test the map does not know (an unmapped compiled test, an executable
+# the graph does not build, a script test with no entry) always runs.
+
+SOURCE_KEY_VARIANTS = ("per-entry", "strict-data", "list-level")
+# Registration labels that mean the test drives a shared host resource.
+ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
+
+
+sys.path.insert(0, str(HERE.parent / "ci"))
+
+
+def _is_cmake(path: str) -> bool:
+    return path.endswith(("CMakeLists.txt", ".cmake"))
+
+
+def _declared_hit(inputs: Iterable[str], changed: Iterable[str]) -> bool:
+    inputs = [i.rstrip("/") for i in inputs]
+    return any(f == i or f.startswith(i + "/") for f in changed for i in inputs)
+
+
+def environment_bound(mapped: dict) -> bool:
+    return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
+
+
+def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
+                         head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
+                         rebuilt: set[str], all_executables: set[str]) -> dict[str, dict]:
+    """Per variant: the tests that must run and the share of executables rebuilt.
+
+    `rebuilt` is the set of executables (relative to the build dir) the drift
+    reaches through the graph. Pure: the graph and git reads happen before."""
+    import test_receipts_shadow  # tools/ci: the always-run names and the runtime-surface rule
+    always_run = test_receipts_shadow.ALWAYS_RUN_NAME_RE
+    surface = test_receipts_shadow.is_runtime_surface
+    drift_set = set(drift)
+    cmake = any(_is_cmake(f) for f in drift)
+    data = sorted(f for f in drift if surface(f) and not _is_cmake(f) and f != SCRIPT_INPUTS_PATH)
+    list_changed = SCRIPT_INPUTS_PATH in drift_set
+    out: dict[str, dict] = {}
+    for variant in SOURCE_KEY_VARIANTS:
+        strict = variant == "strict-data"
+        run: list[str] = []
+        for name in group_tests:
+            mapped = test_map.get(name) or {}
+            exes = mapped.get("executables") or []
+            if strict and (always_run.search(name) or environment_bound(mapped)):
+                run.append(name)
+            elif exes:
+                if (not set(exes) <= all_executables or (strict and (cmake or data))
+                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])):
+                    run.append(name)
+            elif group_entries is not None and name in group_entries and head_entries is not None:
+                entry = group_entries[name]
+                if (head_entries.get(name) != entry or _declared_hit(entry.get("inputs") or [], drift)
+                        or (variant == "list-level" and list_changed)
+                        or (strict and "hermetic" not in (mapped.get("labels") or []))):
+                    run.append(name)
+            else:
+                run.append(name)  # unknown inputs: never skippable
+        total = len(all_executables)
+        rebuilt_n = total if (strict and cmake) else len(rebuilt & all_executables)
+        out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": rebuilt_n,
+                        "cmake_changed": cmake, "data_changed": data[:20]}
+    return out
+
+
+def load_graph(build_dir: Path | None, pickle_path: Path | None):
+    """A Ninja graph with header deps: from a pickled affected_tests_shadow
+    Graph, or parsed from a configured build dir (slow on a full tree)."""
+    import affected_tests_shadow as shadow  # tools/ci: the Ninja graph the affected-test shadow uses
+    if pickle_path is not None:
+        import pickle
+        sys.modules.setdefault("ats", shadow)  # pickles made from a copy of the module
+        with open(pickle_path, "rb") as handle:
+            return pickle.load(handle)
+    edges = shadow.parse_build_ninja((build_dir / "build.ninja").read_text(encoding="utf-8", errors="replace"))
+    deps = shadow.parse_ninja_deps(subprocess.run(["ninja", "-C", str(build_dir), "-t", "deps"], check=True,
+                                                  capture_output=True, text=True).stdout)
+    return shadow.Graph(build_dir, edges, deps)
+
+
+def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,
+                         test_map: dict[str, dict], only_runs: set[str] | None = None) -> dict:
+    """Write the three source-key variants into each pair that has a valid
+    head run with per-test records; return counts for the manifest."""
+    import reuse_policy_replay as rpr
+    corpus = rpr.Corpus.load(corpus_dir)
+    collector = Collector.__new__(Collector)
+    collector.repo, collector.cache = repo, corpus_dir / "cache"
+    collector._git_lock, collector._commit_cache = threading.Lock(), {}
+    entries_cache: dict[str, dict | None] = {}
+
+    unread: list[str] = []
+
+    def entries(sha: str) -> dict | None:
+        if sha not in entries_cache:
+            for _ in range(3):
+                res = collector._git("show", f"{sha}:{SCRIPT_INPUTS_PATH}", check=False)
+                if not res.returncode:
+                    break
+            try:
+                entries_cache[sha] = None if res.returncode else json.loads(res.stdout).get("tests", {})
+            except json.JSONDecodeError:
+                entries_cache[sha] = None
+            if entries_cache[sha] is None:
+                unread.append(f"{sha}: {res.stderr.strip()[:200]}")
+        return entries_cache[sha]
+
+    build_real = os.path.realpath(graph_build_dir)
+    # Executables the graph builds; a test mapped to anything else is unknown.
+    built = {os.path.relpath(graph.norm(o), build_real) for outs in graph.fwd.values() for o in outs}
+    all_exes = {e for v in test_map.values() for e in v.get("executables") or []} & built
+    done = 0
+    for pair in corpus.pairs:
+        if only_runs is not None and str(pair["group_run_id"]) not in only_runs:
+            continue
+        group = corpus.run(pair["group_run_id"])
+        head_row = next((h for h in pair.get("heads") or [] if h.get("drift_files") is not None), None)
+        if group is None or validate_run(group) or head_row is None:
+            continue
+        head = corpus.run(head_row["run_id"])
+        tests = corpus.tests(group["run_id"])
+        if head is None or validate_run(head) or not tests:
+            continue
+        drift = head_row["drift_files"]
+        changed_abs = [os.path.realpath(os.path.join(graph_source_root, f)) for f in drift]
+        reached = graph.affected_outputs(changed_abs)
+        rebuilt = {os.path.relpath(p, build_real) for p in reached if p.startswith(build_real + os.sep)}
+        pair["source_key"] = classify_source_keys(
+            drift, [t["test_id"] for t in tests], test_map, entries(head["checkout_sha"]),
+            entries(group["checkout_sha"]), rebuilt, all_exes)
+        pair["source_key_head_run_id"] = head_row["run_id"]
+        done += 1
+    write_jsonl(corpus_dir / "pairs.jsonl", corpus.pairs)
+    # A list that cannot be read makes every script test unknown (it runs);
+    # name the commits so a low number is traceable to its cause.
+    return {"pairs_annotated": done, "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}

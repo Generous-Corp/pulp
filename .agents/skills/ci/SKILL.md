@@ -462,6 +462,11 @@ boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
 unstacked enqueue path.
 
+`shipyard metrics gate-cost --since 7d` needs no flags in a Pulp checkout:
+`.shipyard/config.toml [metrics.gate_cost]` names the repo, `build.yml` and the
+`macos` gate. Quote that command, not a hand-typed flag set, so two gate-cost
+numbers are comparable.
+
 Use these commands as the normal agent loop:
 
 ```bash
@@ -1074,6 +1079,19 @@ them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and ex
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
 
+### Governed builds have a class: validations are `background`, everything else `interactive`
+
+`PULP_BUILD_CLASS=background` is set on every `.shipyard/config.toml` stage that
+calls `governed-build.sh`; anything else (a `pulp build`, a manual
+`governed-build.sh`, a release build) runs `interactive`: normal QoS always,
+partial lease or a short local wait instead of the background-QoS floor. Do not
+drop the prefix from a new Shipyard stage — a validation running `interactive`
+competes with the person waiting on their own build, which is the exact
+2026-09-30 MacBook incident (two validations held the whole non-gate budget and
+an awaited Spectr build ran background-throttled). Read a host's knobs with
+`tartci governor show`; `tartci governor explain` says what each class would get
+now, which is the first thing to run when a build reports a small `-j`.
+
 ### The pre-push coverage build skips itself on a starved host: a skip, not a pass
 
 On a host whose cores are leased to gate VMs, `governed-build.sh` pins a build at
@@ -1570,7 +1588,14 @@ transitions and cases present in only one artifact. Same-name duplicates are
 compared as status-count groups, never guessed per case. CI publishes the v2
 JSON beside the original XML in each non-Windows `ctest-logs-<key>`. Exit 0 means the observation is
 readable, even when tests failed or skipped; exit 2 means unavailable/incomplete
-evidence, not a CTest verdict. Empty reports never claim that every test ran. No
+evidence, not a CTest verdict. Empty reports never claim that every test ran.
+A leg whose full suite was skipped (a pull-request head on the fast tier, a
+build that stopped first) has no `ctest.junit.xml` by design; the step then
+passes `--fallback <ctest-pr-fast.junit.xml> --not-run-reason ...`, so it
+observes the fast tier's report or records `observation: not_run` with the
+reason and exits 0. Before that, every fast-tier PR head carried a red
+`exit code 2` annotation that meant nothing. A suite that ran and left no
+report still exits 2. No
 test is executed, provisioned, or selected by this helper.
 
 Four things bite when touching this:
@@ -2023,6 +2048,27 @@ group's own test-binary sha256 list with the PR head's receipt. Until
 groups at ~100% identical, no design may assume two VMs link the same bytes;
 a differing path names the linker input to normalise (embedded path, UUID,
 timestamp) before any per-binary reuse is proposed.
+
+## Per-test replay history lives in `reuse-record-macos`, not `ctest-logs-macos`
+
+`ctest-logs-macos` expires in 7 days, and its `LastTest.log` is NOT the suite's:
+every ctest call after the run (the `--show-only` listing, the GPU-adapter
+probe) replaces that file, so the artifact holds only the last probe's block.
+For outcome, attempts, duration and executable per test over 90 days, read the
+`reuse-record-macos` artifact (`tests.jsonl`, `identity.json`, `job.json`;
+`tools/ci/reuse_record.py`), which every `macos` job writes. `attempts` is null
+where a `--repeat` suite left no log (the pull-request affected-test batches),
+never guessed as 1. A missing record announces itself as `reuse-record NOT
+written`; count those annotations before calling the record complete.
+
+Link maps (`-DPULP_RECORD_LINK_MAPS=ON`) run through a linker launcher, so
+two traps apply. `add_custom_command(TARGET ... POST_BUILD)` cannot attach to
+a target from another directory, which is why the map is post-processed by
+the launcher rather than a post-build step; and a launcher is copied into a
+target when it is defined, so `PulpLinkMaps.cmake` must be included before
+the first target (and before FetchContent). The launcher must exit with the
+linker's status and fall back to the plain command whenever it cannot write
+its record: recording may never fail a link.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 
@@ -2632,6 +2678,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    a false pass); raising is not. So: never raise it, always lower it when you
    shrink. A PR that both grows one hotspot and shrinks another needs a
    `Hotspot-Grow:` trailer *and* a `max_loc` reduction.
+2b4. **Header fan-out grew?** The `header-fanout` gate
+   (`header_fanout_guard.py`, ledger `header_fanout_guard.json`) counts the
+   translation units whose `#include` closure holds each tracked header, from the
+   static include graph at HEAD vs the merge-base. It fails when THIS PR pushed a
+   tracked header over its `max_tus` ceiling, and the failure names the new
+   include edge. The usual cause is an umbrella include: a widely included header
+   that now includes a heavy one. Fix it by including the heavy header in the
+   `.cpp` or narrower header that uses it, or by forward-declaring. A deliberate
+   widening takes `Fanout-Grow: <path> reason="..."`. The count is TUs, not
+   executables. Most of a core header's *executable* reach is static-library
+   membership: a `.cpp` in `libpulp-audio.a` including it relinks everything that
+   links the library. Include hygiene cannot move that, so read link reach with
+   `--build-dir build` before attributing it to includes.
 2c. **Is a RED check even your fault?** Before investigating a failing check,
    run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
    check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —
@@ -2715,22 +2774,16 @@ perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
 dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
 label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
 
-## PR gate settle window (`PULP_PR_GATE_SETTLE_SECONDS`, default off)
+## Do not add a PR "settle" wait before the gate
 
-A `pr-gate-settle` job in build.yml can hold the PR native matrix behind a
-hosted sleep so a rapid follow-up push cancels the run before a gate VM is
-claimed. Watch out for:
-
-- **A `needs` entry you never read must be paired with a status function.**
-  `build` needs `pr-gate-settle` but gates on `!cancelled()` and never reads
-  its result; without the status function a skipped settle (the default)
-  would skip the whole native matrix, including the required `macos` leg.
-- **pull_request only.** Shipyard validates PRs through `workflow_dispatch`,
-  which never waits; neither `macos` bootstrap depends on the job either.
-- **A new required-gate latency, not a free win.** Every native PR run pays
-  the value minus ~30 s of preamble. Pick it from the measured gap between
-  consecutive pushes that cancelled a claimed VM, not from intuition. Details:
-  `docs/guides/local-ci.md`, "The PR gate settle window is default off".
+build.yml once had a default-off `pr-gate-settle` job that slept on a hosted
+runner so a superseding push would cancel a PR run before its macOS leg
+claimed a gate VM. It never ran (the variable was never set) and was removed.
+Measured over 140 PR runs: pushes that land within about five minutes already
+cancel the run before any VM is claimed (the preamble takes that long), and
+the pushes that did cancel a claimed VM came 4 to 27 minutes apart. A window
+long enough to catch them costs every native PR run that much latency to save
+a few VM-minutes a day. Re-measure the push gaps before proposing it again.
 
 ## A dead lane is only visible as queue age — never as a missing runner
 
@@ -4251,7 +4304,10 @@ bisectable.
   `version_at_land.py` runs `shipyard changelog regenerate` as a derived
   regenerator, so there is no post-tag workflow. Do not run
   `shipyard release-bot hook install`: it recreates `post-tag-sync.yml`, whose
-  per-tag changelog PR pays the required gate again for one docs file.
+  per-tag changelog PR pays the required gate again for one docs file. The
+  bump fast path (`generated_version_bump_check.py`) cannot run Shipyard, so it
+  adopts the candidate's `CHANGELOG.md` bytes (`UNREPRODUCED_DERIVED`) and still
+  reproduces every other byte; add a file there only if the build never reads it.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push

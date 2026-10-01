@@ -675,6 +675,20 @@ failed) shares a 5 s budget and fails open. Each log line is one JSON object:
 pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
 lookup, policy, mode, decision, via`.
 
+### Gate cost per merged PR
+
+`.shipyard/config.toml [metrics.gate_cost]` pins the repository, workflow
+(`build.yml`) and required gate job (`macos`) for `shipyard metrics gate-cost`,
+so the proxy needs no flags and two people get the same answer:
+
+```bash
+shipyard metrics gate-cost --since 7d
+```
+
+It reports gate runs and gate-minutes per merged PR, merge-queue batch
+fullness, and receipt reuse for the `macos` target, each with its sample size
+and named gaps. A flag overrides the matching key for one run.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
@@ -920,6 +934,37 @@ failed in the same run): it must stay 0 over a long window, and binary
 identity must approach 100%, before enforcement is proposed as a contract
 amendment.
 
+Every `macos` job, pull-request head and merge group alike, also uploads a
+**reuse replay record** (`tools/ci/reuse_record.py`, artifact
+`reuse-record-macos`, or `reuse-record-macos-attempt-N` on a re-run, kept 90
+days): `tests.jsonl` with one record per test (run and pull request, head,
+base and merge tree, suite, outcome, attempts, duration, executable, runner
+image fingerprint, and the per-test receipt key where the merge-group shadow
+computed one), `identity.json` with each executable's sha256 and the
+digest of its runtime closure (the non-system dylibs and frameworks it loads,
+a script's interpreter), and `job.json` with the context and sizes. Outcomes
+come from ctest's JUnit report and attempts from its `LastTest.log`, which the
+test step keeps as `LastTest.full.log` because any later ctest call in the
+build directory replaces it. An alias `macos` job that ran no suite uploads a
+record with no tests and the reason. It is history for scoring reuse policies
+offline and decides nothing; a job that should carry one and does not warns
+`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
+completed `macos` jobs.
+
+The record hashes every registered test executable, not only those the job
+ran, so a fast-tier pull-request head's hashes are there for the merge
+group's **binary-identity shadow**, which reads the head's reuse record when
+the head issued no receipt (annotation field `source: reuse-record`). The
+macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
+(`tools/cmake/PulpLinkMaps.cmake`): every link runs through
+`tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
+linker's status, and for an executable keeps only the map's object list and
+the link arguments under `<build>/link-members/` (the map, megabytes of
+symbol table, is deleted). The linked bytes are identical with and without
+it. `link-members-<sha>.json` in the record then lists, per executable, the
+archive members its link pulled, with `whole` set on archives the link line
+force-loads (`-force_load`, `-all_load`, `-ObjC`).
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
@@ -1042,6 +1087,29 @@ or `PULP_TARTCI_WATCHDOG=0` to disable the wrapper. Operators can tune
 `PULP_TARTCI_WATCHDOG_INTERVAL_SECS`, `PULP_TARTCI_WATCHDOG_SAMPLES`,
 `PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS`, `PULP_TARTCI_WATCHDOG_CPU_PER_JOB`,
 and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
+
+### Build classes: interactive vs background
+
+`tools/ci/governed-build.sh` (which `pulp build` uses in a source checkout)
+runs every build in one of two classes, chosen by `PULP_BUILD_CLASS`:
+
+| Class | Who | Lease request | QoS | On denial |
+|---|---|---|---|---|
+| `interactive` (default) | `pulp build`, manual builds, release/packaging builds | the host's interactive share; any partial grant down to `interactive_min_cores`, waiting up to `interactive_wait_secs` for it | normal, always | leaseless `-j2` at normal QoS (never the background floor) |
+| `background` | every Shipyard-local stage in `.shipyard/config.toml` | the profile size, partial grants accepted | the host role's QoS (background on laptops) | the agent-floor lease, then leaseless `-j2` |
+
+Against a tartci that predates classes (no `TARTCI_GOVERNOR_SCHEMA` in `tartci
+host-profile`), both classes use the class-less lease contract, and an
+interactive build still never runs under `taskpolicy -b` or takes a floor lease.
+With no tartci at all the Tier-0 bound applies unchanged.
+
+Where a host enables `dynamic_lending`, an interactive build may borrow the
+gate's idle reserved cores; a gate lease that needs them is admitted anyway
+and the borrower is moved to background QoS until the gate finishes (nothing is
+killed). Each host's knobs live in `~/.config/tartci/governor.toml`; `tartci
+governor show` prints them with their sources, `tartci governor set
+KEY=VALUE` edits them, and `tartci governor explain` says what each class
+would be granted right now.
 
 ### The macOS release VM lane and cross-lane priority
 
@@ -2799,35 +2867,16 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
-## The PR gate settle window is default off
+## Why there is no PR gate settle window
 
-`PULP_PR_GATE_SETTLE_SECONDS` (repo variable, unset by default) holds the
-native `build` matrix on a pull request behind the `pr-gate-settle` job, which
-sleeps that many seconds on the hosted preamble lane. A push that arrives
-during the wait cancels the superseded run through the `build-<ref>`
-concurrency group before its macOS leg claims a self-hosted gate VM, so the
-cancellation costs a hosted sleep instead of VM time.
-
-- Unset, empty, or `0`: the job is skipped at the job level and `build`
-  evaluates exactly as before. `build` gates on `!cancelled()` and never reads
-  the settle result, so a skipped, failed, or timed-out settle can neither skip
-  nor fail the required `macos` context.
-- `1`–`900`: sleep that long, in parallel with `resolve-provider`, `classify`,
-  and `protected-receipt-reuse`. The added latency is the value minus the
-  preamble time (median about 30 s), paid by every native PR run.
-- Anything else (non-integer, negative, above the 900 s cap): a
-  `PR gate settle ignored` notice and no wait.
-- Only `pull_request` waits. `merge_group`, `push`, and `workflow_dispatch`
-  (including Shipyard's PR validation dispatch) never do, and neither
-  skip-safe `macos` bootstrap depends on the job, so a PR with no native work
-  is never delayed.
-
-The window only catches a superseding push that lands before the VM would have
-been claimed. Measure the gap between consecutive pushes on the same PR before
-choosing a value: most pushes that cancel a gate VM arrive many minutes apart,
-which no reasonable settle window catches.
-`tools/scripts/test_build_workflow.py` (`PrGateSettleWorkflowTest`) pins the
-event gating, the unread dependency, and the value validation.
+A superseding push cancels a pull request's previous run through the
+`build-<ref>` concurrency group. There is deliberately no wait before the
+native matrix to give that cancellation a head start: pushes that land within
+about five minutes already cancel the run before its macOS leg claims a gate
+VM, and the pushes that cancelled a claimed VM in a 140-run sample arrived 4
+to 27 minutes apart, so a window long enough to catch them would add that
+latency to every native pull-request run to save a few VM-minutes a day.
+`tools/scripts/test_build_workflow.py` (`NoPrGateSettleTest`) keeps it out.
 
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 
@@ -4546,6 +4595,13 @@ python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --register
 python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
   --baseline /tmp/known-good/ctest.junit.xml --json
 ```
+
+On a leg whose full suite was skipped (a pull-request head that ran only the
+fast tier, or a build that stopped before ctest) there is no `ctest.junit.xml`
+by design. The CI step then passes `--fallback` with the fast tier's
+`ctest-pr-fast.junit.xml` and `--not-run-reason`: it observes the fast tier's
+report when one exists and otherwise records `observation: not_run` with the
+reason and exits 0. A suite that ran and left no report still exits 2.
 
 CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
 `ctest-logs-<key>` artifact. Download two artifacts when investigating a change;

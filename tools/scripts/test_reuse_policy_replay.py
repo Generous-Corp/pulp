@@ -41,6 +41,7 @@ TOOL = HERE / "reuse_policy_replay.py"
 DESIGN_SCENARIOS = {
     "env-read selftest", "generated-list drift", "host-shaped gate", "masked verdict",
     "flake on one VM", "base-red poison", "iOS PostBuild crash", "unpinned tool", "stale build dir",
+    "affected-selection misses",
 }
 
 
@@ -48,7 +49,7 @@ def group(**kw) -> dict:
     run = {"run_id": "g1", "run_kind": "merge_group", "pr": 1, "head_sha": "h1", "group_sha": "m1",
            "checkout_sha": "m1", "checkout_parents": ["b2", "h1"], "base_sha": "b2", "merge_tree": "t2",
            "runner_image": None, "created_at": "2026-09-29T12:00:00Z",
-           "ctest": {"complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
+           "ctest": {"ran": True, "complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
     run.update(kw)
     return run
 
@@ -114,6 +115,14 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["flake_skips"], 0)
         self.assertEqual(result["verdict"], "UNSAFE: false skips")
 
+    def test_a_run_stopped_on_a_failure_is_scored(self):
+        stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
+                             tests={"g1": [t("a", "fail", 2)]})
+        self.assertEqual(rpr.score(stopped, "inert-drift")["false_skips"], 1)
+        cut = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 0}), head()], [pair()],
+                         tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(cut, "inert-drift")["statuses"], {"incomplete": 1})
+
     def test_timeout_is_a_failure(self):
         result = rpr.score(corpus([t("slow-one", "timeout", 2)]), "inert-drift")
         self.assertEqual(result["false_skips"], 1)
@@ -132,6 +141,18 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["benefit_median"], 1.0)
         self.assertEqual(result["skipped_test_seconds"], 20.0)
         self.assertEqual(result["verdict"], "safe over the window")
+
+    def test_quartiles_come_from_the_per_group_shares(self):
+        groups = [group(run_id=f"g{i}", group_sha=f"m{i}", checkout_sha=f"m{i}") for i in range(4)]
+        pairs = [dict(pair(), group_run_id=f"g{i}") for i in range(4)]
+        tests = {f"g{i}": [t("a", dur=1.0), t("b", dur=1.0)] for i in range(4)}
+        pairs[0]["heads"][0]["drift_files"] = ["core/x.cpp"]  # runs: share 0
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (1.0, 1.0, 1.0))
+        self.assertEqual(result["group_test_seconds"], 8.0)
+        pairs[1]["heads"][0]["drift_files"] = ["core/x.cpp"]
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (0.0, 0.5, 1.0))
 
     def test_skip_nothing_control_reads_zero(self):
         result = rpr.score(corpus([t("a", "fail", 2)]), "none")
@@ -166,7 +187,7 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(rpr.score(c, "inert-drift")["replay_vs_observed"]["replay_only"], 1)
 
     def test_seams_refuse_to_score(self):
-        for name in ("source-key", "per-executable"):
+        for name in ("suite-source-key", "per-executable"):
             with self.assertRaises(rpr.PolicyNotImplemented):
                 rpr.score(corpus([t("a")]), name)
 
@@ -246,6 +267,12 @@ class ParseTests(unittest.TestCase):
         refused = "2026-09-30T19:20:00.0000000Z ##[warning]selection too narrow — the merge group will validate in full\n"
         self.assertIs(self.parse(refused)["receipt_issued"], False)
 
+    def test_a_verbatim_repeated_line_is_not_a_retry(self):
+        line = "2026-09-30T19:10:16.5818700Z     4/5 Test     #6: a test whose name says Failed ....   Passed    1.00 sec\n"
+        self.assertIn(line, LOG)
+        tests = {x["test_id"]: x for x in rrc.parse_job_log(LOG.replace(line, line + line).splitlines())["tests"]}
+        self.assertEqual(tests["a test whose name says Failed"]["attempts"], 1)
+
     def test_log_without_ctest_is_not_complete(self):
         p = rrc.parse_job_log(LOG.splitlines()[:2])
         self.assertEqual((p["ctest"]["ran"], p["ctest"]["complete"]), (False, False))
@@ -295,6 +322,155 @@ class DriftTests(unittest.TestCase):
     def test_different_heads_have_no_base_fallback(self):
         other = group(head_sha="h9", checkout_parents=["b2", "h9"])
         self.assertEqual(self.collector(False).drift(head(), other), (None, None))
+
+
+class RunRecordTests(unittest.TestCase):
+    def record(self, parsed: dict, conclusion: str = "failure") -> dict:
+        c = rrc.Collector.__new__(rrc.Collector)
+        job = {"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": conclusion}
+        c.jobs = lambda run_id: [job]
+        c.parsed_log = lambda job_id: parsed
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
+        return c.run_record(run, "merge_group", 7, "h")[0]
+
+    def test_failure_after_checkout_without_ctest_is_a_build_failure(self):
+        rec = self.record({"checkout_sha": "m1", "ctest": {"ran": False}, "tests": [], "receipt_issued": None})
+        self.assertTrue(rec["build_failed"])
+        self.assertEqual(rpr.pair_status(rec), "build_failed")
+
+    def test_failure_before_checkout_ran_nothing(self):
+        rec = self.record({"checkout_sha": None, "ctest": {}, "tests": [], "receipt_issued": None})
+        self.assertFalse(rec["build_failed"])
+        self.assertEqual(rec["checkout_sha"], "m1")
+        self.assertEqual(rpr.pair_status(rec), "no_suite")
+
+
+class LogDownloadTests(unittest.TestCase):
+    class Resp:
+        def __init__(self, body: bytes, declared: int) -> None:
+            self.body, self.headers = body, {"Content-Length": str(declared)}
+        def read(self) -> bytes:
+            return self.body
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def github(self, responses: list) -> rrc.GitHub:
+        gh = rrc.GitHub("o/r", "token")
+        gh._request = lambda url, accept: responses.pop(0)
+        return gh
+
+    def test_a_short_body_is_an_error_not_a_short_log(self):
+        gh = self.github([self.Resp(LOG.encode()[:300], len(LOG.encode()))])
+        with self.assertRaises(rrc.TruncatedLog):
+            gh.job_log_lines(1)
+
+    def test_a_truncated_download_is_retried_and_never_cached_partial(self):
+        full = LOG.encode()
+        c = rrc.Collector.__new__(rrc.Collector)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rrc.time, "sleep"):
+            c.cache = Path(tmp)
+            c.gh = self.github([self.Resp(full[:300], len(full)), self.Resp(full, len(full))])
+            self.assertEqual(c.parsed_log(7)["ctest"]["executed"], 5)
+            c.gh = self.github([self.Resp(full[:300], len(full))] * 4)
+            self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
+            self.assertTrue((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "7.json.gz").is_file())
+            self.assertFalse((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "8.json.gz").exists())
+
+
+class SourceKeyClassifyTests(unittest.TestCase):
+    MAP = {
+        "compiled": {"executables": ["test/a"], "sources": ["test/test_a.cpp"]},
+        "other-exe": {"executables": ["test/b"], "sources": ["test/test_b.cpp"]},
+        "gpu": {"executables": ["test/c"], "sources": [], "resource_locks": ["pulp_gpu"]},
+        "browser": {"executables": ["test/d"], "sources": [], "labels": ["browser-capture"]},
+        "renamed": {"executables": ["test/gone"], "sources": []},
+        "script": {"labels": []},
+        "sealed": {"labels": ["hermetic"]},
+        "list-drift": {"labels": []},
+    }
+    ENTRIES = {"script": {"inputs": ["tools/x"]}, "sealed": {"inputs": ["tools/y"]},
+               "list-drift": {"inputs": ["tools/z"]}}
+    EXES = {"test/a", "test/b", "test/c", "test/d"}
+
+    def run_sets(self, drift, rebuilt=frozenset(), head=None, group=None):
+        out = rrc.classify_source_keys(list(drift), list(self.MAP) + ["unmapped"], self.MAP,
+                                       head if head is not None else self.ENTRIES,
+                                       group if group is not None else self.ENTRIES, set(rebuilt), self.EXES)
+        return {v: set(d["run"]) for v, d in out.items()}, out
+
+    def test_unrelated_drift_skips_mapped_tests_but_never_unknown_ones(self):
+        runs, _ = self.run_sets(["docs/guide.md"])
+        self.assertEqual(runs["per-entry"], {"renamed", "unmapped"})
+        self.assertEqual(runs["strict-data"], {"renamed", "unmapped", "gpu", "browser", "script", "list-drift"})
+
+    def test_a_rebuilt_executable_or_drifted_source_runs_its_tests(self):
+        runs, _ = self.run_sets(["core/x.cpp"], rebuilt={"test/a"})
+        self.assertIn("compiled", runs["per-entry"])
+        self.assertNotIn("other-exe", runs["per-entry"])
+        self.assertIn("other-exe", self.run_sets(["test/test_b.cpp"])[0]["per-entry"])
+
+    def test_strict_runs_compiled_tests_on_data_and_everything_on_cmake(self):
+        runs, out = self.run_sets(["tools/import-design/fixture.json"])
+        self.assertNotIn("compiled", runs["per-entry"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], 0)
+        runs, out = self.run_sets(["test/cmake/x_tests.cmake"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], len(self.EXES))
+        self.assertEqual(out["per-entry"]["executables_rebuilt"], 0)
+
+    def test_script_tests_follow_their_own_entry(self):
+        runs, _ = self.run_sets(["tools/x/run.py"])
+        self.assertIn("script", runs["per-entry"])
+        self.assertNotIn("sealed", runs["per-entry"])
+        changed = dict(self.ENTRIES, sealed={"inputs": ["tools/y", "tools/new"]})
+        self.assertIn("sealed", self.run_sets(["docs/a.md"], group=changed)[0]["per-entry"])
+
+    def test_a_list_edit_reruns_declared_scripts_only_at_list_level(self):
+        runs, _ = self.run_sets(["test/ctest_script_inputs.json"])
+        self.assertNotIn("script", runs["per-entry"])
+        self.assertIn("script", runs["list-level"])
+
+    def test_strict_skips_only_hermetic_scripts_and_never_environment_bound_tests(self):
+        runs, _ = self.run_sets(["docs/a.md"])
+        self.assertNotIn("sealed", runs["strict-data"])
+        self.assertIn("script", runs["strict-data"])
+        self.assertTrue({"gpu", "browser"} <= runs["strict-data"])
+        self.assertFalse({"gpu", "browser"} & runs["per-entry"])
+
+    def test_an_unreadable_list_makes_script_tests_unknown(self):
+        runs, _ = self.run_sets(["docs/a.md"], head={})
+        self.assertIn("script", runs["per-entry"])
+        out = rrc.classify_source_keys(["docs/a.md"], ["script"], self.MAP, None, self.ENTRIES, set(), self.EXES)
+        self.assertEqual(out["per-entry"]["run"], ["script"])
+
+
+class SourceKeyPolicyTests(unittest.TestCase):
+    def corpus(self, head_tests, run, rebuilt=1, total=4):
+        p = pair()
+        p["source_key"] = {"strict-data": {"run": run, "executables_total": total, "executables_rebuilt": rebuilt}}
+        p["source_key_head_run_id"] = "p1"
+        return rpr.Corpus([group(), head()], [p],
+                          tests={"g1": [t("a", "fail", 2), t("b"), t("c")], "p1": head_tests})
+
+    def test_skips_unchanged_tests_the_head_passed_first_time(self):
+        c = self.corpus([t("a"), t("b"), t("c", "pass", 2)], run=[])
+        result = rpr.score(c, "source-key")
+        self.assertEqual(result["false_skips"], 1)          # a: unchanged, passed on the head, failed here
+        self.assertEqual(result["skipped_test_seconds"], 20.0)  # c passed only on retry: not evidence
+        self.assertEqual(result["build_skipped_pooled"], 0.75)
+
+    def test_a_test_in_the_run_set_or_absent_from_the_head_runs(self):
+        result = rpr.score(self.corpus([t("b")], run=["b"]), "source-key")
+        self.assertEqual((result["false_skips"], result["skipped_test_seconds"]), (0, 0.0))
+
+    def test_no_reconstructed_key_is_unevaluable(self):
+        c = rpr.Corpus([group(), head()], [pair()], tests={"g1": [t("a", "fail", 2)]})
+        result = rpr.score(c, "source-key")
+        self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
 
 
 class GraftTests(unittest.TestCase):
