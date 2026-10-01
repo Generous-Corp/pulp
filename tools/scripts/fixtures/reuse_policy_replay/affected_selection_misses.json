@@ -1,0 +1,2938 @@
+{
+ "schema": "pulp-reuse-replay-scenario/v1",
+ "name": "affected-selection misses",
+ "what_happened": "the merge-group affected-test shadow left 7 of 11 failing merge-group tests outside its selection (2026-09-29): script-test-inputs-drift x3, pulp-gpu-host-mapped-pointer-probe x2, pulp-browser-capture-node-integration, and a materialized-paint browser-capture test. Pairs, head outcomes and source-key run sets are taken from the replay corpus; each group is reduced to its failing test and one unchanged neighbour.",
+ "cases": [
+  {
+   "label": "the selection itself: every miss is a false skip",
+   "policy": "selection-reference",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "36545528395",
+      "run_kind": "merge_group",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_parents": [
+       "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+      "merge_tree": "c111278f0177b0ce23b346e24edb6b666c85c5e8",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:52:52Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36542532812",
+      "run_kind": "pr_head",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": null,
+      "checkout_sha": "7f201fac7f35a8680997fd313b436e76636139e2",
+      "checkout_parents": [
+       "4806402eb1b56640ff82e006c405d6f5504e2705",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "4806402eb1b56640ff82e006c405d6f5504e2705",
+      "merge_tree": "c483e80494128cfc194b4750bc920eed269e6b3f",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:24:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1829.9
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36535153595",
+      "run_kind": "merge_group",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_parents": [
+       "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+      "merge_tree": "df6d924f0a865ca8649b4ad438db00e4fb8c223c",
+      "runner_image": null,
+      "created_at": "2026-09-29T07:11:12Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531750174",
+      "run_kind": "pr_head",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": null,
+      "checkout_sha": "9cb3df7a3021724c6f12bc3df34a7154f4921a30",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "3a880700d6d88d62396bf73b258e0b2e71328cfa",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:34:14Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 2292.05
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36532836240",
+      "run_kind": "merge_group",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_parents": [
+       "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "merge_tree": "61c19d995b82d72540aaeb008259580b389d1bdd",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:46:23Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36530524958",
+      "run_kind": "pr_head",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": null,
+      "checkout_sha": "6237034023086d5f2a76d8913c32794203758176",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "0414e075061209c810b14537c5af6e9a1ec21304",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:20:01Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1740.69
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531070745",
+      "run_kind": "merge_group",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_parents": [
+       "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+      "merge_tree": "5044ac80cff2600710dc633b06abdb9591911ff4",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:26:28Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36528887653",
+      "run_kind": "pr_head",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": null,
+      "checkout_sha": "9015f835fd460d57744d4cc16ca77ed5309530b4",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "101058e09d92fbec793487d366f1bc4a33dca294",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:00:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1547.4
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36520488710",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_parents": [
+       "92245be053d3b46c636bc390ef55cc13afe01331",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "92245be053d3b46c636bc390ef55cc13afe01331",
+      "merge_tree": "aa5770397d70379ece05c3b39efe4fadac14fcfe",
+      "runner_image": null,
+      "created_at": "2026-09-29T04:11:11Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36518667100",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_parents": [
+       "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+      "merge_tree": "539ce7de1a6766ebee9e85b384a0dced65eefbcd",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:47:01Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36516843482",
+      "run_kind": "merge_group",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_parents": [
+       "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+      "merge_tree": "1482afdc4f1e8d9a08b4060f442ec52057f2cd80",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:22:31Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36515663356",
+      "run_kind": "pr_head",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": null,
+      "checkout_sha": "87c4f1fc46b87827f39a98636b007afdb0f4997e",
+      "checkout_parents": [
+       "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+      "merge_tree": "fc8275ed5a451ecdf3411cbb2d455ee2e7e21ee0",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:06:25Z",
+      "ctest": {
+       "complete": true,
+       "executed": 97,
+       "failed": 0,
+       "full_suite": false,
+       "label_exclude": null,
+       "ran": true,
+       "selected": 97,
+       "test_seconds": 44.08
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_run_id": "36545528395",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36542532812",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "materialized paint keeps the full host frame around an authored panel"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36542532812",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: compiled test that drives a browser (label browser-capture); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_run_id": "36535153595",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36531750174",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36531750174",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: drives a browser (RESOURCE_LOCK browser); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_run_id": "36532836240",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36530524958",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36530524958",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_run_id": "36531070745",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36528887653",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36528887653",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36520488710",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36518667100",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_run_id": "36516843482",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36515663356",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36515663356",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     }
+    ],
+    "tests": {
+     "36545528395": [
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36542532812": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.02
+      }
+     ],
+     "36535153595": [
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36531750174": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 362.59
+      }
+     ],
+     "36532836240": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36530524958": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.2
+      }
+     ],
+     "36531070745": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36528887653": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.14
+      }
+     ],
+     "36520488710": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36517237009": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36518667100": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36516843482": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36515663356": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 7,
+    "scored_pairs": 7
+   }
+  },
+  {
+   "label": "tier 1a per-entry: the four misses the head had passed are false skips (registration and environment are outside an entry key)",
+   "policy": "source-key-per-entry",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "36545528395",
+      "run_kind": "merge_group",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_parents": [
+       "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+      "merge_tree": "c111278f0177b0ce23b346e24edb6b666c85c5e8",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:52:52Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36542532812",
+      "run_kind": "pr_head",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": null,
+      "checkout_sha": "7f201fac7f35a8680997fd313b436e76636139e2",
+      "checkout_parents": [
+       "4806402eb1b56640ff82e006c405d6f5504e2705",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "4806402eb1b56640ff82e006c405d6f5504e2705",
+      "merge_tree": "c483e80494128cfc194b4750bc920eed269e6b3f",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:24:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1829.9
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36535153595",
+      "run_kind": "merge_group",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_parents": [
+       "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+      "merge_tree": "df6d924f0a865ca8649b4ad438db00e4fb8c223c",
+      "runner_image": null,
+      "created_at": "2026-09-29T07:11:12Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531750174",
+      "run_kind": "pr_head",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": null,
+      "checkout_sha": "9cb3df7a3021724c6f12bc3df34a7154f4921a30",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "3a880700d6d88d62396bf73b258e0b2e71328cfa",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:34:14Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 2292.05
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36532836240",
+      "run_kind": "merge_group",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_parents": [
+       "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "merge_tree": "61c19d995b82d72540aaeb008259580b389d1bdd",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:46:23Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36530524958",
+      "run_kind": "pr_head",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": null,
+      "checkout_sha": "6237034023086d5f2a76d8913c32794203758176",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "0414e075061209c810b14537c5af6e9a1ec21304",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:20:01Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1740.69
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531070745",
+      "run_kind": "merge_group",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_parents": [
+       "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+      "merge_tree": "5044ac80cff2600710dc633b06abdb9591911ff4",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:26:28Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36528887653",
+      "run_kind": "pr_head",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": null,
+      "checkout_sha": "9015f835fd460d57744d4cc16ca77ed5309530b4",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "101058e09d92fbec793487d366f1bc4a33dca294",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:00:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1547.4
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36520488710",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_parents": [
+       "92245be053d3b46c636bc390ef55cc13afe01331",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "92245be053d3b46c636bc390ef55cc13afe01331",
+      "merge_tree": "aa5770397d70379ece05c3b39efe4fadac14fcfe",
+      "runner_image": null,
+      "created_at": "2026-09-29T04:11:11Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36518667100",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_parents": [
+       "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+      "merge_tree": "539ce7de1a6766ebee9e85b384a0dced65eefbcd",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:47:01Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36516843482",
+      "run_kind": "merge_group",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_parents": [
+       "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+      "merge_tree": "1482afdc4f1e8d9a08b4060f442ec52057f2cd80",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:22:31Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36515663356",
+      "run_kind": "pr_head",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": null,
+      "checkout_sha": "87c4f1fc46b87827f39a98636b007afdb0f4997e",
+      "checkout_parents": [
+       "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+      "merge_tree": "fc8275ed5a451ecdf3411cbb2d455ee2e7e21ee0",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:06:25Z",
+      "ctest": {
+       "complete": true,
+       "executed": 97,
+       "failed": 0,
+       "full_suite": false,
+       "label_exclude": null,
+       "ran": true,
+       "selected": 97,
+       "test_seconds": 44.08
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_run_id": "36545528395",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36542532812",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "materialized paint keeps the full host frame around an authored panel"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36542532812",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: compiled test that drives a browser (label browser-capture); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_run_id": "36535153595",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36531750174",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36531750174",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: drives a browser (RESOURCE_LOCK browser); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_run_id": "36532836240",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36530524958",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36530524958",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_run_id": "36531070745",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36528887653",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36528887653",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36520488710",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36518667100",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_run_id": "36516843482",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36515663356",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36515663356",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     }
+    ],
+    "tests": {
+     "36545528395": [
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36542532812": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.02
+      }
+     ],
+     "36535153595": [
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36531750174": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 362.59
+      }
+     ],
+     "36532836240": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36530524958": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.2
+      }
+     ],
+     "36531070745": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36528887653": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.14
+      }
+     ],
+     "36520488710": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36517237009": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36518667100": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36516843482": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36515663356": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 4,
+    "evaluable_pairs": 7
+   }
+  },
+  {
+   "label": "tier 1a strict: CMake drift, environment locks and whole-tree names keep all seven running",
+   "policy": "source-key",
+   "corpus": {
+    "runs": [
+     {
+      "run_id": "36545528395",
+      "run_kind": "merge_group",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_sha": "432953d0d51a2e69d582efef76c0f9738618f091",
+      "checkout_parents": [
+       "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "ad9f72fb5925fc5313bd8eccae2be3d02e07dbad",
+      "merge_tree": "c111278f0177b0ce23b346e24edb6b666c85c5e8",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:52:52Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36542532812",
+      "run_kind": "pr_head",
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_sha": null,
+      "checkout_sha": "7f201fac7f35a8680997fd313b436e76636139e2",
+      "checkout_parents": [
+       "4806402eb1b56640ff82e006c405d6f5504e2705",
+       "e1d6326eaef147512e15d5ba96869f450773024c"
+      ],
+      "base_sha": "4806402eb1b56640ff82e006c405d6f5504e2705",
+      "merge_tree": "c483e80494128cfc194b4750bc920eed269e6b3f",
+      "runner_image": null,
+      "created_at": "2026-09-29T08:24:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1829.9
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36535153595",
+      "run_kind": "merge_group",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_sha": "88ef7ae675090c7eddea99e128dcfc645aea56e0",
+      "checkout_parents": [
+       "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "8fd8c6dc17be35550ee5ca4c7a6d386076d5859c",
+      "merge_tree": "df6d924f0a865ca8649b4ad438db00e4fb8c223c",
+      "runner_image": null,
+      "created_at": "2026-09-29T07:11:12Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531750174",
+      "run_kind": "pr_head",
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_sha": null,
+      "checkout_sha": "9cb3df7a3021724c6f12bc3df34a7154f4921a30",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "1204aa4df07db68d28536f0e6d2b46574a878b25"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "3a880700d6d88d62396bf73b258e0b2e71328cfa",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:34:14Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 2292.05
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36532836240",
+      "run_kind": "merge_group",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_sha": "7184f5255692515c933e047f758fcc4f63a0321d",
+      "checkout_parents": [
+       "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "merge_tree": "61c19d995b82d72540aaeb008259580b389d1bdd",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:46:23Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36530524958",
+      "run_kind": "pr_head",
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_sha": null,
+      "checkout_sha": "6237034023086d5f2a76d8913c32794203758176",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "88f9f4bbbdda57386072cd2ab06488e45a25bac1"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "0414e075061209c810b14537c5af6e9a1ec21304",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:20:01Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1740.69
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36531070745",
+      "run_kind": "merge_group",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_sha": "2ce20a344af3e22edfcbffcf5afb70f216bfef03",
+      "checkout_parents": [
+       "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "72515ddd3aa0bcd67142e2f3147bef1b1b781af2",
+      "merge_tree": "5044ac80cff2600710dc633b06abdb9591911ff4",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:26:28Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36528887653",
+      "run_kind": "pr_head",
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_sha": null,
+      "checkout_sha": "9015f835fd460d57744d4cc16ca77ed5309530b4",
+      "checkout_parents": [
+       "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+       "3194dc2c187b31c2cf1e8917d47cf96918bdbc05"
+      ],
+      "base_sha": "6e95d5cabf8ea7fe440b145923ddbab79b0ff7c1",
+      "merge_tree": "101058e09d92fbec793487d366f1bc4a33dca294",
+      "runner_image": null,
+      "created_at": "2026-09-29T06:00:34Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21889,
+       "failed": 0,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21889,
+       "test_seconds": 1547.4
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": true,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36520488710",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_sha": "f002c18d6c858f5a6e05ddc60c0b810df795f9da",
+      "checkout_parents": [
+       "92245be053d3b46c636bc390ef55cc13afe01331",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "92245be053d3b46c636bc390ef55cc13afe01331",
+      "merge_tree": "aa5770397d70379ece05c3b39efe4fadac14fcfe",
+      "runner_image": null,
+      "created_at": "2026-09-29T04:11:11Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36518667100",
+      "run_kind": "merge_group",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_sha": "6b41a46fb0df6cc27338a68ed20e8db24b016535",
+      "checkout_parents": [
+       "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "7126a3c7a1dadf081d08fd7902439a9b78663cb1",
+      "merge_tree": "539ce7de1a6766ebee9e85b384a0dced65eefbcd",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:47:01Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36517237009",
+      "run_kind": "pr_head",
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_sha": null,
+      "checkout_sha": "2fbb73fc9b7ca80dc9a7a6731995f9d6678cbbbb",
+      "checkout_parents": [
+       "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+       "bf08ce207c827c039fff7323c8af12c2d2cc1ff6"
+      ],
+      "base_sha": "de9f91cfa32bf5765b13570549f8061cd7ce278f",
+      "merge_tree": "7dbb74f3da6dd32f95fcded685fcfcbf3d775501",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:27:47Z",
+      "ctest": {
+       "complete": true,
+       "executed": 21863,
+       "failed": 1,
+       "full_suite": true,
+       "label_exclude": "validation|slow|performance|bench|quality-lab|source-selftest",
+       "ran": true,
+       "selected": 21863,
+       "test_seconds": 1954.24
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36516843482",
+      "run_kind": "merge_group",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_sha": "312128e39f7434be800e0208b4bf7daf574700ef",
+      "checkout_parents": [
+       "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "8b2c6919238eb6955bd81899e259faee3a0f0a7f",
+      "merge_tree": "1482afdc4f1e8d9a08b4060f442ec52057f2cd80",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:22:31Z",
+      "ctest": {
+       "ran": true,
+       "complete": true,
+       "failed": 1
+      },
+      "build_failed": false,
+      "observed_decision": "refuse",
+      "receipt_issued": null,
+      "required_contexts_green": null
+     },
+     {
+      "run_id": "36515663356",
+      "run_kind": "pr_head",
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_sha": null,
+      "checkout_sha": "87c4f1fc46b87827f39a98636b007afdb0f4997e",
+      "checkout_parents": [
+       "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+       "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3"
+      ],
+      "base_sha": "017dcea427389c6b7a4240321b5ad5fd67bc5475",
+      "merge_tree": "fc8275ed5a451ecdf3411cbb2d455ee2e7e21ee0",
+      "runner_image": null,
+      "created_at": "2026-09-29T03:06:25Z",
+      "ctest": {
+       "complete": true,
+       "executed": 97,
+       "failed": 0,
+       "full_suite": false,
+       "label_exclude": null,
+       "ran": true,
+       "selected": 97,
+       "test_seconds": 44.08
+      },
+      "build_failed": false,
+      "observed_decision": null,
+      "receipt_issued": null,
+      "required_contexts_green": null
+     }
+    ],
+    "pairs": [
+     {
+      "pr": 9058,
+      "head_sha": "e1d6326eaef147512e15d5ba96869f450773024c",
+      "group_run_id": "36545528395",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36542532812",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "materialized paint keeps the full host frame around an authored panel"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "tools/ci/base_poison_detector.py",
+         "tools/ci/ctest_gate_args.py",
+         "tools/ci/test_base_poison_detector.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36542532812",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: compiled test that drives a browser (label browser-capture); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9048,
+      "head_sha": "1204aa4df07db68d28536f0e6d2b46574a878b25",
+      "group_run_id": "36535153595",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36531750174",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-browser-capture-node-integration"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 0,
+        "cmake_changed": false,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/test_claude_md_sync_hook.sh",
+         "tools/ci/source_selftests.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36531750174",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: drives a browser (RESOURCE_LOCK browser); inputs unchanged, failed twice"
+      }
+     },
+     {
+      "pr": 9046,
+      "head_sha": "88f9f4bbbdda57386072cd2ab06488e45a25bac1",
+      "group_run_id": "36532836240",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36530524958",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "hooks/scripts/pulp_claude_md_sync_install.py",
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36530524958",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9044,
+      "head_sha": "3194dc2c187b31c2cf1e8917d47cf96918bdbc05",
+      "group_run_id": "36531070745",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36528887653",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "per-entry": {
+        "run": [],
+        "executables_total": 1298,
+        "executables_rebuilt": 818,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "pulp-gpu-host-mapped-pointer-probe"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "test/cmake/test_forge_catalog_install.py",
+         "test/fixtures/sample-region-compat/expected/abi.txt",
+         "test/test_verify_gpu_same_device_storage.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36528887653",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: inherited from the batch entry ahead (its CMake change); the shadow diffs from the first parent"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36520488710",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9036,
+      "head_sha": "bf08ce207c827c039fff7323c8af12c2d2cc1ff6",
+      "group_run_id": "36518667100",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36517237009",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 668,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         "tools/ci/affected_tests_shadow.py",
+         "tools/ci/binary_identity_shadow.py",
+         "tools/ci/flake_exoneration_shadow.py"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36517237009",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     },
+     {
+      "pr": 9034,
+      "head_sha": "c01b98bf86ea7744dfaad171d2d95d165c1f3ac3",
+      "group_run_id": "36516843482",
+      "stacked": true,
+      "heads": [
+       {
+        "run_id": "36515663356",
+        "drift_files": [],
+        "drift_declared_input_hits": [],
+        "required_contexts_green": true
+       }
+      ],
+      "source_key": {
+       "list-level": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "per-entry": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 645,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       },
+       "strict-data": {
+        "run": [
+         "script-test-inputs-drift"
+        ],
+        "executables_total": 1298,
+        "executables_rebuilt": 1298,
+        "cmake_changed": true,
+        "data_changed": [
+         ".claude-plugin/marketplace.json",
+         ".claude-plugin/plugin.json",
+         "compat.json"
+        ]
+       }
+      },
+      "source_key_head_run_id": "36515663356",
+      "selection": {
+       "run": [],
+       "source": "affected-tests shadow: whole-tree check whose entry declares 2 paths but reads every registration and script import"
+      }
+     }
+    ],
+    "tests": {
+     "36545528395": [
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36542532812": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "materialized paint keeps the full host frame around an authored panel",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.02
+      }
+     ],
+     "36535153595": [
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36531750174": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-browser-capture-node-integration",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 362.59
+      }
+     ],
+     "36532836240": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36530524958": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.2
+      }
+     ],
+     "36531070745": [
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36528887653": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "pulp-gpu-host-mapped-pointer-probe",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 0.14
+      }
+     ],
+     "36520488710": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36517237009": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36518667100": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36516843482": [
+      {
+       "test_id": "script-test-inputs-drift",
+       "outcome": "fail",
+       "attempts": 2,
+       "duration_s": 10.0
+      },
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ],
+     "36515663356": [
+      {
+       "test_id": "unchanged neighbour",
+       "outcome": "pass",
+       "attempts": 1,
+       "duration_s": 10.0
+      }
+     ]
+    }
+   },
+   "expect": {
+    "false_skips": 0,
+    "evaluable_pairs": 7
+   }
+  }
+ ]
+}

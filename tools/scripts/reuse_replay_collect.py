@@ -737,3 +737,171 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
     return pmr.required_contexts_from_ruleset(repo / ".github" / "rulesets" / "main-protection.json")
 
 
+
+
+# --------------------------------------------------------------------------
+# Tier-1a source keys reconstructed from git and a build graph
+# --------------------------------------------------------------------------
+#
+# A per-executable source key matches the PR head's when nothing the
+# executable is built from changed between the head run's tree and the
+# group's tree. Recorded keys do not exist for history, so the replay
+# reconstructs the verdict: the drift (files that differ between the two
+# checkouts) is propagated through a Ninja graph (sources, headers via the
+# recorded deps, archives, links) to the executables it rebuilds. A script
+# test is keyed on its own entry in test/ctest_script_inputs.json. Three
+# variants are written per pair:
+#
+#   per-entry    a compiled test runs when one of its executables is
+#                rebuilt or one of its sources drifted; a script test runs
+#                when its own entry changed or a declared input drifted.
+#   strict-data  per-entry, plus fail-closed rules for what keys cannot
+#                see yet: any drifted runtime data file (no compiled test
+#                declares the data it reads) or CMake file runs every
+#                compiled test; whole-tree tests (drift, lint, registry,
+#                census, probe, ...) and tests whose registration names a
+#                shared host resource (a RESOURCE_LOCK, or a gpu or
+#                browser-capture label) always run; and a script test is
+#                skippable only when it is labelled `hermetic`. This is the
+#                variant to ship.
+#   list-level   per-entry, except a script test also runs whenever the
+#                list file itself changed. A negative control: it must read
+#                lower than per-entry.
+#
+# A test the map does not know (an unmapped compiled test, an executable
+# the graph does not build, a script test with no entry) always runs.
+
+SOURCE_KEY_VARIANTS = ("per-entry", "strict-data", "list-level")
+# Registration labels that mean the test drives a shared host resource.
+ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
+
+
+sys.path.insert(0, str(HERE.parent / "ci"))
+
+
+def _is_cmake(path: str) -> bool:
+    return path.endswith(("CMakeLists.txt", ".cmake"))
+
+
+def _declared_hit(inputs: Iterable[str], changed: Iterable[str]) -> bool:
+    inputs = [i.rstrip("/") for i in inputs]
+    return any(f == i or f.startswith(i + "/") for f in changed for i in inputs)
+
+
+def environment_bound(mapped: dict) -> bool:
+    return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
+
+
+def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
+                         head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
+                         rebuilt: set[str], all_executables: set[str]) -> dict[str, dict]:
+    """Per variant: the tests that must run and the share of executables rebuilt.
+
+    `rebuilt` is the set of executables (relative to the build dir) the drift
+    reaches through the graph. Pure: the graph and git reads happen before."""
+    import test_receipts_shadow  # tools/ci: the always-run names and the runtime-surface rule
+    always_run = test_receipts_shadow.ALWAYS_RUN_NAME_RE
+    surface = test_receipts_shadow.is_runtime_surface
+    drift_set = set(drift)
+    cmake = any(_is_cmake(f) for f in drift)
+    data = sorted(f for f in drift if surface(f) and not _is_cmake(f) and f != SCRIPT_INPUTS_PATH)
+    list_changed = SCRIPT_INPUTS_PATH in drift_set
+    out: dict[str, dict] = {}
+    for variant in SOURCE_KEY_VARIANTS:
+        strict = variant == "strict-data"
+        run: list[str] = []
+        for name in group_tests:
+            mapped = test_map.get(name) or {}
+            exes = mapped.get("executables") or []
+            if strict and (always_run.search(name) or environment_bound(mapped)):
+                run.append(name)
+            elif exes:
+                if (not set(exes) <= all_executables or (strict and (cmake or data))
+                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])):
+                    run.append(name)
+            elif group_entries is not None and name in group_entries and head_entries is not None:
+                entry = group_entries[name]
+                if (head_entries.get(name) != entry or _declared_hit(entry.get("inputs") or [], drift)
+                        or (variant == "list-level" and list_changed)
+                        or (strict and "hermetic" not in (mapped.get("labels") or []))):
+                    run.append(name)
+            else:
+                run.append(name)  # unknown inputs: never skippable
+        total = len(all_executables)
+        rebuilt_n = total if (strict and cmake) else len(rebuilt & all_executables)
+        out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": rebuilt_n,
+                        "cmake_changed": cmake, "data_changed": data[:20]}
+    return out
+
+
+def load_graph(build_dir: Path | None, pickle_path: Path | None):
+    """A Ninja graph with header deps: from a pickled affected_tests_shadow
+    Graph, or parsed from a configured build dir (slow on a full tree)."""
+    import affected_tests_shadow as shadow  # tools/ci: the Ninja graph the affected-test shadow uses
+    if pickle_path is not None:
+        import pickle
+        sys.modules.setdefault("ats", shadow)  # pickles made from a copy of the module
+        with open(pickle_path, "rb") as handle:
+            return pickle.load(handle)
+    edges = shadow.parse_build_ninja((build_dir / "build.ninja").read_text(encoding="utf-8", errors="replace"))
+    deps = shadow.parse_ninja_deps(subprocess.run(["ninja", "-C", str(build_dir), "-t", "deps"], check=True,
+                                                  capture_output=True, text=True).stdout)
+    return shadow.Graph(build_dir, edges, deps)
+
+
+def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,
+                         test_map: dict[str, dict], only_runs: set[str] | None = None) -> dict:
+    """Write the three source-key variants into each pair that has a valid
+    head run with per-test records; return counts for the manifest."""
+    import reuse_policy_replay as rpr
+    corpus = rpr.Corpus.load(corpus_dir)
+    collector = Collector.__new__(Collector)
+    collector.repo, collector.cache = repo, corpus_dir / "cache"
+    collector._git_lock, collector._commit_cache = threading.Lock(), {}
+    entries_cache: dict[str, dict | None] = {}
+
+    unread: list[str] = []
+
+    def entries(sha: str) -> dict | None:
+        if sha not in entries_cache:
+            for _ in range(3):
+                res = collector._git("show", f"{sha}:{SCRIPT_INPUTS_PATH}", check=False)
+                if not res.returncode:
+                    break
+            try:
+                entries_cache[sha] = None if res.returncode else json.loads(res.stdout).get("tests", {})
+            except json.JSONDecodeError:
+                entries_cache[sha] = None
+            if entries_cache[sha] is None:
+                unread.append(f"{sha}: {res.stderr.strip()[:200]}")
+        return entries_cache[sha]
+
+    build_real = os.path.realpath(graph_build_dir)
+    # Executables the graph builds; a test mapped to anything else is unknown.
+    built = {os.path.relpath(graph.norm(o), build_real) for outs in graph.fwd.values() for o in outs}
+    all_exes = {e for v in test_map.values() for e in v.get("executables") or []} & built
+    done = 0
+    for pair in corpus.pairs:
+        if only_runs is not None and str(pair["group_run_id"]) not in only_runs:
+            continue
+        group = corpus.run(pair["group_run_id"])
+        head_row = next((h for h in pair.get("heads") or [] if h.get("drift_files") is not None), None)
+        if group is None or validate_run(group) or head_row is None:
+            continue
+        head = corpus.run(head_row["run_id"])
+        tests = corpus.tests(group["run_id"])
+        if head is None or validate_run(head) or not tests:
+            continue
+        drift = head_row["drift_files"]
+        changed_abs = [os.path.realpath(os.path.join(graph_source_root, f)) for f in drift]
+        reached = graph.affected_outputs(changed_abs)
+        rebuilt = {os.path.relpath(p, build_real) for p in reached if p.startswith(build_real + os.sep)}
+        pair["source_key"] = classify_source_keys(
+            drift, [t["test_id"] for t in tests], test_map, entries(head["checkout_sha"]),
+            entries(group["checkout_sha"]), rebuilt, all_exes)
+        pair["source_key_head_run_id"] = head_row["run_id"]
+        done += 1
+    write_jsonl(corpus_dir / "pairs.jsonl", corpus.pairs)
+    # A list that cannot be read makes every script test unknown (it runs);
+    # name the commits so a low number is traceable to its cause.
+    return {"pairs_annotated": done, "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}

@@ -12,6 +12,7 @@ that score says it would never have skipped a test that failed.
     reuse_policy_replay.py collect --since <ISO> [--until <ISO>] --out <corpus-dir>
     reuse_policy_replay.py score   --corpus <corpus-dir> --policy <name> [--json]
     reuse_policy_replay.py score   --scenarios <dir>        # named-scenario fixtures
+    reuse_policy_replay.py source-keys --corpus <dir> --test-map <json> (--graph-pickle P | --build-dir B)
 
 `collect` is Pulp's adapter and lives in reuse_replay_collect.py; everything
 in this module is project-neutral and reads only the corpus.
@@ -67,12 +68,24 @@ POLICIES
                  inert-drift, plus no drifted file is a declared input of a
                  script test (`test/ctest_script_inputs.json` at the group's
                  tree); a group whose tree has no such list is unevaluable.
-  source-key, per-executable
-                 tier-1 and tier-2 seams: registered, not implemented.
-  none, key-match-reference
+  source-key     tier 1a: a test is skipped, and its executable not rebuilt,
+                 when its per-executable source key matches the head run's
+                 (reconstructed by `source-keys` from git and a build graph)
+                 and the head passed it first time. Fails closed on drifted
+                 data files, CMake and whole-tree tests; the variant to ship.
+  source-key-per-entry
+                 the same with script tests keyed on their own entry and
+                 compiled tests' data reads assumed declared: the estimate.
+  source-key-list-level
+                 control: a list edit re-runs every declared script test; it
+                 must read lower than per-entry.
+  suite-source-key, per-executable
+                 tier-1b and tier-2 seams: registered, not implemented.
+  none, key-match-reference, selection-reference
                  controls for the scenario fixtures: `none` skips nothing;
                  `key-match-reference` skips a test whose head and group
-                 records carry the same output_key. Neither is a candidate.
+                 records carry the same output_key; `selection-reference`
+                 skips what a recorded selection left out. None is a candidate.
 
 Exit codes: 0 success; 1 `score` found a false skip or a scenario verdict
 mismatch, or `collect` found no merge groups or no PR-head pairs (the
@@ -234,6 +247,8 @@ class Decision:
     reason: str
     skip_all: bool = False
     skip: frozenset = frozenset()
+    # (executables not rebuilt, executables) when the policy also skips builds
+    build: tuple[int, int] | None = None
 
     def skips(self, test_id: str) -> bool:
         return self.skip_all or test_id in self.skip
@@ -325,6 +340,51 @@ def decide_inert_drift_inputs(pair: dict, corpus: Corpus, opts: dict) -> Decisio
     return _inert_drift(pair, corpus, opts, check_inputs=True)
 
 
+def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
+    """Tier 1a: per-executable source keys (see reuse_replay_collect).
+
+    A test is skipped when the pair's reconstructed key says nothing it is
+    built from or reads changed between the head run's tree and the group's,
+    AND the head run passed it on the first attempt (a retried pass is not
+    evidence). Its executable is then not rebuilt either."""
+    def decide(pair: dict, corpus: Corpus, opts: dict) -> Decision:
+        group = corpus.run(pair.get("group_run_id"))
+        if group is None or validate_run(group):
+            return _unevaluable("group checkout unknown or rejected")
+        keys = (pair.get("source_key") or {}).get(variant)
+        head = corpus.run(pair.get("source_key_head_run_id"))
+        if keys is None or head is None or validate_run(head):
+            return _unevaluable("no reconstructed source key")
+        if not image_compatible(head, group):
+            return Decision(True, "runner image differs")
+        passed = {t["test_id"] for t in corpus.tests(head["run_id"]) or []
+                  if t.get("outcome") == "pass" and int(t.get("attempts") or 1) == 1}
+        if not passed:
+            return _unevaluable("no head test records")
+        must_run = set(keys["run"])
+        skip = frozenset(t["test_id"] for t in corpus.tests(group["run_id"]) or []
+                         if t["test_id"] in passed and t["test_id"] not in must_run)
+        total = int(keys.get("executables_total") or 0)
+        build = (total - int(keys.get("executables_rebuilt") or 0), total) if total else None
+        return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build)
+    return decide
+
+
+def decide_selection_reference(pair: dict, corpus: Corpus, opts: dict) -> Decision:
+    """Skip every group test outside `pair["selection"]["run"]`, the shape of
+    any test-selection rule (an affected-test set, a changed-surface plan).
+    No head evidence is consulted: a selection runs what it selects."""
+    group = corpus.run(pair.get("group_run_id"))
+    if group is None or validate_run(group):
+        return _unevaluable("group checkout unknown or rejected")
+    selection = pair.get("selection")
+    if selection is None:
+        return _unevaluable("no recorded selection")
+    keep = set(selection.get("run") or [])
+    skip = frozenset(t["test_id"] for t in corpus.tests(group["run_id"]) or [] if t["test_id"] not in keep)
+    return Decision(True, f"selection skips {len(skip)} tests", skip=skip)
+
+
 def decide_none(pair: dict, corpus: Corpus, opts: dict) -> Decision:
     group = corpus.run(pair.get("group_run_id"))
     if group is None or validate_run(group):
@@ -371,11 +431,19 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "whole-receipt, or drift classify_changes calls non-native, not stacked"),
     Policy("inert-drift-inputs", decide_inert_drift_inputs, True,
            "inert-drift, and no drifted file is a declared script-test input"),
-    Policy("source-key", None, True,
-           "tier 1: one source key over every test's inputs (not implemented)"),
+    Policy("source-key", _source_key("strict-data"), True,
+           "tier 1a: per-executable source key, fail closed on undeclared data and whole-tree tests"),
+    Policy("source-key-per-entry", _source_key("per-entry"), True,
+           "tier 1a estimate: script tests keyed on their own entry, data reads assumed declared"),
+    Policy("source-key-list-level", _source_key("list-level"), False,
+           "control: any change to the script-input list re-runs every declared script test"),
+    Policy("suite-source-key", None, True,
+           "tier 1b: one source key over the whole suite (not implemented)"),
     Policy("per-executable", None, True,
            "tier 2: output key per test executable (not implemented)"),
     Policy("none", decide_none, False, "control: skips nothing"),
+    Policy("selection-reference", decide_selection_reference, False,
+           "fixture control: skip what a recorded test selection left out"),
     Policy("key-match-reference", decide_key_match_reference, False,
            "fixture control: equal output_key and a first-attempt head pass"),
 )}
@@ -424,6 +492,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         raise PolicyNotImplemented(f"policy {policy_name!r} is a registered seam without a decision function")
     statuses: dict[str, int] = {}
     benefits: list[float] = []
+    build_fracs: list[float] = []
+    build_skipped = build_total = 0
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
     build_failures_skipped: list[dict] = []
@@ -459,6 +529,10 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         evaluable += 1
         if decision.skip_all:
             skipped_groups += 1
+        if decision.build is not None:
+            build_skipped += decision.build[0]
+            build_total += decision.build[1]
+            build_fracs.append(decision.build[0] / decision.build[1])
         pair_skipped = 0.0
         for t in tests:
             if not decision.skips(t["test_id"]):
@@ -486,6 +560,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "benefit_median": statistics.median(benefits) if benefits else None,
         "benefit_p90": _percentile(benefits, 0.9),
         "benefit_pooled": (skipped_seconds / total_seconds) if total_seconds else None,
+        "build_skipped_median": statistics.median(build_fracs) if build_fracs else None,
+        "build_skipped_pooled": (build_skipped / build_total) if build_total else None,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -554,6 +630,8 @@ def render(result: dict) -> str:
         f"  benefit median {_fmt(result['benefit_median'], True)}  p90 {_fmt(result['benefit_p90'], True)}  "
         f"pooled {_fmt(result['benefit_pooled'], True)} "
         f"({result['skipped_test_seconds']:.0f} of {result['group_test_seconds']:.0f} test-seconds)",
+        f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
+        f"pooled {_fmt(result['build_skipped_pooled'], True)}",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",
@@ -578,6 +656,15 @@ def main(argv: list[str]) -> int:
     c.add_argument("--workers", type=int, default=6)
     c.add_argument("--rate-reserve", type=int, default=2500,
                    help="pause when fewer API calls than this remain (the limit is shared)")
+    k = sub.add_parser("source-keys", help="reconstruct tier-1a source keys into a corpus's pairs")
+    k.add_argument("--corpus", required=True, type=Path)
+    k.add_argument("--test-map", required=True, type=Path,
+                   help="JSON {tests: {name: {executables: [...], sources: [...]}}} for the graph's build dir")
+    k.add_argument("--build-dir", type=Path, help="configured Ninja build dir the graph and map describe")
+    k.add_argument("--graph-pickle", type=Path, help="a pickled affected_tests_shadow Graph (faster)")
+    k.add_argument("--source-root", type=Path, help="checkout the graph's paths are under (default: the build dir's parent)")
+    k.add_argument("--repo", default=str(REPO_ROOT), type=Path)
+    k.add_argument("--runs", type=Path, help="JSON list of group runs ([{run: id}] or ids) to restrict to")
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -607,6 +694,21 @@ def main(argv: list[str]) -> int:
                   "the instrument is broken, not the history", file=sys.stderr)
             return 1
         return 0
+
+    if a.cmd == "source-keys":
+        import reuse_replay_collect as rrc
+        doc = json.loads(a.test_map.read_text(encoding="utf-8"))
+        build_dir = a.build_dir or Path(doc["build_dir"])
+        if a.graph_pickle is None and a.build_dir is None:
+            ap.error("--graph-pickle or --build-dir is required")
+        graph = rrc.load_graph(a.build_dir, a.graph_pickle)
+        only = None
+        if a.runs:
+            only = {str(x["run"] if isinstance(x, dict) else x) for x in json.loads(a.runs.read_text())}
+        result = rrc.annotate_source_keys(a.corpus, a.repo, graph, a.source_root or build_dir.parent,
+                                          build_dir, doc["tests"], only)
+        print(json.dumps(result))
+        return 0 if result["pairs_annotated"] else 1
 
     if a.scenarios:
         results = run_scenarios(a.scenarios)
