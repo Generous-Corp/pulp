@@ -2740,22 +2740,16 @@ perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
 dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
 label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
 
-## PR gate settle window (`PULP_PR_GATE_SETTLE_SECONDS`, default off)
+## Do not add a PR "settle" wait before the gate
 
-A `pr-gate-settle` job in build.yml can hold the PR native matrix behind a
-hosted sleep so a rapid follow-up push cancels the run before a gate VM is
-claimed. Watch out for:
-
-- **A `needs` entry you never read must be paired with a status function.**
-  `build` needs `pr-gate-settle` but gates on `!cancelled()` and never reads
-  its result; without the status function a skipped settle (the default)
-  would skip the whole native matrix, including the required `macos` leg.
-- **pull_request only.** Shipyard validates PRs through `workflow_dispatch`,
-  which never waits; neither `macos` bootstrap depends on the job either.
-- **A new required-gate latency, not a free win.** Every native PR run pays
-  the value minus ~30 s of preamble. Pick it from the measured gap between
-  consecutive pushes that cancelled a claimed VM, not from intuition. Details:
-  `docs/guides/local-ci.md`, "The PR gate settle window is default off".
+build.yml once had a default-off `pr-gate-settle` job that slept on a hosted
+runner so a superseding push would cancel a PR run before its macOS leg
+claimed a gate VM. It never ran (the variable was never set) and was removed.
+Measured over 140 PR runs: pushes that land within about five minutes already
+cancel the run before any VM is claimed (the preamble takes that long), and
+the pushes that did cancel a claimed VM came 4 to 27 minutes apart. A window
+long enough to catch them costs every native PR run that much latency to save
+a few VM-minutes a day. Re-measure the push gaps before proposing it again.
 
 ## A dead lane is only visible as queue age — never as a missing runner
 
