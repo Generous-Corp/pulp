@@ -317,8 +317,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "tools/scripts/test_gpu_trace_overhead_acceptance.py",
           "state": "pulp-owned-retained",
-          "revision": "a7ff6e4e11d4f34f290c3ae2f8bbe9c158e15eef",
-          "object_id": "d342ae66471bd3cf92400f9f7591326ec8e2bca3",
+          "revision": "4c1ed987748899cd466557f0e05dc91d337d2b63",
+          "object_id": "3455990db5b9fe0b1a0e1632749a99d43214e33b",
           "object_type": "blob"
         }
       ],
