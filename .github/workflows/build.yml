@@ -1351,8 +1351,10 @@ jobs:
       # mirror as a Git alternate makes the checkout below and the provenance
       # hydration fetch only the objects the mirror lacks, instead of ~56 MiB
       # and ~57 MiB of history on every job. checkout@v5 keeps an existing
-      # repository whose origin URL matches and deletes anything else, so a
-      # missing cache, a warm workspace or any surprise falls back to the
+      # repository whose origin URL matches only while `clean` is false (true
+      # here on self-hosted runners; with `clean: true` its `reset --hard`
+      # fails on the unborn seed and it recreates the repository). Either way
+      # a missing cache, a warm workspace or any surprise falls back to the
       # ordinary full fetch.
       - name: Seed the checkout from the host git mirror (tartci macOS)
         if: runner.os == 'macOS'
@@ -1375,7 +1377,8 @@ jobs:
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           printf '%s\n' "$mirror/objects" > .git/objects/info/alternates
           head="$(git --git-dir="$mirror" rev-parse --verify --quiet refs/heads/main || true)"
-          if [ -z "$head" ] || ! git cat-file -e "$head^{commit}"; then
+          if [ -z "$head" ] || ! git cat-file -e "$head^{commit}" \
+              || ! git cat-file -e "$head^{tree}"; then
             echo "gate-git-seed: mirror is unreadable; removing the seed"
             rm -rf .git
             exit 0

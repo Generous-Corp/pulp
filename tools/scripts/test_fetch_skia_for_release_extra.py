@@ -540,6 +540,11 @@ class ArtifactCacheTests(unittest.TestCase):
             self.assertEqual(skia.artifact_cache_blob(self.sha), self.cache / "sha256" / self.sha)
             self.assertIsNone(skia.artifact_cache_blob("../sha256/" + self.sha))
 
+    def test_an_unreadable_share_reads_as_absent(self) -> None:
+        with mock.patch.dict(os.environ, {"TARTCI_ARTIFACT_CACHE": str(self.cache)}), \
+                mock.patch.object(pathlib.Path, "is_file", side_effect=OSError(5, "EIO")):
+            self.assertIsNone(skia.artifact_cache_blob(self.sha))
+
 
 if __name__ == "__main__":
     unittest.main()

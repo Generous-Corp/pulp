@@ -640,7 +640,12 @@ def artifact_cache_blob(expected_sha: str) -> Path | None:
     if not root or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
         return None
     blob = Path(root) / "sha256" / expected_sha
-    return blob if blob.is_file() else None
+    try:
+        # A stale or disconnected share can raise EIO/ESTALE here rather than
+        # report absence; either way there is nothing usable to copy.
+        return blob if blob.is_file() else None
+    except OSError:
+        return None
 
 
 def obtain_release_asset(url: str, zip_path: Path, expected_sha: str) -> str:
