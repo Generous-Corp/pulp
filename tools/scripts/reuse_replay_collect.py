@@ -14,6 +14,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as dt
 import gzip
+import http.client
 import json
 import os
 import re
@@ -54,7 +55,7 @@ GATE_ARGS_RE = re.compile(_TS + r"ctest gate args: label_exclude=(?P<exclude>\S*
 RECEIPT_ISSUED_RE = re.compile(_TS + r"##\[notice\]exact-tree receipt for [0-9a-f]{40} on base [0-9a-f]{40}")
 RECEIPT_NOT_ISSUED_RE = re.compile(_TS + r"##\[warning\].* the merge group will validate in full")
 # Bump when parse_job_log's output changes, so cached parses are redone.
-PARSER_VERSION = 2
+PARSER_VERSION = 4
 
 
 def outcome_of(status: str) -> str:
@@ -88,12 +89,15 @@ def parse_job_log(lines: Iterable[str]) -> dict:
             expect_sha = True
             continue
         if CTEST_START_RE.match(line):
-            current = {"tests": {}, "summary": None, "total": None}
+            current = {"tests": {}, "summary": None, "total": None, "seen": set()}
             sessions.append(current)
             continue
         if current is not None:
             match = TEST_LINE_RE.match(line)
             if match:
+                if line in current["seen"]:
+                    continue  # the job log repeats a block verbatim; a retry has its own timestamp
+                current["seen"].add(line)
                 num = int(match.group("num"))
                 rec = current["tests"].get(num)
                 if rec is None:
@@ -219,11 +223,25 @@ class GitHub:
         with self._request(url, "application/vnd.github+json") as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def job_log_lines(self, job_id: int) -> Iterator[str]:
+    def job_log_lines(self, job_id: int) -> list[str]:
+        """The whole job log, or TruncatedLog when the body is shorter than
+        its declared length. Iterating a response that drops mid-stream just
+        ends early, and a log cut off mid-ctest parses as a plausible short
+        run (no receipt, an incomplete suite) rather than as an error."""
         url = f"{API}/repos/{self.repository}/actions/jobs/{job_id}/logs"
         with self._request(url, "application/vnd.github+json") as resp:
-            for raw in resp:
-                yield raw.decode("utf-8", "replace").rstrip("\r\n")
+            try:
+                body = resp.read()
+            except http.client.IncompleteRead as err:
+                raise TruncatedLog(f"job {job_id}: {len(err.partial)} bytes before the stream ended") from err
+            declared = resp.headers.get("Content-Length")
+            if declared is not None and int(declared) != len(body):
+                raise TruncatedLog(f"job {job_id}: {len(body)} of {declared} bytes")
+        return body.decode("utf-8", "replace").splitlines()
+
+
+class TruncatedLog(RuntimeError):
+    """A job log arrived shorter than the length the server declared."""
 
 
 def _days(since: dt.datetime, until: dt.datetime) -> Iterator[str]:
@@ -293,15 +311,26 @@ class Collector:
 
     def parsed_log(self, job_id: int) -> dict:
         def fetch() -> dict:
-            try:
-                return parse_job_log(self.gh.job_log_lines(job_id))
-            except urllib.error.HTTPError as err:
-                if err.code not in (404, 410):
-                    raise
-                # Expired past the log retention window: nothing is known.
-                return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
-                        "receipt_issued": None}
-        return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+            for attempt in range(4):
+                try:
+                    return parse_job_log(self.gh.job_log_lines(job_id))
+                except urllib.error.HTTPError as err:
+                    if err.code not in (404, 410):
+                        raise
+                    # Expired past the log retention window: nothing is known.
+                    return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                            "receipt_issued": None}
+                except (TruncatedLog, ConnectionError, TimeoutError, urllib.error.URLError):
+                    if attempt == 3:
+                        raise  # never cache a partial log as if it were the run
+                    time.sleep(2 ** attempt)
+            raise AssertionError("unreachable")
+        try:
+            return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+        except TruncatedLog:
+            # Unknown for this collect, and not cached, so the next one retries.
+            return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                    "receipt_issued": None}
 
     def decision(self, job_id: int) -> str | None:
         def fetch() -> list:
@@ -318,10 +347,11 @@ class Collector:
                 verdict = note.get("verdict")
         return verdict
 
-    def required_contexts_green(self, head_sha: str, required: tuple[str, ...],
-                                as_of: str | None = None) -> bool | None:
-        """Every required context other than macos green on the head, reading
-        only check-runs that had completed by `as_of` (the group's creation)."""
+    def required_contexts(self, head_sha: str, required: tuple[str, ...],
+                          as_of: str | None = None) -> dict[str, list[str]] | None:
+        """The required contexts other than macos that were red, and those with
+        no completed check-run, on the head as of `as_of` (the group's
+        creation). None when the head's check-runs cannot be read."""
         def fetch() -> list:
             rows, page = [], 1
             while True:
@@ -342,13 +372,16 @@ class Collector:
                 continue
             if name and (name not in latest or str(cr.get("completed_at") or "") >= str(latest[name].get("completed_at") or "")):
                 latest[name] = cr
+        out: dict[str, list[str]] = {"red": [], "absent": []}
         for context in required:
             if context == "macos":
                 continue  # the full-suite ctest facts stand in for the head's own macos check
             cr = latest.get(context)
-            if cr is None or cr.get("conclusion") not in GREEN_CONCLUSIONS:
-                return False
-        return True
+            if cr is None:
+                out["absent"].append(context)
+            elif cr.get("conclusion") not in GREEN_CONCLUSIONS:
+                out["red"].append(context)
+        return out
 
     def merged_at(self, since: dt.datetime) -> dict[int, str | None]:
         """merged_at per closed pull request updated since `since`."""
@@ -496,9 +529,10 @@ class Collector:
         parsed = self.parsed_log(job["id"]) if job else {"checkout_sha": None, "ctest": {}, "tests": [],
                                                            "receipt_issued": None}
         checkout = parsed["checkout_sha"]
-        if checkout is None and job is None and kind == "merge_group":
-            # No suite ran (reused, or no native input): the group's commit is
-            # still exactly the run's own head.
+        if checkout is None and kind == "merge_group":
+            # The job never checked out (reused, no native input, cancelled
+            # before checkout, log expired): the group's commit is still
+            # exactly the run's own head, and no suite ran on it.
             checkout = run["head_sha"]
         commit = self.commit(checkout)
         record = {
@@ -513,7 +547,10 @@ class Collector:
             "base_sha": commit["parents"][0] if commit and commit["parents"] else None,
             "merge_tree": commit["tree"] if commit else None,
             "ctest": parsed["ctest"], "receipt_issued": parsed["receipt_issued"],
-            "build_failed": bool(job and job["conclusion"] == "failure" and not parsed["ctest"].get("ran")),
+            # A build failure got as far as checking out and never reached ctest;
+            # a job that failed before checkout (a cancelled leg) ran nothing.
+            "build_failed": bool(job and job["conclusion"] == "failure" and parsed["checkout_sha"]
+                                 and not parsed["ctest"].get("ran")),
             "required_contexts_green": None, "observed_decision": None,
         }
         if kind == "merge_group":
@@ -535,11 +572,14 @@ class Collector:
                 by_head.setdefault(run["head_sha"], []).append(run)
 
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            jobs_done = list(pool.map(lambda g: self.jobs(g["id"]), groups))
-        del jobs_done
+            for _ in pool.map(lambda g: self.jobs(g["id"]) and None, groups):
+                pass
         group_logs = [self.ctest_job(self.jobs(g["id"])) for g in groups]
         with concurrent.futures.ThreadPoolExecutor(self.workers) as pool:
-            list(pool.map(lambda j: self.parsed_log(j["id"]) if j else None, group_logs))
+            # Warm the log cache only; keeping the parses would hold every
+            # run's per-test rows in memory at once.
+            for _ in pool.map(lambda j: j and self.parsed_log(j["id"]) and None, group_logs):
+                pass
         self.prime_commits([self.parsed_log(j["id"])["checkout_sha"] for j in group_logs if j]
                             + [g["head_sha"] for g in groups])
 
@@ -611,11 +651,15 @@ class Collector:
                         hits = self.declared_input_hits(group, drift)
                     elif drift == []:
                         hits = []
-                green = None
+                contexts = None
                 if record["ctest"].get("complete") and record["ctest"].get("failed") == 0:
-                    green = self.required_contexts_green(record["head_sha"], required, group["created_at"])
-                head_rows.append({"run_id": run_id, "drift_files": drift, "drift_source": source,
-                                  "drift_declared_input_hits": hits, "required_contexts_green": green})
+                    contexts = self.required_contexts(record["head_sha"], required, group["created_at"])
+                head_rows.append({
+                    "run_id": run_id, "drift_files": drift, "drift_source": source,
+                    "drift_declared_input_hits": hits,
+                    "required_contexts_green": None if contexts is None else not (contexts["red"] or contexts["absent"]),
+                    "required_contexts_red": None if contexts is None else contexts["red"],
+                    "required_contexts_absent": None if contexts is None else contexts["absent"]})
             return {"schema": PAIR_SCHEMA, "pr": group["pr"], "head_sha": group["head_sha"],
                     "group_run_id": group["run_id"], "heads": head_rows,
                     "stacked": _stacked(group, queue_commits, merged_at, self)}

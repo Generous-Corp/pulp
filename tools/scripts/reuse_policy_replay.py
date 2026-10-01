@@ -134,12 +134,26 @@ def validate_run(run: dict) -> str | None:
     return None
 
 
-def receipt_eligible(run: dict, source: str = "derived", contexts_green: bool | None = None) -> bool:
+def contexts_ok(cand: dict, run: dict, mode: str = "red-only") -> bool:
+    """Did the head's required contexts allow a receipt, as of the group?
+
+    `strict` (the live verifier): every required context present and green.
+    `red-only` (the default for history): none of the contexts present was
+    red; a context the head has no check-run for does not refuse, because
+    today's required list names contexts that did not exist for most of
+    the window. An unreadable record refuses in both modes."""
+    if mode == "strict" or cand.get("required_contexts_red") is None:
+        green = cand.get("required_contexts_green")
+        return (green if green is not None else run.get("required_contexts_green")) is True
+    return not cand["required_contexts_red"]
+
+
+def receipt_eligible(run: dict, source: str = "derived", cand: dict | None = None,
+                     contexts: str = "red-only") -> bool:
     """Would this PR-head run have issued a reusable receipt?
 
     `derived`: it ran the full suite to completion with every test's final
-    outcome green, and no required context on the head was red or unknown
-    (`contexts_green`, as of the group's creation, when the pair records it).
+    outcome green, and its required contexts allowed it (`contexts_ok`).
     `observed`: the issuer said it published one."""
     if run.get("run_kind") != "pr_head" or validate_run(run):
         return False
@@ -147,9 +161,7 @@ def receipt_eligible(run: dict, source: str = "derived", contexts_green: bool | 
         return run.get("receipt_issued") is True
     ctest = run.get("ctest") or {}
     return bool(ctest.get("complete") and ctest.get("full_suite") is True
-                and ctest.get("failed", 1) == 0
-                and (contexts_green if contexts_green is not None
-                     else run.get("required_contexts_green")) is True)
+                and ctest.get("failed", 1) == 0 and contexts_ok(cand or {}, run, contexts))
 
 
 def image_compatible(a: dict, b: dict) -> bool:
@@ -254,7 +266,7 @@ def _group_and_heads(pair: dict, corpus: Corpus, opts: dict
     heads = []
     for cand in pair.get("heads") or []:
         run = corpus.run(cand.get("run_id"))
-        if run is not None and receipt_eligible(run, source, cand.get("required_contexts_green")):
+        if run is not None and receipt_eligible(run, source, cand, opts.get("contexts", "red-only")):
             heads.append((run, cand))
     return group, heads
 
@@ -384,10 +396,13 @@ def pair_status(group: dict | None) -> str:
     ctest = group.get("ctest") or {}
     if group.get("build_failed"):
         return "build_failed"
-    if not ctest:
-        return "no_suite"  # no native input, or the suite job never ran
-    if not ctest.get("complete"):
-        return "incomplete"
+    if ctest.get("log_unavailable"):
+        return "log_expired"
+    if not ctest.get("ran"):
+        return "no_suite"  # no native input, a cancelled leg, or the job never reached ctest
+    if not ctest.get("complete") and not ctest.get("failed"):
+        return "incomplete"  # cut off mid-run with nothing failed yet: no ground truth
+    # A run stopped on a failure is ground truth for that failure.
     return "scored"
 
 
@@ -570,6 +585,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--policy", action="append", default=None,
                    help=f"one of {', '.join(POLICIES)} (repeatable; default: every implemented candidate)")
     s.add_argument("--receipt-source", choices=("derived", "observed"), default="derived")
+    s.add_argument("--contexts", choices=("red-only", "strict"), default="red-only",
+                   help="derived receipts: refuse on a red required context only (history), or also on an absent one (the live rule)")
     s.add_argument("--since", default=None, help="score only groups created at or after this ISO time")
     s.add_argument("--min-sample", type=int, default=20)
     s.add_argument("--json", action="store_true")
@@ -608,7 +625,7 @@ def main(argv: list[str]) -> int:
                         if (corpus.run(p["group_run_id"]) or {}).get("created_at")
                         and _parse_time(corpus.run(p["group_run_id"])["created_at"]) >= cutoff]
     names = a.policy or [p.name for p in POLICIES.values() if p.candidate and p.decide]
-    opts = {"receipt_source": a.receipt_source, "min_sample": a.min_sample}
+    opts = {"receipt_source": a.receipt_source, "contexts": a.contexts, "min_sample": a.min_sample}
     results = []
     for name in names:
         try:

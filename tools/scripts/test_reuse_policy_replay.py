@@ -48,7 +48,7 @@ def group(**kw) -> dict:
     run = {"run_id": "g1", "run_kind": "merge_group", "pr": 1, "head_sha": "h1", "group_sha": "m1",
            "checkout_sha": "m1", "checkout_parents": ["b2", "h1"], "base_sha": "b2", "merge_tree": "t2",
            "runner_image": None, "created_at": "2026-09-29T12:00:00Z",
-           "ctest": {"complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
+           "ctest": {"ran": True, "complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
     run.update(kw)
     return run
 
@@ -113,6 +113,14 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["false_skip_rows"][0]["test_id"], "skills-doc-sync")
         self.assertEqual(result["flake_skips"], 0)
         self.assertEqual(result["verdict"], "UNSAFE: false skips")
+
+    def test_a_run_stopped_on_a_failure_is_scored(self):
+        stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
+                             tests={"g1": [t("a", "fail", 2)]})
+        self.assertEqual(rpr.score(stopped, "inert-drift")["false_skips"], 1)
+        cut = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 0}), head()], [pair()],
+                         tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(cut, "inert-drift")["statuses"], {"incomplete": 1})
 
     def test_timeout_is_a_failure(self):
         result = rpr.score(corpus([t("slow-one", "timeout", 2)]), "inert-drift")
@@ -246,6 +254,12 @@ class ParseTests(unittest.TestCase):
         refused = "2026-09-30T19:20:00.0000000Z ##[warning]selection too narrow — the merge group will validate in full\n"
         self.assertIs(self.parse(refused)["receipt_issued"], False)
 
+    def test_a_verbatim_repeated_line_is_not_a_retry(self):
+        line = "2026-09-30T19:10:16.5818700Z     4/5 Test     #6: a test whose name says Failed ....   Passed    1.00 sec\n"
+        self.assertIn(line, LOG)
+        tests = {x["test_id"]: x for x in rrc.parse_job_log(LOG.replace(line, line + line).splitlines())["tests"]}
+        self.assertEqual(tests["a test whose name says Failed"]["attempts"], 1)
+
     def test_log_without_ctest_is_not_complete(self):
         p = rrc.parse_job_log(LOG.splitlines()[:2])
         self.assertEqual((p["ctest"]["ran"], p["ctest"]["complete"]), (False, False))
@@ -295,6 +309,62 @@ class DriftTests(unittest.TestCase):
     def test_different_heads_have_no_base_fallback(self):
         other = group(head_sha="h9", checkout_parents=["b2", "h9"])
         self.assertEqual(self.collector(False).drift(head(), other), (None, None))
+
+
+class RunRecordTests(unittest.TestCase):
+    def record(self, parsed: dict, conclusion: str = "failure") -> dict:
+        c = rrc.Collector.__new__(rrc.Collector)
+        job = {"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": conclusion}
+        c.jobs = lambda run_id: [job]
+        c.parsed_log = lambda job_id: parsed
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
+        return c.run_record(run, "merge_group", 7, "h")[0]
+
+    def test_failure_after_checkout_without_ctest_is_a_build_failure(self):
+        rec = self.record({"checkout_sha": "m1", "ctest": {"ran": False}, "tests": [], "receipt_issued": None})
+        self.assertTrue(rec["build_failed"])
+        self.assertEqual(rpr.pair_status(rec), "build_failed")
+
+    def test_failure_before_checkout_ran_nothing(self):
+        rec = self.record({"checkout_sha": None, "ctest": {}, "tests": [], "receipt_issued": None})
+        self.assertFalse(rec["build_failed"])
+        self.assertEqual(rec["checkout_sha"], "m1")
+        self.assertEqual(rpr.pair_status(rec), "no_suite")
+
+
+class LogDownloadTests(unittest.TestCase):
+    class Resp:
+        def __init__(self, body: bytes, declared: int) -> None:
+            self.body, self.headers = body, {"Content-Length": str(declared)}
+        def read(self) -> bytes:
+            return self.body
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def github(self, responses: list) -> rrc.GitHub:
+        gh = rrc.GitHub("o/r", "token")
+        gh._request = lambda url, accept: responses.pop(0)
+        return gh
+
+    def test_a_short_body_is_an_error_not_a_short_log(self):
+        gh = self.github([self.Resp(LOG.encode()[:300], len(LOG.encode()))])
+        with self.assertRaises(rrc.TruncatedLog):
+            gh.job_log_lines(1)
+
+    def test_a_truncated_download_is_retried_and_never_cached_partial(self):
+        full = LOG.encode()
+        c = rrc.Collector.__new__(rrc.Collector)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rrc.time, "sleep"):
+            c.cache = Path(tmp)
+            c.gh = self.github([self.Resp(full[:300], len(full)), self.Resp(full, len(full))])
+            self.assertEqual(c.parsed_log(7)["ctest"]["executed"], 5)
+            c.gh = self.github([self.Resp(full[:300], len(full))] * 4)
+            self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
+            self.assertTrue((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "7.json.gz").is_file())
+            self.assertFalse((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "8.json.gz").exists())
 
 
 class GraftTests(unittest.TestCase):

@@ -25,7 +25,8 @@
       "created_at": "2026-09-29T12:00:00Z",
       "ctest": {
        "complete": true,
-       "failed": 0
+       "failed": 0,
+       "ran": true
       },
       "build_failed": false,
       "observed_decision": null
@@ -110,7 +111,8 @@
       "created_at": "2026-09-29T12:00:00Z",
       "ctest": {
        "complete": true,
-       "failed": 0
+       "failed": 0,
+       "ran": true
       },
       "build_failed": false,
       "observed_decision": null
