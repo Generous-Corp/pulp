@@ -109,7 +109,7 @@ function(pulp_gpu_audio_configure_provider_identity target)
                 --dawn-header "${_pulp_gpu_audio_dawn_header}"
                 --dawn-library "${DAWN_LIBRARY}"
                 --configured-receipt "${_pulp_gpu_audio_configure_receipt}"
-                --result "${_pulp_gpu_audio_identity_dir}/$<CONFIG>/library-pre-link.json"
+                --result "${_pulp_gpu_audio_prelink_receipt}"
             VERBATIM)
         add_dependencies(${target} pulp-gpu-audio-provider-prelink)
     endif()
