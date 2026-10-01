@@ -858,6 +858,11 @@ EXPORTS = [
     capability(
         key="signal.custom-node-events", domain="signal",
         status="experimental",
+        # Emission widens what this capability produces, and the contract gate
+        # classifies any change to a non-binding contract field as breaking, so
+        # the major moves rather than the minor.
+        contract_version={"major": 2, "minor": 0},
+        evolution={"state": "active", "introduced_in": {"major": 1, "minor": 0}},
         summary="A Custom graph node reads the inbound MIDI the graph already gathered for it.",
         rt_class="audio",
         lifecycle={"construction": "control", "prepare": "control", "process": "audio",
@@ -871,7 +876,7 @@ EXPORTS = [
         determinism={"repeatability": "not_promised", "block_partition": "invariant",
                      "platform_scope": "same_build", "transport_history": "irrelevant"},
         input_domain="the node's gathered inbound MIDI for the block, which may be absent",
-        output_domain="audio written by the registered callback; event emission is not available",
+        output_domain="audio written by the registered callback, plus any MIDI it emits into the block's output buffer",
         units=["samples"],
         latency="declared by the registered type", tail="zero",
         scheduling="block-synchronous",
@@ -879,7 +884,7 @@ EXPORTS = [
             binding(role="event_block", kind="cpp_type",
                     include="pulp/host/custom_node_events.hpp",
                     qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host",
-                    header_fingerprint="sha256:14d2127f4a9baa9474b56c18984539c8f0d2dcf293e5f5fe59624da6be940dd3"),
+                    header_fingerprint="sha256:3593ccc6cb772b630fc61bec7014eb5315b5bef7e99d6047206947384c7c6006"),
             binding(role="node_type", kind="cpp_type",
                     include="pulp/host/custom_node_type.hpp",
                     qualified_name="pulp::host::CustomNodeType", target="Pulp::host",
