@@ -1567,6 +1567,12 @@ here removes a flake without removing any coverage.
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
 
+The update itself is skipped when `ccache` and `ninja` are both already on
+PATH, which is every tartci gate VM (the golden bakes both). Nothing later in
+the job runs `brew install` there, so the update only downloaded a portable
+Ruby and the Homebrew API data on every gate job. A runner missing either tool
+(Namespace, GitHub-hosted) still updates before installing.
+
 ## The visual-analysis Python dependencies are installed, then proved
 
 `build.yml` installs `tools/motion/visual/requirements.txt` into the
