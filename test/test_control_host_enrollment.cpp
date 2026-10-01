@@ -39,8 +39,7 @@ struct Fixture {
         executable = root / "source" / "trusted-host";
         fs::copy_file(PULP_CONTROL_TRUSTED_HOST_FIXTURE, executable);
         std::ofstream manifest(executable.string() + ".inspector-capabilities.json");
-        // codeql[cpp/cleartext-storage-file] -- this is a public test fixture, not a secret.
-        manifest << kManifest;
+        manifest << kManifest; // codeql[cpp/cleartext-storage-file] -- public fixture data.
         manifest.close();
 #ifndef _WIN32
         ::chmod(executable.c_str(), 0700);
