@@ -333,6 +333,39 @@ class RunRecordTests(unittest.TestCase):
         self.assertEqual(rpr.pair_status(rec), "no_suite")
 
 
+class LogDownloadTests(unittest.TestCase):
+    class Resp:
+        def __init__(self, body: bytes, declared: int) -> None:
+            self.body, self.headers = body, {"Content-Length": str(declared)}
+        def read(self) -> bytes:
+            return self.body
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def github(self, responses: list) -> rrc.GitHub:
+        gh = rrc.GitHub("o/r", "token")
+        gh._request = lambda url, accept: responses.pop(0)
+        return gh
+
+    def test_a_short_body_is_an_error_not_a_short_log(self):
+        gh = self.github([self.Resp(LOG.encode()[:300], len(LOG.encode()))])
+        with self.assertRaises(rrc.TruncatedLog):
+            gh.job_log_lines(1)
+
+    def test_a_truncated_download_is_retried_and_never_cached_partial(self):
+        full = LOG.encode()
+        c = rrc.Collector.__new__(rrc.Collector)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rrc.time, "sleep"):
+            c.cache = Path(tmp)
+            c.gh = self.github([self.Resp(full[:300], len(full)), self.Resp(full, len(full))])
+            self.assertEqual(c.parsed_log(7)["ctest"]["executed"], 5)
+            c.gh = self.github([self.Resp(full[:300], len(full))] * 4)
+            self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
+            self.assertFalse(list(Path(tmp).rglob("8.json.gz")))
+
+
 class GraftTests(unittest.TestCase):
     def test_parents_are_read_through_shallow_grafts(self):
         with tempfile.TemporaryDirectory() as tmp:

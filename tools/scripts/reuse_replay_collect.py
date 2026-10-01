@@ -14,6 +14,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as dt
 import gzip
+import http.client
 import json
 import os
 import re
@@ -54,7 +55,7 @@ GATE_ARGS_RE = re.compile(_TS + r"ctest gate args: label_exclude=(?P<exclude>\S*
 RECEIPT_ISSUED_RE = re.compile(_TS + r"##\[notice\]exact-tree receipt for [0-9a-f]{40} on base [0-9a-f]{40}")
 RECEIPT_NOT_ISSUED_RE = re.compile(_TS + r"##\[warning\].* the merge group will validate in full")
 # Bump when parse_job_log's output changes, so cached parses are redone.
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 
 
 def outcome_of(status: str) -> str:
@@ -222,11 +223,25 @@ class GitHub:
         with self._request(url, "application/vnd.github+json") as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def job_log_lines(self, job_id: int) -> Iterator[str]:
+    def job_log_lines(self, job_id: int) -> list[str]:
+        """The whole job log, or TruncatedLog when the body is shorter than
+        its declared length. Iterating a response that drops mid-stream just
+        ends early, and a log cut off mid-ctest parses as a plausible short
+        run (no receipt, an incomplete suite) rather than as an error."""
         url = f"{API}/repos/{self.repository}/actions/jobs/{job_id}/logs"
         with self._request(url, "application/vnd.github+json") as resp:
-            for raw in resp:
-                yield raw.decode("utf-8", "replace").rstrip("\r\n")
+            try:
+                body = resp.read()
+            except http.client.IncompleteRead as err:
+                raise TruncatedLog(f"job {job_id}: {len(err.partial)} bytes before the stream ended") from err
+            declared = resp.headers.get("Content-Length")
+            if declared is not None and int(declared) != len(body):
+                raise TruncatedLog(f"job {job_id}: {len(body)} of {declared} bytes")
+        return body.decode("utf-8", "replace").splitlines()
+
+
+class TruncatedLog(RuntimeError):
+    """A job log arrived shorter than the length the server declared."""
 
 
 def _days(since: dt.datetime, until: dt.datetime) -> Iterator[str]:
@@ -296,15 +311,26 @@ class Collector:
 
     def parsed_log(self, job_id: int) -> dict:
         def fetch() -> dict:
-            try:
-                return parse_job_log(self.gh.job_log_lines(job_id))
-            except urllib.error.HTTPError as err:
-                if err.code not in (404, 410):
-                    raise
-                # Expired past the log retention window: nothing is known.
-                return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
-                        "receipt_issued": None}
-        return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+            for attempt in range(4):
+                try:
+                    return parse_job_log(self.gh.job_log_lines(job_id))
+                except urllib.error.HTTPError as err:
+                    if err.code not in (404, 410):
+                        raise
+                    # Expired past the log retention window: nothing is known.
+                    return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                            "receipt_issued": None}
+                except (TruncatedLog, ConnectionError, TimeoutError, urllib.error.URLError):
+                    if attempt == 3:
+                        raise  # never cache a partial log as if it were the run
+                    time.sleep(2 ** attempt)
+            raise AssertionError("unreachable")
+        try:
+            return self._cached(f"logs-v{PARSER_VERSION}/{job_id}.json.gz", fetch)
+        except TruncatedLog:
+            # Unknown for this collect, and not cached, so the next one retries.
+            return {"checkout_sha": None, "ctest": {"log_unavailable": True}, "tests": [],
+                    "receipt_issued": None}
 
     def decision(self, job_id: int) -> str | None:
         def fetch() -> list:
