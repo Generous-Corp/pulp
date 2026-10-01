@@ -8913,6 +8913,13 @@ because Namespace's runner image had drifted past the freshness
 window the brew preamble enforces. Adding `brew update --quiet`
 once unblocks the whole queue.
 
+`brew update (macOS)` now returns early when `ccache` and `ninja` are both on
+PATH: the only `brew install` calls in the macOS job are for those two tools,
+each guarded by `command -v`, so on a gate VM (both baked) the update bought
+nothing. Keep the guard in sync if a later step adds another `brew install`:
+that step's tool must join the `command -v` list, or a stale-config runner
+will fail its install.
+
 ## SignalGraph Phase 0 learnings (PR #153)
 
 Gotchas surfaced while landing the four-phase SignalGraph follow-up:
