@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261001-chrome-code-sign-clone-launch-flag-watch",
+  "created_at": "2026-10-01T10:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "chromium-authoring-frontend",
+    "design-output-and-packaging",
+    "design-source-ingest",
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a disk-hygiene change to the browser launchers: tools/import-design/browser_capture/browser_process.mjs adds MacAppCodeSignClone to its existing --disable-features list, and tools/import-validation/chrome_gradient_oracle.py and tools/coordination/capture-webview-baseline.sh pass --disable-features=MacAppCodeSignClone, so branded macOS Chrome stops copying its app bundle into the per-user temp dir on every launch and leaving it behind when torn down by signal. The import-design skill gains the matching gotcha. No capture semantics, DesignIR, rendering, thresholds or packaging change; the capture integration suite passes unchanged. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-browser-capture-node-integration"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
