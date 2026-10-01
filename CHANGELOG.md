@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08890"></a>
+## [0.889.0] - 2026-10-01
+
+- release/version bump ([#9193](https://github.com/Generous-Corp/pulp/pull/9193))
+- feature/changed surface policy narrow ([#9186](https://github.com/Generous-Corp/pulp/pull/9186))
+- fix/test scratch cleanup and chrome clone ([#9189](https://github.com/Generous-Corp/pulp/pull/9189))
+- ci/shipyard mac lane opt in ([#9188](https://github.com/Generous-Corp/pulp/pull/9188))
+- feat/host header surface and event capability key ([#9187](https://github.com/Generous-Corp/pulp/pull/9187))
+
 <a id="v08880"></a>
 ## [0.888.0] - 2026-10-01
 
@@ -9382,6 +9391,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.889.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.889.0
 [0.888.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.888.0
 [0.887.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.887.1
 [0.887.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.887.0
