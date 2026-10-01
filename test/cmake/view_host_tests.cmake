@@ -132,6 +132,13 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_plugin_view_host_hover_macos.mm
         LIBRARIES pulp::view "-framework AppKit")
 endif()
+# A press into a hosted editor whose window is not key reaches the control
+# (-acceptsFirstMouse: on both plug-in host views), driven through NSWindow.
+if(APPLE AND NOT PULP_IOS)
+    pulp_add_test_suite(pulp-test-plugin-view-first-mouse-macos GROUP pulp-test-group-view-host-mac
+        SOURCES test_plugin_view_host_first_mouse_macos.mm
+        LIBRARIES pulp::view "-framework AppKit")
+endif()
 # Windows UIA backend — compile-gated on _WIN32 in the
 # source. The sentinel test case keeps the binary present + named
 # consistently on non-Windows hosts so ctest output stays stable.
