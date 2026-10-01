@@ -382,8 +382,9 @@ WORKFLOW_LINT = REPO_ROOT / ".github" / "workflows" / "workflow-lint.yml"
 # is reported as NOT CHECKED, never as a pass; the workflow still runs it.
 WORKFLOW_LOCAL_SKIPS = {
     "tools/scripts/test_generated_version_bump_check.py": (
-        "replays generators that walk full git history per file: ~105 s for its "
-        "whole step on CI's shallow clone, over 600 s on a full-history checkout"
+        "35 fixtures each clone the checkout and let the check add a worktree, so "
+        "the suite takes minutes on a loaded host even with its one-commit clone; "
+        "CI runs it in its own workflow-lint step"
     ),
     # ctest registrations (the --ctest-python lane) share this list.
     "rack-plugin-loads": (

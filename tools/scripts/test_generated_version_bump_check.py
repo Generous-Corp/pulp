@@ -44,8 +44,14 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         self.root = Path(self.holder.name)
         source = Path(__file__).resolve().parents[2]
         self.repo = self.root / "repo"
+        # One commit of history, the shape CI's `fetch-depth: 1` checkout gives
+        # the workflow that runs this suite. The derived regenerators resolve
+        # per-path last-owner revisions by walking history, so over a full local
+        # history each regeneration costs tens of seconds; every assertion here
+        # is about the transaction on top of `self.base`, which needs none of it.
         subprocess.run(
-            ["git", "clone", "--quiet", "--shared", str(source), str(self.repo)],
+            ["git", "clone", "--quiet", "--no-local", "--depth", "1",
+             source.as_uri(), str(self.repo)],
             check=True,
         )
         run(self.repo, "config", "user.name", CHECK.BOT_NAME)
