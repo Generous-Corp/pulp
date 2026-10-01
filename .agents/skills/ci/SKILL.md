@@ -685,6 +685,24 @@ flag, because the verifier runs from the base and an older one rejects an
 unknown argument. Add new verifier inputs the same way: accept the argument
 first, then enforce it once the accepting version is the protected base.
 
+### Required checks are only as trustworthy as the PR's workflow YAML
+
+A merge group runs the workflow YAML its PR carries, and every required context
+is posted by a GitHub Actions workflow. So a PR that edits `build.yml` can pass
+`macos` by forcing `macos_reused=true` or by rewriting the job. A base-sourced
+verifier called from PR-controlled control flow does not fix this: the PR
+decides whether it runs. Pinning a context to the Shipyard App does not fix it
+either, because that App's key is a repo secret that merge_group jobs can read.
+Only an org-level required workflow or required code-owner review would close
+it. By Daniel's decision on 2026-09-30 neither is used, and the risk is visible
+instead: the advisory `Required-check machinery (advisory)` check run
+(`required-check-machinery.yml`, `pull_request_target`, protected-main
+definition) names every changed file that can decide a required check, with
+conclusion `neutral` when it flags anything. A workflow token usually cannot
+read branch protection, so in practice it counts every workflow file. Do not
+propose an in-workflow "unforgeable" gate; read that status and review the
+named files.
+
 ### A PR head also runs the tests its own diff reaches, and that step gates
 
 Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate

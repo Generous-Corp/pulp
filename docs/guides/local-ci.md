@@ -2731,6 +2731,44 @@ there; the full suite runs in the merge queue), `full` where the full suite
 ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
 fast-tier green is never read as full validation.
 
+### Required checks trust the pull request's own workflow YAML
+
+Every required context on `main` is posted by a GitHub Actions workflow, and a
+merge group runs the workflow YAML its pull request carries. A pull request
+that edits `build.yml` can therefore decide its own `macos` result, by forcing
+`macos_reused=true` or by rewriting the job outright. Only the receipt verifier
+is loaded from the protected base, and the pull request controls whether it is
+called. No check inside the repository can close this: anything a workflow
+runs, the pull request can remove. By Daniel's decision on 2026-09-30, required
+contexts are only as trustworthy as the pull request's own workflow YAML. There
+is no org-level required workflow and no required code-owner review.
+
+What CI does instead is make it visible. `required-check-machinery.yml` runs on
+`pull_request_target`, so its definition and its script
+(`tools/scripts/required_check_machinery.py`) come from protected `main`. The
+pull request's head is fetched only to diff it. It posts the advisory, never
+required, check run `Required-check machinery (advisory)`: conclusion `neutral`
+titled `touches required-check machinery: <files>` when anything is flagged,
+`success` titled `touches no required-check machinery` otherwise, so a flagged
+pull request is visibly different without reading as a failure to chase. The
+check's summary and the run summary list each flagged file with its reason, and
+a flagged run also emits a `::warning`. If the report cannot be computed the
+job fails and posts no check run.
+
+| Reason | Paths |
+|---|---|
+| `receipt reuse` | `build.yml`, `.agents/contract.toml`, `classify_changes.py`, `protected_merge_receipt.py`, `tools/ci/ctest_gate_args.py` |
+| `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
+| `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
+
+The required contexts come from the live branch protection when the workflow
+token can read it. When it cannot (reading branch protection needs
+administration access, which a workflow token does not normally have), or the
+list is empty, every `.github/workflows` and `.github/actions` file is counted
+and the check's summary says so. A required context with no mapped producer
+widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
+itself, and review those files before it is enqueued.
+
 ## A2T evidence receipts get a nonterminal required-job attestation
 
 When a pull-request head targeting `Generous-Corp/pulp` `main` adds or modifies the exact tracked
