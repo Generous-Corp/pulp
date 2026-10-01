@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261001-reuse-policy-replay-source-keys-watch",
+  "created_at": "2026-10-01T02:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a tool-registry text update that crosses the design-output-and-packaging family only through its docs/status/tools.yaml selector. The reuse-policy-replay entry now documents its tier-1a source-keys subcommand and the caveat that reconstructed keys come from one build graph; the CLAUDE.md digest is regenerated. No design-import, capture, DesignIR, rendering, codegen, packaging or release path changes. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "tools-registry-check",
+    "reuse-policy-replay-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

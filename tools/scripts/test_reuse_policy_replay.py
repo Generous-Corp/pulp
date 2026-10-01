@@ -41,6 +41,7 @@ TOOL = HERE / "reuse_policy_replay.py"
 DESIGN_SCENARIOS = {
     "env-read selftest", "generated-list drift", "host-shaped gate", "masked verdict",
     "flake on one VM", "base-red poison", "iOS PostBuild crash", "unpinned tool", "stale build dir",
+    "affected-selection misses",
 }
 
 
@@ -141,6 +142,18 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["skipped_test_seconds"], 20.0)
         self.assertEqual(result["verdict"], "safe over the window")
 
+    def test_quartiles_come_from_the_per_group_shares(self):
+        groups = [group(run_id=f"g{i}", group_sha=f"m{i}", checkout_sha=f"m{i}") for i in range(4)]
+        pairs = [dict(pair(), group_run_id=f"g{i}") for i in range(4)]
+        tests = {f"g{i}": [t("a", dur=1.0), t("b", dur=1.0)] for i in range(4)}
+        pairs[0]["heads"][0]["drift_files"] = ["core/x.cpp"]  # runs: share 0
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (1.0, 1.0, 1.0))
+        self.assertEqual(result["group_test_seconds"], 8.0)
+        pairs[1]["heads"][0]["drift_files"] = ["core/x.cpp"]
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (0.0, 0.5, 1.0))
+
     def test_skip_nothing_control_reads_zero(self):
         result = rpr.score(corpus([t("a", "fail", 2)]), "none")
         self.assertEqual((result["benefit_median"], result["false_skips"]), (0.0, 0))
@@ -174,7 +187,7 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(rpr.score(c, "inert-drift")["replay_vs_observed"]["replay_only"], 1)
 
     def test_seams_refuse_to_score(self):
-        for name in ("source-key", "per-executable"):
+        for name in ("suite-source-key", "per-executable"):
             with self.assertRaises(rpr.PolicyNotImplemented):
                 rpr.score(corpus([t("a")]), name)
 
@@ -365,6 +378,99 @@ class LogDownloadTests(unittest.TestCase):
             self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
             self.assertTrue((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "7.json.gz").is_file())
             self.assertFalse((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "8.json.gz").exists())
+
+
+class SourceKeyClassifyTests(unittest.TestCase):
+    MAP = {
+        "compiled": {"executables": ["test/a"], "sources": ["test/test_a.cpp"]},
+        "other-exe": {"executables": ["test/b"], "sources": ["test/test_b.cpp"]},
+        "gpu": {"executables": ["test/c"], "sources": [], "resource_locks": ["pulp_gpu"]},
+        "browser": {"executables": ["test/d"], "sources": [], "labels": ["browser-capture"]},
+        "renamed": {"executables": ["test/gone"], "sources": []},
+        "script": {"labels": []},
+        "sealed": {"labels": ["hermetic"]},
+        "list-drift": {"labels": []},
+    }
+    ENTRIES = {"script": {"inputs": ["tools/x"]}, "sealed": {"inputs": ["tools/y"]},
+               "list-drift": {"inputs": ["tools/z"]}}
+    EXES = {"test/a", "test/b", "test/c", "test/d"}
+
+    def run_sets(self, drift, rebuilt=frozenset(), head=None, group=None):
+        out = rrc.classify_source_keys(list(drift), list(self.MAP) + ["unmapped"], self.MAP,
+                                       head if head is not None else self.ENTRIES,
+                                       group if group is not None else self.ENTRIES, set(rebuilt), self.EXES)
+        return {v: set(d["run"]) for v, d in out.items()}, out
+
+    def test_unrelated_drift_skips_mapped_tests_but_never_unknown_ones(self):
+        runs, _ = self.run_sets(["docs/guide.md"])
+        self.assertEqual(runs["per-entry"], {"renamed", "unmapped"})
+        self.assertEqual(runs["strict-data"], {"renamed", "unmapped", "gpu", "browser", "script", "list-drift"})
+
+    def test_a_rebuilt_executable_or_drifted_source_runs_its_tests(self):
+        runs, _ = self.run_sets(["core/x.cpp"], rebuilt={"test/a"})
+        self.assertIn("compiled", runs["per-entry"])
+        self.assertNotIn("other-exe", runs["per-entry"])
+        self.assertIn("other-exe", self.run_sets(["test/test_b.cpp"])[0]["per-entry"])
+
+    def test_strict_runs_compiled_tests_on_data_and_everything_on_cmake(self):
+        runs, out = self.run_sets(["tools/import-design/fixture.json"])
+        self.assertNotIn("compiled", runs["per-entry"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], 0)
+        runs, out = self.run_sets(["test/cmake/x_tests.cmake"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], len(self.EXES))
+        self.assertEqual(out["per-entry"]["executables_rebuilt"], 0)
+
+    def test_script_tests_follow_their_own_entry(self):
+        runs, _ = self.run_sets(["tools/x/run.py"])
+        self.assertIn("script", runs["per-entry"])
+        self.assertNotIn("sealed", runs["per-entry"])
+        changed = dict(self.ENTRIES, sealed={"inputs": ["tools/y", "tools/new"]})
+        self.assertIn("sealed", self.run_sets(["docs/a.md"], group=changed)[0]["per-entry"])
+
+    def test_a_list_edit_reruns_declared_scripts_only_at_list_level(self):
+        runs, _ = self.run_sets(["test/ctest_script_inputs.json"])
+        self.assertNotIn("script", runs["per-entry"])
+        self.assertIn("script", runs["list-level"])
+
+    def test_strict_skips_only_hermetic_scripts_and_never_environment_bound_tests(self):
+        runs, _ = self.run_sets(["docs/a.md"])
+        self.assertNotIn("sealed", runs["strict-data"])
+        self.assertIn("script", runs["strict-data"])
+        self.assertTrue({"gpu", "browser"} <= runs["strict-data"])
+        self.assertFalse({"gpu", "browser"} & runs["per-entry"])
+
+    def test_an_unreadable_list_makes_script_tests_unknown(self):
+        runs, _ = self.run_sets(["docs/a.md"], head={})
+        self.assertIn("script", runs["per-entry"])
+        out = rrc.classify_source_keys(["docs/a.md"], ["script"], self.MAP, None, self.ENTRIES, set(), self.EXES)
+        self.assertEqual(out["per-entry"]["run"], ["script"])
+
+
+class SourceKeyPolicyTests(unittest.TestCase):
+    def corpus(self, head_tests, run, rebuilt=1, total=4):
+        p = pair()
+        p["source_key"] = {"strict-data": {"run": run, "executables_total": total, "executables_rebuilt": rebuilt}}
+        p["source_key_head_run_id"] = "p1"
+        return rpr.Corpus([group(), head()], [p],
+                          tests={"g1": [t("a", "fail", 2), t("b"), t("c")], "p1": head_tests})
+
+    def test_skips_unchanged_tests_the_head_passed_first_time(self):
+        c = self.corpus([t("a"), t("b"), t("c", "pass", 2)], run=[])
+        result = rpr.score(c, "source-key")
+        self.assertEqual(result["false_skips"], 1)          # a: unchanged, passed on the head, failed here
+        self.assertEqual(result["skipped_test_seconds"], 20.0)  # c passed only on retry: not evidence
+        self.assertEqual(result["build_skipped_pooled"], 0.75)
+
+    def test_a_test_in_the_run_set_or_absent_from_the_head_runs(self):
+        result = rpr.score(self.corpus([t("b")], run=["b"]), "source-key")
+        self.assertEqual((result["false_skips"], result["skipped_test_seconds"]), (0, 0.0))
+
+    def test_no_reconstructed_key_is_unevaluable(self):
+        c = rpr.Corpus([group(), head()], [pair()], tests={"g1": [t("a", "fail", 2)]})
+        result = rpr.score(c, "source-key")
+        self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
 
 
 class GraftTests(unittest.TestCase):
