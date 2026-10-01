@@ -462,6 +462,11 @@ boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
 unstacked enqueue path.
 
+`shipyard metrics gate-cost --since 7d` needs no flags in a Pulp checkout:
+`.shipyard/config.toml [metrics.gate_cost]` names the repo, `build.yml` and the
+`macos` gate. Quote that command, not a hand-typed flag set, so two gate-cost
+numbers are comparable.
+
 Use these commands as the normal agent loop:
 
 ```bash

@@ -675,6 +675,20 @@ failed) shares a 5 s budget and fails open. Each log line is one JSON object:
 pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
 lookup, policy, mode, decision, via`.
 
+### Gate cost per merged PR
+
+`.shipyard/config.toml [metrics.gate_cost]` pins the repository, workflow
+(`build.yml`) and required gate job (`macos`) for `shipyard metrics gate-cost`,
+so the proxy needs no flags and two people get the same answer:
+
+```bash
+shipyard metrics gate-cost --since 7d
+```
+
+It reports gate runs and gate-minutes per merged PR, merge-queue batch
+fullness, and receipt reuse for the `macos` target, each with its sample size
+and named gaps. A flag overrides the matching key for one run.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
