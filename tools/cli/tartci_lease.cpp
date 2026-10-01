@@ -570,17 +570,21 @@ TartciAgentBuildLease::~TartciAgentBuildLease() {
 int parse_json_lease_cores(const std::string& json) {
     const std::string key = "\"lease_size_cores\"";
     const auto at = json.find(key);
-    if (at == std::string::npos) return 0;
+    if (at == std::string::npos)
+        return 0;
     auto pos = json.find(':', at + key.size());
-    if (pos == std::string::npos) return 0;
+    if (pos == std::string::npos)
+        return 0;
     ++pos;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t'))
+        ++pos;
     int value = 0;
     bool any = false;
     while (pos < json.size() && json[pos] >= '0' && json[pos] <= '9') {
         value = value * 10 + (json[pos] - '0');
         any = true;
-        if (value > 100000) return 0;
+        if (value > 100000)
+            return 0;
         ++pos;
     }
     return any ? value : 0;
@@ -633,7 +637,8 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     if (class_aware && !background) {
         const int interactive_jobs =
             parse_shell_assignment_int(profile.output, "TARTCI_INTERACTIVE_BUILD_JOBS");
-        if (interactive_jobs > 0) profile_jobs = interactive_jobs;
+        if (interactive_jobs > 0)
+            profile_jobs = interactive_jobs;
     }
     if (profile_jobs <= 0 && env_jobs <= 0) {
         // host-profile ran but advertised no build budget — same degrade-to-safe
@@ -671,15 +676,17 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         int wait_secs = 0;
         if (!background) {
             min_cores = parse_shell_assignment_int(profile.output, "TARTCI_INTERACTIVE_MIN_CORES");
-            if (min_cores <= 0) min_cores = 2;
+            if (min_cores <= 0)
+                min_cores = 2;
             wait_secs = parse_positive_int(
                 parse_shell_assignment(profile.output, "TARTCI_INTERACTIVE_WAIT_SECS"));
-            if (wait_secs < 0) wait_secs = 0;
+            if (wait_secs < 0)
+                wait_secs = 0;
         }
         min_cores = std::min(min_cores, lease.jobs_);
-        cmd += std::string(" --class ") + (background ? "background" : "interactive")
-             + " --min-cores " + std::to_string(min_cores)
-             + " --wait-secs " + std::to_string(wait_secs);
+        cmd += std::string(" --class ") + (background ? "background" : "interactive") +
+               " --min-cores " + std::to_string(min_cores) + " --wait-secs " +
+               std::to_string(wait_secs);
     }
     if (auto run_id = env_value("GITHUB_RUN_ID"); !run_id.empty()) {
         cmd += " --job-id " + shell_quote(run_id);
@@ -699,7 +706,8 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     if (class_aware) {
         // A partial grant is the build's parallelism: never more than asked.
         const int granted = parse_json_lease_cores(acquired.output);
-        if (granted > 0 && granted < lease.jobs_) lease.jobs_ = granted;
+        if (granted > 0 && granted < lease.jobs_)
+            lease.jobs_ = granted;
     }
     lease.active_ = true;
     lease.start_heartbeat();

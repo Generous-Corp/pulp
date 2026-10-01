@@ -606,22 +606,20 @@ fi
 exit 0
 )SH";
     out.close();
-    fs::permissions(script,
-                    fs::perms::owner_read | fs::perms::owner_write
-                        | fs::perms::owner_exec,
+    fs::permissions(script, fs::perms::owner_read | fs::perms::owner_write | fs::perms::owner_exec,
                     fs::perm_options::replace);
     return script;
 }
 
 fs::path fresh_lease_test_root(const char* tag) {
-    auto root = fs::temp_directory_path()
-        / (std::string("pulp-tartci-class-") + tag + "-"
-           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto root = fs::temp_directory_path() /
+                (std::string("pulp-tartci-class-") + tag + "-" +
+                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(root);
     return root;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("json lease reply yields the granted core count") {
     REQUIRE(parse_json_lease_cores(R"({"ok": true, "lease": {"lease_size_cores": 8}})") == 8);
