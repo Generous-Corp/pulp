@@ -56,7 +56,9 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.holder.cleanup()
 
-    def _generated_commit(self, *, extra_path: str | None = None) -> str:
+    def _generated_commit(
+        self, *, extra_path: str | None = None, changelog: str | None = None
+    ) -> str:
         scripts = self.repo / "tools" / "scripts"
         sys.path.insert(0, str(scripts))
         try:
@@ -70,6 +72,13 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
             ):
                 sys.modules.pop(name, None)
             version_at_land = __import__("version_at_land")
+            # The changelog render shells out to Shipyard over the whole tag
+            # graph; the fixture writes the rendered bytes itself instead.
+            version_at_land._DERIVED_REGENERATORS = [
+                (output, command)
+                for output, command in version_at_land._DERIVED_REGENERATORS
+                if set(output) - set(CHECK.UNREPRODUCED_DERIVED)
+            ]
             surfaces = __import__("version_bump_surfaces")
             config = surfaces.load_config(scripts / "versioning.json")
             plugin = next(surface for surface in config.surfaces if surface.name == "plugin")
@@ -79,6 +88,9 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
             plan = [version_at_land.Assignment("plugin", "patch", current, assigned)]
             edited = version_at_land._write_plan(self.repo, config, plan)
             subprocess.run(["git", "add", "--", *edited], cwd=self.repo, check=True)
+            if changelog is not None:
+                (self.repo / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
+                subprocess.run(["git", "add", "--", "CHANGELOG.md"], cwd=self.repo, check=True)
             if extra_path:
                 path = self.repo / extra_path
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +258,21 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         # exact-tree guard is the only thing preventing the hostile source byte
         # from riding the fast path; deleting that guard must break this test.
         candidate = self._generated_commit(extra_path="core/hostile.cpp")
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "byte regeneration"):
+            CHECK.verify(self._inputs(candidate))
+
+    def test_changelog_rendered_by_the_bump_rides_the_fast_path(self) -> None:
+        # The bump commit carries CHANGELOG.md rendered from the tag graph by a
+        # tool this verifier does not run; its bytes are adopted, not rejected.
+        candidate = self._generated_commit(changelog="# Changelog\n\n## [9.9.9]\n")
+        self.assertTrue(CHECK.verify(self._inputs(candidate))["generated_version_bump"])
+
+    def test_only_the_changelog_is_adopted_unreproduced(self) -> None:
+        # Control for the test above: any other documentation byte still has to
+        # be reproduced, so it still falls back to full validation.
+        candidate = self._generated_commit(
+            changelog="# Changelog\n", extra_path="docs/hostile.md"
+        )
         with self.assertRaisesRegex(CHECK.NotGeneratedBump, "byte regeneration"):
             CHECK.verify(self._inputs(candidate))
 
