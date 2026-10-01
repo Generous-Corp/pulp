@@ -224,6 +224,7 @@ sys.exit(2)
         work = self.root / "work"
         work.mkdir()
         for rel in (rcm.RULESET, ".github/workflows/build.yml", "docs/guides/local-ci.md",
+                    ".github/workflows/release-cli.yml",
                     "tools/scripts/required_check_machinery.py"):
             (work / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / rel, work / rel)
@@ -236,7 +237,8 @@ sys.exit(2)
         git(work, "push", "-q", "origin", "main")
         self.work = work
         self.heads: dict[str, str] = {}
-        for number, rel in ((1, ".github/workflows/build.yml"), (2, "docs/guides/local-ci.md")):
+        for number, rel in ((1, ".github/workflows/build.yml"), (2, "docs/guides/local-ci.md"),
+                            (3, ".github/workflows/release-cli.yml")):
             git(work, "checkout", "-q", "-b", f"pr{number}", "main")
             with (work / rel).open("a", encoding="utf-8") as handle:
                 handle.write("\n# edit\n")
@@ -284,6 +286,17 @@ sys.exit(2)
         self.assertEqual(check["conclusion"], "success")
         self.assertEqual(check["output"]["title"], "touches no required-check machinery")
         self.assertNotIn("::warning", check["stdout"])
+
+    def test_live_contexts_decide_whether_another_workflow_is_flagged(self) -> None:
+        # A workflow that posts no required check is flagged only when the
+        # required checks could not be read.
+        head = self.heads[".github/workflows/release-cli.yml"]
+        readable = self.run_step(3, head, json.dumps(rcm.required_contexts(ROOT)))
+        self.assertEqual(readable["conclusion"], "success")
+        unreadable = self.run_step(3, head, None)
+        self.assertEqual(unreadable["conclusion"], "neutral")
+        self.assertEqual(unreadable["output"]["title"],
+                         "touches required-check machinery: release-cli.yml")
 
     def test_unreadable_required_checks_are_named_in_the_summary(self) -> None:
         check = self.run_step(2, self.heads["docs/guides/local-ci.md"], None)
