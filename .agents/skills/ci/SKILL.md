@@ -3072,6 +3072,27 @@ the copy with `relay_contract_check.py --tartci <checkout> --write` in the Pulp
 PR. It counts literal URLs in macOS-capable `run:` scripts plus pip/npm/brew
 invocations; a download a TEST makes itself goes in its `CORPUS_HOSTS` list.
 
+## Reading `gate-git-transfer` / `gate-artifact` lines in a macos log
+
+A gate job on a tartci VM may take repository history and pinned archives from
+a read-only host cache (`TARTCI_ARTIFACT_CACHE`; tartci `docs/runbook.md`).
+Each path logs what it actually did, and those lines are the proof, not the
+step duration:
+
+- `gate-git-seed: alternates=… mirror_main=<sha>` means the checkout was seeded;
+  `no host mirror` means the host has no cache (expected on hosts not yet set up).
+- `gate-git-transfer: local_object_kib=N alternates=yes|no` after hydration is
+  the repository bytes the job pulled over the network. Without a mirror it is
+  ~113 MiB; with a current mirror a few hundred KiB. A large value with
+  `alternates=yes` means the host mirror is stale: run tartci
+  `scripts/artifact-cache.sh git-sync --repo Generous-Corp/pulp` on that host.
+- `gate-artifact: chrome source=cache|network` and Skia's `Copied from host
+  artifact cache` / `Downloaded N bytes` say where each pinned archive came from.
+  A `network` reading on a seeded host means that digest is not in the cache yet.
+
+A cache miss or a bad cache entry never fails the gate; it costs the download
+the job would have done anyway.
+
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
 A red `macos` whose log dies between `gpu-provenance-hydration: PASS` and
