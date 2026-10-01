@@ -21,6 +21,7 @@ bool SharedIoComputePlan::prepare(SharedIoArenaProvider& provider, const Config&
                          .storage_kind = config.storage_kind},
                         std::move(program)))
         return false;
+    provider_ = &provider;
     pending_.assign(config.slots, {});
     completions_.assign(static_cast<std::size_t>(config.slots) * 2 + 1, {});
     completion_read_ = completion_write_ = 0;
@@ -106,7 +107,16 @@ void SharedIoComputePlan::record_terminal(const SharedIoSlotLedger::SlotToken& t
         ++telemetry_.misses;
         return;
     }
-    completions_[completion_write_] = {pending, status, false};
+    Completion completion{pending, status, false};
+    if (provider_)
+        completion.gpu_elapsed_available =
+            provider_->gpu_elapsed_ns(token, completion.gpu_elapsed_ns);
+    if (completion.gpu_elapsed_available) {
+        telemetry_.gpu_elapsed_ns += completion.gpu_elapsed_ns;
+        ++telemetry_.gpu_timestamp_samples;
+        telemetry_.gpu_timing_available = true;
+    }
+    completions_[completion_write_] = completion;
     completion_write_ = next;
 }
 

@@ -26,12 +26,15 @@ class SharedIoComputePlan {
         SubmitToken token;
         SharedIoArena::CompletionStatus status = SharedIoArena::CompletionStatus::RetiredFailed;
         bool late = false;
+        std::uint64_t gpu_elapsed_ns = 0;
+        bool gpu_elapsed_available = false;
     };
     struct Telemetry {
         std::uint64_t payload_bytes_copied = 0;
         std::uint64_t encode_submit_ns = 0;
         std::uint64_t gpu_elapsed_ns = 0;
         std::uint64_t completion_wall_ns = 0;
+        std::uint64_t gpu_timestamp_samples = 0;
         std::uint64_t misses = 0;
         std::uint64_t late_completions = 0;
         std::uint64_t high_water_in_flight = 0;
@@ -84,7 +87,10 @@ class SharedIoComputePlan {
         return arena_.release_output(record);
     }
     bool release() noexcept {
-        return arena_.release();
+        const bool released = arena_.release();
+        if (released)
+            provider_ = nullptr;
+        return released;
     }
     const Telemetry& telemetry() const noexcept {
         return telemetry_;
@@ -101,6 +107,7 @@ class SharedIoComputePlan {
                          SharedIoArena::CompletionStatus status) noexcept;
 
     SharedIoArena arena_;
+    SharedIoArenaProvider* provider_ = nullptr;
     std::vector<Pending> pending_;
     std::vector<Completion> completions_;
     std::size_t completion_read_ = 0;
