@@ -2501,9 +2501,20 @@ jobs:
         shell: bash
         env:
           PULP_CTEST_LEG: ${{ matrix.name }} [${{ matrix.provider }}]
+          CTEST_OUTCOME: ${{ steps.ctest.outcome }}
         run: |
           set -uo pipefail
           junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          # When the full suite did not run (a pull-request head that took the
+          # fast tier, or a build that stopped first) there is no full report
+          # by design: observe the fast tier's own report if it exists, and
+          # otherwise record a named "not run" instead of an unavailable error.
+          # A suite that DID run and left no report stays an error.
+          absent=()
+          if [ "$CTEST_OUTCOME" = skipped ]; then
+            absent=(--fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+                    --not-run-reason "the full suite did not run on this leg (fast tier only, or the build stopped before ctest)")
+          fi
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
           raw_lines="$(printf '%s\n' "$listing" | wc -l | tr -d ' ')"
           registered="$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p' | tail -1)"
@@ -2512,7 +2523,7 @@ jobs:
           # finished run; the log can. Same reason the ctest-failure step below
           # echoes its names twice.
           echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
-          python3 tools/scripts/ctest_nonruns.py "$junit" \
+          python3 tools/scripts/ctest_nonruns.py "$junit" ${absent[@]+"${absent[@]}"} \
             --registered "${registered:-unknown}" --raw-lines "$raw_lines" \
             --json-output "$PULP_BUILD_DIR/ctest.nonruns.json" \
             --leg "$PULP_CTEST_LEG" >> "$GITHUB_STEP_SUMMARY"
