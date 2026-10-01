@@ -42,23 +42,6 @@ TEST_CASE("FilterDesign bandpass has zero DC gain", "[signal][filter_design]") {
     REQUIRE_THAT(dc_gain(c), WithinAbs(0.0, 0.01));
 }
 
-TEST_CASE("FilterDesign notch passes DC", "[signal][filter_design]") {
-    auto c = FilterDesign::notch(1000.0f, 1.0f, 44100.0f);
-    REQUIRE_THAT(dc_gain(c), WithinAbs(1.0, 0.01));
-}
-
-TEST_CASE("FilterDesign allpass passes DC", "[signal][filter_design]") {
-    auto c = FilterDesign::allpass(1000.0f, 0.707f, 44100.0f);
-    REQUIRE_THAT(dc_gain(c), WithinAbs(1.0, 0.01));
-}
-
-TEST_CASE("FilterDesign allpass keeps unity magnitude at Nyquist",
-          "[signal][filter_design]") {
-    auto c = FilterDesign::allpass(5000.0f, 0.9f, 48000.0f);
-    require_finite(c);
-    REQUIRE_THAT(std::abs(nyquist_gain(c)), WithinAbs(1.0f, 0.01f));
-}
-
 TEST_CASE("FilterDesign peaking_eq with 0dB gain is unity", "[signal][filter_design]") {
     auto c = FilterDesign::peaking_eq(1000.0f, 1.0f, 0.0f, 44100.0f);
     // 0 dB gain = no change, coefficients should be identity-like
@@ -169,8 +152,11 @@ TEST_CASE("FilterDesign lowpass and highpass have complementary Nyquist behavior
 
 TEST_CASE("FilterDesign allpass keeps unity gain at DC and Nyquist",
           "[signal][filter_design]") {
-    for (float q : {0.5f, 0.707f, 2.0f}) {
-        auto c = FilterDesign::allpass(3200.0f, q, 48000.0f);
+    struct Point { float freq, q, sample_rate; };
+    for (const Point p : {Point{3200.0f, 0.5f, 48000.0f}, Point{3200.0f, 0.707f, 48000.0f},
+                          Point{3200.0f, 2.0f, 48000.0f}, Point{1000.0f, 0.707f, 44100.0f},
+                          Point{5000.0f, 0.9f, 48000.0f}}) {
+        auto c = FilterDesign::allpass(p.freq, p.q, p.sample_rate);
         require_finite(c);
         REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
         REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));
@@ -179,8 +165,10 @@ TEST_CASE("FilterDesign allpass keeps unity gain at DC and Nyquist",
 
 TEST_CASE("FilterDesign notch preserves endpoint gains across Q values",
           "[signal][filter_design]") {
-    for (float q : {0.25f, 1.0f, 4.0f}) {
-        auto c = FilterDesign::notch(2400.0f, q, 48000.0f);
+    struct Point { float freq, q, sample_rate; };
+    for (const Point p : {Point{2400.0f, 0.25f, 48000.0f}, Point{2400.0f, 1.0f, 48000.0f},
+                          Point{2400.0f, 4.0f, 48000.0f}, Point{1000.0f, 1.0f, 44100.0f}}) {
+        auto c = FilterDesign::notch(p.freq, p.q, p.sample_rate);
         require_finite(c);
         REQUIRE_THAT(dc_gain(c), WithinAbs(1.0f, 0.01f));
         REQUIRE_THAT(nyquist_gain(c), WithinAbs(1.0f, 0.01f));

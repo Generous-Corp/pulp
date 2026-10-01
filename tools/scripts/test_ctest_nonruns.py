@@ -289,6 +289,52 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["observation"], "unavailable")
 
+    def run_cli(self, *args):
+        return subprocess.run([sys.executable, str(SCRIPT), *map(str, args), "--json"],
+                              capture_output=True, text=True, timeout=10)
+
+    def test_fallback_report_is_observed_when_the_primary_is_absent(self):
+        fast = self.root / "ctest-pr-fast.junit.xml"
+        fast.write_text('<testsuite tests="1"><testcase name="lint" status="run"/></testsuite>', encoding="utf-8")
+        result = self.run_cli(self.report, "--fallback", fast, "--not-run-reason", "fast tier")
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["observation"], "observed")
+        self.assertEqual(report["input"], str(fast))
+
+    def test_primary_report_wins_over_the_fallback(self):
+        self.report.write_text('<testsuite tests="1"><testcase name="full" status="run"/></testsuite>', encoding="utf-8")
+        fast = self.root / "ctest-pr-fast.junit.xml"
+        fast.write_text('<testsuite tests="1"><testcase name="lint" status="run"/></testsuite>', encoding="utf-8")
+        report = json.loads(self.run_cli(self.report, "--fallback", fast).stdout)
+        self.assertEqual(report["input"], str(self.report))
+
+    def test_no_report_with_a_stated_reason_is_a_named_not_run(self):
+        result = self.run_cli(self.report, "--fallback", self.root / "absent.xml", "--not-run-reason", "fast tier only")
+        report = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((report["observation"], report["reason"], report["counts"]), ("not_run", "fast tier only", None))
+        text = observer.markdown(report, "leg")
+        self.assertIn("No CTest report on this leg: fast tier only", text)
+        self.assertNotIn("Every", text)
+
+    def test_no_report_without_a_reason_stays_an_error(self):
+        result = self.run_cli(self.report, "--fallback", self.root / "absent.xml")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["observation"], "unavailable")
+
+    def test_workflow_excuses_a_missing_report_only_when_the_suite_was_skipped(self):
+        text = (ROOT / ".github/workflows/build.yml").read_text()
+        step = text.split("- name: Observe ctest non-runs (non-Windows)", 1)[1].split("- name:", 1)[0]
+        self.assertIn("CTEST_OUTCOME: ${{ steps.ctest.outcome }}", step)
+        guard = step.split('if [ "$CTEST_OUTCOME" = skipped ]; then', 1)[1].split("fi", 1)[0]
+        self.assertIn("--fallback", guard)
+        self.assertIn("ctest-pr-fast.junit.xml", guard)
+        self.assertIn("--not-run-reason", guard)
+        self.assertEqual(step.count("--not-run-reason"), 1)
+        # An empty array must not trip `set -u` on bash 3.2.
+        self.assertIn('${absent[@]+"${absent[@]}"}', step)
+
     @unittest.skipUnless(shutil.which("ctest"), "real CTest not installed")
     def test_real_ctest_pass_fail_skip_disabled(self):
         python = Path(sys.executable).as_posix()

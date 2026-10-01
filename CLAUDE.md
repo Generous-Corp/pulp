@@ -286,6 +286,14 @@ start fresh and old/new bindings cannot execute concurrently. See
 Full guidance and reserved terminology: `docs/reference/processing-models.md`.
 Run `python3 tools/scripts/processing_model_terms_lint.py` to check terminology.
 
+When changing sample-region documentation or public examples, keep the guide,
+reference pages, module index, capability-control projections, and installed
+consumer example aligned. The focused documentation check is
+`tools/check-docs.sh`; pair it with the processing-model terminology lint and
+the installed `sample-region-allpass` consumer validation. A green docs check
+does not establish graph reachability or format portability; those claims still
+require the packet's independent runtime receipts.
+
 ### Scripted plugin UIs — read the checklist BEFORE you write the UI
 
 Load the [`view-bridge`](.agents/skills/view-bridge/SKILL.md) skill before writing or changing a JS/scripted editor with
@@ -379,6 +387,8 @@ Non-obvious things that cost real time when you don't know them:
   committed reference is a byte-exact **determinism** fixture; no quality ratchet.
 - **DSP perf is neither gated nor tracked by `bench_diff.py`** — it diffs UI/GPU
   frame-timing JSON, not DSP, and is referenced by zero workflows.
+- **An offline render cannot hear a dropped buffer**: a DAW-only click at a transition is
+  usually a per-callback cost spike; gate its operation counts (`audio-harness`).
 
 ### Thread Model
 
@@ -1043,6 +1053,8 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
   - ⚠ **Cannot see:** Pipeline numbers are only as fresh as the last `ingest`. Wall-clock waits track load; judge a change by `proxies`, where a zero control reads INSTRUMENT BLIND and a small side reads "insufficient sample". The iOS compile gate has no step of its own (it runs inside Build), so its cost is part of Build. A host whose installed sensor predates the build snapshot is read by a live probe and labelled so; an unreachable host says UNREACHABLE, never zeros.
 - Deciding what a build spends its time on, or how many compiles and relinks one edit costs, before and after a build-system change. → `tools/scripts/build_time_report.py blast-radius`
   - ⚠ **Cannot see:** Blast radius on a tree that is not up to date is a LOWER BOUND (already-pending edges are not counted) and says so. It touches each file and restores its mtime, so do not run it against a tree another build is using. A dry run that cannot see the graph exits 3 rather than printing zeros.
+- Before any test-result reuse policy (receipt reuse across base drift, per-test or per-executable skips) goes live, or when changing one, its key, or a fail-closed rule — replay it over merge-queue history and read its false skips, which must be 0. → `tools/scripts/reuse_policy_replay.py collect`
+  - ⚠ **Cannot see:** Replays with TODAY's classify_changes.py and today's required-context list, and reads required contexts as check-runs completed before the group, so an old head's eligibility is approximate. History records no runner image (null on both sides, so no image check applies), no recorded source keys (`source-keys` reconstructs tier-1a keys from git and ONE build graph, so pairs far from that graph's commit are approximate) and no exoneration verdicts (every final failure counts as real). A build-failed group is excluded from test scoring; `build_failures_skipped` lists the ones a build-skipping policy would have skipped. `collect` exits 1 when it finds no merge groups or no head pairs (a broken instrument, not an empty history).
 
 **test-evidence**
 - Explain which CTest cases did not execute, or compare two CTest JUnit artifacts to find new skips, recoveries, and population drift. → `tools/scripts/ctest_nonruns.py`
@@ -2182,7 +2194,13 @@ live on m3/m5/m1, layered in tiers:
   which does NOT go through the `pulp` CLI — is routed through
   `tools/ci/governed-build.sh`, which acquires a lease, bounds `-j`, and releases
   on exit (falling back to the Tier-0 bound, never failing the build, when tartci
-  is absent or the lease is denied).
+  is absent or the lease is denied). Builds carry a class, `PULP_BUILD_CLASS`:
+  `interactive` (the default — `pulp build`, manual and release builds; normal
+  QoS, never `taskpolicy -b`, may take a partial lease or wait briefly for one,
+  and may borrow idle gate-reserved cores the gate preempts) or `background`
+  (set on every `.shipyard/config.toml` stage; capped at the host's background
+  share, role QoS, agent floor). Each host's knobs live in one file,
+  `~/.config/tartci/governor.toml`: `tartci governor show|set|explain`.
 - **Tier 2 — Orchard fleet VM placement (shadow phase).** Presence of a
   configured fleet endpoint (`TARTCI_ORCHARD_URL`); wired but placing nothing yet.
 

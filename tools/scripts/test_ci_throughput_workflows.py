@@ -101,6 +101,12 @@ def toml_json_value(table: str, key: str):
 def shipyard_ctest_contract_errors(command: str) -> list[str]:
     argv = shlex.split(command)
     errors = []
+    # A Shipyard stage declares its build class as a leading assignment; it
+    # changes the governor's share and QoS, never whether the governor runs.
+    while argv and argv[0].startswith("PULP_BUILD_CLASS="):
+        if argv[0] not in ("PULP_BUILD_CLASS=background", "PULP_BUILD_CLASS=interactive"):
+            errors.append(f"unknown build class {argv[0]}")
+        argv = argv[1:]
     lock_prefix = ["python3", "tools/ci/build_dir_lock.py"]
     if argv[:2] == lock_prefix:
         try:
@@ -416,8 +422,9 @@ class ShipyardTopologyContractTests(unittest.TestCase):
         command = toml_json_value(default, "test")
 
         self.assertEqual(
-            shlex.split(command)[:7],
+            shlex.split(command)[:8],
             [
+                "PULP_BUILD_CLASS=background",
                 "python3",
                 "tools/ci/build_dir_lock.py",
                 "--build-dir",
@@ -434,6 +441,23 @@ class ShipyardTopologyContractTests(unittest.TestCase):
             '--label-exclude "validation|slow|performance|bench|quality-lab"',
         ):
             self.assertIn(preserved, command)
+
+    def test_every_shipyard_governed_stage_runs_in_the_background_class(self) -> None:
+        # A validation nobody is watching must not compete with an awaited
+        # build: every governed-build call in a Shipyard stage string carries
+        # PULP_BUILD_CLASS=background (the wrapper defaults to interactive).
+        config = (ROOT / ".shipyard" / "config.toml").read_text(encoding="utf-8")
+        stage_lines = [
+            line for line in config.splitlines()
+            if "tools/ci/governed-build.sh" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertGreaterEqual(len(stage_lines), 4)
+        for line in stage_lines:
+            for segment in line.split("&&"):
+                if "tools/ci/governed-build.sh" not in segment:
+                    continue
+                with self.subTest(segment=segment.strip()):
+                    self.assertIn("PULP_BUILD_CLASS=background", segment)
 
     def test_parser_shipyard_ctest_uses_the_governed_host_share(self) -> None:
         config = (ROOT / ".shipyard" / "config.toml").read_text(encoding="utf-8")

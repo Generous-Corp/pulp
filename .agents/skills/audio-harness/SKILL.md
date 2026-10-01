@@ -199,6 +199,62 @@ Two more traps from the same work:
 - **Accumulated `1/N` fade steps do not reach 1 for every N** (N = 12 stops at
   0.99999988 in float), so "pure hold" never arrives and a residual live leak
   stays. Count fade steps as integers and test several N, including 12.
+- **A hold across a change of material needs a change stimulus, and a level
+  check.** With the default newest-frame frequency, a 2 s hold taken 0.4 s after
+  a chord change plays the older chord ~55 dB down: its bins rotate at the newer
+  chord's leakage frequency and cancel frame to frame. `energy_weighted`
+  frequency brings it to ~-11 dB. A steady tone passes either way. The residual
+  gap is the latched frame's lobe phases (taken from the newer material), which
+  nothing restores yet.
+- **Judge a hold's level over time, not at one point.** An unlocked hold starts
+  phase-coherent and decoheres while audible (about +1 dB over its first 0.5 s
+  on a detuned pad, settling over ~2 s). Compare the first 0.5 s of pure hold
+  with the last second; `phase_lock = peak_lobe` holds it within 0.1 dB. Short
+  (50 ms) windows still beat on detuned partials, so bound the window deviation
+  loosely and the early-versus-settled mean tightly.
+- **A per-hop cost test needs the default's burst as its control.** The freeze
+  cost tests in `test/test_freeze_hold.cpp` count operations per frame group
+  (`rt::RtWorkCounter`) and assert the default configuration shows the burst
+  (a latch summing `capture_frames × channels × bins`, a polar per bin per held
+  hop) before asserting the bounded configuration does not.
+
+## An offline render cannot hear a dropped buffer — measure cost at every transition
+
+Offline has no deadline: a callback that takes 4 ms against a 2.67 ms budget
+(128 frames at 48 kHz) renders perfectly offline and clicks in every DAW, because
+the host drops that buffer. A freeze engage that ran ~23 IFFTs and ~94 k
+`std::polar` calls in the latching callback shipped with six offline click tests
+green. Before reporting a transition (parameter edge, engage/release, mode
+switch, preset load) clean, measure what the callback containing it costs.
+
+- `RenderScenario` records a `BlockCost` per processed block
+  (`result.block_costs`: thread CPU time, wall time, operation counts, and how
+  many parameter steps landed before the block).
+- `TransitionScenario::standard(factory)` (`test/support/transition_scenario.hpp`)
+  enumerates every parameter from the processor's own `define_parameters()` and
+  steps it min→max and max→min mid-stream over loud broadband input; `.add()` a
+  plugin-specific edge (a freeze at each hold length, a mode switch).
+- **The required gate is operation counts**, `assert_transition_ops_bounded()`:
+  FFT executions (hooked in `Fft` / `MultiBackendFft`), transcendental calls
+  made through `pulp::signal::rt::polar/sin/cos/exp/arg`, and per-bin
+  accumulation a processor reports with `rt::count_bins()`
+  (`core/signal/include/pulp/signal/rt_work_counter.hpp`). Counts cannot flake.
+  They exist only when `PULP_RT_WORK_COUNTERS` is on (it follows
+  `PULP_BUILD_TESTS`); the gate FAILS rather than passing vacuously without
+  them. DSP that wants its trig visible must call the `rt::` wrappers — a bare
+  `std::polar` is invisible to the count.
+- **Timing is advisory** (`assert_transition_cpu_ratio()`, `performance` label):
+  minimum over repeats of worst-after-edge / worst-steady thread CPU time.
+- Both compare against the steady **maximum**, not the median: an STFT whose hop
+  exceeds the block size is bursty in steady state by design. Give
+  `warmup_blocks` at least one full hop, and `settle_blocks` enough to contain
+  any staged work.
+- Negative control: `BurstyProcessor<23>` (`test/support/bursty_processor.hpp`)
+  must fail both gates and `BurstyProcessor<0>` must pass, in the same suite
+  (`test/test_transition_cost.cpp`, `test/test_transition_cost_timing.cpp`).
+- Fix a failing transition by amortising the work over the following blocks
+  or precomputing it in `prepare()`, never by widening the allowance for work
+  that could be staged.
 
 ## Copy-this patterns
 

@@ -24,6 +24,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PULP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 include(${PULP_ROOT}/tools/cmake/PulpWam.cmake)
 
+if(PULP_SAMPLE_REGION_WEB)
+    set(_allpass ${PULP_ROOT}/examples/sample-region-allpass)
+    pulp_add_wam_plugin(SampleRegionAllpassWorklet SINGLE_FILE
+        ENTRY ${CMAKE_CURRENT_SOURCE_DIR}/sample_region_allpass_wam.cpp
+        SOURCES ${_allpass}/allpass_graph.cpp ${_allpass}/allpass_processor.cpp
+        INCLUDES ${_allpass})
+    return()
+endif()
+
+
 # Run the installed-SDK registered-content consumer against the exact object
 # closure every WAM plugin links. Keeping the existing consumer as the entry
 # point makes its fixture, seed, exact notes, and committed semantic hash the

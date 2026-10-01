@@ -27,6 +27,7 @@ Or run a single cluster module directly:
     python3 tools/scripts/test_skill_sync.py
     python3 tools/scripts/test_skill_path_map.py
     python3 tools/scripts/test_skill_path_map_lint.py
+    python3 tools/scripts/test_gates_script_inputs.py
 
 Not every module here uses a throwaway repo: the skill-path-map suites
 assert against the real `tools/scripts/skill_path_map.json` and the real
@@ -73,6 +74,10 @@ from test_friction_report_exposure_check import (  # noqa: E402,F401
 from test_shipyard_local_check import MacRerouteWarningTests  # noqa: E402,F401
 from test_shipyard_local_check import MainTests as ShipyardLocalMainTests  # noqa: E402,F401
 from test_skill_path_map import NoSilentEmptyPatterns  # noqa: E402,F401
+from test_gates_script_inputs import (  # noqa: E402,F401
+    GatesScriptInputsTests,
+    TouchReasonsTests,
+)
 from test_skill_path_map_lint import (  # noqa: E402,F401
     CoClaimBaseResolutionTests,
     CoClaimRuleTests,

@@ -83,6 +83,9 @@ class GpuConvolver : public GpuAudioNode {
     /// is reported as PDC and shared by the bridge and CPU fallback.
     static constexpr uint32_t kLatencyBlocks = 2;
     static constexpr uint32_t kMaxLatencyBlocks = 64;
+    // Physical shared-I/O provider capacity, independent of logical lead.
+    // Diagnostic receipts use this value instead of a stale literal.
+    static constexpr uint32_t kSharedIoSlots = 16;
 
     GpuConvolver(uint32_t channels, uint32_t block_size, uint32_t sample_rate,
                  std::vector<float> impulse_response);

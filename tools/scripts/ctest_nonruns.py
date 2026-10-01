@@ -370,6 +370,8 @@ def markdown(report: dict, leg: str = "") -> str:
                 lines.append("| " + " | ".join(cell(row[key]) for key in ("name", "reason", "labels", "output")) + " |")
         elif report["observation"] == "observed":
             lines.append("_Every reported test ran; this is not a claim about filtered or unregistered tests._")
+    if report["observation"] == "not_run":
+        lines.append(f"_No CTest report on this leg: {cell(report.get('reason', ''))}. Nothing is observed._")
     comparison = report.get("comparison")
     if comparison and comparison["status"] == "observed":
         counts = comparison["transition_counts"]
@@ -413,6 +415,31 @@ def count_argument(value):
     return int(value)
 
 
+def select_report(primary: Path, fallbacks: list[Path]) -> Path | None:
+    """The first of `primary, *fallbacks` that exists; None when none does."""
+    for candidate in (primary, *fallbacks):
+        if os.path.lexists(candidate):
+            return candidate
+    return None
+
+
+def not_run_report(path: Path, reason: str, registered=None, raw_lines=None) -> dict:
+    """An explicit "no suite ran here" record.
+
+    Distinct from "unavailable": the caller states why no report exists (a
+    pull-request head that took the fast tier, a build that stopped before
+    ctest). It carries no counts, so it can never read as "every test ran".
+    """
+    return {
+        "schema": "pulp.ctest-nonruns.v2", "observation": "not_run", "reason": bounded_text(reason),
+        "input": str(path), "sha256": None, "bytes": None,
+        "registered": registered, "listing_raw_lines": raw_lines,
+        "declared_tests": None, "testcases": None, "counts": None,
+        "nonruns": [], "omitted_nonruns": 0, "omitted_issues": 0, "comparison": None, "issues": [],
+        "limitations": ["No CTest report exists for this leg; nothing about skips can be said."],
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("junit", type=Path)
@@ -422,8 +449,25 @@ def main(argv=None) -> int:
     parser.add_argument("--baseline", type=Path, help="compare with another CTest JUnit artifact")
     parser.add_argument("--json", action="store_true", help="emit the same observation as JSON")
     parser.add_argument("--json-output", type=Path, help="also write the observation to a regular JSON file")
+    parser.add_argument("--fallback", type=Path, action="append", default=[],
+                        help="observe this report instead when the first is absent (repeatable, in order)")
+    parser.add_argument("--not-run-reason",
+                        help="the caller knows no suite ran: when no report exists, say so and exit 0")
     args = parser.parse_args(argv)
-    report, cases = observe_with_cases(args.junit, args.registered, args.raw_lines)
+    junit = select_report(args.junit, args.fallback)
+    if junit is None and args.not_run_reason:
+        report = not_run_report(args.junit, args.not_run_reason, args.registered, args.raw_lines)
+        output_error = None
+        if args.json_output is not None:
+            try:
+                write_json_output(args.json_output, report)
+            except (OSError, ValueError) as error:
+                output_error = bounded_text(str(error))
+        print(json.dumps(report, ensure_ascii=True) if args.json else markdown(report, args.leg),
+              end="\n" if args.json else "")
+        print(f"ctest-nonruns: observation=not_run reason={report['reason']}", file=sys.stderr)
+        return 0 if output_error is None else 2
+    report, cases = observe_with_cases(junit or args.junit, args.registered, args.raw_lines)
     if args.baseline is not None:
         compare(report, cases, args.baseline)
     output_error = None

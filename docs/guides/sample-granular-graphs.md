@@ -71,3 +71,20 @@ See the allpass example and the [SignalGraph reference](../reference/signal-grap
 for the public vocabulary. The sample-region surface is experimental and bounded;
 unsupported latency, state, automation, or projection cases must remain explicit
 refusals until their contracts and compatibility proofs exist.
+
+## Documentation and proof authorities
+
+This guide describes the authoring path; the inventories remain generated or
+source-adjacent authorities. Use the [processing-model reference](../reference/processing-models.md)
+for the Processor-versus-SignalGraph boundary, the [module reference](../reference/modules.md)
+for installed module and target names, and the [capability-control reference](../reference/capability-control.md)
+for brokered inspection and edit operations. The inspector tables and control
+examples are projections of the canonical control registry, while
+`docs/status/modules.yaml` remains the module input. Do not update a generated
+table by hand or add a second sample-region capability registry.
+
+For a release-facing check, run `tools/check-docs.sh`,
+`python3 tools/scripts/processing_model_terms_lint.py`, and the installed
+`sample-region-allpass` consumer proof. Those checks cover link/index hygiene,
+reserved processing-model terminology, and compilation through the installed
+SDK; they do not replace the runtime acceptance receipts for a packet.

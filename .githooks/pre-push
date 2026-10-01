@@ -188,6 +188,8 @@ DNL="$ROOT/tools/scripts/docs_noise_lint.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
+HFG="$ROOT/tools/scripts/header_fanout_guard.py"
+HFG_CFG="$ROOT/tools/scripts/header_fanout_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
 SCC="$ROOT/tools/import-validation/check-source-contracts.py"
@@ -459,6 +461,18 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
         0) ;;
         1) fail=1 ;;
         *) gate_could_not_run "hotspot_size_guard" "$gate_rc"; fail=1 ;;
+    esac
+fi
+
+# Header fan-out guard. A tracked header over its translation-unit ceiling is
+# a violation when this range grew it (a new umbrella include); deliberate
+# growth passes with a `Fanout-Grow:` trailer.
+if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
+    run_gate_captured "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report
+    gate_rc=$?; case $gate_rc in
+        0) ;;
+        1) fail=1 ;;
+        *) gate_could_not_run "header_fanout_guard" "$gate_rc"; fail=1 ;;
     esac
 fi
 

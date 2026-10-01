@@ -103,6 +103,7 @@ DEFAULT_REQUIRED_CHECKS = [
     "Build + prove + (owner-gated) deploy",
     "Vellum trusted freeze",
     "Vellum freeze",
+    "drift-fast",
 ]
 
 # A CheckRun conclusion that satisfies a required-status-check gate. SKIPPED and

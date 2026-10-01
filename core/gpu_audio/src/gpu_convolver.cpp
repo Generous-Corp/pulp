@@ -234,7 +234,6 @@ bool GpuConvolver::prepare() {
         requested_path != detail::SharedIoRequest::RequireStaged) {
         try {
             constexpr uint32_t kSharedIoCapacity = 8;
-            constexpr uint32_t kSharedIoSlots = 2;
             const uint32_t shared_capacity = std::max(kSharedIoCapacity, latency_blocks_ + 1u);
             if (fft_size_ <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
                 auto state = std::make_unique<SharedIoState>();

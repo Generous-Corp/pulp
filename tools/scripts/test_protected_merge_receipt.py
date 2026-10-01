@@ -4,14 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -292,6 +297,85 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(receipt.ReceiptError, "different label set"):
             receipt.issue(self.issue_args())
 
+    def test_issue_accepts_the_selection_that_admits_slow_affected_proofs(self) -> None:
+        # The emitted gate selection of a head whose change requires a
+        # `slow-affected` proof. It excludes fewer tests than the plain
+        # selection, so it is full validation and must yield a receipt.
+        anchored = "validation|^slow$|performance|bench|quality-lab|source-selftest"
+        self.write_selection(label_exclude=anchored)
+        issued = receipt.issue(self.issue_args())
+        self.assertEqual(issued["validation"]["selection"]["label_exclude"], anchored)
+
+    def test_accepted_label_sets_are_exactly_what_the_gate_lanes_emit(self) -> None:
+        # The receipt script carries its own literal (the workflow runs a copy
+        # extracted from the protected base), so pin it to the selector.
+        import importlib.util
+        path = Path(__file__).resolve().parents[1] / "ci" / "ctest_gate_args.py"
+        spec = importlib.util.spec_from_file_location("ctest_gate_args", path)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        emitted = {
+            gate.label_exclude(event, "macOS", affected_slow)
+            for event in ("pull_request", "merge_group")
+            for affected_slow in (False, True)
+        }
+        self.assertEqual(emitted, set(receipt.ACCEPTED_LABEL_EXCLUDES))
+        self.assertEqual(gate.label_exclude("merge_group", "macOS"), receipt.REQUIRED_LABEL_EXCLUDE)
+
+    def test_issue_refuses_label_sets_that_exclude_more_than_the_gate(self) -> None:
+        for label_exclude in (
+            "validation|slow|performance|bench|quality-lab|source-selftest|pr-fast",
+            "validation|slow|performance|bench|quality-lab|source-selftest|^slow$",
+            "validation|^slow|performance|bench|quality-lab|source-selftest",
+            "validation|slow$|performance|bench|quality-lab|source-selftest",
+            "",
+        ):
+            with self.subTest(label_exclude=label_exclude):
+                self.write_selection(label_exclude=label_exclude)
+                with self.assertRaisesRegex(receipt.ReceiptError, "different label set"):
+                    receipt.issue(self.issue_args())
+
+    def verify_with_requirement(self, issued: dict, required: str | None) -> tuple[dict, str]:
+        args = self.verify_args()
+        args.affected_slow_required = required
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            decision = receipt.verify_receipt(issued, args)
+        return decision, stderr.getvalue()
+
+    def test_group_that_falls_back_to_requiring_proofs_is_reported(self) -> None:
+        # The head's classification did not need the slow-affected proofs, so
+        # its run used the plain selection; the group's classifier fell back
+        # to requiring them. The mismatch is reported without refusing reuse.
+        issued = receipt.issue(self.issue_args())
+        self.assertFalse(receipt.ran_affected_slow_proofs(issued["validation"]))
+        decision, stderr = self.verify_with_requirement(issued, "true")
+        self.assertEqual(decision["verdict"], "reuse")
+        self.assertIn("requires the slow-affected proofs", stderr)
+
+    def test_proof_requirement_met_or_absent_reports_nothing(self) -> None:
+        plain = receipt.issue(self.issue_args())
+        self.write_selection(label_exclude=receipt.AFFECTED_SLOW_LABEL_EXCLUDE)
+        with_proofs = receipt.issue(self.issue_args())
+        self.assertTrue(receipt.ran_affected_slow_proofs(with_proofs["validation"]))
+        for issued, required in ((with_proofs, "true"), (with_proofs, "false"),
+                                 (plain, "false"), (plain, None)):
+            with self.subTest(proofs=receipt.ran_affected_slow_proofs(issued["validation"]),
+                              required=required):
+                decision, stderr = self.verify_with_requirement(issued, required)
+                self.assertEqual(decision["verdict"], "reuse")
+                self.assertEqual(stderr, "")
+
+    def test_verify_cli_accepts_only_a_boolean_proof_requirement(self) -> None:
+        parser = receipt._parser()
+        base = ["verify", "--repository", "r", "--target", "macos", "--group-sha", "g",
+                "--receipt", "x", "--output", "y"]
+        self.assertEqual(parser.parse_args(base + ["--affected-slow-required", "true"])
+                         .affected_slow_required, "true")
+        self.assertIsNone(parser.parse_args(base).affected_slow_required)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(base + ["--affected-slow-required", ""])
+
     def test_skipped_tests_count_as_run_evidence_but_not_passes(self) -> None:
         self.write_junit({"unit": "notrun"})
         with self.assertRaisesRegex(receipt.ReceiptError, "no executed tests"):
@@ -543,6 +627,101 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
         })
 
 
+class BlobRedirectServer:
+    """GitHub's artifact download, reproduced over real HTTP.
+
+    The "API" server answers `archive_download_url` with 302 to a second host,
+    the "blob store", which behaves like Azure Blob Storage: a request that
+    still carries `Authorization` next to the SAS signature is refused with
+    401 "Server failed to authenticate the request". The two listen on
+    different ports, so the redirect crosses hosts exactly as it does in CI.
+    """
+
+    BLOB_401 = b"Server failed to authenticate the request."
+
+    def __init__(self, body: bytes) -> None:
+        outer = self
+        self.body = body
+        self.blob_saw_authorization: list[bool] = []
+
+        class Blob(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server naming
+                has_auth = self.headers.get("Authorization") is not None
+                outer.blob_saw_authorization.append(has_auth)
+                if has_auth:
+                    self.send_response(401, "Server failed to authenticate the request")
+                    self.end_headers()
+                    self.wfile.write(outer.BLOB_401)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(outer.body)))
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+            def log_message(self, *args):
+                pass
+
+        class Api(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                if self.headers.get("Authorization") != "Bearer tok":
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{outer.blob.server_port}/blob?sig=sas")
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        self.blob = ThreadingHTTPServer(("127.0.0.1", 0), Blob)
+        self.api = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+
+    @property
+    def archive_url(self) -> str:
+        return f"http://127.0.0.1:{self.api.server_port}/repos/O/R/actions/artifacts/1/zip"
+
+    def __enter__(self) -> "BlobRedirectServer":
+        for server in (self.blob, self.api):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        for server in (self.api, self.blob):
+            server.shutdown()
+            server.server_close()
+
+
+class CredentialSafeDownloadTest(unittest.TestCase):
+    def test_plain_urlopen_forwards_the_token_and_the_blob_store_refuses_it(self) -> None:
+        # The failure the receipt readers had: urllib copies Authorization
+        # onto the cross-host redirect, and the blob store answers 401.
+        with BlobRedirectServer(b"zip-bytes") as server:
+            request = urllib.request.Request(server.archive_url, headers={"Authorization": "Bearer tok"})
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=10)  # noqa: S310 - loopback fixture
+            self.assertEqual(caught.exception.code, 401)
+            caught.exception.close()
+            self.assertEqual(server.blob_saw_authorization, [True])
+
+    def test_download_archive_drops_the_token_on_the_cross_host_redirect(self) -> None:
+        with BlobRedirectServer(b"zip-bytes") as server:
+            self.assertEqual(receipt.download_archive(server.archive_url, "tok", 1024), b"zip-bytes")
+            self.assertEqual(server.blob_saw_authorization, [False])
+
+    def test_download_archive_reads_one_byte_past_the_bound(self) -> None:
+        with BlobRedirectServer(b"x" * 100) as server:
+            self.assertEqual(len(receipt.download_archive(server.archive_url, "tok", 10)), 11)
+
+    def test_describe_lookup_error_names_the_status(self) -> None:
+        err = urllib.error.HTTPError("u", 401, "Server failed to authenticate the request", {}, io.BytesIO())
+        self.assertEqual(receipt.describe_lookup_error(err),
+                         "HTTP 401 Server failed to authenticate the request")
+        self.assertEqual(receipt.describe_lookup_error(urllib.error.URLError("timed out")),
+                         "network error: timed out")
+        self.assertEqual(receipt.describe_lookup_error(OSError("boom")), "OSError: boom")
+
+
 class DecisionNoteCliTest(unittest.TestCase):
     """The notes Shipyard reads describe a decision; they never make one."""
 
@@ -732,6 +911,95 @@ class ReuseStepRefusalReasonTest(unittest.TestCase):
         self.assertIn("::notice::receipt reuse not evaluated: merge group changed no native "
                       "build input", stdout)
         self.assertIn("merge group changed no native build input |", summary)
+
+
+class ReuseStepProofRequirementTest(unittest.TestCase):
+    """The reuse step hands the group's proof requirement to the protected verifier.
+
+    The protected base carries a stub verifier that logs its argv, so the test
+    reads what the step actually passed rather than the step's text.
+    """
+
+    STUB = """import json, os, pathlib, sys
+args = sys.argv[1:]
+with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(args) + "\\n")
+if args[0] in ("download", "verify"):
+    pathlib.Path(args[args.index("--output") + 1]).write_text("{}", encoding="utf-8")
+if args[0] == "verify":
+    print("protected receipt: stub finding", file=sys.stderr)
+"""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "step.sh").write_text(ReuseStepRefusalReasonTest.step_script(),
+                                           encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def group_repo(self, name: str, accepts_requirement: bool) -> tuple[Path, str]:
+        repo = self.root / name
+        scripts = repo / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        stub = self.STUB + ("# accepts --affected-slow-required\n" if accepts_requirement else "")
+        (scripts / "protected_merge_receipt.py").write_text(stub, encoding="utf-8")
+        git(repo, "init", "-q")
+        git(repo, "config", "user.email", "ci@example.invalid")
+        git(repo, "config", "user.name", "CI")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "base")
+        base = git(repo, "rev-parse", "HEAD")
+        head = git(repo, "commit-tree", git(repo, "rev-parse", "HEAD^{tree}"), "-p", base,
+                   input_text="head\n")
+        group = git(repo, "commit-tree", git(repo, "rev-parse", "HEAD^{tree}"),
+                    "-p", base, "-p", head, input_text="group\n")
+        # The workspace note/publish helpers are the real script.
+        (scripts / "protected_merge_receipt.py").write_bytes(Path(receipt.__file__).read_bytes())
+        return repo, group
+
+    def run_step(self, repo: Path, group: str, required: str | None) -> tuple[list[list[str]], str]:
+        runner_temp = repo.parent / f"rt-{repo.name}-{required}"
+        runner_temp.mkdir()
+        log = runner_temp / "stub.log"
+        env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", NATIVE_BUILD_REQUIRED="true",
+                   GITHUB_SHA=group, RUNNER_TEMP=str(runner_temp),
+                   GITHUB_STEP_SUMMARY=str(runner_temp / "summary.md"),
+                   GITHUB_OUTPUT=str(runner_temp / "output"),
+                   ORIGINAL_MATRIX='{"include":[{"key":"macos"},{"key":"linux"}]}',
+                   RECEIPT_TOKEN="unused", A2T_RECEIPT_VERIFICATION_REQUIRED="false",
+                   GITHUB_REPOSITORY="example/repo", GITHUB_WORKSPACE=str(repo),
+                   GITHUB_REF="refs/heads/gh-readonly-queue/main/pr-1-" + "a" * 40,
+                   STUB_LOG=str(log))
+        env.pop("AFFECTED_SLOW_REQUIRED", None)
+        if required is not None:
+            env["AFFECTED_SLOW_REQUIRED"] = required
+        done = subprocess.run(["bash", "-e", str(self.root / "step.sh")], cwd=repo,
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        return [c for c in calls if c[0] == "verify"], done.stdout
+
+    @staticmethod
+    def requirement(call: list[str]) -> str | None:
+        flag = "--affected-slow-required"
+        return call[call.index(flag) + 1] if flag in call else None
+
+    def test_group_requirement_reaches_a_verifier_that_accepts_it(self) -> None:
+        repo, group = self.group_repo("accepts", accepts_requirement=True)
+        for required, expected in (("true", "true"), ("false", "false"), (None, "true")):
+            with self.subTest(required=required):
+                verifies, stdout = self.run_step(repo, group, required)
+                self.assertEqual([c[1] for c in verifies], ["--repo", "--repo"])
+                self.assertEqual({self.requirement(c) for c in verifies}, {expected})
+                self.assertIn("::notice::protected receipt: stub finding", stdout)
+
+    def test_older_protected_verifier_is_not_handed_the_requirement(self) -> None:
+        repo, group = self.group_repo("older", accepts_requirement=False)
+        verifies, _ = self.run_step(repo, group, "true")
+        self.assertEqual(len(verifies), 2)
+        self.assertEqual({self.requirement(c) for c in verifies}, {None})
 
 
 if __name__ == "__main__":

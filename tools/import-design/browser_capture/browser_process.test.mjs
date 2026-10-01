@@ -12,6 +12,8 @@ import {
   browserProcessIdentity,
   createBrowserCustody,
   createEmptyProfile,
+  GUARDIAN_CUSTODY_MIN_TIMEOUT_MS,
+  guardianCustodyTimeoutMs,
   launchBrowser,
   recoverStaleBrowserProfiles,
   resolveOwnedBrowserIdentity,
@@ -442,6 +444,17 @@ test("a browser adopted after custody was released is still terminated",
       try { child.kill("SIGKILL"); } catch {}
     }
   });
+
+test("guardian custody waits as long as the launch it belongs to", () => {
+  // A capture launches under its whole capture deadline; a guardian that is
+  // merely slow to start on a loaded machine must not fail it sooner.
+  assert.equal(guardianCustodyTimeoutMs(30000), 30000);
+  assert.equal(guardianCustodyTimeoutMs(90000), 90000);
+  // A launch with a shorter deadline keeps the floor that start-up needs.
+  assert.equal(guardianCustodyTimeoutMs(2000), GUARDIAN_CUSTODY_MIN_TIMEOUT_MS);
+  assert.equal(guardianCustodyTimeoutMs(undefined), GUARDIAN_CUSTODY_MIN_TIMEOUT_MS);
+  assert.equal(guardianCustodyTimeoutMs(Number.NaN), GUARDIAN_CUSTODY_MIN_TIMEOUT_MS);
+});
 
 test("launch identity probe waits for a pid that is not yet the browser",
   { skip: process.platform === "win32" }, async () => {

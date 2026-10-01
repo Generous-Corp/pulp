@@ -675,6 +675,20 @@ failed) shares a 5 s budget and fails open. Each log line is one JSON object:
 pure_refresh, mergeable, failing_required, ejected_at_head, gate_in_flight,
 lookup, policy, mode, decision, via`.
 
+### Gate cost per merged PR
+
+`.shipyard/config.toml [metrics.gate_cost]` pins the repository, workflow
+(`build.yml`) and required gate job (`macos`) for `shipyard metrics gate-cost`,
+so the proxy needs no flags and two people get the same answer:
+
+```bash
+shipyard metrics gate-cost --since 7d
+```
+
+It reports gate runs and gate-minutes per merged PR, merge-queue batch
+fullness, and receipt reuse for the `macos` target, each with its sample size
+and named gaps. A flag overrides the matching key for one run.
+
 ### Runner timing metrics
 
 Pulp does not store CI timing history in the Pulp CLI or MCP server. When a
@@ -831,8 +845,16 @@ same-repository `pull_request` run, with a marker naming the same digest and
 run (decisions contract row 23). One run in ten (by run id) and every
 `schedule`/`push` run is a control that runs the gate anyway, and every
 lookup failure runs it. The job summary says which happened
-(`iOS compile gate: SKIPPED — input digest … passed in trusted run N`), and
-the `pulp-ios-gate-shadow/v1` notice records `skipped`, `control_run`,
+(`iOS compile gate: SKIPPED — input digest … passed in trusted run N`). A
+lookup that could not be answered is reported as such, never as a miss: the
+summary reads `receipt lookup failed: HTTP 401 …`, the job carries an
+`ios-gate-receipt-lookup` warning, and the notice gains a `lookup_error`
+field, while `no matching receipt for this digest` and `no trusted PASS
+receipt for this digest` mean the lookup worked. Artifact archives redirect
+to blob storage, which refuses a forwarded token with 401; every receipt
+reader downloads through `protected_merge_receipt.py`'s
+`download_archive()`, which drops the token on that cross-host hop. The
+`pulp-ios-gate-shadow/v1` notice records `skipped`, `control_run`,
 `would_skip` or `run`, then `ran_ok` or `ran_failed`. The safety number is
 `control_run`/`would_skip` followed by `ran_failed`: it was 0 over the shadow
 window and must stay 0. If it is ever not, set the repository variable
@@ -854,6 +876,17 @@ build of the tree writes the same bytes. The affected-test shadow selects a decl
 test only when one of its inputs changed; a test without an entry (nested
 cmake builds, tests with no command) keeps the fail-closed "any script surface
 changed" rule.
+
+Compiled tests declare the checkout files they open at run time with
+`pulp_test_data(<suite> PATHS ...)` next to their registration
+(`tools/cmake/PulpTestData.cmake`); configure writes
+`<build>/test/test-data/<exe>.inputs.json` plus an index of every test
+executable's sources, and the generator folds them into the same list under
+`executables` (`kind: compiled`). An executable with a source that reads the
+checkout (names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition pointing
+into the checkout) but no declaration is `data: undeclared`: the shadow
+selects it on every change, and `script-test-inputs-drift` fails a pull
+request that adds a new undeclared source, so the backlog only shrinks.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
@@ -887,7 +920,11 @@ that passed, and the names that failed, as the `test-receipts-macos`
 artifact, only from merge-group runs. It then reads the last 20 trusted
 receipts and reports how many selected tests a receipt-keyed skip WOULD have
 skipped and their test-seconds (job summary: "Per-test receipts (shadow):
-would skip N of M tests"). Always-run, never counted: drift/lint/registry/
+would skip N of M tests"). A failed receipt request is counted apart from a
+refused receipt (`lookup_errors` and `lookup_error` in the notice, a
+`test-receipts-shadow-lookup` warning, and `receipt lookup failed: <status>`
+in the summary), so `receipt_runs: 0` from a broken lookup cannot pass for an
+empty history. Always-run, never counted: drift/lint/registry/
 sync/guard/census/inventory tests and probes, `pr-fast`/GPU/host-labelled
 tests, script tests that declare a top-level directory, unkeyable tests
 (undeclared scripts, nested builds), and anything that failed in a receipt
@@ -897,14 +934,51 @@ failed in the same run): it must stay 0 over a long window, and binary
 identity must approach 100%, before enforcement is proposed as a contract
 amendment.
 
+Every `macos` job, pull-request head and merge group alike, also uploads a
+**reuse replay record** (`tools/ci/reuse_record.py`, artifact
+`reuse-record-macos`, or `reuse-record-macos-attempt-N` on a re-run, kept 90
+days): `tests.jsonl` with one record per test (run and pull request, head,
+base and merge tree, suite, outcome, attempts, duration, executable, runner
+image fingerprint, and the per-test receipt key where the merge-group shadow
+computed one), `identity.json` with each executable's sha256 and the
+digest of its runtime closure (the non-system dylibs and frameworks it loads,
+a script's interpreter), and `job.json` with the context and sizes. Outcomes
+come from ctest's JUnit report and attempts from its `LastTest.log`, which the
+test step keeps as `LastTest.full.log` because any later ctest call in the
+build directory replaces it. An alias `macos` job that ran no suite uploads a
+record with no tests and the reason. It is history for scoring reuse policies
+offline and decides nothing; a job that should carry one and does not warns
+`reuse-record NOT written`. The proxy is jobs carrying the artifact ÷
+completed `macos` jobs.
+
+The record hashes every registered test executable, not only those the job
+ran, so a fast-tier pull-request head's hashes are there for the merge
+group's **binary-identity shadow**, which reads the head's reuse record when
+the head issued no receipt (annotation field `source: reuse-record`). The
+macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
+(`tools/cmake/PulpLinkMaps.cmake`): every link runs through
+`tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
+linker's status, and for an executable keeps only the map's object list and
+the link arguments under `<build>/link-members/` (the map, megabytes of
+symbol table, is deleted). The linked bytes are identical with and without
+it. `link-members-<sha>.json` in the record then lists, per executable, the
+archive members its link pulled, with `whole` set on archives the link line
+force-loads (`-force_load`, `-all_load`, `-ObjC`).
+
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
 from `tools/ci/flake_exoneration_shadow.py`): for each failing test, whether
 it failed on at least two other heads in the last 24 hours (other runs'
-`ctest-logs-macos` artifacts) and passes on main's latest merge-group run,
-Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing; the job still fails.
-Read `exonerated_only` failures ÷ merge-group failures, with `unique_cause`
-> 0 and the base-red streak count unchanged as controls.
+`ctest-logs-macos` artifacts) and passes on main's tip, judged by the tip's
+required gate job, Chromium's `OCCURS_ON_OTHER_CLS`. It exonerates nothing;
+the job still fails. Main evidence that was not actually read (a tip whose
+gate did not execute the suite, a failing-test list that could not be
+downloaded, a red gate that named no test) is "main unknown" and never
+exonerates, and a deterministic test (label `pr-fast`, or named in
+`tools/ci/drift_fast.json`) is never eligible. Read `exonerated_only`
+failures ÷ merge-group failures, and `main_evidence_read` ÷ exonerations,
+which must be 1, with `unique_cause` > 0 and the base-red streak count
+unchanged as controls.
 
 Receipt reuse in a merge group downloads the PR head's exact-tree receipt and
 verifies the run it came from. GitHub leaves `pull_requests` empty on runs of
@@ -1013,6 +1087,29 @@ or `PULP_TARTCI_WATCHDOG=0` to disable the wrapper. Operators can tune
 `PULP_TARTCI_WATCHDOG_INTERVAL_SECS`, `PULP_TARTCI_WATCHDOG_SAMPLES`,
 `PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS`, `PULP_TARTCI_WATCHDOG_CPU_PER_JOB`,
 and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
+
+### Build classes: interactive vs background
+
+`tools/ci/governed-build.sh` (which `pulp build` uses in a source checkout)
+runs every build in one of two classes, chosen by `PULP_BUILD_CLASS`:
+
+| Class | Who | Lease request | QoS | On denial |
+|---|---|---|---|---|
+| `interactive` (default) | `pulp build`, manual builds, release/packaging builds | the host's interactive share; any partial grant down to `interactive_min_cores`, waiting up to `interactive_wait_secs` for it | normal, always | leaseless `-j2` at normal QoS (never the background floor) |
+| `background` | every Shipyard-local stage in `.shipyard/config.toml` | the profile size, partial grants accepted | the host role's QoS (background on laptops) | the agent-floor lease, then leaseless `-j2` |
+
+Against a tartci that predates classes (no `TARTCI_GOVERNOR_SCHEMA` in `tartci
+host-profile`), both classes use the class-less lease contract, and an
+interactive build still never runs under `taskpolicy -b` or takes a floor lease.
+With no tartci at all the Tier-0 bound applies unchanged.
+
+Where a host enables `dynamic_lending`, an interactive build may borrow the
+gate's idle reserved cores; a gate lease that needs them is admitted anyway
+and the borrower is moved to background QoS until the gate finishes (nothing is
+killed). Each host's knobs live in `~/.config/tartci/governor.toml`; `tartci
+governor show` prints them with their sources, `tartci governor set
+KEY=VALUE` edits them, and `tartci governor explain` says what each class
+would be granted right now.
 
 ### The macOS release VM lane and cross-lane priority
 
@@ -1539,6 +1636,45 @@ python3 -m pip install --user -r tools/motion/visual/requirements.txt
 The analyzer falls back to a translation-only estimator without it, so it stays
 optional and is not part of the checked set.
 
+## Build-time Node dependencies are installed before the build, never inside it
+
+The Three.js bundler (`tools/scripts/bundle_threejs_for_jsc.mjs`) runs as an
+iOS AUv3 POST_BUILD command inside the iOS compile gate and as the
+`pulp_bundle_threejs_for_jsc_smoke` ctest. It loads esbuild from
+`tools/scripts/node_modules`, and when that is absent its default is to run
+`npm install` on the spot. That is convenient in a local checkout and wrong in
+the required gate: an ephemeral VM starts without `node_modules`, so every gate
+run made a compile depend on `registry.npmjs.org`, and a DNS blip
+(`getaddrinfo ENOTFOUND registry.npmjs.org`) failed the `macos` check as an
+iOS compile error (exit 65) three times between 2026-09-27 and 2026-09-29, on
+three different hosts.
+
+`build.yml` now splits the two:
+
+1. The build job sets `PULP_OFFLINE_BUILD=1`. Under it the bundler refuses a
+   missing esbuild with exit 3 and a message naming
+   `npm ci --prefix tools/scripts`, instead of fetching. Any value other than
+   empty, `0`, `false`, `no` or `off` counts. Local builds leave it unset and
+   keep the one-time install.
+2. The **Install build-time Node dependencies** step, ahead of **Build**, runs
+   `npm ci --prefix tools/scripts --prefer-offline` from the committed
+   `package-lock.json` with three attempts spaced 20 s and 40 s apart
+   (`PULP_NPM_RETRY_DELAY_SECS`). It first loads the installed esbuild, checks
+   its version against the lockfile and runs one transform (which starts the
+   platform binary), and stops there with no registry contact when that works.
+   It succeeds only when the same probe passes after the install. Without
+   `node` on `PATH` it does nothing, because CMake then registers neither the
+   bundle step nor its tests.
+
+A registry outage now fails that step, after its retries, with a message that
+says so, rather than surfacing twenty minutes later as a compile failure. No
+tartci host mount carries an npm cache today, so `--prefer-offline` only helps
+where the runner's own `~/.npm` persists; an npm cache mount analogous to
+`TARTCI_PIP_WHEELHOUSE` would remove the registry from the gate entirely.
+`tools/scripts/test_node_build_deps_step.py` runs the step's real script
+against a stub registry, and `pulp_bundle_threejs_for_jsc_offline` proves the
+bundler never launches npm under `PULP_OFFLINE_BUILD`.
+
 ## Lane timeouts — and why a timeout looks like a broken PR
 
 **Gate-VM job timeouts are a different clock.** On the self-hosted macOS gate
@@ -1913,7 +2049,7 @@ four hours whatever the cron says, longer than a batch's lifetime. A
 `workflow_run` job runs the default branch's copy of the workflow with
 base-repository permissions, so the detector checks out only the default branch
 (never the triggering run's head) and its token is read-only (`actions`,
-`contents`, `pull-requests`). It runs on the preamble Linux runner,
+`checks`, `contents`, `pull-requests`, `statuses`). It runs on the preamble Linux runner,
 draws no macOS gate host, and **reports only** — pausing a re-forming batch or
 prioritising the fix is Shipyard's side and is not wired here. One detector runs
 at a time (`group: main-health-detector`, `cancel-in-progress: false`); a
@@ -1921,35 +2057,65 @@ superseded tick loses nothing, because the next one reads main's *current* head,
 which is strictly more relevant than the head the cancelled tick would have
 reported on.
 
-**Where main's evidence comes from without a build.** The merge_group run whose
+**Where main's evidence comes from without a build.** The merge group whose
 head sha is main's tip (`main_evidence_source: head-sha`). Under the MERGE
-method that run tested exactly the commit on main. It is judged by its
-**required gate jobs** — the job names in `.shipyard/config.toml`
-`[governance] required_status_checks`, i.e. `macos` — never by the run's
+method its runs tested exactly the commit on main. It is judged on **every
+required status context** — `.shipyard/config.toml` `[governance]
+required_status_checks` (six contexts: `macos`, `Enforce version & skill sync`,
+`Build + prove + (owner-gated) deploy`, `Vellum freeze`, `Vellum trusted
+freeze`, `drift-fast`) — gathered from the merge_group runs of every workflow in
+`[landability] workflows`: build.yml's jobs through the jobs API (their steps
+tell an executed `macos` suite from a reused receipt), the other workflows'
+jobs through one `commits/<sha>/check-runs` read kept to those runs' check
+suites (so a push run on the landed commit is never read as the gate), and the
+commit's statuses for a context published as a status. Never by a run's
 conclusion, which also folds in advisory legs: while hosted Linux was failing
 every merge group, reading the run called every green tip red and turned the
-Linux failure into a fake batch streak. The tip's run is read at any status,
-because a group lands as soon as its required checks pass while advisory legs
-may still be running. When the tip's gate is not evidence (a reused receipt, or
-still running), an earlier merge group whose head tree equals main's tree is
-used instead (`tree-identity`): the tree determines what was built. When the
-tip has no merge_group run at all (an admin or direct push), the verdict is
-`unproven` and its reason names the tip. The signal says which source it used
-and carries `main_head_sha`.
+Linux failure into a fake batch streak. And never by `macos` alone: on
+2026-09-29 the required `drift-fast` context was red on main for about fourteen
+hours while `macos` stayed green, the macos-only detector read `healthy`
+throughout, and every batch that failed `drift-fast` read as a pass, so the
+batch streak stayed 0. Replaying tip `31e644ed61b2` read-only now reports
+`poisoned` (`drift-fast` failed `gpu-probe-historical-v1-acceptance` on main and
+in 5 consecutive batches).
 
-Failing test names are read from the `ctest-logs-macos` **artifact**
-(`Testing/Temporary/LastTestsFailed.log`), never from a job log:
+The tip is `healthy` only when every required context is present and green and
+`macos` executed the suite; a context that failed makes it red whatever the
+others say; a context still running or never reported leaves it `unproven`, and
+its reason names the context. The tip's runs are read at any status, because a
+group lands as soon as its required checks pass while advisory legs may still
+be running. When the tip is not evidence (a reused receipt, still running), an
+earlier merge group whose head tree equals main's tree is used instead
+(`tree-identity`): the tree determines what was built. When the tip has no
+merge_group run at all (an admin or direct push), the verdict is `unproven` and
+its reason names the tip. The signal says which source it used and carries
+`main_head_sha`. Batches are judged the same way, newest head first, so a batch
+counts toward the streak when any required context failed on it.
+
+Failing test names come from wherever the failing context records them: for
+`macos`, the `ctest-logs-macos` **artifact**
+(`Testing/Temporary/LastTestsFailed.log`); for a context that uploads no
+artifact (`drift-fast`), the ctest "The following tests FAILED" block of its
+job, read from the **run** log zip. Never the per-job log endpoint:
 `ghapp api .../actions/jobs/<id>/logs` refuses any response carrying terminal
 escape sequences and returns a short refusal instead, so a log scrape silently
 yields no failing tests — which reads as "the failure was not a test failure".
+
+Replay an earlier state read-only with `--tip-sha <sha>` (judge that commit as
+main's tip) and `--before <ISO time>` (batch history as it stood then).
 
 **The signal.** A `::notice title=base-poison-signal::` annotation carrying one
 line of compact JSON (schema `base-poison-signal/v1`), plus a job-summary table
 and a `base-poison-signal` artifact. Fields: `status`, `proof`,
 `safe_to_pause_queue`, `tests`, `main_observed`, `main_run_id`,
-`main_evidence_source`, `main_head_sha`, `main_failing_tests`, `batch_streak`,
-`batch_streak_tests`, `batch_streak_runs`, `candidate_fix_pr`,
-`likely_culprits`, `required_contexts_source`, `reason`.
+`main_evidence_source`, `main_head_sha`, `main_failing_tests`,
+`main_failing_contexts`, `main_contexts` (one `{context, state, conclusion,
+source, run_id, tests}` per required context), `batch_streak`,
+`batch_streak_tests`, `batch_streak_contexts`, `batch_streak_heads`,
+`batch_streak_runs`, `candidate_fix_pr`, `likely_culprits`,
+`required_contexts_source`, `reason`. Fields are only ever added under
+`base-poison-signal/v1`; Shipyard's reader keys on `schema`, `status` and
+`safe_to_pause_queue`.
 
 `likely_culprits` (filled only with `--name-fix-pr`) lists the queued entries
 whose presence separates the merge groups that failed a test from the ones that
@@ -1962,10 +2128,10 @@ was judged, and `macos-only-fallback` when branch protection could not be read
 
 | `status` | Means | `safe_to_pause_queue` |
 |---|---|---|
-| `healthy` | a job that genuinely ran the suite on main's tree passed | false |
-| `unproven` | no such job exists — main's health is unmeasured | false |
-| `suspected` | a streak, or a main failure naming no test | false |
-| `poisoned` | main's own suite failed a test that a streak of consecutive executed batches also failed | **true** |
+| `healthy` | every required context passed on main's tree and `macos` ran the suite | false |
+| `unproven` | a required context is still running, missing, or `macos` ran nothing — main's health is unmeasured | false |
+| `suspected` | a streak, or a main failure not shared by a streak (or naming no test) | false |
+| `poisoned` | a required context failed a test on main that a streak of consecutive executed batches also failed | **true** |
 
 `safe_to_pause_queue` is the only field a consumer should act on. It is true for
 `poisoned` and for nothing else.
@@ -2110,34 +2276,6 @@ signing identity) becomes a distinct authorization boundary, first publish its
 public fingerprint on protected main and then pin the embedded SSH signature
 key to that reviewed value.
 
-## The Shipyard merge steward uses one repository-scoped writer
-
-`.github/workflows/shipyard-merge-steward.yml` is the single logical,
-model-free controller for exact-head PR reconciliation and native merge-queue
-enrollment. M1, M3, and M5 may supply fenced recovery capacity after their
-canaries pass; they must not run independent mutating queue loops.
-
-The steward mints a one-repository GitHub App installation token. Queue
-enrollment requires both `permission-merge-queues: write` and
-`permission-contents: write`: the first grants queue management, while the
-second gives the actor the repository write access GitHub requires to enqueue a
-pull request. Downscoping contents to read fails closed with `Resource not
-accessible by integration` even when the App installation itself owns both
-permissions. Keep the token repository-scoped, retain the exact-head guard, and
-never replace this pair with a personal credential or an admin-merge bypass.
-
-Recovery dispatch must follow TartCI's disposable JIT lifecycle. The controller
-queues one exact-head job on `shipyard-recovery-pool`; it does **not** wait for
-an already-online idle recovery runner. TartCI runners do not exist until a
-matching job is queued, so a pre-dispatch runner census creates a deadlock. An
-eligible M3, M5, or M1 supervisor boots a disposable VM, registers a one-job
-runner whose name starts with `shipyard-recovery-m3-`,
-`shipyard-recovery-m5-`, or `shipyard-recovery-m1-`, and GitHub assigns the
-single queued job. The workflow derives the actual worker from that fenced
-name before checkout; an ordinary CI label or an unknown name fails closed.
-The pending exact-head status remains the durable obligation while every Mac
-is offline, so its age alone never creates a duplicate model invocation.
-
 ## A merge_group batch stops at the first failing test
 
 The full suite is roughly 21,764 tests. A batch that has one failing test is
@@ -2190,7 +2328,11 @@ configures exactly as the gate does (`Release`, examples off, GPU on) and does
 not build. Before configuring, it runs
 `tools/scripts/hydrate_gpu_provenance_commits.py` because the historical GPU
 probe acceptance registration walks commits outside the depth-2 event
-checkout. `tools/ci/drift_fast.py run` then runs the selection named in
+checkout. Without it that test raises `ShallowCheckoutError` on every run, a
+red check the `macos` gate never shares, so `tools/ci/drift_fast.json` lists the
+step under `workflow_preconditions` (each with a `why`) and
+`tools/ci/drift_fast.py check` fails when the workflow does not invoke it ahead
+of the driver. `tools/ci/drift_fast.py run` then runs the selection named in
 `tools/ci/drift_fast.json`: every member of `ctest_labels` (today the whole
 `pr-fast` tier, 99 tests) plus the listed registrations outside it, through
 ctest itself, so `SKIP_RETURN_CODE`, pass regexes, timeouts and resource locks
@@ -2220,7 +2362,11 @@ to each other.
 
 Adding a test: append it to `tools/ci/drift_fast.json` with a `why`. It must
 pass from a configure alone; a test that needs a built binary does not belong
-here.
+here. A red `drift-fast` should mean the same tree fails `macos` too. When a
+test is red only on this Ubuntu checkout (a shallow history, an Apple-only SDK
+clone the gate has and this runner lacks), fix its Linux precondition or name
+the step it needs under `workflow_preconditions`; do not let the lane carry a
+standing false alarm.
 
 Local reproduction (configure only; no compile):
 
@@ -2230,17 +2376,46 @@ cmake -S . -B build-drift -G Ninja -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMP
 PULP_SCRIPT_INPUTS_BASE=origin/main python3 tools/ci/drift_fast.py run --build-dir build-drift
 ```
 
+`tools/scripts/gates.sh` does the configure half on its own for the one check
+most often broken by hand: when the diff can drift
+`test/ctest_script_inputs.json` and no current Ninja build exists, it
+configures `build-gate` (no compile) and runs the diff-scoped
+`script-test-inputs-drift` check, printing the `--write` command on drift.
+`PULP_GATES_NO_CONFIGURE=1` opts out and reports the check NOT CHECKED.
+
 On a warm M-series host this is about 60 s of configure plus about 40 s of
 tests. Set `PULP_SCRIPT_INPUTS_BASE` to scope `script-test-inputs-drift` the
 way CI does; without a base it compares every entry, and entries whose
 recorded path embeds a build-directory name report as stale.
 
-**It is advisory.** `drift-fast` is not a required status check, so a red run
-does not block a merge group. Requiring it is a ruleset change on `main`
-(adding `drift-fast` to the required status checks), which also turns every
-drift-only batch into a fail-in-minutes ejection instead of a
-fail-after-the-build one. That is an owner decision; this workflow does not
-make it.
+**It is required.** `drift-fast` is a required status check on `main`, so a red
+run blocks the pull request and ejects the merge group, in minutes rather than
+after the ~20-minute `macos` build. It was promoted after 18 consecutive green
+`merge_group` runs with no false alarm, following two environment fixes that
+removed its only false alarms: the bounded GPU-provenance hydration above
+(`gpu-probe-historical-v1-acceptance` raised `ShallowCheckoutError` on the
+depth-2 checkout), and `consumption-census-drift-description` comparing only
+header roots the checkout actually provisions. The one caveat: in that window no merge group was genuinely drifted,
+so it has not yet shown a true catch at the merge-group stage; its pull-request
+runs have caught real drift (`skip-not-pass-lint`, `script-test-inputs-drift`)
+on heads that were then fixed before queueing.
+
+Because it is required, it must report on every event it can see. A required
+check that never reports holds a pull request on "Expected — Waiting for
+status" forever. So the workflow triggers on every `pull_request` to `main`
+(drafts included, no `paths:` or `paths-ignore:` filter) and on every
+`merge_group`, and its job carries no job-level `if:`. `tools/ci/drift_fast.py
+check` fails if either invariant is broken, and `drift-fast-selftest` runs it.
+Step-level `if:` is fine: it skips a step, never the job. A pull request from a
+fork needs a maintainer's approval before any workflow runs, which holds every
+required check equally; see the `contrib-intake` skill.
+
+Live enforcement is classic branch protection, not a ruleset; the checked-in
+`.github/rulesets/main-protection.json` and `.shipyard/config.toml`
+`[governance]` mirror it, and `base-poison-detector-selftest` fails when those
+two disagree (and the detector judges all six on main's tip). `[governance]` is the full six-context contract, because
+`shipyard governance apply` pushes exactly that list to branch protection.
+Removing it again is the reverse `required_status_checks` edit.
 
 ## A green `macos` check does not always mean the suite ran
 
@@ -2519,6 +2694,19 @@ protected-base verifier's own reason (for example "receipt selection covers too
 little of the built test inventory"). The notes are rendered by the checked-out
 script after the protected-base verifier has decided; they never decide.
 
+A receipt stands in for the group's whole suite, including the
+`slow-affected` proofs (such as `agent-capability-installed-sdk`) that the
+change classifier admits for some changes. The receipt's signed selection
+records whether they ran: the anchored `^slow$` label set means they did. The
+reuse step passes the group's own classification to the verifier as
+`--affected-slow-required` (an empty classifier output counts as `true`), but
+only when the protected-base verifier accepts that flag. A group that requires
+the proofs while the receipt's run skipped them is reported as a
+`::notice::protected receipt: merge group requires the slow-affected proofs
+...` line on an otherwise successful reuse. The verifier does not refuse on it,
+so those notices give the would-refuse count to read before refusal is
+switched on.
+
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the
 history is unavailable). A merge group that changed no native build input is
@@ -2679,35 +2867,16 @@ as the absolute resolver-script argument. Keep new inline Python in a
 `PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
 `tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
 
-## The PR gate settle window is default off
+## Why there is no PR gate settle window
 
-`PULP_PR_GATE_SETTLE_SECONDS` (repo variable, unset by default) holds the
-native `build` matrix on a pull request behind the `pr-gate-settle` job, which
-sleeps that many seconds on the hosted preamble lane. A push that arrives
-during the wait cancels the superseded run through the `build-<ref>`
-concurrency group before its macOS leg claims a self-hosted gate VM, so the
-cancellation costs a hosted sleep instead of VM time.
-
-- Unset, empty, or `0`: the job is skipped at the job level and `build`
-  evaluates exactly as before. `build` gates on `!cancelled()` and never reads
-  the settle result, so a skipped, failed, or timed-out settle can neither skip
-  nor fail the required `macos` context.
-- `1`–`900`: sleep that long, in parallel with `resolve-provider`, `classify`,
-  and `protected-receipt-reuse`. The added latency is the value minus the
-  preamble time (median about 30 s), paid by every native PR run.
-- Anything else (non-integer, negative, above the 900 s cap): a
-  `PR gate settle ignored` notice and no wait.
-- Only `pull_request` waits. `merge_group`, `push`, and `workflow_dispatch`
-  (including Shipyard's PR validation dispatch) never do, and neither
-  skip-safe `macos` bootstrap depends on the job, so a PR with no native work
-  is never delayed.
-
-The window only catches a superseding push that lands before the VM would have
-been claimed. Measure the gap between consecutive pushes on the same PR before
-choosing a value: most pushes that cancel a gate VM arrive many minutes apart,
-which no reasonable settle window catches.
-`tools/scripts/test_build_workflow.py` (`PrGateSettleWorkflowTest`) pins the
-event gating, the unread dependency, and the value validation.
+A superseding push cancels a pull request's previous run through the
+`build-<ref>` concurrency group. There is deliberately no wait before the
+native matrix to give that cancellation a head start: pushes that land within
+about five minutes already cancel the run before its macOS leg claims a gate
+VM, and the pushes that cancelled a claimed VM in a 140-run sample arrived 4
+to 27 minutes apart, so a window long enough to catch them would add that
+latency to every native pull-request run to save a few VM-minutes a day.
+`tools/scripts/test_build_workflow.py` (`NoPrGateSettleTest`) keeps it out.
 
 ## The preamble and alias lanes run GitHub-hosted, and a persistent runner may not own them
 
@@ -3695,10 +3864,8 @@ reread confirms the same status, head, event, and workflow. It applies the same
 age thresholds. Push, merge-group, workflow-dispatch, and unrelated workflow
 runs are excluded: they have separate concurrency/merge-stall semantics. A
 zero-job finding points first to an older non-terminal run on the same ref
-holding the workflow concurrency group, not to Tart capacity. The merge steward
-independently cancels bounded superseded-head runs; this alert remains the
-off-fleet backstop when a current-head run is stranded or that cleanup has not
-converged.
+holding the workflow concurrency group, not to Tart capacity. This alert is the
+off-fleet backstop when a current-head run is stranded.
 
 Any failed API read or truncated run listing makes the sweep degraded. A
 degraded sweep suppresses alarms and cannot create, update, reopen, or close the
@@ -3965,7 +4132,7 @@ hours with 34 PRs open and nothing merging while every check was green.)
    is read from branch protection at runtime, not hardcoded; if the token cannot
    read protection rules it falls back to the complete documented `main` set:
    `macos`, `Enforce version & skill sync`, `Build + prove + (owner-gated)
-   deploy`, `Vellum trusted freeze`, and `Vellum freeze`.
+   deploy`, `Vellum trusted freeze`, `Vellum freeze`, and `drift-fast`.
 2. **`mergeStateStatus` in `{CLEAN, BEHIND}`** — GitHub's own merge verdict.
    `DIRTY` (conflicts), `BLOCKED` (a required check red/missing/review pending),
    and `UNSTABLE` (a non-required check still moving) are excluded — those wait
@@ -4428,6 +4595,13 @@ python3 tools/scripts/ctest_nonruns.py /absolute/path/ctest.junit.xml --register
 python3 tools/scripts/ctest_nonruns.py /tmp/current/ctest.junit.xml \
   --baseline /tmp/known-good/ctest.junit.xml --json
 ```
+
+On a leg whose full suite was skipped (a pull-request head that ran only the
+fast tier, or a build that stopped before ctest) there is no `ctest.junit.xml`
+by design. The CI step then passes `--fallback` with the fast tier's
+`ctest-pr-fast.junit.xml` and `--not-run-reason`: it observes the fast tier's
+report when one exists and otherwise records `observation: not_run` with the
+reason and exits 0. A suite that ran and left no report still exits 2.
 
 CI also writes `ctest.nonruns.json` beside `ctest.junit.xml` in each non-Windows
 `ctest-logs-<key>` artifact. Download two artifacts when investigating a change;
@@ -5943,31 +6117,12 @@ refreshed. The guard only takes effect on hosts where `shipyard guards status`
 shows `branch-refresh-guard` current. A local `git merge origin/main && git
 push` bypasses it, so do not merge `main` into a PR unless it conflicts.
 
-## Steward auto-handoff is PAUSED (2026-09-07)
+## Steward auto-handoff stays off
 
-`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`. Normally it
-is `true`, making PR creation and durable steward ownership one operation.
-
-It is paused because since 2026-08-31 the handoff rejects every agent-run
-`shipyard pr` against this repo, **after the branch is pushed**, with
-`--workstream-id must be a canonical GEN-style handle`. Two guards combine to
-make that unavoidable here: Shipyard synthesizes the fallback id as `{repo}#{pr}`
-preserving case and its escape hatch requires an already-lowercase slug (this
-repo is `Generous-Corp/pulp`), and even lowercased the hatch is refused once an
-agent route is detected — `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID` are set in
-every agent shell. Deterministic, not flaky.
-
-While paused, new PRs are not steward-managed: `runner steward` marks them
-`shipyard:unmanaged` and will not queue, re-run, cancel or recovery-signal them.
-That is the pre-2026-08-14 landing path — `shipyard ship` validates and merges on
-its own, and ship/queue/watch never consult the managed label. The recovery
-worker goes idle rather than broken.
-
-**Do not pass `--workstream-id` while this is paused**, or the fleet splits into
-managed and unmanaged PRs, which is worse than either state alone.
-
-Restore by setting `auto_handoff = true` once Shipyard's validator accepts a
-mixed-case slug from an agent shell.
+`.shipyard/config.toml` sets `[merge_steward] auto_handoff = false`, and nothing
+reads a handoff receipt: Pulp removed its repository-wide steward workflow and
+recovery worker, and PRs land through the native merge queue. Do not pass
+`shipyard pr --workstream-id`; it opts one PR into the same unread handoff.
 
 ## Troubleshooting
 
@@ -6322,10 +6477,10 @@ plus a local `git show` of the workflow file.
 #### `[landability] workflows` in `.shipyard/config.toml`
 
 The check can only resolve a required context to a lane if it has read the
-workflow that produces it. Branch protection on `main` requires **five**
+workflow that produces it. Branch protection on `main` requires **six**
 contexts, and the tool's built-in default reads only `build.yml` — which left
-four of them `no_producer`: not checked, and reported as a warning that reads
-identically to a clean result. `.shipyard/config.toml` therefore names all five
+the others `no_producer`: not checked, and reported as a warning that reads
+identically to a clean result. `.shipyard/config.toml` therefore names all six
 producers explicitly:
 
 | required context | producing workflow |
@@ -6335,8 +6490,9 @@ producers explicitly:
 | `Build + prove + (owner-gated) deploy` | `wclap-cloudflare.yml` |
 | `Vellum freeze` | `vellum-freeze-check.yml` |
 | `Vellum trusted freeze` | `vellum-trusted-gate.yml` |
+| `drift-fast` | `drift-fast.yml` |
 
-None of the five is path-filtered under `pull_request` — `wclap-cloudflare.yml`
+None of the six is path-filtered under `pull_request` — `wclap-cloudflare.yml`
 keeps its `paths:` under `push` on purpose, because a path-filtered **required**
 check leaves unrelated pull requests stuck on "Expected — Waiting for status"
 forever. Add a row here whenever a workflow starts producing a required context,
@@ -6424,7 +6580,20 @@ jobs** for 15 minutes (the concurrency-holder signature, which reads exactly
 like runner saturation and is not). It opens, edits and closes one issue
 labelled `ci-landing-wedge`, and writes nothing else.
 
-Budget: 1 call plus at most 3 per open PR, every 30 minutes, on
+A required context counts as present when the head carries it as a check run
+**or** a commit status: `Vellum trusted freeze` reaches a pull request's head
+as a status posted by a `pull_request_target` run, so a check-run-only reader
+would call it absent on every pull request. The required set is
+`[governance] required_status_checks`, all six contexts.
+
+Every tick first replays `tools/scripts/fixtures/landing_watchdog_wedge.json`
+against that set as a negative control; it must fire (`absent`, `unassigned`,
+`zero_jobs`) and must not flag the fixture's healthy pull request. The replay
+rewrites the fixture's `REPLACE_OLD` timestamps against the current clock; read
+raw, every age is zero and the control cannot fire.
+
+Budget: 1 call plus 3 per open PR (check runs, combined status, workflow runs),
+plus one jobs probe per pending run (at most 3), every 30 minutes, on
 `GITHUB_TOKEN`'s own per-repository bucket.
 
 ### Both detectors report their own failure
@@ -6549,9 +6718,36 @@ Two more downloads followed the same pattern and are now fetched up front:
   reset (exit 56), the two that actually happened. It now passes
   `--retry-all-errors` and keeps the SHA-256 check.
 
-`tools/scripts/test_build_fetch_resilience.py` runs the cargo step's real
-script against a stub `cargo`, checks the step precedes every cargo consumer,
-and rejects any `curl` in the build job that lacks `--retry-all-errors`.
+- **ccache (macOS).** The gate VM golden bakes ccache, yet `brew install ccache`
+  still reached the Homebrew API and one failed attempt failed the gate. The
+  step now uses an installed ccache as is and only installs when it is absent,
+  with three attempts spaced 20 s and 40 s apart
+  (`PULP_BREW_RETRY_DELAY_SECS`) and a `brew update` before each retry.
+- **pip and git in the other required contexts.** `vellum-freeze-check.yml`,
+  `vellum-trusted-gate.yml` and `version-skill-check.yml` install PyYAML and
+  fetch commits. Each such command runs through `tools/ci/net-retry.sh`
+  (`PULP_NET_RETRY_ATTEMPTS`, default 3; `PULP_NET_RETRY_DELAY_SECS`, default
+  20, multiplied by the attempt number), which wraps only the network command
+  and returns its exit status after the last attempt. The trusted merge-group
+  job keeps an inline loop instead, because it runs the protected base
+  commit's tools, which can predate a helper the workflow file names.
+
+`tools/scripts/test_build_fetch_resilience.py` runs the cargo and ccache steps'
+real scripts against stub `cargo` and `brew`, drives `net-retry.sh` with a
+failing stub, checks the cargo step precedes every cargo consumer, rejects any
+`curl` in the build job that lacks `--retry-all-errors`, and rejects a pip
+install or git fetch/clone in those three required workflows that neither goes
+through `net-retry.sh` nor sits in a step with its own retry loop.
+
+**A deleted merge-queue branch is a notice, not a fetch failure.**
+`hydrate_gpu_provenance_commits.py` fetches the event ref first. On a
+`merge_group` run that is `gh-readonly-queue/...`, which GitHub deletes when it
+drops or re-forms the group while the run keeps going, so git answers
+`couldn't find remote ref`. The script reports that as a
+`::notice::... merge group gone` line and falls back to the event commit. Every
+other fetch error, including any other error on the queue branch, is still a
+`bounded fetch failed` warning, and unresolved or non-ancestor provenance still
+fails the step.
 
 ## Protected-validation receipt reuse
 

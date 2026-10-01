@@ -13,8 +13,8 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
-The hosted `drift-fast` workflow selects the historical GPU-probe acceptance
-test from a depth-2 checkout. Keep its bounded
+The hosted `drift-fast` workflow is a required status check. It selects the
+historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 `hydrate_gpu_provenance_commits.py` step after checkout and before configure;
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
@@ -287,12 +287,19 @@ why the detector is event-triggered. When you need a read NOW, dispatch it:
 default branch's copy with base-repo permissions: never check out
 `github.event.workflow_run.head_sha` in one, and keep its token read-only.
 
-**Where main's evidence comes from without a build.** The merge_group run whose
-head sha is main's tip (`source: head-sha`), judged by its **required gate
-jobs** — the names in `.shipyard/config.toml` `[governance]
-required_status_checks`, i.e. `macos` — never by the run conclusion, and read at
-any run status because a group lands as soon as its required checks pass while
-advisory legs may still run. If that run's gate is not evidence (a reused
+**Where main's evidence comes from without a build.** The merge group whose
+head sha is main's tip (`source: head-sha`), judged on **every required
+context** in `.shipyard/config.toml` `[governance] required_status_checks`,
+gathered from the merge_group runs of every `[landability] workflows` entry
+(build.yml jobs with steps, the other workflows' check runs by check suite, and
+commit statuses) — never by a run conclusion and never by `macos` alone, and
+read at any run status because a group lands as soon as its required checks
+pass while advisory legs may still run. Judging `macos` alone is how a
+fourteen-hour `drift-fast` red on 2026-09-29 read `healthy`, and why every
+batch that failed `drift-fast` broke the streak (`batch_streak` 0). Failing
+tests come from `ctest-logs-macos` for `macos` and from the RUN log zip for a
+context with no artifact (`drift-fast`); never the per-job log endpoint, which
+`ghapp` answers with a refusal. Replay read-only with `--tip-sha` + `--before`. If that run's gate is not evidence (a reused
 receipt, still running), an earlier merge group that built the same tree is
 used (`source: tree-identity`). No merge_group run for the tip (an admin or
 direct push) is `unproven`. The signal carries `main_head_sha`, so a verdict
@@ -301,8 +308,8 @@ made every tip read red while advisory Linux was failing.
 
 | `status` | Means | Act on it? |
 |---|---|---|
-| `healthy` | a job that genuinely ran the suite on main's tree passed | no |
-| `unproven` | no such job exists; main's health is unmeasured | no |
+| `healthy` | every required context passed on main's tree and `macos` ran the suite | no |
+| `unproven` | a required context is running/missing, or `macos` ran nothing; unmeasured | no |
 | `suspected` | a streak of batches share a failure, or main failed naming no test | **hint only** |
 | `poisoned` | main's own suite failed a test a streak of executed batches also failed | **yes** |
 
@@ -454,6 +461,11 @@ formal GitHub stacks fail closed at every Shipyard merge-queue mutation
 boundary, including `shipyard runner steward`; use the native `gh stack`
 lifecycle for an explicit pilot rather than routing stack members through the
 unstacked enqueue path.
+
+`shipyard metrics gate-cost --since 7d` needs no flags in a Pulp checkout:
+`.shipyard/config.toml [metrics.gate_cost]` names the repo, `build.yml` and the
+`macos` gate. Quote that command, not a hand-typed flag set, so two gate-cost
+numbers are comparable.
 
 Use these commands as the normal agent loop:
 
@@ -665,6 +677,14 @@ pull-request run executes, check `tools/scripts/test_build_workflow.py` and
 `tools/scripts/test_protected_merge_receipt.py` (both run from
 `workflow-lint.yml`).
 
+A receipt must also cover the group's `slow-affected` proofs. The signed
+selection is the record: an anchored `^slow$` label set means they ran. The
+reuse step hands the group's classify output to the protected verifier as
+`--affected-slow-required`, gated on the protected verifier accepting the
+flag, because the verifier runs from the base and an older one rejects an
+unknown argument. Add new verifier inputs the same way: accept the argument
+first, then enforce it once the accepting version is the protected base.
+
 ### A PR head also runs the tests its own diff reaches, and that step gates
 
 Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate
@@ -835,6 +855,15 @@ consequences worth knowing before you debug:
   A stale Makefiles `build/` beside a current `build-gate` once made
   `script-test-inputs-drift` print NOT CHECKED mid-log under a green summary,
   and the branch was pushed red three times.
+- When the diff can drift `test/ctest_script_inputs.json` (the list itself, a
+  declared entry/input, a script under a declared input directory, or CMake
+  that registers tests) and no current Ninja build exists, `gates.sh`
+  configures `build-gate` (configure only, no compile, ~40 s) and runs the
+  diff-scoped `script-test-inputs-drift` check, printing the exact `--write`
+  command on drift (`tools/scripts/gates_script_inputs.py`). A diff that cannot
+  drift the list configures nothing. `PULP_GATES_NO_CONFIGURE=1` keeps the old
+  NOT CHECKED behaviour with a loud warning. Without this, a hand-edited list
+  passed `gates.sh` as NOT CHECKED and failed only on the PR head.
 - The consumption-census checks (`consumption-census-drift` and the others that
   pass `--build-dir`) only mean something against a build of the scope the
   census measured. Each profile in `docs/status/consumption-profiles.json`
@@ -877,7 +906,7 @@ ImportError` fallback, under `if TYPE_CHECKING`, or under a `sys.version_info`
 branch is allowed. Needing a new third-party package means adding it to the lock
 (and the wheelhouse), not to the check.
 
-### `drift-fast` catches tree-reading drift before the build, advisory only
+### `drift-fast` catches tree-reading drift before the build, and is required
 
 The hosted `drift-fast` job (`.github/workflows/drift-fast.yml`) configures the
 tip-plus-head tree without building and runs `tools/ci/drift_fast.json`'s
@@ -885,8 +914,14 @@ selection (the `pr-fast` tier plus `wide-non-native-selftest`, the census,
 tools-registry, rack, lane-contract and scheduling checks) in a few minutes.
 When a merge group ejects on one of those, its `drift-fast` run on the same
 group should already name the test, minutes earlier; read it before the
-`macos` log. It is NOT
-required, so it never blocks by itself, and on its Linux configure the census
+`macos` log. It IS
+required (classic branch protection, mirrored in the checked-in ruleset and
+`[governance]`), so a red run blocks the PR and ejects the group by itself.
+Never add a `paths:` filter to its trigger or a job-level `if:`: a required
+check that does not report holds every PR on "Expected" forever, and
+`drift_fast.py check` fails on either. Its one open caveat is that no merge
+group has yet been genuinely drifted since it went green, so its merge-group
+true-catch rate is unproven. On its Linux configure the census
 comparison skips (only `darwin-arm64` profiles are recorded) and
 `ios-compile-gate-legs` is not registered; both print as `NOT CHECKED`. A new
 tree-reading check that can pass from a configure alone belongs in the
@@ -1043,6 +1078,19 @@ to slip past. It executes in three places with different force:
 them, so a pre-commit `gates.sh` reports `no mapped config paths touched` and exits
 0 on a change that will fail the moment it is committed. Commit first, then run
 gates — a green run over an empty range is not evidence about your change.
+
+### Governed builds have a class: validations are `background`, everything else `interactive`
+
+`PULP_BUILD_CLASS=background` is set on every `.shipyard/config.toml` stage that
+calls `governed-build.sh`; anything else (a `pulp build`, a manual
+`governed-build.sh`, a release build) runs `interactive`: normal QoS always,
+partial lease or a short local wait instead of the background-QoS floor. Do not
+drop the prefix from a new Shipyard stage — a validation running `interactive`
+competes with the person waiting on their own build, which is the exact
+2026-09-30 MacBook incident (two validations held the whole non-gate budget and
+an awaited Spectr build ran background-throttled). Read a host's knobs with
+`tartci governor show`; `tartci governor explain` says what each class would get
+now, which is the first thing to run when a build reports a small `-j`.
 
 ### The pre-push coverage build skips itself on a starved host: a skip, not a pass
 
@@ -1540,7 +1588,14 @@ transitions and cases present in only one artifact. Same-name duplicates are
 compared as status-count groups, never guessed per case. CI publishes the v2
 JSON beside the original XML in each non-Windows `ctest-logs-<key>`. Exit 0 means the observation is
 readable, even when tests failed or skipped; exit 2 means unavailable/incomplete
-evidence, not a CTest verdict. Empty reports never claim that every test ran. No
+evidence, not a CTest verdict. Empty reports never claim that every test ran.
+A leg whose full suite was skipped (a pull-request head on the fast tier, a
+build that stopped first) has no `ctest.junit.xml` by design; the step then
+passes `--fallback <ctest-pr-fast.junit.xml> --not-run-reason ...`, so it
+observes the fast tier's report or records `observation: not_run` with the
+reason and exits 0. Before that, every fast-tier PR head carried a red
+`exit code 2` annotation that meant nothing. A suite that ran and left no
+report still exits 2. No
 test is executed, provisioned, or selected by this helper.
 
 Four things bite when touching this:
@@ -1690,6 +1745,24 @@ exports `CARGO_NET_OFFLINE=true`. The Chrome download uses
 `test_build_fetch_resilience.py` fails on a `curl` in the build job without
 `--retry-all-errors`, so a new unretried download cannot creep back in.
 
+**Required workflows retry pip and git through `tools/ci/net-retry.sh`.** The
+same test fails on a `pip install` or `git fetch`/`git clone` in
+`vellum-freeze-check.yml`, `vellum-trusted-gate.yml` or `version-skill-check.yml`
+that neither goes through the helper nor sits in a step with its own
+`for attempt` loop. Wrap only the network command, never a check whose failure
+is a verdict. Watch out: a job that checks out a different commit than the
+workflow file came from (the trusted merge-group job checks out
+`merge_group.base_sha`) cannot call a helper this PR adds, because the base
+commit predates it; the first merge group would fail with `No such file`. Keep
+such retries inline. The macOS ccache step uses an installed ccache (the gate
+golden bakes it) and never calls `brew install` then.
+
+**A deleted `gh-readonly-queue/...` branch is `merge group gone`, not a red.**
+`hydrate_gpu_provenance_commits.py` prints a `::notice::` for it and falls back
+to the event commit; only other fetch errors print `bounded fetch failed`.
+Before attributing a hydrate-step red to a vanished queue branch, check that the
+run's workflow commit carries the event-commit fallback at all.
+
 **One registration in the set must not be allowed to skip.** Everything above is
 still unfalsifiable on its own — a wrong interpreter and a short dependency list
 both produce a green step. `visual-python-deps-present` exists for that: it
@@ -1705,6 +1778,22 @@ The general shape, worth reaching for whenever a lane's health depends on
 something being installed: pair the provisioning step with one non-skippable
 test that asserts the provisioning worked. The install step reports that it ran;
 only the test reports that it landed.
+
+**Build-time npm is installed before the build (`PULP_OFFLINE_BUILD`).** The
+Three.js bundler used to `npm install` esbuild mid-build whenever
+`tools/scripts/node_modules` was absent, which on an ephemeral gate VM is every
+run; a `getaddrinfo ENOTFOUND registry.npmjs.org` then red the required `macos`
+check as an iOS compile gate exit 65 (3 jobs, 2026-09-27..29, m1/m3/m5). The
+build job now sets `PULP_OFFLINE_BUILD=1` (bundler exits 3 naming
+`npm ci --prefix tools/scripts` instead of fetching) and the **Install
+build-time Node dependencies** step runs `npm ci` from the lockfile with three
+spaced attempts before **Build**. An npm error in that step is the registry or
+the guest's egress, not the diff. Any new build step or ctest that fetches must
+follow the same split: provision in a retried step, refuse under
+`PULP_OFFLINE_BUILD`. Known remaining in-build fetches: cargo (Rust CLI build
+and `pulp-rust-*` cargo ctests pull crates) and the iOS gate's Skia simulator
+slice (`fetch_skia_for_release.py`, which retries transient download errors
+itself but is fetched fresh into the gate build tree each run).
 
 ## A gate that could not RUN must block — `.githooks/pre-push` used to pass it
 
@@ -1817,7 +1906,13 @@ decide` finds a PASS receipt (`ios-gate-ok-<digest>`) for the exact input
 digest written by a TRUSTED run: this repo's `build.yml`, `merge_group` or
 same-repository `pull_request`, marker naming the same digest and run
 (decisions contract row 23). One run id in ten and every schedule/push run is
-a control that runs anyway; any lookup error runs it. `pulp-ios-gate-shadow/v1`
+a control that runs anyway; any lookup error runs it, and says so: a failed
+request reads `receipt lookup failed: <status>` (summary, an
+`ios-gate-receipt-lookup` warning, and `lookup_error` in the notice), never
+"no trusted receipt". Receipt artifacts must be downloaded through
+`protected_merge_receipt.download_archive()`: the archive URL redirects to blob
+storage, and plain `urllib.urlopen` forwards the Bearer token, which the blob
+host rejects with 401 on every download. `pulp-ios-gate-shadow/v1`
 notices record `skipped` / `control_run` / `would_skip` / `run`, then
 `ran_ok` / `ran_failed`. A `control_run` or `would_skip` followed by
 `ran_failed` means the input set missed a file: set the repository variable
@@ -1846,6 +1941,30 @@ inherits. Do not enforce while `would_skip_failed` is ever nonzero or binary
 identity (`binary_identity_shadow.py report`) is below ~100%: an unreproducible
 binary only means zero hits, but a missed runtime input means a false skip.
 
+## Compiled tests declare runtime data with `pulp_test_data()`
+
+A compiled test that opens checkout files at run time (fixtures, schemas,
+scripts it shells out to) reads inputs no build edge records, so a result
+keyed on build inputs alone would reuse a verdict whose data changed.
+Declare the reads next to the registration in `test/cmake/*_tests.cmake`:
+`pulp_test_data(<suite-or-exe> PATHS <repo-relative files, dirs, globs>)`
+(`tools/cmake/PulpTestData.cmake`). It defines `PULP_SOURCE_DIR` for that
+suite's sources (grouped members: only their own sources), so drop the
+`COMPILE_DEFINITIONS PULP_SOURCE_DIR=...` it replaces, and every path must
+match something at configure or configure fails. The generator folds the
+configure evidence into the same `test/ctest_script_inputs.json` under
+`executables` (`kind: compiled`); regenerate it as for script tests.
+A source that names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition
+pointing into the checkout, with no declaration covering it, marks its
+executable `data: undeclared` (the shadow selects it on every change). The
+pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
+undeclared source (one not undeclared in the base list); the backlog can only
+shrink. Declare only what the code opens: a test that hands the whole
+checkout to a CLI subprocess or doctor walk is not boundable and stays
+undeclared. Declaring a subset is worse than not declaring, because it
+makes an unsound key look sound. Count with
+`script_test_inputs.py --build-dir <dir> --data-summary`.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
@@ -1861,6 +1980,8 @@ treadmill. Regenerate with `--write` against a configured build dir and
 commit the file; `--check --full` shows every stale entry.
 A test the generator cannot bound (cmake-driven, no command) has no entry
 and stays fail-closed; do not hand-edit entries to make a test look narrower.
+**Never hand-edit `test/ctest_script_inputs.json`; regenerate it with
+`--write` against a configured `build-gate`.**
 **Every PR that adds or changes a script-driven test must regenerate the
 list** (`python3 tools/scripts/script_test_inputs.py --build-dir <dir>
 --write`, then commit `test/ctest_script_inputs.json`) as its LAST step;
@@ -1928,16 +2049,48 @@ groups at ~100% identical, no design may assume two VMs link the same bytes;
 a differing path names the linker input to normalise (embedded path, UUID,
 timestamp) before any per-binary reuse is proposed.
 
+## Per-test replay history lives in `reuse-record-macos`, not `ctest-logs-macos`
+
+`ctest-logs-macos` expires in 7 days, and its `LastTest.log` is NOT the suite's:
+every ctest call after the run (the `--show-only` listing, the GPU-adapter
+probe) replaces that file, so the artifact holds only the last probe's block.
+For outcome, attempts, duration and executable per test over 90 days, read the
+`reuse-record-macos` artifact (`tests.jsonl`, `identity.json`, `job.json`;
+`tools/ci/reuse_record.py`), which every `macos` job writes. `attempts` is null
+where a `--repeat` suite left no log (the pull-request affected-test batches),
+never guessed as 1. A missing record announces itself as `reuse-record NOT
+written`; count those annotations before calling the record complete.
+
+Link maps (`-DPULP_RECORD_LINK_MAPS=ON`) run through a linker launcher, so
+two traps apply. `add_custom_command(TARGET ... POST_BUILD)` cannot attach to
+a target from another directory, which is why the map is post-processed by
+the launcher rather than a post-build step; and a launcher is copied into a
+target when it is defined, so `PulpLinkMaps.cmake` must be included before
+the first target (and before FetchContent). The launcher must exit with the
+linker's status and fall back to the plain command whenever it cannot write
+its record: recording may never fail a link.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
 (`tools/ci/flake_exoneration_shadow.py`): per failing test, `would_exonerate`
-when it failed on >= 2 other heads in 24 h AND passes on main's latest
-merge-group run. It is evidence, not a verdict: `base_poison_detector.py`
-records why cross-batch corroboration alone was measured unsafe, and this
-shadow inherits that by requiring the main pass and acting on nothing. Read
-exonerated-only failures ÷ failures; do not wire it into the job outcome
-without a contract decision and the shadow data as Step Zero.
+when it failed on >= 2 other heads in 24 h AND passes on main's tip, judged
+by the tip's required gate job. It is evidence, not a verdict:
+`base_poison_detector.py` records why cross-batch corroboration alone was
+measured unsafe, and this shadow inherits that by requiring the main pass and
+acting on nothing. Read exonerated-only failures ÷ failures; do not wire it
+into the job outcome without a contract decision and the shadow data as Step
+Zero.
+
+Gotcha: it used to judge "passes on main" from the latest merge group's
+whole-run conclusion (an advisory Linux red counts) and read an undownloadable
+failing-test list as "nothing failed", so 3 of its first 4 exonerations were
+`script-test-inputs-drift`, a deterministic test, on a red main. Now evidence
+that was not read (no executed gate, unreadable or empty list) is "main
+unknown" and never exonerates, `main_evidence_read` is on every verdict, and
+tests labelled `pr-fast` or named in `tools/ci/drift_fast.json` are never
+eligible. Do not reuse `artifact_failing_tests()` where "unreadable" must
+differ from "empty"; it returns `()` for both.
 
 ## A PR head's full-suite failure is announced, not hidden behind continue-on-error
 
@@ -2525,6 +2678,19 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    a false pass); raising is not. So: never raise it, always lower it when you
    shrink. A PR that both grows one hotspot and shrinks another needs a
    `Hotspot-Grow:` trailer *and* a `max_loc` reduction.
+2b4. **Header fan-out grew?** The `header-fanout` gate
+   (`header_fanout_guard.py`, ledger `header_fanout_guard.json`) counts the
+   translation units whose `#include` closure holds each tracked header, from the
+   static include graph at HEAD vs the merge-base. It fails when THIS PR pushed a
+   tracked header over its `max_tus` ceiling, and the failure names the new
+   include edge. The usual cause is an umbrella include: a widely included header
+   that now includes a heavy one. Fix it by including the heavy header in the
+   `.cpp` or narrower header that uses it, or by forward-declaring. A deliberate
+   widening takes `Fanout-Grow: <path> reason="..."`. The count is TUs, not
+   executables. Most of a core header's *executable* reach is static-library
+   membership: a `.cpp` in `libpulp-audio.a` including it relinks everything that
+   links the library. Include hygiene cannot move that, so read link reach with
+   `--build-dir build` before attributing it to includes.
 2c. **Is a RED check even your fault?** Before investigating a failing check,
    run `python3 tools/scripts/pr_check_triage.py <PR#>` — it labels each red
    check REQUIRED vs advisory and PRE-EXISTING (also red / not run on main —
@@ -2608,22 +2774,16 @@ perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
 dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
 label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
 
-## PR gate settle window (`PULP_PR_GATE_SETTLE_SECONDS`, default off)
+## Do not add a PR "settle" wait before the gate
 
-A `pr-gate-settle` job in build.yml can hold the PR native matrix behind a
-hosted sleep so a rapid follow-up push cancels the run before a gate VM is
-claimed. Watch out for:
-
-- **A `needs` entry you never read must be paired with a status function.**
-  `build` needs `pr-gate-settle` but gates on `!cancelled()` and never reads
-  its result; without the status function a skipped settle (the default)
-  would skip the whole native matrix, including the required `macos` leg.
-- **pull_request only.** Shipyard validates PRs through `workflow_dispatch`,
-  which never waits; neither `macos` bootstrap depends on the job either.
-- **A new required-gate latency, not a free win.** Every native PR run pays
-  the value minus ~30 s of preamble. Pick it from the measured gap between
-  consecutive pushes that cancelled a claimed VM, not from intuition. Details:
-  `docs/guides/local-ci.md`, "The PR gate settle window is default off".
+build.yml once had a default-off `pr-gate-settle` job that slept on a hosted
+runner so a superseding push would cancel a PR run before its macOS leg
+claimed a gate VM. It never ran (the variable was never set) and was removed.
+Measured over 140 PR runs: pushes that land within about five minutes already
+cancel the run before any VM is claimed (the preamble takes that long), and
+the pushes that did cancel a claimed VM came 4 to 27 minutes apart. A window
+long enough to catch them costs every native PR run that much latency to save
+a few VM-minutes a day. Re-measure the push gaps before proposing it again.
 
 ## A dead lane is only visible as queue age — never as a missing runner
 
@@ -3528,50 +3688,6 @@ du -sh "$FETCHCONTENT_BASE_DIR" 2>/dev/null || echo "nothing cached"
 Same idea applies to the self-hosted golden images: bake with the flags CI actually
 uses, or the golden warms a cache the real jobs never touch.
 
-## Autonomous repair: the fences count, they do not judge
-
-Every fence on the recovery lane bounds **how much** a repair changed — exact
-head, epoch, fingerprint, force-with-lease, changed-file count, patch bytes,
-control-plane path prefixes. On 2026-08-17 every one of them held while the
-lane, asked to satisfy `static_assert(std::is_trivially_copyable_v<ParamValue>)`,
-removed all five `std::atomic` members from `ParamValue` and rewrote its docs to
-make thread-safety the caller's problem. `ParamValue` is the audio-thread to
-UI-thread primitive; the repair introduced data races on the audio thread of a
-real-time framework, and **it would have gone green**, because the assertion
-passes once the atomics are gone.
-
-`tools/scripts/shipyard_recovery_judgement.py` is the check that reads meaning.
-Two independent tests, either of which escalates to `needs_human`:
-
-- **Surface** — an ALLOWLIST (`test/` only today), not a denylist. A denylist
-  fails open on the surface nobody named, and the dangerous surfaces are not
-  only `core/`: a repair could make a failing gate pass by editing
-  `.github/workflows/build.yml`, or disable a check in `tools/cmake`.
-- **Invariant removal** — surface alone is insufficient. A test-only diff that
-  merely deletes `REQUIRE` lines satisfies any surface rule and is the same
-  failure: a model can make a check pass by making the claim true **or by
-  deleting the claim**, and it chose to delete.
-
-Two things to know before "fixing" it:
-
-1. **It escalates the CORRECT repair too.** The right fix on 2026-08-17 was to
-   delete the false assertion, and the invariant test refuses that as well.
-   That is intended. The lane's job is to never land a catastrophic change
-   unattended, not to land every correct one unattended.
-2. **It is enforced in the publisher, not the worker.** The worker still
-   uploads its artifact so an escalated repair stays inspectable; the publisher
-   is the step that applies and pushes, so that is where refusing matters. On
-   escalation it exits `3` (distinct from `1`, which means the check itself
-   broke) and records the reason on the exact head as
-   `shipyard/recovery-judgement`.
-
-Like `shipyard_recovery_result_check.py`, it lives under
-`tools/scripts/shipyard_recovery_`, which is in `FORBIDDEN_PREFIXES` in
-`shipyard_recovery_repair.py` — so a fenced repair model cannot weaken the check
-that constrains it. `test_shipyard_recovery_judgement.py` asserts that
-containment rather than assuming it, and its central case is the verbatim diff
-from `a08ec2d4abd8`.
-
 ## GitHub workflow gotchas
 
 - **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
@@ -4184,10 +4300,14 @@ bisectable.
   so `ccache --show-stats` there is the host's lifetime total and says nothing
   about one release; read `--show-log-stats` instead. Never `ccache -z` on a
   shared host cache: it resets the counters of every concurrent gate job.
-- **`post-tag-sync.yml` is dispatch-only** while no runner registers
-  `pulp-queue-authority-studio`; its tag trigger only parked a run per tag for
-  ~5.5 h. `shipyard release-bot hook install` rewrites the file and restores the
-  trigger, so re-remove it (or serve the label) after any reinstall.
+- **CHANGELOG.md rides the version-bump commit, one release behind.**
+  `version_at_land.py` runs `shipyard changelog regenerate` as a derived
+  regenerator, so there is no post-tag workflow. Do not run
+  `shipyard release-bot hook install`: it recreates `post-tag-sync.yml`, whose
+  per-tag changelog PR pays the required gate again for one docs file. The
+  bump fast path (`generated_version_bump_check.py`) cannot run Shipyard, so it
+  adopts the candidate's `CHANGELOG.md` bytes (`UNREPRODUCED_DERIVED`) and still
+  reproduces every other byte; add a file there only if the build never reads it.
 - **Hooks inherit `GIT_DIR` — tests that shell out to git can corrupt the live
   worktree.** Git exports `GIT_DIR`/`GIT_WORK_TREE` into hook environments, and
   a set `GIT_DIR` *overrides* `git -C <dir>` discovery. So when the pre-push
@@ -4232,8 +4352,7 @@ bisectable.
   on a schedule without secrets.
 - **Release-bot source refs must be SSH-signed.** `auto-release.yml` creates
   signed annotated `v*` tags with `git tag -s`, and the bot commit workflow
-  (`post-tag-sync.yml`, and `version-at-land.yml` once flipped to `--push`)
-  configures the same SSH
+  (`version-at-land.yml`) configures the same SSH
   signing helper before committing. The required Actions secret is
   `RELEASE_BOT_SSH_SIGNING_KEY`; it is a file-backed OpenSSH private key backed
   up outside the repo. The workflow uses `25807+danielraffel@users.noreply.github.com`
@@ -4410,44 +4529,15 @@ module) is **not covered until you add its glob**. A web demo that silently stop
 being built is the failure mode.
 
 
-### `post-tag-sync.yml` curl-installs its OWN Shipyard — pin it in lockstep
+### Required checks read `MISSING`: the workflow never dispatched
 
-The post-tag changelog sync does NOT run on the local fleet CLI. `post-tag-sync.yml`
-(Shipyard-owned, generated by `shipyard release-bot hook install`) fires on a `v*`
-tag, `curl`-installs a Shipyard pinned by its OWN `SHIPYARD_VERSION` env on
-ubuntu-latest, and runs `shipyard release-bot hook run`, which reads
-`[release.post_tag_hook]` from `.shipyard/config.toml`.
-
-So there are TWO Shipyard versions that matter, and they drift independently: the
-one on each fleet Mac (`tools/shipyard.toml` + `install-shipyard.sh`), and the one
-THIS workflow installs. If the workflow's pin is older than a config key it must
-honour, it silently ignores the key. A stale pin at 0.70.0 reverted to a direct
-push to `main` that the merge-queue ruleset refuses — defeating the config change
-and the fleet upgrade both.
-
-**The `push_mode = "pr"` floor is v0.79.0, NOT v0.78.0.** This distinction is
-subtle and it cost nine unmergeable PRs. 0.78.0 honours `push_mode` far enough to
-*open* the PR, so the pin looks correct and the branch appears — but the commit is
-still stamped `docs: regenerate changelog for <tag> [skip ci]`. That marker is
-right for the direct-push path it was written for and **fatal on the PR path**:
-Actions skips every workflow, so the PR never obtains the required checks branch
-protection demands, so it can never merge, and the next release opens another one.
-They stacked from v0.751.0 to v0.759.0 and blocked the release pipeline, surfacing
-as a run of `release: stuck — fix/feat merged without bump` issues rather than as
-anything pointing at the changelog PRs. Shipyard split the two subjects in 0.79.0
-(`release_bot_commit_subject`: `pr` omits the marker, direct keeps it).
-
-Diagnosing this class: a PR whose required checks read **`MISSING`** (not
+A PR whose required checks read **`MISSING`** (not
 pending, not failing — absent) is almost always a workflow that never dispatched.
 Check the tip commit for `[skip ci]` first, then whether the PR was opened by an
 App token — GitHub does not dispatch `pull_request` workflows for App-token
 actions, and neither `workflow_dispatch` (its runs do not attach to the PR as
 checks) nor close/reopen from an App token will fix that. A commit pushed from a
 **user** identity does.
-
-Keep `SHIPYARD_VERSION` here `>=` the `tools/shipyard.toml` pin whenever a
-post-tag-hook feature depends on it. (Durable fix is for `hook install` to pin
-from `tools/shipyard.toml` — a Shipyard-side change.)
 
 ### Release platforms are a one-line knob: `active_platforms`
 
@@ -5153,11 +5243,20 @@ skipped run as a pass.
 alongside `.github/rulesets/main-protection.json`. Two hard rules:
 
 - **The declared required checks must match the LIVE GitHub ruleset, not what
-  we wish we enforced.** Live `main` requires exactly two contexts: `macos` and
-  `Enforce version & skill sync`. Both the `[governance]
-  required_status_checks` list in `.shipyard/config.toml` AND the
-  `required_status_checks` array in `main-protection.json` are pinned to that
-  two-context set. `[branch_protection."main"] require_strict_status = true`
+  we wish we enforced.** Live `main` requires six contexts: `macos`,
+  `Enforce version & skill sync`, `Build + prove + (owner-gated) deploy`,
+  `Vellum freeze`, `Vellum trusted freeze` and `drift-fast`. Both the
+  `[governance] required_status_checks` list in `.shipyard/config.toml` AND the
+  `required_status_checks` array in `main-protection.json` name that full set;
+  `base-poison-detector-selftest` fails when the two disagree. The list must be
+  the WHOLE contract: `shipyard governance apply` PUTs exactly it to branch
+  protection, so a partial list silently drops required checks. A reader that
+  judges only part of it narrows it itself — the base-poison detector judges
+  all six on each merge-group head, reading statuses as well as jobs; the landing watchdog reads
+  commit statuses as well as check runs, because `Vellum trusted freeze`
+  reaches a PR head as a status from a `pull_request_target` run and a
+  check-run-only reader calls it absent on every PR.
+  `[branch_protection."main"] require_strict_status = true`
   mirrors the ruleset's `strict_required_status_checks_policy`. Before editing
   either, run `shipyard governance diff` — a clean run prints
   `OK main: no changes`; any other output means the checked-in intent has
@@ -5168,8 +5267,7 @@ alongside `.github/rulesets/main-protection.json`. Two hard rules:
   lane would wedge every merge — without adding signal. This is why the ruleset
   was trimmed from four contexts to two: so nobody can "fix drift" by pushing a
   config that flips the advisory lanes blocking. `test_ruleset_drift_config.py`
-  asserts the two-context required set; keep it and the two config surfaces in
-  lockstep.
+  pins the required set; keep it and the two config surfaces in lockstep.
 
 ## PR Review Thread Hygiene
 
@@ -5686,18 +5784,6 @@ The PR enters the queue once its required contexts are green. Note GitHub uses
 the **latest** run for a required context, so a newly-queued re-run makes an
 already-green context pending again and delays entry — that resolves itself.
 
-#### The pin is load-bearing at v0.78.0 because of the post-tag hook
-
-`[release.post_tag_hook]` runs `shipyard changelog regenerate` after every SDK
-tag and pushes `CHANGELOG.md` directly to `main` — which the queue ruleset
-refuses. The tag and binaries still publish; the changelog sync fails, retries
-`max_push_attempts` times, and leaves a red run plus a stale CHANGELOG.
-
-v0.78.0 adds `push_mode` to that hook; `push_mode = "pr"` opens a pull request so
-the changelog lands *through* the queue. A fleet Mac still on an older Shipyard
-silently ignores `push_mode` and reverts to the direct push, so the pin, the
-installed binary on every host, and the config setting must move together.
-
 #### `shipyard update` is an updater, not a converger — it will not go backwards
 
 `shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older
@@ -5712,8 +5798,8 @@ Two consequences:
   machine and that machine leaves the pin permanently — `latest` ran 7 minors
   ahead of the pin on 2026-07-16 (pin v0.70.0, latest v0.77.1). It is then
   running a Shipyard that was never validated against Pulp's CI matrix and
-  that disagrees with every workflow's `SHIPYARD_VERSION` (the exact drift
-  `check_shipyard_pin.py` exists to prevent). Always `--to` the pin.
+  that disagrees with the version every workflow installs through
+  `tools/install-shipyard.sh`. Always `--to` the pin.
 - **Coming back to the pin needs `tools/install-shipyard.sh`**, which installs
   the pinned version unconditionally (via the upstream, checksum-verifying
   `install.sh`). Routing a downgrade through `shipyard update` is a silent
@@ -5885,290 +5971,16 @@ ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
 period (see Generous-Corp/pulp#120).
 
-### Central merge steward (Shipyard v0.88.4+)
+### No repository-wide merge steward
 
-`.github/workflows/shipyard-merge-steward.yml` is the single logical
-repository-wide PR landing controller. Manual dispatch is dry-run by default;
-the ten-minute schedule is present but commented out until one manual apply +
-recovery dispatch proves the recovery judgement wiring end to end. Once
-enabled, it applies deterministic mutations and may dispatch at most one fenced
-recovery exception per serialized tick. It runs on GitHub-hosted Ubuntu so
-all three Macs may be offline, serializes mutations with one repository-scoped
-concurrency group, restores a small bounded-retry cache, uses GitHub's durable
-run-attempt counter to prevent retry-budget reset after cache loss, and configures its ephemeral
-machine-global authority as `github-actions` before invoking
-`shipyard runner steward`.
-
-Queue and status mutations use a repository-scoped installation token minted
-from `SHIPYARD_APP_ID` and `SHIPYARD_APP_PRIVATE_KEY`, not the workflow
-`GITHUB_TOKEN`: GitHub suppresses downstream workflow events for mutations made
-with `GITHUB_TOKEN`, which would prevent required `merge_group` checks from
-starting. The job runs only from `refs/heads/main`, checks out `main` without
-persisted credentials, and passes the short-lived App token only to Shipyard's
-authority and reconciliation steps.
-
-Only an exact head carrying both the `shipyard:managed` label and a successful
-current-head `shipyard/steward-handoff` status is eligible for mutation. PRs
-without that contract remain visible as `unmanaged` and are never adopted
-implicitly. Routine checks, queue admission, merge confirmation, and cleanup
-use no model. A code/test/conflict blocker receives one deduplicated
-`shipyard:needs-agent` signal plus a failed `shipyard/steward-recovery` status;
-the recovery dispatcher is a separate exception path.
-
-> **PAUSED 2026-09-07 — do not perform this handoff, and do not pass
-> `--workstream-id`.** `[merge_steward] auto_handoff` is `false` in
-> `.shipyard/config.toml` (Pulp #8107) while the Linear/workstream ledger work
-> is frozen pending new requirements. An explicit `--workstream-id` still opts
-> in, so passing one now produces a fleet where a few PRs are steward-managed
-> and most are not — which is worse than either state alone. Land PRs with
-> `shipyard pr`, and adopt an orphaned one with `shipyard ship --pr <n>`.
->
-> Two corrections to the text below, so it is not followed as written:
-> **(1)** "A PR-scoped handle is no longer accepted" is **no longer true** —
-> Shipyard #585 restored the lowercase PR-scoped fallback (`owner/repo#<pr>`),
-> because requiring an already-lowercase slug made the hatch unreachable for
-> `Generous-Corp/pulp` and every other repo with a capital in its slug.
-> **(2)** The handoff no longer refuses merely because an agent shell exports
-> `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`; that fence now applies only to
-> explicit routes.
->
-> The rest of this section is retained for when the pause is lifted.
-
-`shipyard pr` does **not** imply this durable controller handoff. After the PR
-exists and its remote head is final, the submitting agent must run:
-
-```bash
-shipyard runner steward-handoff \
-  --repo Generous-Corp/pulp \
-  --pr "$PR_NUMBER" \
-  --head "$EXACT_REMOTE_HEAD" \
-  --workstream-id "$WORKSTREAM_ID" \
-  --context-url "$DURABLE_CONTEXT_URL" \
-  --apply --json
-```
-
-Then re-read GitHub and verify that the same head has a successful
-`shipyard/steward-handoff` commit status. The managed label by itself is not a
-receipt and is not head-specific. An agent may stop watching only after this
-server-owned receipt exists; local Shipyard state is never sufficient for
-cross-machine continuation.
-
-`--workstream-id` must be a **canonical `GEN-<n>` handle**, uppercase. Shipyard
-validates it before it does anything else and rejects everything else with
-`--workstream-id must be a canonical GEN-style handle`. Probed against
-shipyard 0.155.2 in dry-run (dry-run is the default, so this is safe to repeat):
-`GEN-7` and `GEN-8033` pass validation, while `pulp-pr-8033`, `PULP-8033` and
-lowercase `gen-7` are all rejected. A PR-scoped handle is no longer accepted.
-
-The handle is a *durable work item identifier*, so do not mint a `GEN-<n>` that
-maps to no work item just to satisfy the validator: that is fabricated
-provenance in the one field whose whole purpose is cross-machine continuation.
-When a change genuinely has no work item, leave the handoff to the durable
-controller rather than inventing a number.
-
-**`shipyard pr` performs this handoff itself** when `.shipyard/config.toml` sets
-`[merge_steward] auto_handoff = true`, and it is the *last* step. So its failure
-is late: the branch is already pushed and the PR already open by the time the
-error prints, and the non-zero exit reads like nothing shipped. Check with
-`ghapp pr list --head <branch>` before doing anything else. To recover, resume
-the existing PR:
-
-```bash
-shipyard ship --pr "$PR_NUMBER" --base main
-```
-
-Never re-run `shipyard pr` to recover: it targets a PR that already exists.
-
-Each tick also reconciles one labeled GitHub issue containing every current PR
-exception and control-plane error. The issue is updated in place, closes at
-zero exceptions, and reopens on recurrence. This is the durable, model-free
-operator outbox; Actions artifacts remain bounded evidence rather than the only
-copy of work that needs attention.
-
-Repository automation must never create an unlabeled PR. In particular,
-`version_at_land.py --route pr` creates each `release/version-bump` PR with the
-`automation` label in the same `gh pr create` transaction; a later label repair
-is not an acceptable provenance window.
-
-Do not add a second scheduled or per-Mac mutating controller. M1, M3, and M5 may
-serve as fenced recovery workers only after disposable-runner proof; they do
-not independently poll or mutate the merge queue.
-
-The Shipyard CLI does not wake itself up. Once the schedule is enabled, GitHub
-Actions is the durable clock: the scheduled controller re-reads GitHub truth,
-reconciles the exact-head ledger/outbox, and invokes Shipyard without a model.
-Recovery runners consume only the exceptional durable jobs that controller
-emits; they are not a second polling authority.
-
-Enable the ten-minute schedule only after live canaries prove an unmanaged
-negative control, exact-head handoff, native queue landing without an agent,
-one deduplicated recovery signal, and clearing that signal on a corrected head.
-
-When a GitHub Actions controller mints a repository-scoped installation token
-for `enqueuePullRequest`, request both `permission-merge-queues: write` and
-`permission-contents: write`. The dedicated queue permission alone is not the
-repository write access GitHub requires for queue enrollment; downscoping
-contents to read fails closed with `Resource not accessible by integration`
-even when the App installation itself has both permissions.
-
-`.github/workflows/shipyard-recovery-worker-canary.yml` is the manual, read-only
-precondition for recovery workers. Its one job requires the unique
-`shipyard-recovery-canary-m5-20260814` label in addition to the disposable VM
-labels, revalidates the open PR's exact head and a positive assignment epoch,
-and launches no model. Serve it only with a one-shot Tart JIT runner carrying
-that exact label. Do not generalize the label, add a persistent service, inject
-Subrouter credentials, or enable M3/M5/M1 failover until this proof passes and
-the runner is destroyed.
-
-**Recovery dispatch must queue before a JIT runner exists.** Never select a
-recovery worker from `actions/runners`: a healthy idle Tart JIT worker is absent
-from that census, so preselection creates a circular wait in which no job is
-queued and no runner registers. Dispatch one durable job to the shared
-`shipyard-recovery-pool` first, record its exact Actions URL in the pending
-recovery status, and let a fenced one-shot runner claim it. Derive the actual
-worker only from the registered runner-name prefix inside the job. A pending
-pool assignment is an offline-safe obligation, not an age-based retry signal;
-do not dispatch a duplicate merely because it has waited. Prefer hosts without
-encoding priority in GitHub labels by giving their TartCI supervisors increasing
-minimum queued ages (M3 first, then M5, then M1). A returning faster host cannot
-preempt a job that another runner has already claimed.
-
-**Keep recovery routing and repair activation explicit.** The M3 recovery
-endpoint is a non-secret repository variable
-(`vars.SUBROUTER_RECOVERY_BASE_URL`); only the admin bearer belongs in the
-protected `SUBROUTER_SESSION_LEASE_ADMIN_TOKEN` secret. Mint the short-lived
-model-bound lease in trusted default-branch code before fetching the untrusted
-PR head, then expose only the returned scoped broker credential to the model.
-When the steward dispatches the recovery workflow it must set both
-`publish_status=true` and `attempt_repair=true`: omitting the latter silently
-turns the autonomous path into triage-only monitoring. This does not bypass the
-cost or safety fence—Luna must still return the exact `needs_sol_fix`
-classification before the single networkless Sol-medium repair step can run,
-and the GitHub-hosted publisher independently revalidates the exact head,
-assignment epoch, and blocker fingerprint before applying any patch.
-
-**The recovery worker has two model lanes: Codex primary, Claude fallback.**
-Codex Luna/low triage and Sol/medium repair run first and are unchanged. Each
-now carries `continue-on-error` so that a failing model does not abort the job
-before the bounded fallback can run. The fallback is deliberately *reactive*,
-gated on `steps.triage.outcome == 'failure'` and
-`steps.repair.outcome == 'failure'`, because **a Subrouter lease mints
-successfully even when its account is out of quota** — exhaustion only surfaces
-when the model actually runs, so no preflight probe can detect it. This was
-proven on 2026-08-16 when all five Codex accounts hit their weekly limit and the
-recovery canary failed 44 seconds into `luna-triage` with every fence, lease,
-and teardown behaving correctly.
-
-Four rules govern the fallback lane:
-
-- **Mint it model-unbound.** Subrouter rejects any request whose body model
-  differs from a bound lease, and Claude Code issues background calls on a small
-  fast model. Send `provider:"claude"` with no `model` field; an empty model
-  short-circuits that validation, but an empty provider *and* empty model
-  defaults the lease back to Codex.
-- **Consume the lease through the environment.** A Claude lease returns
-  `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, and
-  `CLOUDMUX_SUBROUTER_LEASE_TOKEN`. The base URL is bare — only Codex, Kimi, and
-  ZAI leases get path suffixes. There is no `--base-url` flag.
-- **Keep the context deliberately minimal.** A default Claude Code launch loads
-  plugin and MCP context that dwarfs the bounded recovery prompt (roughly 60k
-  cache-creation tokens versus 35k for an isolated launch), so the lane pins
-  `--strict-mcp-config`, an empty `--mcp-config`, `--settings
-  '{"disableAllHooks":true}'`, `--no-session-persistence`, and an isolated
-  `CLAUDE_CONFIG_DIR`.
-- **Install the platform package by name.** `@anthropic-ai/claude-code`'s
-  `bin/claude` is a wrapper that resolves its native binary during
-  `postinstall`, and the lane installs with `--ignore-scripts`, so the base
-  package alone yields `claude native binary not installed` — this failed a live
-  recovery job on 2026-08-16, 15 seconds in. Install
-  `@anthropic-ai/claude-code-darwin-arm64` explicitly, integrity-pin it like the
-  base package, and `ln -sf` the real binary onto `bin/claude`. Do **not** fix
-  this by dropping `--ignore-scripts`: the install runs on a disposable runner
-  moments before it holds a broker lease, so a script-free install is the point.
-  Codex's own install is not a template here — it ships its platform binary
-  differently.
-- **Strip `$schema` before passing a schema to `--json-schema`.** The CLI's
-  validator cannot resolve `"$schema": "https://json-schema.org/draft/2020-12/schema"`
-  and rejects the committed file verbatim with `no schema with key or ref` —
-  this failed a live recovery job on 2026-08-16. Pass
-  `jq -c 'del(."$schema")' <file>`; every constraint is preserved and the fenced
-  validator re-checks the payload against the full schema afterwards. Note the
-  trap that hid it: a hand-written inline schema in a local probe has no
-  `$schema` key, so rehearsing with a lookalike passes while the real artifact
-  fails. Rehearse with the committed file.
-- **Re-validate the output locally.** `claude --json-schema` validates upstream
-  but leaves no trusted local proof, so
-  `tools/scripts/shipyard_recovery_result_check.py` re-checks the payload. That
-  path is inside the `FORBIDDEN_PREFIXES` fence on purpose: a validator living
-  outside the fence could be weakened by the very repair model it constrains.
-
-If both lanes fail the job errors rather than reporting a green tick with no
-classification, and the publisher's commit trailers record the lane that
-actually produced the patch (`Agent: codex` vs `Agent: claude`) so the audit
-trail never misattributes a repair.
-
-**The repair-publication path is the part no canary has exercised.** Every live
-canary so far ended at triage (`no_action`), so the bundle/validate/commit/push
-steps have never run against a real model patch. Seven defects were found by
-reading it adversarially rather than by a red run, and each is a class that
-would have shipped a *wrong* repair while every check reported success:
-
-- **Diff against the fenced commit, never the index.** `git add
-  --intent-to-add --all` fully stages a DELETION, so a worktree-vs-index
-  `git diff` silently drops deleted and renamed files from *both* the patch and
-  the declared path list — and the publisher's parity check still passes,
-  because both lists are identically wrong. The lane force-pushes a "fix" that
-  does not delete what the model deleted. Use `git reset --mixed
-  "$EXPECTED_HEAD"` then `git diff HEAD`; resetting to the assignment's exact
-  head rather than `HEAD` also survives a model that committed.
-- **Reset the worktree before the fallback repair.** Both repair lanes edit the
-  same checkout, and the primary lane runs under `continue-on-error` — it can
-  fail *after* editing (a mid-task error, or tripping its own enum check).
-  Without `git reset --hard "$EXPECTED_HEAD" && git clean -qfd`, a failed
-  Codex attempt's partial edits are bundled into the fallback's patch and
-  attributed to Claude by the commit trailers.
-- **`--settings` does not stop project settings from loading.** cwd is inside
-  the untrusted PR head, so a PR-supplied `.claude/settings.json` is read unless
-  the lane pins `--setting-sources user`. Valid values are `user,project,local`;
-  the CLI rejects anything else, so the flag fails loudly if it ever changes.
-- **Keep the trailers one paragraph.** One `-m` per trailer makes each its own
-  paragraph and `git interpret-trailers --parse` reads only the last, so the
-  audit trail collapses to `Router: subrouter`. Build the message with `printf`
-  into a variable — a literal multi-line `-m` inside a `run: |` block dedents to
-  column zero and breaks the YAML block scalar.
-- **Pin `LC_ALL=C` on BOTH sorted path lists.** The worker and the publisher
-  run on different hosts and the parity check is a plain `diff -u` of the two.
-  C and `en_US.UTF-8` genuinely order `-`, `_`, and case differently for
-  ordinary source paths (`LC_ALL=C` gives `A-b a-b a_b ab`; `en_US.UTF-8` gives
-  `a_b a-b A-b ab`), so an unpinned sort rejects a correct patch on locale
-  alone. Pinning one side is worse than pinning neither.
-- **Whitespace is a warning on BOTH sides, or on neither.** Trailing whitespace
-  is not grounds to discard a repair that fixes a real blocker. Demoting only
-  the worker's `--check` moves the rejection to the publisher — *after* the
-  lease and model are already spent — instead of removing it. The security
-  fences (control-plane prefixes, path escape, size caps, exact
-  head/epoch/fingerprint revalidation, parity) are what protect this path;
-  whitespace is not one of them.
-- **`skipped` is not `failure` in the publisher's classification.** A repair the
-  model marked `fixed` whose push step never *ran* leaves
-  `steps.repair_push.outcome` as `skipped`; a bare `= failure` test falls
-  through to a success classification and tells the steward the dispatch
-  completed cleanly while the authorised repair evaporated. Gate the extra
-  clause on `repair_outcome = fixed`, not a blanket `!= success` — `skipped` is
-  legitimate when no repair was attempted.
-
-`tools/scripts/test_shipyard_recovery_worker_workflow.py` pins all seven. They
-are text assertions against a workflow that CI cannot execute end to end, so
-verify them by mutation: revert a fix, confirm exactly one test fails.
-
-Because the assertions are textual, they prove the workflow *says* the right
-thing, not that the path *works*. Rehearse the semantics separately in a
-scratch git repo: build a synthetic model patch that modifies, deletes,
-renames, and adds; run the real bundle commands and the real
-`shipyard_recovery_repair.py`; then apply the patch in a second checkout at the
-fenced head and compare. Under the pre-fix commands that rehearsal reports
-`validator: PASS` and `parity check: PASS` while leaving the deleted file in
-place — which is precisely why no amount of green CI would have caught it.
+Pulp once carried a GitHub-hosted steward workflow
+(`shipyard-merge-steward.yml`) plus a model-driven recovery worker and canary.
+The steward never left manual dispatch, its last runs failed, and the native
+merge queue now does the landing it was built for, so all of it was removed.
+Land a PR by arming auto-merge with `mergeMethod: MERGE`; adopt an orphaned
+Shipyard PR with `shipyard ship --pr <n>`. `[merge_steward] auto_handoff` stays
+`false` and `shipyard pr --workstream-id` stays unused: both write
+`shipyard/steward-handoff` receipts that nothing reads.
 
 ### Why your macOS leg routed to `[github-hosted]`, and why re-running did not fix it
 
@@ -8565,6 +8377,7 @@ by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf
 - `Build + prove + (owner-gated) deploy`
 - `Vellum freeze` — `.github/workflows/vellum-freeze-check.yml`
 - `Vellum trusted freeze` — status posted by `.github/workflows/vellum-trusted-gate.yml`
+- `drift-fast` — `.github/workflows/drift-fast.yml` (hosted, configure-only drift checks)
 
 `vellum-routing-contract` is a separate evidence-producing check. It executes
 the closed repository-qualified Pulp/Vellum router suite on relevant PRs and on
@@ -8638,7 +8451,8 @@ ghapp api repos/Generous-Corp/pulp/branches/main/protection \
 ```
 
 which today returns `macos`, `Enforce version & skill sync`, `Build + prove +
-(owner-gated) deploy`, `Vellum trusted freeze`, and `Vellum freeze`. Never
+(owner-gated) deploy`, `Vellum trusted freeze`, `Vellum freeze`, and
+`drift-fast`. Never
 describe a check as non-blocking, or propose deleting it, on ruleset evidence
 alone.
 

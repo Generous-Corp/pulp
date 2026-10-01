@@ -122,9 +122,30 @@ class HeaderNameDrift(unittest.TestCase):
 
     def test_committed_lists_match_the_checkout(self) -> None:
         # The names are a fact of the source tree; the committed document
-        # must list exactly what the checkout holds under every root.
+        # must list exactly what the checkout holds under every root. A root
+        # under an SDK the host provisions (external/AudioUnitSDK is macOS-only)
+        # is absent on other hosts and holds no tracked file, so it cannot be
+        # compared there; a tracked root that has gone missing still fails.
+        checked, unprovisioned = [], []
         for root, names in self.recorded.items():
+            if not (REPO_ROOT / root).is_dir() and not tracked_under(root):
+                unprovisioned.append(root)
+                continue
             self.assertEqual(names, cc.header_names(REPO_ROOT, root), root)
+            checked.append(root)
+        if unprovisioned:
+            print(f"not provisioned on this host, not compared: {', '.join(unprovisioned)}",
+                  file=sys.stderr)
+        # Control: the comparison must actually have looked at the checkout.
+        self.assertTrue(any(root.startswith("core/") for root in checked), checked)
+
+
+def tracked_under(root: str) -> bool:
+    """Whether git tracks any file under `root` in this checkout."""
+    listed = subprocess.run(
+        ["git", "ls-files", "--", root], cwd=REPO_ROOT, capture_output=True, text=True
+    )
+    return bool(listed.stdout.strip())
 
 
 def git(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:

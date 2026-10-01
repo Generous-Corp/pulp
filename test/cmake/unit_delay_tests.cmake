@@ -6,4 +6,5 @@ pulp_add_test_suite(pulp-test-unit-delay
         harness/rt_allocation_probe.cpp
         support/audio_signal_generators.cpp
         support/render_scenario.cpp
+        support/callback_cost_probe.cpp
     LIBRARIES pulp::format pulp::audio-analysis pulp::signal)

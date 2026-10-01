@@ -43,7 +43,7 @@
    "docs": [
     "docs/guides/local-ci.md"
    ],
-   "why": "The advisory drift-fast lane (what it runs, what it cannot check on a Linux configure, and the ruleset change that would make it required) is documented in local-ci.md; changing its selection or triggers without a doc edit drifts that description."
+   "why": "The required drift-fast lane (what it runs, what it cannot check on a Linux configure, and why its trigger must never be path-filtered or its job made conditional) is documented in local-ci.md; changing its selection or triggers without a doc edit drifts that description."
   },
   {
    "paths": [

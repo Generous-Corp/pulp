@@ -26,7 +26,10 @@ test-only (test/support), links pulp::audio-analysis:
 reverb     (reverb_metrics)     — T60 / band T60 / echo density / band level, header-only
 signals    (audio_test_signals, audio_signal_generators) — deterministic stimulus + event scripts
    ↓
-scenarios  (render_scenario)    — HeadlessHost block-loop renders + matrix sweeps
+scenarios  (render_scenario, callback_cost_probe) — HeadlessHost block-loop renders + matrix sweeps,
+                                  per-block CPU time and RT operation counts
+   ↓
+transitions (transition_scenario, bursty_processor) — per-callback cost gates at parameter edges
    ↓
 contracts  (audio_contracts)    — named claims over one rendered scenario
    ↓

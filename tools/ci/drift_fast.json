@@ -1,8 +1,14 @@
 {
   "schema_version": 1,
-  "_comment": "Tree-reading drift checks run by the advisory hosted `drift-fast` job (.github/workflows/drift-fast.yml) against a configured-but-unbuilt tree, so a merge group whose tip-plus-head tree drifts fails in minutes on a hosted runner instead of after the ~20-minute macOS build. `ctest_labels` pulls in every member of each label; `tests` names individual registrations outside those labels. Every entry must pass from a configure alone: no compiled binary, no installed SDK. `tools/ci/drift_fast.py run` fails when a label selects nothing or when ctest ran a different number of tests than it selected. See docs/guides/local-ci.md.",
+  "_comment": "Tree-reading drift checks run by the required hosted `drift-fast` job (.github/workflows/drift-fast.yml) against a configured-but-unbuilt tree, so a merge group whose tip-plus-head tree drifts fails in minutes on a hosted runner instead of after the ~20-minute macOS build. `ctest_labels` pulls in every member of each label; `tests` names individual registrations outside those labels. Every entry must pass from a configure alone: no compiled binary, no installed SDK. `tools/ci/drift_fast.py run` fails when a label selects nothing or when ctest ran a different number of tests than it selected. See docs/guides/local-ci.md.",
   "ctest_labels": [
     "pr-fast"
+  ],
+  "workflow_preconditions": [
+    {
+      "step": "tools/scripts/hydrate_gpu_provenance_commits.py",
+      "why": "gpu-probe-historical-v1-acceptance (pr-fast) walks commits outside the depth-2 event checkout and raises ShallowCheckoutError without them; before this step ran it failed all 21 merge groups from 2026-09-29 09:41Z to 22:12Z while macos passed each one"
+    }
   ],
   "tests": [
     {

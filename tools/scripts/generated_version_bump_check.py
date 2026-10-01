@@ -50,6 +50,13 @@ TRUSTED_WRITER_PATHS = (
 )
 
 
+# Derived files the bump renders with a tool this verifier does not run: the
+# changelog comes from `shipyard changelog regenerate` over the tag graph. The
+# build and tests never read it, so its bytes are taken from the candidate
+# instead of reproduced, and the rest of the tree must still match exactly.
+UNREPRODUCED_DERIVED = ("CHANGELOG.md",)
+
+
 class NotGeneratedBump(RuntimeError):
     """A normal full-validation disposition, never a workflow failure."""
 
@@ -366,6 +373,8 @@ def _bind_trusted_regenerators(module: Any, worktree: Path) -> None:
     scripts = (worktree / TRUSTED_WRITER_ROOT).resolve()
     bound: list[tuple[str, list[str]]] = []
     for output, command in module._DERIVED_REGENERATORS:
+        if tuple(output) and set(output) <= set(UNREPRODUCED_DERIVED):
+            continue
         if len(command) < 2 or command[0] != "python3":
             raise NotGeneratedBump("trusted derived regenerator has an unknown command shape")
         relative = Path(command[1])
@@ -382,6 +391,31 @@ def _bind_trusted_regenerators(module: Any, worktree: Path) -> None:
             raise NotGeneratedBump("trusted derived regenerator script is missing")
         bound.append((output, [sys.executable, str(trusted_script), *command[2:]]))
     module._DERIVED_REGENERATORS = bound
+
+
+def _adopt_unreproduced(
+    repo: Path, worktree: Path, *, base: str, observed: str, edited: list[str]
+) -> list[str]:
+    """Copy the observed bytes of each unreproduced derived file it changed."""
+    adopted = list(edited)
+    for path in UNREPRODUCED_DERIVED:
+        changed = _git(repo, "diff", "--quiet", base, observed, "--", path, check=False)
+        if changed.returncode == 0:
+            continue
+        if changed.returncode != 1:
+            raise NotGeneratedBump(f"could not compare {path} against the base")
+        blob = subprocess.run(
+            ["git", "cat-file", "blob", f"{observed}:{path}"],
+            cwd=repo,
+            capture_output=True,
+            check=False,
+        )
+        if blob.returncode != 0:
+            raise NotGeneratedBump(f"candidate {path} is not a readable blob")
+        (worktree / path).write_bytes(blob.stdout)
+        if path not in adopted:
+            adopted.append(path)
+    return adopted
 
 
 def _reproduce_tree(
@@ -443,6 +477,9 @@ def _reproduce_tree(
             edited = version_at_land._write_plan(worktree, config, assignments)
             if not edited:
                 raise NotGeneratedBump("trusted version writer reproduced no edits")
+            edited = _adopt_unreproduced(
+                repo, worktree, base=base, observed=candidate, edited=edited
+            )
             _git(worktree, "add", "--", *dict.fromkeys(edited))
             expected_tree = _git_text(worktree, "write-tree")
             actual_tree = _git_text(repo, "rev-parse", f"{candidate}^{{tree}}")
@@ -489,6 +526,13 @@ def _reproduce_tree(
                     )
                     if not cumulative_edited:
                         raise NotGeneratedBump("cumulative projection reproduced no edits")
+                    cumulative_edited = _adopt_unreproduced(
+                        repo,
+                        cumulative_worktree,
+                        base=cumulative_base,
+                        observed=cumulative_head,
+                        edited=cumulative_edited,
+                    )
                     _git(
                         cumulative_worktree,
                         "add",

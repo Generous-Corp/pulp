@@ -296,6 +296,18 @@ export class WebClapPlugin {
     }
     return this;
   }
+  // Call after activation, outside a concurrent process call. CLAP reset runs
+  // in the audio-thread role even when this offline host uses one JS thread.
+  reset() {
+    const wasAudioThread = this.host._inAudioThread;
+    this.host._inAudioThread = true;
+    try {
+      this.host.call(this._fn(32), this.ptr);
+    } finally {
+      this.host._inAudioThread = wasAudioThread;
+    }
+    return this;
+  }
   destroy() { this.host.call(this._fn(12), this.ptr); }
 
   // Query a plugin extension by id (get_extension @40). Returns the extension

@@ -17,6 +17,17 @@
 #   tools/ci/governed-build.sh cmake --build build [--target ...]
 #   tools/ci/governed-build.sh --probe-jobs   # print the share a build would get
 #
+# Build class (PULP_BUILD_CLASS, default `interactive`):
+#   interactive  someone is waiting (`pulp build`, a manual build, a release or
+#                packaging build). Normal QoS always — never `taskpolicy -b`.
+#                On a class-aware tartci it asks for a share it may take
+#                partially, waits briefly for one rather than dropping to the
+#                background floor, and may borrow idle gate-reserved cores
+#                where the host lends them.
+#   background   Shipyard-local PR validations and other opportunistic work
+#                (.shipyard/config.toml sets it on every stage). Capped at the
+#                host's background share; keeps the role QoS and agent floor.
+#
 # Before any lease is requested it refuses two things that waste a shared host:
 # a source checkout in a temporary directory (checkout_location_guard.py; the
 # same rule the root CMake configure applies), and a second `cmake --build`
@@ -251,6 +262,19 @@ status_field() {
     | grep -o '[0-9][0-9]*$' | head -n 1 || true
 }
 
+# Value of KEY in `tartci host-profile` output ($1), or "".
+profile_value() {
+  printf '%s\n' "$1" | awk -F= -v k="$2" '$1 == k {print $2; exit}'
+}
+
+# The build class this invocation runs as: interactive (default) or background.
+build_class() {
+  case "${PULP_BUILD_CLASS:-interactive}" in
+    background) echo background ;;
+    *) echo interactive ;;
+  esac
+}
+
 # Print the parallelism a build started now would most likely run at, without
 # acquiring anything: `jobs=<N> grant=<lease|partial-lease|agent-floor|floor|tier0>`.
 # It is a snapshot, so a caller may use it to decide whether a build is worth
@@ -269,6 +293,22 @@ probe_jobs() {
     status="$("$TARTCI_BIN" leases status --json 2>/dev/null)" || status=""
     avail="$(status_field "$status" non_gate_available_cores)"
     floor_avail="$(status_field "$status" floor_available_cores)"
+    if positive_int "$(profile_value "$profile" TARTCI_GOVERNOR_SCHEMA)"; then
+      local class_avail
+      if [ "$(build_class)" = "interactive" ]; then
+        local ijobs
+        ijobs="$(profile_value "$profile" TARTCI_INTERACTIVE_BUILD_JOBS)"
+        if positive_int "$ijobs"; then
+          jobs="$ijobs"
+          if positive_int "$requested" && [ "$requested" -lt "$jobs" ]; then jobs="$requested"; fi
+        fi
+        class_avail="$(status_field "$status" interactive_available_cores)"
+        floor_avail=""  # an interactive build is never floored
+      else
+        class_avail="$(status_field "$status" background_available_cores)"
+      fi
+      if [ -n "$class_avail" ]; then avail="$class_avail"; fi
+    fi
     if positive_int "$avail" && [ "$avail" -ge "$jobs" ]; then
       best="$jobs"; grant="lease"
     else
@@ -454,8 +494,10 @@ acquire_floor_lease() {
   local out size
   FLOOR_CORES=""
   FLOOR_QOS=""
+  local class_args=()
+  if positive_int "${governor_schema:-}"; then class_args=(--class background); fi
   out="$("$TARTCI_BIN" leases acquire \
-    --id "$LEASE_ID" --cores "$1" --priority build --allow-floor \
+    --id "$LEASE_ID" --cores "$1" --priority build --allow-floor ${class_args[@]+"${class_args[@]}"} \
     --kind shipyard-local --owner "governed-build" --pid "$$" \
     --job-id "${GITHUB_RUN_ID:-}" --json 2>/dev/null)" || return 1
   printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || return 1
@@ -479,6 +521,12 @@ acquire_floor_lease() {
 # leaves LEASE_ID set; on failure clears LEASE_ID so no id is ever released or
 # heartbeated that this process does not hold.
 try_floor_lease() {
+  # A floor lease is granted on condition of background QoS, which an
+  # interactive build never runs at; it takes the leaseless floor instead.
+  if [ "$BUILD_CLASS" = "interactive" ]; then
+    LEASE_ID=""
+    return 1
+  fi
   if acquire_floor_lease "$1"; then
     jobs="$FLOOR_CORES"
     if [ "$FLOOR_QOS" = "background" ]; then
@@ -495,9 +543,40 @@ try_floor_lease() {
   return 1
 }
 
+# Class-aware acquire against a tartci that exports TARTCI_GOVERNOR_SCHEMA:
+# `--class` plus `--min-cores` lets the store grant the largest share that fits
+# (never more than asked), so no second status round-trip or retry is needed.
+# Sets GRANTED_CORES on success; on denial clears LEASE_ID so nothing this
+# process does not hold is ever heartbeated or released.
+GRANTED_CORES=""
+acquire_class_lease() {
+  local class="$1" cores="$2" min="$3" wait="$4" out size
+  GRANTED_CORES=""
+  out="$("$TARTCI_BIN" leases acquire \
+    --id "$LEASE_ID" --cores "$cores" --priority build --class "$class" \
+    --min-cores "$min" --wait-secs "$wait" \
+    --kind shipyard-local --owner "governed-build" --pid "$$" \
+    --job-id "${GITHUB_RUN_ID:-}" --json 2>/dev/null)" || { LEASE_ID=""; return 1; }
+  printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || { LEASE_ID=""; return 1; }
+  size="$(printf '%s' "$out" \
+    | grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
+    | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
+  if ! positive_int "$size" || [ "$size" -gt "$cores" ]; then
+    "$TARTCI_BIN" leases release --id "$LEASE_ID" --json >/dev/null 2>&1 || true
+    LEASE_ID=""
+    return 1
+  fi
+  GRANTED_CORES="$size"
+  return 0
+}
+
 jobs=""
 qos=""
 FLOOR_GRANTED=0
+BUILD_CLASS="$(build_class)"
+if [ -n "${PULP_BUILD_CLASS:-}" ] && [ "${PULP_BUILD_CLASS}" != "$BUILD_CLASS" ]; then
+  log "unknown PULP_BUILD_CLASS=${PULP_BUILD_CLASS}; running as $BUILD_CLASS"
+fi
 # A caller may request a lower cap (for example, `pulp build -j2`).  Apply it
 # only after lease admission: it can reduce the granted share, never enlarge
 # it.  The value is deliberately read before this script exports its own
@@ -515,6 +594,16 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
   # Host profile is available → size the lease from it.
   jobs="$(printf '%s\n' "$profile" | awk -F= '/^PULP_BUILD_JOBS=/{print $2; exit}')"
   qos="$(printf '%s\n' "$profile" | awk -F= '/^TARTCI_AGENT_QOS=/{print $2; exit}')"
+  governor_schema="$(profile_value "$profile" TARTCI_GOVERNOR_SCHEMA)"
+  if [ "$BUILD_CLASS" = "interactive" ]; then
+    # Someone is waiting: never background QoS, whatever the host role says.
+    qos="normal"
+    ijobs="$(profile_value "$profile" TARTCI_INTERACTIVE_BUILD_JOBS)"
+    if positive_int "$governor_schema" && positive_int "$ijobs"; then jobs="$ijobs"; fi
+  elif positive_int "$governor_schema"; then
+    bqos="$(profile_value "$profile" TARTCI_BACKGROUND_QOS)"
+    if [ -n "$bqos" ]; then qos="$bqos"; fi
+  fi
   [ -n "$jobs" ] && [ "$jobs" -ge 1 ] 2>/dev/null || jobs="$(tier0_jobs)"
   # Apply a caller's lower cap before admission so it does not reserve a
   # profile-sized lease that the build will never use. A cap can reduce the
@@ -526,7 +615,43 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
   fi
   LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
   admission_jobs="$jobs"
-  if acquire_lease "$jobs"; then
+  if positive_int "$governor_schema" && [ "$BUILD_CLASS" = "interactive" ]; then
+    # Interactive on a class-aware store: take whatever share fits now (down to
+    # the host's interactive minimum), waiting briefly for that minimum rather
+    # than falling to a background-QoS floor. Then a leaseless floor at
+    # NORMAL QoS — still bounded, never throttled.
+    imin="$(profile_value "$profile" TARTCI_INTERACTIVE_MIN_CORES)"
+    positive_int "$imin" || imin=2
+    [ "$imin" -le "$jobs" ] || imin="$jobs"
+    iwait="${PULP_GOVERNED_BUILD_WAIT_SECS:-$(profile_value "$profile" TARTCI_INTERACTIVE_WAIT_SECS)}"
+    case "$iwait" in ''|*[!0-9]*) iwait=90 ;; esac
+    if acquire_class_lease interactive "$jobs" "$imin" "$iwait"; then
+      jobs="$GRANTED_CORES"
+      log "interactive lease acquired id=$LEASE_ID cores=$jobs (asked $admission_jobs, normal QoS)"
+      start_heartbeat
+    else
+      jobs="$(min_jobs)"
+      log "interactive lease denied after ${iwait}s — proceeding leaseless at -j$jobs (normal QoS)"
+      log_lease_holders
+    fi
+  elif positive_int "$governor_schema"; then
+    # Background on a class-aware store: the largest share of the background
+    # budget that fits, then the agent floor, then the leaseless floor.
+    if acquire_class_lease background "$jobs" 1 0; then
+      jobs="$GRANTED_CORES"
+      log "background lease acquired id=$LEASE_ID cores=$jobs (asked $admission_jobs)"
+      start_heartbeat
+    else
+      LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
+      if try_floor_lease "$admission_jobs"; then
+        :
+      else
+        jobs="$(min_jobs)"
+        log "background lease denied — proceeding leaseless at -j$jobs (floor)"
+        log_lease_holders
+      fi
+    fi
+  elif acquire_lease "$jobs"; then
     log "lease acquired id=$LEASE_ID cores=$jobs (host profile)"
     start_heartbeat
   else

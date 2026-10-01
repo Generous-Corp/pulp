@@ -28,6 +28,7 @@ import {
   pageTarget,
 } from "./browser_process.mjs";
 import {
+  captureStableFrameWithHiddenPaint,
   captureStableScreenshot,
   disableMotion,
   freezeAndMeasureDocumentExtent,
@@ -1708,8 +1709,9 @@ async function runCapture(options) {
     // is the native-composition plate: typography, SVGs, spacing, modal chrome,
     // and every non-canvas pixel remain Chromium-authoritative, while live
     // CanvasWidget programs can occupy the holes without double-painting the
-    // frozen analyzer/minimap frame underneath them.
-    await cdp.call("Runtime.evaluate", {
+    // frozen analyzer/minimap frame underneath them. A panel without canvases
+    // hides nothing, so its plate is the accepted frame itself.
+    const hiddenCanvases = await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         globalThis.__pulpCanvasVisibilityRestore = [];
         for (const canvas of document.querySelectorAll('canvas')) {
@@ -1724,9 +1726,8 @@ async function runCapture(options) {
       })()`,
       returnByValue: true,
     });
-    let chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
-    if (!chromeBytes)
-      chromeBytes = await captureStableScreenshot(cdp, screenshotOptions);
+    const chromeBytes = await captureStableFrameWithHiddenPaint(
+      cdp, screenshotOptions, screenshotBytes, hiddenCanvases.result?.value);
     await cdp.call("Runtime.evaluate", {
       expression: `(() => {
         for (const item of globalThis.__pulpCanvasVisibilityRestore || []) {

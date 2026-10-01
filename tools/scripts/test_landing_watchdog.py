@@ -29,6 +29,9 @@ import landing_watchdog as lw  # noqa: E402
 
 FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures",
                        "landing_watchdog_wedge.json")
+# The config the scheduled workflow replays the fixture against.
+CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                      ".shipyard", "config.toml")
 
 
 def iso(when: datetime) -> str:
@@ -50,7 +53,11 @@ class ReplayTheIncident(unittest.TestCase):
         self.path = os.path.join(self.tmp.name, "fixture.json")
         with open(self.path, "w", encoding="utf-8") as handle:
             handle.write(materialize(self.now))
-        self.contexts = ["macos", "Build + prove + (owner-gated) deploy"]
+        # The repository's own required set, exactly as the workflow's
+        # negative-control step reads it: the fixture has to keep producing its
+        # findings, and nothing for the healthy PR, against the live contract.
+        self.contexts = lw.required_contexts(CONFIG)
+        self.assertIn("Vellum trusted freeze", self.contexts, "config was not read")
 
     def findings(self):
         return lw.replay(self.path, self.now, self.contexts)
@@ -138,6 +145,79 @@ class Thresholds(unittest.TestCase):
         ]
         found = lw.classify_pr(self._pr(5), [], runs, self.contexts, self.now)
         self.assertEqual(found, [], "queued-with-jobs is capacity, not a concurrency hold")
+
+
+class WorkflowNegativeControl(unittest.TestCase):
+    """The scheduled workflow's first step, run the way the workflow runs it:
+    the CLI replays the unmaterialized fixture against the repository config.
+    It must exit 1 with all three finding states and leave the healthy PR alone,
+    or the workflow fails every tick before it scans anything."""
+
+    def test_cli_replay_fires_on_the_wedge_and_spares_the_healthy_pr(self):
+        import contextlib
+        import io
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = lw.main(["--config", CONFIG, "--replay", FIXTURE, "--json"])
+        self.assertEqual(code, 1, out.getvalue())
+        findings = json.loads(out.getvalue())["findings"]
+        self.assertEqual({f["state"] for f in findings}, {"absent", "unassigned", "zero_jobs"})
+        self.assertFalse([f for f in findings if f["pr"] == 8281], findings)
+
+
+class CommitStatusContexts(unittest.TestCase):
+    """A required context can be a commit status rather than a check run.
+
+    `Vellum trusted freeze` is published on a pull request's head as a status by
+    a `pull_request_target` run; read as check runs alone it is absent on every
+    pull request."""
+
+    def setUp(self):
+        self.now = datetime(2026, 9, 13, 5, 36, tzinfo=timezone.utc)
+        self.contexts = ["macos", "Vellum trusted freeze"]
+        self.pr = {
+            "number": 2,
+            "updated_at": iso(self.now - timedelta(minutes=600)),
+            "head": {"sha": "feedface" * 5},
+            "user": {"type": "User"},
+        }
+        self.checks = [{"name": "macos", "status": "completed", "conclusion": "success"}]
+
+    def _status(self, state: str, age_mins: int = 600) -> list[dict]:
+        return [{
+            "context": "Vellum trusted freeze",
+            "state": state,
+            "created_at": iso(self.now - timedelta(minutes=age_mins)),
+        }]
+
+    def test_a_status_satisfies_a_required_context(self):
+        found = lw.classify_pr(self.pr, self.checks, [], self.contexts, self.now,
+                               self._status("success"))
+        self.assertEqual(found, [], found)
+
+    def test_a_failed_status_is_present_not_absent(self):
+        found = lw.classify_pr(self.pr, self.checks, [], self.contexts, self.now,
+                               self._status("failure"))
+        self.assertEqual(found, [], "a red status is a code problem, not a wedge")
+
+    def test_without_the_status_the_context_is_absent(self):
+        # The control: same PR, same checks, no status. The finding must appear,
+        # or the test above passes because nothing is ever flagged.
+        found = lw.classify_pr(self.pr, self.checks, [], self.contexts, self.now)
+        self.assertEqual([(f["context"], f["state"]) for f in found],
+                         [("Vellum trusted freeze", "absent")])
+
+    def test_a_long_pending_status_is_unassigned(self):
+        found = lw.classify_pr(self.pr, self.checks, [], self.contexts, self.now,
+                               self._status("pending", age_mins=90))
+        self.assertEqual([(f["context"], f["state"]) for f in found],
+                         [("Vellum trusted freeze", "unassigned")])
+
+    def test_a_fresh_pending_status_is_not_a_finding(self):
+        found = lw.classify_pr(self.pr, self.checks, [], self.contexts, self.now,
+                               self._status("pending", age_mins=5))
+        self.assertEqual(found, [])
 
 
 class InstrumentSelfReport(unittest.TestCase):

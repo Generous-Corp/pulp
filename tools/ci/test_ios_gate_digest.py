@@ -24,14 +24,19 @@ import json
 import os
 import subprocess
 import sys
+import contextlib
 import tempfile
 import unittest
+from unittest import mock
+import urllib.error
 import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ios_gate_digest as igd  # noqa: E402
+sys.path.insert(0, str(HERE.parent / "scripts"))
+from test_protected_merge_receipt import BlobRedirectServer  # noqa: E402
 
 TOOLCHAIN = "Xcode 27.0 | 27.0 | 27.0"
 
@@ -258,7 +263,7 @@ class TrustedLookupTests(unittest.TestCase):
         self.assertTrue(r["trusted"])
         self.assertEqual(r["source_run_id"], 5)
 
-    def test_a_candidate_whose_api_call_fails_is_refused_not_trusted(self) -> None:
+    def test_a_candidate_whose_api_call_fails_is_a_failed_lookup_not_trusted(self) -> None:
         def fetch(url, token):
             if "/actions/artifacts?" in url:
                 return {"artifacts": [{"name": igd.artifact_name(self.D), "expired": False,
@@ -266,6 +271,45 @@ class TrustedLookupTests(unittest.TestCase):
             raise OSError("503")
         r = igd.trusted_lookup("O/R", "t", self.D, fetch=fetch, download=lambda u, t: b"")
         self.assertFalse(r["trusted"])
+        self.assertEqual(r["refusals"], [])
+        self.assertEqual(r["lookup_errors"], ["run 3: OSError: 503"])
+
+    def test_a_401_download_reads_as_a_failed_lookup_not_as_no_receipt(self) -> None:
+        fetch, _ = self.world({7: self.run_rec(7)}, {})
+
+        def download(url, token):
+            err = urllib.error.HTTPError(url, 401, "Server failed to authenticate the request", {}, io.BytesIO())
+            self.addCleanup(err.close)
+            raise err
+        hit = igd.trusted_lookup("O/R", "t", self.D, fetch=fetch, download=download)
+        d = igd.decide("enforce", "merge_group", 123, hit)
+        self.assertEqual(d["action"], "run")
+        self.assertTrue(d["lookup_failed"])
+        self.assertTrue(d["reason"].startswith(
+            "receipt lookup failed: HTTP 401 Server failed to authenticate the request"), d["reason"])
+        self.assertIn("**receipt lookup failed: HTTP 401", igd.summary_line(d, self.D))
+
+    def test_absent_refused_and_failed_lookups_read_differently(self) -> None:
+        self.assertEqual(igd.untrusted_reason({"candidates": 0}), "no matching receipt for this digest")
+        self.assertEqual(igd.untrusted_reason({"candidates": 2, "refusals": ["run 1: fork"]}),
+                         "no trusted PASS receipt for this digest")
+        self.assertIn("receipt lookup failed: HTTP 401",
+                      igd.untrusted_reason({"candidates": 1, "lookup_errors": ["run 1: HTTP 401 x"]}))
+        self.assertFalse(igd.decide("enforce", "merge_group", 123, {"candidates": 0})["lookup_failed"])
+
+    def test_the_default_download_follows_the_blob_redirect_without_the_token(self) -> None:
+        """The real transport against a redirect whose blob host refuses a
+        forwarded token, as GitHub's artifact storage does."""
+        with BlobRedirectServer(marker_zip(self.D, 7)) as server:
+            fetch, _ = self.world({7: self.run_rec(7)}, {})
+            arts = fetch("/actions/artifacts?", "tok")["artifacts"]
+            arts[0]["archive_download_url"] = server.archive_url
+
+            def fetch_with_url(url, token):
+                return {"artifacts": arts} if "/actions/artifacts?" in url else fetch(url, token)
+            r = igd.trusted_lookup("O/R", "tok", self.D, fetch=fetch_with_url)
+            self.assertTrue(r["trusted"], r)
+            self.assertEqual(server.blob_saw_authorization, [False])
 
 
 class DecideTests(unittest.TestCase):
@@ -319,6 +363,28 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(vals["ios_action"], "run")
             self.assertEqual(vals["ios_digest"], fx.digest())
             self.assertIn("iOS compile gate: ran", summary.read_text())
+
+    def test_cli_decide_reports_a_failed_lookup_as_a_warning(self) -> None:
+        failed = {"found": True, "trusted": False, "candidates": 4, "refusals": [],
+                  "lookup_errors": ["run 9: HTTP 401 Server failed to authenticate the request"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = Fixture(Path(tmp))
+            env_out, summary = Path(tmp) / "decision.env", Path(tmp) / "summary.md"
+            out = io.StringIO()
+            with mock.patch.object(igd, "trusted_lookup", return_value=failed), \
+                    mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), \
+                    contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                rc = igd.main(["igd", "decide", "--repo", str(fx.repo), "--repository", "O/R",
+                               "--token", "t", "--run-id", "123", "--event", "merge_group",
+                               "--toolchain-id", TOOLCHAIN, "--env-out", str(env_out)])
+            self.assertEqual(rc, 0)
+            lines = out.getvalue().splitlines()
+            warning = next(l for l in lines if l.startswith("::warning title=ios-gate-receipt-lookup::"))
+            self.assertIn("receipt lookup failed: HTTP 401", warning)
+            notice = next(l for l in lines if l.startswith("::notice title=ios-gate-shadow::"))
+            self.assertIn("receipt lookup failed: HTTP 401", json.loads(notice.split("::", 2)[2])["lookup_error"])
+            self.assertIn("receipt lookup failed: HTTP 401", summary.read_text())
+            self.assertIn("ios_action=run", env_out.read_text())
 
 
 if __name__ == "__main__":

@@ -262,7 +262,7 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
-add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/callback_cost_probe.cpp support/transition_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis pulp::audio)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
@@ -276,6 +276,18 @@ add_executable(pulp-test-render-scenario test_render_scenario.cpp)
 target_link_libraries(pulp-test-render-scenario PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-render-scenario PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-render-scenario)
+# Per-callback cost at state transitions. The operation-count gate is
+# deterministic and stays on the required lane; its CPU-time twin
+# ([performance]-tagged cases) is load-sensitive and carries the
+# `performance` label.
+pulp_add_test_suite(pulp-test-transition-cost
+    SOURCES test_transition_cost.cpp test_transition_cost_timing.cpp
+    LIBRARIES pulp-audio-test-support pulp::signal-fft-backend
+    TEST_SPEC "~[performance]")
+catch_discover_tests(pulp-test-transition-cost
+    TEST_SPEC "[performance]"
+    TEST_PREFIX "performance::"
+    LABELS performance)
 add_executable(pulp-test-audio-support test_audio_support.cpp)
 target_link_libraries(pulp-test-audio-support PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-support PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
@@ -562,8 +574,8 @@ add_executable(pulp-test-cross-platform-audio-golden
     test_cross_platform_audio_golden.cpp)
 target_link_libraries(pulp-test-cross-platform-audio-golden
     PRIVATE pulp::audio pulp::signal Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-cross-platform-audio-golden PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cross-platform-audio-golden
+    PATHS test/fixtures/audio/cross_platform_signal_chain.wav)
 target_compile_options(pulp-test-cross-platform-audio-golden PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>
     $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:strict>)
@@ -586,8 +598,8 @@ catch_discover_tests(pulp-test-negative-path)
 # iOS foundation tests (platform detection, safe area geometry, touch events,
 # AUv3 HostApp template shape).
 pulp_add_test_suite(pulp-test-ios-foundation GROUP pulp-test-group-app-view
-    LIBRARIES pulp::view pulp::platform
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    LIBRARIES pulp::view pulp::platform)
+pulp_test_data(pulp-test-ios-foundation PATHS templates/ios-auv3/HostApp/ContentView.swift)
 # Identity/UUID tests
 pulp_add_test_suite(pulp-test-identity LIBRARIES pulp::runtime)
 # WebView tests (requires PULP_BUILD_WEBVIEW — WebViewPanel::create is only compiled when ON)
@@ -972,5 +984,5 @@ pulp_add_test_suite(pulp-test-widget-metrics GROUP pulp-test-group-app-view
 # they annotate, in both directions. Carries the negative controls that prove
 # the audit fails closed on a grown, shrunk, or mislabelled catalog node.
 pulp_add_test_suite(pulp-test-forge-descriptor-audit GROUP pulp-test-group-app-host
-    LIBRARIES pulp::host
-    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    LIBRARIES pulp::host)
+pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.json)

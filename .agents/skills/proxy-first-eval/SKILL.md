@@ -35,9 +35,23 @@ it load-dependent, and do not let it decide.
 | Merge-queue churn | merge-queue attempts per merged PR | `merge_group` runs / PRs merged in the window |
 | Queue ejections | ejections **by cause** (red check, timeout, wedge, neighbour failure) | merge-queue events + the failing check-run's `output.title` |
 | Build speed | compile units rebuilt, cache hit rate, blast radius of a header | `tools/scripts/build_speed_scorecard.py report --split <ISO-time>` |
+| Test-result reuse: benefit | test-seconds skipped ÷ merge-group test-seconds, per group (ctest per-test durations, never elapsed wall time) | ctest log lines / JUnit `time` per test; `reuse_policy_replay.py score` |
+| Test-result reuse: safety | false skips (group tests that FAILED which the policy would have skipped) | replay corpus outcome vs policy verdict; live: sampled re-run failures |
+| Test-result reuse: flakes | flake-skips (skipped tests whose fail was retried to pass or exonerated) | attempts > 1 in JUnit; exoneration shadow annotation |
+| Receipt supply | receipts issued ÷ eligible PR heads | issuer notice / artifact listing vs full-suite green heads |
+| Receipt use | reuse ÷ evaluated groups | `shipyard-receipt-decision/v1` annotations, by verdict and reason |
 
 Normalise every count for volume: a rate per job, per PR or per merge, never a
 raw total across windows of different traffic.
+
+A reuse policy (anything that lets a merge group skip tests an earlier run
+proved) ships only when `tools/scripts/reuse_policy_replay.py score` reads
+**0 false skips** over the history window; its benefit is reported beside that,
+never instead of it. Controls on the same corpus: the `none` policy reads 0%
+benefit, `whole-receipt` on a tree-identical pair reads 100%, and the
+`score --scenarios` fixtures include a synthetic failing record that must read
+1 false skip. A policy whose coverage is small is "insufficient sample", not
+safe.
 
 ### DSP / audio
 
@@ -126,6 +140,9 @@ Context:     wall time <before -> after>, load-dependent, not the verdict
   its timing columns as context.
 - `tools/scripts/build_speed_scorecard.py report --split <ISO-time>` — build
   proxies split at the change.
+- `tools/scripts/reuse_policy_replay.py collect|score` — replays a
+  test-result reuse policy over merge-queue history: benefit, false skips,
+  flake-skips, coverage, and the named incident scenarios.
 - `audio-harness` skill (C++ lane, gating) and quality-lab / `/audio-compare`
   (advisory A/B with timestamped detectors).
 - Visual-compare tools in the CLAUDE.md tool registry, each with its

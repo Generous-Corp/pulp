@@ -192,9 +192,9 @@ void SampleRegionAllpassProcessor::process(audio::BufferView<float>& output,
         std::copy_n(input_ptr, frames, input_alias_scratch_.data());
         const std::array<const float*, 1> safe_ptrs{input_alias_scratch_.data()};
         const audio::BufferView<const float> safe_input(safe_ptrs.data(), 1, context.num_samples);
-        graph_.process(output, safe_input, context.num_samples);
+        graph_.process(output, safe_input, context.num_samples, context);
     } else {
-        graph_.process(output, input, context.num_samples);
+        graph_.process(output, input, context.num_samples, context);
     }
 }
 

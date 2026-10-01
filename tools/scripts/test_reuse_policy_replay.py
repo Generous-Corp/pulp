@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""Tests for tools/scripts/reuse_policy_replay.py and its collector, reuse_replay_collect.py.
+
+What must hold:
+- every named scenario fixture scores to its stated verdict, and all nine
+  scenarios from the design plus the inert-drift rules are present;
+- a group test that FAILED (after until-pass:2) and that a policy skips is a
+  false skip, and a policy with one is UNSAFE and makes `score` exit 1;
+- a skipped fail-then-pass test is a flake-skip, never a false skip;
+- a pair lacking what a policy needs runs everything: it lowers coverage and
+  is never counted as a skip;
+- the job-log parser takes the final outcome and counts attempts across the
+  retry lines ctest prints without a counter, and reads the receipt verdict
+  from the rendered notice, never from the step script that echoes it;
+- registered seams without a decision function refuse to score;
+- `collect` exits 1 when it finds no merge groups or no PR-head pairs.
+
+Run:
+    python3 tools/scripts/test_reuse_policy_replay.py
+"""
+from __future__ import annotations
+
+import io
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+from unittest import mock
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import reuse_policy_replay as rpr  # noqa: E402
+import reuse_replay_collect as rrc  # noqa: E402
+
+SCENARIOS = HERE / "fixtures" / "reuse_policy_replay"
+TOOL = HERE / "reuse_policy_replay.py"
+
+DESIGN_SCENARIOS = {
+    "env-read selftest", "generated-list drift", "host-shaped gate", "masked verdict",
+    "flake on one VM", "base-red poison", "iOS PostBuild crash", "unpinned tool", "stale build dir",
+    "affected-selection misses",
+}
+
+
+def group(**kw) -> dict:
+    run = {"run_id": "g1", "run_kind": "merge_group", "pr": 1, "head_sha": "h1", "group_sha": "m1",
+           "checkout_sha": "m1", "checkout_parents": ["b2", "h1"], "base_sha": "b2", "merge_tree": "t2",
+           "runner_image": None, "created_at": "2026-09-29T12:00:00Z",
+           "ctest": {"ran": True, "complete": True, "failed": 0}, "build_failed": False, "observed_decision": None}
+    run.update(kw)
+    return run
+
+
+def head(**kw) -> dict:
+    run = {"run_id": "p1", "run_kind": "pr_head", "pr": 1, "head_sha": "h1", "group_sha": None,
+           "checkout_sha": "r1", "checkout_parents": ["b1", "h1"], "base_sha": "b1", "merge_tree": "t1",
+           "runner_image": None, "created_at": "2026-09-29T11:00:00Z",
+           "ctest": {"complete": True, "full_suite": True, "failed": 0}, "receipt_issued": True,
+           "required_contexts_green": True}
+    run.update(kw)
+    return run
+
+
+def pair(drift=("docs/guides/versioning.md",), stacked=False) -> dict:
+    return {"pr": 1, "head_sha": "h1", "group_run_id": "g1", "stacked": stacked,
+            "heads": [{"run_id": "p1", "drift_files": list(drift), "drift_declared_input_hits": [],
+                       "required_contexts_green": True}]}
+
+
+def t(test_id: str, outcome: str = "pass", attempts: int = 1, dur: float = 10.0, **kw) -> dict:
+    return {"test_id": test_id, "outcome": outcome, "attempts": attempts, "duration_s": dur, **kw}
+
+
+def corpus(tests: list[dict], **pair_kw) -> rpr.Corpus:
+    return rpr.Corpus([group(), head()], [pair(**pair_kw)], tests={"g1": tests})
+
+
+class ScenarioTests(unittest.TestCase):
+    def test_every_scenario_scores_its_stated_verdict(self):
+        results = rpr.run_scenarios(SCENARIOS)
+        bad = [r for r in results if not r["ok"]]
+        self.assertEqual(bad, [], "scenario verdicts differ from the fixtures")
+        self.assertGreaterEqual(len(results), 20)
+
+    def test_all_design_scenarios_are_present(self):
+        names = {r["scenario"] for r in rpr.run_scenarios(SCENARIOS)}
+        self.assertEqual(DESIGN_SCENARIOS - names, set())
+
+    def test_cli_scenarios_exit_zero(self):
+        proc = subprocess.run([sys.executable, str(TOOL), "score", "--scenarios", str(SCENARIOS)],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertNotIn("FAIL", proc.stdout)
+
+    def test_a_wrong_expectation_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = json.loads((SCENARIOS / "inert_drift_rules.json").read_text())
+            doc["cases"] = doc["cases"][:1]
+            doc["cases"][0]["expect"]["false_skips"] = 0  # the truth is 1
+            (Path(tmp) / "x.json").write_text(json.dumps(doc))
+            results = rpr.run_scenarios(Path(tmp))
+            self.assertFalse(results[0]["ok"])
+            self.assertEqual(results[0]["mismatches"]["false_skips"], {"expected": 0, "actual": 1})
+
+
+class ScoreTests(unittest.TestCase):
+    def test_inert_drift_skipping_a_real_failure_is_a_false_skip(self):
+        result = rpr.score(corpus([t("skills-doc-sync", "fail", 2), t("other")]), "inert-drift")
+        self.assertEqual(result["skipped_groups"], 1)
+        self.assertEqual(result["false_skips"], 1)
+        self.assertEqual(result["false_skip_rows"][0]["test_id"], "skills-doc-sync")
+        self.assertEqual(result["flake_skips"], 0)
+        self.assertEqual(result["verdict"], "UNSAFE: false skips")
+
+    def test_a_run_stopped_on_a_failure_is_scored(self):
+        stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
+                             tests={"g1": [t("a", "fail", 2)]})
+        self.assertEqual(rpr.score(stopped, "inert-drift")["false_skips"], 1)
+        cut = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 0}), head()], [pair()],
+                         tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(cut, "inert-drift")["statuses"], {"incomplete": 1})
+
+    def test_timeout_is_a_failure(self):
+        result = rpr.score(corpus([t("slow-one", "timeout", 2)]), "inert-drift")
+        self.assertEqual(result["false_skips"], 1)
+
+    def test_fail_then_pass_is_a_flake_skip_not_a_false_skip(self):
+        result = rpr.score(corpus([t("WorkerPool", "pass", 2), t("other")]), "inert-drift")
+        self.assertEqual(result["flake_skips"], 1)
+        self.assertEqual(result["false_skips"], 0)
+
+    def test_exonerated_failure_is_a_flake_skip(self):
+        result = rpr.score(corpus([t("x", "fail", 2, exonerated=True)]), "inert-drift")
+        self.assertEqual((result["flake_skips"], result["false_skips"]), (1, 0))
+
+    def test_passing_skipped_group_reads_full_benefit(self):
+        result = rpr.score(corpus([t("a", dur=5.0), t("b", dur=15.0)]), "inert-drift", {"min_sample": 1})
+        self.assertEqual(result["benefit_median"], 1.0)
+        self.assertEqual(result["skipped_test_seconds"], 20.0)
+        self.assertEqual(result["verdict"], "safe over the window")
+
+    def test_quartiles_come_from_the_per_group_shares(self):
+        groups = [group(run_id=f"g{i}", group_sha=f"m{i}", checkout_sha=f"m{i}") for i in range(4)]
+        pairs = [dict(pair(), group_run_id=f"g{i}") for i in range(4)]
+        tests = {f"g{i}": [t("a", dur=1.0), t("b", dur=1.0)] for i in range(4)}
+        pairs[0]["heads"][0]["drift_files"] = ["core/x.cpp"]  # runs: share 0
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (1.0, 1.0, 1.0))
+        self.assertEqual(result["group_test_seconds"], 8.0)
+        pairs[1]["heads"][0]["drift_files"] = ["core/x.cpp"]
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (0.0, 0.5, 1.0))
+
+    def test_skip_nothing_control_reads_zero(self):
+        result = rpr.score(corpus([t("a", "fail", 2)]), "none")
+        self.assertEqual((result["benefit_median"], result["false_skips"]), (0.0, 0))
+
+    def test_failure_in_a_group_the_policy_runs_is_not_a_false_skip(self):
+        result = rpr.score(corpus([t("a", "fail", 2)], drift=("core/view/src/widgets.cpp",)), "inert-drift")
+        self.assertEqual((result["skipped_groups"], result["false_skips"]), (0, 0))
+
+    def test_missing_data_runs_everything_and_lowers_coverage(self):
+        c = corpus([t("a", "fail", 2)], stacked=None)
+        result = rpr.score(c, "inert-drift")
+        self.assertEqual((result["evaluable_pairs"], result["coverage"], result["false_skips"]), (0, 0.0, 0))
+
+    def test_whole_receipt_needs_exact_base_and_tree(self):
+        result = rpr.score(corpus([t("a")]), "whole-receipt")
+        self.assertEqual(result["skipped_groups"], 0)
+        exact = rpr.Corpus([group(base_sha="b1", checkout_parents=["b1", "h1"], merge_tree="t1"), head()],
+                           [pair(drift=())], tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(exact, "whole-receipt")["skipped_groups"], 1)
+
+    def test_head_without_green_full_suite_is_not_a_receipt(self):
+        for override in ({"ctest": {"complete": True, "full_suite": False, "failed": 0}},
+                         {"ctest": {"complete": True, "full_suite": True, "failed": 1}},
+                         {"ctest": {"complete": False, "full_suite": True, "failed": 0}}):
+            c = rpr.Corpus([group(), head(**override)], [pair()], tests={"g1": [t("a", "fail", 2)]})
+            result = rpr.score(c, "inert-drift")
+            self.assertEqual((result["skipped_groups"], result["evaluable_pairs"]), (0, 0), override)
+
+    def test_observed_decisions_are_compared(self):
+        c = rpr.Corpus([group(observed_decision="refuse"), head()], [pair()], tests={"g1": [t("a")]})
+        self.assertEqual(rpr.score(c, "inert-drift")["replay_vs_observed"]["replay_only"], 1)
+
+    def test_seams_refuse_to_score(self):
+        for name in ("suite-source-key", "per-executable"):
+            with self.assertRaises(rpr.PolicyNotImplemented):
+                rpr.score(corpus([t("a")]), name)
+
+    def test_cli_score_exits_one_on_a_false_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            rpr.write_jsonl(root / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(root / "pairs.jsonl", [pair()])
+            rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("a", "fail", 2)])
+            proc = subprocess.run([sys.executable, str(TOOL), "score", "--corpus", tmp, "--policy", "inert-drift"],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("FALSE SKIPS 1", proc.stdout)
+            rpr.write_jsonl(root / "tests" / "g1.jsonl.gz", [t("a")])
+            proc = subprocess.run([sys.executable, str(TOOL), "score", "--corpus", tmp, "--policy", "inert-drift"],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+
+class ValidateTests(unittest.TestCase):
+    def test_bound_records_pass(self):
+        self.assertIsNone(rpr.validate_run(group()))
+        self.assertIsNone(rpr.validate_run(head()))
+
+    def test_unbound_records_are_rejected(self):
+        self.assertIsNotNone(rpr.validate_run(head(checkout_parents=["b1", "older-head"])))
+        self.assertIsNotNone(rpr.validate_run(group(checkout_sha="other")))
+        self.assertIsNotNone(rpr.validate_run(head(checkout_sha=None)))
+        self.assertIsNotNone(rpr.validate_run(head(base_sha="b9")))
+
+
+LOG = """\
+2026-09-30T19:05:11.2268210Z [command]/opt/homebrew/bin/git log -1 --format=%H
+2026-09-30T19:05:11.2328200Z 491da3c2f9351d7ba7da866b8aa028aa6ac0088b
+2026-09-30T19:09:34.0705630Z   echo "::notice title=protected receipt issued (macos)::exact-tree receipt for $PR_HEAD_SHA on base $PR_BASE_SHA"
+2026-09-30T19:09:34.0705640Z   echo "::warning title=protected receipt NOT issued (macos)::${reason} — the merge group will validate in full"
+2026-09-30T19:09:34.1319140Z ctest gate args: label_exclude=validation|^slow$|source-selftest stop_on_failure=--stop-on-failure
+2026-09-30T19:09:34.1741680Z Test project /Users/admin/actions-runner/_work/pulp/pulp/build-macos
+2026-09-30T19:10:13.5818700Z     1/5 Test #21481: pulp-browser-capture-node-integration .......   Passed   38.26 sec
+2026-09-30T19:10:14.5818700Z     2/5 Test     #4: WorkerPool cold-idles workers without blocking later batches ....***Failed    4.46 sec
+2026-09-30T19:10:15.5818700Z     3/5 Test     #5: register_font_url: detached worker ....***Skipped   0.01 sec
+2026-09-30T19:10:16.5818700Z     4/5 Test     #6: a test whose name says Failed ....   Passed    1.00 sec
+2026-09-30T19:10:17.5818700Z           Test     #4: WorkerPool cold-idles workers without blocking later batches ....   Passed    0.50 sec
+2026-09-30T19:10:18.5818700Z     5/5 Test     #7: census ....***Timeout 120.01 sec
+2026-09-30T19:14:17.8783890Z 80% tests passed, 1 tests failed out of 5
+2026-09-30T19:14:18.0000000Z Test project /Users/admin/actions-runner/_work/pulp/pulp/build-macos
+2026-09-30T19:14:19.0000000Z     1/1 Test #1: installed-capability ....   Passed    0.96 sec
+2026-09-30T19:14:20.0000000Z 100% tests passed, 0 tests failed out of 1
+"""
+
+
+class ParseTests(unittest.TestCase):
+    def parse(self, extra: str = "") -> dict:
+        return rrc.parse_job_log((LOG + extra).splitlines())
+
+    def test_checkout_and_largest_session(self):
+        p = self.parse()
+        self.assertEqual(p["checkout_sha"], "491da3c2f9351d7ba7da866b8aa028aa6ac0088b")
+        self.assertEqual(p["ctest"]["executed"], 5)
+        self.assertEqual(p["ctest"]["selected"], 5)
+        self.assertTrue(p["ctest"]["complete"])
+        self.assertEqual(p["ctest"]["label_exclude"], "validation|^slow$|source-selftest")
+
+    def test_retry_lines_become_attempts_with_the_final_outcome(self):
+        tests = {x["test_id"]: x for x in self.parse()["tests"]}
+        retried = tests["WorkerPool cold-idles workers without blocking later batches"]
+        self.assertEqual((retried["attempts"], retried["outcome"], retried["duration_s"]), (2, "pass", 4.96))
+        self.assertEqual(tests["register_font_url: detached worker"]["outcome"], "skipped")
+        self.assertEqual(tests["a test whose name says Failed"]["outcome"], "pass")
+        self.assertEqual(tests["census"]["outcome"], "timeout")
+        self.assertEqual(self.parse()["ctest"]["failed"], 1)
+
+    def test_receipt_verdict_comes_from_the_rendered_notice_not_the_script(self):
+        self.assertIsNone(self.parse()["receipt_issued"])
+        issued = "2026-09-30T19:20:00.0000000Z ##[notice]exact-tree receipt for " + "a" * 40 + " on base " + "b" * 40 + "\n"
+        self.assertIs(self.parse(issued)["receipt_issued"], True)
+        refused = "2026-09-30T19:20:00.0000000Z ##[warning]selection too narrow — the merge group will validate in full\n"
+        self.assertIs(self.parse(refused)["receipt_issued"], False)
+
+    def test_a_verbatim_repeated_line_is_not_a_retry(self):
+        line = "2026-09-30T19:10:16.5818700Z     4/5 Test     #6: a test whose name says Failed ....   Passed    1.00 sec\n"
+        self.assertIn(line, LOG)
+        tests = {x["test_id"]: x for x in rrc.parse_job_log(LOG.replace(line, line + line).splitlines())["tests"]}
+        self.assertEqual(tests["a test whose name says Failed"]["attempts"], 1)
+
+    def test_log_without_ctest_is_not_complete(self):
+        p = rrc.parse_job_log(LOG.splitlines()[:2])
+        self.assertEqual((p["ctest"]["ran"], p["ctest"]["complete"]), (False, False))
+
+
+class CollectControlTests(unittest.TestCase):
+    def run_main(self, manifest: dict) -> int:
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rrc.Collector, "collect", return_value=manifest), \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return rpr.main(["collect", "--since", "2026-09-01", "--out", tmp, "--token", "x"])
+
+    def test_zero_merge_groups_or_pairs_fails_the_control(self):
+        self.assertEqual(self.run_main({"merge_groups": 0, "pairs_with_head_run": 0}), 1)
+        self.assertEqual(self.run_main({"merge_groups": 5, "pairs_with_head_run": 0}), 1)
+        self.assertEqual(self.run_main({"merge_groups": 5, "pairs_with_head_run": 3}), 0)
+
+    def test_stacked_requires_the_base_to_have_landed_before_the_group(self):
+        collector = mock.Mock()
+        collector._git.return_value = subprocess.CompletedProcess([], 0)
+        g = group(base_sha="q1", created_at="2026-09-29T12:00:00Z")
+        queue = {"q1": {"pr": 7}}
+        self.assertTrue(rrc._stacked(g, queue, {7: "2026-09-29T12:30:00Z"}, collector))
+        self.assertFalse(rrc._stacked(g, queue, {7: "2026-09-29T11:30:00Z"}, collector))
+        self.assertIsNone(rrc._stacked(g, queue, {}, collector))
+        collector._git.return_value = subprocess.CompletedProcess([], 1)
+        self.assertTrue(rrc._stacked(g, queue, {7: "2026-09-29T11:30:00Z"}, collector))
+
+
+class DriftTests(unittest.TestCase):
+    def collector(self, local: bool) -> rrc.Collector:
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.commit = lambda sha: {"tree": "t", "parents": [], "local": local}
+        c.prime_commits = lambda shas: None
+        c.diff_files = lambda a, b: {("r1", "m1"): ["docs/a.md"], ("b1", "b2"): ["docs/a.md", "core/x.cpp"]}[(a, b)]
+        return c
+
+    def test_local_checkouts_diff_the_trees(self):
+        self.assertEqual(self.collector(True).drift(head(), group()), (["docs/a.md"], "trees"))
+
+    def test_unfetchable_checkout_falls_back_to_the_base_superset(self):
+        self.assertEqual(self.collector(False).drift(head(), group()), (["docs/a.md", "core/x.cpp"], "bases"))
+
+    def test_identical_trees_have_no_drift(self):
+        self.assertEqual(self.collector(False).drift(head(merge_tree="t2"), group()), ([], "trees"))
+
+    def test_different_heads_have_no_base_fallback(self):
+        other = group(head_sha="h9", checkout_parents=["b2", "h9"])
+        self.assertEqual(self.collector(False).drift(head(), other), (None, None))
+
+
+class RunRecordTests(unittest.TestCase):
+    def record(self, parsed: dict, conclusion: str = "failure") -> dict:
+        c = rrc.Collector.__new__(rrc.Collector)
+        job = {"id": 5, "name": "macos", "runner_name": "gate-vm-1", "conclusion": conclusion}
+        c.jobs = lambda run_id: [job]
+        c.parsed_log = lambda job_id: parsed
+        c.commit = lambda sha: {"tree": "t", "parents": ["b", "h"], "local": True}
+        run = {"id": 1, "head_sha": "m1", "created_at": "2026-09-01T00:00:00Z", "updated_at": None, "conclusion": "failure"}
+        return c.run_record(run, "merge_group", 7, "h")[0]
+
+    def test_failure_after_checkout_without_ctest_is_a_build_failure(self):
+        rec = self.record({"checkout_sha": "m1", "ctest": {"ran": False}, "tests": [], "receipt_issued": None})
+        self.assertTrue(rec["build_failed"])
+        self.assertEqual(rpr.pair_status(rec), "build_failed")
+
+    def test_failure_before_checkout_ran_nothing(self):
+        rec = self.record({"checkout_sha": None, "ctest": {}, "tests": [], "receipt_issued": None})
+        self.assertFalse(rec["build_failed"])
+        self.assertEqual(rec["checkout_sha"], "m1")
+        self.assertEqual(rpr.pair_status(rec), "no_suite")
+
+
+class LogDownloadTests(unittest.TestCase):
+    class Resp:
+        def __init__(self, body: bytes, declared: int) -> None:
+            self.body, self.headers = body, {"Content-Length": str(declared)}
+        def read(self) -> bytes:
+            return self.body
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def github(self, responses: list) -> rrc.GitHub:
+        gh = rrc.GitHub("o/r", "token")
+        gh._request = lambda url, accept: responses.pop(0)
+        return gh
+
+    def test_a_short_body_is_an_error_not_a_short_log(self):
+        gh = self.github([self.Resp(LOG.encode()[:300], len(LOG.encode()))])
+        with self.assertRaises(rrc.TruncatedLog):
+            gh.job_log_lines(1)
+
+    def test_a_truncated_download_is_retried_and_never_cached_partial(self):
+        full = LOG.encode()
+        c = rrc.Collector.__new__(rrc.Collector)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(rrc.time, "sleep"):
+            c.cache = Path(tmp)
+            c.gh = self.github([self.Resp(full[:300], len(full)), self.Resp(full, len(full))])
+            self.assertEqual(c.parsed_log(7)["ctest"]["executed"], 5)
+            c.gh = self.github([self.Resp(full[:300], len(full))] * 4)
+            self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
+            self.assertTrue((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "7.json.gz").is_file())
+            self.assertFalse((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "8.json.gz").exists())
+
+
+class SourceKeyClassifyTests(unittest.TestCase):
+    MAP = {
+        "compiled": {"executables": ["test/a"], "sources": ["test/test_a.cpp"]},
+        "other-exe": {"executables": ["test/b"], "sources": ["test/test_b.cpp"]},
+        "gpu": {"executables": ["test/c"], "sources": [], "resource_locks": ["pulp_gpu"]},
+        "browser": {"executables": ["test/d"], "sources": [], "labels": ["browser-capture"]},
+        "renamed": {"executables": ["test/gone"], "sources": []},
+        "script": {"labels": []},
+        "sealed": {"labels": ["hermetic"]},
+        "list-drift": {"labels": []},
+    }
+    ENTRIES = {"script": {"inputs": ["tools/x"]}, "sealed": {"inputs": ["tools/y"]},
+               "list-drift": {"inputs": ["tools/z"]}}
+    EXES = {"test/a", "test/b", "test/c", "test/d"}
+
+    def run_sets(self, drift, rebuilt=frozenset(), head=None, group=None):
+        out = rrc.classify_source_keys(list(drift), list(self.MAP) + ["unmapped"], self.MAP,
+                                       head if head is not None else self.ENTRIES,
+                                       group if group is not None else self.ENTRIES, set(rebuilt), self.EXES)
+        return {v: set(d["run"]) for v, d in out.items()}, out
+
+    def test_unrelated_drift_skips_mapped_tests_but_never_unknown_ones(self):
+        runs, _ = self.run_sets(["docs/guide.md"])
+        self.assertEqual(runs["per-entry"], {"renamed", "unmapped"})
+        self.assertEqual(runs["strict-data"], {"renamed", "unmapped", "gpu", "browser", "script", "list-drift"})
+
+    def test_a_rebuilt_executable_or_drifted_source_runs_its_tests(self):
+        runs, _ = self.run_sets(["core/x.cpp"], rebuilt={"test/a"})
+        self.assertIn("compiled", runs["per-entry"])
+        self.assertNotIn("other-exe", runs["per-entry"])
+        self.assertIn("other-exe", self.run_sets(["test/test_b.cpp"])[0]["per-entry"])
+
+    def test_strict_runs_compiled_tests_on_data_and_everything_on_cmake(self):
+        runs, out = self.run_sets(["tools/import-design/fixture.json"])
+        self.assertNotIn("compiled", runs["per-entry"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], 0)
+        runs, out = self.run_sets(["test/cmake/x_tests.cmake"])
+        self.assertIn("compiled", runs["strict-data"])
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], len(self.EXES))
+        self.assertEqual(out["per-entry"]["executables_rebuilt"], 0)
+
+    def test_script_tests_follow_their_own_entry(self):
+        runs, _ = self.run_sets(["tools/x/run.py"])
+        self.assertIn("script", runs["per-entry"])
+        self.assertNotIn("sealed", runs["per-entry"])
+        changed = dict(self.ENTRIES, sealed={"inputs": ["tools/y", "tools/new"]})
+        self.assertIn("sealed", self.run_sets(["docs/a.md"], group=changed)[0]["per-entry"])
+
+    def test_a_list_edit_reruns_declared_scripts_only_at_list_level(self):
+        runs, _ = self.run_sets(["test/ctest_script_inputs.json"])
+        self.assertNotIn("script", runs["per-entry"])
+        self.assertIn("script", runs["list-level"])
+
+    def test_strict_skips_only_hermetic_scripts_and_never_environment_bound_tests(self):
+        runs, _ = self.run_sets(["docs/a.md"])
+        self.assertNotIn("sealed", runs["strict-data"])
+        self.assertIn("script", runs["strict-data"])
+        self.assertTrue({"gpu", "browser"} <= runs["strict-data"])
+        self.assertFalse({"gpu", "browser"} & runs["per-entry"])
+
+    def test_an_unreadable_list_makes_script_tests_unknown(self):
+        runs, _ = self.run_sets(["docs/a.md"], head={})
+        self.assertIn("script", runs["per-entry"])
+        out = rrc.classify_source_keys(["docs/a.md"], ["script"], self.MAP, None, self.ENTRIES, set(), self.EXES)
+        self.assertEqual(out["per-entry"]["run"], ["script"])
+
+
+class SourceKeyPolicyTests(unittest.TestCase):
+    def corpus(self, head_tests, run, rebuilt=1, total=4):
+        p = pair()
+        p["source_key"] = {"strict-data": {"run": run, "executables_total": total, "executables_rebuilt": rebuilt}}
+        p["source_key_head_run_id"] = "p1"
+        return rpr.Corpus([group(), head()], [p],
+                          tests={"g1": [t("a", "fail", 2), t("b"), t("c")], "p1": head_tests})
+
+    def test_skips_unchanged_tests_the_head_passed_first_time(self):
+        c = self.corpus([t("a"), t("b"), t("c", "pass", 2)], run=[])
+        result = rpr.score(c, "source-key")
+        self.assertEqual(result["false_skips"], 1)          # a: unchanged, passed on the head, failed here
+        self.assertEqual(result["skipped_test_seconds"], 20.0)  # c passed only on retry: not evidence
+        self.assertEqual(result["build_skipped_pooled"], 0.75)
+
+    def test_a_test_in_the_run_set_or_absent_from_the_head_runs(self):
+        result = rpr.score(self.corpus([t("b")], run=["b"]), "source-key")
+        self.assertEqual((result["false_skips"], result["skipped_test_seconds"]), (0, 0.0))
+
+    def test_no_reconstructed_key_is_unevaluable(self):
+        c = rpr.Corpus([group(), head()], [pair()], tests={"g1": [t("a", "fail", 2)]})
+        result = rpr.score(c, "source-key")
+        self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
+
+
+class GraftTests(unittest.TestCase):
+    def test_parents_are_read_through_shallow_grafts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            for n in ("a", "b"):
+                (repo / n).write_text(n)
+                subprocess.run(git + ["add", n], check=True)
+                subprocess.run(git + ["commit", "-q", "-m", n], check=True)
+            head_sha, parent_sha = subprocess.run(git + ["rev-parse", "HEAD", "HEAD~1"], check=True,
+                                                  capture_output=True, text=True).stdout.split()
+            (repo / ".git" / "shallow").write_text(head_sha + "\n")
+            grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True)
+            self.assertEqual(grafted.stdout.strip(), "", "control: the graft hides the parent from plain git")
+            c = rrc.Collector.__new__(rrc.Collector)
+            c.repo, c.cache = repo, Path(tmp) / "cache"
+            self.assertEqual(c._read_commits([head_sha])[head_sha]["parents"], [parent_sha])
+
+
+if __name__ == "__main__":
+    unittest.main()

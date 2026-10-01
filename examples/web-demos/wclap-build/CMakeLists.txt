@@ -41,6 +41,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(PULP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 include(${PULP_ROOT}/tools/cmake/PulpWclap.cmake)
 
+if(PULP_SAMPLE_REGION_WEB)
+    set(_allpass ${PULP_ROOT}/examples/sample-region-allpass)
+    pulp_add_wclap(SampleRegionAllpass
+        ENTRY ${CMAKE_CURRENT_SOURCE_DIR}/sample_region_allpass_wclap.cpp
+        SOURCES ${_allpass}/allpass_graph.cpp ${_allpass}/allpass_processor.cpp
+        INCLUDES ${_allpass})
+    return()
+endif()
+
+
 pulp_add_wclap(PulpGain
     ENTRY    ${CMAKE_CURRENT_SOURCE_DIR}/pulp_gain_wclap.cpp
     INCLUDES ${PULP_ROOT}/examples/pulp-gain)

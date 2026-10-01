@@ -53,7 +53,7 @@ jobs:
             # after the branch fork and can report an unrelated duplicate
             # family claim as if this PR authored it.
             protected_base="$(git rev-parse --verify "$GITHUB_SHA^1")"
-            git fetch --no-tags origin refs/heads/main
+            tools/ci/net-retry.sh git fetch --no-tags origin refs/heads/main
             live_base="$(git rev-parse --verify FETCH_HEAD)"
             if [[ "$protected_base" != "$live_base" ]]; then
               echo "proposed merge base $protected_base is not current protected main $live_base; rerun this check" >&2
@@ -70,7 +70,7 @@ jobs:
               echo "head=$MERGE_HEAD"
               echo "source_head=$MERGE_HEAD"
             } >> "$GITHUB_OUTPUT"
-            git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"
+            tools/ci/net-retry.sh git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"
           fi
 
       - name: Validate durable source-authority events
@@ -86,7 +86,7 @@ jobs:
             --output "$RUNNER_TEMP/vellum-expansion-watch.json"
 
       - name: Install inventory parser dependency
-        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+        run: tools/ci/net-retry.sh python3 -m pip install --quiet 'pyyaml==6.0.2'
 
       - name: Run freeze-check negative controls
         run: |

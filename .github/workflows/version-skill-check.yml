@@ -244,6 +244,15 @@ jobs:
               --mode=report \
               --require-ceiling-reduction
 
+      - name: Header fan-out guard
+        # A tracked header whose translation-unit fan-out this PR grew past its
+        # ceiling (an umbrella include) fails; `Fanout-Grow:` trailer bypass.
+        run: |
+          python3 tools/scripts/header_fanout_guard.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --config tools/scripts/header_fanout_guard.json \
+              --mode=report
+
       - name: Planning-gitlink guard
         # Rejects an accidental `planning` submodule pointer bump in a PR; a
         # deliberate re-pin passes with a `Planning-Bump:` trailer.
@@ -322,6 +331,7 @@ jobs:
           python3 tools/scripts/test_gates.py
           python3 tools/scripts/test_node_abi_gate.py
           python3 tools/scripts/test_hotspot_size_guard.py
+          python3 tools/scripts/test_header_fanout_guard.py
           python3 tools/scripts/test_planning_gitlink_guard.py
           python3 tools/scripts/test_pr_check_triage.py
           python3 tools/scripts/test_version_at_land.py
@@ -364,6 +374,6 @@ jobs:
         if: vars.PULP_CLASSIFY_WIDE_NON_NATIVE == '1'
         timeout-minutes: 15
         run: |
-          python3 -m pip install --quiet 'PyYAML==6.0.2'
+          tools/ci/net-retry.sh python3 -m pip install --quiet 'PyYAML==6.0.2'
           python3 tools/ci/source_selftests.py run \
             --manifest tools/ci/wide_non_native_checks.json --min-count 7

@@ -13,11 +13,19 @@ lost DNS or had a transfer reset:
     calls transient, which excludes a resolve failure (exit 6) and a receive
     reset (exit 56) - the two that actually happened.
 
-The cargo cases run the step's real script, taken out of build.yml, with a stub
-`cargo` first on PATH that fails a set number of attempts, so the retry, the
-opt-in offline export and the non-fatal exhaustion are exercised rather than
-restated. The ordering and curl-flag cases are structural because the property
-IS the structure: which step runs first, and which flags curl receives.
+  * `brew install ccache` in the macOS bootstrap reached the Homebrew API even
+    on a gate VM whose golden already bakes ccache, and one failed attempt
+    failed the gate.
+  * The required Vellum and versioning checks installed PyYAML and fetched
+    commits with a single unretried pip or git call.
+
+The cargo and ccache cases run the step's real script, taken out of build.yml,
+with stubs first on PATH that fail a set number of attempts, so the retry, the
+opt-in offline export and the exhaustion behaviour are exercised rather than
+restated. tools/ci/net-retry.sh is driven the same way. The ordering, curl-flag
+and required-workflow cases are structural because the property IS the
+structure: which step runs first, which flags curl receives, and whether a
+network command goes through a retry.
 """
 
 from __future__ import annotations
@@ -35,7 +43,19 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github/workflows/build.yml"
+NET_RETRY = REPO / "tools/ci/net-retry.sh"
 CARGO_STEP = "Fetch pulp-rs crates"
+CCACHE_STEP = "Install ccache (macOS)"
+# Workflows that post required contexts and fetch from the network. Each pip
+# install or git fetch/clone in them must go through tools/ci/net-retry.sh, or
+# sit in a step that carries its own `for attempt` loop (a job that runs the
+# protected base commit's tools cannot rely on a helper the workflow names).
+REQUIRED_FETCH_WORKFLOWS = (
+    "vellum-freeze-check.yml",
+    "vellum-trusted-gate.yml",
+    "version-skill-check.yml",
+)
+NETWORK_COMMAND = re.compile(r"(^|[\s;&|(])(pip3? install|-m pip install|git fetch|git clone)\s")
 CHROME_STEP = "Install pinned Chrome for browser-source fidelity (macOS ARM64)"
 # Steps that run cargo against experimental/pulp-rs: the CMake custom command
 # in Build and the `cargo test` ctests in either test step.
@@ -171,6 +191,146 @@ class NoUnretriedCurlInTheBuildJob(unittest.TestCase):
                 if re.search(r"(^|[\s;&|(])curl\s", code) and "--retry-all-errors" not in code:
                     offenders.append(f"{step.get('name')}: {code.strip()[:120]}")
         self.assertEqual(offenders, [], "a curl in the build job lacks --retry-all-errors")
+
+
+def _stub(bindir: Path, name: str, body: str) -> None:
+    path = bindir / name
+    path.write_text("#!/bin/bash\n" + textwrap.dedent(body))
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _failing_stub(
+    bindir: Path, name: str, calls: Path, fail_attempts: int, rc: int = 7, counted: str = ""
+) -> None:
+    """A stub that records its argv and fails its first `fail_attempts` calls.
+
+    With `counted`, only calls whose first argument is `counted` can fail; the
+    rest succeed without consuming an attempt.
+    """
+    counter = bindir.parent / f"{name}.count"
+    counter.write_text("0")
+    only = f'[ "$1" = "{counted}" ] || exit 0' if counted else ""
+    _stub(
+        bindir,
+        name,
+        f"""\
+        printf '%s|' "$0" "$@" >> {calls}; echo >> {calls}
+        {only}
+        n=$(( $(cat {counter}) + 1 ))
+        echo "$n" > {counter}
+        [ "$n" -gt {fail_attempts} ] || exit {rc}
+        """,
+    )
+
+
+class NetRetryHelper(unittest.TestCase):
+    def _run(self, fail_attempts: int, *args: str) -> tuple[subprocess.CompletedProcess, list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            bindir = Path(tmp) / "bin"
+            bindir.mkdir()
+            calls = Path(tmp) / "calls"
+            _failing_stub(bindir, "fetchy", calls, fail_attempts)
+            proc = subprocess.run(
+                ["bash", str(NET_RETRY), *args],
+                env={"PATH": f"{bindir}:/usr/bin:/bin", "PULP_NET_RETRY_DELAY_SECS": "0"},
+                capture_output=True, text=True, timeout=60,
+            )
+            recorded = calls.read_text().splitlines() if calls.exists() else []
+            return proc, recorded
+
+    def test_first_success_runs_once(self) -> None:
+        proc, calls = self._run(0, "fetchy", "a")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("::warning::", proc.stdout)
+
+    def test_retries_a_transient_failure(self) -> None:
+        proc, calls = self._run(2, "fetchy")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(proc.stdout.count("::warning::fetchy attempt"), 2)
+
+    def test_exhaustion_returns_the_commands_own_status(self) -> None:
+        proc, calls = self._run(99, "fetchy")
+        self.assertEqual(proc.returncode, 7)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("::error::fetchy failed after 3 attempts (exit 7)", proc.stdout)
+
+    def test_arguments_pass_through_verbatim_and_are_not_echoed(self) -> None:
+        proc, calls = self._run(1, "fetchy", "has space", "https://token@example/x")
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue(all(call.endswith("|has space|https://token@example/x|") for call in calls))
+        self.assertNotIn("token@", proc.stdout + proc.stderr)
+
+    def test_no_command_is_a_usage_error(self) -> None:
+        proc = subprocess.run(["bash", str(NET_RETRY)], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2)
+
+
+class RequiredWorkflowFetchesRetry(unittest.TestCase):
+    def test_every_pip_and_git_fetch_is_retried(self) -> None:
+        offenders, seen = [], 0
+        for name in REQUIRED_FETCH_WORKFLOWS:
+            workflow = yaml.safe_load((REPO / ".github/workflows" / name).read_text(encoding="utf-8"))
+            for job_name, job in workflow["jobs"].items():
+                for step in job.get("steps", []):
+                    run = step.get("run") or ""
+                    has_loop = re.search(r"^\s*for attempt in ", run, re.MULTILINE) is not None
+                    for line in re.sub(r"\\\n\s*", " ", run).splitlines():
+                        code = line.split("#", 1)[0]
+                        if not NETWORK_COMMAND.search(code):
+                            continue
+                        seen += 1
+                        if "tools/ci/net-retry.sh" in code or has_loop:
+                            continue
+                        offenders.append(f"{name}:{job_name}:{step.get('name')}: {code.strip()[:120]}")
+        # The control: the scan must actually find the fetches it polices.
+        self.assertGreaterEqual(seen, 8, "the scan no longer sees the required workflows' fetches")
+        self.assertEqual(offenders, [], "a pip or git fetch in a required workflow is not retried")
+
+    def test_the_scanner_flags_a_bare_fetch(self) -> None:
+        for code in ("git fetch --no-tags origin main", "python3 -m pip install pyyaml", "pip install x"):
+            self.assertIsNotNone(NETWORK_COMMAND.search(code), code)
+        self.assertIsNone(NETWORK_COMMAND.search("echo pip-installed"))
+
+
+class MacosCcacheStep(unittest.TestCase):
+    def _run(self, ccache_present: bool, brew_failures: int) -> tuple[subprocess.CompletedProcess, list[str]]:
+        script = _step(CCACHE_STEP)["run"]
+        with tempfile.TemporaryDirectory() as tmp:
+            bindir = Path(tmp) / "bin"
+            bindir.mkdir()
+            calls = Path(tmp) / "calls"
+            _failing_stub(bindir, "brew", calls, brew_failures, counted="install")
+            if ccache_present:
+                _stub(bindir, "ccache", "echo 'ccache version 4.11'\n")
+            proc = subprocess.run(
+                ["bash", "-e", "-o", "pipefail", "-c", script],
+                env={"PATH": f"{bindir}:/usr/bin:/bin", "PULP_BREW_RETRY_DELAY_SECS": "0"},
+                capture_output=True, text=True, timeout=60,
+            )
+            recorded = calls.read_text().splitlines() if calls.exists() else []
+            return proc, [call.split("|", 1)[1] for call in recorded]
+
+    def test_an_installed_ccache_never_reaches_brew(self) -> None:
+        proc, calls = self._run(ccache_present=True, brew_failures=99)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(calls, [])
+        self.assertIn("ccache already installed: ccache version 4.11", proc.stdout)
+
+    def test_a_failed_install_updates_and_retries(self) -> None:
+        proc, calls = self._run(ccache_present=False, brew_failures=2)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(
+            calls,
+            ["install|ccache|", "update|--quiet|", "install|ccache|", "update|--quiet|", "install|ccache|"],
+        )
+
+    def test_exhaustion_fails_the_step(self) -> None:
+        proc, calls = self._run(ccache_present=False, brew_failures=99)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(calls.count("install|ccache|"), 3)
+        self.assertIn("::error::brew install ccache failed after 3 attempts", proc.stdout)
 
 
 if __name__ == "__main__":

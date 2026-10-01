@@ -260,6 +260,8 @@ class MergeGroupHydrationTest(unittest.TestCase):
             with self.assertRaises(hydration.HydrationError) as raised:
                 hydration.hydrate(self.checkout, "origin")
         self.assertIn("remain unresolved", str(raised.exception))
+        # Real git's wording for the deleted branch is what classifies it.
+        self.assertIn("merge group this run validated is gone", str(raised.exception))
 
     def test_a_reachable_queue_branch_is_still_preferred(self) -> None:
         """A live ref decides the fetch; the commit id never displaces it."""

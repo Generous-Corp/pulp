@@ -1026,6 +1026,31 @@ TEST_CASE("stamped bridge applies configurable lead to delivery and trace identi
     }
 }
 
+TEST_CASE("stamped bridge counts ingress saturation in shared telemetry",
+          "[gpu_audio][shared_io][trace][telemetry]") {
+    const auto trace_config = config(1);
+    SharedIoTraceRecorder recorder(trace_config);
+    REQUIRE(recorder.enabled());
+    SharedIoTelemetry telemetry;
+    SharedIoStampedBridge bridge;
+    REQUIRE(bridge.prepare({.capacity = 3, .channels = 1, .block_size = 2}, 1));
+    bridge.set_trace(&recorder, &telemetry);
+
+    const std::array<float, 2> input{1.f, 2.f};
+    std::array<float, 2> output{};
+    for (std::uint64_t sequence = 0; sequence < 4; ++sequence) {
+        const auto callback = bridge.begin_callback(input, sequence);
+        REQUIRE(callback.valid());
+        const auto delivery = bridge.consume_output(callback, output);
+        if (sequence < 2)
+            CHECK(delivery == SharedIoStampedBridge::Delivery::Priming);
+        else
+            CHECK(delivery != SharedIoStampedBridge::Delivery::Invalid);
+    }
+    CHECK(bridge.recovery_reason() == SharedIoRecoveryReason::InputSaturated);
+    CHECK(telemetry.snapshot().input_drops == 1);
+}
+
 TEST_CASE("deferred callback delivery prevents epoch replacement and forged GPU success",
           "[gpu_audio][trace][delivery]") {
     SharedIoStampedBridge bridge;

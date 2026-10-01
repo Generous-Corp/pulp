@@ -1075,58 +1075,6 @@ jobs:
             echo "agent_capability_installed_sdk_required=$agent_capability_installed_sdk_required"
           } >> "$GITHUB_OUTPUT"
 
-  # ── PR gate settle window (default OFF) ───────────────────────────────────
-  # A new push to a PR cancels the previous run through the `build-<ref>`
-  # concurrency group. When that cancellation lands after the macOS matrix leg
-  # has claimed a self-hosted gate VM, the VM time already spent is simply
-  # lost, and gate VMs are the scarcest CI capacity. This job holds the native
-  # `build` matrix behind a short wait on a cheap hosted runner, so a push that
-  # is about to be superseded is cancelled while it still costs no VM.
-  #
-  # Controlled by the PULP_PR_GATE_SETTLE_SECONDS repo variable:
-  #   unset / "" / "0"  → the job is skipped at the job level (no runner), and
-  #                       `build` evaluates exactly as it would without it.
-  #   1..900            → sleep that many seconds, in parallel with
-  #                       resolve-provider / classify / protected-receipt-reuse.
-  #   anything else     → a notice, then no sleep.
-  # pull_request only: merge_group, push, and workflow_dispatch never wait.
-  # Fail-open by construction: `build` gates on `!cancelled()` and never reads
-  # this job's result, so a skipped, failed, or timed-out settle cannot skip
-  # or fail the required `macos` context. The skip-safe `macos` alias does not
-  # need this job at all, so a PR with no native work is never delayed.
-  pr-gate-settle:
-    if: >-
-      !inputs.local_proof
-      && github.event_name == 'pull_request'
-      && vars.PULP_PR_GATE_SETTLE_SECONDS != ''
-      && vars.PULP_PR_GATE_SETTLE_SECONDS != '0'
-    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
-    timeout-minutes: 17
-    continue-on-error: true
-    permissions: {}
-    steps:
-      - name: Settle before claiming a gate VM
-        shell: bash
-        env:
-          SETTLE_SECONDS: ${{ vars.PULP_PR_GATE_SETTLE_SECONDS }}
-          SETTLE_MAX_SECONDS: "900"
-        run: |
-          set -euo pipefail
-          if [[ ! "$SETTLE_SECONDS" =~ ^[0-9]{1,6}$ ]]; then
-            echo "::notice title=PR gate settle ignored::PULP_PR_GATE_SETTLE_SECONDS='${SETTLE_SECONDS}' is not a non-negative integer; not waiting"
-            exit 0
-          fi
-          seconds=$((10#$SETTLE_SECONDS))
-          if (( seconds > SETTLE_MAX_SECONDS )); then
-            echo "::notice title=PR gate settle ignored::PULP_PR_GATE_SETTLE_SECONDS=${seconds} exceeds the ${SETTLE_MAX_SECONDS}s cap; not waiting"
-            exit 0
-          fi
-          if (( seconds == 0 )); then
-            exit 0
-          fi
-          echo "Settling ${seconds}s so a superseding push cancels this run before a gate VM is claimed."
-          sleep "$seconds"
-
   protected-receipt-reuse:
     if: ${{ !inputs.local_proof }}
     needs: [resolve-provider, classify]
@@ -1146,6 +1094,7 @@ jobs:
           NATIVE_BUILD_REQUIRED: ${{ needs.classify.outputs.native_build_required }}
           RECEIPT_TOKEN: ${{ github.token }}
           A2T_RECEIPT_VERIFICATION_REQUIRED: ${{ needs.classify.outputs.a2t_receipt_verification_required }}
+          AFFECTED_SLOW_REQUIRED: ${{ needs.classify.outputs.agent_capability_installed_sdk_required }}
         shell: bash
         run: |
           set -u
@@ -1181,6 +1130,12 @@ jobs:
               done
             elif git show "$base:tools/scripts/protected_merge_receipt.py" \
               > "$RUNNER_TEMP/protected_merge_receipt.py"; then
+              # The group's own proof requirement, passed only to a protected
+              # verifier that accepts it. An empty classify output fails closed.
+              affected_slow_args=()
+              if grep -q -- '--affected-slow-required' "$RUNNER_TEMP/protected_merge_receipt.py"; then
+                affected_slow_args=(--affected-slow-required "${AFFECTED_SLOW_REQUIRED:-true}")
+              fi
               for target in macos linux; do
                 if [ "$target" = macos ] \
                     && [ "$A2T_RECEIPT_VERIFICATION_REQUIRED" = true ]; then
@@ -1211,7 +1166,13 @@ jobs:
                 elif python3 "$RUNNER_TEMP/protected_merge_receipt.py" verify \
                     --repo "$GITHUB_WORKSPACE" --repository "$GITHUB_REPOSITORY" \
                     --target "$target" --group-sha "$group" \
+                    ${affected_slow_args[@]+"${affected_slow_args[@]}"} \
                     --receipt "$receipt_path" --output "$decision_path" 2> "$verify_err"; then
+                  # A reuse the verifier accepted can still carry a finding it
+                  # reports without refusing; surface it rather than drop it.
+                  if [ -s "$verify_err" ]; then
+                    sed 's/^/::notice::/' "$verify_err"
+                  fi
                   matrix="$(MATRIX_JSON="$matrix" TARGET="$target" python3 - <<'PY'
           import json, os
           matrix = json.loads(os.environ["MATRIX_JSON"])
@@ -1304,12 +1265,10 @@ jobs:
           python3 tools/scripts/a2t_structural_verification_ci.py --verify-only
 
   build:
-    needs: [resolve-provider, classify, protected-receipt-reuse, pr-gate-settle]
+    needs: [resolve-provider, classify, protected-receipt-reuse]
     # Skip the entire native build matrix (no runner allocated) when the PR
     # touches no C++/Swift build input. The macos/linux/windows alias jobs
     # below still run and report.
-    # `pr-gate-settle` is waited on but deliberately never read below: its
-    # skipped or failed result must not change whether the matrix runs.
     if: >-
       !inputs.local_proof
       && !cancelled()
@@ -1361,6 +1320,11 @@ jobs:
       CCACHE_COMPILERCHECK: content
       CCACHE_NODEPEND: "true"
       CCACHE_SLOPPINESS: time_macros
+      # Build and test commands must not fetch dependencies. The Three.js
+      # bundler (an iOS AUv3 POST_BUILD command and a ctest) honours this by
+      # refusing a missing esbuild instead of running `npm install` inside the
+      # build; "Install build-time Node dependencies" below provides it first.
+      PULP_OFFLINE_BUILD: "1"
 
     steps:
       # `lfs: false` — pulp's `core.hooksPath = .githooks` (set by
@@ -1372,6 +1336,15 @@ jobs:
       # for this repo — they're downloaded from a mirror by setup.sh's
       # bootstrap step (`./setup.sh --ci --deps-only` below). Skipping
       # checkout's LFS pull is therefore safe.
+      # The reuse replay record (end of this job) leaves out any test report
+      # older than this moment: a self-hosted runner keeps its build directory
+      # between jobs. The event payload file is no clock for this; the runner
+      # rewrites it for every step.
+      - name: Mark job start for the reuse replay record
+        if: runner.os == 'macOS' && matrix.key == 'macos'
+        continue-on-error: true
+        shell: bash
+        run: echo "REUSE_RECORD_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v5
         with:
           lfs: false
@@ -1474,13 +1447,30 @@ jobs:
         if: runner.os == 'macOS'
         run: brew update --quiet || echo "brew update failed; install steps retry"
 
+      # The gate VM golden bakes ccache, and `brew install` of an installed
+      # formula still reaches the Homebrew API, so an installed ccache is used
+      # as is. Hosted runners install it with 3 spaced attempts; a brew update
+      # before each retry recovers the stale-config case described above.
       - name: Install ccache (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ccache || {
-            brew update
-            brew install ccache
-          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "ccache already installed: $(ccache --version | head -n 1)"
+            exit 0
+          fi
+          delay="${PULP_BREW_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if brew install ccache; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::brew install ccache attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+              brew update --quiet || true
+            fi
+          done
+          echo "::error::brew install ccache failed after 3 attempts"
+          exit 1
 
       - name: Install ccache (Windows)
         if: runner.os == 'Windows'
@@ -1790,7 +1780,12 @@ jobs:
           # gate's name: PULP_TEXT_SHAPING follows PULP_ENABLE_GPU, and without
           # it `render_to_rgba` returns an empty buffer, so capture-based view
           # tests fail for the configuration rather than for the change.
-          cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF)
+          #
+          # PULP_RECORD_LINK_MAPS records which archive members each
+          # executable's link pulled, for the reuse replay record
+          # (tools/cmake/PulpLinkMaps.cmake). The map is a side output, the
+          # linked bytes are unchanged, and it does nothing off Apple linkers.
+          cmake_args=(-DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_EXAMPLES=OFF -DPULP_RECORD_LINK_MAPS=ON)
           # Ask CMake for its codemodel: the pull-request step that runs the
           # tests a diff reaches maps changed files to targets through it.
           mkdir -p "$PULP_BUILD_DIR/.cmake/api/v1/query"
@@ -1901,6 +1896,64 @@ jobs:
           # Whether the set was pre-provisioned or installed here, the
           # non-skippable `visual-python-deps-present` ctest is what proves it.
           # This step only has to stop being a network-dependent tripwire.
+
+      - name: Install build-time Node dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Three.js bundler (tools/scripts/bundle_threejs_for_jsc.mjs) runs
+          # as an iOS AUv3 POST_BUILD command inside the iOS compile gate and as
+          # the pulp_bundle_threejs_for_jsc_smoke ctest. It loads esbuild from
+          # tools/scripts/node_modules. Left to itself it runs `npm install`
+          # mid-build, which made a compile depend on registry.npmjs.org: on
+          # 2026-09-27 and 2026-09-29 gate VMs on three hosts failed the
+          # required macos check with `getaddrinfo ENOTFOUND
+          # registry.npmjs.org` inside the build. The job sets
+          # PULP_OFFLINE_BUILD, so the bundler now refuses instead, and the
+          # install happens here, from the committed lockfile, with retries.
+          prefix=tools/scripts
+          if ! command -v node >/dev/null 2>&1; then
+            # CMake registers neither the bundle step nor its ctests without node.
+            echo "node is not on PATH; nothing here runs the Three.js bundler"
+            exit 0
+          fi
+          # Loads the installed esbuild and runs one transform, which starts the
+          # platform binary and checks it against the JS package's version, and
+          # compares that to the lockfile pin. A package from another platform,
+          # a stale version or a half-extracted install all fail it.
+          esbuild_ready() {
+            # The directory is resolved by node against its own cwd, so the
+            # path is native on Windows too (Git Bash $PWD is not).
+            node -e '
+              const dir = require("path").resolve(process.argv[1]);
+              const pin = require(dir + "/package-lock.json")
+                .packages["node_modules/esbuild"].version;
+              const esbuild = require(dir + "/node_modules/esbuild");
+              if (esbuild.version !== pin) process.exit(1);
+              esbuild.transformSync("let x = 1");
+            ' "$prefix" >/dev/null 2>&1
+          }
+          if esbuild_ready; then
+            echo "esbuild already installed in $prefix at the locked version; no registry fetch"
+            exit 0
+          fi
+          # --prefer-offline serves anything already in the npm cache without a
+          # registry round trip. Three spaced attempts cover an outage that
+          # outlasts npm's own fetch retries.
+          delay="${PULP_NPM_RETRY_DELAY_SECS:-20}"
+          for attempt in 1 2 3; do
+            if npm ci --prefix "$prefix" --prefer-offline --no-audit --no-fund \
+                && esbuild_ready; then
+              echo "Installed esbuild into $prefix from package-lock.json"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::npm ci attempt $attempt failed; retrying in $(( delay * attempt ))s"
+              sleep $(( delay * attempt ))
+            fi
+          done
+          echo "::error::could not install $prefix/package-lock.json after 3 attempts; the Three.js bundler would fail the build" >&2
+          exit 1
 
       - name: Build
         shell: bash
@@ -2305,6 +2358,13 @@ jobs:
           ctest_exit=0
           ctest --test-dir "$PULP_BUILD_DIR" --output-on-failure --repeat until-pass:2 ${stop_on_failure} -C Release -LE "$label_exclude" -j"$ctest_jobs" --timeout 120 --exclude-regex "$exclude" --output-junit "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml" || ctest_exit=$?
           printf '%s\n' "$ctest_exit" > "$evidence_dir/exit-code"
+          # LastTest.log is ctest's only per-execution record of the --repeat
+          # retries, and every later ctest call in this build directory (the
+          # listing just below included) replaces it. Keep this run's. ctest
+          # replaces the file by rename, so a hard link keeps the old contents.
+          ln -f "$PULP_BUILD_DIR/Testing/Temporary/LastTest.log" "$evidence_dir/LastTest.full.log" 2>/dev/null \
+            || cp "$PULP_BUILD_DIR/Testing/Temporary/LastTest.log" "$evidence_dir/LastTest.full.log" 2>/dev/null \
+            || true
           # Inventory of what that selection covers: a listing, not a run, so
           # it takes no stop-on-failure flag. A failed listing leaves an invalid
           # file, and the receipt issuer then refuses rather than guessing.
@@ -2408,9 +2468,20 @@ jobs:
         shell: bash
         env:
           PULP_CTEST_LEG: ${{ matrix.name }} [${{ matrix.provider }}]
+          CTEST_OUTCOME: ${{ steps.ctest.outcome }}
         run: |
           set -uo pipefail
           junit="$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest.junit.xml"
+          # When the full suite did not run (a pull-request head that took the
+          # fast tier, or a build that stopped first) there is no full report
+          # by design: observe the fast tier's own report if it exists, and
+          # otherwise record a named "not run" instead of an unavailable error.
+          # A suite that DID run and left no report stays an error.
+          absent=()
+          if [ "$CTEST_OUTCOME" = skipped ]; then
+            absent=(--fallback "$GITHUB_WORKSPACE/$PULP_BUILD_DIR/ctest-pr-fast.junit.xml"
+                    --not-run-reason "the full suite did not run on this leg (fast tier only, or the build stopped before ctest)")
+          fi
           listing="$(ctest --test-dir "$PULP_BUILD_DIR" -N 2>/dev/null)" || listing=""
           raw_lines="$(printf '%s\n' "$listing" | wc -l | tr -d ' ')"
           registered="$(printf '%s\n' "$listing" | sed -n 's/^Total Tests: //p' | tail -1)"
@@ -2419,7 +2490,7 @@ jobs:
           # finished run; the log can. Same reason the ctest-failure step below
           # echoes its names twice.
           echo "ctest-nonruns: registered(ctest -N raw lines)=$raw_lines registered(total)=${registered:-unknown}"
-          python3 tools/scripts/ctest_nonruns.py "$junit" \
+          python3 tools/scripts/ctest_nonruns.py "$junit" ${absent[@]+"${absent[@]}"} \
             --registered "${registered:-unknown}" --raw-lines "$raw_lines" \
             --json-output "$PULP_BUILD_DIR/ctest.nonruns.json" \
             --leg "$PULP_CTEST_LEG" >> "$GITHUB_STEP_SUMMARY"
@@ -2625,6 +2696,10 @@ jobs:
         run: |
           set +e
           tdir="$PULP_BUILD_DIR/Testing/Temporary"
+          # The suite's own LastTest.log, kept by the test step; the one in the
+          # build directory now holds only the last ctest call's block.
+          lastlog="$RUNNER_TEMP/ctest-evidence/LastTest.full.log"
+          [ -s "$lastlog" ] || lastlog="$tdir/LastTest.log"
           {
             echo "## ❌ ctest failures — ${{ matrix.name }} [${{ matrix.provider }}]"
             if [ -f "$tdir/LastTestsFailed.log" ]; then
@@ -2632,7 +2707,7 @@ jobs:
               echo '```'; cat "$tdir/LastTestsFailed.log"; echo '```'
               echo "### Failing assertions (from LastTest.log)"
               echo '```'
-              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$tdir/LastTest.log" 2>/dev/null | head -60 || true
+              grep -aE "FAILED:|with expansion:|REQUIRE\(|REQUIRE_FALSE\(|CHECK\(" "$lastlog" 2>/dev/null | head -60 || true
               echo '```'
             else
               echo "_No ctest result log at \`$tdir\` — the test step likely failed before ctest ran (configure/build/crash)._"
@@ -2663,6 +2738,76 @@ jobs:
             ${{ env.PULP_BUILD_DIR }}/ctest.nonruns.json
           if-no-files-found: ignore
           retention-days: 7
+
+      # Replay history for test-result reuse: one record per test (outcome,
+      # attempts, duration, executable) plus each executable's digest and
+      # runtime closure, written from ctest's own result files by
+      # tools/ci/reuse_record.py and kept 90 days. The JUnit artifact above
+      # expires in 7, and per-binary digests otherwise exist only where a
+      # receipt was issued. Recording only: nothing reads it to decide a run,
+      # and every step here is continue-on-error. A job that should carry a
+      # record and does not says so in a `reuse-record NOT written` warning.
+      # A suite is passed only when its step ran in this job, so a report left
+      # in the build directory by an earlier run is never recorded as this one.
+      - name: Record per-test results for reuse replay (macOS)
+        id: reuse_record
+        if: ${{ !cancelled() && runner.os == 'macOS' && matrix.key == 'macos' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CTEST_OUTCOME: ${{ steps.ctest.outcome }}
+          PR_FAST_OUTCOME: ${{ steps.pr_fast_tests.outcome }}
+          PR_AFFECTED_OUTCOME: ${{ steps.pr_affected_tests.outcome }}
+        run: |
+          set -uo pipefail
+          b="$GITHUB_WORKSPACE/$PULP_BUILD_DIR"
+          ev="$RUNNER_TEMP/ctest-evidence"
+          shadows="$RUNNER_TEMP/merge-group-shadows"
+          out="$RUNNER_TEMP/reuse-record"
+          suites=()
+          case "$CTEST_OUTCOME" in success|failure) suites+=(--suite "full=$b/ctest.junit.xml,attempts=$ev/LastTest.full.log,repeat") ;; esac
+          case "$PR_FAST_OUTCOME" in success|failure) suites+=(--suite "pr-fast=$b/ctest-pr-fast.junit.xml") ;; esac
+          case "$PR_AFFECTED_OUTCOME" in success|failure) suites+=(--suite "pr-affected=$b/pr-affected-junit,repeat") ;; esac
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$out" \
+            --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
+            --selected-json "$ev/selected.json" \
+            --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members \
+            --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
+            --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc; this job's per-test replay history is lost"
+            exit 1
+          fi
+          size="$(du -sk "$out" | cut -f1)"
+          echo "reuse-record: ${size} KiB uncompressed in $out"
+          echo "Reuse replay record: ${size} KiB uncompressed (artifact \`reuse-record-macos\`)." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Upload reuse replay record (macOS)
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          # One artifact per run attempt: a re-run keeps the failed attempt's
+          # record, which is the flake evidence a replay most needs.
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record (macOS)
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' && steps.reuse_record_upload.outcome != 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::the record was built but its upload failed; this job's per-test replay history is lost"
 
       - name: Test (Windows — UTF-8 code page wrapped)
         # Windows needs a UTF-8 console code page so ctest's child
@@ -3045,6 +3190,60 @@ jobs:
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
           fi
+      # A `macos` check that ran no suite still belongs in the replay history
+      # (receipt reuse and skip-safe groups are what a policy's coverage is
+      # measured against), so it writes a record with no tests and says why.
+      # Recording only: every step is continue-on-error and runs after the
+      # verdict above.
+      - name: Check out the reuse record writer
+        if: ${{ !cancelled() }}
+        id: reuse_record_checkout
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/reuse_record.py
+          sparse-checkout-cone-mode: false
+
+      - name: Record that no suite ran, for reuse replay
+        id: reuse_record
+        if: ${{ !cancelled() && steps.reuse_record_checkout.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          NO_SUITE_REASON: 'no suite: macos alias job (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }})'
+        run: |
+          set -uo pipefail
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$RUNNER_TEMP/reuse-record" \
+            --source-root "$GITHUB_WORKSPACE" --no-suite-reason "$NO_SUITE_REASON" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$RUNNER_TEMP/reuse-record/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc"
+            exit 1
+          fi
+
+      - name: Upload reuse replay record
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record
+        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   macos-merge-group:
     # Native merge groups get `macos` directly from the macOS matrix leg. This
@@ -3108,6 +3307,60 @@ jobs:
           else
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"not-required"}'
           fi
+      # A `macos` check that ran no suite still belongs in the replay history
+      # (receipt reuse and skip-safe groups are what a policy's coverage is
+      # measured against), so it writes a record with no tests and says why.
+      # Recording only: every step is continue-on-error and runs after the
+      # verdict above.
+      - name: Check out the reuse record writer
+        if: ${{ !cancelled() }}
+        id: reuse_record_checkout
+        continue-on-error: true
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            tools/ci/reuse_record.py
+          sparse-checkout-cone-mode: false
+
+      - name: Record that no suite ran, for reuse replay
+        id: reuse_record
+        if: ${{ !cancelled() && steps.reuse_record_checkout.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          NO_SUITE_REASON: 'no suite: macos merge-group bootstrap (provider=${{ needs.resolve-provider.result }} classify=${{ needs.classify.result }} native_build_required=${{ needs.classify.outputs.native_build_required }} receipt_reused=${{ needs.protected-receipt-reuse.outputs.macos_reused }})'
+        run: |
+          set -uo pipefail
+          rc=0
+          python3 tools/ci/reuse_record.py write --out-dir "$RUNNER_TEMP/reuse-record" \
+            --source-root "$GITHUB_WORKSPACE" --no-suite-reason "$NO_SUITE_REASON" || rc=$?
+          if [ "$rc" -ne 0 ] || [ ! -s "$RUNNER_TEMP/reuse-record/job.json" ]; then
+            echo "::warning title=reuse-record NOT written::reuse_record.py exited $rc"
+            exit 1
+          fi
+
+      - name: Upload reuse replay record
+        id: reuse_record_upload
+        if: ${{ !cancelled() && steps.reuse_record.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ github.run_attempt == '1' && 'reuse-record-macos' || format('reuse-record-macos-attempt-{0}', github.run_attempt) }}
+          path: ${{ runner.temp }}/reuse-record/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Announce a missing reuse replay record
+        if: ${{ !cancelled() && (steps.reuse_record_checkout.outcome != 'success' || steps.reuse_record.outcome != 'success' || steps.reuse_record_upload.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        run: echo "::warning title=reuse-record NOT written::checkout, record or upload did not succeed; this job's replay history is lost"
 
   linux:
     needs: [build, classify]

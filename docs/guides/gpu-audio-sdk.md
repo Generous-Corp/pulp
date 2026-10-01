@@ -185,6 +185,18 @@ fills the block — `Silence` by default (a bounded, obvious dropout), or
 `latency_blocks * block_size`, and a host that is not told leaves your track
 shifted late against every other track in the session.
 
+The transport also has an opt-in macOS scheduling experiment for an owned
+worker. Set `Config::join_audio_workgroup` and pass a borrowed
+`Config::audio_workgroup` handle when the host has a valid `os_workgroup_t`.
+The worker joins before it starts pumping and leaves during `release()`. The
+callback still only publishes a ring record and can use `wake_on_write`; it
+never joins a workgroup or calls Dawn. `Stats::worker_workgroup_joined` and
+`worker_workgroup_join_failures` report adoption. This is a scheduling
+experiment, not a hard realtime claim: Dawn command encoding, submission, and
+completion APIs may allocate and lock internally, so the submission path stays
+off the callback and the CPU fallback remains continuously prepared. The
+handle is borrowed and must outlive the transport.
+
 `GpuConvolver` exposes a host-thread-only provider policy for experiments that
 need an explicit selection: `Auto` preserves staged execution, `StagedOnly`
 forces the staged provider, and `SharedRequired`
