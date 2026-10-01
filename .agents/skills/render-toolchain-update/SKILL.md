@@ -250,6 +250,10 @@ retain those fields in the PR/landing evidence.
   their portable releases with a normal ubuntu-latest artifact.
 - `fetch_skia_for_release.py` platform keys must match the manifest exactly (notably
   `wasm-wasm32`).
+- After a Skia pin bump, the gate VMs download the new archive until each tartci
+  host's artifact cache holds it (`scripts/artifact-cache.sh add --url <asset>
+  --sha256 <pin>` in tartci). That is a speed loss only: the fetcher prefers
+  `$TARTCI_ARTIFACT_CACHE/sha256/<pin>` and falls back to the network on a miss.
 - `fetch_skia_for_release.py` retries the asset download, but only for failures a
   second attempt can fix: 408/425/429 and 5xx, plus `URLError`, `TimeoutError`,
   `ConnectionError` and `IncompleteRead`, with exponential backoff from 2s capped at

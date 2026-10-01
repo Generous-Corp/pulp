@@ -1567,6 +1567,32 @@ here removes a flake without removing any coverage.
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
 
+## Repository history and pinned archives from the tartci host cache
+
+A gate VM is fresh for every job, so without help each job re-downloads the
+same bytes: a depth-2 checkout (~56 MiB) and the GPU-provenance `--unshallow`
+(~57 MiB), the pinned Chrome for Testing archive (187 MB), the prebuilt Skia
+archive (57 MB) and, when the iOS gate runs, the iOS simulator Skia slice
+(69 MB). tartci can mount a read-only host artifact cache and name it in
+`TARTCI_ARTIFACT_CACHE` (tartci `docs/runbook.md`, `scripts/artifact-cache.sh`).
+`build.yml` uses it only as an accelerator:
+
+- `Seed the checkout from the host git mirror` runs before `actions/checkout`
+  and pre-creates the workspace repository with
+  `$TARTCI_ARTIFACT_CACHE/git/<owner>/<repo>.git/objects` as a Git alternate.
+  checkout@v5 keeps a repository whose origin URL matches and deletes anything
+  else, so with no cache, a warm workspace or any failure the job does the
+  ordinary full fetch. The hydration step prints `gate-git-transfer:
+  local_object_kib=N alternates=yes|no`: the repository bytes this job pulled.
+- The Chrome step and `fetch_skia_for_release.py` look up the digest they
+  already pin under `$TARTCI_ARTIFACT_CACHE/sha256/`, re-verify the bytes and
+  download on a miss or mismatch. They log `gate-artifact: chrome
+  source=cache|network bytes=N` and `Copied from host artifact cache` /
+  `Downloaded N bytes`.
+
+A pin bump therefore never breaks the gate; until the hosts' caches hold the new
+archive, jobs download it as before.
+
 ## The visual-analysis Python dependencies are installed, then proved
 
 `build.yml` installs `tools/motion/visual/requirements.txt` into the
