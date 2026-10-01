@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261001-view-header-array-include-watch",
+  "created_at": "2026-10-01T06:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record a one-line include fix in core/view/include/pulp/view/view.hpp under render-assets-and-backends: the header uses std::array for ancestor clip radii and now includes <array> directly instead of relying on a transitive include that the view header include trim removed. MSVC had no transitive path, so the Windows CLI release legs failed to compile. No declarations, rendering, capture, DesignIR or thresholds change. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-group-script-view"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
