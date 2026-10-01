@@ -1,0 +1,71 @@
+name: Required-check machinery
+
+# Advisory and never required. Every required context on main is posted by a
+# GitHub Actions workflow, and a pull request's merge group runs the workflow
+# YAML that pull request carries, so a change to those workflows, to the
+# receipt-reuse decision, or to the rulesets decides its own required checks.
+# Repository policy accepts that; this posts a status naming the files so the
+# reviewer sees it. pull_request_target runs this definition and the checked-out
+# script from protected main: the pull request's copy of both is never run, and
+# its head is only diffed.
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: required-check-machinery-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Required-check machinery report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out protected main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Report files that decide required checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          STATUS_REPOSITORY: ${{ github.repository }}
+          STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          post() {
+            gh api --method POST "repos/$STATUS_REPOSITORY/statuses/$PR_HEAD" \
+              -f state="$1" -f context='Required-check machinery (advisory)' \
+              -f description="$2" -f target_url="$STATUS_TARGET" >/dev/null
+          }
+          report="$RUNNER_TEMP/required-check-machinery.json"
+          # Data only: the head is fetched for diffing and never checked out.
+          if ! git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/remotes/origin/pr-head" \
+              || ! python3 tools/scripts/required_check_machinery.py \
+                --repo . --diff HEAD "$PR_HEAD" > "$report"; then
+            post error "could not compute the changed files; see the run log"
+            exit 0
+          fi
+          description="$(jq -r .description "$report")"
+          {
+            echo "### Required-check machinery (advisory)"
+            echo
+            echo "$description"
+            echo
+            jq -r '.flagged | to_entries[] | "- `\(.key)`: \(.value | join(", "))"' "$report"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(jq '.flagged | length' "$report")" -gt 0 ]; then
+            echo "::warning title=Required-check machinery (advisory)::$description. Required checks are only as trustworthy as this pull request's own workflow YAML; review these files."
+          fi
+          post success "$description"
