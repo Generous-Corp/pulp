@@ -298,6 +298,9 @@
             add_test(NAME pulp-gpu-dawn-shared-io-provider-completion-wait-bound
                 COMMAND pulp-gpu-dawn-shared-io-provider-probe
                     --verify-completion-wait-bound)
+            add_test(NAME pulp-gpu-dawn-shared-io-provider-timestamp-import-bound
+                COMMAND pulp-gpu-dawn-shared-io-provider-probe
+                    --verify-timestamp-import-bound)
             set_tests_properties(pulp-gpu-dawn-shared-io-provider-probe PROPERTIES
                 FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                 RESOURCE_LOCK pulp_gpu
@@ -309,6 +312,7 @@
                 pulp-gpu-dawn-shared-io-provider-wait-any-timeout-recovery
                 pulp-gpu-dawn-shared-io-provider-wait-any-error-recovery
                 pulp-gpu-dawn-shared-io-provider-completion-wait-bound
+                pulp-gpu-dawn-shared-io-provider-timestamp-import-bound
                 PROPERTIES
                     FIXTURES_REQUIRED pulp_gpu_dawn_shared_io_provider_identity
                     RESOURCE_LOCK pulp_gpu

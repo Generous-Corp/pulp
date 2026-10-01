@@ -94,9 +94,11 @@ CaseResult run_case(std::uint32_t frames, std::uint32_t channels, bool enable_ti
 
     pulp::test::DawnTransferCallCounter transfer_counter(
         pulp::test::DawnTransferCallCounter::InstallMode::DeferredSingleInstall);
-    DawnSharedIoProvider::Options provider_options{.expected_dawn_revision =
-                                                       PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-                                                   .enable_timestamps = enable_timestamps};
+    DawnSharedIoProvider::Options provider_options{
+        .expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+        .storage_kind = enable_timestamps ? DawnSharedIoProvider::StorageKind::Staged
+                                          : DawnSharedIoProvider::StorageKind::ImportedHostPointer,
+        .enable_timestamps = enable_timestamps};
     if (!enable_timestamps)
         provider_options.proc_table_override_for_testing = transfer_counter.deferred_proc_table();
     auto created = DawnSharedIoProvider::create(provider_options);
@@ -113,7 +115,12 @@ CaseResult run_case(std::uint32_t frames, std::uint32_t channels, bool enable_ti
     if (!program ||
         !plan.prepare(
             *created.provider,
-            {.slots = slots, .input_bytes_per_slot = bytes, .output_bytes_per_slot = bytes},
+            {.slots = slots,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = enable_timestamps
+                                 ? DawnSharedIoProvider::StorageKind::Staged
+                                 : DawnSharedIoProvider::StorageKind::ImportedHostPointer},
             std::move(program)))
         return {.stage = 3};
 

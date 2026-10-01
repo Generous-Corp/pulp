@@ -274,6 +274,7 @@ bool wait_for_output(SharedIoArena& arena, std::uint64_t sequence,
 int main(int argc, char** argv) {
     bool strict = false;
     bool verify_completion_wait_bound = false;
+    bool verify_timestamp_import_bound = false;
     std::string_view scenario_name = "baseline";
     auto completion_policy = DawnSharedIoProvider::CompletionPolicy::ProcessEvents;
     std::uint64_t completion_wait_ns = 0;
@@ -283,6 +284,8 @@ int main(int argc, char** argv) {
             strict = true;
         else if (argument == "--verify-completion-wait-bound")
             verify_completion_wait_bound = true;
+        else if (argument == "--verify-timestamp-import-bound")
+            verify_timestamp_import_bound = true;
         else if (argument.starts_with("--scenario="))
             scenario_name = argument.substr(std::string_view("--scenario=").size());
         else if (argument.starts_with("--completion-policy=")) {
@@ -300,6 +303,16 @@ int main(int argc, char** argv) {
             }
         } else
             return 1;
+    }
+    if (verify_timestamp_import_bound) {
+        const auto rejected = DawnSharedIoProvider::create(
+            {.storage_kind = DawnSharedIoProvider::StorageKind::ImportedHostPointer,
+             .enable_timestamps = true});
+        return !rejected.provider &&
+                       rejected.availability == DawnSharedIoProvider::Availability::Unsupported &&
+                       rejected.reason == "timestamps_require_staged_storage"
+                   ? 0
+                   : 1;
     }
     if (verify_completion_wait_bound) {
         const auto invalid_wait_ns = std::numeric_limits<std::uint64_t>::max();

@@ -1039,6 +1039,11 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
         result.reason = "completion_wait_ns_out_of_range";
         return result;
     }
+    if (options.enable_timestamps && options.storage_kind == StorageKind::ImportedHostPointer) {
+        result.availability = Availability::Unsupported;
+        result.reason = "timestamps_require_staged_storage";
+        return result;
+    }
     try {
         auto impl = std::make_unique<Impl>(options);
         if (!impl->initialize(result.reason, result.availability))
@@ -2455,7 +2460,8 @@ bool DawnSharedIoProvider::reconfigure_storage_kind(StorageKind kind) noexcept {
     if (!impl_ || !impl_->accepting || !impl_->reusable || !impl_->slots.empty() ||
         impl_->convolution || impl_->wavenet || device_lost() ||
         impl_->uncaptured_error_generation.load(std::memory_order_acquire) != 0 ||
-        (kind != StorageKind::ImportedHostPointer && kind != StorageKind::Staged))
+        (kind != StorageKind::ImportedHostPointer && kind != StorageKind::Staged) ||
+        (impl_->timestamps_enabled && kind == StorageKind::ImportedHostPointer))
         return false;
     impl_->options.storage_kind = kind;
     return true;
