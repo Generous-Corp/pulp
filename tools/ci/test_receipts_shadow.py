@@ -551,7 +551,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 - no receipts is a verdict of zero hits, stated
             lookup_errors.append(f"listing: {pmr.describe_lookup_error(exc)}")
     for why in refusals[:10]:
-        print(f"test-receipts shadow: receipt refused: {why}", file=sys.stderr)  # codeql[py/clear-text-logging-sensitive-data]
+        print("test-receipts shadow: receipt refused; continuing without reuse", file=sys.stderr)
     for why in lookup_errors[:10]:
         print(f"test-receipts shadow: receipt lookup failed: {why}", file=sys.stderr)  # codeql[py/clear-text-logging-sensitive-data]
     if lookup_errors:
