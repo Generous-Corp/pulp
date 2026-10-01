@@ -963,7 +963,12 @@ the link arguments under `<build>/link-members/` (the map, megabytes of
 symbol table, is deleted). The linked bytes are identical with and without
 it. `link-members-<sha>.json` in the record then lists, per executable, the
 archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`).
+force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+(`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
+source list, compile groups, link line and the ctest registrations that run
+its artifact, read from the file-API codemodel reply the configure step
+requests, with build and source roots written as `<build>/` and `<src>/` so
+the same configuration digests identically on every VM.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
