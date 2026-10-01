@@ -82,7 +82,7 @@ NATIVE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".mm", ".m"
 CMAKE_SUFFIXES = (".cmake", "CMakeLists.txt")
 # Labels that tie a test to a shared host resource (the reuse replay's
 # environment rule, plus audio devices).
-ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture", "audio-device"})
+ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture", "audio-device", "environment-bound"})
 # Build-tree directories that hold example executables and plugin bundles.
 EXAMPLE_PRODUCT_ROOTS = frozenset({"examples", "AU", "AUv3", "CLAP", "VST3", "LV2"})
 # Prose and workflow files name scripts without executing them in a ctest.
@@ -256,7 +256,8 @@ def generate(root: Path, tests: list[dict], model: inventory.CodeModel) -> list[
 def environment_bound(tests: list[dict]) -> set[str]:
     """Tests whose outcome depends on a shared host resource rather than on
     their inputs: a RESOURCE_LOCK, or a gpu, browser-capture or audio-device
-    label. Their failures cannot be predicted from a diff, so a bounded run
+    label, or the explicit `environment-bound` label for a test whose host
+    dependence no other label states. Their failures cannot be predicted from a diff, so a bounded run
     always includes them."""
     bound = set()
     for test in tests:

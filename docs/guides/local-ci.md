@@ -1947,7 +1947,12 @@ inputs it imports or names) and writes one family per group of top-level
 `.shipyard/config.toml`, plus `agent-skill-docs` for
 `.agents/skills/*/SKILL.md` and a `script-surface-whole-tree` family that adds
 the drift, lint, registry, sync, guard, census, inventory and probe tests to
-any of those changes. A script stays unmapped, and so selects the full suite,
+any of those changes. A `script-surface-environment-bound` family likewise
+adds every declared script test with a `RESOURCE_LOCK` or a `gpu`,
+`browser-capture`, `audio-device` or `environment-bound` label: their failures
+follow the host, not the diff. Label a test `environment-bound` when its
+outcome depends on timing, the toolchain or host state and no other label
+says so. A script stays unmapped, and so selects the full suite,
 when native code, a shell or JavaScript file, or CMake (other than as a test's
 entry) names it, transitively; when a reader needs a CTest fixture or runs a
 build product no non-example target produces; or when nothing in the
