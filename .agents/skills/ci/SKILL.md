@@ -5796,7 +5796,7 @@ mac`, or `shipyard run --targets mac`. It became opt-in on 2026-09-30 (decisions
 contract row #9) after failing 64 of 64 runs in a week at about 42 host-hours on
 one Mac while PRs merged on the required checks anyway. Example compilation is
 advisory now (`example-validation`), until that context is promoted to required.
-Shipyard older than 0.234.0 ignores `default` and still runs the lane; upgrade
+Shipyard older than 0.242.0 ignores `default` and still runs the lane; upgrade
 (`shipyard update`) rather than passing `--skip-target mac`, which exits 2
 because `mac` is the only target.
 

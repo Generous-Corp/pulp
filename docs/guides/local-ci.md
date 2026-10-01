@@ -637,7 +637,7 @@ shipyard run --targets mac                # validate the current branch only
 It was made opt-in on 2026-09-30 (decisions contract row #9): after 2026-09-02
 it passed 1 of 147 runs, failed 64 of 64 in the week before the change at about
 42 host-hours on one Mac, and PRs merged on the required checks regardless.
-Opt-in needs Shipyard 0.234.0 or later, which fleet hosts receive through
+Opt-in needs Shipyard 0.242.0 or later, which fleet hosts receive through
 Shipyard's own auto-update; an older binary ignores the key and runs the lane as
 before.
 
