@@ -363,7 +363,8 @@ class LogDownloadTests(unittest.TestCase):
             self.assertEqual(c.parsed_log(7)["ctest"]["executed"], 5)
             c.gh = self.github([self.Resp(full[:300], len(full))] * 4)
             self.assertTrue(c.parsed_log(8)["ctest"]["log_unavailable"])
-            self.assertFalse(list(Path(tmp).rglob("8.json.gz")))
+            self.assertTrue((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "7.json.gz").is_file())
+            self.assertFalse((Path(tmp) / f"logs-v{rrc.PARSER_VERSION}" / "8.json.gz").exists())
 
 
 class GraftTests(unittest.TestCase):
