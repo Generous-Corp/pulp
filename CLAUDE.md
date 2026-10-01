@@ -1165,12 +1165,10 @@ VMs produces, so they cannot hold a required gate there. They still run on
 push, on the nightly, and on the advisory `cross-platform-check` lane — which
 excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
 and Windows and on arm64 Linux.
-`build.yml`'s required `macos` Actions job configures examples OFF, so example
-plugins are compiled by the advisory, path-filtered `example-validation` lane,
-and by Shipyard's local `mac` lane only when it is requested
-(`shipyard pr --target mac`; it is opt-in, not run by default). Example
-compilation is therefore advisory until `example-validation` is promoted to a
-required check. That dedicated lane compiles
+`build.yml`'s required `macos` job configures examples OFF; examples compile on the
+advisory `example-validation` lane, and on Shipyard's opt-in local `mac` lane
+only when requested (`--target mac`), until that lane is promoted to required.
+That dedicated lane compiles
 the full examples tree on Linux and compiles plus runs the available hosted
 validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
 clap-validator require an operator-dispatched advisory image);
