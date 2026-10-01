@@ -293,6 +293,20 @@ the generated graph, not the CMake text —
 `grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
 build/CMakeFiles/Makefile2` must print a line.
 
+### The C++ lease path is interactive unless told otherwise
+
+`TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`; `pulp build
+--watch/--validate`, `pulp dev`, `pulp loop`, local SDK install) treats every
+build as `interactive` unless `PULP_BUILD_CLASS=background`: `qos()` is
+`normal`, so `apply_agent_build_qos` never wraps it in `taskpolicy -b`, even on
+a host whose role QoS is background. Against a class-aware tartci
+(`TARTCI_GOVERNOR_SCHEMA` in `host-profile`) it requests
+`TARTCI_INTERACTIVE_BUILD_JOBS` with `--class interactive --min-cores
+--wait-secs` and `jobs()` becomes the granted `lease_size_cores`
+(`parse_json_lease_cores`), never more than asked. Keep this in step with
+`tools/ci/governed-build.sh`; `test/test_cli_tartci_lease.cpp` pins both
+classes against a fake class-aware tartci.
+
 ### Build-shaped commands consult the focused-build selector
 
 `pulp build`, `pulp dev`, `pulp loop`, `pulp test`, and `pulp-cpp build --watch`
