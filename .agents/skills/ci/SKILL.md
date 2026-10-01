@@ -6995,8 +6995,16 @@ reviewed CMake producer targets for narrowly reviewed families, medium-risk
 extended neighbors, and known full-required surfaces. Current bounded families
 include the Forge/DSP CLI projections, the isolated ChildProcess test source,
 and Forge Rack's `generate.py` plus its registered safety/endings contracts.
-The Rack family is deliberately exact: `patch.py`, provenance/preflight tools,
-and neighboring delivery skills still select full validation. Documentation
+The Rack family is deliberately exact: `patch.py` and provenance/preflight tools
+still select full validation. Top-level `tools/scripts/*.py` and
+`.agents/skills/*/SKILL.md` select through families generated from
+`test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
+also adds the whole-tree drift/lint/sync tests; a script native code, shell or
+CMake names stays full. After regenerating the script-inputs list, regenerate
+the block with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
+blocks the next change to a script or skill doc. Neither this skill nor
+`tools/scripts/test_*.py` forces full validation any more; CMake and
+`test/cmake/**` still do. Documentation
 under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`, and
 `docs/validation/**` runs the mandatory kernel and may omit the mobile compile
 gate; generated authority under `docs/status/**` remains fail-closed. Its protected-base execution

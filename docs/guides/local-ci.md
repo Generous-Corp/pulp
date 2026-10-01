@@ -1933,11 +1933,38 @@ security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. Reviewed
 bounded families cover Forge/DSP catalog projection commands, the isolated
 ChildProcess test source, and the Forge Rack module generator plus its safety
-contract. Each family names literal affected tests and any required extended
+contract; generated families cover Python tool scripts and skill docs (below). Each family names literal affected tests and any required extended
 tests; neighboring paths remain full. The declared inventory is tied to the required
 macOS Debug configuration, which enables
 `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
 that platform-specific cardinality.
+
+Python tool scripts and skill docs select through generated families.
+`tools/scripts/changed_surface_script_families.py` reads
+`test/ctest_script_inputs.json` (each script-driven ctest's entry and the
+inputs it imports or names) and writes one family per group of top-level
+`tools/scripts/*.py` files sharing the same readers into the marked block of
+`.shipyard/config.toml`, plus `agent-skill-docs` for
+`.agents/skills/*/SKILL.md` and a `script-surface-whole-tree` family that adds
+the drift, lint, registry, sync, guard, census, inventory and probe tests to
+any of those changes. A script stays unmapped, and so selects the full suite,
+when native code, a shell or JavaScript file, or CMake (other than as a test's
+entry) names it, transitively; when a reader needs a CTest fixture or runs a
+build product no non-example target produces; or when nothing in the
+authoritative corpus reads it. Each family also builds the targets whose
+products its readers run. A Python test script's body is not CTest
+registration, so `tools/scripts/test_*.py` is no longer a test-topology path;
+`test/cmake/**` and CMake files still are. The skill and guide prose that
+describe this policy are not policy inputs either. The generator, the
+script-inputs list and the inventory contract are.
+
+`changed-surface-script-families-drift` (macOS) regenerates the block and
+compares it. Like `script-test-inputs-drift` it is diff-scoped: drift blocks a
+change touching a script, a skill doc, the script-inputs list, the generator or
+the config, reports otherwise, and never fails a merge group. Regenerate with
+`python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write`
+after the script-inputs list. The build directory needs a CMake file-API
+codemodel reply; without one the check reports a skip.
 
 Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
 and `docs/validation/**` selects only that mandatory kernel. Generated or
