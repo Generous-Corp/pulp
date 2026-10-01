@@ -13,6 +13,7 @@ REVIEWED_MINIMAL_TARGETS = {
     "pulp/host/signal_graph_runtime.hpp": "Pulp::host",
     "pulp/host/signal_graph_prepared_topology_edit.hpp": "Pulp::host",
     "pulp/host/custom_node_type.hpp": "Pulp::host",
+    "pulp/host/custom_node_events.hpp": "Pulp::host",
     "pulp/host/sample_region_authoring.hpp": "Pulp::host",
     "pulp/host/sample_region_proof.hpp": "Pulp::host",
     "pulp/host/sample_region_parameters.hpp": "Pulp::host",
