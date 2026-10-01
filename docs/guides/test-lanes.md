@@ -9,7 +9,7 @@ single source of truth for that model.
 
 | Lane | Trigger | Gates the PR? | Builds examples? | What it runs |
 |------|---------|---------------|------------------|--------------|
-| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard: yes until promotion | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
+| **Required core gate** (`macos`) | every PR + every merge group | **yes** (blocking) | Actions: no; Shipyard opt-in `mac` lane (`--target mac`): yes | merge group: all core tests **except** the `validation`, `slow`, `performance`, `bench`, and `quality-lab` labels; PR head: the build plus only the `pr-fast` tier (see below), plus a non-gating full run on a head that is armed for auto-merge on the current `main` so it can issue a receipt; an unchanged exact PR merge tree may reuse that artifact-bound result after protected-base verification |
 | **Source selftests** (`Enforce version & skill sync`, step *Source-only selftests*) | every PR + every merge group | **yes** (blocking) | no build at all | the ~140 Python registrations in `tools/ci/source_selftests.json` (label `source-selftest`), which the `macos` gate excludes on gate events; see [below](#the-source-selftest-lane) |
 | **Example-validation** (`example-validation`) | PRs touching `examples/**`, state/format headers, core CMake, or shared dependency infrastructure | advisory pending promotion (see status below) | yes — Linux + macOS | Linux compiles every example artifact; hosted macOS runs auval + built-in CLAP dlopen checks; pluginval/clap-validator require an operator-dispatched advisory image |
 | **API contracts** (`api-contracts`) | every PR + every merge group | advisory pending promotion (see below) | no | the Doxygen strict pass over the catalogued public headers, ~3 s of work |
@@ -237,8 +237,9 @@ of the time on the required gate and cost unrelated PRs hours (see
 `planning/friction/2026-07-15-*`). Two things follow:
 
 1. **Compile is checked on relevant changes.** `build.yml`'s required `macos`
-   Actions job configures examples OFF. Shipyard's separate blocking
-   `[validation.default]` temporarily keeps `PULP_BUILD_EXAMPLES=ON` until the
+   Actions job configures examples OFF. Shipyard's `[validation.default]` keeps
+   `PULP_BUILD_EXAMPLES=ON`, but its `mac` target is opt-in (run only with
+   `--target mac`), so example compilation is advisory until the
    always-reporting context below is promoted to a required check. The
    `example-validation` workflow compiles the full examples tree on Linux and
    macOS whenever an example, watched state/format header, core CMake surface,

@@ -212,6 +212,10 @@ In source-tree mode it also reports the effective PR workflow (`shipyard`,
 `github`, or `manual`) and whether the selected workflow's local tool is
 available. Public Pulp installs do not install Shipyard or GitHub CLI; those
 are contributor/source-checkout tools checked when the PR workflow needs them.
+Under the `shipyard` workflow it lists each Shipyard target that is opt-in in
+`.shipyard/config.toml` (`default = false`), for example
+`mac: opt-in, not run (GitHub required checks decide)`, so a PR with no local
+Shipyard run is not mistaken for a broken lane.
 It also reports the effective `pulp import-design` defaults, including whether
 they came from the built-in `live/js` default, `~/.pulp/config.toml`, or
 `PULP_IMPORT_DESIGN_DEFAULT_*` environment overrides.

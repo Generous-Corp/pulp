@@ -803,6 +803,13 @@
       "timeout": 120.0
     },
     {
+      "name": "shipyard-target-defaults-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_shipyard_target_defaults.py"
+      ],
+      "timeout": 60.0
+    },
+    {
       "name": "silent-revert-guard-selftest",
       "argv": [
         "{repo}/tools/scripts/test_silent_revert_guard.py"

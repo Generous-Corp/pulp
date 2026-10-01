@@ -5801,6 +5801,26 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
+#### The local `mac` lane is opt-in: `shipyard pr` delegates to the required checks
+
+`[targets.mac]` in `.shipyard/config.toml` carries `default = false`, so
+`shipyard pr` and `shipyard ship` push, open or find the PR and arm auto-merge,
+then print `validation: delegated` (`--json`: `"verdict_owner":
+"required-checks"`) without queueing a job or writing ship-state. That is
+success, not a wedge: the required GitHub checks decide, and a Pulp PR with no
+ship-state is expected. `pulp status`, `shipyard status`, `ship-state
+list/show`, `landing` and `doctor` print
+`mac: opt-in, not run (GitHub required checks decide)`; "the mac lane never ran"
+is therefore not a break to diagnose. Run the local Debug + examples + full-ctest lane only
+when you want it: `shipyard pr --target mac`, `shipyard ship --pr <n> --target
+mac`, or `shipyard run --targets mac`. It became opt-in on 2026-09-30 (decisions
+contract row #9) after failing 64 of 64 runs in a week at about 42 host-hours on
+one Mac while PRs merged on the required checks anyway. Example compilation is
+advisory now (`example-validation`), until that context is promoted to required.
+Shipyard older than 0.242.0 ignores `default` and still runs the lane; upgrade
+(`shipyard update`) rather than passing `--skip-target mac`, which exits 2
+because `mac` is the only target.
+
 #### Shipyard cannot merge under a merge queue — it errors, and that is expected
 
 `shipyard pr` is still the right way to create a PR: it runs the gates, applies

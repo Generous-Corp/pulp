@@ -5091,6 +5091,13 @@
    ],
    "kind": "shell"
   },
+  "shipyard-target-defaults-selftest": {
+   "entry": "tools/ci/test_shipyard_target_defaults.py",
+   "inputs": [
+    "tools/ci/test_shipyard_target_defaults.py"
+   ],
+   "kind": "python"
+  },
   "silent-revert-guard-selftest": {
    "entry": "tools/scripts/test_silent_revert_guard.py",
    "inputs": [
