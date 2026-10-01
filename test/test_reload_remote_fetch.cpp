@@ -140,7 +140,7 @@ TEST_CASE("remote fetch: a valid signed newer pack is Applied + installed",
     REQUIRE_FALSE(fs::exists(cfg.install_base));
 }
 
-#ifndef _WIN32  // POSIX permission bits; Windows has no read-only directories.
+#ifndef _WIN32 // POSIX permission bits; Windows has no read-only directories.
 TEST_CASE("remote fetch: test temp trees are removable after a read-only install",
           "[reload][remote-fetch][test-hygiene]") {
     // The exact shape install_verified_pack publishes, built by hand so the
@@ -151,11 +151,10 @@ TEST_CASE("remote fetch: test temp trees are removable after a read-only install
     std::ofstream(pack / "ui.js") << "export const ui = 1;";
     fs::permissions(pack / "ui.js", fs::perms::owner_read, fs::perm_options::replace);
     fs::permissions(pack / "sub", fs::perms::none, fs::perm_options::replace);
-    fs::permissions(pack, fs::perms::owner_read | fs::perms::owner_exec,
-                    fs::perm_options::replace);
+    fs::permissions(pack, fs::perms::owner_read | fs::perms::owner_exec, fs::perm_options::replace);
     std::error_code ec;
     fs::remove_all(base, ec);
-    REQUIRE(fs::exists(pack / "ui.js"));      // a bare remove_all leaves it behind
+    REQUIRE(fs::exists(pack / "ui.js")); // a bare remove_all leaves it behind
     REQUIRE(pulp::test::remove_tmp_tree(base));
     REQUIRE_FALSE(fs::exists(base));
 }
