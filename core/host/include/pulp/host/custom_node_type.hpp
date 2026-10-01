@@ -5,6 +5,7 @@
 // state or execution machinery.
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/host/custom_node_events.hpp>
 #include <pulp/state/parameter.hpp>
 
 #include <cmath>
@@ -210,6 +211,22 @@ struct CustomNodeType {
     // compatibility.
     std::function<int(double /*sample_rate*/, int /*max_block_size*/)> latency_samples_for_block;
 
+    // Optional event-aware process callbacks. The graph already gathers a node's
+    // inbound MIDI before the executor dispatches on binding kind; these are how
+    // a Custom node reads it. Kept after the historical callbacks so positional
+    // aggregate initializers written before the event lane stay valid. The block
+    // and callback types live in custom_node_events.hpp.
+    CustomNodeEventProcessFn process_events;
+    CustomNodeInstanceEventProcessFn process_instance_events;
+
+    // True when this type declares a usable event-aware execution path.
+    // DERIVED from callback presence rather than stored as a flag, so it can
+    // never disagree with the callbacks it describes.
+    bool consumes_events() const noexcept {
+        return static_cast<bool>(process_events) ||
+               (static_cast<bool>(create) && static_cast<bool>(process_instance_events));
+    }
+
     bool is_valid_registration() const noexcept {
         const bool has_plain_callback =
             static_cast<bool>(process) ||
@@ -228,6 +245,20 @@ struct CustomNodeType {
              !has_plain_callback)) {
             return false;
         }
+
+        // A stateful event callback needs a complete instance lifecycle, exactly
+        // as the stateful transport and baked-param callbacks do.
+        if (process_instance_events && (!create || !destroy)) return false;
+
+        // The bake layer carries no event plane, so a lowered event-aware node
+        // would run its audio silently MIDI-less instead of failing. Refuse the
+        // combination at registration, where it is still visible.
+        if (lowerable && consumes_events()) return false;
+
+        // Transport-aware and event-aware execution in one type would need a
+        // dispatch precedence the binding does not define. Carrying transport on
+        // the event block is what lifts this.
+        if (consumes_events() && has_transport_callback) return false;
 
         // Bake-layer obligations live here too, so that every registrar — the
         // direct one, the transactional edit, and the node-adding leaf — applies
@@ -397,6 +428,10 @@ struct CustomNodeTypeMetadata {
     std::string default_name;
     bool lowerable = false;
     std::vector<CustomNodeBakedParam> baked_params;
+    // Mirrors CustomNodeType::consumes_events() for a registered type, so an
+    // edge validator can ask whether a resolved destination reads events
+    // without holding the callbacks themselves.
+    bool consumes_events = false;
 };
 
 }  // namespace pulp::host

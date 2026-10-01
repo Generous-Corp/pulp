@@ -615,6 +615,31 @@ resolver cannot silently compare against an older merge base. The checker's
 protected-base prefix and evolution rules remain authoritative; never repair
 history by rewriting or deleting protected entries.
 
+### A new `core/host` header cannot be tracked without widening a named tuple
+
+`core/host/include/pulp/host` is **not** one of `PUBLIC_ROOTS`. Every other
+domain is discovered by `rglob`, so a new public header there is fingerprinted
+the moment it exists; a **host** header reaches the surface only if it is listed
+in `SAMPLE_REGION_HOST_HEADERS` by name.
+
+The consequence is easy to miss and reads as success: adding a new installed
+header under `core/host/include` leaves `--check` reporting `fresh`, because the
+surface never saw it. The header is public and unguarded — a later byte change to
+it trips nothing.
+
+A `REVIEWED_HEADERS` row does not rescue it. `discover_headers()` builds the
+`current` map first, and `REVIEWED_HEADERS` is validated *against* that map, so a
+row for an undiscovered host header fails `reviewed public header is missing`
+rather than registering it. The only way to track one is to add it to
+`SAMPLE_REGION_HOST_HEADERS` — which also stamps its domain as `signal`,
+mislabeling anything that is not sample-region work.
+
+So a host-side vocabulary header ships untracked unless that tuple is
+deliberately widened (or renamed to mean "reviewed host headers"). Treat
+widening it as a surface-policy change owned by this skill, not something a
+feature slice does in passing — and state the gap rather than letting a `fresh`
+check imply coverage.
+
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 
 A header named by a `binding(...)` in a catalog is already a capability

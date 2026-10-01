@@ -528,20 +528,38 @@ void SignalGraph::run_reference_walk_(
                     }
                 }
                 break;
-            case NodeType::Custom:
-                if (auto custom_it = cg->custom_processors.find(id);
-                    custom_it != cg->custom_processors.end()) {
-                    audio::BufferView<float> out_view(
-                        rt.output_ptrs.data(), rt.output_ptrs.size(),
-                        static_cast<std::size_t>(num_samples));
-                    audio::BufferView<const float> in_view(
-                        rt.input_const_ptrs.data(), rt.input_const_ptrs.size(),
-                        static_cast<std::size_t>(num_samples));
+            case NodeType::Custom: {
+                audio::BufferView<float> out_view(
+                    rt.output_ptrs.data(), rt.output_ptrs.size(),
+                    static_cast<std::size_t>(num_samples));
+                audio::BufferView<const float> in_view(
+                    rt.input_const_ptrs.data(), rt.input_const_ptrs.size(),
+                    static_cast<std::size_t>(num_samples));
+                // Events take precedence over the plain callback, in the SAME
+                // order the routed binding uses. Both resolve from the snapshot's
+                // one event map, so a node cannot read events on one path and not
+                // the other.
+                if (auto event_it = cg->custom_event_processors.find(id);
+                    event_it != cg->custom_event_processors.end()) {
+                    rt.midi_out.clear();
+                    rt.midi_out.clear_sysex();
+                    if (auto* ump = rt.midi_out.ump()) ump->clear();
+                    const CustomNodeEventBlock events{&rt.midi_in, nullptr};
+                    event_it->second(out_view, in_view, num_samples, events);
+                } else if (auto custom_it = cg->custom_processors.find(id);
+                           custom_it != cg->custom_processors.end()) {
                     custom_it->second(out_view, in_view, num_samples);
                 } else {
                     pass_through_or_zero(rt);
                 }
+                // The routed executor propagates a node's inbound incompleteness
+                // through EVERY binding, Custom included. Mirror it here for all
+                // three branches, or a Custom node between a dropping source and
+                // a MIDI sink reports differently on the two paths.
+                rt.midi_out_incomplete =
+                    rt.midi_in_incomplete || midi_block_has_drops(rt.midi_out);
                 break;
+            }
         }
         if (rt.load) rt.load->end();
     }

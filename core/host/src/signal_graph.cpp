@@ -228,7 +228,9 @@ bool custom_types_equal_for_idempotency(const CustomNodeType& lhs,
         !same_function(lhs.process_instance_transport, rhs.process_instance_transport) ||
         !same_function(lhs.process_instance_baked_param, rhs.process_instance_baked_param) ||
         !same_function(lhs.latency_samples, rhs.latency_samples) ||
-        !same_function(lhs.latency_samples_for_block, rhs.latency_samples_for_block)) {
+        !same_function(lhs.latency_samples_for_block, rhs.latency_samples_for_block) ||
+        !same_function(lhs.process_events, rhs.process_events) ||
+        !same_function(lhs.process_instance_events, rhs.process_instance_events)) {
         return false;
     }
     for (std::size_t i = 0; i < lhs.baked_params.size(); ++i) {
@@ -792,6 +794,7 @@ std::vector<CustomNodeTypeMetadata> SignalGraph::custom_node_types() const {
             type.default_name,
             type.lowerable,
             type.baked_params,
+            type.consumes_events(),
         });
     }
     std::sort(snapshot.begin(), snapshot.end(),
@@ -1973,6 +1976,14 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
     return &it->second;
 }
 
+const CustomNodeEventProcessFn* SignalGraph::live_custom_event_processor(
+    NodeId id) const noexcept {
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->custom_event_processors.find(id);
+    if (it == live_slot_.live()->custom_event_processors.end()) return nullptr;
+    return &it->second;
+}
+
 int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
     // Read-guarded rather than a bare live() deref: this one is read by the
     // PDC/bake paths while a re-prepare can be publishing a new snapshot, and
@@ -2343,6 +2354,11 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 return it == cg.custom_transport_processors.end() ? nullptr
                                                                   : &it->second;
             },
+        .custom_event_for =
+            [&cg](NodeId id) -> const CustomNodeEventProcessFn* {
+                auto it = cg.custom_event_processors.find(id);
+                return it == cg.custom_event_processors.end() ? nullptr : &it->second;
+            },
         .custom_latency_for =
             [&cg](NodeId id) -> int {
                 auto it = cg.custom_latency_samples.find(id);
@@ -2689,13 +2705,30 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
                 }
+                // Event-aware resolution, with the same instance-lifetime
+                // guarantee: a stateful callback is wrapped in a lambda holding
+                // the instance shared_ptr by value, so the map always stores the
+                // stateless shape and both execution paths read one map.
+                if (n.custom_instance && type->process_instance_events) {
+                    auto inst = n.custom_instance;
+                    auto fn = type->process_instance_events;
+                    cg->custom_event_processors[n.id] =
+                        [inst, fn](audio::BufferView<float>& out,
+                                   const audio::BufferView<const float>& in,
+                                   int num_samples, const CustomNodeEventBlock& events) {
+                            fn(inst.get(), out, in, num_samples, events);
+                        };
+                } else if (type->process_events) {
+                    cg->custom_event_processors[n.id] = type->process_events;
+                }
                 // A registered type with no live callback is transparent on the
                 // live graph, so it must not add latency there. Baked-only
                 // callbacks capture their latency separately during lowering.
                 // Evaluated once here, off the audio thread, at the graph's own
                 // rate, and clamped into the declared range — the value is not
                 // knowable at registration, so this is where it gets checked.
-                if (cg->custom_processors.contains(n.id) &&
+                if ((cg->custom_processors.contains(n.id) ||
+                     cg->custom_event_processors.contains(n.id)) &&
                     (type->latency_samples_for_block || type->latency_samples)) {
                     const int latency =
                         type->latency_samples_for_block
@@ -2749,6 +2782,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 [prepared](audio::BufferView<float>& out, const audio::BufferView<const float>& in,
                            int frames) noexcept { prepared->process(out, in, frames); };
             cg->custom_latency_samples[n.id] = 0;
+            // A region anchor's processor IS the prepared region, which has no
+            // event plane. Drop any event binding its registered type resolved
+            // above, so the region cannot be entered through the event lane.
+            cg->custom_event_processors.erase(n.id);
             n.transport_sensitive = true;
         }
         // Before sample-region quotienting, compile_ resolved this flag directly
