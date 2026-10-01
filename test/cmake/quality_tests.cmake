@@ -678,6 +678,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Per-target codemodel digests in the reuse record: relocation
+        # stability and which part moves with which change.
+        add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_codemodel_digest.py")
+        set_tests_properties(codemodel-digest-selftest PROPERTIES TIMEOUT 120)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

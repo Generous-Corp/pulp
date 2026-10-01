@@ -685,6 +685,24 @@ flag, because the verifier runs from the base and an older one rejects an
 unknown argument. Add new verifier inputs the same way: accept the argument
 first, then enforce it once the accepting version is the protected base.
 
+### Required checks are only as trustworthy as the PR's workflow YAML
+
+A merge group runs the workflow YAML its PR carries, and every required context
+is posted by a GitHub Actions workflow. So a PR that edits `build.yml` can pass
+`macos` by forcing `macos_reused=true` or by rewriting the job. A base-sourced
+verifier called from PR-controlled control flow does not fix this: the PR
+decides whether it runs. Pinning a context to the Shipyard App does not fix it
+either, because that App's key is a repo secret that merge_group jobs can read.
+Only an org-level required workflow or required code-owner review would close
+it. By Daniel's decision on 2026-09-30 neither is used, and the risk is visible
+instead: the advisory `Required-check machinery (advisory)` check run
+(`required-check-machinery.yml`, `pull_request_target`, protected-main
+definition) names every changed file that can decide a required check, with
+conclusion `neutral` when it flags anything. A workflow token usually cannot
+read branch protection, so in practice it counts every workflow file. Do not
+propose an in-workflow "unforgeable" gate; read that status and review the
+named files.
+
 ### A PR head also runs the tests its own diff reaches, and that step gates
 
 Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate
@@ -2070,6 +2088,12 @@ the first target (and before FetchContent). The launcher must exit with the
 linker's status and fall back to the plain command whenever it cannot write
 its record: recording may never fail a link.
 
+`codemodel-<sha>.json` digests only named codemodel fields: never hash a raw
+target record, whose `backtrace` indices move whenever an unrelated line of
+CMake moves. A ctest registration belongs to the target whose artifact is its
+`command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
+compiled test is missing and only script tests (owned by no target) appear.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
@@ -3047,6 +3071,27 @@ host and what needs it. Fix order: land the host in tartci first, then refresh
 the copy with `relay_contract_check.py --tartci <checkout> --write` in the Pulp
 PR. It counts literal URLs in macOS-capable `run:` scripts plus pip/npm/brew
 invocations; a download a TEST makes itself goes in its `CORPUS_HOSTS` list.
+
+## Reading `gate-git-transfer` / `gate-artifact` lines in a macos log
+
+A gate job on a tartci VM may take repository history and pinned archives from
+a read-only host cache (`TARTCI_ARTIFACT_CACHE`; tartci `docs/runbook.md`).
+Each path logs what it actually did, and those lines are the proof, not the
+step duration:
+
+- `gate-git-seed: alternates=… mirror_main=<sha>` means the checkout was seeded;
+  `no host mirror` means the host has no cache (expected on hosts not yet set up).
+- `gate-git-transfer: local_object_kib=N alternates=yes|no` after hydration is
+  the repository bytes the job pulled over the network. Without a mirror it is
+  ~113 MiB; with a current mirror a few hundred KiB. A large value with
+  `alternates=yes` means the host mirror is stale: run tartci
+  `scripts/artifact-cache.sh git-sync --repo Generous-Corp/pulp` on that host.
+- `gate-artifact: chrome source=cache|network` and Skia's `Copied from host
+  artifact cache` / `Downloaded N bytes` say where each pinned archive came from.
+  A `network` reading on a seeded host means that digest is not in the cache yet.
+
+A cache miss or a bad cache entry never fails the gate; it costs the download
+the job would have done anyway.
 
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
@@ -8914,6 +8959,13 @@ the macOS `Install ccache (macOS)` step within minutes of each other
 because Namespace's runner image had drifted past the freshness
 window the brew preamble enforces. Adding `brew update --quiet`
 once unblocks the whole queue.
+
+`brew update (macOS)` now returns early when `ccache` and `ninja` are both on
+PATH: the only `brew install` calls in the macOS job are for those two tools,
+each guarded by `command -v`, so on a gate VM (both baked) the update bought
+nothing. Keep the guard in sync if a later step adds another `brew install`:
+that step's tool must join the `command -v` list, or a stale-config runner
+will fail its install.
 
 ## SignalGraph Phase 0 learnings (PR #153)
 

@@ -627,6 +627,53 @@ def download_release_asset(url: str,
     raise last_error
 
 
+def artifact_cache_blob(expected_sha: str) -> Path | None:
+    """The host artifact cache's copy of the pinned archive, when one exists.
+
+    A tartci gate VM may mount a read-only host directory and name it in
+    TARTCI_ARTIFACT_CACHE; its `sha256/<hex>` entries are files whose SHA-256
+    is their name. The digest looked up is the one the manifest already pins,
+    and the caller still verifies the copied bytes, so the cache only decides
+    where the bytes come from.
+    """
+    root = os.environ.get("TARTCI_ARTIFACT_CACHE", "").strip()
+    if not root or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+        return None
+    blob = Path(root) / "sha256" / expected_sha
+    try:
+        # A stale or disconnected share can raise EIO/ESTALE here rather than
+        # report absence; either way there is nothing usable to copy.
+        return blob if blob.is_file() else None
+    except OSError:
+        return None
+
+
+def obtain_release_asset(url: str, zip_path: Path, expected_sha: str) -> str:
+    """Fill `zip_path` with the pinned asset and return the SHA-256 it holds.
+
+    Prefers the host artifact cache and downloads when the cache has no entry,
+    cannot be read, or holds bytes that do not match the pin: the cache is an
+    accelerator, and a bad entry must cost a download, never the build.
+    """
+    blob = artifact_cache_blob(expected_sha)
+    if blob is not None:
+        try:
+            shutil.copyfile(blob, zip_path)
+        except OSError as error:
+            print(f"  host artifact cache unreadable ({error}); downloading instead")
+        else:
+            actual = _file_sha256(zip_path)
+            if actual == expected_sha:
+                print(f"Copied from host artifact cache: {blob} "
+                      f"({zip_path.stat().st_size} bytes, no download)")
+                return actual
+            print(f"  host artifact cache entry {blob} hashes to {actual}; "
+                  "downloading instead")
+    download_release_asset(url, zip_path)
+    print(f"Downloaded {zip_path.stat().st_size} bytes from {url}")
+    return _file_sha256(zip_path)
+
+
 def _main(argv: list[str]) -> int:
     dest_root = "external/skia-build"
     args = argv[1:]
@@ -823,14 +870,8 @@ def _main(argv: list[str]) -> int:
         raise RuntimeError("Skia archive created outside the main() cleanup scope")
     archives.append(zip_path)
     print(f"Downloading -> {zip_path}")
-    download_release_asset(url, zip_path)
-
     # Verify sha256 BEFORE unpacking.
-    h = hashlib.sha256()
-    with zip_path.open("rb") as fp:
-        for chunk in iter(lambda: fp.read(1024 * 1024), b""):
-            h.update(chunk)
-    actual_sha = h.hexdigest()
+    actual_sha = obtain_release_asset(url, zip_path, expected_sha)
     if actual_sha != expected_sha:
         print(
             f"ERROR: sha256 mismatch\n  expected: {expected_sha}\n  actual:   {actual_sha}",

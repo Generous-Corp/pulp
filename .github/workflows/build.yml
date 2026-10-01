@@ -1345,6 +1345,45 @@ jobs:
         continue-on-error: true
         shell: bash
         run: echo "REUSE_RECORD_JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+      # A tartci gate VM may mount a read-only host artifact cache holding a
+      # bare mirror of this repository (TARTCI_ARTIFACT_CACHE; see tartci's
+      # docs/runbook.md). Pre-creating the workspace repository with that
+      # mirror as a Git alternate makes the checkout below and the provenance
+      # hydration fetch only the objects the mirror lacks, instead of ~56 MiB
+      # and ~57 MiB of history on every job. checkout@v5 keeps an existing
+      # repository whose origin URL matches only while `clean` is false (true
+      # here on self-hosted runners; with `clean: true` its `reset --hard`
+      # fails on the unborn seed and it recreates the repository). Either way
+      # a missing cache, a warm workspace or any surprise falls back to the
+      # ordinary full fetch.
+      - name: Seed the checkout from the host git mirror (tartci macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache="${TARTCI_ARTIFACT_CACHE:-}"
+          mirror="$cache/git/$GITHUB_REPOSITORY.git"
+          if [ -z "$cache" ] || [ ! -d "$mirror/objects/pack" ]; then
+            echo "gate-git-seed: no host mirror; checkout fetches the full depth"
+            exit 0
+          fi
+          cd "$GITHUB_WORKSPACE"
+          if [ -e .git ] || [ -n "$(ls -A)" ]; then
+            echo "gate-git-seed: workspace is not empty; leaving it to checkout"
+            exit 0
+          fi
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          printf '%s\n' "$mirror/objects" > .git/objects/info/alternates
+          head="$(git --git-dir="$mirror" rev-parse --verify --quiet refs/heads/main || true)"
+          if [ -z "$head" ] || ! git cat-file -e "$head^{commit}" \
+              || ! git cat-file -e "$head^{tree}"; then
+            echo "gate-git-seed: mirror is unreadable; removing the seed"
+            rm -rf .git
+            exit 0
+          fi
+          echo "gate-git-seed: alternates=$mirror/objects mirror_main=$head"
       - uses: actions/checkout@v5
         with:
           lfs: false
@@ -1385,7 +1424,13 @@ jobs:
 
       - name: Hydrate bounded GPU provenance commits
         shell: bash
-        run: python3 tools/scripts/hydrate_gpu_provenance_commits.py
+        run: |
+          python3 tools/scripts/hydrate_gpu_provenance_commits.py
+          # What checkout and hydration stored locally: the repository bytes
+          # this job pulled over the network (objects served by a host-mirror
+          # alternate are not counted, which is the point of the mirror).
+          git count-objects -v | awk '/^size(-pack)?:/ {kib += $2} END {printf "gate-git-transfer: local_object_kib=%d ", kib}'
+          if [ -s .git/objects/info/alternates ]; then echo "alternates=yes"; else echo "alternates=no"; fi
 
       - name: Set up Namespace macOS cache
         if: runner.os == 'macOS' && contains(matrix.runs_on_json, 'namespace-profile')
@@ -1443,9 +1488,21 @@ jobs:
       # install step below already retries with its own `brew update`,
       # which is what actually recovers the stale-config case, so
       # swallowing the exit code here costs no coverage.
+      #
+      # Only a later `brew install` needs a fresh Homebrew config, and the
+      # macOS steps below install only ccache and ninja, each only when it is
+      # absent. The gate VM golden bakes both, so there the update installs
+      # nothing and only costs a portable-ruby and API download on every job.
+      # Skip it when both tools are already on PATH; any runner missing one
+      # still updates first, exactly as before.
       - name: brew update (macOS)
         if: runner.os == 'macOS'
-        run: brew update --quiet || echo "brew update failed; install steps retry"
+        run: |
+          if command -v ccache >/dev/null 2>&1 && command -v ninja >/dev/null 2>&1; then
+            echo "ccache and ninja are installed, so Homebrew has nothing to install; skipping brew update"
+            exit 0
+          fi
+          brew update --quiet || echo "brew update failed; install steps retry"
 
       # The gate VM golden bakes ccache, and `brew install` of an installed
       # formula still reaches the Homebrew API, so an installed ccache is used
@@ -1541,17 +1598,30 @@ jobs:
           chrome="$chrome_root/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
           if [ ! -x "$chrome" ]; then
             archive="$RUNNER_TEMP/chrome-mac-arm64.zip"
-            # A gate VM has lost DNS for storage.googleapis.com, or had the
-            # transfer reset, for tens of seconds at a time, failing the
-            # required macos check before the build started. Plain `--retry`
-            # treats neither a resolve failure (exit 6) nor a receive reset
-            # (exit 56) as transient, so they must be named with
-            # `--retry-all-errors`; the SHA-256 check below still rejects any
-            # bad bytes a retried transfer could leave behind.
-            curl --fail --location --retry 8 --retry-all-errors --retry-delay 15 \
-              --connect-timeout 30 --output "$archive" \
-              https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
             expected=9529990b6afd9867a862c7a5bff2a4a8eef84614d910acac22e4c5fa5c24daee
+            # A tartci gate VM may carry the pinned archive in a read-only host
+            # artifact cache, named by the digest pinned here. Its bytes are
+            # checked against that digest like a download; a missing or
+            # mismatched entry falls back to the network.
+            blob="${TARTCI_ARTIFACT_CACHE:-}/sha256/$expected"
+            source=network
+            if [ -n "${TARTCI_ARTIFACT_CACHE:-}" ] && [ -f "$blob" ] \
+                && cp "$blob" "$archive" \
+                && [ "$(shasum -a 256 "$archive" | awk '{print $1}')" = "$expected" ]; then
+              source=cache
+            else
+              # A gate VM has lost DNS for storage.googleapis.com, or had the
+              # transfer reset, for tens of seconds at a time, failing the
+              # required macos check before the build started. Plain `--retry`
+              # treats neither a resolve failure (exit 6) nor a receive reset
+              # (exit 56) as transient, so they must be named with
+              # `--retry-all-errors`; the SHA-256 check below still rejects any
+              # bad bytes a retried transfer could leave behind.
+              curl --fail --location --retry 8 --retry-all-errors --retry-delay 15 \
+                --connect-timeout 30 --output "$archive" \
+                https://storage.googleapis.com/chrome-for-testing-public/151.0.7922.47/mac-arm64/chrome-mac-arm64.zip
+            fi
+            echo "gate-artifact: chrome source=$source bytes=$(wc -c < "$archive" | tr -d ' ')"
             actual=$(shasum -a 256 "$archive" | awk '{print $1}')
             [ "$actual" = "$expected" ] || { echo "Chrome archive SHA-256 mismatch" >&2; exit 1; }
             mkdir -p "$chrome_root"
@@ -2779,7 +2849,7 @@ jobs:
             --build-dir "$b" --source-root "$GITHUB_WORKSPACE" ${suites[@]+"${suites[@]}"} \
             --selected-json "$ev/selected.json" \
             --identity-json "$shadows/our-identity.json" --test-keys "$shadows/test-keys.json" \
-            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members \
+            --build-outcome "$BUILD_OUTCOME" --not-before-epoch "${REUSE_RECORD_JOB_START:-}" --link-members --codemodel \
             --context "ctest=$CTEST_OUTCOME" --context "pr_fast=$PR_FAST_OUTCOME" \
             --context "pr_affected=$PR_AFFECTED_OUTCOME" || rc=$?
           if [ "$rc" -ne 0 ] || [ ! -s "$out/job.json" ]; then

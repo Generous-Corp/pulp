@@ -481,5 +481,70 @@ class DownloadRetryThroughMain(unittest.TestCase):
             )
 
 
+class ArtifactCacheTests(unittest.TestCase):
+    """The host artifact cache replaces the download only with matching bytes."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = pathlib.Path(self._tmp.name)
+        self.payload = b"pinned skia archive"
+        self.sha = hashlib.sha256(self.payload).hexdigest()
+        self.cache = self.tmp / "cache"
+        (self.cache / "sha256").mkdir(parents=True)
+        self.zip_path = self.tmp / "asset.zip"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _obtain(self, cache_env: str | None, network_bytes: bytes):
+        def fake_download(url, path, **_):
+            path.write_bytes(network_bytes)
+        env = {} if cache_env is None else {"TARTCI_ARTIFACT_CACHE": cache_env}
+        with mock.patch.dict(os.environ, env, clear=False), \
+                mock.patch.object(skia, "download_release_asset", side_effect=fake_download) as dl, \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            if cache_env is None:
+                os.environ.pop("TARTCI_ARTIFACT_CACHE", None)
+            actual = skia.obtain_release_asset("https://example.invalid/a.zip",
+                                               self.zip_path, self.sha)
+        return actual, dl.call_count, out.getvalue()
+
+    def test_a_matching_blob_replaces_the_download(self) -> None:
+        (self.cache / "sha256" / self.sha).write_bytes(self.payload)
+        actual, downloads, out = self._obtain(str(self.cache), b"network")
+        self.assertEqual((actual, downloads), (self.sha, 0))
+        self.assertEqual(self.zip_path.read_bytes(), self.payload)
+        self.assertIn("no download", out)
+
+    def test_no_cache_or_no_entry_downloads(self) -> None:
+        for env in (None, "", str(self.cache)):
+            with self.subTest(env=env):
+                actual, downloads, _ = self._obtain(env, self.payload)
+                self.assertEqual((actual, downloads), (self.sha, 1))
+
+    def test_a_corrupt_blob_falls_back_to_the_network(self) -> None:
+        (self.cache / "sha256" / self.sha).write_bytes(b"bit rot")
+        actual, downloads, out = self._obtain(str(self.cache), self.payload)
+        self.assertEqual((actual, downloads), (self.sha, 1))
+        self.assertIn("downloading instead", out)
+
+    def test_the_returned_digest_is_of_the_bytes_on_disk(self) -> None:
+        # A tampered network body is reported, not trusted: _main compares it.
+        actual, _, _ = self._obtain(str(self.cache), b"tampered")
+        self.assertEqual(actual, hashlib.sha256(b"tampered").hexdigest())
+        self.assertNotEqual(actual, self.sha)
+
+    def test_a_non_digest_pin_never_reads_the_cache(self) -> None:
+        (self.cache / "sha256" / self.sha).write_bytes(self.payload)
+        with mock.patch.dict(os.environ, {"TARTCI_ARTIFACT_CACHE": str(self.cache)}):
+            self.assertEqual(skia.artifact_cache_blob(self.sha), self.cache / "sha256" / self.sha)
+            self.assertIsNone(skia.artifact_cache_blob("../sha256/" + self.sha))
+
+    def test_an_unreadable_share_reads_as_absent(self) -> None:
+        with mock.patch.dict(os.environ, {"TARTCI_ARTIFACT_CACHE": str(self.cache)}), \
+                mock.patch.object(pathlib.Path, "is_file", side_effect=OSError(5, "EIO")):
+            self.assertIsNone(skia.artifact_cache_blob(self.sha))
+
+
 if __name__ == "__main__":
     unittest.main()

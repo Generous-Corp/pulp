@@ -501,6 +501,10 @@ public:
     // GraphNode::transport_sensitive was resolved true.
     const CustomNodeTransportProcessFn* live_custom_transport_processor(
         NodeId id) const noexcept;
+    // The live compiled snapshot's event-aware custom callback for a Custom
+    // node, or nullptr when the node's type registered none. Same lifetime
+    // contract as live_custom_processor.
+    const CustomNodeEventProcessFn* live_custom_event_processor(NodeId id) const noexcept;
     // Prepare-stable intrinsic latency cached in the live compiled snapshot.
     // Returns zero for an unresolved/zero-latency/non-Custom node, or without a
     // snapshot.
@@ -1051,6 +1055,13 @@ private:
         // that node (both resolved from the same compile-time condition), so the
         // routed binding and the anticipation analysis stay consistent.
         std::unordered_map<NodeId, CustomNodeTransportProcessFn> custom_transport_processors;
+        // Event-aware custom callbacks, populated alongside custom_processors for
+        // any Custom node whose type declared an event-aware variant. Always the
+        // stateless shape: a stateful type is resolved into a lambda that holds
+        // its instance, exactly as custom_processors does. Both the routed
+        // binding and the reference walk resolve from THIS map, so the two paths
+        // cannot disagree about which nodes read events.
+        std::unordered_map<NodeId, CustomNodeEventProcessFn> custom_event_processors;
         struct NodeShape {
             NodeType type;
             int num_input_ports;

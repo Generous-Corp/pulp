@@ -376,6 +376,45 @@ class CliTests(unittest.TestCase):
         self.assertEqual([t["name"] for t in only], ["ran"])
 
 
+    def write_in_process(self, tmp: str, build: Path, src: Path, tests: list[dict]) -> tuple[str, dict]:
+        import contextlib
+        import io
+        original = pmr.ctest_inventory
+        pmr.ctest_inventory = lambda build_dir, ctest_json=None: {"tests": tests}
+        out = io.StringIO()
+        old_env = dict(os.environ)
+        os.environ.update({"GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"})
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = rr.main(["reuse_record.py", "write", "--out-dir", f"{tmp}/out", "--build-dir", str(build),
+                              "--source-root", str(src), "--codemodel", "--identity-scope", "ran"])
+        finally:
+            pmr.ctest_inventory = original
+            os.environ.clear()
+            os.environ.update(old_env)
+        self.assertEqual(rc, 0)
+        return out.getvalue(), json.loads((Path(tmp) / "out" / "job.json").read_text())
+
+    def test_codemodel_digests_are_written_beside_the_identity(self) -> None:
+        import test_codemodel_digest as tcd
+        with tempfile.TemporaryDirectory() as tmp:
+            build, src, tests = tcd.materialise(tmp)
+            stdout, job = self.write_in_process(tmp, build, src, tests)
+            doc = json.loads((Path(tmp) / "out" / "codemodel-abc.json").read_text())
+        self.assertEqual((job["codemodel"]["targets"], job["codemodel"]["with_tests"],
+                          job["codemodel"]["tests_unmatched"]), (5, 1, 0))
+        self.assertEqual(job["bytes"]["codemodel"], job["codemodel"]["bytes"])
+        self.assertIn("t", doc["targets"])
+        self.assertNotIn("::warning", stdout)
+
+    def test_a_build_without_a_codemodel_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "build").mkdir()
+            stdout, job = self.write_in_process(tmp, Path(tmp) / "build", Path(tmp), [])
+        self.assertIsNone(job["codemodel"])
+        self.assertIn("::warning title=reuse-record incomplete::codemodel digest unavailable", stdout)
+
+
 class WorkflowContractTests(unittest.TestCase):
     """build.yml records on every macos job and never lets a record go missing silently."""
 
@@ -434,6 +473,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(run, keep)
         self.assertLess(keep, listing)
         self.assertIn("attempts=$ev/LastTest.full.log,repeat", self.text)
+
+    def test_the_gate_records_link_members_and_codemodel_digests(self) -> None:
+        record = self.blocks("Record per-test results for reuse replay (macOS)")[0]
+        self.assertIn("--link-members", record)
+        self.assertIn("--codemodel", record)
+        self.assertIn('.cmake/api/v1/query/codemodel-v2"', self.text)
 
 
 if __name__ == "__main__":

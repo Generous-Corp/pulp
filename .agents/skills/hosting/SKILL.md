@@ -2261,6 +2261,63 @@ initializers. Two rules bind when you add or move a binder:
 `tools/scripts/designated_initializer_lint.py` guards the duplicate case; adding
 a binder out of order is still only caught by an MSVC build.
 
+## A graph-parity test can compare the reference walk against itself
+
+`SignalGraph` has FOUR execution paths, not three: the executor's serial,
+level and parallel walks all funnel through `run_routed_node`, and
+`signal_graph_reference_walk.cpp` is a separate hand-maintained oracle. A
+"routed vs walk" test only means something if the routed graph actually routed,
+and two things conspire to make that silently untrue:
+
+* **`run_legacy()` in `test_signal_graph_executor_parity.cpp` sets
+  `set_canonical_executor_routing_enabled(false)` on the graph you hand it.**
+  It is a legacy-FORCING runner. Passing the routed graph to it makes both sides
+  the walk, and the comparison becomes the walk against itself. Use
+  `run_graph_process()` when each graph's path should come from its own build
+  flag.
+* **`routed_execution_status().routed_path_ready()` does not mean the block
+  routed** — it still permits the reference walk (`strict_routed_ready()` is the
+  one that does not). `signal_graph_executor_eligible()` is weaker still: it
+  checks topology only, never the live snapshot.
+
+The proof that costs nothing is `acquire_routed_only_execution()`: it forbids the
+walk, so a fallback becomes a COUNTED
+`routed_only_execution_failures()` instead of an invisible one. Assert that
+counter is zero at the end. A routed-vs-walk test without it can pass with the
+routed binding entirely removed — which is exactly what
+`tools/scripts/confirm_failure.sh` reports as `NOT CONFIRMED` on the routed side
+while the walk side confirms.
+
+`use_serial` is the field to read when a graph will not route: it is false
+whenever `canonical_executor_routing_enabled_` is, and the PDC execution domain
+only pins `Legacy`/`RoutedSerial` when some connection carries a delay.
+
+## A Custom node reads events through one map, or the two paths diverge
+
+`CustomNodeType` carries `process_events` / `process_instance_events`
+(`custom_node_events.hpp` holds the block and callback types). Non-obvious parts:
+
+* Both the routed binding and the reference walk resolve from the SAME
+  `CompiledGraph::custom_event_processors`, and their dispatch precedence
+  (events, then transport, then plain, then pass-through-or-zero) must stay
+  identical. Nothing enforces that ordering — it is a review obligation.
+* `consumes_events()` is derived from callback presence, never a stored flag, so
+  it cannot disagree with the callbacks. Registration refuses a lowerable
+  event-aware type (the bake layer has no event plane and would run MIDI-less
+  rather than fail) and refuses events plus transport (no defined precedence).
+* Emission is not wired: the block's `out` is always null. The reason is
+  missing proof, NOT a safety hazard — `set_out_incomplete` is per-node on that
+  node's own out buffer (the same one `plugin_binding` writes), so an emitting
+  Custom node could only mark itself incomplete. Wiring it is two lines; the
+  work is the parity proof (emitted events equal on both paths, overflow
+  reported identically, no stale events in a later block).
+* A sample-region anchor drops any event binding — its processor is the prepared
+  region.
+* There are TWO binder sites. `SignalGraph`'s compile-time binder is the one the
+  ordinary prepared graph uses; the `live_custom_*` binder in
+  `signal_graph_executor_routing.cpp` serves a different rebuild path. Wiring
+  only one leaves a silently event-less lane.
+
 ## A Forge-exposed parameter needs a descriptor, not just a baked range
 
 `CustomNodeBakedParam` carries id, min, max and default — everything the audio

@@ -139,3 +139,62 @@ TEST_CASE("custom-node registration and metadata enumeration share a safe snapsh
     REQUIRE(complete.size() == 2048);
     REQUIRE(is_sorted(complete));
 }
+
+TEST_CASE("event-aware custom registration enforces its coherence rules",
+          "[host][graph][custom][midi]") {
+    SignalGraph graph;
+
+    SECTION("a stateless event callback registers and is reported as a consumer") {
+        CustomNodeType type = make_type("pulp.test.events.stateless", 1, "Events");
+        type.process = nullptr;
+        type.process_events = [](auto&, const auto&, int,
+                                 const pulp::host::CustomNodeEventBlock&) {};
+        REQUIRE(type.consumes_events());
+        REQUIRE(graph.register_custom_node_type(type));
+        const auto snapshot = graph.custom_node_types();
+        REQUIRE(snapshot.size() == 1);
+        REQUIRE(snapshot.front().consumes_events);
+    }
+
+    SECTION("a type with no event callback is not reported as a consumer") {
+        CustomNodeType type = make_type("pulp.test.events.none", 1, "Plain");
+        REQUIRE_FALSE(type.consumes_events());
+        REQUIRE(graph.register_custom_node_type(type));
+        REQUIRE_FALSE(graph.custom_node_types().front().consumes_events);
+    }
+
+    SECTION("a stateful event callback needs a complete instance lifecycle") {
+        CustomNodeType type = make_type("pulp.test.events.stateful", 1, "Stateful");
+        type.process = nullptr;
+        type.create = []() -> void* { return nullptr; };
+        type.process_instance_events = [](void*, auto&, const auto&, int,
+                                          const pulp::host::CustomNodeEventBlock&) {};
+        // No destroy: the instance it creates could never be released.
+        REQUIRE_FALSE(type.is_valid_registration());
+        REQUIRE_FALSE(graph.register_custom_node_type(type));
+        type.destroy = [](void*) {};
+        REQUIRE(type.is_valid_registration());
+        REQUIRE(graph.register_custom_node_type(type));
+    }
+
+    SECTION("an event-aware type cannot also be lowerable") {
+        // The bake layer has no event plane, so lowering one would run its audio
+        // silently MIDI-less instead of failing.
+        CustomNodeType type = make_type("pulp.test.events.lowerable", 1, "Lowerable");
+        type.process_events = [](auto&, const auto&, int,
+                                 const pulp::host::CustomNodeEventBlock&) {};
+        type.lowerable = true;
+        REQUIRE_FALSE(type.is_valid_registration());
+        REQUIRE_FALSE(graph.register_custom_node_type(type));
+    }
+
+    SECTION("an event-aware type cannot also declare a transport callback") {
+        // Two eligible execution paths with no defined precedence between them.
+        CustomNodeType type = make_type("pulp.test.events.transport", 1, "Transport");
+        type.process_events = [](auto&, const auto&, int,
+                                 const pulp::host::CustomNodeEventBlock&) {};
+        type.process_transport = [](auto&, const auto&, int, const auto&) {};
+        REQUIRE_FALSE(type.is_valid_registration());
+        REQUIRE_FALSE(graph.register_custom_node_type(type));
+    }
+}

@@ -198,6 +198,15 @@ shipping artifact.
   `OSError` is refused too because it is usually a full disk rather than the
   network. Check free space before re-running a fetch that failed on write.
 
+- **On a tartci gate VM the archive may come from the host, not the CDN.** When
+  `TARTCI_ARTIFACT_CACHE` is set, the fetcher first copies
+  `$TARTCI_ARTIFACT_CACHE/sha256/<pinned digest>` and logs `Copied from host
+  artifact cache`; otherwise it logs `Downloaded N bytes from <url>`. The copied
+  bytes are hashed like a download and a mismatch falls back to the network, so a
+  pin bump is safe before the host cache holds the new archive: that job just
+  downloads. To serve a new pin from the cache, run tartci's
+  `scripts/artifact-cache.sh add --url <asset> --sha256 <pin>` on each host.
+
 - **Release Skia archives require `SK_RELEASE` in every consumer, including
   Debug Pulp builds.** The published skia-builder libraries live under
   `lib/Release` and compile Skia's inline ref-counting code with release

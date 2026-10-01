@@ -963,7 +963,12 @@ the link arguments under `<build>/link-members/` (the map, megabytes of
 symbol table, is deleted). The linked bytes are identical with and without
 it. `link-members-<sha>.json` in the record then lists, per executable, the
 archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`).
+force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+(`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
+source list, compile groups, link line and the ctest registrations that run
+its artifact, read from the file-API codemodel reply the configure step
+requests, with build and source roots written as `<build>/` and `<src>/` so
+the same configuration digests identically on every VM.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
@@ -1566,6 +1571,38 @@ here removes a flake without removing any coverage.
 
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
+
+The update itself is skipped when `ccache` and `ninja` are both already on
+PATH, which is every tartci gate VM (the golden bakes both). Nothing later in
+the job runs `brew install` there, so the update only downloaded a portable
+Ruby and the Homebrew API data on every gate job. A runner missing either tool
+(Namespace, GitHub-hosted) still updates before installing.
+
+## Repository history and pinned archives from the tartci host cache
+
+A gate VM is fresh for every job, so without help each job re-downloads the
+same bytes: a depth-2 checkout (~56 MiB) and the GPU-provenance `--unshallow`
+(~57 MiB), the pinned Chrome for Testing archive (187 MB), the prebuilt Skia
+archive (57 MB) and, when the iOS gate runs, the iOS simulator Skia slice
+(69 MB). tartci can mount a read-only host artifact cache and name it in
+`TARTCI_ARTIFACT_CACHE` (tartci `docs/runbook.md`, `scripts/artifact-cache.sh`).
+`build.yml` uses it only as an accelerator:
+
+- `Seed the checkout from the host git mirror` runs before `actions/checkout`
+  and pre-creates the workspace repository with
+  `$TARTCI_ARTIFACT_CACHE/git/<owner>/<repo>.git/objects` as a Git alternate.
+  checkout@v5 keeps a repository whose origin URL matches and deletes anything
+  else, so with no cache, a warm workspace or any failure the job does the
+  ordinary full fetch. The hydration step prints `gate-git-transfer:
+  local_object_kib=N alternates=yes|no`: the repository bytes this job pulled.
+- The Chrome step and `fetch_skia_for_release.py` look up the digest they
+  already pin under `$TARTCI_ARTIFACT_CACHE/sha256/`, re-verify the bytes and
+  download on a miss or mismatch. They log `gate-artifact: chrome
+  source=cache|network bytes=N` and `Copied from host artifact cache` /
+  `Downloaded N bytes`.
+
+A pin bump therefore never breaks the gate; until the hosts' caches hold the new
+archive, jobs download it as before.
 
 ## The visual-analysis Python dependencies are installed, then proved
 
@@ -2728,11 +2765,9 @@ records whether they ran: the anchored `^slow$` label set means they did. The
 reuse step passes the group's own classification to the verifier as
 `--affected-slow-required` (an empty classifier output counts as `true`), but
 only when the protected-base verifier accepts that flag. A group that requires
-the proofs while the receipt's run skipped them is reported as a
-`::notice::protected receipt: merge group requires the slow-affected proofs
-...` line on an otherwise successful reuse. The verifier does not refuse on it,
-so those notices give the would-refuse count to read before refusal is
-switched on.
+the proofs while the receipt's run skipped them is refused with "merge group
+requires the slow-affected proofs but the receipt's run did not execute them",
+and a verifier given no requirement treats the proofs as required.
 
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the
@@ -2748,6 +2783,44 @@ annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
 there; the full suite runs in the merge queue), `full` where the full suite
 ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
 fast-tier green is never read as full validation.
+
+### Required checks trust the pull request's own workflow YAML
+
+Every required context on `main` is posted by a GitHub Actions workflow, and a
+merge group runs the workflow YAML its pull request carries. A pull request
+that edits `build.yml` can therefore decide its own `macos` result, by forcing
+`macos_reused=true` or by rewriting the job outright. Only the receipt verifier
+is loaded from the protected base, and the pull request controls whether it is
+called. No check inside the repository can close this: anything a workflow
+runs, the pull request can remove. By Daniel's decision on 2026-09-30, required
+contexts are only as trustworthy as the pull request's own workflow YAML. There
+is no org-level required workflow and no required code-owner review.
+
+What CI does instead is make it visible. `required-check-machinery.yml` runs on
+`pull_request_target`, so its definition and its script
+(`tools/scripts/required_check_machinery.py`) come from protected `main`. The
+pull request's head is fetched only to diff it. It posts the advisory, never
+required, check run `Required-check machinery (advisory)`: conclusion `neutral`
+titled `touches required-check machinery: <files>` when anything is flagged,
+`success` titled `touches no required-check machinery` otherwise, so a flagged
+pull request is visibly different without reading as a failure to chase. The
+check's summary and the run summary list each flagged file with its reason, and
+a flagged run also emits a `::warning`. If the report cannot be computed the
+job fails and posts no check run.
+
+| Reason | Paths |
+|---|---|
+| `receipt reuse` | `build.yml`, `.agents/contract.toml`, `classify_changes.py`, `protected_merge_receipt.py`, `tools/ci/ctest_gate_args.py` |
+| `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
+| `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
+
+The required contexts come from the live branch protection when the workflow
+token can read it. When it cannot (reading branch protection needs
+administration access, which a workflow token does not normally have), or the
+list is empty, every `.github/workflows` and `.github/actions` file is counted
+and the check's summary says so. A required context with no mapped producer
+widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
+itself, and review those files before it is enqueued.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 

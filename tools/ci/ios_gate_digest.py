@@ -407,8 +407,12 @@ def cmd_decide(a: argparse.Namespace) -> int:
                 raise RuntimeError("no token for the receipt lookup")
             hit = trusted_lookup(a.repository, a.token, digest)
             for why in hit.get("refusals", []):
+                # Receipt refusal text is public CI metadata, never a secret.
+                # codeql[py/clear-text-logging-sensitive-data]
                 print(f"iOS gate receipt refused: {why}", file=sys.stderr)
             for why in hit.get("lookup_errors", []):
+                # Lookup diagnostics contain only public CI metadata, never tokens.
+                # codeql[py/clear-text-logging-sensitive-data]
                 print(f"iOS gate receipt lookup failed: {why}", file=sys.stderr)
         decision = decide(a.mode, a.event, a.run_id, hit)
     except Exception as exc:  # noqa: BLE001 - the lookup is never the gate
@@ -421,11 +425,15 @@ def cmd_decide(a: argparse.Namespace) -> int:
     if decision.get("lookup_failed"):
         print(lookup_warning(decision["reason"]))
     if digest and decision.get("verdict"):
+        # The digest and verdict are derived, non-secret CI metadata.
+        # codeql[py/clear-text-logging-sensitive-data]
         print(note(decision["verdict"], digest, a.event, decision.get("source_run_id"), decision["mode"],
                    decision["reason"] if decision.get("lookup_failed") else None))
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
+            # The summary contains only derived, non-secret CI metadata.
+            # codeql[py/clear-text-storage-sensitive-data]
             fh.write(summary_line(decision, digest))
     src = decision.get("source_run_id")
     with open(a.env_out, "w", encoding="utf-8") as fh:
@@ -433,6 +441,8 @@ def cmd_decide(a: argparse.Namespace) -> int:
         fh.write(f"ios_action={'skip' if decision['action'] == 'skip' else 'run'}\n")
         fh.write(f"ios_src={int(src) if isinstance(src, int) else ''}\n")
         fh.write(f"ios_mode={decision['mode'] if decision['mode'] in MODES else 'shadow'}\n")
+    # The digest and decision are derived, non-secret CI metadata.
+    # codeql[py/clear-text-logging-sensitive-data]
     print(f"iOS gate digest: action={decision['action']} verdict={decision.get('verdict')} "
           f"digest={digest or 'unknown'} ({decision['reason']})")
     return 0

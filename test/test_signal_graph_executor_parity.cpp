@@ -2643,3 +2643,207 @@ TEST_CASE("Routed PDC compensates a Custom node's declared latency like the walk
             REQUIRE(lo[static_cast<std::size_t>(i)] == ro[static_cast<std::size_t>(i)]);
     }
 }
+
+// ── Event-aware custom nodes ──────────────────────────────────────────
+namespace {
+
+// An event-aware custom node. Its instance derives a gain from the MIDI it has
+// seen and keeps it across blocks, so a render that missed the event handoff,
+// ran it twice, or resolved a different callback than the reference walk
+// diverges audibly rather than silently.
+struct CustomMidiGate {
+    float gain = 0.25f;
+    int note_ons = 0;
+};
+
+pulp::host::CustomNodeType make_midi_gate_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.midi_gate";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "MidiGate";
+    t.create = []() -> void* { return new CustomMidiGate(); };
+    t.destroy = [](void* p) { delete static_cast<CustomMidiGate*>(p); };
+    t.reset = [](void* p) { *static_cast<CustomMidiGate*>(p) = CustomMidiGate{}; };
+    t.process_instance_events =
+        [](void* p, pulp::audio::BufferView<float>& out,
+           const pulp::audio::BufferView<const float>& in, int n,
+           const pulp::host::CustomNodeEventBlock& events) {
+            auto* s = static_cast<CustomMidiGate*>(p);
+            // A null `in` is the audio-only case and means exactly the same as an
+            // empty buffer; the two paths legitimately differ on which they hand
+            // over, so a conforming callback cannot distinguish them.
+            if (events.in != nullptr) {
+                for (const auto& ev : *events.in) {
+                    if (!ev.is_note_on()) continue;
+                    ++s->note_ons;
+                    s->gain = 0.25f + 0.001f * static_cast<float>(ev.data()[1]) +
+                              0.01f * static_cast<float>(s->note_ons);
+                }
+            }
+            for (int i = 0; i < n; ++i)
+                out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * s->gain;
+        };
+    return t;
+}
+
+}  // namespace
+
+namespace {
+
+// A STATELESS event-aware node. It resolves through a different branch than the
+// stateful one (the type's callback is stored directly rather than wrapped in a
+// lambda holding an instance), so the stateful fixture above does not reach it.
+// Gain comes from the block's own events only, since there is nowhere to carry
+// state.
+pulp::host::CustomNodeType make_stateless_midi_gate_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.midi_gate_stateless";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "MidiGateStateless";
+    t.process_events = [](pulp::audio::BufferView<float>& out,
+                          const pulp::audio::BufferView<const float>& in, int n,
+                          const pulp::host::CustomNodeEventBlock& events) {
+        float gain = 0.25f;
+        if (events.in != nullptr) {
+            for (const auto& ev : *events.in) {
+                if (!ev.is_note_on()) continue;
+                gain = 0.25f + 0.005f * static_cast<float>(ev.data()[1]);
+            }
+        }
+        for (int i = 0; i < n; ++i)
+            out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * gain;
+    };
+    return t;
+}
+
+}  // namespace
+
+TEST_CASE("Translated routing matches SignalGraph: stateless event-aware custom node parity",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    struct Ids { pulp::host::NodeId mi; };
+    auto build = [](SignalGraph& g, bool route_executor, bool wire_midi_in) {
+        REQUIRE(g.register_custom_node_type(make_stateless_midi_gate_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_gate_stateless", "MidiGateStateless");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        if (wire_midi_in) REQUIRE(g.connect_midi(mi, node));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mi};
+    };
+
+    SignalGraph walk, routed, unwired;
+    const auto wids = build(walk, /*route_executor=*/false, /*wire_midi_in=*/true);
+    const auto rids = build(routed, /*route_executor=*/true, /*wire_midi_in=*/true);
+    build(unwired, /*route_executor=*/true, /*wire_midi_in=*/false);
+    REQUIRE(routed.routed_execution_status(kFrames).routed_path_ready());
+    routed.acquire_routed_only_execution();
+    unwired.acquire_routed_only_execution();
+
+    bool control_diverged = false;
+    for (int blk = 0; blk < 4; ++blk) {
+        CAPTURE(blk);
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(walk.inject_midi(wids.mi, inj));
+        REQUIRE(routed.inject_midi(rids.mi, inj));
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        const std::vector<std::vector<float>> input{x};
+        const auto ran = run_graph_process(routed, kFrames, input, 1);
+        expect_equal(run_graph_process(walk, kFrames, input, 1), ran);
+        if (run_graph_process(unwired, kFrames, input, 1) != ran) control_diverged = true;
+    }
+    REQUIRE(control_diverged);
+    REQUIRE(routed.routed_only_execution_failures() == 0);
+    REQUIRE(unwired.routed_only_execution_failures() == 0);
+    routed.release_routed_only_execution();
+    unwired.release_routed_only_execution();
+}
+
+TEST_CASE("Translated routing matches SignalGraph: event-aware custom node parity",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    // The routed executor and the reference walk must agree sample-for-sample and
+    // event-for-event for a Custom node that READS MIDI. The node is also wired as
+    // a MIDI source so the empty-output and incompleteness-propagation paths are
+    // compared too, not just the input handoff.
+    struct Ids { pulp::host::NodeId mi, mo; };
+    auto build = [](SignalGraph& g, bool route_executor, bool wire_midi_in) {
+        REQUIRE(g.register_custom_node_type(make_midi_gate_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_gate", "MidiGate");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        if (wire_midi_in) REQUIRE(g.connect_midi(mi, node));
+        REQUIRE(g.connect_midi(node, mo));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mi, mo};
+    };
+
+    SignalGraph walk, routed;
+    const auto wids = build(walk, /*route_executor=*/false, /*wire_midi_in=*/true);
+    const auto rids = build(routed, /*route_executor=*/true, /*wire_midi_in=*/true);
+    REQUIRE(signal_graph_executor_eligible(routed));
+    // Topology eligibility does NOT prove the live snapshot routed. Without this,
+    // a fallback to the walk turns the whole comparison into the walk being
+    // compared against itself, which passes while proving nothing.
+    SignalGraph unwired;
+    build(unwired, /*route_executor=*/true, /*wire_midi_in=*/false);
+    const auto rstatus = routed.routed_execution_status(kFrames);
+    CAPTURE(rstatus.prepared, rstatus.serial_selected, rstatus.serial_snapshot_valid,
+            rstatus.serial_pool_fits, rstatus.parallel_selected,
+            rstatus.parallel_snapshot_valid, rstatus.parallel_pool_fits);
+    REQUIRE(rstatus.routed_path_ready());
+    // routed_path_ready() still permits the reference walk. Forbid it outright on
+    // the routed graphs so any fallback is COUNTED rather than silently compared
+    // against itself.
+    routed.acquire_routed_only_execution();
+    unwired.acquire_routed_only_execution();
+
+    // The control for this test: the SAME graph with the inbound MIDI edge
+    // removed. Its audio must differ, which is what proves the parity above is
+    // comparing a node that actually received events rather than two identically
+    // event-starved renders.
+
+    bool control_diverged = false;
+    for (int blk = 0; blk < 4; ++blk) {
+        CAPTURE(blk);
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(walk.inject_midi(wids.mi, inj));
+        REQUIRE(routed.inject_midi(rids.mi, inj));
+
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        const std::vector<std::vector<float>> input{x};
+        // run_graph_process, NOT run_legacy: run_legacy forces routing OFF on the
+        // graph it is given, which would compare the reference walk against
+        // itself. Each graph's path comes from its own build() flag.
+        const auto walked = run_graph_process(walk, kFrames, input, 1);
+        const auto ran = run_graph_process(routed, kFrames, input, 1);
+        expect_equal(walked, ran);
+        expect_midi_equal(extract_collected(walk, wids.mo),
+                          extract_collected(routed, rids.mo));
+
+        const auto starved = run_graph_process(unwired, kFrames, input, 1);
+        if (starved != ran) control_diverged = true;
+    }
+    // Not per-block: the first block's gain could coincide. Over four blocks with
+    // accumulating state, an event-consuming node cannot match a starved one.
+    REQUIRE(control_diverged);
+    // If either routed graph had fallen back to the walk, every comparison above
+    // would have been the walk against itself.
+    REQUIRE(routed.routed_only_execution_failures() == 0);
+    REQUIRE(unwired.routed_only_execution_failures() == 0);
+    routed.release_routed_only_execution();
+    unwired.release_routed_only_execution();
+}

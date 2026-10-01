@@ -1,0 +1,105 @@
+{
+  "id": "custom-node-event-lane",
+  "title": "A Custom graph node receives the inbound MIDI the graph already gathered",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "38fb9dd6-52e6-4782-8471-94202535d26b",
+  "owned_paths": [
+    "core/host/include/pulp/host/signal_graph_runtime.hpp",
+    "docs/status/sequencer-exposure/rows/custom-node-event-lane.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+      "needles": [
+        "std::unordered_map<NodeId, CustomNodeEventProcessFn> custom_event_processors;",
+        "const CustomNodeEventProcessFn* live_custom_event_processor(NodeId id) const noexcept;"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/custom_node_events.hpp",
+      "needles": [
+        "struct CustomNodeEventBlock",
+        "using CustomNodeInstanceEventProcessFn"
+      ]
+    },
+    {
+      "path": "core/host/include/pulp/host/custom_node_type.hpp",
+      "needles": [
+        "CustomNodeInstanceEventProcessFn process_instance_events;",
+        "bool consumes_events() const noexcept"
+      ]
+    },
+    {
+      "path": "test/test_signal_graph_executor_parity.cpp",
+      "needles": [
+        "event-aware custom node parity",
+        "routed.acquire_routed_only_execution();"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "core/host/include/pulp/ is installed by the per-subsystem header loop in tools/cmake/PulpInstallRules.cmake, which appends `host` whenever the pulp-host target exists and installs the tree FILES_MATCHING \"*.hpp\". An SDK consumer therefore gets custom_node_events.hpp, the two new CustomNodeType callbacks and the live_custom_event_processor accessor, and can register an event-aware Custom node against the installed headers. Measured against that loop rather than assumed.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/custom_node_type.hpp",
+          "needles": [
+            "CustomNodeInstanceEventProcessFn process_instance_events;",
+            "bool consumes_events() const noexcept"
+          ]
+        },
+        {
+          "kind": "sdk_header",
+          "path": "core/host/include/pulp/host/signal_graph_runtime.hpp",
+          "needles": [
+            "const CustomNodeEventProcessFn* live_custom_event_processor(NodeId id) const noexcept;"
+          ]
+        },
+        {
+          "kind": "sdk_target",
+          "path": "tools/cmake/PulpInstallRules.cmake",
+          "needles": [
+            "list(APPEND _pulp_sdk_header_subsystems host)",
+            "install(DIRECTORY \"${_inc_dir}/pulp/\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, or handler changes. A Custom node type is registered from C++ against a SignalGraph; the offline timeline CLI neither registers node types nor reaches this callback."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition or handler changes, for the same reason as the CLI: there is no MCP surface that registers a CustomNodeType."
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "A musician cannot reach this. It is an authoring capability for code that builds a graph, and the route that would expose it in a product is the Forge CustomNodeType pack. That route is blocked earlier than it appears: a pack entry must be lowerable because packs are registered before bake(), while registration here refuses a lowerable event-aware type and the baked binder carries no event binder at all. The bake layer needs an event plane before a pack entry is even expressible, so that is the first dependency rather than the pack itself.",
+      "dependencies": [
+        "baked-graph-event-plane",
+        "forge-custom-node-type-pack",
+        "custom-node-midi-emission"
+      ],
+      "owner": "sequencer-control-closure"
+    },
+    "design_time_agent_manifest": {
+      "disposition": "gap",
+      "rationale": "The installed capability manifest carries no key for a Custom node reading events, so an agent reading the manifest cannot discover it. The supporting header custom_node_events.hpp is additionally untracked by the capability surface: core/host/include/pulp/host is not one of PUBLIC_ROOTS, so a host header is fingerprinted only when named in SAMPLE_REGION_HOST_HEADERS, and naming it there would stamp its domain as `signal`. Widening or renaming that tuple is a surface-policy decision this slice does not take.",
+      "dependencies": [
+        "custom-node-event-capability-key",
+        "host-header-surface-tracking"
+      ],
+      "owner": "sequencer-control-closure"
+    }
+  }
+}
