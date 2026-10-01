@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -82,6 +83,10 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t completion_wait_ns = 0;
         // Private matched-storage experiment; production remains imported.
         StorageKind storage_kind = StorageKind::ImportedHostPointer;
+        // Opt-in diagnostic timing. When enabled, every accepted submission
+        // gets a per-slot timestamp query and an asynchronous mapped readback.
+        // The default remains completely query/map-free.
+        bool enable_timestamps = false;
     };
 
     struct CreateResult {
@@ -115,6 +120,14 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
         std::uint64_t wait_any_unsupported = 0;
         std::uint64_t wait_any_max_futures = 0;
         std::uint64_t wait_any_max_timeout_ns = 0;
+        std::uint64_t timestamp_submissions = 0;
+        std::uint64_t timestamp_samples = 0;
+        std::uint64_t timestamp_failures = 0;
+    };
+
+    struct GpuTimestamp {
+        SlotToken token;
+        std::uint64_t elapsed_ns = 0;
     };
 
     struct AdapterIdentity {
@@ -148,6 +161,7 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     void poll() noexcept override;
     bool device_lost() const noexcept override;
     bool drain() noexcept override;
+    bool gpu_elapsed_ns(SlotToken token, std::uint64_t& elapsed) const noexcept override;
 
     std::uint32_t alignment() const noexcept;
     std::uint64_t proc_table_install_count() const noexcept;
@@ -160,6 +174,8 @@ class DawnSharedIoProvider final : public SharedIoArenaProvider {
     bool reconfigure_storage_kind(StorageKind kind) noexcept;
     StorageKind storage_kind() const noexcept;
     std::uint64_t device_owner_generation() const noexcept;
+    bool timestamps_enabled() const noexcept;
+    std::optional<GpuTimestamp> gpu_timestamp(const SlotToken& token) const noexcept;
 
     bool prepare_wavenet_program(const DawnSharedIoWavenetProgramSpec& spec,
                                  std::span<const SlotBufferHandle> slots) noexcept;
