@@ -86,11 +86,11 @@
     },
     "live_product_control": {
       "disposition": "gap",
-      "rationale": "A musician cannot reach this. It is an authoring capability for code that builds a graph, and the route that would expose it in a product is the Forge CustomNodeType pack. That route is blocked earlier than it appears: a pack entry must be lowerable because packs are registered before bake(), while registration here refuses a lowerable event-aware type and the baked binder carries no event binder at all. The bake layer needs an event plane before a pack entry is even expressible, so that is the first dependency rather than the pack itself.",
+      "rationale": "A musician cannot reach this, and the route is blocked earlier than it looks. The product-facing read would be a graph topology control, which does not exist: the only graph controls today are the two sample-region ones. Minting one now would report consumes_events=false in every product it could run in, because a shipped Forge product is the baked path, Forge catalog types set lowerable = true, and registration refuses a lowerable event-aware type \u2014 so the bake layer needs an event plane before either a control or a pack entry can report anything true. MIDI emission is no longer a dependency: it is delivered, and it gated MIDI-transform pack nodes rather than an event-consuming effect.",
       "dependencies": [
         "baked-graph-event-plane",
-        "forge-custom-node-type-pack",
-        "custom-node-midi-emission"
+        "graph-topology-read-control",
+        "forge-custom-node-type-pack"
       ],
       "owner": "sequencer-control-closure"
     },
