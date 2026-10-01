@@ -30,8 +30,10 @@ network command goes through a retry.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -331,6 +333,152 @@ class MacosCcacheStep(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(calls.count("install|ccache|"), 3)
         self.assertIn("::error::brew install ccache failed after 3 attempts", proc.stdout)
+
+
+SEED_STEP = "Seed the checkout from the host git mirror (tartci macOS)"
+
+
+def _git(*args: str, cwd: Path | None = None) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"},
+    ).stdout.strip()
+
+
+class HostGitMirrorSeed(unittest.TestCase):
+    """The seed adds the host mirror as an alternate only when it is usable."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cache = self.tmp / "cache"
+        self.mirror = self.cache / "git/Owner/repo.git"
+        src = self.tmp / "src"
+        _git("init", "--quiet", "-b", "main", str(src))
+        (src / "f").write_text("x")
+        _git("add", "f", cwd=src)
+        _git("commit", "--quiet", "-m", "one", cwd=src)
+        self.head = _git("rev-parse", "HEAD", cwd=src)
+        _git("clone", "--quiet", "--bare", str(src), str(self.mirror))
+        _git("repack", "-a", "-d", "-q", cwd=self.mirror)
+        self.workspace = self.tmp / "ws"
+        self.workspace.mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, cache: str | None) -> subprocess.CompletedProcess:
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.tmp),
+               "GITHUB_WORKSPACE": str(self.workspace),
+               "GITHUB_REPOSITORY": "Owner/repo",
+               "GITHUB_SERVER_URL": "https://github.com"}
+        if cache is not None:
+            env["TARTCI_ARTIFACT_CACHE"] = cache
+        return subprocess.run(["bash", "-e", "-c", _step(SEED_STEP)["run"]],
+                              env=env, capture_output=True, text=True, timeout=60)
+
+    def test_a_usable_mirror_becomes_the_checkout_alternate(self) -> None:
+        proc = self._run(str(self.cache))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual((self.workspace / ".git/objects/info/alternates").read_text(),
+                         f"{self.mirror}/objects\n")
+        # checkout@v5 keeps the repository only when this URL matches its own.
+        self.assertEqual(_git("config", "--local", "--get", "remote.origin.url", cwd=self.workspace),
+                         "https://github.com/Owner/repo")
+        _git("cat-file", "-e", f"{self.head}^{{commit}}", cwd=self.workspace)
+        self.assertIn(f"mirror_main={self.head}", proc.stdout)
+
+    def test_no_cache_or_no_mirror_leaves_the_workspace_alone(self) -> None:
+        for cache in (None, "", str(self.tmp / "absent")):
+            with self.subTest(cache=cache):
+                proc = self._run(cache)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertEqual(list(self.workspace.iterdir()), [])
+
+    def test_a_populated_workspace_is_never_touched(self) -> None:
+        (self.workspace / "keep").write_text("warm")
+        proc = self._run(str(self.cache))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual([p.name for p in self.workspace.iterdir()], ["keep"])
+
+    def test_an_unreadable_mirror_removes_the_seed(self) -> None:
+        _git("update-ref", "-d", "refs/heads/main", cwd=self.mirror)
+        proc = self._run(str(self.cache))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("removing the seed", proc.stdout)
+        self.assertFalse((self.workspace / ".git").exists())
+
+    def test_the_seed_runs_before_checkout(self) -> None:
+        names = [step.get("name") or step.get("uses") for step in _build_steps()]
+        self.assertLess(names.index(SEED_STEP), names.index("actions/checkout@v5"))
+
+
+class ChromeArtifactCache(unittest.TestCase):
+    """The Chrome step takes the pinned archive from the cache only when it matches."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.payload = b"chrome archive"
+        self.sha = hashlib.sha256(self.payload).hexdigest()
+        script = _step(CHROME_STEP)["run"]
+        pinned = re.search(r"expected=([0-9a-f]{64})", script).group(1)
+        # The real digest names the real archive; substitute the test payload's.
+        self.script = script.replace(pinned, self.sha)
+        self.bin = self.tmp / "bin"
+        self.bin.mkdir()
+        self.calls = self.tmp / "curl.calls"
+        _stub(self.bin, "curl", f"""\
+            echo "$*" >> {self.calls}
+            while [ "$#" -gt 0 ]; do [ "$1" = "--output" ] && out="$2"; shift; done
+            printf '%s' "{self.payload.decode()}" > "$out"
+            """)
+        _stub(self.bin, "unzip", """\
+            while [ "$#" -gt 0 ]; do [ "$1" = "-d" ] && d="$2"; shift; done
+            app="$d/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS"
+            mkdir -p "$app" && printf '#!/bin/sh\\n' > "$app/Google Chrome for Testing"
+            chmod +x "$app/Google Chrome for Testing"
+            """)
+        self.cache = self.tmp / "cache"
+        (self.cache / "sha256").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _run(self, cache: str | None) -> subprocess.CompletedProcess:
+        runner_temp = self.tmp / "rt"
+        shutil.rmtree(runner_temp, ignore_errors=True)
+        runner_temp.mkdir()
+        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "RUNNER_TEMP": str(runner_temp),
+               "GITHUB_ENV": str(self.tmp / "github_env")}
+        if cache is not None:
+            env["TARTCI_ARTIFACT_CACHE"] = cache
+        return subprocess.run(["bash", "-c", self.script], env=env,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_a_matching_blob_skips_the_download(self) -> None:
+        (self.cache / "sha256" / self.sha).write_bytes(self.payload)
+        proc = self._run(str(self.cache))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("gate-artifact: chrome source=cache", proc.stdout)
+        self.assertFalse(self.calls.exists())
+
+    def test_no_cache_downloads(self) -> None:
+        for cache in (None, str(self.cache)):
+            with self.subTest(cache=cache):
+                self.calls.unlink(missing_ok=True)
+                proc = self._run(cache)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("gate-artifact: chrome source=network", proc.stdout)
+                self.assertTrue(self.calls.exists())
+
+    def test_a_corrupt_blob_falls_back_to_the_download(self) -> None:
+        (self.cache / "sha256" / self.sha).write_bytes(b"rot")
+        proc = self._run(str(self.cache))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("source=network", proc.stdout)
+        self.assertTrue(self.calls.exists())
 
 
 if __name__ == "__main__":
