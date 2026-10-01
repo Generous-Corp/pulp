@@ -308,7 +308,11 @@ int main(int argc, char** argv) {
         const auto rejected = DawnSharedIoProvider::create(
             {.storage_kind = DawnSharedIoProvider::StorageKind::ImportedHostPointer,
              .enable_timestamps = true});
-        return !rejected.provider && rejected.reason == "timestamps_require_staged_storage" ? 0 : 1;
+        return !rejected.provider &&
+                       rejected.availability == DawnSharedIoProvider::Availability::Unsupported &&
+                       rejected.reason == "timestamps_require_staged_storage"
+                   ? 0
+                   : 1;
     }
     if (verify_completion_wait_bound) {
         const auto invalid_wait_ns = std::numeric_limits<std::uint64_t>::max();
