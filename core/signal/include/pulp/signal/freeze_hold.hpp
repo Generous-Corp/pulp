@@ -45,10 +45,60 @@
 /// storage, serialized to a versioned, size-bounded byte image, and
 /// recalled with `stage_restore()` from a non-audio thread. The audio
 /// owner adopts a staged restore at the start of the next frame group.
+///
+/// Per-callback cost. The defaults reproduce the original hold bit for bit,
+/// and three of their costs land in single callbacks: every held frame
+/// evaluates one `std::polar` per channel per bin; a latch averages
+/// `capture_frames × channels × bins` magnitudes in the latching frame group
+/// (about 1.5 M adds for a 2 s hold at 8192 points, stereo); and the latch
+/// derives every bin's phase with an atan2. A host drops a buffer whose
+/// callback overruns, so these are opt-in `Config` fields that bound them:
+///
+/// - `synthesis = rotor` keeps each held bin as a unit phasor advanced by a
+///   per-bin rotor and a 256-entry jitter table: two complex multiplies per
+///   bin per hop and no transcendental. The walk is quantised to 256 steps
+///   over ±phase_jitter (inaudible at the default rates) and phasors are
+///   renormalised every 64 hops, so output differs from `polar` in the last
+///   bits and in the walk's fine structure, not in character.
+/// - `engage_bins_per_hop > 0` (with `rotor`) stages the latch-side rotor
+///   construction — and, with `energy_weighted`, the per-bin atan2 — across
+///   the following frame groups through StagedTransition; a bin whose rotor
+///   is not ready yet holds its phase for those hops, inaudible at fade-in
+///   gain.
+/// - `average = running` keeps per-bin running sums over the capture window
+///   as frames arrive, so the latch divides instead of summing the window.
+///
+/// Level and frequency over long holds. With `frequency = newest` (the
+/// default) every bin rotates at the increment of the NEWEST captured frame.
+/// Over a window that spans a change of material, a bin whose energy came
+/// from the older material is then rotated at whatever frequency the newest
+/// frame's leakage gave it, so the older sound is not heard and the hold
+/// plays well below the input. `frequency = energy_weighted` takes each
+/// bin's increment as the circular mean over the whole window, weighted by
+/// the per-frame product of consecutive magnitudes (the argument of
+/// sum_t sum_ch X_t conj(X_{t-1})), so a bin follows the content that
+/// dominates it.
+///
+/// Stationarity. With `phase_lock = none` a hold starts phase-coherent (the
+/// latched frame's phases) and each bin then advances at its own frequency,
+/// so the bins of one partial's main lobe drift apart and the hold decoheres
+/// over its first few hundred milliseconds: its level moves after it is
+/// already audible. `phase_lock = peak_lobe` keeps each peak's lobe rotating
+/// at the peak's frequency, so a partial stays coherent, and starts every
+/// other bin at a random phase, so noise-like content has its steady-state
+/// statistics from the first held frame. The inter-channel phase offsets are
+/// kept in both cases.
+///
+/// Expensive work is reported to `pulp::signal::rt` counters (`trig` for
+/// each polar/atan2, `bins` for per-bin accumulation), which is what a
+/// transition-cost gate reads.
 
 #include <pulp/signal/checked_allocation.hpp>
+#include <pulp/signal/rt_work_counter.hpp>
+#include <pulp/signal/staged_transition.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cmath>
@@ -61,6 +111,41 @@
 #include <vector>
 
 namespace pulp::signal {
+
+/// How held frames are synthesised (see the class notes on per-callback cost).
+enum class FreezeHoldSynthesis : std::uint8_t {
+    /// One std::polar per channel per bin per hop (the original path).
+    polar,
+    /// Unit phasor per bin advanced by a rotor and a jitter table.
+    rotor,
+};
+
+/// Where a held bin's instantaneous frequency comes from.
+enum class FreezeHoldFrequency : std::uint8_t {
+    /// The newest captured frame's phase increment (the original estimate).
+    newest,
+    /// Energy-weighted circular mean of the increments over the window.
+    energy_weighted,
+};
+
+/// When the capture window is averaged.
+enum class FreezeHoldAverage : std::uint8_t {
+    /// Sum the window inside the latching frame group (the original path).
+    at_latch,
+    /// Maintain running sums as frames arrive; the latch only divides.
+    running,
+};
+
+/// Phase structure of a hold as it starts (see the class notes on
+/// stationarity).
+enum class FreezeHoldPhaseLock : std::uint8_t {
+    /// Every bin starts at its latched phase and rotates at its own
+    /// frequency (the original behaviour).
+    none,
+    /// Bins within `lobe_half_width` of a spectral peak rotate at the peak's
+    /// frequency; every other bin starts at a random phase.
+    peak_lobe,
+};
 
 /// How a restored hold enters the output.
 enum class FreezeRestoreEngage : std::uint8_t {
@@ -350,6 +435,25 @@ public:
         /// Longest capture set_capture_seconds() may select later.
         /// 0 = capture_seconds (no headroom).
         double max_capture_seconds = 0.0;
+
+        /// Held-frame synthesis. `polar` reproduces the original output.
+        FreezeHoldSynthesis synthesis = FreezeHoldSynthesis::polar;
+        /// Per-bin frequency estimate. `newest` reproduces the original.
+        FreezeHoldFrequency frequency = FreezeHoldFrequency::newest;
+        /// Capture-window averaging. `at_latch` reproduces the original.
+        FreezeHoldAverage average = FreezeHoldAverage::at_latch;
+        /// With `rotor` synthesis: bins whose rotor (and, with
+        /// `energy_weighted`, frequency) is built per frame group after a
+        /// latch, starting in the latching group. 0 builds them all in the
+        /// latching frame group. A restored hold is always built in full.
+        int engage_bins_per_hop = 0;
+        /// Phase structure at the latch. `none` reproduces the original.
+        FreezeHoldPhaseLock phase_lock = FreezeHoldPhaseLock::none;
+        /// With `peak_lobe`: bins either side of a peak locked to it (2 spans
+        /// a Hann main lobe). A peak is a bin whose channel-summed power is a
+        /// maximum over +-lobe_half_width and within 60 dB of the frame's
+        /// largest.
+        int lobe_half_width = 2;
     };
 
     using Snapshot = FreezeHoldSnapshotT<SampleType>;
@@ -406,6 +510,26 @@ public:
             || !charge.add<SampleType>(channel_bins)
             || !charge.add<double>(channel_bins) || !charge.add<double>(bins))
             return false;
+        // Opt-in cost modes: the per-frame increment ring and its window sum,
+        // running magnitude sums, and the phasor / rotor / jitter state.
+        if (config.frequency == FreezeHoldFrequency::energy_weighted) {
+            std::uint64_t capture_bins = 0;
+            if (!checked_capacity_product(depth, bins, UINT64_MAX, capture_bins)
+                || !charge.add<std::complex<SampleType>>(capture_bins)
+                || !charge.add<std::complex<double>>(bins))
+                return false;
+        }
+        if (config.average == FreezeHoldAverage::running
+            && !charge.add<double>(channel_bins))
+            return false;
+        if (config.synthesis == FreezeHoldSynthesis::rotor
+            && (!charge.add<std::complex<double>>(channel_bins)
+                || !charge.add<std::complex<double>>(bins)))
+            return false;
+        if (config.phase_lock == FreezeHoldPhaseLock::peak_lobe
+            && (!charge.add<int>(bins) || !charge.add<double>(bins)
+                || !charge.add<double>(bins)))
+            return false;
         bytes = charge.total();
         return true;
     }
@@ -433,6 +557,25 @@ public:
         pending_mag_.assign(channels * bins, SampleType{0});
         pending_phase_.assign(channels * bins, 0.0);
         pending_inst_freq_.assign(bins, 0.0);
+        const bool weighted = config.frequency == FreezeHoldFrequency::energy_weighted;
+        increment_ring_.assign(weighted ? depth * bins : 0, std::complex<SampleType>{});
+        increment_sum_.assign(weighted ? bins : 0, std::complex<double>{});
+        running_mag_sum_.assign(
+            config.average == FreezeHoldAverage::running ? channels * bins : 0, 0.0);
+        const bool rotor = config.synthesis == FreezeHoldSynthesis::rotor;
+        phasor_.assign(rotor ? channels * bins : 0, std::complex<double>(1.0, 0.0));
+        rotor_.assign(rotor ? bins : 0, std::complex<double>(1.0, 0.0));
+        // Jitter entry j is the walk step for u = (j + 0.5) / 128 - 1, the
+        // centre of the j-th of 256 equal slices of [-1, 1].
+        for (std::size_t j = 0; j < jitter_table_.size(); ++j) {
+            const double u = (static_cast<double>(j) + 0.5) / 128.0 - 1.0;
+            jitter_table_[j] = std::polar(1.0, static_cast<double>(config.phase_jitter) * u);
+            random_phase_table_[j] = std::polar(1.0, 3.14159265358979323846 * u);
+        }
+        const bool lock = config.phase_lock == FreezeHoldPhaseLock::peak_lobe;
+        peak_of_.assign(lock ? bins : 0, -1);
+        lobe_power_.assign(lock ? bins : 0, 0.0);
+        lobe_draw_.assign(lock ? bins : 0, 0.0);
         pending_.value.store(kRestoreIdle, std::memory_order_release);
         active_capture_frames_ = config.capture_frames;
         latched_capture_frames_ = 0;
@@ -475,6 +618,8 @@ public:
         fade_ = SampleType{0};
         fade_step_ = 0;
         rng_ = kRngSeed;
+        engage_staging_.cancel();
+        renormalise_countdown_ = kRenormaliseHops;
     }
 
     /// Forget captured input only. The hold, its request and fade position,
@@ -487,6 +632,7 @@ public:
         captured_ = 0;
         capture_pos_ = 0;
         prev_valid_ = false;
+        window_ = 0;
     }
 
     /// RT-safe engage/release request. Releasing a latched hold commits it
@@ -497,6 +643,7 @@ public:
     void set_frozen(bool frozen) {
         if (engaged_ && !frozen && latched_) {
             captured_ = 0;
+            window_ = 0;
             releasing_ = true;
         }
         engaged_ = frozen;
@@ -529,11 +676,16 @@ public:
     }
     /// Current hold phases of one channel, wrapped to [-pi, pi]: the phases
     /// the next hold frame is rendered with.
+    ///
+    /// With `rotor` synthesis the phases are derived from the phasors on each
+    /// call (one atan2 per bin): an inspection accessor, not a per-hop call.
     std::span<const double> held_phases(int channel) const {
+        if (rotor_mode()) sync_phases_from_phasors();
         return {held_phase_.data() + static_cast<size_t>(channel) * static_cast<size_t>(num_bins_),
                 static_cast<size_t>(num_bins_)};
     }
     /// Per-bin instantaneous frequency of the hold, radians per sample.
+    /// While engage_pending() the bins not yet staged are incomplete.
     std::span<const double> instantaneous_frequency() const {
         return {inst_freq_.data(), inst_freq_.size()};
     }
@@ -545,15 +697,28 @@ public:
                     int num_bins) const {
         if (!has_hold_ || channels != config_.channels || num_bins != num_bins_)
             return false;
+        if (rotor_mode()) {
+            for (int ch = 0; ch < channels; ++ch) {
+                const auto mags = held_magnitudes(ch);
+                const auto* z = phasor_.data() + static_cast<size_t>(ch) * static_cast<size_t>(num_bins_);
+                for (int k = 0; k < num_bins; ++k)
+                    frames[ch][k] = scaled_phasor(z[k], mags[static_cast<size_t>(k)]);
+            }
+            return true;
+        }
         for (int ch = 0; ch < channels; ++ch) {
             const auto mags = held_magnitudes(ch);
             const auto phases = held_phases(ch);
             for (int k = 0; k < num_bins; ++k)
-                frames[ch][k] = std::polar(mags[static_cast<size_t>(k)],
-                                           static_cast<SampleType>(phases[static_cast<size_t>(k)]));
+                frames[ch][k] = rt::polar(mags[static_cast<size_t>(k)],
+                                          static_cast<SampleType>(phases[static_cast<size_t>(k)]));
         }
         return true;
     }
+
+    /// True while latch- or restore-side rotor construction is still being
+    /// staged across frame groups (`engage_bins_per_hop > 0`).
+    bool engage_pending() const { return engage_staging_.active(); }
 
     /// Advance the hold by `frames` analysis hops exactly as process_group()
     /// does after each held frame (instantaneous frequency plus the random
@@ -569,7 +734,26 @@ public:
     /// e.g. to align a hold with a path that runs a fixed number of hops
     /// behind it. Not an exact inverse of advance_hold(), whose walk it
     /// does not undo.
+    ///
+    /// With `rotor` synthesis a rewind while engage_pending() first finishes
+    /// the staged rotor construction, since it needs every bin's rotor.
     void rewind_hold_phases(int frames) {
+        if (rotor_mode()) {
+            if (engage_staging_.active())
+                engage_staging_.finish_now([this](int step) { build_rotor_chunk(step); });
+            // conj(rotor)^frames by repeated squaring: no transcendental.
+            for (int k = 0; k < num_bins_; ++k) {
+                std::complex<double> base = std::conj(rotor_[static_cast<size_t>(k)]);
+                std::complex<double> back(1.0, 0.0);
+                for (int n = std::max(frames, 0); n > 0; n >>= 1) {
+                    if (n & 1) back *= base;
+                    base *= base;
+                }
+                for (int ch = 0; ch < config_.channels; ++ch)
+                    phasor_[static_cast<size_t>(ch) * num_bins_ + static_cast<size_t>(k)] *= back;
+            }
+            return;
+        }
         const double hops = static_cast<double>(frames)
                           * static_cast<double>(config_.analysis_hop);
         for (int k = 0; k < num_bins_; ++k) {
@@ -586,10 +770,13 @@ public:
 
     /// Copy the current hold into `out`, which must have been prepared for
     /// this geometry. Returns false (leaving `out` unchanged) when there is
-    /// no hold or the storage does not match. Allocation-free.
+    /// no hold, the storage does not match, or engage staging has not
+    /// finished (engage_pending()). Allocation-free.
     bool snapshot(Snapshot& out) const {
         const auto bins = static_cast<std::size_t>(num_bins_);
         const auto channel_bins = static_cast<std::size_t>(config_.channels) * bins;
+        if (engage_staging_.active()) return false;
+        if (rotor_mode()) sync_phases_from_phasors();
         if (!has_hold_ || num_bins_ == 0 || out.fft_size != config_.fft_size
             || out.channels != config_.channels
             || out.analysis_hop != config_.analysis_hop
@@ -692,6 +879,9 @@ public:
         if (engaged_ && !latched_ && captured_ >= active_capture_frames_)
             latch();
 
+        if (engage_staging_.active())
+            engage_staging_.run_next(1, [this](int step) { build_rotor_chunk(step); });
+
         if (!latched_)
             return; // pass-through (possibly still filling — never mute)
 
@@ -724,11 +914,14 @@ public:
             live_gain = std::cos(t);
         }
 
+        const bool rotor = rotor_mode();
         for (int ch = 0; ch < channels; ++ch) {
             const SampleType* mags = held_mag_.data()
                                      + static_cast<size_t>(ch) * num_bins_;
             const double* phases = held_phase_.data()
                                    + static_cast<size_t>(ch) * num_bins_;
+            const std::complex<double>* phasors =
+                rotor ? phasor_.data() + static_cast<size_t>(ch) * num_bins_ : nullptr;
             // Per-channel frame energies for the transition normalization
             // below: the gain laws above are only flat on average — a
             // narrowband bin whose hold drifted to anti-phase with the live
@@ -740,8 +933,9 @@ public:
             double e_live = 0.0, e_hold = 0.0, e_mix = 0.0;
             for (int k = 0; k < num_bins_; ++k) {
                 const auto live = frames[ch][k];
-                const auto held = std::polar(mags[k] * hold_gain,
-                                             static_cast<SampleType>(phases[k]));
+                const auto held = rotor
+                    ? scaled_phasor(phasors[k], mags[k] * hold_gain)
+                    : rt::polar(mags[k] * hold_gain, static_cast<SampleType>(phases[k]));
                 e_live += static_cast<double>(std::norm(live));
                 e_hold += static_cast<double>(mags[k]) * mags[k];
                 const auto mixed = live * live_gain + held;
@@ -773,6 +967,14 @@ private:
     void capture(std::complex<SampleType>* const* frames, int channels) {
         const auto bins = static_cast<size_t>(num_bins_);
         const auto depth = static_cast<size_t>(config_.max_capture_frames);
+        const bool running = config_.average == FreezeHoldAverage::running;
+        const bool weighted = config_.frequency == FreezeHoldFrequency::energy_weighted;
+        // A window that spans the whole ring includes the slot about to be
+        // overwritten: take it out of the running sums first.
+        if (running && window_ >= config_.max_capture_frames) {
+            remove_from_window(capture_pos_);
+            --window_;
+        }
         for (int ch = 0; ch < channels; ++ch) {
             SampleType* slot = capture_mag_.data()
                                + (static_cast<size_t>(ch) * depth
@@ -788,29 +990,128 @@ private:
         // has no predecessor and records the bin-centre increment.
         double* increment = latest_increment_.data();
         const double ha = static_cast<double>(config_.analysis_hop);
-        for (int k = 0; k < num_bins_; ++k) {
-            std::complex<double> acc(0.0, 0.0);
-            for (int ch = 0; ch < channels; ++ch) {
-                const auto now = frames[ch][k];
-                auto& prev = prev_frame_[static_cast<size_t>(ch) * bins + static_cast<size_t>(k)];
-                acc += std::complex<double>(now) * std::conj(std::complex<double>(prev));
-                prev = now;
+        if (weighted) {
+            // Keep the raw increment vector per frame; its argument is taken
+            // once, over the window, at the latch. A frame with no
+            // predecessor contributes nothing.
+            std::complex<SampleType>* ring = increment_ring_.data()
+                + static_cast<size_t>(capture_pos_) * bins;
+            for (int k = 0; k < num_bins_; ++k) {
+                std::complex<double> acc(0.0, 0.0);
+                for (int ch = 0; ch < channels; ++ch) {
+                    const auto now = frames[ch][k];
+                    auto& prev = prev_frame_[static_cast<size_t>(ch) * bins + static_cast<size_t>(k)];
+                    acc += std::complex<double>(now) * std::conj(std::complex<double>(prev));
+                    prev = now;
+                }
+                ring[k] = prev_valid_ ? std::complex<SampleType>(acc) : std::complex<SampleType>{};
             }
-            increment[k] = prev_valid_ ? std::arg(acc) : two_pi_ * k / config_.fft_size * ha;
+        } else {
+            for (int k = 0; k < num_bins_; ++k) {
+                std::complex<double> acc(0.0, 0.0);
+                for (int ch = 0; ch < channels; ++ch) {
+                    const auto now = frames[ch][k];
+                    auto& prev = prev_frame_[static_cast<size_t>(ch) * bins + static_cast<size_t>(k)];
+                    acc += std::complex<double>(now) * std::conj(std::complex<double>(prev));
+                    prev = now;
+                }
+                increment[k] = prev_valid_ ? rt::arg(acc) : two_pi_ * k / config_.fft_size * ha;
+            }
         }
         prev_valid_ = true;
         last_frames_ = frames; // valid only within process_group call
+        const int written = capture_pos_;
         capture_pos_ = (capture_pos_ + 1) % config_.max_capture_frames;
         if (captured_ < config_.max_capture_frames) ++captured_;
+        if (running) {
+            add_to_window(written);
+            ++window_;
+            slide_window(kWindowAdjustPerHop);
+        }
+    }
+
+    // ── running window sums (average = running) ──────────────────────────
+
+    int ring_slot_back(int back) const {
+        const int ring = config_.max_capture_frames;
+        return ((capture_pos_ - back) % ring + ring) % ring;
+    }
+
+    void add_to_window(int slot) {
+        accumulate_slot(slot, window_ == 0 ? 0 : 1);
+    }
+
+    void remove_from_window(int slot) { accumulate_slot(slot, -1); }
+
+    // sign 0 assigns (the window was empty, so no stale sum survives a
+    // history clear), +1 adds, -1 subtracts.
+    void accumulate_slot(int slot, int sign) {
+        const auto bins = static_cast<size_t>(num_bins_);
+        const auto ring = static_cast<size_t>(config_.max_capture_frames);
+        for (int ch = 0; ch < config_.channels; ++ch) {
+            const SampleType* mags = capture_mag_.data()
+                + (static_cast<size_t>(ch) * ring + static_cast<size_t>(slot)) * bins;
+            double* sum = running_mag_sum_.data() + static_cast<size_t>(ch) * bins;
+            for (size_t k = 0; k < bins; ++k) {
+                const double m = static_cast<double>(mags[k]);
+                sum[k] = sign == 0 ? m : sum[k] + sign * m;
+            }
+        }
+        std::uint64_t work = static_cast<std::uint64_t>(config_.channels) * bins;
+        if (config_.frequency == FreezeHoldFrequency::energy_weighted) {
+            const std::complex<SampleType>* inc = increment_ring_.data()
+                + static_cast<size_t>(slot) * bins;
+            for (size_t k = 0; k < bins; ++k) {
+                const std::complex<double> v(inc[k]);
+                increment_sum_[k] = sign == 0 ? v
+                                  : sign > 0 ? increment_sum_[k] + v
+                                             : increment_sum_[k] - v;
+            }
+            work += bins;
+        }
+        rt::count_bins(work);
+    }
+
+    // Move the window toward the active capture depth: the ordinary slide
+    // (one frame out per frame in) plus at most `extra` frames of catch-up
+    // after set_capture_frames(), so a hold-length change never bursts the
+    // whole difference into one frame group. A latch finishes the catch-up.
+    void slide_window(int extra) {
+        const int target = std::min(active_capture_frames_, captured_);
+        if (window_ > target) {
+            remove_from_window(ring_slot_back(window_));
+            --window_;
+        }
+        for (int i = 0; i < extra && window_ != target; ++i) {
+            if (window_ > target) {
+                remove_from_window(ring_slot_back(window_));
+                --window_;
+            } else {
+                add_to_window(ring_slot_back(window_ + 1));
+                ++window_;
+            }
+        }
     }
 
     void latch() {
         const auto bins = static_cast<size_t>(num_bins_);
         const int ring = config_.max_capture_frames;
         const int count = active_capture_frames_;
+        const bool running = config_.average == FreezeHoldAverage::running;
+        const bool weighted = config_.frequency == FreezeHoldFrequency::energy_weighted;
 
+        if (running) {
+            // The running sums already cover the newest `count` frames unless
+            // a recent hold-length change is still being caught up.
+            while (window_ != count) slide_window(1);
+            const double inv = 1.0 / static_cast<double>(count);
+            for (size_t i = 0; i < held_mag_.size(); ++i)
+                held_mag_[i] = static_cast<SampleType>(std::max(running_mag_sum_[i], 0.0) * inv);
+            rt::count_bins(held_mag_.size());
+        } else {
         // Hold magnitudes: average over the newest `count` captured frames —
         // exactly the last `count` consecutive analysis frames.
+        rt::count_bins(static_cast<std::uint64_t>(count) * config_.channels * bins);
         for (int ch = 0; ch < config_.channels; ++ch) {
             SampleType* held = held_mag_.data() + static_cast<size_t>(ch) * bins;
             std::fill(held, held + bins, SampleType{0});
@@ -823,8 +1124,34 @@ private:
             const SampleType inv = SampleType{1} / static_cast<SampleType>(count);
             for (int k = 0; k < num_bins_; ++k) held[k] *= inv;
         }
+        }
         latched_capture_frames_ = count;
 
+        if (weighted && !running) {
+            // Window sum of the per-frame increment vectors.
+            std::fill(increment_sum_.begin(), increment_sum_.end(), std::complex<double>{});
+            for (int back = 1; back <= count; ++back) {
+                const std::complex<SampleType>* inc = increment_ring_.data()
+                    + static_cast<size_t>((capture_pos_ - back + ring) % ring) * bins;
+                for (size_t k = 0; k < bins; ++k)
+                    increment_sum_[k] += std::complex<double>(inc[k]);
+            }
+            rt::count_bins(static_cast<std::uint64_t>(count) * bins);
+        }
+
+        const bool staged = rotor_mode() && config_.engage_bins_per_hop > 0;
+        const bool lock = config_.phase_lock == FreezeHoldPhaseLock::peak_lobe;
+        if (lock) assign_lobes();
+        if (weighted) {
+            // With staging, each bin's frequency is derived with its rotor;
+            // peaks are derived now because their lobes read them.
+            if (!staged) {
+                for (int k = 0; k < num_bins_; ++k) derive_weighted_frequency(k);
+            } else if (lock) {
+                for (int k = 0; k < num_bins_; ++k)
+                    if (peak_of_[static_cast<size_t>(k)] == k) derive_weighted_frequency(k);
+            }
+        } else {
         // Instantaneous frequency from the newest capture's increment
         // (heterodyned phase increment over one analysis hop).
         const double* increment = latest_increment_.data();
@@ -834,16 +1161,35 @@ private:
             const double delta = princarg(increment[k] - omega * ha);
             inst_freq_[static_cast<size_t>(k)] = omega + delta / ha;
         }
+        }
 
         // Initial hold phases from the latched (newest) live frame so the
         // per-channel phase relationships — the image — carry into the hold.
         if (last_frames_ != nullptr) {
-            for (int ch = 0; ch < config_.channels; ++ch) {
-                double* phases = held_phase_.data() + static_cast<size_t>(ch) * bins;
-                for (int k = 0; k < num_bins_; ++k)
-                    phases[k] = static_cast<double>(std::arg(last_frames_[ch][k]));
+            if (rotor_mode()) {
+                // Unit phasors straight from the frame: no atan2.
+                for (int ch = 0; ch < config_.channels; ++ch) {
+                    std::complex<double>* z = phasor_.data() + static_cast<size_t>(ch) * bins;
+                    for (int k = 0; k < num_bins_; ++k) {
+                        const std::complex<double> x(last_frames_[ch][k]);
+                        const double r = std::abs(x);
+                        z[k] = r > 0.0 ? x / r : std::complex<double>(1.0, 0.0);
+                    }
+                }
+            } else {
+                for (int ch = 0; ch < config_.channels; ++ch) {
+                    double* phases = held_phase_.data() + static_cast<size_t>(ch) * bins;
+                    for (int k = 0; k < num_bins_; ++k)
+                        phases[k] = static_cast<double>(rt::arg(last_frames_[ch][k]));
+                }
             }
         }
+        if (lock) {
+            if (!(weighted && staged)) lock_lobe_frequencies();
+            randomise_unlocked_phases();
+        }
+        if (rotor_mode())
+            begin_rotor_build(weighted && staged, staged);
         fade_ = SampleType{0};
         fade_step_ = 0;
         latched_ = true;
@@ -864,16 +1210,187 @@ private:
         fade_step_ = pending_fade_step_;
         fade_ = static_cast<SampleType>(fade_step_)
               / static_cast<SampleType>(config_.crossfade_frames);
-        if (releasing_) captured_ = 0; // the next hold starts from fresh input
+        if (releasing_) {
+            captured_ = 0; // the next hold starts from fresh input
+            window_ = 0;
+        }
+        // A restored hold carries no lobe structure: each bin walks alone.
+        std::fill(peak_of_.begin(), peak_of_.end(), -1);
+        if (rotor_mode()) {
+            // Built in full: a staged bin would hold its phase for a few
+            // hops and the restored hold would no longer track its source.
+            for (size_t i = 0; i < phasor_.size(); ++i)
+                phasor_[i] = rt::polar(1.0, held_phase_[i]);
+            begin_rotor_build(false, false);
+        }
         pending_.value.store(kRestoreIdle, std::memory_order_release);
     }
 
+    // ── rotor synthesis ────────────────────────────────────────────────────
+
+    bool rotor_mode() const { return config_.synthesis == FreezeHoldSynthesis::rotor; }
+
+    static std::complex<SampleType> scaled_phasor(const std::complex<double>& z,
+                                                  SampleType magnitude) {
+        const double m = static_cast<double>(magnitude);
+        return {static_cast<SampleType>(z.real() * m), static_cast<SampleType>(z.imag() * m)};
+    }
+
+    // Build every rotor now, or stage them over the following frame groups
+    // (`engage_bins_per_hop` per group); a bin whose rotor is not built yet
+    // holds its phase (rotor = 1). `derive_frequency` also derives each
+    // bin's energy-weighted frequency in its step.
+    void begin_rotor_build(bool derive_frequency, bool staged) {
+        derive_frequency_in_steps_ = derive_frequency;
+        const int chunk = staged ? config_.engage_bins_per_hop : num_bins_;
+        engage_chunk_ = chunk;
+        if (staged)
+            std::fill(rotor_.begin(), rotor_.end(), std::complex<double>(1.0, 0.0));
+        engage_staging_.begin((num_bins_ + chunk - 1) / chunk);
+        if (!staged)
+            engage_staging_.finish_now([this](int step) { build_rotor_chunk(step); });
+    }
+
+    void build_rotor_chunk(int step) {
+        const double ha = static_cast<double>(config_.analysis_hop);
+        const int first = step * engage_chunk_;
+        const int last = std::min(first + engage_chunk_, num_bins_);
+        const bool lock = !peak_of_.empty();
+        for (int k = first; k < last; ++k) {
+            if (derive_frequency_in_steps_) {
+                const int peak = lock ? peak_of_[static_cast<size_t>(k)] : -1;
+                if (peak < 0)
+                    derive_weighted_frequency(k);
+                else if (peak != k) // the peak itself was derived at the latch
+                    inst_freq_[static_cast<size_t>(k)] = inst_freq_[static_cast<size_t>(peak)];
+            }
+            rotor_[static_cast<size_t>(k)] =
+                rt::polar(1.0, inst_freq_[static_cast<size_t>(k)] * ha);
+        }
+    }
+
+    // Instantaneous frequency of bin k from the window's summed increment
+    // vector. A silent bin (zero sum) keeps its bin-centre frequency.
+    void derive_weighted_frequency(int k) {
+        const double ha = static_cast<double>(config_.analysis_hop);
+        const double omega = two_pi_ * k / config_.fft_size;
+        const auto sum = increment_sum_[static_cast<size_t>(k)];
+        const double increment = (sum.real() == 0.0 && sum.imag() == 0.0)
+                               ? omega * ha
+                               : rt::arg(sum);
+        const double delta = princarg(increment - omega * ha);
+        inst_freq_[static_cast<size_t>(k)] = omega + delta / ha;
+    }
+
+    // ── peak-lobe phase lock ───────────────────────────────────────────────
+
+    // Mark every bin within lobe_half_width of a peak with that peak's index
+    // (-1 elsewhere). Peaks are local maxima of the channel-summed held power
+    // over +-lobe_half_width, so two peaks are more than a lobe apart and a
+    // peak is never inside another peak's lobe; a bin between two lobes goes
+    // to the stronger peak.
+    void assign_lobes() {
+        const int bins = num_bins_;
+        const int w = std::max(config_.lobe_half_width, 0);
+        double top = 0.0;
+        for (int k = 0; k < bins; ++k) {
+            double p = 0.0;
+            for (int ch = 0; ch < config_.channels; ++ch) {
+                const double m = held_mag_[static_cast<size_t>(ch) * bins + static_cast<size_t>(k)];
+                p += m * m;
+            }
+            lobe_power_[static_cast<size_t>(k)] = p;
+            top = std::max(top, p);
+        }
+        std::fill(peak_of_.begin(), peak_of_.end(), -1);
+        const double floor = top * 1e-6; // -60 dB
+        for (int k = 0; k < bins; ++k) {
+            const double p = lobe_power_[static_cast<size_t>(k)];
+            if (!(p > floor)) continue;
+            bool peak = true;
+            for (int j = std::max(k - w, 0); peak && j <= std::min(k + w, bins - 1); ++j)
+                if (j != k && (j < k ? lobe_power_[static_cast<size_t>(j)] >= p
+                                     : lobe_power_[static_cast<size_t>(j)] > p))
+                    peak = false;
+            if (!peak) continue;
+            for (int j = std::max(k - w, 0); j <= std::min(k + w, bins - 1); ++j) {
+                int& owner = peak_of_[static_cast<size_t>(j)];
+                if (owner < 0 || lobe_power_[static_cast<size_t>(owner)] < p) owner = k;
+            }
+        }
+        rt::count_bins(static_cast<std::uint64_t>(bins)
+                       * static_cast<std::uint64_t>(config_.channels + 2 * w + 1));
+    }
+
+    void lock_lobe_frequencies() {
+        for (int k = 0; k < num_bins_; ++k) {
+            const int peak = peak_of_[static_cast<size_t>(k)];
+            if (peak >= 0 && peak != k)
+                inst_freq_[static_cast<size_t>(k)] = inst_freq_[static_cast<size_t>(peak)];
+        }
+    }
+
+    // One random rotation per unlocked bin, shared by every channel so the
+    // inter-channel phase offsets survive.
+    void randomise_unlocked_phases() {
+        const auto bins = static_cast<size_t>(num_bins_);
+        for (size_t k = 0; k < bins; ++k) {
+            if (peak_of_[k] >= 0) continue;
+            if (rotor_mode()) {
+                const auto turn = random_phase_table_[next_jitter_index()];
+                for (int ch = 0; ch < config_.channels; ++ch)
+                    phasor_[static_cast<size_t>(ch) * bins + k] *= turn;
+            } else {
+                const double turn = 3.14159265358979323846 * next_uniform();
+                for (int ch = 0; ch < config_.channels; ++ch) {
+                    double& phase = held_phase_[static_cast<size_t>(ch) * bins + k];
+                    phase = princarg(phase + turn);
+                }
+            }
+        }
+    }
+
+    void sync_phases_from_phasors() const {
+        for (size_t i = 0; i < phasor_.size(); ++i)
+            held_phase_[i] = rt::arg(phasor_[i]);
+    }
+
     void advance_hold_phases() {
+        // Under a peak-lobe lock one partial is one random walk: every lobe
+        // bin takes its peak's draw, so the walk never decoheres a lobe. The
+        // stream still advances once per bin, as without the lock.
+        const bool lock = !peak_of_.empty();
+        if (lock)
+            for (size_t k = 0; k < lobe_draw_.size(); ++k)
+                lobe_draw_[k] = rotor_mode() ? static_cast<double>(next_jitter_index())
+                                             : next_uniform();
+        const auto draw_for = [&](size_t k) {
+            const int peak = peak_of_[k];
+            return lobe_draw_[peak >= 0 ? static_cast<size_t>(peak) : k];
+        };
+        if (rotor_mode()) {
+            const auto bins = static_cast<size_t>(num_bins_);
+            for (size_t k = 0; k < bins; ++k) {
+                const std::size_t index = lock ? static_cast<std::size_t>(draw_for(k))
+                                               : next_jitter_index();
+                const auto step = rotor_[k] * jitter_table_[index];
+                for (int ch = 0; ch < config_.channels; ++ch)
+                    phasor_[static_cast<size_t>(ch) * bins + k] *= step;
+            }
+            // One Newton step toward |z| = 1 (z *= (3 - |z|^2) / 2) keeps
+            // rounding from ever reaching the level.
+            if (--renormalise_countdown_ <= 0) {
+                renormalise_countdown_ = kRenormaliseHops;
+                for (auto& z : phasor_) z *= 0.5 * (3.0 - std::norm(z));
+            }
+            return;
+        }
         const double ha = static_cast<double>(config_.analysis_hop);
         const double jitter = static_cast<double>(config_.phase_jitter);
         for (int k = 0; k < num_bins_; ++k) {
             const double advance = inst_freq_[static_cast<size_t>(k)] * ha
-                                   + jitter * next_uniform();
+                                   + jitter * (lock ? draw_for(static_cast<size_t>(k))
+                                                    : next_uniform());
             // Keep phases wrapped: the mix converts them to SampleType, and an
             // unbounded float phase loses the per-channel offsets (the stereo
             // image) and inter-frame coherence within seconds of holding.
@@ -887,11 +1404,19 @@ private:
 
     // xorshift64* — deterministic, allocation-free; uniform in [-1, 1].
     double next_uniform() {
+        return static_cast<double>(next_random() >> 11) * (2.0 / 9007199254740992.0) - 1.0;
+    }
+
+    // The same stream quantised to a jitter-table index (top 8 bits).
+    std::size_t next_jitter_index() {
+        return static_cast<std::size_t>(next_random() >> 56);
+    }
+
+    std::uint64_t next_random() {
         rng_ ^= rng_ >> 12;
         rng_ ^= rng_ << 25;
         rng_ ^= rng_ >> 27;
-        const std::uint64_t r = rng_ * 0x2545f4914f6cdd1dull;
-        return static_cast<double>(r >> 11) * (2.0 / 9007199254740992.0) - 1.0;
+        return rng_ * 0x2545f4914f6cdd1dull;
     }
 
     static double princarg(double p) {
@@ -902,6 +1427,8 @@ private:
     static constexpr std::uint64_t kRngSeed = 0x9e3779b97f4a7c15ull;
     static constexpr std::uint32_t kRestoreIdle = 0;
     static constexpr std::uint32_t kRestoreReady = 1;
+    static constexpr int kRenormaliseHops = 64;
+    static constexpr int kWindowAdjustPerHop = 2;
 
     // Copyable wrapper so the hold (and the processors that own one by value)
     // keep their implicit copy/move operations.
@@ -924,8 +1451,27 @@ private:
     std::vector<double> latest_increment_;         // bins
     std::vector<std::complex<SampleType>> prev_frame_; // channels * bins
     std::vector<SampleType> held_mag_;             // channels * bins
-    std::vector<double> held_phase_;               // channels * bins, wrapped
+    // Mutable: with rotor synthesis the phasors are the state and these
+    // phases are derived on demand by const accessors.
+    mutable std::vector<double> held_phase_;       // channels * bins, wrapped
     std::vector<double> inst_freq_;                // bins
+
+    // Opt-in cost modes (empty unless configured).
+    std::vector<std::complex<SampleType>> increment_ring_; // max depth * bins
+    std::vector<std::complex<double>> increment_sum_;      // bins
+    std::vector<double> running_mag_sum_;                  // channels * bins
+    std::vector<std::complex<double>> phasor_;             // channels * bins, |z| = 1
+    std::vector<std::complex<double>> rotor_;              // bins
+    std::array<std::complex<double>, 256> jitter_table_{};
+    std::array<std::complex<double>, 256> random_phase_table_{};
+    std::vector<int> peak_of_;                             // bins, peak index or -1
+    std::vector<double> lobe_power_;                       // bins, scratch
+    std::vector<double> lobe_draw_;                        // bins, per-hop walk draws
+    StagedTransition engage_staging_;
+    int engage_chunk_ = 0;
+    bool derive_frequency_in_steps_ = false;
+    int window_ = 0;                  // frames in the running sums
+    int renormalise_countdown_ = kRenormaliseHops;
 
     // Staged-restore slot (single non-audio producer, audio consumer).
     std::vector<SampleType> pending_mag_;

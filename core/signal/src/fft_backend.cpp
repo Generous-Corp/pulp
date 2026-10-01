@@ -481,7 +481,15 @@ FftBackend MultiBackendFft::backend() const noexcept {
     return impl_ ? impl_->backend : FftBackend::auto_;
 }
 
-void MultiBackendFft::forward(std::complex<float>* data) const { impl_->forward(data); }
-void MultiBackendFft::inverse(std::complex<float>* data) const { impl_->inverse(data); }
+// The vdsp branch delegates to Fft, which counts its own transforms; every
+// other branch is counted here so each transform is recorded exactly once.
+void MultiBackendFft::forward(std::complex<float>* data) const {
+    if (impl_->backend != FftBackend::vdsp) rt::count_fft();
+    impl_->forward(data);
+}
+void MultiBackendFft::inverse(std::complex<float>* data) const {
+    if (impl_->backend != FftBackend::vdsp) rt::count_fft();
+    impl_->inverse(data);
+}
 
 }  // namespace pulp::signal
