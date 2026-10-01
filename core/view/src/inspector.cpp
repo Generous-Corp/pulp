@@ -1,4 +1,5 @@
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/widgets.hpp>
 #include <choc/text/choc_JSON.h>
 #include <sstream>
 

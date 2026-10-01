@@ -8,6 +8,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/command_registry.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/tree_view.hpp>
 #include <pulp/view/property_list.hpp>
 #include <pulp/view/split_view.hpp>
