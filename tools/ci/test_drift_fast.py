@@ -171,6 +171,42 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("never calls", out)
 
+    HYDRATE = "tools/scripts/hydrate_gpu_provenance_commits.py"
+
+    def test_workflow_without_hydration_fails(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
+        text = text.replace(f"python3 {self.HYDRATE}", "true")
+        rc, out = self.check(text)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"never runs precondition {self.HYDRATE}", out)
+
+    def test_hydration_named_only_in_a_comment_fails(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8")
+        text = text.replace(f"python3 {self.HYDRATE}", f"true\n      # {self.HYDRATE}")
+        rc, out = self.check(text)
+        self.assertEqual(rc, 1)
+        self.assertIn("never runs precondition", out)
+
+    def test_hydration_after_the_driver_fails(self):
+        text = drift_fast.WORKFLOW.read_text(encoding="utf-8").replace(
+            f"python3 {self.HYDRATE}", "true"
+        )
+        text += f"\n      - run: python3 {self.HYDRATE}\n"
+        rc, out = self.check(text)
+        self.assertEqual(rc, 1)
+        self.assertIn("after tools/ci/drift_fast.py run", out)
+
+    def test_checked_in_manifest_requires_hydration(self):
+        steps = [e["step"] for e in drift_fast.load_manifest().get("workflow_preconditions", [])]
+        self.assertIn(self.HYDRATE, steps)
+
+    def test_precondition_without_reason_is_rejected(self):
+        problems = drift_fast.manifest_problems(
+            {"schema_version": 1, "workflow_preconditions": [{"step": "x"}],
+             "tests": [{"name": "a", "why": "x"}]}
+        )
+        self.assertIn("workflow_preconditions entries need a 'step' and a 'why'", problems)
+
     def test_every_listed_test_is_a_real_registration_name(self):
         # Guards typos: each listed name must appear in some test manifest.
         sources = "\n".join(

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -333,6 +334,47 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
                 self.write_selection(label_exclude=label_exclude)
                 with self.assertRaisesRegex(receipt.ReceiptError, "different label set"):
                     receipt.issue(self.issue_args())
+
+    def verify_with_requirement(self, issued: dict, required: str | None) -> tuple[dict, str]:
+        args = self.verify_args()
+        args.affected_slow_required = required
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            decision = receipt.verify_receipt(issued, args)
+        return decision, stderr.getvalue()
+
+    def test_group_that_falls_back_to_requiring_proofs_is_reported(self) -> None:
+        # The head's classification did not need the slow-affected proofs, so
+        # its run used the plain selection; the group's classifier fell back
+        # to requiring them. The mismatch is reported without refusing reuse.
+        issued = receipt.issue(self.issue_args())
+        self.assertFalse(receipt.ran_affected_slow_proofs(issued["validation"]))
+        decision, stderr = self.verify_with_requirement(issued, "true")
+        self.assertEqual(decision["verdict"], "reuse")
+        self.assertIn("requires the slow-affected proofs", stderr)
+
+    def test_proof_requirement_met_or_absent_reports_nothing(self) -> None:
+        plain = receipt.issue(self.issue_args())
+        self.write_selection(label_exclude=receipt.AFFECTED_SLOW_LABEL_EXCLUDE)
+        with_proofs = receipt.issue(self.issue_args())
+        self.assertTrue(receipt.ran_affected_slow_proofs(with_proofs["validation"]))
+        for issued, required in ((with_proofs, "true"), (with_proofs, "false"),
+                                 (plain, "false"), (plain, None)):
+            with self.subTest(proofs=receipt.ran_affected_slow_proofs(issued["validation"]),
+                              required=required):
+                decision, stderr = self.verify_with_requirement(issued, required)
+                self.assertEqual(decision["verdict"], "reuse")
+                self.assertEqual(stderr, "")
+
+    def test_verify_cli_accepts_only_a_boolean_proof_requirement(self) -> None:
+        parser = receipt._parser()
+        base = ["verify", "--repository", "r", "--target", "macos", "--group-sha", "g",
+                "--receipt", "x", "--output", "y"]
+        self.assertEqual(parser.parse_args(base + ["--affected-slow-required", "true"])
+                         .affected_slow_required, "true")
+        self.assertIsNone(parser.parse_args(base).affected_slow_required)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(base + ["--affected-slow-required", ""])
 
     def test_skipped_tests_count_as_run_evidence_but_not_passes(self) -> None:
         self.write_junit({"unit": "notrun"})
@@ -869,6 +911,95 @@ class ReuseStepRefusalReasonTest(unittest.TestCase):
         self.assertIn("::notice::receipt reuse not evaluated: merge group changed no native "
                       "build input", stdout)
         self.assertIn("merge group changed no native build input |", summary)
+
+
+class ReuseStepProofRequirementTest(unittest.TestCase):
+    """The reuse step hands the group's proof requirement to the protected verifier.
+
+    The protected base carries a stub verifier that logs its argv, so the test
+    reads what the step actually passed rather than the step's text.
+    """
+
+    STUB = """import json, os, pathlib, sys
+args = sys.argv[1:]
+with open(os.environ["STUB_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(args) + "\\n")
+if args[0] in ("download", "verify"):
+    pathlib.Path(args[args.index("--output") + 1]).write_text("{}", encoding="utf-8")
+if args[0] == "verify":
+    print("protected receipt: stub finding", file=sys.stderr)
+"""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / "step.sh").write_text(ReuseStepRefusalReasonTest.step_script(),
+                                           encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def group_repo(self, name: str, accepts_requirement: bool) -> tuple[Path, str]:
+        repo = self.root / name
+        scripts = repo / "tools" / "scripts"
+        scripts.mkdir(parents=True)
+        stub = self.STUB + ("# accepts --affected-slow-required\n" if accepts_requirement else "")
+        (scripts / "protected_merge_receipt.py").write_text(stub, encoding="utf-8")
+        git(repo, "init", "-q")
+        git(repo, "config", "user.email", "ci@example.invalid")
+        git(repo, "config", "user.name", "CI")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "base")
+        base = git(repo, "rev-parse", "HEAD")
+        head = git(repo, "commit-tree", git(repo, "rev-parse", "HEAD^{tree}"), "-p", base,
+                   input_text="head\n")
+        group = git(repo, "commit-tree", git(repo, "rev-parse", "HEAD^{tree}"),
+                    "-p", base, "-p", head, input_text="group\n")
+        # The workspace note/publish helpers are the real script.
+        (scripts / "protected_merge_receipt.py").write_bytes(Path(receipt.__file__).read_bytes())
+        return repo, group
+
+    def run_step(self, repo: Path, group: str, required: str | None) -> tuple[list[list[str]], str]:
+        runner_temp = repo.parent / f"rt-{repo.name}-{required}"
+        runner_temp.mkdir()
+        log = runner_temp / "stub.log"
+        env = dict(os.environ, GITHUB_EVENT_NAME="merge_group", NATIVE_BUILD_REQUIRED="true",
+                   GITHUB_SHA=group, RUNNER_TEMP=str(runner_temp),
+                   GITHUB_STEP_SUMMARY=str(runner_temp / "summary.md"),
+                   GITHUB_OUTPUT=str(runner_temp / "output"),
+                   ORIGINAL_MATRIX='{"include":[{"key":"macos"},{"key":"linux"}]}',
+                   RECEIPT_TOKEN="unused", A2T_RECEIPT_VERIFICATION_REQUIRED="false",
+                   GITHUB_REPOSITORY="example/repo", GITHUB_WORKSPACE=str(repo),
+                   GITHUB_REF="refs/heads/gh-readonly-queue/main/pr-1-" + "a" * 40,
+                   STUB_LOG=str(log))
+        env.pop("AFFECTED_SLOW_REQUIRED", None)
+        if required is not None:
+            env["AFFECTED_SLOW_REQUIRED"] = required
+        done = subprocess.run(["bash", "-e", str(self.root / "step.sh")], cwd=repo,
+                              env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        return [c for c in calls if c[0] == "verify"], done.stdout
+
+    @staticmethod
+    def requirement(call: list[str]) -> str | None:
+        flag = "--affected-slow-required"
+        return call[call.index(flag) + 1] if flag in call else None
+
+    def test_group_requirement_reaches_a_verifier_that_accepts_it(self) -> None:
+        repo, group = self.group_repo("accepts", accepts_requirement=True)
+        for required, expected in (("true", "true"), ("false", "false"), (None, "true")):
+            with self.subTest(required=required):
+                verifies, stdout = self.run_step(repo, group, required)
+                self.assertEqual([c[1] for c in verifies], ["--repo", "--repo"])
+                self.assertEqual({self.requirement(c) for c in verifies}, {expected})
+                self.assertIn("::notice::protected receipt: stub finding", stdout)
+
+    def test_older_protected_verifier_is_not_handed_the_requirement(self) -> None:
+        repo, group = self.group_repo("older", accepts_requirement=False)
+        verifies, _ = self.run_step(repo, group, "true")
+        self.assertEqual(len(verifies), 2)
+        self.assertEqual({self.requirement(c) for c in verifies}, {None})
 
 
 if __name__ == "__main__":

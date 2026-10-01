@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.884.1
+    VERSION 0.887.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -25,10 +25,11 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCheckoutLocation.cmake)  # r
 # CMAKE_CURRENT_LIST_DIR in the installed helpers.)
 set(PULP_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "Pulp source tree root")
 
-# ── Default build type + link pool ───────────────────────────────────────
-# Both must run before any target is declared.
+# ── Default build type, link pool, link maps ─────────────────────────────
+# All three must run before any target is declared.
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpDefaultBuildType.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkPool.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkMaps.cmake)
 
 # ── C++20 Standard ──────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
@@ -83,6 +84,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR ANDROID)
     option(PULP_BUILD_TESTS "Build unit tests" OFF)
 else()
     option(PULP_BUILD_TESTS "Build unit tests" ON)
+endif()
+# Deterministic RT operation counters (pulp/signal/rt_work_counter.hpp) back
+# the per-callback transition-cost gate. The definition is directory-wide so
+# every translation unit of one build agrees on the inline counter hooks; it
+# follows PULP_BUILD_TESTS so release/SDK builds (tests OFF) carry none.
+option(PULP_RT_WORK_COUNTERS
+       "Count FFT and transcendental calls for RT transition-cost gates"
+       ${PULP_BUILD_TESTS})
+if(PULP_RT_WORK_COUNTERS)
+    add_compile_definitions(PULP_RT_WORK_COUNTERS=1)
 endif()
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_CHANGED_SURFACE_INVENTORY_TARGET

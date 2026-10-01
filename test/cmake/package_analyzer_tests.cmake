@@ -9,8 +9,7 @@ add_executable(pulp-test-cli-package-analyzer-descriptors
 target_include_directories(pulp-test-cli-package-analyzer-descriptors PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli)
-target_compile_definitions(pulp-test-cli-package-analyzer-descriptors PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-package-analyzer-descriptors PATHS tools/packages/registry.json)
 target_link_libraries(pulp-test-cli-package-analyzer-descriptors PRIVATE
     pulp::audio
     pulp::platform

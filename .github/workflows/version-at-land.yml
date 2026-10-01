@@ -77,7 +77,6 @@ jobs:
           persist-credentials: true
           # RELEASE_BOT_TOKEN if present so the pushed commit re-triggers CI
           # checks gated to non-GITHUB_TOKEN pushes; GITHUB_TOKEN for bootstrap.
-          # (post-tag-sync.yml already uses this exact pattern to push to main.)
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure release bot SSH signing
@@ -85,6 +84,15 @@ jobs:
         env:
           RELEASE_BOT_SSH_SIGNING_KEY: ${{ secrets.RELEASE_BOT_SSH_SIGNING_KEY }}
         run: bash tools/scripts/configure_release_bot_ssh_signing.sh
+
+      - name: Install pinned Shipyard
+        # The bump renders CHANGELOG.md with `shipyard changelog regenerate`
+        # (a derived regenerator in version_at_land.py). Without the binary the
+        # regenerator logs that it could not run and CHANGELOG.md falls behind.
+        shell: bash
+        run: |
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Assign versions (single-writer push)
         # GH_TOKEN authenticates the `gh` CLI the PR-route uses to open + arm the

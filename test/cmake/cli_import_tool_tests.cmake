@@ -210,7 +210,6 @@ target_include_directories(pulp-test-cli-migration-index PRIVATE
     ${CMAKE_SOURCE_DIR}/tools/cli)
 target_link_libraries(pulp-test-cli-migration-index PRIVATE
     Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-cli-migration-index PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-migration-index PATHS tools/scripts/build_migration_index.py)
 catch_discover_tests(pulp-test-cli-migration-index
     PROPERTIES ENVIRONMENT "PULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}")

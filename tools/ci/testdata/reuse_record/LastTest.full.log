@@ -1,0 +1,172 @@
+Start testing: Sep 30 12:37 PDT
+----------------------------------------------------------
+1/8 Testing: ok
+1/8 Test: ok
+Command: "/bin/sh" "-c" "exit 0"
+Directory: /work/b
+"ok" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"ok" end time: Sep 30 12:37 PDT
+"ok" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/8 Testing: flaky
+2/8 Test: flaky
+Command: "/bin/sh" "-c" "if [ -f /work/seen ]; then exit 0; fi; touch /work/seen; exit 1"
+Directory: /work/b
+"flaky" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Failed.
+"flaky" end time: Sep 30 12:37 PDT
+"flaky" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/8 Testing: flaky
+2/8 Test: flaky
+Command: "/bin/sh" "-c" "if [ -f /work/seen ]; then exit 0; fi; touch /work/seen; exit 1"
+Directory: /work/b
+"flaky" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"flaky" end time: Sep 30 12:37 PDT
+"flaky" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/8 Testing: bad
+3/8 Test: bad
+Command: "/bin/sh" "-c" "echo boom; exit 3"
+Directory: /work/b
+"bad" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+boom
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Failed.
+"bad" end time: Sep 30 12:37 PDT
+"bad" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/8 Testing: bad
+3/8 Test: bad
+Command: "/bin/sh" "-c" "echo boom; exit 3"
+Directory: /work/b
+"bad" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+boom
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Failed.
+"bad" end time: Sep 30 12:37 PDT
+"bad" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/8 Testing: skip
+4/8 Test: skip
+Command: "/bin/sh" "-c" "exit 77"
+Directory: /work/b
+"skip" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"skip" end time: Sep 30 12:37 PDT
+"skip" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/8 Testing: slow
+5/8 Test: slow
+Command: "/bin/sh" "-c" "sleep 5"
+Directory: /work/b
+"slow" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   1.04 sec
+----------------------------------------------------------
+Test Failed.
+"slow" end time: Sep 30 12:37 PDT
+"slow" time elapsed: 00:00:01
+----------------------------------------------------------
+
+5/8 Testing: slow
+5/8 Test: slow
+Command: "/bin/sh" "-c" "sleep 5"
+Directory: /work/b
+"slow" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   1.04 sec
+----------------------------------------------------------
+Test Failed.
+"slow" end time: Sep 30 12:37 PDT
+"slow" time elapsed: 00:00:01
+----------------------------------------------------------
+
+6/8 Testing: off
+6/8 Test: off
+Command: ""
+Directory: /work/b
+"off" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"off" end time: Sep 30 12:37 PDT
+"off" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/8 Testing: rxskip
+7/8 Test: rxskip
+Command: "/bin/sh" "-c" "echo SKIPME"
+Directory: /work/b
+"rxskip" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+SKIPME
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Pass Reason:
+Skip regular expression found in output. Regex=[SKIPME]
+"rxskip" end time: Sep 30 12:37 PDT
+"rxskip" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/8 Testing: quoted "name" & <x>
+8/8 Test: quoted "name" & <x>
+Command: "/bin/sh" "-c" "exit 0"
+Directory: /work/b
+"quoted "name" & <x>" start time: Sep 30 12:37 PDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"quoted "name" & <x>" end time: Sep 30 12:37 PDT
+"quoted "name" & <x>" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 30 12:37 PDT

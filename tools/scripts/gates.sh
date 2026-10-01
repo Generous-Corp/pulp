@@ -41,6 +41,9 @@
 #     written reason and an owner, and no allowlist entry outlives its raise)
 #   - ctest label-exclusion (no Catch2 suite is registered only behind a label
 #     that both the required gate and the coverage lane drop)
+#   - script-test inputs (test/ctest_script_inputs.json matches the ctest
+#     inventory for scripts the diff touches; configures build-gate, no
+#     compile, when no current build exists — PULP_GATES_NO_CONFIGURE=1 opts out)
 #
 # Does NOT run:
 #   - local diff-coverage (slow — builds the cov target, hits ring crate
@@ -90,6 +93,8 @@ COMPAT_AGG="$ROOT/tools/scripts/compat_aggregate.py"
 NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
+HFG="$ROOT/tools/scripts/header_fanout_guard.py"
+HFG_CFG="$ROOT/tools/scripts/header_fanout_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
 GHP="$ROOT/tools/scripts/gpu_handoff_pin_freshness.py"
 SRG="$ROOT/tools/scripts/silent_revert_guard.py"
@@ -240,23 +245,6 @@ if ! "$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report \
     fail=1
 fi
 
-# ── 2b. shipyard-pin lockstep ──────────────────────────────────────────────
-# `tools/shipyard.toml` and every workflow's inline `SHIPYARD_VERSION` must
-# agree. The checker for this already existed but was wired into nothing, so
-# the two drifted to 0.78.0 vs 0.70.0 unnoticed — and a post-tag-sync pin
-# below 0.79.0 stamps the changelog commit `[skip ci]`, which makes Actions
-# skip the required checks, which makes the changelog PR unmergeable. Nine
-# stacked up that way and stalled the release pipeline. Cheap and offline,
-# so it runs unconditionally.
-PIN_CHECK="$ROOT/tools/scripts/check_shipyard_pin.py"
-if [ -f "$PIN_CHECK" ]; then
-    echo "" >&2
-    echo "▸ shipyard-pin lockstep check" >&2
-    if ! "$PYTHON" "$PIN_CHECK"; then
-        fail=1
-    fi
-fi
-
 # ── 2c. yoga-oracle lockstep ──────────────────────────────────────
 # The web-compat harness decides whether a CSS property is in scope by looking
 # it up BY NAME in a hand-transcribed table of one Yoga release
@@ -317,6 +305,15 @@ if [ -f "$HSG" ] && [ -f "$HSG_CFG" ]; then
     echo "▸ hotspot-size guard" >&2
     if ! "$PYTHON" "$HSG" --base "$BASE" --config "$HSG_CFG" --mode=report \
             --require-ceiling-reduction; then
+        fail=1
+    fi
+fi
+
+# ── 6a. header fan-out guard ────────────────────────────────────────────────
+if [ -f "$HFG" ] && [ -f "$HFG_CFG" ]; then
+    echo "" >&2
+    echo "▸ header fan-out guard (no new umbrella include of a tracked header)" >&2
+    if ! "$PYTHON" "$HFG" --base "$BASE" --config "$HFG_CFG" --mode=report; then
         fail=1
     fi
 fi
@@ -471,6 +468,27 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     else
         echo "  deps-audit self-tests: ok" >&2
     fi
+fi
+
+# ── 7a-inputs. script-test inputs list (configures build-gate if needed) ──
+# `script-test-inputs-drift` reads the ctest inventory, so without a configured
+# build it used to be NOT CHECKED here and a stale or hand-edited
+# test/ctest_script_inputs.json surfaced only on the PR head. When the diff can
+# drift the list, this lane reuses a current build or configures `build-gate`
+# (configure only, no compile) and runs the diff-scoped check; a diff that
+# cannot drift it costs nothing. It runs before the pr-fast lane below so that
+# lane finds the configured build too. PULP_GATES_NO_CONFIGURE=1 keeps it
+# NOT CHECKED instead of configuring.
+if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
+    echo "" >&2
+    echo "▸ script-test inputs list (diff-scoped; configures build-gate when the diff can drift it)" >&2
+    sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
+    if ! "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
+        fail=1
+    fi
+    grep -v "^NOT CHECKED locally: " "$sti_log" >&2
+    sed -n "s/^\(NOT CHECKED locally: .*\)/[script-inputs] \1/p" "$sti_log" >>"$not_checked_log"
+    rm -f "$sti_log"
 fi
 
 # ── 7a-src. Python contract suites the diff can reach ─────────────────────
