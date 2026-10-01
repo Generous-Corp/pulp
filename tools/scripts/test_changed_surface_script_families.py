@@ -201,9 +201,11 @@ class GeneratedFamiliesTest(FamilyFixture):
         self.script_test("locked-selftest", "tools/scripts/locked.py", lock=["browser"])
         self.write("tools/scripts/plain.py", "")
         self.script_test("plain-selftest", "tools/scripts/plain.py", labels=["node"])
+        self.write("tools/scripts/timing.py", "")
+        self.script_test("timing-selftest", "tools/scripts/timing.py", labels=["environment-bound"])
         generated = self.generate()
         env = generated["script-surface-environment-bound"]
-        self.assertEqual(env["tests"], ["browser-unit", "locked-selftest"])
+        self.assertEqual(env["tests"], ["browser-unit", "locked-selftest", "timing-selftest"])
         self.assertEqual(env["paths"], generated["script-surface-whole-tree"]["paths"])
         self.assertIn("tools/scripts/test_a.py", env["paths"])
 

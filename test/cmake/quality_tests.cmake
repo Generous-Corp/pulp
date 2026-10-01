@@ -215,6 +215,8 @@ if(Python3_Interpreter_FOUND)
     if(UNIX)
         add_test(NAME process-deadline-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_deadline.py")
+        # Wall-clock deadlines: its outcome follows host load, not its inputs.
+        set_property(TEST process-deadline-selftest APPEND PROPERTY LABELS environment-bound)
     endif()
 
     # Reskinnability ratchet: fail on a NEW hardcoded theme color.
@@ -1329,6 +1331,8 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
+        # Stages live processes and worktrees on the host it runs on.
+        set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
 
         # clean_worktrees.sh removes whole worktrees, so its guard is the one
         # that must never be merely present: the suite stages a live process and
