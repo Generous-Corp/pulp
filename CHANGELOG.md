@@ -9,6 +9,21 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08871"></a>
+## [0.887.1] - 2026-10-01
+
+- release/version bump ([#9183](https://github.com/Generous-Corp/pulp/pull/9183))
+- ci/required check machinery visibility ([#9180](https://github.com/Generous-Corp/pulp/pull/9180))
+- ci/gate infra skip brew update ([#9179](https://github.com/Generous-Corp/pulp/pull/9179))
+- ci/run unwired gate selftests ([#9144](https://github.com/Generous-Corp/pulp/pull/9144))
+- ci/reuse record codemodel ([#9178](https://github.com/Generous-Corp/pulp/pull/9178))
+- feature/floor qos from grant ([#9170](https://github.com/Generous-Corp/pulp/pull/9170))
+- fix/view hpp include array ([#9172](https://github.com/Generous-Corp/pulp/pull/9172))
+- ci/receipt proof required enforce ([#9176](https://github.com/Generous-Corp/pulp/pull/9176))
+- fix/plugin view first mouse ([#9143](https://github.com/Generous-Corp/pulp/pull/9143))
+- security/codeql investigation ([#9068](https://github.com/Generous-Corp/pulp/pull/9068))
+- ci/reuse replay tier1a ([#9169](https://github.com/Generous-Corp/pulp/pull/9169))
+
 <a id="v08870"></a>
 ## [0.887.0] - 2026-10-01
 
@@ -9360,6 +9375,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.887.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.887.1
 [0.887.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.887.0
 [0.886.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.886.0
 [0.885.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.885.0
