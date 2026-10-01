@@ -39,13 +39,17 @@ namespace pulp::host {
 /// conforming callback must treat the two as identical, which is why the
 /// parity test compares rendered audio rather than buffer identity.
 ///
-/// `out` is reserved. It is **always null** today, and the reason is proof, not
-/// safety: the executor derives each node's own `out_incomplete` from that
-/// node's own out buffer, so a Custom node writing it could only ever mark
-/// itself incomplete, exactly as a plugin node does. What is missing is the
-/// evidence — that emitted events are identical on the routed path and the
-/// reference walk, that an overflow is reported the same way on both, and that
-/// nothing leaks into a later block. Emission lands with that proof.
+/// `out` is the node's own MIDI output buffer: a real, writable destination that
+/// downstream nodes gather from, cleared by the caller immediately before
+/// dispatch so nothing a previous block emitted survives into this one. It is
+/// nullable on exactly the same terms as `in` — the routed path's per-node
+/// scratch is null when the compiled shape carries no MIDI at all (an audio-only
+/// graph), while the reference walk always hands over its per-node buffer — so a
+/// conforming callback must null-check it and treat a null as "this graph has no
+/// event lane", never as an error. Appends respect the buffer's realtime
+/// capacity: an `add()` past capacity is dropped and recorded, and the executor
+/// derives this node's `out_incomplete` from those drops after the callback
+/// returns, exactly as it does for a plugin node.
 struct CustomNodeEventBlock {
     const midi::MidiBuffer* in = nullptr;
     midi::MidiBuffer* out = nullptr;

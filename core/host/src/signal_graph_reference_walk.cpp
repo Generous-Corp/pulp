@@ -544,7 +544,7 @@ void SignalGraph::run_reference_walk_(
                     rt.midi_out.clear();
                     rt.midi_out.clear_sysex();
                     if (auto* ump = rt.midi_out.ump()) ump->clear();
-                    const CustomNodeEventBlock events{&rt.midi_in, nullptr};
+                    const CustomNodeEventBlock events{&rt.midi_in, &rt.midi_out};
                     event_it->second(out_view, in_view, num_samples, events);
                 } else if (auto custom_it = cg->custom_processors.find(id);
                            custom_it != cg->custom_processors.end()) {

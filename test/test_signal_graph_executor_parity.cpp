@@ -17,6 +17,7 @@
 #include <pulp/graph/graph_runtime_plan.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/host/signal_graph_executor_routing.hpp>
+#include <pulp/midi/block_ops.hpp>
 
 #include "support/thread_progress.hpp"
 
@@ -2846,4 +2847,457 @@ TEST_CASE("Translated routing matches SignalGraph: event-aware custom node parit
     REQUIRE(unwired.routed_only_execution_failures() == 0);
     routed.release_routed_only_execution();
     unwired.release_routed_only_execution();
+}
+
+// ── Event-aware custom nodes that EMIT ────────────────────────────────
+namespace {
+
+// A snapshot of one SysEx message (payload bytes + offset), for bit-exact
+// comparison. collect_midi() above covers only short messages, so a sysex
+// regression would be invisible to it — and the caller's clear_sysex() is one of
+// the two clears a Custom node's emission depends on.
+struct SysexKey {
+    std::vector<std::uint8_t> data;
+    int32_t offset = 0;
+    bool operator==(const SysexKey& o) const { return data == o.data && offset == o.offset; }
+};
+
+std::vector<SysexKey> collect_sysex(const pulp::midi::MidiBuffer& buf) {
+    std::vector<SysexKey> out;
+    for (const auto& sx : buf.sysex()) {
+        SysexKey k;
+        k.data.assign(sx.data.begin(), sx.data.end());
+        k.offset = sx.sample_offset;
+        out.push_back(k);
+    }
+    return out;
+}
+
+// Drain a MidiOutput node's mailbox into both comparable forms at once, so a
+// caller cannot accidentally compare short messages while ignoring sysex. The
+// bool is extract_midi()'s own completeness verdict, which is how the host
+// surfaces an upstream drop.
+struct CollectedEgress {
+    std::vector<MidiEvtKey> events;
+    std::vector<SysexKey> sysex;
+    bool complete = false;
+    bool empty() const { return events.empty() && sysex.empty(); }
+};
+
+CollectedEgress drain_egress(SignalGraph& g, pulp::host::NodeId out_node) {
+    pulp::midi::MidiBuffer buf;
+    buf.reserve(4096, 128, 4096);
+    CollectedEgress out;
+    out.complete = g.extract_midi(out_node, buf);
+    out.events = collect_midi(buf);
+    out.sysex = collect_sysex(buf);
+    return out;
+}
+
+void expect_egress_equal(const CollectedEgress& a, const CollectedEgress& b) {
+    REQUIRE(a.complete == b.complete);
+    expect_midi_equal(a.events, b.events);
+    REQUIRE(a.sysex.size() == b.sysex.size());
+    for (std::size_t i = 0; i < a.sysex.size(); ++i) REQUIRE(a.sysex[i] == b.sysex[i]);
+}
+
+// An event-aware custom node that EMITS. It is stateful so that a path which
+// ran it a different number of times, or resolved a different callback, drifts
+// rather than coinciding: the emitted CC and the sysex payload both carry the
+// per-instance block counter, and the audio gain carries the cumulative note
+// count.
+struct CustomMidiEmitter {
+    int blocks = 0;
+    int note_ons = 0;
+};
+
+pulp::host::CustomNodeType make_midi_emitter_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.midi_emitter";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "MidiEmitter";
+    t.create = []() -> void* { return new CustomMidiEmitter(); };
+    t.destroy = [](void* p) { delete static_cast<CustomMidiEmitter*>(p); };
+    t.reset = [](void* p) { *static_cast<CustomMidiEmitter*>(p) = CustomMidiEmitter{}; };
+    t.process_instance_events =
+        [](void* p, pulp::audio::BufferView<float>& out,
+           const pulp::audio::BufferView<const float>& in, int n,
+           const pulp::host::CustomNodeEventBlock& events) {
+            auto* s = static_cast<CustomMidiEmitter*>(p);
+            const int block = s->blocks++;
+            if (events.in != nullptr) {
+                for (const auto& ev : *events.in) {
+                    if (ev.is_note_on()) ++s->note_ons;
+                }
+            }
+            // `out` is nullable on the same terms as `in`: this graph carries
+            // MIDI so both paths hand one over, but the null-check is the
+            // contract every conforming callback owes.
+            if (events.out != nullptr) {
+                if (events.in != nullptr) {
+                    for (const auto& ev : *events.in) {
+                        if (!ev.is_note_on()) continue;
+                        auto echo = pulp::midi::MidiEvent::note_on(
+                            1, static_cast<std::uint8_t>((ev.data()[1] + 5) & 0x7F), 64);
+                        echo.sample_offset = ev.sample_offset + 1;
+                        events.out->add(echo);
+                    }
+                }
+                auto tick = pulp::midi::MidiEvent::cc(
+                    2, 11, static_cast<std::uint8_t>((block * 7 + s->note_ons) & 0x7F));
+                tick.sample_offset = 3;
+                events.out->add(tick);
+                // One SysEx per block so clear_sysex() is on the proof path too.
+                const std::array<std::uint8_t, 5> payload{
+                    0xF0, 0x7D, static_cast<std::uint8_t>(block & 0x7F),
+                    static_cast<std::uint8_t>(s->note_ons & 0x7F), 0xF7};
+                events.out->add_sysex_copy(payload.data(), payload.size(), 5, 0.0);
+            }
+            const float gain = 0.25f + 0.01f * static_cast<float>(s->note_ons);
+            for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i] * gain;
+        };
+    return t;
+}
+
+// A node that floods its output past the per-node realtime event capacity
+// (1024 on both paths). Appends are dropped rather than growing the buffer, and
+// both paths must report the SAME truncation and the same incompleteness.
+constexpr int kEmitFlood = 2000;
+
+pulp::host::CustomNodeType make_midi_flood_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.midi_flood";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "MidiFlood";
+    t.process_events = [](pulp::audio::BufferView<float>& out,
+                          const pulp::audio::BufferView<const float>& in, int n,
+                          const pulp::host::CustomNodeEventBlock& events) {
+        if (events.out != nullptr) {
+            for (int i = 0; i < kEmitFlood; ++i) {
+                auto ev = pulp::midi::MidiEvent::note_on(
+                    0, static_cast<std::uint8_t>(i & 0x7F), 100);
+                ev.sample_offset = i & 0x1F;
+                events.out->add(ev);
+            }
+        }
+        for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+    };
+    return t;
+}
+
+// Emits on its FIRST block only. The second block's egress must be empty on
+// both paths, which is only true if the caller's clear actually runs — without
+// it the node's out buffer still holds block 1's events and the downstream
+// gather re-collects them.
+pulp::host::CustomNodeType make_first_block_only_emitter_type() {
+    pulp::host::CustomNodeType t;
+    t.type_id = "pulp.test.midi_emit_once";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "MidiEmitOnce";
+    t.create = []() -> void* { return new CustomMidiEmitter(); };
+    t.destroy = [](void* p) { delete static_cast<CustomMidiEmitter*>(p); };
+    t.reset = [](void* p) { *static_cast<CustomMidiEmitter*>(p) = CustomMidiEmitter{}; };
+    t.process_instance_events =
+        [](void* p, pulp::audio::BufferView<float>& out,
+           const pulp::audio::BufferView<const float>& in, int n,
+           const pulp::host::CustomNodeEventBlock& events) {
+            auto* s = static_cast<CustomMidiEmitter*>(p);
+            if (s->blocks++ == 0 && events.out != nullptr) {
+                events.out->add(pulp::midi::MidiEvent::note_on(0, 72, 100));
+                const std::array<std::uint8_t, 4> payload{0xF0, 0x7D, 0x11, 0xF7};
+                events.out->add_sysex_copy(payload.data(), payload.size(), 0, 0.0);
+            }
+            for (int i = 0; i < n; ++i) out.channel_ptr(0)[i] = in.channel_ptr(0)[i];
+        };
+    return t;
+}
+
+}  // namespace
+
+TEST_CASE("Translated routing matches SignalGraph: emitting custom node parity",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    // A Custom node that WRITES its event block's `out`. The routed executor and
+    // the reference walk must agree on the emitted short messages, the emitted
+    // SysEx, and the audio, block for block.
+    struct Ids { pulp::host::NodeId mi, mo; };
+    auto build = [](SignalGraph& g, bool route_executor, bool wire_midi_out) {
+        REQUIRE(g.register_custom_node_type(make_midi_emitter_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_emitter", "MidiEmitter");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        REQUIRE(g.connect_midi(mi, node));
+        // The control drops the node's OUTBOUND edge, so its emission reaches
+        // nothing: the sink must then stay empty while the wired graphs do not.
+        if (wire_midi_out) REQUIRE(g.connect_midi(node, mo));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mi, mo};
+    };
+
+    SignalGraph walk, routed, unwired;
+    const auto wids = build(walk, /*route_executor=*/false, /*wire_midi_out=*/true);
+    const auto rids = build(routed, /*route_executor=*/true, /*wire_midi_out=*/true);
+    const auto uids = build(unwired, /*route_executor=*/true, /*wire_midi_out=*/false);
+    const auto rstatus = routed.routed_execution_status(kFrames);
+    CAPTURE(rstatus.prepared, rstatus.serial_selected, rstatus.serial_snapshot_valid,
+            rstatus.serial_pool_fits);
+    REQUIRE(rstatus.routed_path_ready());
+    // routed_path_ready() still PERMITS the walk; forbid it so a fallback is
+    // counted rather than silently compared against itself.
+    routed.acquire_routed_only_execution();
+    unwired.acquire_routed_only_execution();
+
+    bool saw_emission = false;
+    for (int blk = 0; blk < 4; ++blk) {
+        CAPTURE(blk);
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(walk.inject_midi(wids.mi, inj));
+        REQUIRE(routed.inject_midi(rids.mi, inj));
+        REQUIRE(unwired.inject_midi(uids.mi, inj));
+
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        const std::vector<std::vector<float>> input{x};
+        // run_graph_process, NOT run_legacy: run_legacy forces routing OFF on
+        // whatever graph it is handed, which would compare the walk to itself.
+        const auto walked = run_graph_process(walk, kFrames, input, 1);
+        const auto ran = run_graph_process(routed, kFrames, input, 1);
+        run_graph_process(unwired, kFrames, input, 1);
+        expect_equal(walked, ran);
+
+        const auto w_out = drain_egress(walk, wids.mo);
+        const auto r_out = drain_egress(routed, rids.mo);
+        expect_egress_equal(w_out, r_out);
+        // The parity above would hold just as well between two silent paths.
+        // These are the positive controls that make it mean something.
+        // make_injected_midi carries exactly one note-on, so the node emits its
+        // echo plus the per-block CC tick, and one SysEx.
+        REQUIRE(r_out.events.size() == 2);
+        REQUIRE(r_out.sysex.size() == 1);
+        if (!r_out.empty()) saw_emission = true;
+        // Control: the same node with no outbound MIDI edge reaches no sink.
+        REQUIRE(drain_egress(unwired, uids.mo).empty());
+    }
+    REQUIRE(saw_emission);
+    REQUIRE(routed.routed_only_execution_failures() == 0);
+    REQUIRE(unwired.routed_only_execution_failures() == 0);
+    routed.release_routed_only_execution();
+    unwired.release_routed_only_execution();
+}
+
+TEST_CASE("Translated routing matches SignalGraph: emitting custom node overflow parity",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    // A Custom node emitting past the per-node realtime capacity must truncate
+    // identically on both paths AND mark its own output incomplete identically,
+    // which the downstream MidiOutput's egress reports as extract_midi() == false.
+    struct Ids { pulp::host::NodeId mo; };
+    auto build = [](SignalGraph& g, bool route_executor) {
+        REQUIRE(g.register_custom_node_type(make_midi_flood_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_flood", "MidiFlood");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        REQUIRE(g.connect_midi(node, mo));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mo};
+    };
+
+    SignalGraph walk, routed;
+    const auto wids = build(walk, /*route_executor=*/false);
+    const auto rids = build(routed, /*route_executor=*/true);
+    REQUIRE(routed.routed_execution_status(kFrames).routed_path_ready());
+    routed.acquire_routed_only_execution();
+
+    const auto x = ramp(kFrames, 0.5f);
+    const std::vector<std::vector<float>> input{x};
+    expect_equal(run_graph_process(walk, kFrames, input, 1),
+                 run_graph_process(routed, kFrames, input, 1));
+
+    const auto w_out = drain_egress(walk, wids.mo);
+    const auto r_out = drain_egress(routed, rids.mo);
+    expect_egress_equal(w_out, r_out);
+    // Positive controls: the flood really DID overflow (otherwise "both report
+    // complete" would agree for the wrong reason) and really was truncated.
+    REQUIRE(r_out.complete == false);
+    REQUIRE(r_out.events.size() < static_cast<std::size_t>(kEmitFlood));
+    REQUIRE(!r_out.events.empty());
+
+    REQUIRE(routed.routed_only_execution_failures() == 0);
+    routed.release_routed_only_execution();
+}
+
+TEST_CASE("Translated routing matches SignalGraph: emitted events do not leak into a later block",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    // The node emits on block 1 and nothing on block 2. Block 2's egress must be
+    // EMPTY on both paths: the out buffer persists for the block (downstream nodes
+    // gather from it), so only the caller's clear before dispatch keeps block 1's
+    // events from being re-collected on block 2.
+    struct Ids { pulp::host::NodeId mo; };
+    auto build = [](SignalGraph& g, bool route_executor) {
+        REQUIRE(g.register_custom_node_type(make_first_block_only_emitter_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_emit_once", "MidiEmitOnce");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        REQUIRE(g.connect_midi(node, mo));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        return Ids{mo};
+    };
+
+    SignalGraph walk, routed;
+    const auto wids = build(walk, /*route_executor=*/false);
+    const auto rids = build(routed, /*route_executor=*/true);
+    REQUIRE(routed.routed_execution_status(kFrames).routed_path_ready());
+    routed.acquire_routed_only_execution();
+
+    const auto x = ramp(kFrames, 0.6f);
+    const std::vector<std::vector<float>> input{x};
+
+    run_graph_process(walk, kFrames, input, 1);
+    run_graph_process(routed, kFrames, input, 1);
+    const auto w_first = drain_egress(walk, wids.mo);
+    const auto r_first = drain_egress(routed, rids.mo);
+    expect_egress_equal(w_first, r_first);
+    // The control for the negative below: block 1 MUST be non-empty, or "block 2
+    // is empty" would hold on a node that never emitted anything at all.
+    REQUIRE(r_first.events.size() == 1);
+    REQUIRE(r_first.sysex.size() == 1);
+
+    run_graph_process(walk, kFrames, input, 1);
+    run_graph_process(routed, kFrames, input, 1);
+    const auto w_second = drain_egress(walk, wids.mo);
+    const auto r_second = drain_egress(routed, rids.mo);
+    expect_egress_equal(w_second, r_second);
+    REQUIRE(r_second.empty());
+    REQUIRE(w_second.empty());
+
+    REQUIRE(routed.routed_only_execution_failures() == 0);
+    routed.release_routed_only_execution();
+}
+
+TEST_CASE("Translated routing binder resolves an emitting event-aware custom node",
+          "[host][graph][executor][routing][parity][custom][midi]") {
+    // build_signal_graph_executor_routing() is this harness's translation entry
+    // point and has no production caller: SignalGraph builds its own snapshot
+    // through the same build_executor_snapshot() with its own compile-time
+    // binders. Its `.custom_event_for` binder is therefore reachable only from
+    // here, and dropping it fails OPEN — every event-aware Custom node would bind
+    // an empty callback and route as pass-through-or-zero, silently event-less.
+    // So drive the translated snapshot directly, with the MIDI mailbox bridge the
+    // host performs around process_routed(), and compare against the walk.
+    SignalGraph walk, translated;
+    pulp::host::NodeId wmi = 0, wmo = 0, tmi = 0, tmo = 0;
+    auto build = [](SignalGraph& g, bool route_executor, pulp::host::NodeId& mi_out,
+                    pulp::host::NodeId& mo_out) {
+        REQUIRE(g.register_custom_node_type(make_midi_emitter_type()));
+        const auto in = g.add_input_node(1, "In");
+        const auto node = g.add_custom_node("pulp.test.midi_emitter", "MidiEmitter");
+        const auto out = g.add_output_node(1, "Out");
+        const auto mi = g.add_midi_input_node("MIDI In");
+        const auto mo = g.add_midi_output_node("MIDI Out");
+        REQUIRE(node != 0);
+        REQUIRE(g.connect(in, 0, node, 0));
+        REQUIRE(g.connect(node, 0, out, 0));
+        REQUIRE(g.connect_midi(mi, node));
+        REQUIRE(g.connect_midi(node, mo));
+        g.set_canonical_executor_routing_enabled(route_executor);
+        REQUIRE(g.prepare(kSr, kFrames));
+        mi_out = mi;
+        mo_out = mo;
+    };
+    build(walk, /*route_executor=*/false, wmi, wmo);
+    build(translated, /*route_executor=*/true, tmi, tmo);
+
+    SignalGraphExecutorRouting routing;
+    REQUIRE(build_signal_graph_executor_routing(translated, routing));
+    REQUIRE(routing.valid);
+
+    // Dense plan indices for the MIDI system nodes: the host bridges its
+    // mailboxes by writing a MidiInput node's `out` and draining a MidiOutput
+    // node's `in` around the call, so the test must do the same.
+    const auto plan_index = [&](pulp::host::NodeId id) {
+        const auto& nodes = routing.snapshot.plan().nodes;
+        for (std::uint32_t i = 0; i < nodes.size(); ++i)
+            if (nodes[i].id == id) return i;
+        FAIL("node " << id << " missing from the translated plan");
+        return std::uint32_t{0};
+    };
+    const std::uint32_t mi_index = plan_index(tmi);
+    const std::uint32_t mo_index = plan_index(tmo);
+
+    pulp::format::GraphRuntimeMidiScratch midi;
+    REQUIRE(midi.reset(routing.snapshot.node_count()));
+    REQUIRE(midi.fits(routing.snapshot.node_count()));
+    pulp::format::GraphRuntimeExecutor exec;
+
+    bool saw_emission = false;
+    for (int blk = 0; blk < 4; ++blk) {
+        CAPTURE(blk);
+        const auto inj = make_injected_midi(blk);
+        REQUIRE(walk.inject_midi(wmi, inj));
+
+        // Ingress bridge: the same events, written straight into the MidiInput
+        // node's output buffer.
+        auto* mi_buf = midi.out(mi_index);
+        REQUIRE(mi_buf != nullptr);
+        pulp::midi::clear_midi_block(*mi_buf);
+        midi.set_out_incomplete(mi_index, !pulp::midi::copy_midi_block(inj, *mi_buf));
+
+        const auto x = ramp(kFrames, 0.4f + 0.1f * static_cast<float>(blk));
+        const std::vector<std::vector<float>> input{x};
+        const auto walked = run_graph_process(walk, kFrames, input, 1);
+
+        std::vector<std::vector<float>> ins = input;
+        std::vector<std::vector<float>> outs(
+            1, std::vector<float>(static_cast<std::size_t>(kFrames), 0.0f));
+        std::vector<const float*> in_ptrs{ins[0].data()};
+        std::vector<float*> out_ptrs{outs[0].data()};
+        pulp::audio::BufferView<const float> in_view(in_ptrs.data(), 1, kFrames);
+        pulp::audio::BufferView<float> out_view(out_ptrs.data(), 1, kFrames);
+        pulp::format::BusBufferSet buses;
+        REQUIRE(buses.add_input("main", in_view, pulp::format::BusRole::Main));
+        REQUIRE(buses.add_output("main", out_view, pulp::format::BusRole::Main));
+        pulp::format::ProcessBlock block;
+        block.sample_rate = kSr;
+        block.frame_count = static_cast<std::uint32_t>(kFrames);
+        block.buses = &buses;
+        REQUIRE(block.validate());
+        REQUIRE(exec.process_routed(block, routing.snapshot, routing.pool, &midi).ok());
+
+        expect_equal(walked, outs);
+
+        // Egress bridge: drain the MidiOutput node's gathered input.
+        const auto* mo_buf = midi.in(mo_index);
+        REQUIRE(mo_buf != nullptr);
+        const auto w_out = drain_egress(walk, wmo);
+        CollectedEgress t_out;
+        t_out.events = collect_midi(*mo_buf);
+        t_out.sysex = collect_sysex(*mo_buf);
+        t_out.complete = !midi.in_incomplete(mo_index);
+        expect_egress_equal(w_out, t_out);
+        // Positive control: a dropped `.custom_event_for` binder leaves the node
+        // routing as pass-through-or-zero, which emits nothing at all.
+        REQUIRE(t_out.events.size() == 2);
+        REQUIRE(t_out.sysex.size() == 1);
+        if (!t_out.empty()) saw_emission = true;
+    }
+    REQUIRE(saw_emission);
 }

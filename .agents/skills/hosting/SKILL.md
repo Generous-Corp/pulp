@@ -2305,12 +2305,18 @@ only pins `Legacy`/`RoutedSerial` when some connection carries a delay.
   it cannot disagree with the callbacks. Registration refuses a lowerable
   event-aware type (the bake layer has no event plane and would run MIDI-less
   rather than fail) and refuses events plus transport (no defined precedence).
-* Emission is not wired: the block's `out` is always null. The reason is
-  missing proof, NOT a safety hazard — `set_out_incomplete` is per-node on that
-  node's own out buffer (the same one `plugin_binding` writes), so an emitting
-  Custom node could only mark itself incomplete. Wiring it is two lines; the
-  work is the parity proof (emitted events equal on both paths, overflow
-  reported identically, no stale events in a later block).
+* Emission works: the block's `out` is the node's own MIDI output buffer on both
+  paths, cleared by the caller right before dispatch, so `out->add(...)` /
+  `add_sysex_copy(...)` reaches whatever the node's outbound MIDI edges feed.
+  Two traps. First, `out` is NULLABLE on the same terms as `in` — the routed
+  per-node scratch exists only when the compiled shape carries MIDI at all, so
+  an audio-only graph hands over null while the walk always hands over a buffer;
+  null-check it and treat null as "no event lane", never as an error. Second, the
+  clear is the caller's, which means a callback that early-returns emits nothing
+  rather than re-emitting the previous block — do not try to accumulate across
+  blocks in `out`. Overflow needs no handling either: an `add()` past the 1024-event
+  realtime capacity is dropped and recorded, and `set_out_incomplete` reads those
+  drops after the callback returns, per node, exactly as for `plugin_binding`.
 * A sample-region anchor drops any event binding — its processor is the prepared
   region.
 * There are TWO binder sites. `SignalGraph`'s compile-time binder is the one the

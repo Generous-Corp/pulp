@@ -123,11 +123,22 @@ you reach for either:
 * **A null `events.in` means "no events this block"** and is not an error — the
   graph only allocates an event port when the compiled graph carries MIDI, so an
   audio-only graph hands the callback nothing. Treat null and empty the same.
-* **Emission is not available yet.** `CustomNodeEventBlock::out` exists so that
-  adding it later is not a breaking change, but it is always null today. What is
-  outstanding is evidence rather than safety: emitted events need to be proved
-  identical on the graph's two execution paths, with overflow reported the same
-  way on each and nothing leaking into a later block.
+* **Emission goes through `events.out`.** It is the node's own MIDI output
+  buffer, so appending to it feeds whatever `connect_midi(node, destination)`
+  wires downstream:
+
+  ```cpp
+  if (events.out != nullptr)
+      events.out->add(midi::MidiEvent::note_on(0, 64, 100));   // sample_offset defaults to 0
+  ```
+
+  The graph clears `out` immediately before each call, so a block emits exactly
+  what that call appended — there is nothing to reset, and nothing carries over
+  from the previous block. `out` is nullable for the same reason `in` is, so
+  null-check it. An append past the buffer's realtime capacity is dropped rather
+  than allocating, and the graph then marks the node's output incomplete, which
+  propagates downstream and surfaces as a `false` return from
+  `extract_midi()` at the sink — the same reporting a hosted plugin gets.
 * **Registration refuses incoherent combinations** rather than degrading
   quietly. A stateful event callback needs `create` *and* `destroy`; an
   event-aware type cannot also be `lowerable`, because the bake layer has no
