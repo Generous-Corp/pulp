@@ -60,8 +60,15 @@ STUB = r"""#!/usr/bin/env bash
 [ -n "${STUB_FAIL_ALL:-}" ] && exit 3
 if [ "$1" = "host-profile" ]; then
   [ -n "${STUB_PROFILE_JOBS:-}" ] || exit 1
-  echo "TARTCI_AGENT_QOS=normal"
+  echo "TARTCI_AGENT_QOS=${STUB_AGENT_QOS:-normal}"
   echo "PULP_BUILD_JOBS=${STUB_PROFILE_JOBS}"
+  if [ -n "${STUB_GOVERNOR:-}" ]; then
+    echo "TARTCI_GOVERNOR_SCHEMA=1"
+    echo "TARTCI_INTERACTIVE_BUILD_JOBS=${STUB_INTERACTIVE_JOBS:-14}"
+    echo "TARTCI_INTERACTIVE_MIN_CORES=${STUB_INTERACTIVE_MIN:-2}"
+    echo "TARTCI_INTERACTIVE_WAIT_SECS=0"
+    echo "TARTCI_BACKGROUND_QOS=${STUB_AGENT_QOS:-normal}"
+  fi
   exit 0
 fi
 if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
@@ -87,14 +94,31 @@ if [ "$1" = "leases" ] && [ "$2" = "status" ]; then
   exit 0
 fi
 if [ "$1" = "leases" ] && [ "$2" = "acquire" ]; then
+  [ -n "${STUB_ARGS_LOG:-}" ] && echo "$*" >> "${STUB_ARGS_LOG}"
   cores=""
   floor=""
+  class=""
+  min=""
   while [ "$#" -gt 0 ]; do
     [ "$1" = "--cores" ] && cores="$2"
     [ "$1" = "--allow-floor" ] && floor=1
+    [ "$1" = "--class" ] && class="$2"
+    [ "$1" = "--min-cores" ] && min="$2"
     shift
   done
   [ -n "$cores" ] || exit 1
+  if [ -n "$class" ] && [ -z "$floor" ]; then
+    # A class-aware store grants min(request, STUB_CLASS_GRANT) if that
+    # reaches --min-cores, else denies.
+    grant="${STUB_CLASS_GRANT:-0}"
+    [ "$grant" -gt "$cores" ] && grant="$cores"
+    if [ "$grant" -ge 1 ] && [ "$grant" -ge "${min:-1}" ]; then
+      printf '{"ok":true,"floor":false,"lease":{"lease_size_cores":%s}}\n' "$grant"
+      exit 0
+    fi
+    echo '{"ok":false,"reason":"capacity_exceeded"}'
+    exit 75
+  fi
   if [ -n "$floor" ]; then
     # An older tartci rejects the unknown flag the way argparse does.
     [ -n "${STUB_NO_FLOOR_FLAG:-}" ] && { echo "unrecognized arguments: --allow-floor" >&2; exit 2; }
@@ -154,10 +178,19 @@ class GovernedBuildTests(unittest.TestCase):
                   "STUB_PROFILE_JOBS", "STUB_FREE_CORES", "STUB_MAX_GRANT",
                   "STUB_FAIL_ALL", "STUB_HOLDER_PIDS",
                   "STUB_FLOOR_GRANT", "STUB_NO_FLOOR_FLAG", "STUB_FLOOR_AVAILABLE",
-                  "PULP_TARTCI_TASKPOLICY",
+                  "PULP_TARTCI_TASKPOLICY", "PULP_BUILD_CLASS",
+                  "PULP_GOVERNED_BUILD_WAIT_SECS",
+                  "STUB_GOVERNOR", "STUB_INTERACTIVE_JOBS", "STUB_INTERACTIVE_MIN",
+                  "STUB_CLASS_GRANT", "STUB_AGENT_QOS", "STUB_ARGS_LOG",
                   "TARTCI_GUEST_CORES", "TARTCI_GUEST_MEM_MB"):
             env.pop(k, None)
+        # The cases below pin the class-less lease contract, which is what a
+        # Shipyard validation (background) runs against an older tartci.
+        # BuildClassTests covers the interactive default.
+        env["PULP_BUILD_CLASS"] = "background"
         env.update(stub_env)
+        if env.get("PULP_BUILD_CLASS") == "__unset__":
+            env.pop("PULP_BUILD_CLASS")
         return subprocess.run(
             ["bash", str(SCRIPT), "sh", "-c",
              'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL '
@@ -1037,7 +1070,10 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                                 "PULP_TARTCI_TASKPOLICY")}
             env.update(PULP_TARTCI_BIN=str(shim),
                        PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}",
-                       PULP_GOVERNED_BUILD_MIN_JOBS="2")
+                       PULP_GOVERNED_BUILD_MIN_JOBS="2",
+                       # The floor is a background-class path; an interactive
+                       # build is never floored.
+                       PULP_BUILD_CLASS="background")
             r = subprocess.run(
                 ["bash", str(SCRIPT), "sh", "-c",
                  'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
@@ -1050,6 +1086,68 @@ class TartciLeaseRecoveryIntegrationTests(unittest.TestCase):
                 capture_output=True, text=True, check=False)
             ids = [lease.get("id") for lease in json.loads(after.stdout)["leases"]]
             self.assertEqual(ids, ["holder"], "the floor lease was not released")
+
+    def test_real_tartci_interactive_class_takes_a_partial_lease_at_normal_qos(self) -> None:
+        """Against a class-aware tartci, an interactive build on a busy host
+        takes the share that fits, at normal QoS, and never a floor lease."""
+        probe = subprocess.run([self.tartci, "leases", "acquire", "--help"],
+                               capture_output=True, text=True, check=False)
+        if "--class" not in probe.stdout:
+            raise unittest.SkipTest("installed tartci predates build classes")
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            store = tmp / "leases"
+            common = ["--store-dir", str(store), "--capacity", "8",
+                      "--capacity-mem-mb", "0", "--reserved-gate-cores", "2",
+                      "--agent-floor-cores", "3", "--agent-floor-pool-cores", "3",
+                      "--dynamic-lending", "off", "--background-share-cores", "4"]
+            held = subprocess.run(
+                [self.tartci, "leases", "acquire", *common, "--cores", "4",
+                 "--priority", "build", "--class", "background",
+                 "--pid", str(os.getpid()), "--id", "validation",
+                 "--kind", "shipyard-local", "--json"],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(held.returncode, 0, held.stdout + held.stderr)
+            shim = tmp / "tartci"
+            quoted = " ".join(f"'{arg}'" for arg in common)
+            shim.write_text(
+                "#!/usr/bin/env bash\n"
+                'if [ "$1" = host-profile ]; then\n'
+                "  echo PULP_BUILD_JOBS=4; echo TARTCI_AGENT_QOS=background\n"
+                "  echo TARTCI_GOVERNOR_SCHEMA=1; echo TARTCI_INTERACTIVE_BUILD_JOBS=8\n"
+                "  echo TARTCI_INTERACTIVE_MIN_CORES=2; echo TARTCI_INTERACTIVE_WAIT_SECS=0\n"
+                "  echo TARTCI_BACKGROUND_QOS=background; exit 0\n"
+                "fi\n"
+                'if [ "$1" = leases ]; then\n'
+                '  sub="$2"; shift 2\n'
+                f'  exec "{self.tartci}" leases "$sub" {quoted} "$@"\n'
+                "fi\n"
+                f'exec "{self.tartci}" "$@"\n')
+            shim.chmod(0o755)
+            taskpolicy = tmp / "taskpolicy"
+            taskpolicy.write_text('#!/usr/bin/env bash\n'
+                                  'echo "TASKPOLICY=$1"; shift; exec "$@"\n')
+            taskpolicy.chmod(0o755)
+            env = {k: v for k, v in os.environ.items()
+                   if k not in ("PULP_BUILD_JOBS", "PULP_TARTCI_LEASES",
+                                "PULP_TARTCI_TASKPOLICY", "PULP_BUILD_CLASS")}
+            env.update(PULP_TARTCI_BIN=str(shim),
+                       PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}",
+                       PULP_GOVERNED_BUILD_MIN_JOBS="2")
+            r = subprocess.run(
+                ["bash", str(SCRIPT), "sh", "-c",
+                 'echo "JOBS=$CMAKE_BUILD_PARALLEL_LEVEL"'],
+                capture_output=True, text=True, check=False, env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            # Non-gate budget 6, 4 held by the validation: 2 fit.
+            self.assertIn("JOBS=2", r.stdout, r.stderr)
+            self.assertNotIn("TASKPOLICY", r.stdout, r.stderr)
+            self.assertIn("interactive lease acquired", r.stderr)
+            after = subprocess.run(
+                [self.tartci, "leases", "status", *common, "--json"],
+                capture_output=True, text=True, check=False)
+            ids = [lease.get("id") for lease in json.loads(after.stdout)["leases"]]
+            self.assertEqual(ids, ["validation"], "the interactive lease was not released")
 
     def test_live_pid_from_another_boot_is_reaped(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
@@ -1197,6 +1295,106 @@ class RecordBuildMetricScriptTests(unittest.TestCase):
         self.assertEqual(self._run(*self.BASE, path="/usr/bin:/bin"), [])
         self.assertEqual(self._run("--start", "x", "--end", "1", "--exit-code", "0"), [])
         self.assertEqual(self._run(*self.BASE, "--from-the-future", "1"), [])
+
+
+class BuildClassTests(unittest.TestCase):
+    """PULP_BUILD_CLASS: interactive (default) vs background.
+
+    Interactive never runs at background QoS and never takes a floor lease,
+    against any tartci. On a class-aware tartci (TARTCI_GOVERNOR_SCHEMA in
+    host-profile) both classes pass `--class`, and the store's partial grant
+    is the build's parallelism.
+    """
+
+    # Same stub tartci, taskpolicy stand-in and runner as GovernedBuildTests,
+    # without inheriting (and re-running) its test methods.
+    setUpClass = GovernedBuildTests.__dict__["setUpClass"]
+    tearDownClass = GovernedBuildTests.__dict__["tearDownClass"]
+    _run = GovernedBuildTests._run
+    _granted = GovernedBuildTests._granted
+
+    def _run_class(self, build_class: str | None, **stub_env: str):
+        # None = PULP_BUILD_CLASS absent: the default a `pulp build` sees.
+        return self._run(PULP_BUILD_CLASS=build_class or "__unset__", **stub_env)
+
+    def _with_args_log(self, build_class: str | None, **stub_env: str):
+        log = self.bindir / f"acquire-args-{os.getpid()}-{time.monotonic_ns()}.log"
+        r = self._run_class(build_class, STUB_ARGS_LOG=str(log), **stub_env)
+        args = log.read_text().splitlines() if log.exists() else []
+        return r, args
+
+    def test_default_class_is_interactive_and_asks_the_interactive_share(self) -> None:
+        r, args = self._with_args_log(
+            None, STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+            STUB_INTERACTIVE_JOBS="14", STUB_CLASS_GRANT="10")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 10, r.stderr)
+        self.assertEqual(len(args), 1, args)
+        self.assertIn("--class interactive", args[0])
+        self.assertIn("--cores 14", args[0])
+        self.assertIn("--min-cores 2", args[0])
+
+    def test_interactive_never_runs_background_qos_even_on_a_background_role(self) -> None:
+        r = self._run_class("interactive", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_AGENT_QOS="background", STUB_CLASS_GRANT="8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout, r.stderr)
+        self.assertEqual(self._granted(r), 8, r.stderr)
+
+    def test_interactive_denial_goes_leaseless_at_normal_qos_not_the_agent_floor(self) -> None:
+        r, args = self._with_args_log(
+            "interactive", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+            STUB_AGENT_QOS="background", STUB_CLASS_GRANT="0",
+            STUB_FLOOR_GRANT="5", STUB_FREE_CORES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout, r.stderr)
+        self.assertFalse(any("--allow-floor" in line for line in args), args)
+        self.assertIn("normal QoS", r.stderr)
+
+    def test_interactive_on_an_old_tartci_skips_the_floor_and_background_qos(self) -> None:
+        r, args = self._with_args_log(
+            "interactive", STUB_PROFILE_JOBS=str(PROFILE_JOBS), STUB_FREE_CORES="0",
+            STUB_AGENT_QOS="background", STUB_FLOOR_GRANT="5")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), FLOOR, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout, r.stderr)
+        self.assertFalse(any("--allow-floor" in line for line in args), args)
+        self.assertFalse(any("--class" in line for line in args), args)
+
+    def test_interactive_lease_on_an_old_tartci_runs_normal_qos(self) -> None:
+        r = self._run_class("interactive", STUB_PROFILE_JOBS=str(PROFILE_JOBS),
+                            STUB_AGENT_QOS="background", STUB_MAX_GRANT=str(PROFILE_JOBS))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), PROFILE_JOBS, r.stderr)
+        self.assertNotIn("TASKPOLICY=", r.stdout, r.stderr)
+
+    def test_background_asks_its_class_and_keeps_background_qos(self) -> None:
+        r, args = self._with_args_log(
+            "background", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+            STUB_AGENT_QOS="background", STUB_CLASS_GRANT="4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 4, r.stderr)
+        self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+        self.assertIn("--class background", args[0])
+        self.assertIn("--min-cores 1", args[0])
+
+    def test_background_denial_still_takes_the_agent_floor(self) -> None:
+        r, args = self._with_args_log(
+            "background", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+            STUB_CLASS_GRANT="0", STUB_FLOOR_GRANT="5", STUB_FREE_CORES="0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._granted(r), 5, r.stderr)
+        self.assertIn("TASKPOLICY=-b", r.stdout, r.stderr)
+        self.assertTrue(any("--allow-floor" in line and "--class background" in line
+                            for line in args), args)
+
+    def test_unknown_class_runs_interactive_and_says_so(self) -> None:
+        r = self._run_class("urgent", STUB_GOVERNOR="1", STUB_PROFILE_JOBS="6",
+                            STUB_CLASS_GRANT="6")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("unknown PULP_BUILD_CLASS=urgent", r.stderr)
+        self.assertIn("interactive lease acquired", r.stderr)
 
 
 if __name__ == "__main__":

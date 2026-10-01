@@ -567,6 +567,25 @@ TartciAgentBuildLease::~TartciAgentBuildLease() {
     release();
 }
 
+int parse_json_lease_cores(const std::string& json) {
+    const std::string key = "\"lease_size_cores\"";
+    const auto at = json.find(key);
+    if (at == std::string::npos) return 0;
+    auto pos = json.find(':', at + key.size());
+    if (pos == std::string::npos) return 0;
+    ++pos;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
+    int value = 0;
+    bool any = false;
+    while (pos < json.size() && json[pos] >= '0' && json[pos] <= '9') {
+        value = value * 10 + (json[pos] - '0');
+        any = true;
+        if (value > 100000) return 0;
+        ++pos;
+    }
+    return any ? value : 0;
+}
+
 TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseRequest& req) {
     TartciAgentBuildLease lease;
 
@@ -601,7 +620,21 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         return lease;
     }
 
-    const int profile_jobs = parse_shell_assignment_int(profile.output, "PULP_BUILD_JOBS");
+    // Build class. A `pulp build` / `pulp dev` / `pulp loop` has someone
+    // waiting on it, so it is `interactive` unless the caller declares
+    // PULP_BUILD_CLASS=background: normal QoS whatever the host role says.
+    // A class-aware tartci (TARTCI_GOVERNOR_SCHEMA) also takes `--class`,
+    // grants a partial share down to the interactive minimum, and may lend an
+    // interactive build idle gate-reserved cores.
+    const bool background = env_value("PULP_BUILD_CLASS") == "background";
+    const bool class_aware =
+        parse_shell_assignment_int(profile.output, "TARTCI_GOVERNOR_SCHEMA") > 0;
+    int profile_jobs = parse_shell_assignment_int(profile.output, "PULP_BUILD_JOBS");
+    if (class_aware && !background) {
+        const int interactive_jobs =
+            parse_shell_assignment_int(profile.output, "TARTCI_INTERACTIVE_BUILD_JOBS");
+        if (interactive_jobs > 0) profile_jobs = interactive_jobs;
+    }
     if (profile_jobs <= 0 && env_jobs <= 0) {
         // host-profile ran but advertised no build budget — same degrade-to-safe
         // path: bound the build, don't fail it.
@@ -613,7 +646,14 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
     if (env_jobs > 0 && profile_jobs > 0) {
         lease.jobs_ = std::min(env_jobs, profile_jobs);
     }
-    lease.qos_ = parse_shell_assignment(profile.output, "TARTCI_AGENT_QOS");
+    if (background) {
+        lease.qos_ = parse_shell_assignment(profile.output, "TARTCI_BACKGROUND_QOS");
+        if (lease.qos_.empty()) {
+            lease.qos_ = parse_shell_assignment(profile.output, "TARTCI_AGENT_QOS");
+        }
+    } else {
+        lease.qos_ = "normal";
+    }
     lease.tartci_bin_ = tartci;
     lease.lease_id_ = tartci_agent_lease_id(req);
 
@@ -626,6 +666,21 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         + " --owner " + shell_quote(current_owner())
         + " --label " + shell_quote(lease_label(req.project_root))
         + " --json";
+    if (class_aware) {
+        int min_cores = 1;
+        int wait_secs = 0;
+        if (!background) {
+            min_cores = parse_shell_assignment_int(profile.output, "TARTCI_INTERACTIVE_MIN_CORES");
+            if (min_cores <= 0) min_cores = 2;
+            wait_secs = parse_positive_int(
+                parse_shell_assignment(profile.output, "TARTCI_INTERACTIVE_WAIT_SECS"));
+            if (wait_secs < 0) wait_secs = 0;
+        }
+        min_cores = std::min(min_cores, lease.jobs_);
+        cmd += std::string(" --class ") + (background ? "background" : "interactive")
+             + " --min-cores " + std::to_string(min_cores)
+             + " --wait-secs " + std::to_string(wait_secs);
+    }
     if (auto run_id = env_value("GITHUB_RUN_ID"); !run_id.empty()) {
         cmd += " --job-id " + shell_quote(run_id);
     }
@@ -641,6 +696,11 @@ TartciAgentBuildLease TartciAgentBuildLease::acquire(const TartciAgentLeaseReque
         return lease;
     }
 
+    if (class_aware) {
+        // A partial grant is the build's parallelism: never more than asked.
+        const int granted = parse_json_lease_cores(acquired.output);
+        if (granted > 0 && granted < lease.jobs_) lease.jobs_ = granted;
+    }
     lease.active_ = true;
     lease.start_heartbeat();
     return lease;

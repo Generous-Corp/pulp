@@ -76,7 +76,10 @@ versioning_config   = "tools/scripts/versioning.json"
 # exhaust memory / oversubscribe cores on a shared machine.
 #
 # The POSIX backends (mac `local`, ssh-linux) run through
-# `tools/ci/governed-build.sh`, which acquires a tartci host build-lease when
+# `tools/ci/governed-build.sh` with PULP_BUILD_CLASS=background (a validation
+# is opportunistic work nobody is watching: it takes the host's background
+# share and QoS, leaving the rest for builds someone is waiting on), which
+# acquires a tartci host build-lease when
 # one is available (so a validation build shares the host's core/memory budget
 # with concurrent agent builds instead of racing them) and otherwise falls back
 # to a bounded local `-j`. The ssh-windows overrides below use a fixed cap
@@ -131,7 +134,7 @@ versioning_config   = "tools/scripts/versioning.json"
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "tools/ci/build-dir-sentinel.sh guard build 'ci_python=$(python3 tools/ci/find_python311.py) && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON -DPython3_EXECUTABLE=\"$ci_python\"'"
-build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
+build     = "PULP_BUILD_CLASS=background tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
 # `--label-exclude "validation|slow"` mirrors build.yml's PR ctest and
 # cross-platform-check.yml. Two label groups are skipped on the per-PR gate:
 #   * `slow`       — e.g. `cmake-ios-auv3-configure` (~25-30 min iOS try-compile).
@@ -149,7 +152,7 @@ build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-di
 # still bounded by the test's own TIMEOUT).
 # The governor exports CTEST_PARALLEL_LEVEL from the same leased host share used
 # for builds. CTest remains responsible for RUN_SERIAL and RESOURCE_LOCK.
-test      = "python3 tools/ci/build_dir_lock.py --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
+test      = "PULP_BUILD_CLASS=background python3 tools/ci/build_dir_lock.py --build-dir build -- tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base
@@ -220,8 +223,8 @@ setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF'"
-build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
-test      = "tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
+build     = "PULP_BUILD_CLASS=background tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build"
+test      = "PULP_BUILD_CLASS=background tools/ci/governed-build.sh ctest --test-dir build --output-on-failure --label-include parser-import --exclude-regex AudioWorkgroup --label-exclude slow"
 
 [validation.parser.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=OFF"
@@ -238,7 +241,7 @@ test      = "ctest --test-dir build -C Release --output-on-failure --label-inclu
 stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "tools/ci/build-dir-sentinel.sh guard build 'cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF'"
-build     = "tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && tools/ci/governed-build.sh cmake --build smoke/build"
+build     = "PULP_BUILD_CLASS=background tools/ci/governed-build.sh cmake --build build && tools/ci/build-dir-sentinel.sh clear build && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && PULP_BUILD_CLASS=background tools/ci/governed-build.sh cmake --build smoke/build"
 
 [validation.smoke.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"

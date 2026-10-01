@@ -446,7 +446,9 @@ esac
         REQUIRE(first.ok());
         REQUIRE(first.active());
         REQUIRE(first.jobs() == 6);
-        REQUIRE(first.qos() == "background");
+        // A watch loop is interactive: the host role's background QoS never
+        // applies to a build someone is waiting on.
+        REQUIRE(first.qos() == "normal");
 
         auto second = TartciAgentBuildLease::acquire(req);
         REQUIRE_FALSE(second.ok());
@@ -567,6 +569,115 @@ TEST_CASE("governance tier is Tier 1 when a tartci host-profile succeeds") {
     REQUIRE(g.detail.find("12 jobs") != std::string::npos);
     REQUIRE(g.detail.find("80 GB budget") != std::string::npos);
 
+    fs::remove_all(root);
+}
+#endif
+
+namespace {
+
+// A class-aware fake tartci: host-profile advertises the governor schema and
+// `leases acquire` grants min(--cores, FAKE_TARTCI_GRANT) as lease_size_cores.
+fs::path write_class_aware_tartci(const fs::path& root) {
+    const auto script = root / "tartci";
+    std::ofstream out(script);
+    out << R"SH(#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_TARTCI_LOG:?}"
+if [ "${1:-}" = "host-profile" ]; then
+  printf 'PULP_BUILD_JOBS=6\nTARTCI_AGENT_QOS=background\n'
+  printf 'TARTCI_GOVERNOR_SCHEMA=1\nTARTCI_INTERACTIVE_BUILD_JOBS=14\n'
+  printf 'TARTCI_INTERACTIVE_MIN_CORES=2\nTARTCI_INTERACTIVE_WAIT_SECS=30\n'
+  printf 'TARTCI_BACKGROUND_QOS=background\n'
+  exit 0
+fi
+sub="${2:-}"
+cores=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --cores) cores="${2:-0}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ "$sub" = "acquire" ]; then
+  grant="${FAKE_TARTCI_GRANT:?}"
+  [ "$grant" -gt "$cores" ] && grant="$cores"
+  printf '{"ok": true, "lease": {"lease_size_cores": %s}}\n' "$grant"
+fi
+exit 0
+)SH";
+    out.close();
+    fs::permissions(script,
+                    fs::perms::owner_read | fs::perms::owner_write
+                        | fs::perms::owner_exec,
+                    fs::perm_options::replace);
+    return script;
+}
+
+fs::path fresh_lease_test_root(const char* tag) {
+    auto root = fs::temp_directory_path()
+        / (std::string("pulp-tartci-class-") + tag + "-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(root);
+    return root;
+}
+
+}  // namespace
+
+TEST_CASE("json lease reply yields the granted core count") {
+    REQUIRE(parse_json_lease_cores(R"({"ok": true, "lease": {"lease_size_cores": 8}})") == 8);
+    REQUIRE(parse_json_lease_cores(R"({"lease_size_cores":12,"x":1})") == 12);
+    REQUIRE(parse_json_lease_cores(R"({"ok": true})") == 0);
+    REQUIRE(parse_json_lease_cores(R"({"lease_size_cores": "x"})") == 0);
+}
+
+#ifndef _WIN32
+TEST_CASE("interactive build on a class-aware tartci takes its partial grant at normal qos") {
+    const auto root = fresh_lease_test_root("interactive");
+    const auto log = root / "calls.log";
+    const auto script = write_class_aware_tartci(root);
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+    ScopedEnvVar fake_log("FAKE_TARTCI_LOG", log.string());
+    ScopedEnvVar fake_grant("FAKE_TARTCI_GRANT", "9");
+    ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", "1");
+    ScopedEnvVar no_nested("PULP_TARTCI_LEASE_HELD", std::nullopt);
+    ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar default_class("PULP_BUILD_CLASS", std::nullopt);
+    {
+        TartciAgentLeaseRequest req{root, "pulp-build", false};
+        auto lease = TartciAgentBuildLease::acquire(req);
+        REQUIRE(lease.ok());
+        REQUIRE(lease.active());
+        REQUIRE(lease.jobs() == 9);
+        REQUIRE(lease.qos() == "normal");
+        REQUIRE(apply_agent_build_qos("make", lease.qos()) == "make");
+    }
+    const auto calls = read_file(log);
+    REQUIRE(calls.find("--cores 14") != std::string::npos);
+    REQUIRE(calls.find("--class interactive --min-cores 2 --wait-secs 30") != std::string::npos);
+    fs::remove_all(root);
+}
+
+TEST_CASE("background build keeps the host role qos and asks its class") {
+    const auto root = fresh_lease_test_root("background");
+    const auto log = root / "calls.log";
+    const auto script = write_class_aware_tartci(root);
+    ScopedEnvVar fake_bin("PULP_TARTCI_BIN", script.string());
+    ScopedEnvVar fake_log("FAKE_TARTCI_LOG", log.string());
+    ScopedEnvVar fake_grant("FAKE_TARTCI_GRANT", "4");
+    ScopedEnvVar leases_enabled("PULP_TARTCI_LEASES", "1");
+    ScopedEnvVar no_nested("PULP_TARTCI_LEASE_HELD", std::nullopt);
+    ScopedEnvVar no_user_cap("PULP_BUILD_JOBS", std::nullopt);
+    ScopedEnvVar background("PULP_BUILD_CLASS", "background");
+    {
+        TartciAgentLeaseRequest req{root, "pulp-build", false};
+        auto lease = TartciAgentBuildLease::acquire(req);
+        REQUIRE(lease.ok());
+        REQUIRE(lease.jobs() == 4);
+        REQUIRE(lease.qos() == "background");
+    }
+    const auto calls = read_file(log);
+    REQUIRE(calls.find("--cores 6") != std::string::npos);
+    REQUIRE(calls.find("--class background --min-cores 1 --wait-secs 0") != std::string::npos);
     fs::remove_all(root);
 }
 #endif

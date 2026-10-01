@@ -1057,6 +1057,29 @@ or `PULP_TARTCI_WATCHDOG=0` to disable the wrapper. Operators can tune
 `PULP_TARTCI_WATCHDOG_TERM_GRACE_SECS`, `PULP_TARTCI_WATCHDOG_CPU_PER_JOB`,
 and `PULP_TARTCI_WATCHDOG_PYTHON` per host.
 
+### Build classes: interactive vs background
+
+`tools/ci/governed-build.sh` (which `pulp build` uses in a source checkout)
+runs every build in one of two classes, chosen by `PULP_BUILD_CLASS`:
+
+| Class | Who | Lease request | QoS | On denial |
+|---|---|---|---|---|
+| `interactive` (default) | `pulp build`, manual builds, release/packaging builds | the host's interactive share; any partial grant down to `interactive_min_cores`, waiting up to `interactive_wait_secs` for it | normal, always | leaseless `-j2` at normal QoS (never the background floor) |
+| `background` | every Shipyard-local stage in `.shipyard/config.toml` | the profile size, partial grants accepted | the host role's QoS (background on laptops) | the agent-floor lease, then leaseless `-j2` |
+
+Against a tartci that predates classes (no `TARTCI_GOVERNOR_SCHEMA` in `tartci
+host-profile`), both classes use the class-less lease contract, and an
+interactive build still never runs under `taskpolicy -b` or takes a floor lease.
+With no tartci at all the Tier-0 bound applies unchanged.
+
+Where a host enables `dynamic_lending`, an interactive build may borrow the
+gate's idle reserved cores; a gate lease that needs them is admitted anyway
+and the borrower is moved to background QoS until the gate finishes (nothing is
+killed). Each host's knobs live in `~/.config/tartci/governor.toml`; `tartci
+governor show` prints them with their sources, `tartci governor set
+KEY=VALUE` edits them, and `tartci governor explain` says what each class
+would be granted right now.
+
 ### The macOS release VM lane and cross-lane priority
 
 Release macOS legs (`release-cli.yml`, `sign-and-release.yml`, and

@@ -23,6 +23,8 @@ struct CmakeParallelPlan {
 
 std::string parse_shell_assignment(const std::string& text, const std::string& key);
 int parse_shell_assignment_int(const std::string& text, const std::string& key);
+// `lease_size_cores` from a `tartci leases acquire --json` reply; 0 if absent.
+int parse_json_lease_cores(const std::string& json);
 CmakeParallelPlan cap_cmake_build_parallel_args(const std::vector<std::string>& args,
                                                 int max_jobs);
 
