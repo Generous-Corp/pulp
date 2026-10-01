@@ -6677,6 +6677,19 @@ an abandoned `pulp-browser-capture-*` profile only when its ownership marker
 proves the recorded owner is gone; mismatched or ambiguous processes and
 profiles are preserved fail-closed.
 
+**Branded Chrome copies itself on every launch.** Google Chrome on macOS (not
+Chrome for Testing or Chromium) clones its whole app bundle into
+`$(dirname $(getconf DARWIN_USER_TEMP_DIR))/X/com.google.Chrome.code_sign_clone/`
+at startup (`MacAppCodeSignClone`) and deletes the copy only on an orderly exit.
+A headless browser torn down by signal, which is how every harness here ends,
+leaves ~1.4 GB (logical) behind: the capture integration suite left 4 per run,
+and m5 held 492. `browser_process.mjs`, `chrome_gradient_oracle.py` and
+`capture-webview-baseline.sh` pass `--disable-features=MacAppCodeSignClone`;
+any new direct Chrome launcher must too. Chrome honours only one
+`--disable-features`, so add the name to an existing list rather than a second
+flag, and do not append one to Playwright's `launch()` args, which carry their
+own list.
+
 ## Scoring a native panel — the instrument lies in two specific ways
 
 ### Chromium state matrix -> computed DesignIR -> native proof

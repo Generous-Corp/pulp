@@ -46,18 +46,18 @@ inline bool remove_tmp_tree(const std::filesystem::path& root) {
     namespace fs = std::filesystem;
     std::error_code ec;
     const auto root_status = fs::symlink_status(root, ec);
-    if (ec || !fs::exists(root_status)) return true;
+    if (ec || !fs::exists(root_status))
+        return true;
     if (fs::is_directory(root_status)) {
         fs::permissions(root, fs::perms::owner_all, fs::perm_options::add, ec);
-        fs::recursive_directory_iterator it(
-            root, fs::directory_options::skip_permission_denied, ec);
+        fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied,
+                                            ec);
         for (const fs::recursive_directory_iterator end; !ec && it != end; it.increment(ec)) {
             std::error_code entry_ec;
             // Opened on the next increment, so it must be enterable first.
             const auto entry_status = it->symlink_status(entry_ec);
             if (fs::is_directory(entry_status))
-                fs::permissions(it->path(), fs::perms::owner_all, fs::perm_options::add,
-                                entry_ec);
+                fs::permissions(it->path(), fs::perms::owner_all, fs::perm_options::add, entry_ec);
 #ifdef _WIN32
             // Windows maps a read-only file to an attribute that blocks deletion.
             else if (fs::is_regular_file(entry_status))
@@ -80,7 +80,8 @@ struct TmpPathRegistry {
         paths.push_back(p);
     }
     ~TmpPathRegistry() {
-        for (const auto& p : paths) remove_tmp_tree(p);
+        for (const auto& p : paths)
+            remove_tmp_tree(p);
     }
 };
 
@@ -93,9 +94,9 @@ inline TmpPathRegistry& tmp_path_registry() {
 /// Removed at process exit.
 inline std::filesystem::path unique_tmp_dir(const std::string& prefix) {
     static std::atomic<int> counter{0};
-    auto p = std::filesystem::temp_directory_path() /
-             (prefix + std::to_string(current_pid()) + "-" +
-              std::to_string(counter.fetch_add(1) + 1));
+    auto p =
+        std::filesystem::temp_directory_path() /
+        (prefix + std::to_string(current_pid()) + "-" + std::to_string(counter.fetch_add(1) + 1));
     remove_tmp_tree(p);
     std::error_code ec;
     std::filesystem::create_directories(p, ec);
@@ -108,11 +109,11 @@ inline std::filesystem::path unique_tmp_dir(const std::string& prefix) {
 inline std::filesystem::path unique_tmp_file(const std::string& prefix,
                                              const std::string& ext = "") {
     static std::atomic<int> counter{0};
-    auto p = std::filesystem::temp_directory_path() /
-             (prefix + std::to_string(current_pid()) + "-" +
-              std::to_string(counter.fetch_add(1) + 1) + ext);
+    auto p =
+        std::filesystem::temp_directory_path() / (prefix + std::to_string(current_pid()) + "-" +
+                                                  std::to_string(counter.fetch_add(1) + 1) + ext);
     tmp_path_registry().add(p);
     return p;
 }
 
-}  // namespace pulp::test
+} // namespace pulp::test
