@@ -690,6 +690,10 @@ echo '{"ok":true}'
     REQUIRE(calls.find("--cores 12 --priority build") != std::string::npos);
     REQUIRE(calls.find("--allow-floor") != std::string::npos);
     REQUIRE(calls.find("leases release") != std::string::npos);
+    fs::remove_all(root);
+}
+#endif
+
 namespace {
 
 // A class-aware fake tartci: host-profile advertises the governor schema and
