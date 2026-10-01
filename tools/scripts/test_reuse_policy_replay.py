@@ -142,6 +142,18 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["skipped_test_seconds"], 20.0)
         self.assertEqual(result["verdict"], "safe over the window")
 
+    def test_quartiles_come_from_the_per_group_shares(self):
+        groups = [group(run_id=f"g{i}", group_sha=f"m{i}", checkout_sha=f"m{i}") for i in range(4)]
+        pairs = [dict(pair(), group_run_id=f"g{i}") for i in range(4)]
+        tests = {f"g{i}": [t("a", dur=1.0), t("b", dur=1.0)] for i in range(4)}
+        pairs[0]["heads"][0]["drift_files"] = ["core/x.cpp"]  # runs: share 0
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (1.0, 1.0, 1.0))
+        self.assertEqual(result["group_test_seconds"], 8.0)
+        pairs[1]["heads"][0]["drift_files"] = ["core/x.cpp"]
+        result = rpr.score(rpr.Corpus(groups + [head()], pairs, tests=tests), "inert-drift")
+        self.assertEqual((result["benefit_p25"], result["benefit_median"], result["benefit_p75"]), (0.0, 0.5, 1.0))
+
     def test_skip_nothing_control_reads_zero(self):
         result = rpr.score(corpus([t("a", "fail", 2)]), "none")
         self.assertEqual((result["benefit_median"], result["false_skips"]), (0.0, 0))

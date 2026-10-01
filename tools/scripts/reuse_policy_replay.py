@@ -558,6 +558,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "coverage": (evaluable / scored) if scored else None,
         "skipped_groups": skipped_groups,
         "benefit_median": statistics.median(benefits) if benefits else None,
+        "benefit_p25": _percentile(benefits, 0.25),
+        "benefit_p75": _percentile(benefits, 0.75),
         "benefit_p90": _percentile(benefits, 0.9),
         "benefit_pooled": (skipped_seconds / total_seconds) if total_seconds else None,
         "build_skipped_median": statistics.median(build_fracs) if build_fracs else None,
@@ -627,7 +629,8 @@ def render(result: dict) -> str:
         f"  pairs {result['pairs']}  statuses {result['statuses']}",
         f"  scored {result['scored_pairs']}  evaluable {result['evaluable_pairs']}  "
         f"coverage {_fmt(result['coverage'], True)}  groups skipped {result['skipped_groups']}",
-        f"  benefit median {_fmt(result['benefit_median'], True)}  p90 {_fmt(result['benefit_p90'], True)}  "
+        f"  benefit median {_fmt(result['benefit_median'], True)} (p25 {_fmt(result['benefit_p25'], True)}, "
+        f"p75 {_fmt(result['benefit_p75'], True)})  p90 {_fmt(result['benefit_p90'], True)}  "
         f"pooled {_fmt(result['benefit_pooled'], True)} "
         f"({result['skipped_test_seconds']:.0f} of {result['group_test_seconds']:.0f} test-seconds)",
         f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
