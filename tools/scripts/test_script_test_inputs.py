@@ -12,7 +12,10 @@ cmake-driven test. What must hold:
 - `--check` is clean against a fresh `--write`, reports a stale entry after an
   import is added, reports a missing entry for a new test, and ignores tests
   absent from the current inventory (another platform's list);
-- an unreadable inventory exits 2.
+- an unreadable inventory exits 2;
+- compiled executables fold into the same list from configure evidence: a
+  declared fixture is listed, an undeclared reader is `data: undeclared`,
+  and `--check` fails on a NEW undeclared source against the base list.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -352,6 +355,151 @@ class CheckModeTests(unittest.TestCase):
                                    "--inventory-json", str(repo.build / "absent.json"), "--check"],
                                   capture_output=True, text=True, timeout=60, env=tool_env(event="merge_group", strict=False))
             self.assertEqual(proc.returncode, 2)
+
+
+def compiled_evidence(repo: Repo, *, declare_b: bool = False) -> None:
+    """Configure-time evidence as tools/cmake/PulpTestData.cmake writes it.
+    pulp-test-a declares its fixture; pulp-test-b reads the checkout through
+    PULP_SOURCE_DIR, pulp-test-c through a checkout definition's name, and
+    pulp-test-d reads nothing (no entry)."""
+    write(repo.root, "test/fixtures/a/clip.wav", "RIFF\n")
+    write(repo.root, "test/test_a.cpp", 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a/clip.wav";\n')
+    write(repo.root, "test/test_b.cpp", "auto root = fs::path(PULP_SOURCE_DIR);\n")
+    write(repo.root, "test/test_c.cpp", "auto dir = fs::path(PULP_CORPUS_DIR);\n")
+    write(repo.root, "test/test_d.cpp", "int x = 1;\n")
+    ev = repo.build / "test" / "test-data"
+    ev.mkdir(parents=True, exist_ok=True)
+    (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+        "pulp-test-a": {"sources": ["test/test_a.cpp"], "tree_defines": ["PULP_SOURCE_DIR"]},
+        "pulp-test-b": {"sources": ["test/test_b.cpp"], "tree_defines": ["PULP_SOURCE_DIR"]},
+        "pulp-test-c": {"sources": ["test/test_c.cpp"], "tree_defines": ["PULP_CORPUS_DIR"]},
+        "pulp-test-d": {"sources": ["test/test_d.cpp"], "tree_defines": []}}}), encoding="utf-8")
+    declared = {"pulp-test-a": (["test/test_a.cpp"], ["test/fixtures/a"])}
+    if declare_b:
+        declared["pulp-test-b"] = (["test/test_b.cpp"], ["test/fixtures"])
+    for exe in ("pulp-test-a", "pulp-test-b"):
+        (ev / f"{exe}.inputs.json").unlink(missing_ok=True)
+    for exe, (srcs, paths) in declared.items():
+        (ev / f"{exe}.inputs.json").write_text(json.dumps({
+            "schema": "pulp-test-data-inputs/v1", "executable": exe, "kind": "compiled",
+            "sources": srcs, "inputs": paths}), encoding="utf-8")
+
+
+class CompiledDataTests(unittest.TestCase):
+    def run_tool(self, repo: Repo, *args: str, event: str = "pull_request") -> subprocess.CompletedProcess[str]:
+        inv = repo.build / "inv.json"
+        inv.write_text(json.dumps(repo.inventory()), encoding="utf-8")
+        return subprocess.run([sys.executable, str(SCRIPT), "--repo-root", str(repo.root), "--build-dir", str(repo.build),
+                               "--inventory-json", str(inv), *args], capture_output=True, text=True, timeout=60,
+                              env=tool_env(event=event, strict=False))
+
+    def git_repo(self, repo: Repo) -> None:
+        CheckModeTests.git_repo(self, repo)  # type: ignore[arg-type]
+
+    def test_a_declared_fixture_shows_up_in_the_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
+            self.assertEqual(lst["executables"]["pulp-test-a"], {
+                "kind": "compiled", "data": "declared", "inputs": ["test/fixtures/a"],
+                "sources": ["test/test_a.cpp"], "undeclared_sources": []})
+            self.assertIn("alpha", lst["tests"])  # script entries unchanged, same file
+
+    def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual(ex["pulp-test-b"]["data"], "undeclared")
+            self.assertEqual(ex["pulp-test-b"]["undeclared_sources"], ["test/test_b.cpp"])
+            # A definition pointing into the checkout counts by its own name.
+            self.assertEqual(ex["pulp-test-c"]["undeclared_sources"], ["test/test_c.cpp"])
+            self.assertNotIn("pulp-test-d", ex)
+            summary = sti.data_summary(repo.root, repo.build)
+            self.assertEqual((summary["reading_pulp_source_dir"], summary["reading_pulp_source_dir_with_manifest"]), (2, 1))
+            self.assertEqual((summary["declared"], summary["undeclared"]), (1, 2))
+
+    def test_without_configure_evidence_the_list_has_no_compiled_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            self.assertNotIn("executables", sti.build_list(repo.inventory(), repo.root, repo.build))
+
+    def test_guard_fails_on_a_new_undeclared_source_and_passes_the_backlog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)  # base: b and c are the backlog
+            backlog = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(backlog.returncode, 0, backlog.stdout)
+            # A new test reading the checkout without a declaration, and the
+            # author regenerating the list: the base list is the ratchet.
+            write(repo.root, "test/test_e.cpp", "auto root = fs::path(PULP_SOURCE_DIR);\n")
+            idx = repo.build / "test" / "test-data" / "executables.json"
+            doc = json.loads(idx.read_text(encoding="utf-8"))
+            doc["executables"]["pulp-test-e"] = {"sources": ["test/test_e.cpp"], "tree_defines": ["PULP_SOURCE_DIR"]}
+            idx.write_text(json.dumps(doc), encoding="utf-8")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr adds an undeclared reader")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("new undeclared data source: pulp-test-e: test/test_e.cpp", proc.stdout)
+            self.assertIn("pulp_test_data(<suite> PATHS", proc.stdout)
+            self.assertNotIn("pulp-test-b: test/test_b.cpp", proc.stdout)
+            group = self.run_tool(repo, "--check", "--base", "base-ref", event="merge_group")
+            self.assertEqual(group.returncode, 0, group.stdout)
+
+    def test_an_undeclared_reader_only_another_configuration_lists_is_reported_not_blocking(self) -> None:
+        """A Linux-only executable is absent from a macOS-written base list; a
+        change that leaves its source alone must not go red for it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            write(repo.root, "test/test_linux.cpp", "auto root = fs::path(PULP_SOURCE_DIR);\n")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            idx = repo.build / "test" / "test-data" / "executables.json"
+            doc = json.loads(idx.read_text(encoding="utf-8"))
+            doc["executables"]["pulp-test-linux"] = {"sources": ["test/test_linux.cpp"], "tree_defines": []}
+            idx.write_text(json.dumps(doc), encoding="utf-8")
+            write(repo.root, "test/cmake/x_tests.cmake", "# unrelated\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr touches the test CMake only")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("new undeclared data source: pulp-test-linux: test/test_linux.cpp", proc.stdout)
+            self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
+
+    def test_dropping_a_declaration_is_caught_through_the_test_cmake(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo, declare_b=True)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            compiled_evidence(repo)  # the pulp_test_data() call for b is gone
+            write(repo.root, "test/cmake/b_tests.cmake", "# declaration removed\n")
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "pr drops a declaration")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("new undeclared data source: pulp-test-b: test/test_b.cpp", proc.stdout)
+
+    def test_declaring_a_backlog_source_shrinks_it_and_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.git_repo(repo)
+            compiled_evidence(repo, declare_b=True)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            self.g("add", "-A"); self.g("commit", "-q", "-m", "declare b")
+            proc = self.run_tool(repo, "--check", "--base", "base-ref")
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
+            self.assertEqual(lst["executables"]["pulp-test-b"]["data"], "declared")
+
+    def test_a_stale_compiled_entry_is_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            compiled_evidence(repo, declare_b=True)   # declared, list not regenerated
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
 
 
 if __name__ == "__main__":

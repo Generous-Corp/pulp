@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20260930-reuse-policy-replay-tools-registry-watch",
+  "created_at": "2026-09-30T21:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-output-and-packaging"
+  ],
+  "rationale": "Record a tool-registry addition that crosses the design-output-and-packaging family only through its docs/status/tools.yaml selector. The change registers tools/scripts/reuse_policy_replay.py, a CI tool that replays test-result reuse policies over merge-queue history, as a build-speed tool owned by the ci skill, and regenerates the CLAUDE.md digest. No design-import, capture, DesignIR, rendering, codegen, packaging or release path changes. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "tools-registry-check",
+    "reuse-policy-replay-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

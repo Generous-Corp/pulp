@@ -72,8 +72,7 @@ target_include_directories(pulp-test-cli-import PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(pulp-test-cli-import PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-cli-import PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-import PATHS tools/import/known-frameworks.json)
 catch_discover_tests(pulp-test-cli-import
     PROPERTIES LABELS "parser-import")
 
@@ -106,8 +105,8 @@ target_include_directories(pulp-test-cli-import-terms PRIVATE ${CMAKE_SOURCE_DIR
 target_link_libraries(pulp-test-cli-import-terms PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
-target_compile_definitions(pulp-test-cli-import-terms PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-import-terms
+    PATHS tools/scripts/check_import_provenance.py tools/import/known-frameworks.json)
 catch_discover_tests(pulp-test-cli-import-terms
     PROPERTIES LABELS "parser-import")
 
@@ -326,8 +325,7 @@ target_link_libraries(pulp-test-cli-tartci-lease PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
 # The build-dir lock cases drive the checkout's own tools/ci/build_dir_lock.py.
-target_compile_definitions(pulp-test-cli-tartci-lease PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-tartci-lease PATHS tools/ci/build_dir_lock.py)
 catch_discover_tests(pulp-test-cli-tartci-lease)
 
 # Stale git lock detection behind the `pulp doctor` "git locks" check.
@@ -355,8 +353,7 @@ target_include_directories(pulp-test-cli-docs-command PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli
     ${CMAKE_BINARY_DIR}/tools/cli)
-target_compile_definitions(pulp-test-cli-docs-command PRIVATE
-    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-cli-docs-command PATHS docs/status/authority-navigation.schema.json)
 target_link_libraries(pulp-test-cli-docs-command PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
@@ -401,8 +398,7 @@ endif()
 # runtime source to prove the sentinel bytes still match.
 add_executable(pulp-test-ship-tracing-guard test_ship_tracing_guard.cpp)
 target_include_directories(pulp-test-ship-tracing-guard PRIVATE ${CMAKE_SOURCE_DIR})
-target_compile_definitions(pulp-test-ship-tracing-guard
-    PRIVATE PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-ship-tracing-guard PATHS core/runtime/src/trace.cpp)
 target_link_libraries(pulp-test-ship-tracing-guard PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ship-tracing-guard)
 

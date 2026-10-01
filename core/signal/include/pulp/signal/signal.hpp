@@ -93,6 +93,7 @@
 #include <pulp/signal/offline_stretch.hpp>
 #include <pulp/signal/latency_aware_control_smoother.hpp>
 #include <pulp/signal/transient_phase_policy.hpp>
+#include <pulp/signal/staged_transition.hpp>
 #include <pulp/signal/freeze_hold.hpp>
 #include <pulp/signal/pitched_feedback_delay.hpp>
 #include <pulp/signal/resampler.hpp>

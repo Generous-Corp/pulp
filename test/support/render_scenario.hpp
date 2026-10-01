@@ -42,6 +42,7 @@
 #include <pulp/audio/analysis/latency_evidence.hpp>
 
 #include "audio_signal_generators.hpp"
+#include "callback_cost_probe.hpp"
 
 #include <pulp/format/headless.hpp>
 
@@ -87,6 +88,10 @@ struct ScenarioResult {
     pulp::audio::Buffer<float> input;
     /// What the processor reported about its own latency during this render.
     LatencyObservation latency;
+    /// What every processed block cost, in render order (see
+    /// callback_cost_probe.hpp). Block 0 includes first-touch cold-start
+    /// work; exclude it from any steady-state statistic.
+    std::vector<BlockCost> block_costs;
 };
 
 /// Builder for one deterministic offline render. Copyable — the matrix

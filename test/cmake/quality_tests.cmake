@@ -648,6 +648,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME flake-exoneration-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_flake_exoneration_shadow.py")
         set_tests_properties(flake-exoneration-shadow-selftest PROPERTIES TIMEOUT 120)
+        # Reuse-policy replay over merge-queue history: false skips, flake-skips,
+        # benefit, coverage, and the named incident scenarios.
+        add_test(NAME reuse-policy-replay-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_reuse_policy_replay.py")
+        set_tests_properties(reuse-policy-replay-selftest PROPERTIES TIMEOUT 120)
         # Cross-VM test-binary identity measurement (per-binary receipt reuse
         # precondition), annotated by merge-group macos jobs after the build.
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
@@ -662,6 +667,17 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME test-receipts-shadow-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_test_receipts_shadow.py")
         set_tests_properties(test-receipts-shadow-selftest PROPERTIES TIMEOUT 120)
+        # The per-job replay record every macos job uploads (per-test outcome,
+        # attempts and duration from ctest's own reports; executable digests
+        # and runtime closures), and build.yml's wiring of it.
+        add_test(NAME reuse-record-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_reuse_record.py")
+        set_tests_properties(reuse-record-selftest PROPERTIES TIMEOUT 120)
+        # Link-map recording: the map parser, whole-archive detection, and the
+        # linker launcher's pass-through of the link's status.
+        add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
+        set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

@@ -59,6 +59,7 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(argv[0], "run")
             self.assertEqual(argv[argv.index("--receipts-out") + 1], "/t/test-receipts.json")
             self.assertEqual(argv[argv.index("--identity-json") + 1], "/t/our-identity.json")
+            self.assertEqual(argv[argv.index("--keys-out") + 1], "/t/test-keys.json")
             self.assertEqual(argv[argv.index("--run-id") + 1], "55")
         for outcome in ("skipped", "cancelled"):
             with mock.patch.object(mgs, "_first_parent", return_value="p1"):
