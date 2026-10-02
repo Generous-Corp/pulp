@@ -45,24 +45,16 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          contexts="$RUNNER_TEMP/required-contexts.json"
-          # The live required contexts. Reading branch protection needs
-          # administration access a workflow token may not have; when it cannot
-          # be read the report counts every workflow file instead.
-          context_args=(--contexts-unavailable)
-          if gh api "repos/$REPOSITORY/branches/main/protection/required_status_checks" \
-              --jq '.contexts' > "$contexts" 2>/dev/null; then
-            context_args=(--contexts-file "$contexts")
-          fi
           report="$RUNNER_TEMP/required-check-machinery.json"
           # Data only: the head is fetched for diffing and never checked out.
           git fetch --no-tags origin "+refs/pull/$PR_NUMBER/head:refs/remotes/origin/pr-head"
+          # The required contexts come from protected main's committed ruleset.
           python3 tools/scripts/required_check_machinery.py --repo . \
-            "${context_args[@]}" --diff HEAD "$PR_HEAD" > "$report"
+            --diff HEAD "$PR_HEAD" > "$report"
           description="$(jq -r .description "$report")"
           summary="$(jq -r '
             (if .required_checks_read then "" else
-              "Required checks could not be read, so every workflow file is counted.\n\n" end)
+              "The committed ruleset lists no readable required checks, so every workflow file is counted.\n\n" end)
             + "Required checks are only as trustworthy as this pull request'"'"'s own workflow YAML. "
             + "This report is visibility, not enforcement.\n\n"
             + ([.flagged | to_entries[] | "- `\(.key)`: \(.value | join(", "))"] | join("\n"))
