@@ -60,7 +60,11 @@
         add_executable(pulp-test-native-metal-audio-comparator
             test_metal_native_audio_comparator.mm)
         target_link_libraries(pulp-test-native-metal-audio-comparator PRIVATE
-            "-framework Metal" "-framework Foundation")
+            "-framework Metal" "-framework Foundation" pulp::gpu-audio)
+        target_include_directories(pulp-test-native-metal-audio-comparator PRIVATE
+            "${PROJECT_SOURCE_DIR}/core/gpu_audio/src")
+        target_compile_definitions(pulp-test-native-metal-audio-comparator PRIVATE
+            PULP_GPU_AUDIO_EXPECTED_DAWN_SHA="${_pulp_gpu_audio_expected_dawn_sha}")
         add_test(NAME pulp-test-native-metal-audio-comparator
             COMMAND pulp-test-native-metal-audio-comparator)
         set_tests_properties(pulp-test-native-metal-audio-comparator PROPERTIES
