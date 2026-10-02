@@ -1656,6 +1656,13 @@
    ],
    "kind": "python"
   },
+  "deps-offline-fetch-contract": {
+   "entry": "tools/deps/audit.py",
+   "inputs": [
+    "tools/deps/audit.py"
+   ],
+   "kind": "python"
+  },
   "diff-cover-targets-selftest": {
    "entry": "tools/scripts/test_diff_cover_targets.py",
    "inputs": [

@@ -258,15 +258,35 @@ def _cmake_files(tree: Path) -> list[Path]:
                   if p.is_file() and (p.suffix == ".cmake" or p.name == "CMakeLists.txt"))
 
 
+# A configured build directory to read `<name>_SOURCE_DIR` from (--build-dir):
+# the exact tree that build configured with, wherever FetchContent put it.
+BUILD_DIR: Path | None = None
+
+
+def _build_source_dir(name: str) -> Path | None:
+    cache = BUILD_DIR / "CMakeCache.txt" if BUILD_DIR else None
+    if cache is None or not cache.is_file():
+        return None
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith(f"{name}_SOURCE_DIR:") and "=" in line:
+            path = Path(line.split("=", 1)[1])
+            return path if path.is_dir() else None
+    return None
+
+
 def offline_fetch_tree(dep: dict, contract: dict) -> Path | None:
-    """The pinned tree to scan. FetchContent names its shared-cache entry after
+    """The pinned tree to scan. A configured build directory names the exact
+    source it used. Otherwise FetchContent names its shared-cache entry after
     the CMake dependency name and the full ref (`webgpu-<40-hex sha>`), which
     neither the manifest name nor its short pinned ref spell, so the contract
     names the cache entry and the pin is matched as a ref prefix."""
+    name, version = contract.get("cache_name", ""), dep.get("version", "")
+    built = _build_source_dir(name) if name else None
+    if built is not None:
+        return built
     tree = local_source_tree(dep)
     if tree is not None:
         return tree
-    name, version = contract.get("cache_name", ""), dep.get("version", "")
     if not (name and version and FETCHCONTENT_CACHE.is_dir()):
         return None
     matches = sorted(p for p in FETCHCONTENT_CACHE.iterdir()
@@ -905,7 +925,24 @@ def main() -> int:
         action="store_true",
         help="Check attribution text against the licenses actually on disk",
     )
+    parser.add_argument(
+        "--require-offline-trees",
+        action="store_true",
+        help="Fail when an offline_fetch dependency's tree is not available to check "
+             "(for hosts whose configure must have populated it: the gate and the m3 lane)",
+    )
+    parser.add_argument(
+        "--offline-fetch-only",
+        action="store_true",
+        help="Run only the offline-fetch contract (implies reading checked-out trees)",
+    )
+    parser.add_argument("--build-dir", type=Path, default=None,
+                        help="Configured build directory whose <name>_SOURCE_DIR names the tree")
     args = parser.parse_args()
+    global BUILD_DIR
+    BUILD_DIR = args.build_dir
+    if args.offline_fetch_only:
+        return offline_fetch_main(load_manifest(), args.require_offline_trees)
 
     manifest = load_manifest()
     deps_md_names = parse_dependencies_md()
@@ -1037,12 +1074,38 @@ def main() -> int:
                 print("Offline-fetch contract: FetchContent only in "
                       + ", ".join(offline_verified))
 
+    if args.require_offline_trees and offline_unverified:
+        print("\nOffline-fetch trees required but absent: " + ", ".join(offline_unverified))
+        return 1
     if args.strict and (
         missing_deps or missing_notice or missing_licensing or uncovered
         or license_problems or truncated_notices or offline_problems
     ):
         return 1
     return 0
+
+
+def offline_fetch_main(manifest: list[dict], require_trees: bool) -> int:
+    """Only the offline-fetch contract: what a configured build checks."""
+    failed = False
+    checked = 0
+    for dep in manifest:
+        status, problems = verify_offline_fetch(dep)
+        if status == "not-required":
+            continue
+        checked += 1
+        if status == "unverified":
+            print(f"{dep['name']}: offline fetch NOT VERIFIED: its pinned tree is not available")
+            failed = failed or require_trees
+        for problem in problems:
+            print(f"{dep['name']}: {problem}")
+            failed = True
+        if status == "verified" and not problems:
+            print(f"{dep['name']}: offline fetch verified (FetchContent only)")
+    if checked == 0:
+        print("no dependency is marked offline_fetch: nothing was checked")
+        return 1
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
