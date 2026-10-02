@@ -10,6 +10,11 @@ force-loads one archive and runs as ctest `t-runs`):
   moves `tests`, and every one of them moves the target's `digest`;
 - another target's digests do not move, and backtrace indices are ignored;
 - a target's tests are the ctest registrations that run its artifact;
+- a build-tree file the target compiles or included (Ninja's dependency log)
+  is keyed by CONTENT: a changed generated source or header moves only its
+  own target's `generated` part, while pinned `_deps` headers, checkout
+  headers and object files listed as sources do not count; without a Ninja
+  log the document says `generated_headers: unavailable`;
 - a build without a reply is refused, never digested as empty.
 
 Run:
@@ -108,6 +113,57 @@ class DigestTests(unittest.TestCase):
             for f in d["link"]["commandFragments"]:
                 f["backtrace"] = 999
         self.assertEqual(self.moved(self.digest(shift)), set())
+
+    def generated(self, gen_text: str = "v1", header_text: str = "h1", deps: str | None = "default",
+                  dep_header: str = "gen/version.h", obj_text: str = "o1") -> dict:
+        """t compiles a generated source and includes a generated header."""
+        with tempfile.TemporaryDirectory() as tmp:
+            build, src, tests = materialise(tmp)
+            (build / "sub" / "gen.c").write_text(gen_text)
+            (build / "sub" / "pre.o").write_text(obj_text)
+            (build / "gen").mkdir()
+            (build / "gen" / "version.h").write_text(header_text)
+            (build / "_deps" / "x").mkdir(parents=True)
+            (build / "_deps" / "x" / "cfg.h").write_text(header_text)
+            (src / "plain.h").write_text(header_text)
+            edit_target(build, "t", lambda d: d["sources"].extend(
+                [{"path": str(build / "sub" / "gen.c"), "compileGroupIndex": 0},
+                 {"path": str(build / "sub" / "pre.o")}]))
+            if deps == "default":
+                deps = (f"sub/CMakeFiles/t.dir/main.c.o: #deps 4, deps mtime 1 (VALID)\n"
+                        f"    {src}/sub/main.c\n    {build}/{dep_header}\n"
+                        f"    {build}/_deps/x/cfg.h\n    {src}/plain.h\n\n"
+                        f"CMakeFiles/a.dir/a1.c.o: #deps 1, deps mtime 1 (VALID)\n    {src}/a1.c\n")
+            return cd.digest_targets(build, src, tests, deps_text=deps)
+
+    def test_generated_source_content_moves_only_that_targets_generated_part(self) -> None:
+        before, after = self.generated(gen_text="v1"), self.generated(gen_text="v2")
+        moved = {k for k in before["targets"] if before["targets"][k]["digest"] != after["targets"][k]["digest"]}
+        self.assertEqual(moved, {"t"})
+        self.assertNotEqual(before["targets"]["t"]["generated"], after["targets"]["t"]["generated"])
+        self.assertEqual(before["targets"]["t"]["sources"], after["targets"]["t"]["sources"])
+
+    def test_an_included_generated_header_moves_only_its_includer(self) -> None:
+        before, after = self.generated(header_text="VERSION 1"), self.generated(header_text="VERSION 2")
+        moved = {k for k in before["targets"] if before["targets"][k]["digest"] != after["targets"][k]["digest"]}
+        self.assertEqual(moved, {"t"})
+        self.assertEqual(before["generated_headers"], "ninja-deps")
+        self.assertIsNone(before["targets"]["a"]["generated"])
+
+    def test_pinned_dependency_and_source_tree_headers_are_not_generated_inputs(self) -> None:
+        # Only the _deps and checkout copies differ: the header list excludes them.
+        base = self.generated(header_text="h1", dep_header="sub/unused.h")
+        other = self.generated(header_text="h2", dep_header="sub/unused.h")
+        self.assertEqual(base["targets"]["t"]["generated"], other["targets"]["t"]["generated"])
+
+    def test_an_object_file_listed_as_a_source_is_not_a_generated_input(self) -> None:
+        self.assertEqual(self.generated(obj_text="o1")["targets"]["t"]["digest"],
+                         self.generated(obj_text="o2")["targets"]["t"]["digest"])
+
+    def test_without_a_ninja_log_only_generated_sources_count_and_it_says_so(self) -> None:
+        doc = self.generated(deps=None)
+        self.assertEqual(doc["generated_headers"], "unavailable")
+        self.assertIsNotNone(doc["targets"]["t"]["generated"])
 
     def test_a_build_without_a_reply_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -407,7 +407,10 @@ class CliTests(unittest.TestCase):
                           job["codemodel"]["tests_unmatched"]), (5, 1, 0))
         self.assertEqual(job["bytes"]["codemodel"], job["codemodel"]["bytes"])
         self.assertIn("t", doc["targets"])
-        self.assertNotIn("::warning", stdout)
+        # The fixture build has no Ninja dependency log, which the record says.
+        self.assertEqual(job["codemodel"]["generated_headers"], "unavailable")
+        self.assertIn("::warning title=reuse-record incomplete::codemodel digest has no Ninja dependency log",
+                      stdout)
 
     def test_a_build_without_a_codemodel_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

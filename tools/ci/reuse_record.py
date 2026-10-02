@@ -634,7 +634,12 @@ def cmd_write(a: argparse.Namespace) -> int:
                          "executables": sum(1 for t in doc["targets"].values() if t["type"] == "EXECUTABLE"),
                          "with_tests": sum(1 for t in doc["targets"].values() if t["tests"]),
                          "tests_unmatched": doc["tests_unmatched"],
+                         "with_generated": sum(1 for t in doc["targets"].values() if t.get("generated")),
+                         "generated_headers": doc.get("generated_headers"),
                          "bytes": (out / name).stat().st_size}
+            if doc.get("generated_headers") != "ninja-deps" and a.build_outcome in (None, "success"):
+                problems.append("codemodel digest has no Ninja dependency log: generated headers are not "
+                                "keyed, so a target that includes one may keep its digest when it changes")
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"codemodel digest unavailable: {exc}")
 
