@@ -15,10 +15,11 @@ enum class GpuAudioEngine : std::uint8_t {
     Gpu = 2,
 };
 
-/// Lifecycle state suitable for UI, trace, and host diagnostics.  This is a
-/// provider state, not a real-time guarantee: Ready means the transport was
-/// prepared, while scheduling and deadline behavior are reported by the
-/// counters and timings below.
+/// Lifecycle state suitable for UI, trace, and host diagnostics. This is a
+/// provider state, not a real-time guarantee. Ready means an authenticated
+/// execution provider is active. Degraded means the transport is prepared but
+/// its provider or execution engine cannot be established. Scheduling and
+/// deadline behavior are reported by the counters and timings below.
 enum class GpuAudioProviderState : std::uint8_t {
     Uninitialized = 0,
     Ready = 1,
