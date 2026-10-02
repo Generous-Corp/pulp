@@ -620,6 +620,11 @@ pulp_add_test_suite(pulp-test-neural-model-manifest GROUP pulp-test-group-core-g
     SOURCES test_neural_model_manifest.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
+pulp_add_test_suite(pulp-test-nam-tcn-adapter GROUP pulp-test-group-core-runtime
+    SOURCES test_nam_tcn_adapter.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
+                 ${CMAKE_SOURCE_DIR}/core/audio/include)
+
 # CPU-only receipt for the model-neutral callback lane. The executable owns
 # all model/audio storage before entering the allocation probe and reports a
 # reproducible channel/kernel matrix without requiring Dawn or a GPU device.
