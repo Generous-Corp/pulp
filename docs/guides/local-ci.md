@@ -3993,6 +3993,40 @@ shipyard update --dry-run                 # plan only
 shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
 ```
 
+### Frequent safety nets do not run at their cron cadence
+
+GitHub delays `schedule` events under load and drops the ones that pile up. On
+this repository every hourly-or-faster cron fires roughly once every five hours,
+whatever it says: over 2026-10-01 00:00Z to 2026-10-02 17:00Z each `*/15` and
+`*/30` workflow got 7 or 8 scheduled runs (82 to 164 expected) and each hourly
+one got 6. Daily crons are the control: they fire every day, five to seven
+hours late. Run numbers stay contiguous, so the runs are never created; this is
+GitHub-side, not a disabled job or a deleted run.
+
+`.github/schedule-backstop.json` lists the frequent safety nets (the
+watchdogs in this section, the release reconciler and cadence check,
+`version-at-land`, and the rest). An external dispatcher, tartci's
+schedule-backstop agent, runs on one fleet host every five minutes and calls
+`workflow_dispatch` on a listed workflow when the newest `main` run of that
+workflow, from any event, is older than its `cadence_minutes` and none is
+queued or running. It only dispatches; the workflows still run on
+GitHub-hosted runners. The cron stays as the backstop's own backstop, so with
+the agent off or its host down the behaviour is exactly the throttled cron.
+Because the freshness test counts every event, a workflow that an event trigger
+already keeps fresh is never dispatched.
+
+`tools/scripts/schedule_backstop_check.py` (in `workflow-lint.yml` and
+`gates.sh`) holds every listed workflow to what the dispatcher assumes:
+`workflow_dispatch` with no required input, a cadence equal to its cron, a
+top-level concurrency group, and no self-hosted runner label. A new
+hourly-or-faster cron must be listed or added to `excluded` with a reason.
+
+To judge it, count runs per workflow per day against `1440 / cadence_minutes`:
+
+```bash
+ghapp api "repos/Generous-Corp/pulp/actions/workflows/merge-stall-check.yml/runs?per_page=1&created=>=2026-10-03T00:00:00Z" --jq .total_count
+```
+
 ### Off-fleet queue-age watchdog (`runner-health-check.yml`)
 
 `.github/workflows/runner-health-check.yml` sweeps every 30 minutes and opens a

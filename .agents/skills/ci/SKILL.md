@@ -3777,6 +3777,20 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **An hourly-or-faster cron here fires about once every five hours.** GitHub
+  delays `schedule` events under load and drops the backlog; daily crons still
+  fire daily, five to seven hours late. Never assume a `*/15` or `*/30` safety
+  net ran recently because its cron says so: read its last run. The fix is
+  `.github/schedule-backstop.json` plus tartci's schedule-backstop agent, which
+  dispatches listed workflows at their cadence; `schedule_backstop_check.py`
+  fails a new hourly-or-faster cron that is neither listed nor excluded, and a
+  listed one whose cadence, dispatch inputs, concurrency group, or runner no
+  longer match what the dispatcher assumes.
+  - **Do not filter workflow-run listings with `branch=` when freshness
+    matters.** A cold `actions/workflows/<file>/runs?branch=main` read returned a
+    page days to weeks old in 6 of 26 tries; the unfiltered listing was current
+    in 26 of 26. Filter `head_branch` client-side.
+
 - **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
   storage is billed per ACCOUNT and shared across every repository in it.** That
   makes it the rare CI cost that becomes a *different repo's* outage: when the

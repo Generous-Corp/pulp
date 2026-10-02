@@ -21,6 +21,9 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - '.github/schedule-backstop.json'
+      - 'tools/scripts/schedule_backstop_check.py'
+      - 'tools/scripts/test_schedule_backstop_check.py'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
       - 'tools/scripts/resolve_release_runners.py'
@@ -121,6 +124,9 @@ on:
     paths:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
+      - '.github/schedule-backstop.json'
+      - 'tools/scripts/schedule_backstop_check.py'
+      - 'tools/scripts/test_schedule_backstop_check.py'
       - '.github/actions/**'
       - '.shipyard/ci-profiles/normal-local-fast.toml'
       - 'tools/scripts/resolve_release_runners.py'
@@ -278,13 +284,17 @@ jobs:
         # Every `on: schedule` workflow's entry jobs must carry the fork guard
         # (`github.event_name != 'schedule' || github.repository == '<repo>'`) so
         # a fork's copy doesn't cron-run our monitors and email the fork owner on
-        # every failure. The check also runs in gates.sh and the pre-push hook.
+        # every failure. The schedule-backstop check keeps the manifest of
+        # externally dispatched safety nets consistent with their crons. Both
+        # checks also run in gates.sh and the pre-push hook.
         shell: bash
         run: |
           set -euo pipefail
           python3 -m pip install --quiet 'pyyaml>=6'
           python3 tools/scripts/test_scheduled_workflow_fork_guard_check.py
           python3 tools/scripts/scheduled_workflow_fork_guard_check.py
+          python3 tools/scripts/test_schedule_backstop_check.py
+          python3 tools/scripts/schedule_backstop_check.py
 
       - name: Linux dependency and Codecov upload contracts
         shell: bash
