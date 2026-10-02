@@ -304,6 +304,16 @@ the generated graph, not the CMake text —
 `grep "pulp-test-cli-<suite>.dir/all: tools/cli/CMakeFiles/pulp-cli.dir/all"
 build/CMakeFiles/Makefile2` must print a line.
 
+For a tool other than pulp-cli (pulp-import-design, a fixture), use
+`pulp_test_spawns(<suite> <tool>)` from `tools/cmake/PulpTestData.cmake` next
+to the suite; it defers the edge the same way, and configure fails when a
+`$<TARGET_FILE:x>` definition has no edge. The MCP audio tool tests
+(pulp-test-mcp-server, pulp-test-mcp-timeline-tools) are on the
+`_cli_shellout_suite` list too: the MCP server runs the CLI it finds under a
+project root's `build/tools/cli`, so those tests stage `PULP_CLI_BINARY`
+there through `CliProjectRoot` (test/mcp_server_test_support.hpp) rather than
+running whatever sits in the checkout's `build/`.
+
 ### The C++ lease path is interactive unless told otherwise
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`; `pulp build
