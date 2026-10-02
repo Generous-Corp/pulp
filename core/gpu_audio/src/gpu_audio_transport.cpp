@@ -701,9 +701,8 @@ GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
     // `latency_blocks_` is the transport's fixed PDC delay. It is also the
     // algorithmic lead for authenticated concrete shared providers, but a
     // generic staged node has no lead declaration at this boundary.
-    report.prepared_lead_blocks = report.provider == GpuAudioProvider::Unknown
-                                      ? 0
-                                      : latency_blocks_;
+    report.prepared_lead_blocks =
+        report.provider == GpuAudioProvider::Unknown ? 0 : latency_blocks_;
     report.prepared = true;
     report.fallback_available = miss_policy_ == MissPolicy::CpuFallback;
     report.diagnostics_available = true;

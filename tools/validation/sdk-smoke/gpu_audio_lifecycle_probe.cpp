@@ -83,9 +83,8 @@ int main() {
         prepared_report.eligibility != pulp::gpu_audio::GpuAudioEligibility::Eligible ||
         prepared_report.fallback_policy != MissPolicy::CpuFallback ||
         prepared_report.prepared_latency_blocks != LifecycleNode::kLatency ||
-        prepared_report.prepared_lead_blocks != 0 ||
-        !prepared_report.prepared || !prepared_report.fallback_available ||
-        !prepared_report.diagnostics_available)
+        prepared_report.prepared_lead_blocks != 0 || !prepared_report.prepared ||
+        !prepared_report.fallback_available || !prepared_report.diagnostics_available)
         return 111;
 
     // Normal lifecycle: process, service the worker, then observe the fixed
