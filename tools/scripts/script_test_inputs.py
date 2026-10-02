@@ -341,8 +341,8 @@ DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 
 # Calls that start or load another program. The class names are the repo's
 # own process API (core/platform/child_process.hpp,
-# core/events/child_process_manager.hpp; test_script_test_inputs.py checks
-# every class there that starts a process is listed), plus the C and platform
+# core/events/child_process_manager.hpp; this script's selftest checks every
+# class there that starts a process is listed), plus the C and platform
 # entry points. A compiled test whose sources (or the test/ headers they
 # include) call one runs something at run time; whether that something is a
 # program this repo builds is what its spawn edges, or a reviewed
