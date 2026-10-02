@@ -247,6 +247,15 @@ the panel itself to the CSS-shape inference, which claims click-through. `data-o
 documents that do not author ARIA. (`@pulp/react` reads the same
 `aria-haspopup` prop, plus an explicit `overlayTrigger` prop.)
 
+A press on the trigger that OPENED the open overlay is different from a press
+on another trigger: it closes the overlay, like Escape or a press outside it,
+and the press is spent on the close, so a menu button toggles its own menu
+instead of closing and reopening it. The overlay learns its trigger from the
+press that opened it; the semantic popup owner also names it explicitly, so a
+menu opened from the keyboard toggles the same way. Enter and Space on a
+focused `<button aria-haspopup>` open its menu and, until a row has been
+reached with the arrow keys, close it again.
+
 A third hint does not claim at all — it QUALIFIES a claim:
 
 - **`data-overlay-parent="<id>"`** on the overlay, or **`aria-owns="<overlay

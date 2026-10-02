@@ -140,8 +140,16 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
-    // claimOverlay(id, consume, parentId) / releaseOverlay(id) - generalized
-    // overlay click routing.
+    // claimOverlay(id, consume, parentId, anchorId) / releaseOverlay(id) -
+    // generalized overlay click routing.
+    //
+    // `anchorId` names the control that OPENED this overlay. A press on it
+    // while the overlay is open closes the overlay and is spent on the close,
+    // so a dropdown button toggles instead of closing and reopening on the
+    // same press. A press-opened overlay learns its anchor without it (see
+    // `View::set_overlay_anchor`); name it when the overlay opened some other
+    // way, such as from the keyboard. An id that does not resolve leaves the
+    // anchor as it was.
     //
     // `parentId` names the already-open overlay this one STACKS ON. A submenu
     // placed to escape its menu's box is lifted out of that menu's subtree
@@ -170,6 +178,14 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                     auto parent = self.widgets_.find(parent_id);
                     if (parent != self.widgets_.end())
                         stacks_on = parent->second.view;
+                }
+            }
+            if (args.size() > 3) {
+                auto anchor_id = args.get<std::string>(3, "");
+                if (!anchor_id.empty() && anchor_id != id) {
+                    auto anchor = self.widgets_.find(anchor_id);
+                    if (anchor != self.widgets_.end() && anchor->second)
+                        it->second->set_overlay_anchor(anchor->second.view);
                 }
             }
             it->second->claim_overlay(stacks_on);

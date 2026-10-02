@@ -7115,6 +7115,15 @@ settings cases GREEN. The case that actually catches it is *every native
 dropdown dismisses by Escape and outside press*. Run that one, not just the
 arrow cases, whenever this function changes.
 
+**A dropdown's own button closes it.** Overlay dismissal has three reasons,
+all native and shared by every materialized design: Escape, a press outside
+the open overlay, and a press on the trigger that opened it
+(`OverlayPressTarget::trigger_closed`). The third is consumed, so the button's
+click cannot reopen the menu it just closed; a press on a DIFFERENT trigger
+still switches menus in one press. Do not add a per-design "close when the
+button is pressed again" handler: it races the native dismissal, and a design
+that writes its toggle as `setOpen(true)` closes anyway.
+
 **Editing the file at all:** the runtime is returned as a single template
 literal (`const entry = \`…\`; return entry;`), so a regex in the source needs
 doubled backslashes (`\\[` emits `\[`), and a bare backtick or `${` anywhere in
