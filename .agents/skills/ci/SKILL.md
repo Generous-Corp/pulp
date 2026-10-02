@@ -2103,6 +2103,14 @@ CMake moves. A ctest registration belongs to the target whose artifact is its
 `command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
 compiled test is missing and only script tests (owned by no target) appear.
 
+Key a generated file by its CONTENT, never its path: `configure_file` keeps
+the path when VERSION moves, and the control-shipping / inspector marker
+sources carry a per-configure build nonce. Do not widen "what a target can
+include" to every header under a build-tree include directory: core/runtime's
+generated `build_info.hpp` (configure timestamp) sits in an include directory
+629 targets inherit, which re-keys 560 of 789 targets on every configure; the
+Ninja dependency log says which few actually include it.
+
 ## A new Python test needs three generators, not three hand edits
 
 Adding or changing a Python selftest or script drifts three generated files,
