@@ -1940,8 +1940,11 @@ the base selects the full suite with the reason (`inventory: base not
 recorded`, `inventory: base mismatch`). The base configure runs with
 `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so dependencies resolve from the
 machine's shared FetchContent source cache and a miss fails the configure
-instead of cloning mid-plan; the WebGPU runtime archive uses its own cache
-path the same way. A cold lane build directory refuses by design ("no command
+instead of cloning mid-plan. That includes the prebuilt WebGPU runtime archive,
+which the webgpu dependency fetches through FetchContent: with its cache entry
+removed, the disconnected configure fails ("requires source directory for
+dependency wgpu-macos-aarch64-release to already be populated") and downloads
+nothing. Its "Fetching WebGPU implementation" status line prints either way. A cold lane build directory refuses by design ("no command
 after the build"): bounded runs need the lane's normal warm build. The cached
 base inventories live inside the lane's build directory, which pull-request
 code can write; that is acceptable while the lane runs PR code and is not a
