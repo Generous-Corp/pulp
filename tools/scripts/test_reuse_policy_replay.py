@@ -859,6 +859,45 @@ class SourceKeyPolicyTests(unittest.TestCase):
         self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
 
 
+class RecordCoverageTests(unittest.TestCase):
+    def test_executed_jobs_without_a_record_are_named_and_cancelled_ones_are_not(self):
+        rec = "Record per-test results for reuse replay (macOS)"
+        ran = [{"name": "Build", "conclusion": "success"}, {"name": "Test (non-Windows)", "conclusion": "failure"},
+               {"name": rec, "conclusion": "success"}]
+        lost = [{"name": "Build", "conclusion": None}, {"name": "Test (non-Windows)", "conclusion": None},
+                {"name": rec, "conclusion": None}]
+        lost_after_tests = [{"name": "Build", "conclusion": "success"},
+                            {"name": "Test fast deterministic tier (pull request head)", "conclusion": "success"},
+                            {"name": "Test (non-Windows)", "conclusion": None}, {"name": rec, "conclusion": None}]
+        jobs = {
+            1: [{"id": 11, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            2: [{"id": 12, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": ran}],
+            3: [{"id": 13, "name": "macos", "runner_name": None, "conclusion": "cancelled", "steps": []}],
+            4: [{"id": 14, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            5: [{"id": 15, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            6: [{"id": 16, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": lost}],
+            7: [{"id": 17, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure",
+                 "steps": lost_after_tests}],
+        }
+        artifacts = {1: ["reuse-record-macos"], 2: ["ctest-logs-macos"], 3: [], 4: ["reuse-record-macos-attempt-2"],
+                     5: [], 6: [], 7: []}
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.jobs = lambda run_id: jobs[run_id]
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.side_effect = lambda path: {"artifacts": [{"name": n} for n in artifacts[int(path.split("/runs/")[1].split("/")[0])]]}
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            runs = [{"id": i, "status": "completed", "event": "pull_request", "created_at": "2026-10-02T12:00:00Z"}
+                    for i in (1, 2, 3, 4, 6, 7)]
+            runs.append({"id": 5, "status": "completed", "event": "merge_group", "created_at": "2026-09-30T12:00:00Z"})
+            cov = c.record_coverage(runs)
+        self.assertEqual((cov["executed_jobs"], cov["without_record"]), (3, 1))  # run 5 predates recording
+        self.assertEqual([m["run_id"] for m in cov["runs_without_record"]], ["2"])
+        # runner lost before the record step, whether or not a test step ran first
+        self.assertEqual([m["run_id"] for m in cov["interrupted"]], ["6", "7"])
+
+
 class GraftTests(unittest.TestCase):
     def test_parents_are_read_through_shallow_grafts(self):
         with tempfile.TemporaryDirectory() as tmp:

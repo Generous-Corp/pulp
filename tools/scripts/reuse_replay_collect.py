@@ -146,6 +146,10 @@ REPOSITORY = "Generous-Corp/pulp"
 WORKFLOW = "build.yml"
 QUEUE_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(?P<pr>\d+)-(?P<base>[0-9a-f]{40})$")
 REUSE_RECORD_ARTIFACT = "reuse-record-macos"
+# The first merge-group and PR-head jobs that write a reuse record (the
+# per-target codemodel recording landed then); earlier jobs never had one.
+RECORDING_SINCE = "2026-10-01T07:46:19Z"
+RECORD_STEP_PREFIX = "Record per-test results for reuse replay"
 CTEST_JOB_NAMES = (re.compile(r"^macOS \(ARM64\)"), re.compile(r"^macos$"))
 
 
@@ -606,6 +610,46 @@ class Collector:
                     return job
         return None
 
+    def record_coverage(self, runs: Iterable[dict], since: str = RECORDING_SINCE) -> dict:
+        """Completed runs whose macOS suite job executed a test step (it
+        concluded success or failure) but that published no reuse record.
+        A cancelled or skipped job ran nothing, and a job whose runner was
+        lost (its later steps have no conclusion) never reached its
+        record step (its later steps have no conclusion); neither is
+        counted, the second is reported as `interrupted`. 0 is the expected reading; anything else is a
+        recording that went missing although the suite ran."""
+        executed, missing, interrupted = 0, [], []
+        for run in runs:
+            if run.get("status") != "completed" or run["created_at"] < since:
+                continue
+            job = self.ctest_job(self.jobs(run["id"]))
+            if job is None:
+                continue
+            steps = job.get("steps") or []
+            record_step = next((st for st in steps if str(st.get("name", "")).startswith(RECORD_STEP_PREFIX)), None)
+            lost = (record_step is not None and record_step.get("conclusion") is None
+                    and any(st.get("conclusion") is None for st in steps))
+            ran_tests = any(str(st.get("name", "")).startswith("Test") and st.get("conclusion") in ("success", "failure")
+                            for st in steps)
+            if lost or not ran_tests:
+                # The runner went away before the record step could run (its
+                # later steps carry no conclusion): no step was left to warn.
+                if lost:
+                    interrupted.append({"run_id": str(run["id"]), "job_id": job["id"], "runner": job.get("runner_name"),
+                                        "tests_ran": ran_tests})
+                continue
+            executed += 1
+            listing = self._cached(f"artifacts/{run['id']}.json.gz", lambda r=run: [
+                a.get("name") for a in self.gh.json(
+                    f"repos/{self.gh.repository}/actions/runs/{r['id']}/artifacts?per_page=100").get("artifacts", [])])
+            if not any(n == REUSE_RECORD_ARTIFACT or str(n).startswith(REUSE_RECORD_ARTIFACT + "-attempt-")
+                       for n in listing):
+                missing.append({"run_id": str(run["id"]), "event": run.get("event"), "job_id": job["id"],
+                                "job_conclusion": job.get("conclusion")})
+        return {"since": since, "executed_jobs": executed, "without_record": len(missing),
+                "runs_without_record": missing[:50], "interrupted_jobs": len(interrupted),
+                "interrupted": interrupted[:50]}
+
     def run_record(self, run: dict, kind: str, pr: int | None, head_sha: str | None) -> tuple[dict, list[dict]]:
         jobs = self.jobs(run["id"])
         job = self.ctest_job(jobs)
@@ -761,6 +805,8 @@ class Collector:
             "pairs_with_head_run": sum(1 for p in pairs if p["heads"]),
             "head_runs": sum(1 for r in runs.values() if r["run_kind"] == "pr_head"),
             "rejected_runs": sum(1 for r in runs.values() if r["rejected"]),
+            "record_coverage": self.record_coverage(groups + [r for r in heads_listing
+                                                              if since <= _parse_time(r["created_at"]) <= until]),
             "api_calls": self.gh.calls,
         }
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
