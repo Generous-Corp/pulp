@@ -81,6 +81,11 @@ POLICIES
                  whose recorded file-API codemodel digest moved between the
                  head and group jobs (or that depend on one). Unevaluable
                  where either job recorded no codemodel.
+  source-key-recorded, source-key-codemodel-recorded
+                 the same two on the recorded graph: executables, the tests
+                 each runs, and the members each link pulled come from the
+                 group job's own reuse record, so executable names never go
+                 stale; the Ninja graph only maps headers to sources.
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
@@ -442,6 +447,10 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 1a estimate: script tests keyed on their own entry, data reads assumed declared"),
     Policy("source-key-codemodel", _source_key("cmake-codemodel"), True,
            "tier 1a strict with exact CMake granularity: re-key only targets whose recorded codemodel moved"),
+    Policy("source-key-recorded", _source_key("strict-data-recorded"), True,
+           "tier 1a strict, executables and rebuilds from the group job's recorded link members"),
+    Policy("source-key-codemodel-recorded", _source_key("cmake-codemodel-recorded"), True,
+           "source-key-codemodel on the recorded graph (link members, recorded test executables)"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
     Policy("suite-source-key", None, True,

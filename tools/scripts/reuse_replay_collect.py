@@ -386,26 +386,54 @@ class Collector:
                 out["red"].append(context)
         return out
 
-    def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
-        """The per-target codemodel digests a run's `reuse-record-macos`
-        artifact holds (name -> digest, type, artifacts, dependencies), or
-        None when the run recorded none."""
+    def reuse_record(self, run_id: str) -> dict:
+        """What a run's `reuse-record-macos` artifact says about its build:
+        `targets` (per CMake target: digest, type, artifacts, dependencies),
+        `link` (per executable: direct objects and the archive members its
+        link pulled, names expanded), and `executables` (test id -> the
+        executable it ran). A part the run did not record is None."""
+        def member(zf: zipfile.ZipFile, prefix: str) -> dict | None:
+            name = next((n for n in zf.namelist() if Path(n).name.startswith(prefix)), None)
+            return json.loads(zf.read(name)) if name else None
+
         def fetch() -> dict:
             listing = self.gh.json(f"repos/{self.gh.repository}/actions/runs/{run_id}/artifacts?per_page=100")
             art = next((a for a in listing.get("artifacts", [])
                         if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
             if art is None:
-                return {"targets": None}
+                return {"targets": None, "link": None, "executables": None}
             with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
                 blob = resp.read()
             with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-                name = next((n for n in zf.namelist() if Path(n).name.startswith("codemodel-")), None)
-                if name is None:
-                    return {"targets": None}
-                doc = json.loads(zf.read(name))
-            return {"targets": {n: {k: t.get(k) for k in ("digest", "type", "artifacts", "dependencies")}
-                                for n, t in (doc.get("targets") or {}).items()}}
-        return self._cached(f"codemodel/{run_id}.json.gz", fetch)["targets"]
+                model, links = member(zf, "codemodel-"), member(zf, "link-members-")
+                tests = None
+                name = next((n for n in zf.namelist() if Path(n).name == "tests.jsonl"), None)
+                if name:
+                    tests = {}
+                    for line in zf.read(name).decode("utf-8", "replace").splitlines():
+                        if line.strip():
+                            row = json.loads(line)
+                            if row.get("executable"):
+                                tests[row["test_id"]] = row["executable"].removeprefix("<build>/")
+            link = None
+            if links is not None:
+                names = links.get("members") or {}
+                link = {exe.removeprefix("<build>/"): {
+                            "objects": [o.removeprefix("<build>/") for o in rec.get("objects") or []],
+                            "members": {a.removeprefix("<build>/"): (list(names.get(a) or []) if arc.get("whole") else
+                                                                    [names[a][i] for i in arc.get("members") or []
+                                                                     if a in names and i < len(names[a])])
+                                        for a, arc in (rec.get("archives") or {}).items()}}
+                        for exe, rec in (links.get("executables") or {}).items()}
+            targets = None if model is None else {
+                n: {k: t.get(k) for k in ("digest", "type", "artifacts", "dependencies")}
+                for n, t in (model.get("targets") or {}).items()}
+            return {"targets": targets, "link": link, "executables": tests}
+        return self._cached(f"record/{run_id}.json.gz", fetch)
+
+    def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
+        """The per-target codemodel digests a run recorded, or None."""
+        return self.reuse_record(run_id)["targets"]
 
     def merged_at(self, since: dt.datetime) -> dict[int, str | None]:
         """merged_at per closed pull request updated since `since`."""
@@ -912,6 +940,105 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     return out
 
 
+# The recorded graph. The replay's Ninja graph comes from one configured
+# build, whose executable names drift as tests are regrouped. Each job's
+# reuse record names the executables it actually linked, their direct
+# objects and the archive members each link pulled, so the executables a
+# drift rebuilds are taken from the group's own record: an object or member
+# is reached when its SOURCE (recovered from the object path) is a drifted
+# source, or compiles a header the drift reaches. The older graph is used
+# only for that source -> headers step, which follows source paths, not
+# executable names. Anything the graph cannot place (a source added since
+# the graph was built, an unknown archive member) counts as reached when its
+# own source drifted (matched by name for a member) or when any header
+# drifted, since a header is the only drift that reaches a source the graph
+# never compiled. Toolchain, prebuilt and FetchContent archives are pinned; a
+# CMake-level change to them reaches executables through the codemodel.
+
+COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")
+CODE_SUFFIXES = COMPILE_SUFFIXES + (".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".inc", ".def")
+
+
+def object_source(obj: str) -> str | None:
+    """The repo-relative source a CMake object path compiles, or None.
+
+    `<dir>/CMakeFiles/<target>.dir/<path>.o` compiles `<dir>/<path>`, with
+    `__/` standing for `../`."""
+    head, sep, rest = obj.partition("CMakeFiles/")
+    if not sep or "/" not in rest or not rest.endswith(".o"):
+        return None
+    path = os.path.normpath(os.path.join(head, rest.split("/", 1)[1][:-2].replace("__/", "../")))
+    return None if path.startswith("..") or os.path.isabs(path) else path
+
+
+class GraphIndex:
+    """Source-level facts from a Ninja graph: which compiled sources the
+    drift reaches, and which sources each archive member was built from."""
+
+    def __init__(self, graph, source_root: Path, build_dir: Path) -> None:
+        root = os.path.realpath(source_root) + os.sep
+        self.graph, self.root, self.build = graph, root, os.path.realpath(build_dir)
+        self.obj_source: dict[str, str] = {}
+        for src, outs in graph.src_to_out.items():
+            if src.startswith(root) and src.endswith(COMPILE_SUFFIXES):
+                for o in outs:
+                    if o.endswith(".o"):
+                        self.obj_source[self._rel(o)] = src[len(root):]
+        self.sources = set(self.obj_source.values())
+        self.archive_members: dict[str, dict[str, set[str]]] = {}
+        for i, outs in graph.fwd.items():
+            src = self.obj_source.get(self._rel(i))
+            if src is None:
+                continue
+            for o in outs:
+                if o.endswith(".a"):
+                    self.archive_members.setdefault(self._rel(o), {}).setdefault(os.path.basename(i), set()).add(src)
+
+    def _rel(self, path: str) -> str:
+        return os.path.relpath(self.graph.norm(path), self.build)
+
+    def affected_sources(self, drift: list[str]) -> set[str]:
+        reached = self.graph.affected_outputs([os.path.join(self.root, f) for f in drift])
+        out = {self.obj_source[r] for r in (self._rel(p) for p in reached) if r in self.obj_source}
+        return out | {f for f in drift if f.endswith(COMPILE_SUFFIXES)}
+
+
+def recorded_rebuilt(link: dict[str, dict], drift: list[str], index: "GraphIndex",
+                     affected: set[str] | None = None) -> set[str]:
+    """Executables (relative to the build dir) a drift rebuilds, from one
+    job's recorded link members. Pure given `index`."""
+    affected = index.affected_sources(drift) if affected is None else affected
+    header_drift = any(f.endswith(CODE_SUFFIXES) and not f.endswith(COMPILE_SUFFIXES) for f in drift)
+    drifted = set(drift)
+    drifted_objects = {os.path.basename(f) + ".o" for f in drift if f.endswith(COMPILE_SUFFIXES)}
+    out: set[str] = set()
+    for exe, rec in link.items():
+        hit = False
+        for obj in rec.get("objects") or []:
+            src = object_source(obj)
+            if src is not None and src in index.sources:
+                hit = src in affected
+            else:
+                hit = src in drifted or header_drift
+            if hit:
+                break
+        if not hit:
+            for archive, members in (rec.get("members") or {}).items():
+                if os.path.isabs(archive) or archive.startswith("_deps/"):
+                    continue
+                known = index.archive_members.get(archive) or {}
+                for m in members:
+                    srcs = known.get(m)
+                    if (srcs & affected) if srcs else (m in drifted_objects or header_drift):
+                        hit = True
+                        break
+                if hit:
+                    break
+        if hit:
+            out.add(exe)
+    return out
+
+
 def load_graph(build_dir: Path | None, pickle_path: Path | None):
     """A Ninja graph with header deps: from a pickled affected_tests_shadow
     Graph, or parsed from a configured build dir (slow on a full tree)."""
@@ -941,7 +1068,8 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     collector._git_lock, collector._commit_cache = threading.Lock(), {}
     collector.gh = gh
     entries_cache: dict[str, dict | None] = {}
-    with_codemodel = 0
+    with_codemodel = with_recorded = 0
+    index = GraphIndex(graph, graph_source_root, graph_build_dir) if gh is not None else None
 
     unread: list[str] = []
 
@@ -980,18 +1108,33 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
         reached = graph.affected_outputs(changed_abs)
         rebuilt = {os.path.relpath(p, build_real) for p in reached if p.startswith(build_real + os.sep)}
         codemodel = None
+        group_record = None
         if gh is not None:
-            head_cm, group_cm = collector.codemodel_targets(head["run_id"]), collector.codemodel_targets(group["run_id"])
-            if head_cm is not None and group_cm is not None:
-                codemodel = codemodel_rekeyed(head_cm, group_cm)
+            head_cm, group_record = collector.codemodel_targets(head["run_id"]), collector.reuse_record(group["run_id"])
+            if head_cm is not None and group_record["targets"] is not None:
+                codemodel = codemodel_rekeyed(head_cm, group_record["targets"])
                 with_codemodel += 1
+        test_ids = [t["test_id"] for t in tests]
+        head_entries, group_entries = entries(head["checkout_sha"]), entries(group["checkout_sha"])
         pair["source_key"] = classify_source_keys(
-            drift, [t["test_id"] for t in tests], test_map, entries(head["checkout_sha"]),
-            entries(group["checkout_sha"]), rebuilt, all_exes, codemodel)
+            drift, test_ids, test_map, head_entries, group_entries, rebuilt, all_exes, codemodel)
+        if codemodel is not None and group_record["link"] and group_record["executables"]:
+            # The same variants with executables, test mapping and rebuilds
+            # taken from the group job's own record instead of the graph's build.
+            link = group_record["link"]
+            recorded_map = {name: {**(test_map.get(name) or {}), "sources": [],
+                                   "executables": [e] if (e := group_record["executables"].get(name)) in link else []}
+                            for name in test_ids}
+            recorded = classify_source_keys(
+                drift, test_ids, recorded_map, head_entries, group_entries,
+                recorded_rebuilt(link, drift, index), set(link), codemodel)
+            pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
+            pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
+            with_recorded += 1
         pair["source_key_head_run_id"] = head_row["run_id"]
         done += 1
     write_jsonl(corpus_dir / "pairs.jsonl", corpus.pairs)
     # A list that cannot be read makes every script test unknown (it runs);
     # name the commits so a low number is traceable to its cause.
-    return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel,
+    return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel, "pairs_with_recorded_graph": with_recorded,
             "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}
