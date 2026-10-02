@@ -838,6 +838,8 @@ pulp_add_test_suite(pulp-test-view-lifecycle-bridge GROUP pulp-test-group-view-w
 # splits cannot add unclassified bridge entries.
 pulp_add_test_suite(pulp-test-widget-bridge-api-contracts
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+pulp_test_data(pulp-test-widget-bridge-api-contracts NO_DEFINE
+    PATHS core/view/src)
 
 # Widget bridge — no-GPU gate enforcement.
 # Pure static scan: walks widget_bridge.cpp line-by-line and asserts every

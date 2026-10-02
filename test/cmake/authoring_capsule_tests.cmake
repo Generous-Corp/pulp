@@ -30,4 +30,6 @@ if(TARGET pulp::authoring-capsule)
             PULP_AUTHORING_CAPSULE_SOURCE_DIR="${CMAKE_SOURCE_DIR}/core/authoring_capsule"
         LABELS authoring-capsule
         TIMEOUT 120)
+    pulp_test_data(pulp-test-authoring-capsule-hostile NO_DEFINE
+        PATHS core/authoring_capsule)
 endif()

@@ -262,6 +262,8 @@ pulp_add_test_suite(pulp-test-signal-graph-offline-parity
 pulp_add_test_suite(pulp-test-baked-codec GROUP pulp-test-group-sampler-host-graph
     SOURCES test_baked_codec.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio pulp::runtime)
+pulp_test_data(pulp-test-baked-codec NO_DEFINE
+    PATHS test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake)
 pulp_add_test_suite(pulp-test-baked-graph-processor-parity
     SOURCES test_baked_graph_processor_parity.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::runtime)

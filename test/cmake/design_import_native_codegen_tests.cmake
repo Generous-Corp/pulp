@@ -8,6 +8,12 @@ pulp_add_test_suite(pulp-test-design-import
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     TEST_SPEC "~[network]"
     LABELS "parser-import")
+pulp_test_data(pulp-test-design-import NO_DEFINE
+    SOURCES test_design_import_ir.cpp test_recognition_resolver.cpp
+    PATHS test/fixtures/imports/claude/vite-assets.html
+        test/fixtures/imports/figma-plugin/synthetic-knob.png
+        test/fixtures/import-fidelity/assets/knob_ref.png
+        tools/figma-plugin/library-manifest.json)
 
 # W3C Design Tokens (DTCG) emitter for IRTokens (design_tokens_w3c.cpp).
 add_executable(pulp-test-design-tokens-w3c test_design_tokens_w3c.cpp)
@@ -23,6 +29,8 @@ catch_discover_tests(pulp-test-design-fidelity PROPERTIES LABELS "parser-import"
 # matrix (PULP_SRC_DIR/compat.json) and validates each `types` row's codegen
 # claim against the real generate_pulp_js lowering.
 add_executable(pulp-test-import-object-coverage test_import_object_coverage.cpp)
+pulp_test_data(pulp-test-import-object-coverage NO_DEFINE
+    PATHS compat.json)
 target_link_libraries(pulp-test-import-object-coverage PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-import-object-coverage PRIVATE
     PULP_SRC_DIR="${CMAKE_SOURCE_DIR}")
@@ -33,6 +41,9 @@ catch_discover_tests(pulp-test-import-object-coverage PROPERTIES LABELS "parser-
 # carry an explicit in-test allowlist entry documenting the partial. Reads the
 # surface sources + design_ir.hpp from PULP_SRC_DIR; links Catch2 only.
 add_executable(pulp-test-design-import-parity test_design_import_parity.cpp)
+pulp_test_data(pulp-test-design-import-parity NO_DEFINE
+    PATHS core/view/src core/view/cmake/PulpViewSources.cmake
+        core/view/include/pulp/view/design_ir.hpp)
 target_link_libraries(pulp-test-design-import-parity PRIVATE Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-parity PRIVATE
     PULP_SRC_DIR="${CMAKE_SOURCE_DIR}")
