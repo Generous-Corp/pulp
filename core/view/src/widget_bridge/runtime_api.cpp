@@ -38,11 +38,24 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "    ? provider(nativeNow) : nativeNow;"
             "  return Number.isFinite(resolved) ? resolved : nativeNow;"
             "}"
+            // A host-driven callback (animation frame, timer) runs through
+            // the UI framework's batching hook when one is installed, so the
+            // several state updates one callback makes commit ONCE when it
+            // returns. @pulp/react installs __pulpBatchUpdates__ (React's
+            // batchedUpdates); without it, its synchronous LegacyRoot commits
+            // every setState the moment it is called, and each commit
+            // re-applies captured import metadata. Absent a hook the callback
+            // runs exactly as before.
+            "function __pulpRunHostCallback__(fn, arg) {"
+            "  var batch = (typeof globalThis !== 'undefined')"
+            "    ? globalThis.__pulpBatchUpdates__ : undefined;"
+            "  return (typeof batch === 'function') ? batch(fn, arg) : fn(arg);"
+            "}"
             "function __invokeFrame__(id, now) {"
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) {"
             "    delete __frameCallbacks__[id];"
-            "    fn(now);"
+            "    __pulpRunHostCallback__(fn, now);"
             "  }"
             "}"
             // Timer registry for native setTimeout / setInterval. Callbacks
@@ -55,7 +68,7 @@ void BridgeRegistrars::register_runtime_api(WidgetBridge& self) {
             "  var entry = __timerCallbacks__[id];"
             "  if (!entry) return;"
             "  if (!entry.repeat) delete __timerCallbacks__[id];"
-            "  try { entry.fn(); } catch (e) {"
+            "  try { __pulpRunHostCallback__(function() { entry.fn(); }); } catch (e) {"
             "    if (typeof console !== 'undefined' && console.error)"
             "      console.error('timer:', e);"
             "  }"
