@@ -126,6 +126,33 @@ class ReferenceGraphTests(unittest.TestCase):
         self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
             "tools/scripts/lane_thing.py"].admitted)
 
+    def test_generated_selector_family_listing_is_not_a_blocker(self) -> None:
+        repo = self._repo({
+            "tools/scripts/lane_thing.py": "X = 1\n",
+            wide.SHIPYARD_CONFIG: (
+                "[targets.mac]\n"
+                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
+                'paths = ["tools/scripts/lane_thing.py"]\n'
+                f"{wide.SELECTOR_BLOCK_END}\n"
+            ),
+        })
+        self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
+            "tools/scripts/lane_thing.py"].admitted)
+
+    def test_shipyard_config_running_a_script_keeps_native(self) -> None:
+        repo = self._repo({
+            "tools/scripts/lane_thing.py": "X = 1\n",
+            wide.SHIPYARD_CONFIG: (
+                'test = "python3 tools/scripts/lane_thing.py"\n'
+                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
+                'paths = ["tools/scripts/lane_thing.py"]\n'
+                f"{wide.SELECTOR_BLOCK_END}\n"
+            ),
+        })
+        d = repo.decide("tools/scripts/lane_thing.py")["tools/scripts/lane_thing.py"]
+        self.assertFalse(d.admitted)
+        self.assertIn(wide.SHIPYARD_CONFIG, d.reason)
+
     def test_gate_side_cmake_registration_keeps_native(self) -> None:
         repo = self._repo({
             "tools/scripts/gate_thing.py": "X = 1\n",
@@ -371,6 +398,10 @@ REVIEWED_SCANNERS = {
     "tools/scripts/script_test_inputs.py":
         "reads the configured ctest inventory and follows each script test's imports from "
         "there; script-test-inputs-drift runs in the pr-fast tier on the native gate",
+    "tools/scripts/changed_surface_script_families.py":
+        "reads the configured ctest inventory, test/ctest_script_inputs.json and the "
+        "tracked tree; changed-surface-script-families-drift runs in the native gate's "
+        "full suite",
     "tools/scripts/agent_capability_manifest.py":
         "reads core/*/include; its tools/scripts inputs route to the native "
         "build through AGENT_CAPABILITY_INSTALLED_SDK_PATTERNS",

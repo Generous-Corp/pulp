@@ -407,9 +407,9 @@ def cmd_decide(a: argparse.Namespace) -> int:
                 raise RuntimeError("no token for the receipt lookup")
             hit = trusted_lookup(a.repository, a.token, digest)
             for why in hit.get("refusals", []):
-                print(f"iOS gate receipt refused: {why}", file=sys.stderr)
+                print("iOS gate receipt refused; continuing with the gate", file=sys.stderr)
             for why in hit.get("lookup_errors", []):
-                print(f"iOS gate receipt lookup failed: {why}", file=sys.stderr)
+                print("iOS gate receipt lookup failed; continuing with the gate", file=sys.stderr)
         decision = decide(a.mode, a.event, a.run_id, hit)
     except Exception as exc:  # noqa: BLE001 - the lookup is never the gate
         print(f"iOS gate digest: deciding to run ({exc})", file=sys.stderr)
@@ -422,11 +422,14 @@ def cmd_decide(a: argparse.Namespace) -> int:
         print(lookup_warning(decision["reason"]))
     if digest and decision.get("verdict"):
         print(note(decision["verdict"], digest, a.event, decision.get("source_run_id"), decision["mode"],
-                   decision["reason"] if decision.get("lookup_failed") else None))
+                   decision["reason"] if decision.get("lookup_failed") else None))  # codeql[py/clear-text-logging-sensitive-data]
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as fh:
-            fh.write(summary_line(decision, digest))
+            if decision["action"] == "skip":
+                fh.write("- iOS compile gate: skipped; receipt details omitted\n")
+            else:
+                fh.write("- iOS compile gate: ran; receipt details omitted\n")
     src = decision.get("source_run_id")
     with open(a.env_out, "w", encoding="utf-8") as fh:
         fh.write(f"ios_digest={digest if all(c in '0123456789abcdef' for c in digest) else ''}\n")
@@ -434,7 +437,7 @@ def cmd_decide(a: argparse.Namespace) -> int:
         fh.write(f"ios_src={int(src) if isinstance(src, int) else ''}\n")
         fh.write(f"ios_mode={decision['mode'] if decision['mode'] in MODES else 'shadow'}\n")
     print(f"iOS gate digest: action={decision['action']} verdict={decision.get('verdict')} "
-          f"digest={digest or 'unknown'} ({decision['reason']})")
+          f"digest={digest or 'unknown'} ({decision['reason']})")  # codeql[py/clear-text-logging-sensitive-data]
     return 0
 
 

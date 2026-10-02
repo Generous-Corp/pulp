@@ -279,6 +279,17 @@ INCONCLUSIVE without `--subject` now says which file it fingerprinted and points
 here; it is not a coverage gap in the test and rerunning it will not change the
 answer. Interpreted tests (`python3 …`, `bash …`) take `--no-build` instead.
 
+### `pulp status` reads `.shipyard/config.toml` line by line, not as TOML
+
+`read_opt_in_shipyard_targets()` (`tools/cli/cli_sdk.cpp`) reports a target as
+opt-in only when `default = false` sits directly under `[targets.<name>]`. A
+header with a second dot (`[targets.mac.changed_surface_selection]`) is a
+sub-table and resets the scan; a `default` key there, or inside any other
+table, is not the target's. The CLI has no TOML parser, so keep the check that
+narrow rather than widening it to any `default` line. The shell-out assertion in
+`test_cli_shellout_pr.cpp` reads the checkout's real config, so it moves with
+`.shipyard/config.toml`: making `mac` default again fails that test on purpose.
+
 ### A CLI shell-out suite's build edge lives in `tools/cli/CMakeLists.txt`
 
 `add_subdirectory(test)` runs before `add_subdirectory(tools/cli)`, so a
@@ -339,8 +350,26 @@ rebuild. Keep the two sides in step:
   projection shares `changed_surface_inventory.py` with Shipyard's exact-head
   plan, also run `test_changed_surface_policy.py` and
   `test_run_changed_surface_tests.py` after touching it, and never change the
-  `EXCLUDED_*` filter constants from the projection side: they are pinned by
-  `.shipyard/changed-surface-inventory.json`.
+  `EXCLUDED_*` filter constants from the projection side: the bounded run's
+  base comparison and the authoritative suite both read them.
+
+### A tartci capacity denial retries for the agent floor; its QoS is mandatory
+
+`TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`) answers a
+`leases acquire` exit 75 for a **background-class** build
+(`PULP_BUILD_CLASS=background`) by retrying the same request with
+`--allow-floor`. An interactive build (the default) never takes the floor: it
+runs at normal QoS because someone is waiting on it. A
+host whose fleet profile sets `agent_floor_cores` grants a smaller lease that no
+other lease pays for; the lease then reports `floor()`, the granted size as
+`jobs()`, and the granted `qos()` (`utility` or `background`, per the host's
+`agent_floor_qos`). Every build call site passes `lease.floor()` as the
+`required` argument of `apply_agent_build_qos`, so a floor build runs under
+`taskpolicy -c utility` / `-b` even with `PULP_TARTCI_TASKPOLICY=0`: the QoS is
+the condition of the grant, not a preference. A new build-shaped command must
+do the same, or it will run a floor grant at default QoS and take CPU the host
+never agreed to give. A grant larger than the request, or one without a
+`lease_size_cores`, is released and treated as the original denial.
 
 ## Adding a CLI Command — Full Checklist
 

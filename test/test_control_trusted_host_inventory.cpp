@@ -94,7 +94,7 @@ class Fixture {
     }
     void write_manifest(std::string_view bytes) const {
         std::ofstream output(sidecar(), std::ios::binary | std::ios::trunc);
-        output << bytes;
+        output << bytes; // codeql[cpp/cleartext-storage-file] -- public fixture data.
 #ifndef _WIN32
         output.close();
         ::chmod(sidecar().c_str(), 0600);

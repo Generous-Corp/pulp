@@ -626,6 +626,8 @@
     "core/view",
     "core/view/include/pulp/view/widgets.hpp",
     "core/view/src/widgets.cpp",
+    "docs/status",
+    "test/fixtures",
     "test/harness/rt_allocation_probe.cpp",
     "test/test_cli_shellout.cpp",
     "test/test_host.cpp",
@@ -636,7 +638,9 @@
     "test/test_widgets_label.cpp",
     "tools/cli",
     "tools/cli/cmd_build.cpp",
+    "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_affected_targets.py"
    ],
    "kind": "python"
@@ -1022,12 +1026,15 @@
    "inputs": [
     "core/platform/include/pulp/platform/child_process.hpp",
     "core/signal/include/pulp/signal/signal.hpp",
+    "docs/status",
     "docs/status/dsp-capabilities.json",
     "docs/status/forge-catalog.json",
     "docs/status/sequencer-exposure.json",
     "test/CMakeLists.txt",
     "test/cmake/native_component_tests.cmake",
     "test/cmake/quality_tests.cmake",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
     "test/fixtures/child_process_input_fixture.cpp",
     "test/test_child_process.cpp",
     "test/test_child_process_standard_input.cpp",
@@ -1035,6 +1042,7 @@
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/cmake/toolchains/macos-arm64-osxcross.cmake",
     "tools/import-design/browser_capture/security.mjs",
     "tools/rack/generate.py",
@@ -1042,9 +1050,78 @@
     "tools/rack/provenance_check.py",
     "tools/rack/test_acid_preflight.py",
     "tools/rack/test_generate_safety.py",
+    "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/generate_widget_bridge_api.py",
+    "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_policy.py",
-    "tools/scripts/test_runner_topology_check.py"
+    "tools/scripts/test_runner_topology_check.py",
+    "tools/scripts/version_bump_check.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-registration-projection-selftest": {
+   "entry": "tools/scripts/test_changed_surface_registration_projection.py",
+   "inputs": [
+    "docs/status",
+    "test/fixtures",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/test_changed_surface_registration_projection.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-script-families-drift": {
+   "entry": "tools/scripts/changed_surface_script_families.py",
+   "inputs": [
+    "docs/status",
+    "test/fixtures",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/script_test_inputs.py"
+   ],
+   "kind": "python"
+  },
+  "changed-surface-script-families-selftest": {
+   "entry": "tools/scripts/test_changed_surface_script_families.py",
+   "inputs": [
+    ".github/ISSUE_TEMPLATE",
+    ".github/vellum-change-events",
+    ".github/vellum-expansion-watch-events",
+    ".github/workflows",
+    ".github/workflows/build-macos.yml",
+    ".github/workflows/build.yml",
+    "core/view/src/widgets.cpp",
+    "docs/status",
+    "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "tools/ci/source_selftests.json",
+    "tools/ci/wide_non_native_checks.json",
+    "tools/cli/cmd_run.cpp",
+    "tools/cmake",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/import-validation",
+    "tools/scripts",
+    "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/classify_changes.py",
+    "tools/scripts/docs_noise_lint.py",
+    "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/generated_version_bump_check.py",
+    "tools/scripts/resolve_classify_base.py",
+    "tools/scripts/script_test_inputs.py",
+    "tools/scripts/skills_doc_check.py",
+    "tools/scripts/test_changed_surface_script_families.py",
+    "tools/scripts/test_classify_changes.py",
+    "tools/scripts/test_wide_non_native.py",
+    "tools/scripts/wide_non_native.py",
+    "tools/testing"
    ],
    "kind": "python"
   },
@@ -1320,6 +1397,15 @@
    ],
    "kind": "python"
   },
+  "codemodel-digest-selftest": {
+   "entry": "tools/ci/test_codemodel_digest.py",
+   "inputs": [
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/test_codemodel_digest.py",
+    "tools/ci/testdata/codemodel_digest"
+   ],
+   "kind": "python"
+  },
   "codex-review-signal-selftest": {
    "entry": "tools/scripts/test_codex_review_signal.sh",
    "inputs": [
@@ -1487,8 +1573,12 @@
   "ctest-inventory-parity-self-check": {
    "entry": "tools/scripts/ctest_inventory_parity.py",
    "inputs": [
+    "docs/status",
+    "test/fixtures",
+    "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
-    "tools/scripts/ctest_inventory_parity.py"
+    "tools/scripts/ctest_inventory_parity.py",
+    "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
   },
@@ -3533,6 +3623,7 @@
     "test/CMakeLists.txt",
     "test/cmake/cmake_smoke_tests.cmake",
     "test/cmake/pr_fast_tests.cmake",
+    "test/fixtures",
     "tools/ci/build_dir_lock.py",
     "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
@@ -3543,6 +3634,7 @@
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake/PulpGpuAudioProviderIdentity.cmake",
     "tools/cmake/PulpPlugin.cmake",
+    "tools/cmake/PulpTestData.cmake",
     "tools/deps/manifest.json",
     "tools/motion/visual/requirements.lock",
     "tools/scripts/affected_targets.py",
@@ -3553,6 +3645,7 @@
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
     "tools/scripts/run_changed_surface_tests.py",
+    "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_build_time_report.py",
     "tools/scripts/test_generated_version_bump_check.py"
    ],
@@ -4820,13 +4913,21 @@
    "inputs": [
     ".github/rulesets/main-protection.json",
     ".github/workflows/build.yml",
+    "docs/status",
     "test/ctest_script_inputs.json",
+    "test/fixtures",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
     "tools/ci/reuse_record.py",
+    "tools/ci/test_codemodel_digest.py",
     "tools/ci/test_reuse_record.py",
+    "tools/ci/testdata/codemodel_digest",
     "tools/ci/testdata/reuse_record",
+    "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
-    "tools/scripts/protected_merge_receipt.py"
+    "tools/scripts/protected_merge_receipt.py",
+    "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
   },
@@ -5091,6 +5192,13 @@
     "tools/scripts/test_setup_source_cache.sh"
    ],
    "kind": "shell"
+  },
+  "shipyard-target-defaults-selftest": {
+   "entry": "tools/ci/test_shipyard_target_defaults.py",
+   "inputs": [
+    "tools/ci/test_shipyard_target_defaults.py"
+   ],
+   "kind": "python"
   },
   "silent-revert-guard-selftest": {
    "entry": "tools/scripts/test_silent_revert_guard.py",
@@ -5675,6 +5783,7 @@
     "tools/rack/test_generate_safety.py",
     "tools/scene3d/verify_renderer_probe_route_inventory_contract.py",
     "tools/scripts/agent_capability_manifest.py",
+    "tools/scripts/changed_surface_script_families.py",
     "tools/scripts/check_inspector_protocol_registry.py",
     "tools/scripts/check_skip_not_pass.py",
     "tools/scripts/consumption_census.py",

@@ -6677,6 +6677,19 @@ an abandoned `pulp-browser-capture-*` profile only when its ownership marker
 proves the recorded owner is gone; mismatched or ambiguous processes and
 profiles are preserved fail-closed.
 
+**Branded Chrome copies itself on every launch.** Google Chrome on macOS (not
+Chrome for Testing or Chromium) clones its whole app bundle into
+`$(dirname $(getconf DARWIN_USER_TEMP_DIR))/X/com.google.Chrome.code_sign_clone/`
+at startup (`MacAppCodeSignClone`) and deletes the copy only on an orderly exit.
+A headless browser torn down by signal, which is how every harness here ends,
+leaves ~1.4 GB (logical) behind: the capture integration suite left 4 per run,
+and m5 held 492. `browser_process.mjs`, `chrome_gradient_oracle.py` and
+`capture-webview-baseline.sh` pass `--disable-features=MacAppCodeSignClone`;
+any new direct Chrome launcher must too. Chrome honours only one
+`--disable-features`, so add the name to an existing list rather than a second
+flag, and do not append one to Playwright's `launch()` args, which carry their
+own list.
+
 ## Scoring a native panel — the instrument lies in two specific ways
 
 ### Chromium state matrix -> computed DesignIR -> native proof
@@ -7101,6 +7114,15 @@ metadata binding, yet hard-breaking it leaves the dropdown arrow-traversal and
 settings cases GREEN. The case that actually catches it is *every native
 dropdown dismisses by Escape and outside press*. Run that one, not just the
 arrow cases, whenever this function changes.
+
+**A dropdown's own button closes it.** Overlay dismissal has three reasons,
+all native and shared by every materialized design: Escape, a press outside
+the open overlay, and a press on the trigger that opened it
+(`OverlayPressTarget::trigger_closed`). The third is consumed, so the button's
+click cannot reopen the menu it just closed; a press on a DIFFERENT trigger
+still switches menus in one press. Do not add a per-design "close when the
+button is pressed again" handler: it races the native dismissal, and a design
+that writes its toggle as `setOpen(true)` closes anyway.
 
 **Editing the file at all:** the runtime is returned as a single template
 literal (`const entry = \`…\`; return entry;`), so a regex in the source needs

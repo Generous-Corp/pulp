@@ -192,6 +192,24 @@ bool custom_binding(fmt::ProcessBlock& block,
     // A transport-sensitive custom node (process_transport set once at compile)
     // gets the live host transport when the block carries one; otherwise the
     // transport-unaware `process` runs, byte-for-byte as before.
+    // An event-aware node runs first. Registration refuses a type declaring both
+    // an event and a transport callback, so this cannot shadow transport. The
+    // node's out buffer is cleared before dispatch and then handed over, so
+    // whatever the callback emits is the whole of this block's output and the
+    // executor's post-process drop check reads only the callback's own appends.
+    if (cctx != nullptr && cctx->process_events) {
+        if (ctx.node_midi_out != nullptr) {
+            // Fully, matching the per-node clear a plugin node gets: a partial
+            // clear would leave stale sysex or UMP for the executor's post-process
+            // drop check to read.
+            ctx.node_midi_out->clear();
+            ctx.node_midi_out->clear_sysex();
+            if (auto* ump = ctx.node_midi_out->ump()) ump->clear();
+        }
+        const CustomNodeEventBlock events{ctx.node_midi_in, ctx.node_midi_out};
+        cctx->process_events(out, in, static_cast<int>(frames), events);
+        return true;
+    }
     if (cctx != nullptr && cctx->process_transport && block.transport != nullptr) {
         cctx->process_transport(out, in, static_cast<int>(frames), *block.transport);
         return true;
@@ -430,6 +448,12 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                        .load_for = load_for,
                                        .custom_for = custom_for,
                                        .custom_transport_for = custom_transport_for,
+                                       // This positional overload predates the
+                                       // event lane and carries no event binder,
+                                       // so every Custom node it builds is
+                                       // event-unaware. Callers that need events
+                                       // must use the ExecutorSnapshotBinders
+                                       // overload.
                                        .plugin_latency_for = plugin_latency_for,
                                        .plugin_params_for = plugin_params_for,
                                        .parameter_events_for = parameter_events_for,
@@ -451,6 +475,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     const auto& load_for = binders.load_for;
     const auto& custom_for = binders.custom_for;
     const auto& custom_transport_for = binders.custom_transport_for;
+    const auto& custom_event_for = binders.custom_event_for;
     const auto& custom_latency_for = binders.custom_latency_for;
     const auto& plugin_latency_for = binders.plugin_latency_for;
     const auto& plugin_params_for = binders.plugin_params_for;
@@ -627,9 +652,14 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
             // result <=> transport_sensitive), so binding and partition agree.
             const CustomNodeTransportProcessFn* tfn =
                 custom_transport_for ? custom_transport_for(id) : nullptr;
+            // Resolved from the same snapshot map the reference walk reads, so
+            // the two paths never disagree about which nodes read events.
+            const CustomNodeEventProcessFn* efn =
+                custom_event_for ? custom_event_for(id) : nullptr;
             custom_ctx->push_back(CustomBindingContext{
                 fn ? *fn : CustomNodeProcessFn{},
-                tfn ? *tfn : CustomNodeTransportProcessFn{}});
+                tfn ? *tfn : CustomNodeTransportProcessFn{},
+                efn ? *efn : CustomNodeEventProcessFn{}});
             bindings.push_back(fmt::GraphRuntimeNodeBinding{
                 id, custom_binding, &custom_ctx->back(), /*required=*/false});
         } else {  // AudioInput / AudioOutput / MidiInput / MidiOutput — null
@@ -692,6 +722,8 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
         .custom_for = [&graph](NodeId id) { return graph.live_custom_processor(id); },
         .custom_transport_for =
             [&graph](NodeId id) { return graph.live_custom_transport_processor(id); },
+        .custom_event_for =
+            [&graph](NodeId id) { return graph.live_custom_event_processor(id); },
         .custom_latency_for =
             [&graph](NodeId id) { return graph.live_custom_latency_samples(id); },
     };

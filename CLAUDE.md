@@ -692,26 +692,25 @@ Full Pulp worktrees and their build directories are not temporary-file-sized:
 primary checkout as shown below. This is a per-machine storage decision:
 
 - M3 (`Daniels-Mac-Studio-m3`, formerly `Daniels-Mac-Studio`) must declare
-  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`. Stop rather than
-  falling back if that volume or declaration is unavailable. M3 keeps code,
-  builds, and Tart VMs on Workshop so its internal boot disk cannot fill.
-- M1, M5, and m5s (`Daniels-M5-Studio`) intentionally use their internal disk,
-  so a sibling of the primary checkout remains their default.
+  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`; m5s (`Daniels-M5-Studio`,
+  `Daniels-Mac-Studio-m5`) must declare `/Volumes/Atelier/Code/agent-worktrees`. Stop
+  rather than falling back if that volume or declaration is unavailable; code, builds,
+  and Tart VMs live there so the internal boot disk cannot fill.
+- M1 and M5 intentionally use their internal disk (sibling of the primary checkout).
 
 Before creating parallel lanes, report the resolved root and current free
 space. Do not move an active worktree; let its build finish, capture its git
 state/results, then remove that worktree through `git worktree remove`.
 
 ```bash
-# M3: exported persistently by the host; M1/M5/m5s: sibling default.
-if case "$(hostname -s)" in Daniels-Mac-Studio|Daniels-Mac-Studio-m3) true ;; *) false ;; esac; then
-  : "${PULP_WORKTREES_ROOT:?M3 requires PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees}"
-  [ "$PULP_WORKTREES_ROOT" = "/Volumes/Workshop/Code/agent-worktrees" ] || {
-    echo "M3 worktree root must be /Volumes/Workshop/Code/agent-worktrees" >&2
-    exit 1
-  }
-  mount | grep -F " on /Volumes/Workshop (" >/dev/null || {
-    echo "Workshop is not mounted; refusing to create an internal-disk fallback" >&2
+# M3/m5s: exported persistently by the host; M1/M5: sibling default.
+case "$(hostname -s)" in Daniels-Mac-Studio|Daniels-Mac-Studio-m3) vol=/Volumes/Workshop ;;
+  Daniels-M5-Studio|Daniels-Mac-Studio-m5) vol=/Volumes/Atelier ;; *) vol= ;; esac
+if [ -n "$vol" ]; then
+  : "${PULP_WORKTREES_ROOT:?this host requires PULP_WORKTREES_ROOT=$vol/Code/agent-worktrees}"
+  [ "$PULP_WORKTREES_ROOT" = "$vol/Code/agent-worktrees" ] || { echo "worktree root must be $vol/Code/agent-worktrees" >&2; exit 1; }
+  mount | grep -F " on $vol (" >/dev/null || {
+    echo "$vol is not mounted; refusing to create an internal-disk fallback" >&2
     exit 1
   }
 else
@@ -1165,10 +1164,10 @@ VMs produces, so they cannot hold a required gate there. They still run on
 push, on the nightly, and on the advisory `cross-platform-check` lane — which
 excludes only `validation|slow`, so a timing test lands there on x86-64 Linux
 and Windows and on arm64 Linux.
-`build.yml`'s required `macos` Actions job configures examples OFF. Shipyard's
-separate `[validation.default]` remains blocking and deliberately keeps
-`PULP_BUILD_EXAMPLES=ON` until the path-filtered `example-validation` context is
-promoted to a required check. That dedicated lane compiles
+`build.yml`'s required `macos` job configures examples OFF; examples compile on the
+advisory `example-validation` lane, and on Shipyard's opt-in local `mac` lane
+only when requested (`--target mac`), until that lane is promoted to required.
+That dedicated lane compiles
 the full examples tree on Linux and compiles plus runs the available hosted
 validators on macOS (auval and built-in CLAP dlopen checks; pluginval and
 clap-validator require an operator-dispatched advisory image);
@@ -2038,8 +2037,8 @@ shipyard ship                             # resume/operate on an existing Shipya
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
 1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
-2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and invokes Shipyard validation
-3. Shipyard validates the macOS lane through the local self-hosted runner path
+2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and arms auto-merge
+3. The required GitHub checks (the `macos` gate on the self-hosted Mac VMs, plus the other required contexts) decide whether it lands. Shipyard's local `mac` lane is opt-in (`default = false`) and runs only with `shipyard pr --target mac`; by default `shipyard pr` reports `validation: delegated` and writes no ship-state
 4. GitHub Actions runs Linux and Windows on GitHub-hosted runners as advisory checks
 5. Posts a closeout comment
 

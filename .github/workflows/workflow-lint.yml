@@ -42,6 +42,9 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/protected_merge_receipt.py'
       - 'tools/scripts/test_protected_merge_receipt.py'
+      - 'tools/scripts/required_check_machinery.py'
+      - 'tools/scripts/test_required_check_machinery.py'
+      - '.github/rulesets/**'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
@@ -139,6 +142,9 @@ on:
       - 'tools/scripts/test_sdk_provenance.py'
       - 'tools/scripts/protected_merge_receipt.py'
       - 'tools/scripts/test_protected_merge_receipt.py'
+      - 'tools/scripts/required_check_machinery.py'
+      - 'tools/scripts/test_required_check_machinery.py'
+      - '.github/rulesets/**'
       - 'tools/scripts/required_gate_liveness.py'
       - 'tools/scripts/test_required_gate_liveness.py'
       - 'tools/scripts/queue_age_watchdog.py'
@@ -362,6 +368,8 @@ jobs:
           python3 tools/scripts/test_fork_pr_runner_routing.py
           # Protected-validation receipts: evidence-backed issue and verify.
           python3 tools/scripts/test_protected_merge_receipt.py
+          # Advisory report naming files that decide required checks.
+          python3 tools/scripts/test_required_check_machinery.py
           python3 tools/scripts/test_visual_python_deps_step.py
           python3 tools/scripts/test_node_build_deps_step.py
           python3 tools/scripts/test_build_fetch_resilience.py

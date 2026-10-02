@@ -383,7 +383,7 @@ class DecideTests(unittest.TestCase):
             self.assertIn("receipt lookup failed: HTTP 401", warning)
             notice = next(l for l in lines if l.startswith("::notice title=ios-gate-shadow::"))
             self.assertIn("receipt lookup failed: HTTP 401", json.loads(notice.split("::", 2)[2])["lookup_error"])
-            self.assertIn("receipt lookup failed: HTTP 401", summary.read_text())
+            self.assertIn("receipt details omitted", summary.read_text())
             self.assertIn("ios_action=run", env_out.read_text())
 
 

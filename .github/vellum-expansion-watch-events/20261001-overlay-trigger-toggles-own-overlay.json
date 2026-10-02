@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261001-overlay-trigger-toggles-own-overlay",
+  "created_at": "2026-10-01T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the render-assets-and-backends family through the broad core/view/** selector and design-source-ingest through the web-compat preludes, the widget-bridge claimOverlay signature, and its regenerated bridge API artifacts. The Pulp-owned change adds a third overlay-dismissal reason beside Escape and an outside press: a press on the trigger that OPENED the open overlay closes it and is consumed, so a dropdown button toggles its own menu instead of closing it and letting the same press reopen it. route_press_to_active_overlay records the overlay trigger each press reaches and a following claim adopts it as the overlay's anchor (an instance id, never an address); View::set_overlay_anchor declares one explicitly. A press on a DIFFERENT trigger still switches menus in one press, an outside press and Escape are unchanged, and View::simulate_click on a root now routes through the same shared policy the platform hosts call. The web-compat semantic popup owner names its trigger through a new optional fourth claimOverlay argument so a keyboard-opened menu toggles too, and Enter/Space on a focused button trigger open and close its menu. Paint, layout, asset, renderer, canvas, Skia, Dawn, and authority behavior are unchanged, as is per-root ownership. Regressions are confined to test/test_overlay_routing.cpp and test/test_web_compat_overlay.cpp. No accepted expansion boundary moves and no Vellum implementation is changed; the only generated artifacts that move are the bridge signature regeneration. Registered watch-only so both families' coverage stays explicit about this overlay-dismissal change.",
+  "tests": [
+    "build/test/pulp-test-group-design-import-widgets [overlay]",
+    "build/test/pulp-test-group-design-import-widgets [toggle]",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

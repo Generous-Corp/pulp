@@ -685,6 +685,24 @@ flag, because the verifier runs from the base and an older one rejects an
 unknown argument. Add new verifier inputs the same way: accept the argument
 first, then enforce it once the accepting version is the protected base.
 
+### Required checks are only as trustworthy as the PR's workflow YAML
+
+A merge group runs the workflow YAML its PR carries, and every required context
+is posted by a GitHub Actions workflow. So a PR that edits `build.yml` can pass
+`macos` by forcing `macos_reused=true` or by rewriting the job. A base-sourced
+verifier called from PR-controlled control flow does not fix this: the PR
+decides whether it runs. Pinning a context to the Shipyard App does not fix it
+either, because that App's key is a repo secret that merge_group jobs can read.
+Only an org-level required workflow or required code-owner review would close
+it. By Daniel's decision on 2026-09-30 neither is used, and the risk is visible
+instead: the advisory `Required-check machinery (advisory)` check run
+(`required-check-machinery.yml`, `pull_request_target`, protected-main
+definition) names every changed file that can decide a required check, with
+conclusion `neutral` when it flags anything. A workflow token usually cannot
+read branch protection, so in practice it counts every workflow file. Do not
+propose an in-workflow "unforgeable" gate; read that status and review the
+named files.
+
 ### A PR head also runs the tests its own diff reaches, and that step gates
 
 Over the 7 days to 2026-09-28, 30 merge-group `macos` failures (about 560 gate
@@ -2077,6 +2095,12 @@ the first target (and before FetchContent). The launcher must exit with the
 linker's status and fall back to the plain command whenever it cannot write
 its record: recording may never fail a link.
 
+`codemodel-<sha>.json` digests only named codemodel fields: never hash a raw
+target record, whose `backtrace` indices move whenever an unrelated line of
+CMake moves. A ctest registration belongs to the target whose artifact is its
+`command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
+compiled test is missing and only script tests (owned by no target) appear.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
@@ -3054,6 +3078,27 @@ host and what needs it. Fix order: land the host in tartci first, then refresh
 the copy with `relay_contract_check.py --tartci <checkout> --write` in the Pulp
 PR. It counts literal URLs in macOS-capable `run:` scripts plus pip/npm/brew
 invocations; a download a TEST makes itself goes in its `CORPUS_HOSTS` list.
+
+## Reading `gate-git-transfer` / `gate-artifact` lines in a macos log
+
+A gate job on a tartci VM may take repository history and pinned archives from
+a read-only host cache (`TARTCI_ARTIFACT_CACHE`; tartci `docs/runbook.md`).
+Each path logs what it actually did, and those lines are the proof, not the
+step duration:
+
+- `gate-git-seed: alternates=… mirror_main=<sha>` means the checkout was seeded;
+  `no host mirror` means the host has no cache (expected on hosts not yet set up).
+- `gate-git-transfer: local_object_kib=N alternates=yes|no` after hydration is
+  the repository bytes the job pulled over the network. Without a mirror it is
+  ~113 MiB; with a current mirror a few hundred KiB. A large value with
+  `alternates=yes` means the host mirror is stale: run tartci
+  `scripts/artifact-cache.sh git-sync --repo Generous-Corp/pulp` on that host.
+- `gate-artifact: chrome source=cache|network` and Skia's `Copied from host
+  artifact cache` / `Downloaded N bytes` say where each pinned archive came from.
+  A `network` reading on a seeded host means that digest is not in the cache yet.
+
+A cache miss or a bad cache entry never fails the gate; it costs the download
+the job would have done anyway.
 
 ## `Error: Failed to download` in the required macOS gate is brew, not you
 
@@ -5763,6 +5808,26 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
+#### The local `mac` lane is opt-in: `shipyard pr` delegates to the required checks
+
+`[targets.mac]` in `.shipyard/config.toml` carries `default = false`, so
+`shipyard pr` and `shipyard ship` push, open or find the PR and arm auto-merge,
+then print `validation: delegated` (`--json`: `"verdict_owner":
+"required-checks"`) without queueing a job or writing ship-state. That is
+success, not a wedge: the required GitHub checks decide, and a Pulp PR with no
+ship-state is expected. `pulp status`, `shipyard status`, `ship-state
+list/show`, `landing` and `doctor` print
+`mac: opt-in, not run (GitHub required checks decide)`; "the mac lane never ran"
+is therefore not a break to diagnose. Run the local Debug + examples + full-ctest lane only
+when you want it: `shipyard pr --target mac`, `shipyard ship --pr <n> --target
+mac`, or `shipyard run --targets mac`. It became opt-in on 2026-09-30 (decisions
+contract row #9) after failing 64 of 64 runs in a week at about 42 host-hours on
+one Mac while PRs merged on the required checks anyway. Example compilation is
+advisory now (`example-validation`), until that context is promoted to required.
+Shipyard older than 0.242.0 ignores `default` and still runs the lane; upgrade
+(`shipyard update`) rather than passing `--skip-target mac`, which exits 2
+because `mac` is the only target.
+
 #### Shipyard cannot merge under a merge queue — it errors, and that is expected
 
 `shipyard pr` is still the right way to create a PR: it runs the gates, applies
@@ -6937,8 +7002,19 @@ reviewed CMake producer targets for narrowly reviewed families, medium-risk
 extended neighbors, and known full-required surfaces. Current bounded families
 include the Forge/DSP CLI projections, the isolated ChildProcess test source,
 and Forge Rack's `generate.py` plus its registered safety/endings contracts.
-The Rack family is deliberately exact: `patch.py`, provenance/preflight tools,
-and neighboring delivery skills still select full validation. Documentation
+The Rack family is deliberately exact: `patch.py` and provenance/preflight tools
+still select full validation. Top-level `tools/scripts/*.py` and
+`.agents/skills/*/SKILL.md` select through families generated from
+`test/ctest_script_inputs.json` by `changed_surface_script_families.py`, which
+also adds the whole-tree drift/lint/sync tests; a script native code, shell or
+CMake names stays full. After regenerating the script-inputs list, regenerate
+the block with `--build-dir <dir> --write`, or `changed-surface-script-families-drift`
+blocks the next change to a script or skill doc. A test whose outcome follows
+host load, the toolchain or host state rather than its inputs belongs in the
+`environment-bound` ctest label: the generator then runs it with every bounded
+script or skill change. Neither this skill nor
+`tools/scripts/test_*.py` forces full validation any more; CMake and
+`test/cmake/**` still do. Documentation
 under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`, and
 `docs/validation/**` runs the mandatory kernel and may omit the mobile compile
 gate; generated authority under `docs/status/**` remains fail-closed. Its protected-base execution
@@ -7020,59 +7096,31 @@ Keep these tests registered and runnable for hardware acceptance, main,
 release, or audit work; exclude them from default PR CTest selection rather
 than deleting them or weakening their assertions.
 
-When a change deliberately adds or removes CTest registrations, refresh the
-inventory contract in the same commit: update
-`.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
-count comment in `.shipyard/config.toml`, the pinned-count assertions in
-`tools/scripts/test_changed_surface_policy.py`, and the current inventory
-counts in `docs/guides/local-ci.md`. Derive the digest from the configured
-build's canonical inventory, then run
-`python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
-Otherwise the full suite can finish almost entirely green and fail only at the
-inventory self-test, forcing a needless second admission cycle.
+There is no inventory pin to refresh any more. A committed exact multiset
+(`.shipyard/changed-surface-inventory.json`) went stale with every test that
+landed on main: 21,960 pinned against 22,560 to 22,703 live, and
+`changed-surface-policy-selftest` failed 15 of 15 Shipyard-lane runs, so no
+bounded plan could ever execute. A bounded run now configures the protected
+base itself (`run_changed_surface_tests.base_projection`, a scratch worktree
+under the build directory, through the governor, cached per base and flags)
+and requires this tree's registrations to equal the base's, compared through
+`changed_surface_inventory.project_registrations`. Adding, removing or
+renaming a registration, including a Catch2 `TEST_CASE`, needs no extra edit:
+CMake and `test/cmake/**` already select the full suite, and a discovered
+executable's cases are one row keyed by the executable.
 
-`--build-dir` is the whole verification. Run bare, that script skips inventory
-validation entirely and still reports `Ran 28 tests ... OK` in well under a
-second against a contract that is provably stale — a green run proving only
-that the policy tables parse. Treat a sub-second pass as "not yet verified",
-and confirm the validating mode can fail: before re-pinning, the same command
-against the same build directory must report `inventory contract drift` naming
-the stale fields. A refresh whose validating run was never seen red has not
-been checked.
+`test_changed_surface_policy.py --build-dir build` now checks the live tree
+only: every registration has a command after the build, no composite identity
+is ambiguous, and every literal test the policy names exists. A run bare
+checks the policy tables alone.
 
-Deriving the inventory needs a complete build, not a configure: discovery
-registers per test case by executing the built binaries, so an incomplete tree
-yields a nonzero `placeholder_count` and junk counts. Verify
-`placeholder_count == 0` before trusting any number. `CMAKE_BUILD_TYPE` also
-feeds the toolchain digest, so the refresh must use the `build_flags` pinned in
-`.shipyard/config.toml` (Debug) — a Release tree cannot reproduce the contract.
-In a fresh worktree note that `setup.sh` configures the shared `build/`
-directory as Release with examples OFF and then runs the entire suite, so
-running it first both costs a full test cycle and leaves the cache wrong for
-this purpose; reconfigure explicitly with the pinned flags afterward and
-confirm the cache reads `Debug` before measuring.
-
-Merge the current target branch before deriving that inventory. A configured
-tree from a stale PR head can be internally consistent and still omit tests
-that landed on `main`; refreshing the pinned count and digest from it merely
-replaces one stale contract with another. Reconfigure after the merge, derive
-the inventory from that exact tree, and keep the JSON, Shipyard count, policy
-assertions, and local-CI guide in the same commit.
-
-Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
-too: discovery materializes each case as a registration even when no CMake
-manifest changed. A 2026-08-28 sequence added four cases and removed one after
-the last inventory refresh, leaving main's contract three registrations stale
-until the next unrelated full proof exposed it. Treat changes to discovered test
-sources exactly like explicit `add_test` changes for this refresh requirement.
-
-If two independent exact-head full proofs report the same inventory counts and
-digest while the candidate diff adds, removes, or renames no CTest registration,
-treat that agreement as current-main inventory drift rather than warm-build
-contamination. Derive the canonical manifest from either configured build,
-refresh all four mirrors above together, and rerun the inventory self-test. Do
-not spend another unchanged full-suite admission: a 2026-09-01 pair of proofs
-repeated the same 191-registration delta before this distinction was recorded.
+Reasons a bounded run selects the full suite instead: `inventory: base not
+recorded` (the base did not configure), `inventory: base mismatch` (the
+checkout's merge base is not the plan's base), a registration left without a
+command after the build, or any difference from the base. The receipt records
+`base_inventory_rows`, `base_inventory_name_only_rows` (rows whose program the
+unbuilt base could not list, compared on name, arguments and properties) and
+`base_inventory_configure_seconds`.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
@@ -8913,6 +8961,13 @@ the macOS `Install ccache (macOS)` step within minutes of each other
 because Namespace's runner image had drifted past the freshness
 window the brew preamble enforces. Adding `brew update --quiet`
 once unblocks the whole queue.
+
+`brew update (macOS)` now returns early when `ccache` and `ninja` are both on
+PATH: the only `brew install` calls in the macOS job are for those two tools,
+each guarded by `command -v`, so on a gate VM (both baked) the update bought
+nothing. Keep the guard in sync if a later step adds another `brew install`:
+that step's tool must join the `command -v` list, or a stale-config runner
+will fail its install.
 
 ## SignalGraph Phase 0 learnings (PR #153)
 

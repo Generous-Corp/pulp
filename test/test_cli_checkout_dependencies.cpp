@@ -1,4 +1,5 @@
 #include "../tools/cli/cli_common.hpp"
+#include "../tools/cli/cli_sdk.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -107,4 +108,45 @@ TEST_CASE("checkout dependency bootstrap has an explicit emergency bypass",
           "[cli][dependencies]") {
     ScopedEnv bypass("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
     REQUIRE(ensure_checkout_dependencies(fs::path("/definitely/not/a/pulp/checkout")) == 0);
+}
+
+TEST_CASE("opt-in Shipyard targets are read from the checkout config", "[cli][shipyard]") {
+    TempCheckout checkout;
+    fs::create_directories(checkout.root / ".shipyard");
+    const auto config = checkout.root / ".shipyard" / "config.toml";
+
+    SECTION("a missing config reports no opt-in target") {
+        REQUIRE(read_opt_in_shipyard_targets(checkout.root).empty());
+    }
+
+    SECTION("only `default = false` directly under [targets.<name>] counts") {
+        std::ofstream(config) << "[project]\n"
+                                 "default = false\n"
+                                 "\n"
+                                 "[targets.mac]\n"
+                                 "backend = \"local\"\n"
+                                 "default  = false   # opt-in\n"
+                                 "\n"
+                                 "[targets.mac.changed_surface_selection]\n"
+                                 "default = false\n"
+                                 "\n"
+                                 "[targets.linux]\n"
+                                 "default = true\n"
+                                 "\n"
+                                 "[targets.win]\n"
+                                 "# default = false\n"
+                                 "\n"
+                                 "[targets.ssh]\n"
+                                 "default = false\n";
+        REQUIRE(read_opt_in_shipyard_targets(checkout.root) ==
+                std::vector<std::string>{"mac", "ssh"});
+    }
+
+    SECTION("a sub-table cannot make its parent target opt-in") {
+        std::ofstream(config) << "[targets.mac]\n"
+                                 "backend = \"local\"\n"
+                                 "[targets.mac.changed_surface_selection]\n"
+                                 "default = false\n";
+        REQUIRE(read_opt_in_shipyard_targets(checkout.root).empty());
+    }
 }

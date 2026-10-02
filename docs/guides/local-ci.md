@@ -614,8 +614,34 @@ main. Shipyard PR validation instead arrives through `workflow_dispatch`, whose
 payload has no protected base SHA, so that path retains the explicit protected
 main fetch.
 
-The required `macos` gate runs the shipyard `mac` target
-(`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
+The Shipyard `mac` target (`.shipyard/config.toml`, `[targets.mac]` +
+`[validation.default]`) is a local Debug build with examples ON plus the full
+ctest run, on the Mac that runs `shipyard`. It is **opt-in**
+(`default = false`): `shipyard pr` and `shipyard ship` push the branch, open or
+find the PR and arm auto-merge, then leave the verdict to the required GitHub
+checks (`[governance] required_status_checks`) and print
+`validation: delegated`. Nothing is queued and no ship-state is written, so a
+missing ship-state for a Pulp PR is expected, not an orphan. The lane is never
+silently absent: `pulp status`, `shipyard status`, `shipyard ship-state
+list/show`, `shipyard landing` and `shipyard doctor` all print
+`mac: opt-in, not run (GitHub required checks decide)`, and Shipyard never
+probes it, counts it in landability, or reports it as a validation gap unless
+it is requested. Request the lane explicitly when you want it:
+
+```bash
+shipyard pr --target mac                  # push/open/arm, then also run the local lane
+shipyard ship --pr <n> --target mac       # run it on an existing PR
+shipyard run --targets mac                # validate the current branch only
+```
+
+It was made opt-in on 2026-09-30 (decisions contract row #9): after 2026-09-02
+it passed 1 of 147 runs, failed 64 of 64 in the week before the change at about
+42 host-hours on one Mac, and PRs merged on the required checks regardless.
+Opt-in needs Shipyard 0.242.0 or later, which fleet hosts receive through
+Shipyard's own auto-update; an older binary ignores the key and runs the lane as
+before.
+
+When requested, its `test` step is
 `ctest ... --repeat until-pass:2 --label-exclude "validation|slow|performance|bench|quality-lab"`
 — it excludes the long `slow` tests, the example plugins' `validation`
 format-validators (reported by the path-filtered, currently advisory
@@ -638,8 +664,8 @@ and fails before the hour-long Debug build if neither exists.
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned
-shipyard run                              # validate current branch
-shipyard pr                               # create, track, validate, and merge on green
+shipyard run --targets mac                # validate current branch on the opt-in local lane
+shipyard pr                               # create/track the PR and arm auto-merge; required checks decide
 shipyard cloud run build <branch>         # dispatch to Namespace
 shipyard rescue <PR>                      # recover a wedged PR
 shipyard runner watch --kill-hung-workers # prevent self-hosted runner wedges
@@ -963,7 +989,12 @@ the link arguments under `<build>/link-members/` (the map, megabytes of
 symbol table, is deleted). The linked bytes are identical with and without
 it. `link-members-<sha>.json` in the record then lists, per executable, the
 archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`).
+force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+(`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
+source list, compile groups, link line and the ctest registrations that run
+its artifact, read from the file-API codemodel reply the configure step
+requests, with build and source roots written as `<build>/` and `<src>/` so
+the same configuration digests identically on every VM.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
@@ -1567,6 +1598,38 @@ here removes a flake without removing any coverage.
 When triaging a red `macos`, `Error: Failed to download` in the brew step is
 therefore no longer a cause — read past it to the build and ctest output.
 
+The update itself is skipped when `ccache` and `ninja` are both already on
+PATH, which is every tartci gate VM (the golden bakes both). Nothing later in
+the job runs `brew install` there, so the update only downloaded a portable
+Ruby and the Homebrew API data on every gate job. A runner missing either tool
+(Namespace, GitHub-hosted) still updates before installing.
+
+## Repository history and pinned archives from the tartci host cache
+
+A gate VM is fresh for every job, so without help each job re-downloads the
+same bytes: a depth-2 checkout (~56 MiB) and the GPU-provenance `--unshallow`
+(~57 MiB), the pinned Chrome for Testing archive (187 MB), the prebuilt Skia
+archive (57 MB) and, when the iOS gate runs, the iOS simulator Skia slice
+(69 MB). tartci can mount a read-only host artifact cache and name it in
+`TARTCI_ARTIFACT_CACHE` (tartci `docs/runbook.md`, `scripts/artifact-cache.sh`).
+`build.yml` uses it only as an accelerator:
+
+- `Seed the checkout from the host git mirror` runs before `actions/checkout`
+  and pre-creates the workspace repository with
+  `$TARTCI_ARTIFACT_CACHE/git/<owner>/<repo>.git/objects` as a Git alternate.
+  checkout@v5 keeps a repository whose origin URL matches and deletes anything
+  else, so with no cache, a warm workspace or any failure the job does the
+  ordinary full fetch. The hydration step prints `gate-git-transfer:
+  local_object_kib=N alternates=yes|no`: the repository bytes this job pulled.
+- The Chrome step and `fetch_skia_for_release.py` look up the digest they
+  already pin under `$TARTCI_ARTIFACT_CACHE/sha256/`, re-verify the bytes and
+  download on a miss or mismatch. They log `gate-artifact: chrome
+  source=cache|network bytes=N` and `Copied from host artifact cache` /
+  `Downloaded N bytes`.
+
+A pin bump therefore never breaks the gate; until the hosts' caches hold the new
+archive, jobs download it as before.
+
 ## The visual-analysis Python dependencies are installed, then proved
 
 `build.yml` installs `tools/motion/visual/requirements.txt` into the
@@ -1859,10 +1922,28 @@ aggregate trials without reconstructing the originating agent. A receipt is
 alone does not prove both suites found the same failure. Receipt publication
 fsyncs both the file and containing directory.
 
-The checked-in macOS Debug inventory binds the exact filtered CTest census
-recorded in `.shipyard/changed-surface-inventory.json`. Any topology change
-must regenerate the canonical multiset contract and update the matching policy
-count together; editing only the count cannot satisfy the digest check.
+Nothing pins the exact CTest inventory. A bounded run configures the protected
+base commit (the merge base the plan verified) in a scratch worktree under the
+build directory, with the same generator, Python and policy `build_flags`, and
+requires this tree's registrations to equal the base's. A configure lists every
+registration without building, so this costs one configure (about 20 to 30
+seconds through the build governor), cached per base and flag set. The
+comparison uses the configuration-neutral projection in
+`changed_surface_inventory.project_registrations`: source, build and Python
+paths and the build type become tokens, discovered Catch2 cases are one row per
+executable (their case list is the executable's content, not its
+registration), and a build-tree program is folded to one token because an
+unbuilt base lists none; the run's receipt counts those name-only rows. A base
+that cannot be configured, a checkout whose merge base is not the plan's base,
+a registration left without a command after the build, or any difference from
+the base selects the full suite with the reason (`inventory: base not
+recorded`, `inventory: base mismatch`). A bounded plan never carries a
+registration change of its own: CMake and `test/cmake/**` are test-topology
+paths, which select the full suite. The required gate also records the same
+projection as `registrations-<sha>.json` in each job's `reuse-record-macos`
+artifact, `recordable` only when no registration lacks a command, for
+measurement; it is not on the validation path, because Shipyard's validation
+commands carry no GitHub credentials.
 
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
@@ -1870,11 +1951,43 @@ security, provenance, packaging, dependency, policy, and test-topology changes
 require the full suite; unknown paths fail safely to full as well. Reviewed
 bounded families cover Forge/DSP catalog projection commands, the isolated
 ChildProcess test source, and the Forge Rack module generator plus its safety
-contract. Each family names literal affected tests and any required extended
+contract; generated families cover Python tool scripts and skill docs (below). Each family names literal affected tests and any required extended
 tests; neighboring paths remain full. The declared inventory is tied to the required
 macOS Debug configuration, which enables
 `PULP_CHANGED_SURFACE_INVENTORY_TARGET`; optional Linux targets do not assert
 that platform-specific cardinality.
+
+Python tool scripts and skill docs select through generated families.
+`tools/scripts/changed_surface_script_families.py` reads
+`test/ctest_script_inputs.json` (each script-driven ctest's entry and the
+inputs it imports or names) and writes one family per group of top-level
+`tools/scripts/*.py` files sharing the same readers into the marked block of
+`.shipyard/config.toml`, plus `agent-skill-docs` for
+`.agents/skills/*/SKILL.md` and a `script-surface-whole-tree` family that adds
+the drift, lint, registry, sync, guard, census, inventory and probe tests to
+any of those changes. A `script-surface-environment-bound` family likewise
+adds every declared script test with a `RESOURCE_LOCK` or a `gpu`,
+`browser-capture`, `audio-device` or `environment-bound` label: their failures
+follow the host, not the diff. Label a test `environment-bound` when its
+outcome depends on timing, the toolchain or host state and no other label
+says so. A script stays unmapped, and so selects the full suite,
+when native code, a shell or JavaScript file, or CMake (other than as a test's
+entry) names it, transitively; when a reader needs a CTest fixture or runs a
+build product no non-example target produces; or when nothing in the
+authoritative corpus reads it. Each family also builds the targets whose
+products its readers run. A Python test script's body is not CTest
+registration, so `tools/scripts/test_*.py` is no longer a test-topology path;
+`test/cmake/**` and CMake files still are. The skill and guide prose that
+describe this policy are not policy inputs either. The generator, the
+script-inputs list and the inventory contract are.
+
+`changed-surface-script-families-drift` (macOS) regenerates the block and
+compares it. Like `script-test-inputs-drift` it is diff-scoped: drift blocks a
+change touching a script, a skill doc, the script-inputs list, the generator or
+the config, reports otherwise, and never fails a merge group. Regenerate with
+`python3 tools/scripts/changed_surface_script_families.py --build-dir <dir> --write`
+after the script-inputs list. The build directory needs a CMake file-API
+codemodel reply; without one the check reports a skip.
 
 Documentation under `docs/guides/**`, `docs/reference/**`, `docs/examples/**`,
 and `docs/validation/**` selects only that mandatory kernel. Generated or
@@ -1917,27 +2030,19 @@ their existing event policy remains unchanged. Keep the condition inside the
 required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
-CTest display names are not identities: the authoritative target currently has
-21,960 registrations but only 21,900 unique names. The inventory validator
+CTest display names are not identities: the authoritative target registers
+some names more than once. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
-Literal selection expands every composite with the requested name. The pinned
-`.shipyard/changed-surface-inventory.json` count and digest must match exactly;
-missing commands, duplicate properties, duplicate composite identities, or
-digest drift require the full suite. The contract also pins stable target
-semantics. Source-head, source-tree, and toolchain provenance remain in the
-emitted manifest for comparison, but otherwise-valid Python or CTest patch
-updates are not repository-contract failures. External executables use a
-portable basename in the registration fingerprint while the toolchain digest
-binds their raw and resolved paths plus a bounded content digest, so same-named
-tools remain distinguishable. Raw worktree paths and CTest registration order
-are intentionally excluded from portable identity.
-
-Regenerate this contract only after merging the current target branch and
-reconfiguring its exact tree. The JSON inventory, Shipyard `full_test_count`,
-pinned policy assertions, and these documented counts move together; deriving
-any of them from a stale PR build can silently omit tests already present on
-`main`.
+Literal selection expands every composite with the requested name; missing
+commands, duplicate properties or duplicate composite identities require the
+full suite. Source-head, source-tree, and toolchain provenance remain in the
+emitted manifest for comparison. External executables use a portable basename
+in the registration fingerprint while the toolchain digest binds their raw and
+resolved paths plus a bounded content digest, so same-named tools remain
+distinguishable. Raw worktree paths and CTest registration order are
+intentionally excluded from portable identity. `full_test_count` is an upper
+bound for the declared literal tests and receipt telemetry, not a pin.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the
@@ -2701,11 +2806,9 @@ records whether they ran: the anchored `^slow$` label set means they did. The
 reuse step passes the group's own classification to the verifier as
 `--affected-slow-required` (an empty classifier output counts as `true`), but
 only when the protected-base verifier accepts that flag. A group that requires
-the proofs while the receipt's run skipped them is reported as a
-`::notice::protected receipt: merge group requires the slow-affected proofs
-...` line on an otherwise successful reuse. The verifier does not refuse on it,
-so those notices give the would-refuse count to read before refusal is
-switched on.
+the proofs while the receipt's run skipped them is refused with "merge group
+requires the slow-affected proofs but the receipt's run did not execute them",
+and a verifier given no requirement treats the proofs as required.
 
 A merge group whose commit is not two-parent is refused for both targets with
 the parent count it actually has (or "parents could not be read" when the
@@ -2721,6 +2824,44 @@ annotation: `fast` on a pull-request head (only the `pr-fast` label tier runs
 there; the full suite runs in the merge queue), `full` where the full suite
 ran, and `receipt-reused` / `not-required` from the no-suite bootstraps, so a
 fast-tier green is never read as full validation.
+
+### Required checks trust the pull request's own workflow YAML
+
+Every required context on `main` is posted by a GitHub Actions workflow, and a
+merge group runs the workflow YAML its pull request carries. A pull request
+that edits `build.yml` can therefore decide its own `macos` result, by forcing
+`macos_reused=true` or by rewriting the job outright. Only the receipt verifier
+is loaded from the protected base, and the pull request controls whether it is
+called. No check inside the repository can close this: anything a workflow
+runs, the pull request can remove. By Daniel's decision on 2026-09-30, required
+contexts are only as trustworthy as the pull request's own workflow YAML. There
+is no org-level required workflow and no required code-owner review.
+
+What CI does instead is make it visible. `required-check-machinery.yml` runs on
+`pull_request_target`, so its definition and its script
+(`tools/scripts/required_check_machinery.py`) come from protected `main`. The
+pull request's head is fetched only to diff it. It posts the advisory, never
+required, check run `Required-check machinery (advisory)`: conclusion `neutral`
+titled `touches required-check machinery: <files>` when anything is flagged,
+`success` titled `touches no required-check machinery` otherwise, so a flagged
+pull request is visibly different without reading as a failure to chase. The
+check's summary and the run summary list each flagged file with its reason, and
+a flagged run also emits a `::warning`. If the report cannot be computed the
+job fails and posts no check run.
+
+| Reason | Paths |
+|---|---|
+| `receipt reuse` | `build.yml`, `.agents/contract.toml`, `classify_changes.py`, `protected_merge_receipt.py`, `tools/ci/ctest_gate_args.py` |
+| `required-check workflow` | the workflow mapped to each required context in the ruleset, plus the local actions and reusable workflows it calls |
+| `merge rules` | `.github/rulesets/`, `.github/CODEOWNERS`, and the report's own workflow and script |
+
+The required contexts come from the live branch protection when the workflow
+token can read it. When it cannot (reading branch protection needs
+administration access, which a workflow token does not normally have), or the
+list is empty, every `.github/workflows` and `.github/actions` file is counted
+and the check's summary says so. A required context with no mapped producer
+widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
+itself, and review those files before it is enqueued.
 
 ## A2T evidence receipts get a nonterminal required-job attestation
 

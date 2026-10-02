@@ -27,6 +27,10 @@ Or run a single cluster module directly:
     python3 tools/scripts/test_skill_sync.py
     python3 tools/scripts/test_skill_path_map.py
     python3 tools/scripts/test_skill_path_map_lint.py
+    python3 tools/scripts/test_skill_sync_check.py
+    python3 tools/scripts/test_skill_sync_check_extra.py
+    python3 tools/scripts/test_version_bump_check_extra.py
+    python3 tools/scripts/test_version_bump_model_b.py
     python3 tools/scripts/test_gates_script_inputs.py
 
 Not every module here uses a throwaway repo: the skill-path-map suites
@@ -87,6 +91,25 @@ from test_skill_path_map_lint import (  # noqa: E402,F401
     SchemaRuleTests,
     SubmoduleRuleTests,
 )
+
+# Direct unit suites for the two gate CLIs. The required check runs only what
+# this file imports, so a gate test module missing from this list runs nowhere
+# that can block a pull request (the coverage lane is advisory).
+from test_skill_sync_check import SkillSyncCheckTests  # noqa: E402,F401
+from test_skill_sync_check_extra import (  # noqa: E402,F401
+    ComputeAndRenderTests,
+    GitAndTrailerTests,
+    MatchingAndSelfCheckTests,
+    MainTests as SkillSyncCheckMainTests,
+)
+from test_version_bump_check_extra import (  # noqa: E402,F401
+    AssessmentReportApplyTests,
+    GitAndHeuristicTests,
+    MainTests as VersionBumpCheckMainTests,
+    PerSurfaceTrailerSkipRequiresReason,
+    VersionFileIoTests,
+)
+from test_version_bump_model_b import ModelBGateTests  # noqa: E402,F401
 
 
 # ── Entry ──────────────────────────────────────────────────────────────

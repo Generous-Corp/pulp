@@ -219,8 +219,8 @@ guards = ["tools/scripts/gpu_trace_overhead_acceptance.py", "tools/scripts/gpu_t
 id = 9
 layer = "pulp"
 tags = ["debug-lane", "mac-lane", "release"]
-title = "One unoptimised (-O0) full-suite lane exists on purpose: .github/workflows/debug-o0.yml, clean on GitHub-hosted, nightly on main and dispatchable per PR head. The Shipyard macOS host lane builds DEBUG until that lane has been green on main."
-why = "-O0 caught a real ODR/UB (snap_to_zero) that a Release build masks by inlining. Run once per worktree on the shared host it costs a second full Debug tree per worktree and ~27 min of up to 12 cores per run, while its reds were not acted on (134 of 180 mapped PRs merged over a red local lane)."
+title = "One unoptimised (-O0) full-suite lane exists on purpose: .github/workflows/debug-o0.yml, clean on GitHub-hosted, nightly on main and dispatchable per PR head. The Shipyard macOS host lane is opt-in, not default (`[targets.mac] default = false`, run with `--target mac`), and when requested it builds DEBUG until debug-o0.yml has been green on main."
+why = "-O0 caught a real ODR/UB (snap_to_zero) that a Release build masks by inlining. Run once per worktree on the shared host it costs a second full Debug tree per worktree and ~27 min of up to 12 cores per run, while its reds were not acted on (134 of 180 mapped PRs merged over a red local lane). On 2026-09-30 it was made opt-in: 1 of 147 runs passed after 2026-09-02, 64 of 64 failed in the preceding week at ~42 host-hours on one Mac, and PRs merged on the required GitHub checks regardless, so running it by default bought cost without a verdict anyone used."
 do_not = "Removing the -O0 lane, running it in a warm self-hosted build dir (row #8), or flipping the Shipyard host lane to Release before debug-o0.yml is green on main and the changed-surface inventory contract is re-pinned for the Release lane."
 guards = [".shipyard/config.toml", ".github/workflows/**"]
 

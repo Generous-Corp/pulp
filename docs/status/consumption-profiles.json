@@ -366,6 +366,7 @@
       "pulp/gpu_audio/gpu_audio_capability.hpp",
       "pulp/gpu_audio/gpu_audio_node.hpp",
       "pulp/gpu_audio/gpu_audio_program.hpp",
+      "pulp/gpu_audio/gpu_audio_status.hpp",
       "pulp/gpu_audio/gpu_audio_transport.hpp",
       "pulp/gpu_audio/gpu_convolution_reverb.hpp",
       "pulp/gpu_audio/gpu_convolver.hpp",
@@ -397,6 +398,7 @@
       "pulp/host/baked_graph_processor.hpp",
       "pulp/host/crossfade_plugin_slot.hpp",
       "pulp/host/custom_node_diagnostics.hpp",
+      "pulp/host/custom_node_events.hpp",
       "pulp/host/custom_node_type.hpp",
       "pulp/host/detail/forge_drum_catalog_descriptor.hpp",
       "pulp/host/detail/forge_drum_catalog_impl.hpp",
@@ -12529,7 +12531,7 @@
       },
       "build_scope": {
         "PULP_BUILD_TESTS": "ON",
-        "PULP_BUILD_EXAMPLES": "OFF"
+        "PULP_BUILD_EXAMPLES": "ON"
       },
       "summary": {
         "installed_target_count": 70,
@@ -12675,6 +12677,10 @@
             "closure_node_count": 23
           },
           {
+            "exported_as": "Pulp::inspect-protocol",
+            "closure_node_count": 23
+          },
+          {
             "exported_as": "Pulp::midi",
             "closure_node_count": 23
           },
@@ -12708,10 +12714,6 @@
           },
           {
             "exported_as": "Pulp::inspect-authoring",
-            "closure_node_count": 19
-          },
-          {
-            "exported_as": "Pulp::inspect-protocol",
             "closure_node_count": 19
           },
           {
@@ -14763,8 +14765,9 @@
           "type": "STATIC_LIBRARY",
           "source_dir": "inspect",
           "closure": {
-            "node_count": 19,
+            "node_count": 23,
             "pulp_targets": [
+              "pulp-events",
               "pulp-foundation",
               "pulp-platform",
               "pulp-runtime",
@@ -14783,7 +14786,7 @@
             ]
           },
           "external_dependencies": {
-            "count": 15,
+            "count": 18,
             "third_party_targets": [
               "everest",
               "hwy",
@@ -14801,8 +14804,11 @@
               "Accelerate",
               "Cocoa",
               "CoreFoundation",
+              "CoreServices",
+              "Foundation",
               "Security",
-              "UniformTypeIdentifiers"
+              "UniformTypeIdentifiers",
+              "UserNotifications"
             ],
             "system_libraries": [
               "bsm"
@@ -14815,6 +14821,7 @@
             "generated_include_roots": 0
           },
           "direct_dependencies": [
+            "pulp-events",
             "pulp-runtime"
           ]
         },

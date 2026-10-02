@@ -215,6 +215,8 @@ if(Python3_Interpreter_FOUND)
     if(UNIX)
         add_test(NAME process-deadline-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_run_with_deadline.py")
+        # Wall-clock deadlines: its outcome follows host load, not its inputs.
+        set_property(TEST process-deadline-selftest APPEND PROPERTY LABELS environment-bound)
     endif()
 
     # Reskinnability ratchet: fail on a NEW hardcoded theme color.
@@ -678,6 +680,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Per-target codemodel digests in the reuse record: relocation
+        # stability and which part moves with which change.
+        add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_codemodel_digest.py")
+        set_tests_properties(codemodel-digest-selftest PROPERTIES TIMEOUT 120)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.
@@ -1159,6 +1166,21 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME changed-surface-policy-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_policy.py"
             ${_changed_surface_policy_args})
+        add_test(NAME changed-surface-script-families-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_script_families.py")
+        add_test(NAME changed-surface-registration-projection-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_registration_projection.py")
+        # The generated script families in .shipyard/config.toml must match
+        # test/ctest_script_inputs.json and the tree. The selector is declared
+        # for the macOS target only, and the script-inputs list is written
+        # from the macOS configuration.
+        if(APPLE)
+            add_test(NAME changed-surface-script-families-drift COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/changed_surface_script_families.py"
+                --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
+            set_tests_properties(changed-surface-script-families-drift PROPERTIES
+                TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endif()
     endif()
 
     # Affected-target selector behind the focused `pulp build/dev/loop/test`
@@ -1311,6 +1333,8 @@ if(Python3_Interpreter_FOUND)
             COMMAND ${Python3_EXECUTABLE} -m unittest test_clean_worktree_builds
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/scripts")
         set_tests_properties(clean-worktree-builds-selftest PROPERTIES TIMEOUT 600)
+        # Stages live processes and worktrees on the host it runs on.
+        set_property(TEST clean-worktree-builds-selftest APPEND PROPERTY LABELS environment-bound)
 
         # clean_worktrees.sh removes whole worktrees, so its guard is the one
         # that must never be merely present: the suite stages a live process and

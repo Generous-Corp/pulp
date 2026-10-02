@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import py_compile
 import subprocess
 import sys
@@ -15,6 +16,14 @@ from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent.parent
+# Planted negatives name commits that do not exist ("f" * 40 and friends). In a
+# partial clone (`--filter=blob:none`, the usual agent checkout) Git answers a
+# missing object by fetching it from the promisor remote, so each of those
+# reads waited on the network: the suite took minutes locally and timed out
+# under load, while CI's full checkout answers in milliseconds. With lazy fetch
+# off a missing object is simply missing, which is what the validator must
+# report. Child processes inherit it.
+os.environ["GIT_NO_LAZY_FETCH"] = "1"
 sys.path.insert(0, str(SCRIPT_DIR))
 import gpu_first_visible_a3_acceptance as a3  # noqa: E402
 import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402

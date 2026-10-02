@@ -4,6 +4,8 @@
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 
+#include <vector>
+
 namespace pulp::view {
 namespace {
 
@@ -49,6 +51,62 @@ bool press_hits_overlay_trigger(View& root, Point root_pt) {
     return false;
 }
 
+// One link of the chain a press lands on, captured BEFORE any dismissal
+// callback runs. Those callbacks are application code that routinely unmounts
+// views, so the chain is kept as identities and flags, never as pointers to
+// walk later.
+struct PressChainLink {
+    std::uint64_t id = 0;
+    bool trigger = false;
+};
+
+std::vector<PressChainLink> capture_press_chain(View& root, Point root_pt) {
+    std::vector<PressChainLink> chain;
+    for (View* v = root.hit_test(root_pt); v != nullptr; v = v->parent()) {
+        chain.push_back({v->import_binding_instance_id(), v->overlay_trigger()});
+        if (v == &root) break;
+    }
+    return chain;
+}
+
+// Whether the press lands on the control that OPENED `overlay`, which turns it
+// from "switch to another menu" into "close this one". Nearest wins: when a
+// different trigger sits between the hit view and the anchor — a dropdown
+// inside a toolbar that is itself an anchor — the press means that nearer
+// trigger, exactly as the press would if no overlay were open.
+bool press_hits_own_anchor(const View& overlay,
+                           const std::vector<PressChainLink>& chain) {
+    const std::uint64_t anchor = overlay.overlay_anchor_id();
+    if (anchor == 0) return false;
+    for (const auto& link : chain) {
+        if (link.id == anchor) return true;
+        if (link.trigger) return false;
+    }
+    return false;
+}
+
+// The nearest overlay trigger at or above `hit`, not walking past `stop`.
+View* nearest_overlay_trigger(View* hit, const View* stop) {
+    for (View* v = hit; v != nullptr; v = v->parent()) {
+        if (v->overlay_trigger()) return v;
+        if (v == stop) break;
+    }
+    return nullptr;
+}
+
+// Remember which trigger, if any, this press is about to reach, so an overlay
+// its handler claims knows what opened it (`View::claim_overlay`). Every
+// press overwrites the record, so it never outlives the gesture that set it
+// by more than one press.
+void note_press_opener(View& root, View* opener) {
+    if (opener == nullptr) {
+        if (auto* state = root.existing_interaction())
+            state->pending_overlay_opener = 0;
+        return;
+    }
+    root.interaction().pending_overlay_opener = opener->import_binding_instance_id();
+}
+
 }  // namespace
 
 const OverlayDismissalPolicy& overlay_dismissal_policy() {
@@ -59,7 +117,35 @@ void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy) {
     mutable_policy() = policy;
 }
 
+namespace {
+
+OverlayPressTarget route_press_through_overlays(View& root, Point root_pt);
+
+}  // namespace
+
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
+    OverlayPressTarget result = route_press_through_overlays(root, root_pt);
+    // Record the trigger this press is delivered to — after the dismissals,
+    // because they may have changed what is under the point. A consumed press
+    // is delivered to nothing, so it opens nothing.
+    View* opener = nullptr;
+    if (!result.consume_press) {
+        if (result.routing == OverlayPressRouting::routed) {
+            View* overlay = nullptr;
+            if (auto* state = root.existing_interaction())
+                overlay = state->active_overlay;
+            opener = nearest_overlay_trigger(result.target, overlay);
+        } else {
+            opener = nearest_overlay_trigger(root.hit_test(root_pt), &root);
+        }
+    }
+    note_press_opener(root, opener);
+    return result;
+}
+
+namespace {
+
+OverlayPressTarget route_press_through_overlays(View& root, Point root_pt) {
     // Walk the overlay stack from the top. An entry that contains the press
     // wins; an entry that does not is dismissed, revealing the one below it.
     // That single loop is what makes a nest of menus behave: pressing a parent
@@ -68,6 +154,11 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
     // to whatever sibling pixel sits under the submenu.
     bool dismissed_any = false;
     bool consume_press = false;
+    bool trigger_closed = false;
+    // The hit chain, captured once before anything is dismissed; filled on
+    // first use so a press with no overlay open costs no extra hit test.
+    std::vector<PressChainLink> chain;
+    bool chain_captured = false;
     // Whether the press lands outside EVERY open overlay, read before any
     // dismissal callback can change the tree. Only then is a press on a
     // nest one "outside the menu" rather than "on the menu under a submenu".
@@ -101,7 +192,8 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
                     overlay->hit_test(point_to_local(root_pt, overlay, &root)))
                 return {OverlayPressRouting::routed, sub};
             if (dismissed_any)
-                return {OverlayPressRouting::dismissed, nullptr, consume_press};
+                return {OverlayPressRouting::dismissed, nullptr, consume_press,
+                        trigger_closed};
             return {OverlayPressRouting::not_hittable, nullptr};
         }
 
@@ -115,8 +207,22 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         // callback is arbitrary application code that routinely unmounts the
         // popover and reflows what is underneath, so anything asked afterwards
         // answers about a different tree than the one the user pressed on.
-        const bool entry_consumes = overlay->overlay_consumes_outside_click() &&
-                                    !press_hits_overlay_trigger(root, root_pt);
+        //
+        // A press on the overlay's OWN trigger is spent on the close whatever
+        // the overlay's consumption setting: delivered, the trigger's handler
+        // would run on the same press and open the menu it just closed — the
+        // pointerdown-closes / click-reopens race that kept a dropdown button
+        // from toggling. Dropping the whole pointer sequence covers a handler
+        // bound to the press and one bound to the click alike.
+        if (!chain_captured) {
+            chain = capture_press_chain(root, root_pt);
+            chain_captured = true;
+        }
+        const bool own_trigger = press_hits_own_anchor(*overlay, chain);
+        trigger_closed = trigger_closed || own_trigger;
+        const bool entry_consumes =
+            own_trigger || (overlay->overlay_consumes_outside_click() &&
+                            !press_hits_overlay_trigger(root, root_pt));
         // A submenu nested on the overlay below it is one surface with that
         // overlay. When the press is outside the whole nest, stopping here
         // closed only the submenu and left the menu it belonged to open, so
@@ -145,8 +251,10 @@ OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt) {
         if (after != nullptr && after->active_overlay == overlay) break;
     }
     if (!dismissed_any) return {};
-    return {OverlayPressRouting::dismissed, nullptr, consume_press};
+    return {OverlayPressRouting::dismissed, nullptr, consume_press, trigger_closed};
 }
+
+}  // namespace
 
 View* hover_target_at(View& root, Point root_pt) {
     if (auto* state = root.existing_interaction()) {
@@ -213,7 +321,12 @@ PassivePointerRoute route_passive_pointer(View& root, Point root_pt) {
 }
 
 ContextPressResult route_context_press(View& root, Point root_pt) {
-    const auto overlay_press = route_press_to_active_overlay(root, root_pt);
+    const auto overlay_press = route_press_through_overlays(root, root_pt);
+    // A context press opens no trigger's menu, so it records no opener: a
+    // context menu claimed after a right-click on a dropdown button must not
+    // adopt that button, or the next left press on it would only close the
+    // context menu instead of opening the dropdown.
+    note_press_opener(root, nullptr);
     if (overlay_press.consume_press) {
         // The overlay opted to consume the pointer sequence that dismissed it.
         // Stop before the underlay hit-test: otherwise this one right-click

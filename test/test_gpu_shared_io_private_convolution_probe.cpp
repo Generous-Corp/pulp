@@ -71,10 +71,13 @@ struct CaseResult {
     bool passed = false;
     TransferSnapshot transfer;
     std::uint64_t submissions = 0;
+    std::uint64_t timestamp_samples = 0;
+    std::uint64_t gpu_elapsed_ns = 0;
+    bool gpu_timing_available = false;
     int stage = 0;
 };
 
-CaseResult run_case(std::uint32_t frames, std::uint32_t channels) {
+CaseResult run_case(std::uint32_t frames, std::uint32_t channels, bool enable_timestamps) {
     constexpr std::uint32_t slots = 2;
     const std::uint32_t n = frames * 2u;
     const std::size_t values = static_cast<std::size_t>(channels) * n * 2u;
@@ -91,9 +94,14 @@ CaseResult run_case(std::uint32_t frames, std::uint32_t channels) {
 
     pulp::test::DawnTransferCallCounter transfer_counter(
         pulp::test::DawnTransferCallCounter::InstallMode::DeferredSingleInstall);
-    auto created = DawnSharedIoProvider::create(
-        {.expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
-         .proc_table_override_for_testing = transfer_counter.deferred_proc_table()});
+    DawnSharedIoProvider::Options provider_options{
+        .expected_dawn_revision = PULP_GPU_AUDIO_EXPECTED_DAWN_SHA,
+        .storage_kind = enable_timestamps ? DawnSharedIoProvider::StorageKind::Staged
+                                          : DawnSharedIoProvider::StorageKind::ImportedHostPointer,
+        .enable_timestamps = enable_timestamps};
+    if (!enable_timestamps)
+        provider_options.proc_table_override_for_testing = transfer_counter.deferred_proc_table();
+    auto created = DawnSharedIoProvider::create(provider_options);
     if (!created.provider)
         return {.stage = 1};
     SharedIoComputePlan plan;
@@ -107,7 +115,12 @@ CaseResult run_case(std::uint32_t frames, std::uint32_t channels) {
     if (!program ||
         !plan.prepare(
             *created.provider,
-            {.slots = slots, .input_bytes_per_slot = bytes, .output_bytes_per_slot = bytes},
+            {.slots = slots,
+             .input_bytes_per_slot = bytes,
+             .output_bytes_per_slot = bytes,
+             .storage_kind = enable_timestamps
+                                 ? DawnSharedIoProvider::StorageKind::Staged
+                                 : DawnSharedIoProvider::StorageKind::ImportedHostPointer},
             std::move(program)))
         return {.stage = 3};
 
@@ -175,11 +188,17 @@ CaseResult run_case(std::uint32_t frames, std::uint32_t channels) {
         if (!plan.release_output({token}))
             return {.stage = 8};
     }
+    const auto telemetry = plan.telemetry();
     if (!plan.release())
         return {.stage = 8};
-
     const auto transfer = transfer_counter.snapshot();
-    return {oracle && zero_transfer(transfer), transfer, slots, oracle ? 0 : 9};
+    return {.passed = oracle && (enable_timestamps || zero_transfer(transfer)),
+            .transfer = transfer,
+            .submissions = slots,
+            .timestamp_samples = telemetry.gpu_timestamp_samples,
+            .gpu_elapsed_ns = telemetry.gpu_elapsed_ns,
+            .gpu_timing_available = telemetry.gpu_timing_available,
+            .stage = oracle ? 0 : 9};
 }
 
 CaseResult run_stream_case(std::uint32_t frames, std::uint32_t channels) {
@@ -335,7 +354,10 @@ CaseResult run_stream_case(std::uint32_t frames, std::uint32_t channels) {
     if (!plan.release())
         return {.stage = 23};
     const auto transfer = transfer_counter.snapshot();
-    return {oracle && zero_transfer(transfer), transfer, blocks, oracle ? 0 : 24};
+    return {.passed = oracle && zero_transfer(transfer),
+            .transfer = transfer,
+            .submissions = blocks,
+            .stage = oracle ? 0 : 24};
 }
 
 bool run_fault_scenario(std::string_view scenario) {
@@ -386,7 +408,10 @@ bool run_fault_scenario(std::string_view scenario) {
 
 int main(int argc, char** argv) {
     std::string_view scenario = "baseline";
-    if (argc == 2 && std::string_view(argv[1]).starts_with("--scenario="))
+    bool enable_timestamps = false;
+    if (argc == 2 && std::string_view(argv[1]) == "--timestamps")
+        enable_timestamps = true;
+    else if (argc == 2 && std::string_view(argv[1]).starts_with("--scenario="))
         scenario = std::string_view(argv[1]).substr(std::string_view("--scenario=").size());
     else if (argc != 1)
         return 1;
@@ -403,17 +428,21 @@ int main(int argc, char** argv) {
 
     const std::array<std::uint32_t, 3> frames = {32, 64, 128};
     std::uint64_t submissions = 0, write_buffer = 0, copy_buffer = 0, map_async = 0,
-                  mapped_range = 0, unmap = 0;
+                  mapped_range = 0, unmap = 0, timestamp_samples = 0, gpu_elapsed_ns = 0;
+    bool gpu_timing_available = false;
     int first_failure = 0;
     bool passed = true;
     for (const auto frame_count : frames)
         for (const std::uint32_t channels : {1u, 2u}) {
-            for (const auto result :
-                 {run_case(frame_count, channels), run_stream_case(frame_count, channels)}) {
+            for (const auto result : {run_case(frame_count, channels, enable_timestamps),
+                                      run_stream_case(frame_count, channels)}) {
                 passed = passed && result.passed;
                 if (!result.passed && first_failure == 0)
                     first_failure = result.stage;
                 submissions += result.submissions;
+                timestamp_samples += result.timestamp_samples;
+                gpu_elapsed_ns += result.gpu_elapsed_ns;
+                gpu_timing_available = gpu_timing_available || result.gpu_timing_available;
                 write_buffer += result.transfer.queue_write_buffer_calls;
                 copy_buffer += result.transfer.copy_buffer_to_buffer_calls;
                 map_async += result.transfer.buffer_map_async_calls;
@@ -428,6 +457,10 @@ int main(int argc, char** argv) {
               << R"json(,"map_async_calls":)json" << map_async
               << R"json(,"get_mapped_range_calls":)json" << mapped_range
               << R"json(,"unmap_calls":)json" << unmap << R"json(,"first_failure_stage":)json"
-              << first_failure << "}" << std::endl;
+              << first_failure << R"json(,"timestamp_mode":)json"
+              << (enable_timestamps ? "true" : "false") << R"json(,"gpu_timing_available":)json"
+              << (gpu_timing_available ? "true" : "false") << R"json(,"timestamp_samples":)json"
+              << timestamp_samples << R"json(,"gpu_elapsed_ns":)json" << gpu_elapsed_ns << "}"
+              << std::endl;
     return passed ? 0 : 1;
 }

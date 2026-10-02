@@ -220,6 +220,13 @@ class SharedIoArenaProvider {
         return false;
     }
 
+    // Optional diagnostic GPU execution duration for a retired submission.
+    // Returning false means the backend cannot provide an authentic GPU
+    // timestamp for this token.
+    virtual bool gpu_elapsed_ns(SlotToken, std::uint64_t&) const noexcept {
+        return false;
+    }
+
     // Repeatable lifecycle-phase barrier over the bounded activity initiated
     // before this call. It stops new submission activity for the current
     // provider generation, crosses its provider-specific loss/cancel or

@@ -574,6 +574,15 @@ globalThis.self = window;
         }
         return false;
     }
+    // Enter and Space activate a focused <button> in every browser, which is
+    // how a keyboard user opens and closes a menu button. Scoped to real
+    // buttons on purpose: a browser gives a `role="button"` element no such
+    // activation, so its author handles the key in script, and activating it
+    // here as well would toggle the menu twice.
+    function keyActivates(trigger, event) {
+        return (event.key === "Enter" || event.key === " ")
+            && !!trigger && trigger.tagName === "BUTTON";
+    }
     function triggerFrom(element) {
         while (element) {
             if (element.getAttribute && element.getAttribute("aria-haspopup")) return element;
@@ -801,7 +810,12 @@ globalThis.self = window;
             dismiss(false);
         };
         popup.addEventListener("dismiss", state.onNativeDismiss);
-        if (typeof claimOverlay === "function") claimOverlay(popup._id, true);
+        // Name the trigger as the overlay's anchor. A pointer-opened menu
+        // learns it natively from the press, but a keyboard-opened one has no
+        // press to learn from; without the name a later click on its trigger
+        // would close the menu and then let the same click reopen it.
+        if (typeof claimOverlay === "function")
+            claimOverlay(popup._id, true, "", trigger && trigger._id ? trigger._id : "");
         for (var optionIndex = 0; optionIndex < options.length; ++optionIndex) {
             (function(index) {
                 var onEnter = function() {
@@ -979,8 +993,30 @@ globalThis.self = window;
                 requestAnimationFrame(function() { activate(trigger, edge, true); });
             return;
         }
+        // Enter/Space on a closed menu button opens it, like a click. The
+        // cursor stays hidden, so the same key pressed again closes it.
+        if (!state && trigger && !optedOut(trigger) && keyActivates(trigger, event)) {
+            event.preventDefault();
+            clickSelf(trigger);
+            if (!activate(trigger, "first", false))
+                requestAnimationFrame(function() { activate(trigger, "first", false); });
+            return;
+        }
         if (!state || optedOut(state.trigger)) return;
         var count = state.options.length;
+        // Enter/Space on the trigger of its own open menu TOGGLES it shut, the
+        // keyboard twin of clicking the trigger. Only while no row has been
+        // revealed: once the user has moved the cursor onto a row, Enter
+        // commits that row (below), as every platform list does.
+        if (!state.activeVisible && state.trigger
+            && keyActivates(state.trigger, event)
+            && state.trigger.contains(document.activeElement)) {
+            event.preventDefault();
+            var toggled = currentTrigger(state);
+            if (toggled) clickSelf(toggled);
+            dismiss(true);
+            return;
+        }
         if (event.key === "Escape") {
             event.preventDefault();
             // An adopted menu has no trigger to toggle shut; dismissing the

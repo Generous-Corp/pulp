@@ -3,7 +3,8 @@
 
 This adapter is intentionally narrow. Shipyard owns exact-head selection and
 writes one literal test name per line. This script independently proves that
-the current CTest inventory matches Pulp's protected contract, that every
+the current CTest registrations match the protected base's (derived by
+configuring the exact base commit, never a committed list), that every
 requested name expands to the expected registrations (including duplicate
 display names), and only then invokes CTest with ``--tests-from-file`` as an
 argv element. Any ambiguity exits before a test process starts.
@@ -18,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,7 +36,9 @@ import changed_surface_inventory as inventory
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = REPO_ROOT / ".shipyard" / "config.toml"
-DEFAULT_CONTRACT = REPO_ROOT / ".shipyard" / "changed-surface-inventory.json"
+# Base inventories are derived once per (base, configure flags) and kept beside
+# the build tree, so later selections against the same base reuse them.
+BASE_INVENTORY_CACHE = ".changed-surface-base"
 EXCLUDE_NAME = inventory.EXCLUDED_NAME_REGEX
 EXCLUDE_LABEL = inventory.EXCLUDED_LABEL_REGEX
 MINIMUM_CTEST_VERSION = (3, 29)
@@ -314,6 +318,10 @@ def validate_build_configuration(build_dir: Path, policy: dict[str, Any]) -> Non
 
 
 def ctest_json(build_dir: Path, selected_file: Path | None = None) -> list[dict[str, Any]]:
+    return ctest_payload(build_dir, selected_file)["tests"]
+
+
+def ctest_payload(build_dir: Path, selected_file: Path | None = None) -> dict[str, Any]:
     command = ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"]
     if selected_file is not None:
         command.extend(["--tests-from-file", str(selected_file)])
@@ -331,18 +339,130 @@ def ctest_json(build_dir: Path, selected_file: Path | None = None) -> list[dict[
     tests = payload.get("tests")
     if not isinstance(tests, list):
         raise SelectionExecutionError("CTest JSON has no tests array")
-    return tests
+    return payload
+
+
+def _cache_entries(build_dir: Path) -> dict[str, str]:
+    observed: dict[str, str] = {}
+    cache = build_dir / "CMakeCache.txt"
+    if cache.is_file():
+        for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith(("//", "#")) or ":" not in line or "=" not in line:
+                continue
+            observed[line.split(":", 1)[0]] = line.split("=", 1)[1]
+    return observed
+
+
+def base_projection(
+    base_sha: str,
+    policy: dict[str, Any],
+    build_dir: Path,
+    repo_root: Path = REPO_ROOT,
+    runner: Any = subprocess.run,
+) -> dict[str, Any]:
+    """The protected base's ctest registrations, in this tree's configuration.
+
+    Configures the exact base commit in a scratch worktree with the policy's
+    build flags and this build's generator and Python, then projects its
+    listing. A configure lists registrations without building anything, which
+    is all a registration-level comparison needs. Any failure raises; the
+    caller falls back to the full suite ("inventory: base not recorded")."""
+
+    if not re.fullmatch(r"[0-9a-f]{40}", base_sha or ""):
+        raise SelectionExecutionError(f"inventory: base not recorded: invalid base {base_sha!r}")
+    # The plan verified this base as the PR's merge base on the protected ref;
+    # a checkout whose merge base is anything else is not the tree it planned.
+    merge_base = runner(["git", "-C", str(repo_root), "merge-base", "HEAD", base_sha],
+                        capture_output=True, text=True, shell=False)
+    if merge_base.returncode != 0 or (merge_base.stdout or "").strip() != base_sha:
+        raise SelectionExecutionError(
+            f"inventory: base mismatch: {base_sha} is not this checkout's merge base"
+        )
+    flags = [str(flag) for flag in policy.get("build_flags", [])]
+    cache_entries = _cache_entries(build_dir)
+    generator = cache_entries.get("CMAKE_GENERATOR", "")
+    python = cache_entries.get("Python3_EXECUTABLE", "")
+    key = hashlib.sha256(
+        "\0".join([base_sha, generator, python, *flags]).encode()
+    ).hexdigest()[:16]
+    cache_dir = build_dir / BASE_INVENTORY_CACHE
+    cached = cache_dir / f"{base_sha}-{key}.json"
+    if cached.is_file():
+        reused = json.loads(cached.read_text(encoding="utf-8"))
+        reused["configure_seconds"] = 0.0
+        return reused
+    started = time.monotonic()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tree = Path(tempfile.mkdtemp(prefix=f"base-{base_sha[:12]}-", dir=cache_dir))
+    try:
+        steps = [
+            ["git", "-C", str(repo_root), "worktree", "add", "--detach", "--force", str(tree), base_sha],
+            # Through the host build governor, like every other build-tree
+            # command the lane runs.
+            ["bash", str(repo_root / "tools" / "ci" / "governed-build.sh"),
+             "cmake", "-S", str(tree), "-B", str(tree / "build"),
+             *(["-G", generator] if generator else []), *flags,
+             *([f"-DPython3_EXECUTABLE={python}"] if python else [])],
+        ]
+        for step in steps:
+            result = runner(step, capture_output=True, text=True, shell=False)
+            if result.returncode != 0:
+                tail = (result.stderr or result.stdout or "").strip().splitlines()[-1:]
+                raise SelectionExecutionError(
+                    f"inventory: base not recorded: {' '.join(step[:4])} failed {tail}"
+                )
+        try:
+            projected = inventory.project_registrations(
+                ctest_payload(tree / "build"), tree, tree / "build"
+            )
+        except SelectionExecutionError as error:
+            raise SelectionExecutionError(f"inventory: base not recorded: {error}") from error
+    finally:
+        runner(["git", "-C", str(repo_root), "worktree", "remove", "--force", str(tree)],
+               capture_output=True, text=True, shell=False)
+        shutil.rmtree(tree, ignore_errors=True)
+    projected["base_sha"] = base_sha
+    projected["configure"] = {"generator": generator, "python": python, "flags": flags}
+    cached.write_text(json.dumps(projected, sort_keys=True), encoding="utf-8")
+    projected["configure_seconds"] = round(time.monotonic() - started, 1)
+    print(f"changed-surface: base inventory for {base_sha[:12]} configured in "
+          f"{projected['configure_seconds']}s ({projected['row_count']} rows)", file=sys.stderr)
+    return projected
+
+
+def validate_registrations_match_base(
+    full_payload: dict[str, Any], source_root: Path, build_dir: Path, base: dict[str, Any]
+) -> None:
+    """This tree's registrations must equal the base's. A bounded plan never
+    carries a registration change: CMake and test/cmake edits are
+    test-topology paths, which select the full suite, so any difference here
+    is drift the plan cannot account for."""
+
+    live = inventory.project_registrations(full_payload, source_root, build_dir)
+    unresolved = [name for name in live["incomplete"]
+                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
+    if unresolved:
+        raise SelectionExecutionError(
+            "ctest registrations have no command after the build; require full suite: "
+            + ", ".join(unresolved[:12])
+        )
+    differences = inventory.projection_differences(base, live)
+    if differences:
+        raise SelectionExecutionError(
+            "ctest registrations differ from the protected base; require full suite: "
+            + "; ".join(differences)
+        )
 
 
 def validate_selection(
     *,
     selected_names: Sequence[str],
-    full_tests: list[dict[str, Any]],
+    full_payload: dict[str, Any],
     selected_tests: list[dict[str, Any]],
     source_root: Path,
     build_dir: Path,
     policy: dict[str, Any],
-    contract: dict[str, Any],
+    base: dict[str, Any],
     target: str,
 ) -> None:
     """Fail closed unless CTest's file selection equals the reviewed expansion."""
@@ -354,6 +474,8 @@ def validate_selection(
     if undeclared:
         raise SelectionExecutionError(f"selection contains undeclared names: {undeclared}")
 
+    full_tests = full_payload["tests"]
+    validate_registrations_match_base(full_payload, source_root, build_dir, base)
     live_manifest = inventory.build_manifest(
         full_tests,
         source_root,
@@ -361,7 +483,7 @@ def validate_selection(
         policy,
         target=target,
     )
-    inventory.validate_manifest(live_manifest, contract)
+    inventory.require_unambiguous(live_manifest)
     expected_groups = inventory.expand_literal_selection(live_manifest, selected_names)
     observed_groups = inventory.inventory_groups(selected_tests, source_root, build_dir)
     if inventory.canonical_json(expected_groups) != inventory.canonical_json(observed_groups):
@@ -383,7 +505,7 @@ def validate_deferred_shadow_selection(
 
     This path is shadow-only.  The authoritative full build must replace every
     provenance-backed Catch2 placeholder, after which ``validate_selection``
-    performs the ordinary exact contract comparison before full tests run.
+    performs the ordinary comparison with the base before full tests run.
     """
 
     baseline = policy.get("baseline_tests")
@@ -421,17 +543,18 @@ def validate_deferred_shadow_selection(
 def validate_after_selected_build(
     *,
     selected_names: Sequence[str],
-    full_tests: list[dict[str, Any]],
+    full_payload: dict[str, Any],
     selected_tests: list[dict[str, Any]],
     source_root: Path,
     build_dir: Path,
     policy: dict[str, Any],
-    contract: dict[str, Any],
+    base: dict[str, Any],
     target: str,
     selected_build_targets: Sequence[str],
 ) -> None:
     """Validate the refreshed inventory at its strongest available level."""
 
+    full_tests = full_payload["tests"]
     _, placeholders = inventory.split_proven_unbuilt_placeholders(
         full_tests, build_dir
     )
@@ -447,12 +570,12 @@ def validate_after_selected_build(
     else:
         validate_selection(
             selected_names=selected_names,
-            full_tests=full_tests,
+            full_payload=full_payload,
             selected_tests=selected_tests,
             source_root=source_root,
             build_dir=build_dir,
             policy=policy,
-            contract=contract,
+            base=base,
             target=target,
         )
     validate_build_target_projection(
@@ -797,7 +920,6 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     args._changed_surface_selected_build_result = None
     verification_started = time.monotonic()
     config_path = args.config.resolve(strict=True)
-    contract_path = args.inventory_contract.resolve(strict=True)
     (
         selected_names,
         selected_payload,
@@ -808,7 +930,6 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     validate_receipt_identity(selection_receipt, args.target)
     args._changed_surface_receipt_identity_verified = True
     policy = load_policy(config_path, args.target)
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
     source_root = inventory.source_root_for_build(build_dir).resolve(strict=True)
     if source_root != REPO_ROOT.resolve():
         raise SelectionExecutionError(
@@ -820,22 +941,24 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
     # remain hard prerequisites for accepting any execution result.
     args._changed_surface_fallback_safe = True
     require_ctest_version()
+    base = base_projection(selection_receipt["base_sha"], policy, build_dir)
     compare_full = os.environ.get("SHIPYARD_CHANGED_SURFACE_COMPARE_FULL") == "1"
     with tempfile.TemporaryDirectory(prefix="pulp-changed-surface-") as directory:
         selected_file = write_private_selection(Path(directory), selected_payload)
         snapshot_identity = selected_file.stat()
-        full_tests = ctest_json(build_dir)
+        full_payload = ctest_payload(build_dir)
+        full_tests = full_payload["tests"]
         selected_tests = ctest_json(build_dir, selected_file)
         prebuild_unbuilt_placeholder_count = 0
         try:
             validate_selection(
                 selected_names=selected_names,
-                full_tests=full_tests,
+                full_payload=full_payload,
                 selected_tests=selected_tests,
                 source_root=source_root,
                 build_dir=build_dir,
                 policy=policy,
-                contract=contract,
+                base=base,
                 target=args.target,
             )
         except inventory.InventoryError as error:
@@ -880,16 +1003,17 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
             args._changed_surface_selected_build_result = selected_build_result
         if selected_build_result in (None, 0) and prebuild_unbuilt_placeholder_count:
             deferred_verification_started = time.monotonic()
-            full_tests = ctest_json(build_dir)
+            full_payload = ctest_payload(build_dir)
+            full_tests = full_payload["tests"]
             selected_tests = ctest_json(build_dir, selected_file)
             validate_after_selected_build(
                 selected_names=selected_names,
-                full_tests=full_tests,
+                full_payload=full_payload,
                 selected_tests=selected_tests,
                 source_root=source_root,
                 build_dir=build_dir,
                 policy=policy,
-                contract=contract,
+                base=base,
                 target=args.target,
                 selected_build_targets=selected_build_targets,
             )
@@ -920,7 +1044,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     # runnable subset.  The authoritative full build must then
                     # hydrate every deferred registration before the ordinary
                     # exact-inventory check and full test execution.
-                    full_tests = ctest_json(build_dir)
+                    full_payload = ctest_payload(build_dir)
+                    full_tests = full_payload["tests"]
                     selected_tests = ctest_json(build_dir, selected_file)
                     _, remaining_placeholders = (
                         inventory.split_proven_unbuilt_placeholders(
@@ -933,12 +1058,12 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                         )
                     validate_selection(
                         selected_names=selected_names,
-                        full_tests=full_tests,
+                        full_payload=full_payload,
                         selected_tests=selected_tests,
                         source_root=source_root,
                         build_dir=build_dir,
                         policy=policy,
-                        contract=contract,
+                        base=base,
                         target=args.target,
                     )
             full_seconds = 0.0
@@ -989,6 +1114,11 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     "selected_logical_count": len(selected_names),
                     "selected_registration_count": len(selected_tests),
                     "full_registration_count": len(full_tests),
+                    "base_inventory_rows": base.get("row_count"),
+                    # Rows the base listed without a program (an unbuilt
+                    # target), so compared on name, arguments and properties.
+                    "base_inventory_name_only_rows": inventory.name_only_rows(base),
+                    "base_inventory_configure_seconds": base.get("configure_seconds"),
                     "prebuild_unbuilt_placeholder_count": (
                         prebuild_unbuilt_placeholder_count
                     ),
@@ -1047,7 +1177,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--selection-receipt-sha256", required=True)
     parser.add_argument("--build-dir", default=REPO_ROOT / "build", type=Path)
     parser.add_argument("--config", default=DEFAULT_CONFIG, type=Path)
-    parser.add_argument("--inventory-contract", default=DEFAULT_CONTRACT, type=Path)
     parser.add_argument("--target", default="mac")
     return parser.parse_args(argv)
 

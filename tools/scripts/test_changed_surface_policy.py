@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static, mutation, and exact-inventory contract for changed-surface policy."""
+"""Static, mutation, and live-inventory contract for changed-surface policy."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import changed_surface_inventory as inventory
+import changed_surface_script_families as script_families
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -94,10 +95,6 @@ def load_policy() -> dict:
     return load_config()["targets"]["mac"]["changed_surface_selection"]
 
 
-def load_inventory_contract() -> dict:
-    return json.loads(INVENTORY_CONTRACT_PATH.read_text(encoding="utf-8"))
-
-
 def matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
@@ -158,7 +155,6 @@ def fixture(
 class ChangedSurfacePolicyTest(unittest.TestCase):
     def setUp(self) -> None:
         self.policy = load_policy()
-        self.contract = load_inventory_contract()
         self.source_root = Path("/repo")
         self.build_dir = Path("/repo/build")
 
@@ -166,9 +162,8 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(self.policy["schema_version"], 3)
         self.assertEqual(self.policy["build_type"], "debug")
         self.assertGreater(self.policy["full_test_count"], 20_000)
-        self.assertEqual(
-            self.policy["full_test_count"], self.contract["registration_count"]
-        )
+        self.assertFalse(INVENTORY_CONTRACT_PATH.exists(),
+                         "the committed inventory pin is retired; bounded runs compare with the base")
         self.assertTrue(self.policy["baseline_tests"])
         self.assertTrue(self.policy["baseline_build_targets"])
         self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
@@ -204,7 +199,7 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "tools/rack/provenance_check.py": "full_required",
             "test/cmake/quality_tests.cmake": "test_topology",
             ".shipyard/config.toml": "selector_policy",
-            ".shipyard/changed-surface-inventory.json": "selector_policy",
+            "tools/scripts/run_changed_surface_tests.py": "selector_policy",
             "tools/scripts/changed_surface_inventory.py": "selector_policy",
             "core/future_subsystem/new_runtime.cpp": "unknown_full",
         }
@@ -329,11 +324,15 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "tools/rack/patch.py",
             "tools/rack/provenance_check.py",
             "tools/rack/test_acid_preflight.py",
-            ".agents/skills/forge-app-delivery/SKILL.md",
         ]
         for path in neighboring_paths:
             with self.subTest(path=path):
                 self.assertNotEqual(disposition(self.policy, path), "bounded")
+        # A neighboring skill doc selects through the skill-doc readers, never
+        # through the Rack generator's tests.
+        self.assertFalse(
+            matches(".agents/skills/forge-app-delivery/SKILL.md", family["paths"])
+        )
 
         self.assertEqual(
             selection_mode(self.policy, family["paths"]),
@@ -352,13 +351,18 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "CMakeLists.txt",
             "test/CMakeLists.txt",
             "test/cmake/native_component_tests.cmake",
-            "tools/scripts/test_runner_topology_check.py",
         }
         for path in topology_paths:
             with self.subTest(path=path):
                 self.assertEqual(disposition(self.policy, path), "test_topology")
 
         self.assertNotIn("test/**", self.policy["test_topology_paths"])
+        # A Python test script's body is not registration; its edits select
+        # the ctests that run it through the generated families.
+        self.assertFalse(
+            matches("tools/scripts/test_runner_topology_check.py",
+                    self.policy["test_topology_paths"])
+        )
         self.assertIn("test/cmake/**", self.policy["test_topology_paths"])
         self.assertEqual(
             disposition(self.policy, "tools/scripts/test_changed_surface_policy.py"),
@@ -377,20 +381,65 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "test_topology",
         )
 
-    def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
-        self.assertEqual(self.contract["schema_version"], 1)
-        self.assertEqual(self.contract["registration_count"], 21_960)
-        self.assertEqual(self.contract["unique_name_count"], 21_900)
-        self.assertEqual(self.contract["unique_composite_count"], 21_960)
-        self.assertEqual(self.contract["duplicate_name_group_count"], 56)
-        self.assertEqual(self.contract["duplicate_name_excess_count"], 60)
-        self.assertEqual(self.contract["duplicate_composite_group_count"], 0)
+    def generated_families(self) -> list[dict]:
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        start = text.index(script_families.BEGIN)
+        end = text.index(script_families.END)
+        block = tomllib.loads(text[start:end].replace(
+            script_families.FAMILY_TABLE, "[[families]]"))
+        return block.get("families", [])
+
+    def test_policy_prose_does_not_force_full_validation(self) -> None:
+        self.assertNotIn(".agents/skills/ci/SKILL.md", self.policy["policy_paths"])
+        self.assertEqual(disposition(self.policy, ".agents/skills/ci/SKILL.md"), "bounded")
+        for path in [
+            "tools/scripts/changed_surface_script_families.py",
+            "test/ctest_script_inputs.json",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "selector_policy")
+
+    def test_generated_script_families_are_exact_and_carry_whole_tree_tests(self) -> None:
+        generated = self.generated_families()
+        names = {family["name"] for family in generated}
+        self.assertIn("script-surface-whole-tree", names)
+        self.assertIn("agent-skill-docs", names)
+        whole_tree = next(f for f in generated if f["name"] == "script-surface-whole-tree")
+        self.assertTrue(whole_tree["tests"])
+        self.assertTrue(all(
+            script_families.WHOLE_TREE_NAME_RE.search(test) for test in whole_tree["tests"]))
+        covered = set(whole_tree["paths"])
+        for family in generated:
+            with self.subTest(family=family["name"]):
+                self.assertEqual(family["risk_class"], "low")
+                self.assertIn("pulp-cli", family["build_targets"])
+                self.assertTrue(set(family["paths"]) <= covered)
+                for path in family["paths"]:
+                    # Literal paths only: a pattern could map a script the
+                    # generator excluded.
+                    self.assertTrue(path == script_families.SKILL_DOC_PATTERN
+                                    or not any(c in path for c in "*?["), path)
+
+    def test_scripts_native_code_runs_stay_full(self) -> None:
+        # The CLI runs these scripts, so no ctest input list can bound them.
+        for path in [
+            "tools/scripts/dsp_capability_registry.py",
+            "tools/scripts/version_bump_check.py",
+            "tools/scripts/generate_widget_bridge_api.py",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(disposition(self.policy, path), "unknown_full")
         self.assertEqual(
-            self.contract["authoritative_filter_digest"],
-            inventory.authoritative_filter_digest(),
+            selection_mode(self.policy, [".agents/skills/ci/SKILL.md",
+                                         "tools/scripts/version_bump_check.py"]),
+            "full",
         )
-        self.assertRegex(self.contract["target_contract_digest"], r"^[0-9a-f]{64}$")
-        self.assertRegex(self.contract["inventory_digest"], r"^[0-9a-f]{64}$")
+
+    def test_authoritative_filter_digest_is_stable(self) -> None:
+        self.assertEqual(
+            inventory.authoritative_filter_digest(), inventory.authoritative_filter_digest()
+        )
+        self.assertRegex(inventory.authoritative_filter_digest(), r"^[0-9a-f]{64}$")
 
     def test_authoritative_filter_matches_validation_command(self) -> None:
         tests = [
@@ -661,16 +710,10 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         )
         self.assertEqual(first_group, second_group)
 
-    def test_contract_digest_drift_forces_full(self) -> None:
-        observed = dict(self.contract)
-        observed["inventory_digest"] = "0" * 64
-        with self.assertRaisesRegex(inventory.InventoryError, "require full suite"):
-            inventory.validate_manifest(observed, self.contract)
-
-    def test_toolchain_patch_drift_is_telemetry_not_a_repository_failure(self) -> None:
-        observed = dict(self.contract)
-        observed["toolchain_digest"] = "f" * 64
-        inventory.validate_manifest(observed, self.contract)
+    def test_duplicate_composite_identity_is_refused(self) -> None:
+        with self.assertRaisesRegex(inventory.InventoryError, "ambiguous"):
+            inventory.require_unambiguous({"duplicate_composite_group_count": 1})
+        inventory.require_unambiguous({"duplicate_composite_group_count": 0})
 
     def test_literal_selection_rejects_missing_or_repeated_requests(self) -> None:
         groups = inventory.inventory_groups(
@@ -684,15 +727,26 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
 
 def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
+    """A built tree's registrations must be complete and name every literal
+    test the policy declares. Whether they match the protected base is decided
+    per plan, against that base (run_changed_surface_tests.base_projection)."""
     policy = load_policy()
     source_root = inventory.source_root_for_build(build_dir)
+    payload = inventory.load_ctest_payload(build_dir)
+    projection = inventory.project_registrations(payload, source_root, build_dir)
+    unresolved = [name for name in projection["incomplete"]
+                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
+    if unresolved:
+        raise inventory.InventoryError(
+            f"registrations without a command after the build: {unresolved[:12]}"
+        )
     manifest = inventory.build_manifest(
-        inventory.load_ctest_json(build_dir),
+        payload["tests"],
         source_root,
         Path(os.path.abspath(build_dir)),
         policy,
     )
-    inventory.validate_manifest(manifest, load_inventory_contract())
+    inventory.require_unambiguous(manifest)
     missing = sorted(
         literal_tests(policy)
         - {group["composite"]["name"] for group in manifest["groups"]}
@@ -703,7 +757,7 @@ def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = Non
         )
     inventory.expand_literal_selection(manifest, literal_tests(policy))
     if manifest_output is not None:
-        manifest_output.write_bytes(inventory.canonical_json(manifest) + b"\n")
+        manifest_output.write_bytes(inventory.canonical_json(projection) + b"\n")
 
 
 def main() -> int:

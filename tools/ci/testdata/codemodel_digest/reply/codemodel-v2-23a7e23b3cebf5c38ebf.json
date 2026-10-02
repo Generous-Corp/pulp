@@ -1,0 +1,126 @@
+{
+  "configurations": [
+    {
+      "abstractTargets": [
+        {
+          "directoryIndex": 0,
+          "id": "Python3::Interpreter::@6890427a1f51a3e7e1df",
+          "jsonFile": "target-Python3__Interpreter-36335fd14dcd37acda0f.json",
+          "name": "Python3::Interpreter",
+          "projectIndex": 0
+        },
+        {
+          "directoryIndex": 0,
+          "id": "Python3::InterpreterMultiConfig::@6890427a1f51a3e7e1df",
+          "jsonFile": "target-Python3__InterpreterMultiConfig-b9453aea0fc6dc04ed0f.json",
+          "name": "Python3::InterpreterMultiConfig",
+          "projectIndex": 0
+        }
+      ],
+      "directories": [
+        {
+          "abstractTargetIndexes": [
+            0,
+            1
+          ],
+          "build": ".",
+          "childIndexes": [
+            1
+          ],
+          "jsonFile": "directory-.-fd6451d79dc282e2f566.json",
+          "minimumCMakeVersion": {
+            "string": "3.25"
+          },
+          "projectIndex": 0,
+          "source": ".",
+          "targetIndexes": [
+            0,
+            2,
+            3
+          ]
+        },
+        {
+          "build": "sub",
+          "jsonFile": "directory-sub-53d4404baf5a672f61c0.json",
+          "minimumCMakeVersion": {
+            "string": "3.25"
+          },
+          "parentIndex": 0,
+          "projectIndex": 0,
+          "source": "sub",
+          "targetIndexes": [
+            1,
+            4
+          ]
+        }
+      ],
+      "name": "",
+      "projects": [
+        {
+          "abstractTargetIndexes": [
+            0,
+            1
+          ],
+          "directoryIndexes": [
+            0,
+            1
+          ],
+          "name": "lm",
+          "targetIndexes": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      ],
+      "targets": [
+        {
+          "directoryIndex": 0,
+          "id": "a::@6890427a1f51a3e7e1df",
+          "jsonFile": "target-a-3d00b3acfa8d2a48af86.json",
+          "name": "a",
+          "projectIndex": 0
+        },
+        {
+          "directoryIndex": 1,
+          "id": "app::@2417087a58ea4ddb4a1c",
+          "jsonFile": "target-app-70fe9ef05b9a61aab66e.json",
+          "name": "app",
+          "projectIndex": 0
+        },
+        {
+          "directoryIndex": 0,
+          "id": "d::@6890427a1f51a3e7e1df",
+          "jsonFile": "target-d-4936a3f39e727b8faaa5.json",
+          "name": "d",
+          "projectIndex": 0
+        },
+        {
+          "directoryIndex": 0,
+          "id": "f::@6890427a1f51a3e7e1df",
+          "jsonFile": "target-f-377784d3a80996f841f9.json",
+          "name": "f",
+          "projectIndex": 0
+        },
+        {
+          "directoryIndex": 1,
+          "id": "t::@2417087a58ea4ddb4a1c",
+          "jsonFile": "target-t-45ecefa7048537191678.json",
+          "name": "t",
+          "projectIndex": 0
+        }
+      ]
+    }
+  ],
+  "kind": "codemodel",
+  "paths": {
+    "build": "@BUILD@",
+    "source": "@SRC@"
+  },
+  "version": {
+    "major": 2,
+    "minor": 10
+  }
+}

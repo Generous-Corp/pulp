@@ -141,6 +141,14 @@ void print_pr_workflow_status(const fs::path& root, bool source_tree_mode) {
     std::cout << "PR workflow: " << workflow.workflow << " (" << workflow.source << ")\n";
 
     if (workflow.workflow == "shipyard") {
+        // A target Shipyard skips by default must say so, or its silence
+        // reads as a lane that broke.
+        if (auto opt_in = read_opt_in_shipyard_targets(root); !opt_in.empty()) {
+            std::cout << "Shipyard targets:\n";
+            for (const auto& name : opt_in) {
+                std::cout << "  " << name << ": opt-in, not run (GitHub required checks decide)\n";
+            }
+        }
         auto shipyard = find_executable_in_path("shipyard");
         auto pinned = read_pinned_shipyard_version(root);
         if (shipyard.empty()) {

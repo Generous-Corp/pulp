@@ -588,6 +588,50 @@ sequence rather than one checklist. Make all four edits before running it:
 4. **Both counters** — `MANIFEST_REVISION` and `SURFACE_INVENTORY_VERSION`,
    reported as two separate errors.
 
+### Reset the generated artifacts to the base BEFORE `--write`
+
+`previous` is the **on-disk** `docs/status/agent-capabilities.json`, not the base
+ref. So a tree where a previous `--write` partially succeeded, or where
+`rederive` has reset some artifacts and not others, makes the gate compare
+against a state that never existed. The symptom is a pair of contradictory
+verdicts across consecutive runs on an unchanged diff:
+
+```
+agent-capabilities: INVALID: <key> changed without a contract_version increase
+agent-capabilities: INVALID: new capability must start at contract version 1.0: <key>
+```
+
+Both cannot be true. Reading either as the real constraint sends you to invent a
+version number. The fix is to make `previous` the base again and write once:
+
+```sh
+git checkout origin/main -- docs/status/agent-capabilities.json \
+    docs/status/agent-capability-surface.json \
+    tools/agent-capabilities/contract-history.json \
+    test/test_agent_capability_compile.cpp
+python3 tools/scripts/agent_capability_manifest.py --write
+```
+
+### Dropping `contract-history.json` is safe for a NEW capability, not for a changed one
+
+Dropping the ~18k-line history snapshot keeps a capability PR reviewable, and it
+is correct when you are only *introducing* a capability. It is **wrong** on a
+change that moves an existing capability's `contract_version`: `--check` reads
+the history as its new-capability oracle, so without an entry the capability
+reads as new on every subsequent run and `must start at contract version 1.0`
+can never be satisfied — the version is then unbumpable.
+
+Test it rather than assume: run `--check` with the snapshot retained and again
+with it dropped. If the dropped run fails `must start at contract version 1.0`,
+the snapshot is load-bearing for your change and has to ship.
+
+One rule worth knowing before you reach for a version bump at all:
+`_binding_identity` (`agent_capability_evolution.py`) excludes
+`header_fingerprint`, and `bindings` is popped before the non-binding
+comparison — so repointing a digest is NOT a contract change. Any edit to a
+non-binding field such as `output_domain` IS, and the gate classifies every such
+edit as breaking, so the MAJOR moves, never the minor.
+
 ### History stores prior snapshots; the current artifacts store the new contract
 
 `agent_capability_rederive.py` first restores the generated manifest, surface and
@@ -614,6 +658,34 @@ not the protected base. Commit the merge before deriving counters so the base
 resolver cannot silently compare against an older merge base. The checker's
 protected-base prefix and evolution rules remain authoritative; never repair
 history by rewriting or deleting protected entries.
+
+### A new `core/host` header is invisible until it is NAMED
+
+`core/host/include/pulp/host` is **not** one of `PUBLIC_ROOTS`. Every other
+domain is discovered by `rglob`, so a new public header there is fingerprinted
+the moment it exists; a **host** header reaches the surface only if it is listed
+by name in `REVIEWED_HOST_HEADERS` (`agent_capability_surface.py`), whose records
+carry `REVIEWED_HOST_DOMAIN` (`host`).
+
+The consequence is easy to miss because it reads as success: adding an installed
+header under `core/host/include` leaves `--check` reporting `fresh`, since the
+surface never saw it. The header ships public and unguarded, and a later byte
+change to it trips nothing. **Add it to the tuple in the same slice that adds the
+header.**
+
+Two further rules, both learned by getting them wrong:
+
+* **A `REVIEWED_HEADERS` row cannot rescue an undiscovered header.**
+  `discover_headers()` builds the `current` map first, and `REVIEWED_HEADERS` is
+  validated *against* that map, so a row for a host header missing from the tuple
+  fails `reviewed public header is missing` rather than registering it. Name it in
+  the tuple first; only then does a row (or a catalog binding) resolve.
+* **Do not rglob the host root to avoid naming things.** Every host header would
+  surface at once, each then failing as an unclassified public header until
+  someone gave it a disposition. The tuple is deliberate, not an oversight.
+
+If the header is bound by a capability in a catalog module, it needs no reviewed
+row at all — see the next section.
 
 ### A catalog-bound header must NOT also get a `REVIEWED_HEADERS` row
 

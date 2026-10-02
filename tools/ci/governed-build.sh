@@ -478,11 +478,13 @@ acquire_lease() {
 
 # Ask for an agent-floor lease after an ordinary denial. tartci (with
 # `agent_floor_cores` set in the host's fleet profile) answers a starved,
-# non-gate build with a small lease that runs at background QoS and is not
+# non-gate build with a small lease that runs at a lower QoS and is not
 # charged against any other lease's admission. The grant may be smaller than
 # the request, so the build must use the size tartci reports, and it must run
-# at background QoS: that is the condition under which the host agreed to
-# oversubscribe cores.
+# at the QoS tartci reports ("utility" or "background", per the host's
+# `agent_floor_qos`): that is the condition under which the host agreed to
+# oversubscribe cores. A floor grant without a recognised qos is background,
+# which is what every tartci before the knob meant.
 #
 # Returns 0 and sets FLOOR_CORES / FLOOR_QOS only for a well-formed grant.
 # Everything else is a denial: a host with the knob off (rc 75), a tartci too
@@ -513,6 +515,9 @@ acquire_floor_lease() {
   FLOOR_CORES="$size"
   if printf '%s' "$out" | grep -q '"floor"[[:space:]]*:[[:space:]]*true'; then
     FLOOR_QOS="background"
+    if printf '%s' "$out" | grep -q '"qos"[[:space:]]*:[[:space:]]*"utility"'; then
+      FLOOR_QOS="utility"
+    fi
   fi
   return 0
 }
@@ -529,10 +534,10 @@ try_floor_lease() {
   fi
   if acquire_floor_lease "$1"; then
     jobs="$FLOOR_CORES"
-    if [ "$FLOOR_QOS" = "background" ]; then
-      qos="background"
+    if [ -n "$FLOOR_QOS" ]; then
+      qos="$FLOOR_QOS"
       FLOOR_GRANTED=1
-      log "lease denied — acquired agent-floor lease id=$LEASE_ID cores=$jobs (background QoS)"
+      log "lease denied — acquired agent-floor lease id=$LEASE_ID cores=$jobs ($FLOOR_QOS QoS)"
     else
       log "lease denied — acquired id=$LEASE_ID cores=$jobs on the allow-floor retry"
     fi
@@ -794,9 +799,12 @@ record_build_metric() {
 write_build_marker "$@"
 
 rc=0
-# An agent-floor lease is granted ON CONDITION of background QoS, so it ignores
-# the PULP_TARTCI_TASKPOLICY=0 opt-out that applies to an ordinary lease.
-if [ "$FLOOR_GRANTED" = "1" ] && command -v taskpolicy >/dev/null 2>&1; then
+# An agent-floor lease is granted ON CONDITION of its QoS, so it ignores the
+# PULP_TARTCI_TASKPOLICY=0 opt-out that applies to an ordinary lease.
+if [ "$FLOOR_GRANTED" = "1" ] && [ "$qos" = "utility" ] \
+    && command -v taskpolicy >/dev/null 2>&1; then
+  taskpolicy -c utility "$@" || rc=$?
+elif [ "$FLOOR_GRANTED" = "1" ] && command -v taskpolicy >/dev/null 2>&1; then
   taskpolicy -b "$@" || rc=$?
 elif [ "$qos" = "background" ] && command -v taskpolicy >/dev/null 2>&1 \
     && [ "${PULP_TARTCI_TASKPOLICY:-}" != "0" ]; then

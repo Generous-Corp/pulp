@@ -1,0 +1,53 @@
+{
+  "backtraceGraph" : 
+  {
+    "commands" : 
+    [
+      "add_test"
+    ],
+    "files" : 
+    [
+      "@SRC@/sub/CMakeLists.txt"
+    ],
+    "nodes" : 
+    [
+      {
+        "file" : 0
+      },
+      {
+        "command" : 0,
+        "file" : 0,
+        "line" : 9,
+        "parent" : 0
+      }
+    ]
+  },
+  "kind" : "ctestInfo",
+  "tests" : 
+  [
+    {
+      "backtrace" : 1,
+      "command" : 
+      [
+        "@BUILD@/sub/t"
+      ],
+      "name" : "t-runs",
+      "properties" : 
+      [
+        {
+          "name" : "TIMEOUT",
+          "value" : 5.0
+        },
+        {
+          "name" : "WORKING_DIRECTORY",
+          "value" : "@BUILD@/sub"
+        }
+      ]
+    }
+  ],
+  "version" : 
+  {
+    "major" : 1,
+    "minor" : 0
+  }
+}

@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -97,6 +98,9 @@ bool is_valid_pr_workflow(const std::string& workflow);
 std::string normalize_pr_workflow(std::string workflow);
 PrWorkflowSelection resolve_pr_workflow(const std::string& cli_override = {});
 std::string read_pinned_shipyard_version(const fs::path& root);
+// Names of `[targets.<name>]` tables in `.shipyard/config.toml` that set
+// `default = false`: Shipyard does not run them on a plain `shipyard pr`.
+std::vector<std::string> read_opt_in_shipyard_targets(const fs::path& root);
 std::string capture_shipyard_version(const std::string& shipyard_bin);
 
 // Write/update `key = "value"` under `[section]` in ~/.pulp/config.toml.

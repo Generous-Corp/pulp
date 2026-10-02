@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""Generate the changed-surface families for Python tool scripts and skill docs.
+
+The changed-surface selector (`[targets.mac.changed_surface_selection]` in
+`.shipyard/config.toml`) can bound a pull request's tests only when every
+changed path belongs to a reviewed family that names the literal tests able
+to observe that path. Python tool scripts already have that map: the
+script-driven ctests record their entry script and every input they import or
+name in `test/ctest_script_inputs.json`. This tool turns that map into one
+family per group of scripts sharing the same readers, so a change to
+`tools/scripts/foo.py` selects exactly the ctests that read it, and builds the
+CMake targets whose products those ctests run.
+
+A script is mapped only when nothing outside that map can reach it. It stays
+unmapped, and the selector falls back to the full suite, when:
+
+- native code, a shell script or a JavaScript file names it (a compiled test or
+  a `pulp` command can run it, and no ctest input list records that), or CMake
+  names it other than as the entry of a declared script test; this closes over
+  every script such a script names in turn;
+- one of its readers requires a CTest fixture, which a bounded run does not
+  set up, or runs a build product no non-example target produces;
+- it has no reader in the authoritative CTest corpus.
+
+`.agents/skills/*/SKILL.md` maps to the declared script tests whose inputs
+name the skills tree. Whole-tree tests (drift, lint, registry, sync, guard,
+census, inventory and probe checks, the same names the test-receipt shadow
+always runs) and environment-bound tests (a RESOURCE_LOCK, or a gpu,
+browser-capture or audio-device label) are added through families whose paths
+are every mapped path, so any bounded script or skill change also runs them.
+Both sets are taken from the declared script tests, which exist in every
+configuration; an undeclared environment-bound test reads nothing a mapped
+script can reach without naming it.
+
+    changed_surface_script_families.py --build-dir <dir> --write   # rewrite the block
+    changed_surface_script_families.py --build-dir <dir> --check   # drift check
+
+The generated block lives between the BEGIN/END markers in
+`.shipyard/config.toml`. `--check` is diff-scoped like
+`script_test_inputs.py --check`: drift blocks a change that touches a script,
+a skill doc, the script-inputs list, this generator or the config, because
+that is when a stale family could bound the change wrongly; other drift (a
+native file that started naming a script, say) is reported and blocks the
+next change touching that script. A merge group reports drift without failing.
+
+Exit codes: 0 in sync, advisory drift, or written; 1 blocking drift; 2 an
+input could not be read; 77 the build directory has no codemodel reply (a
+skip, which ctest reports as one).
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any, Iterable
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent / "ci"))
+import changed_surface_inventory as inventory  # noqa: E402
+import script_test_inputs  # noqa: E402  (base resolution and merge-group advisory)
+
+CONFIG = Path(".shipyard") / "config.toml"
+SCRIPT_INPUTS = Path("test") / "ctest_script_inputs.json"
+BEGIN = "# BEGIN GENERATED changed-surface script families: tools/scripts/changed_surface_script_families.py --write"
+END = "# END GENERATED changed-surface script families"
+FAMILY_TABLE = "[[targets.mac.changed_surface_selection.families]]"
+SCRIPT_DIR = "tools/scripts/"
+SKILL_DOC_PATTERN = ".agents/skills/*/SKILL.md"
+SKILL_DOC_RE = re.compile(r"^\.agents/skills/[^/]+/SKILL\.md$")
+SKILL_READER_RE = re.compile(r"\.agents|SKILL\.md")
+# The test-receipt shadow's whole-tree names (tools/ci/test_receipts_shadow.py).
+WHOLE_TREE_NAME_RE = re.compile(r"drift|census|registry|sync|guard|lint|inventory|probe", re.I)
+NATIVE_SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".mm", ".m", ".swift",
+                   ".sh", ".bash", ".zsh", ".js", ".mjs", ".cjs", ".ts")
+CMAKE_SUFFIXES = (".cmake", "CMakeLists.txt")
+# Labels that tie a test to a shared host resource (the reuse replay's
+# environment rule, plus audio devices).
+ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture", "audio-device", "environment-bound"})
+# Build-tree directories that hold example executables and plugin bundles.
+EXAMPLE_PRODUCT_ROOTS = frozenset({"examples", "AU", "AUv3", "CLAP", "VST3", "LV2"})
+# Prose and workflow files name scripts without executing them in a ctest.
+NON_EXECUTING_PREFIXES = ("docs/", ".github/", "planning/", ".agents/", ".claude/", ".codex/")
+
+
+SKIP_EXIT = 77
+
+
+class GenerationError(RuntimeError):
+    pass
+
+
+def tracked_files(root: Path) -> list[str]:
+    result = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], check=True,
+                            capture_output=True)
+    return sorted(p for p in result.stdout.decode("utf-8", "replace").split("\0") if p)
+
+
+def read_text(root: Path, rel: str) -> str:
+    try:
+        return (root / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def top_level_scripts(tracked: Iterable[str]) -> list[str]:
+    return sorted(p for p in tracked
+                  if p.startswith(SCRIPT_DIR) and p.endswith(".py") and "/" not in p[len(SCRIPT_DIR):])
+
+
+def native_reachable(scripts: list[str], tracked: list[str], entries: set[str],
+                     text: Any) -> set[str]:
+    """Scripts that code outside the declared script tests can run."""
+    native = [p for p in tracked if p.endswith(NATIVE_SUFFIXES)
+              and not p.startswith(NON_EXECUTING_PREFIXES)]
+    cmake = [p for p in tracked if p.endswith(CMAKE_SUFFIXES) and not p.startswith(NON_EXECUTING_PREFIXES)]
+    native_text = "\n".join(text(p) for p in native)
+    cmake_text = "\n".join(text(p) for p in cmake)
+    reached = set()
+    for script in scripts:
+        name = os.path.basename(script)
+        if name in native_text or (name in cmake_text and script not in entries):
+            reached.add(script)
+    pending = sorted(reached)
+    while pending:
+        body = text(pending.pop())
+        for script in scripts:
+            if script in reached:
+                continue
+            if re.search(r"\b" + re.escape(os.path.basename(script)[:-3]) + r"\b", body):
+                reached.add(script)
+                pending.append(script)
+    return reached
+
+
+def readers_of(path: str, declared: dict[str, dict]) -> set[str]:
+    readers = set()
+    for name, entry in declared.items():
+        inputs = [i.rstrip("/") for i in entry.get("inputs") or []] + [entry.get("entry") or ""]
+        if any(path == i or path.startswith(i + "/") for i in inputs if i):
+            readers.add(name)
+    return readers
+
+
+def producer_targets(tests: list[dict], model: inventory.CodeModel) -> tuple[dict[str, set[str]], set[str]]:
+    """The CMake targets whose products each test runs, and the tests a
+    bounded run cannot be trusted to satisfy.
+
+    A test is unsatisfiable when it needs a CTest fixture (a bounded run does
+    not set fixtures up), or names a build-tree file that no non-example
+    target produces. Example targets exist only when examples are configured,
+    so a reader of their products would map differently per configuration;
+    it blocks instead, in every configuration alike."""
+    owner: dict[str, str] = {}
+    for target in model.targets.values():
+        if target.source_dir == "examples" or target.source_dir.startswith("examples/"):
+            continue
+        for artifact in target.artifacts:
+            path = artifact if os.path.isabs(artifact) else os.path.join(model.build_root, artifact)
+            owner[os.path.normpath(path)] = target.name
+    build_root = os.path.normpath(model.build_root)
+    targets: dict[str, set[str]] = {}
+    unsatisfiable: set[str] = set()
+    for test in tests:
+        props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
+        if props.get("FIXTURES_REQUIRED"):
+            unsatisfiable.add(test["name"])
+        words = list(test.get("command") or [])
+        for key in ("ENVIRONMENT", "REQUIRED_FILES"):
+            value = props.get(key)
+            words.extend(value if isinstance(value, list) else [value] if value else [])
+        needed = targets.setdefault(test["name"], set())
+        for word in words:
+            for token in re.split(r"[=:;,\s]", str(word)):
+                if not token or not os.path.isabs(token):
+                    continue
+                path = os.path.normpath(token)
+                if path in owner:
+                    needed.add(owner[path])
+                elif path.startswith(build_root + os.sep) and (
+                        Path(path).relative_to(build_root).parts[0] in EXAMPLE_PRODUCT_ROOTS
+                        or os.path.splitext(path)[1] not in (".json", ".txt", ".log", "")):
+                    # A build product nothing in this configuration owns.
+                    unsatisfiable.add(test["name"])
+    return targets, unsatisfiable
+
+
+def generate(root: Path, tests: list[dict], model: inventory.CodeModel) -> list[dict[str, Any]]:
+    declared_all = json.loads((root / SCRIPT_INPUTS).read_text(encoding="utf-8"))["tests"]
+    authoritative = {t["name"] for t in inventory.authoritative_tests(tests)}
+    counts = Counter(t["name"] for t in tests)
+    duplicated = {name for name, count in counts.items() if count > 1}
+    products, unsatisfiable = producer_targets(tests, model)
+    # A reader outside the authoritative corpus does not run in the full suite
+    # either, so it is dropped rather than counted. A reader the bounded run
+    # cannot satisfy, or whose name is ambiguous, blocks every path it reads.
+    declared = {n: e for n, e in declared_all.items() if n in authoritative}
+    blocked_readers = (duplicated | unsatisfiable) & set(declared)
+
+    tracked = tracked_files(root)
+    cache: dict[str, str] = {}
+
+    def text(rel: str) -> str:
+        if rel not in cache:
+            cache[rel] = read_text(root, rel)
+        return cache[rel]
+
+    scripts = top_level_scripts(tracked)
+    entries = {e.get("entry") for e in declared_all.values()}
+    reached = native_reachable(scripts, tracked, entries, text)
+
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for script in scripts:
+        if script in reached:
+            continue
+        readers = readers_of(script, declared)
+        if not readers or readers & blocked_readers:
+            continue
+        groups.setdefault(tuple(sorted(readers)), []).append(script)
+
+    skill_readers = set()
+    for name, entry in declared.items():
+        for rel in [entry.get("entry") or ""] + list(entry.get("inputs") or []):
+            if rel and (root / rel).is_file() and SKILL_READER_RE.search(text(rel)):
+                skill_readers.add(name)
+                break
+    skill_docs = [p for p in tracked if SKILL_DOC_RE.match(p)]
+    families: list[dict[str, Any]] = []
+    for readers, paths in sorted(groups.items(), key=lambda item: item[1][0]):
+        families.append(_family(f"script-readers-{_digest(readers)}", paths, list(readers), products))
+    if skill_docs and skill_readers and not skill_readers & blocked_readers:
+        families.append(_family("agent-skill-docs", [SKILL_DOC_PATTERN], sorted(skill_readers), products))
+
+    whole_tree = sorted(n for n in declared if WHOLE_TREE_NAME_RE.search(n))
+    if families:
+        if not whole_tree or set(whole_tree) & blocked_readers:
+            raise GenerationError("whole-tree tests are missing or cannot run bounded; "
+                                  "refusing to bound script changes")
+        env_bound = sorted(n for n in declared if n in environment_bound(tests))
+        if set(env_bound) & blocked_readers:
+            raise GenerationError("environment-bound tests cannot run bounded: "
+                                  + ", ".join(sorted(set(env_bound) & blocked_readers)))
+        covered = sorted({p for f in families for p in f["paths"]})
+        families.append(_family("script-surface-whole-tree", covered, whole_tree, products))
+        if env_bound:
+            families.append(_family("script-surface-environment-bound", covered, env_bound, products))
+    return families
+
+
+def environment_bound(tests: list[dict]) -> set[str]:
+    """Tests whose outcome depends on a shared host resource rather than on
+    their inputs: a RESOURCE_LOCK, or a gpu, browser-capture or audio-device
+    label, or the explicit `environment-bound` label for a test whose host
+    dependence no other label states. Their failures cannot be predicted from a diff, so a bounded run
+    always includes them."""
+    bound = set()
+    for test in tests:
+        props = {p.get("name"): p.get("value") for p in test.get("properties") or []}
+        labels = props.get("LABELS") or []
+        if props.get("RESOURCE_LOCK") or ENVIRONMENT_LABELS & set(labels):
+            bound.add(test["name"])
+    return bound
+
+
+def _digest(readers: Iterable[str]) -> str:
+    return hashlib.sha256("\0".join(sorted(readers)).encode()).hexdigest()[:12]
+
+
+def _family(name: str, paths: list[str], tests: list[str],
+            products: dict[str, set[str]]) -> dict[str, Any]:
+    build_targets = {"pulp-cli"}.union(*(products.get(test, set()) for test in tests))
+    return {
+        "name": name,
+        "paths": sorted(paths),
+        "tests": sorted(set(tests)),
+        "build_targets": sorted(build_targets),
+        "supported_build_types": ["debug", "release"],
+        "risk_class": "low",
+    }
+
+
+def _toml_list(key: str, values: list[str]) -> list[str]:
+    if len(values) == 1:
+        return [f"{key} = [{json.dumps(values[0])}]"]
+    return [f"{key} = ["] + [f"  {json.dumps(v)}," for v in values] + ["]"]
+
+
+def render(families: list[dict[str, Any]]) -> str:
+    lines = [BEGIN,
+             "# Do not edit by hand. Regenerate after test/ctest_script_inputs.json or a",
+             "# script's callers change; `changed-surface-script-families-drift` checks it.",
+             "# Resolve a merge conflict in this block by regenerating, never by hand."]
+    for family in families:
+        lines += ["", FAMILY_TABLE, f"name = {json.dumps(family['name'])}"]
+        lines += _toml_list("paths", family["paths"])
+        lines += _toml_list("tests", family["tests"])
+        lines += _toml_list("build_targets", family["build_targets"])
+        lines += _toml_list("supported_build_types", family["supported_build_types"])
+        lines.append(f"risk_class = {json.dumps(family['risk_class'])}")
+    lines.append(END)
+    return "\n".join(lines) + "\n"
+
+
+def splice(config_text: str, block: str) -> str:
+    start = config_text.find(BEGIN)
+    end = config_text.find(END)
+    if start < 0 or end < start:
+        raise GenerationError(f"{CONFIG} has no generated-family markers")
+    end = config_text.index("\n", end) + 1
+    return config_text[:start] + block + config_text[end:]
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--repo-root", type=Path, default=HERE.parents[1])
+    parser.add_argument("--build-dir", type=Path, required=True)
+    parser.add_argument("--base", default=None,
+                        help="diff-scope --check to changes since this ref (default: as "
+                             "script_test_inputs.py --check resolves it; none means a full check)")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--write", action="store_true")
+    mode.add_argument("--check", action="store_true")
+    args = parser.parse_args(argv)
+    root = args.repo_root.resolve()
+    config_path = root / CONFIG
+    if not inventory.codemodel_reply_available(args.build_dir):
+        # Without the file-API reply the producer targets cannot be read. The
+        # gate and the Shipyard lane both request it before configuring.
+        print(f"changed-surface script families: SKIP: {args.build_dir} has no CMake file-API "
+              "codemodel reply (touch .cmake/api/v1/query/codemodel-v2 and reconfigure)")
+        return SKIP_EXIT
+    try:
+        config_text = config_path.read_text(encoding="utf-8")
+        tests = inventory.load_ctest_json(args.build_dir)
+        model = inventory.load_codemodel_targets(args.build_dir)
+        block = render(generate(root, tests, model))
+        updated = splice(config_text, block)
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, GenerationError) as error:
+        print(f"changed-surface script families: cannot generate: {error}", file=sys.stderr)
+        return 2
+    if args.write:
+        if updated != config_text:
+            config_path.write_text(updated, encoding="utf-8")
+        return 0
+    if updated == config_text:
+        print(f"changed-surface script families: OK, {config_text[config_text.find(BEGIN):].count(FAMILY_TABLE)} "
+              f"generated families checked against {args.build_dir}")
+        return 0
+    fix = ("regenerate with\n  python3 tools/scripts/changed_surface_script_families.py "
+           "--build-dir <dir> --write")
+    base = script_test_inputs.resolve_base(root, args.base)
+    touched = sorted(script_test_inputs.changed_files(root, base)) if base else None
+    if touched is not None and not any(blocks_on(path) for path in touched):
+        print(f"changed-surface script families: note: {CONFIG} drifted, but this change touches "
+              f"none of its inputs; the next change to a mapped surface must {fix}")
+        return 0
+    print(f"changed-surface script families drifted in {CONFIG}; {fix}", file=sys.stderr)
+    for line in describe_drift(config_text, block)[:12]:
+        print(f"  {line}", file=sys.stderr)
+    if script_test_inputs.advisory_here():
+        print("::warning title=changed-surface script families stale (advisory in a merge group)::"
+              "regenerate on the next push")
+        return 0
+    return 1
+
+
+def describe_drift(config_text: str, block: str) -> list[str]:
+    """Which mapped paths a regeneration would add, drop or move."""
+    def mapping(text: str) -> dict[str, set[str]]:
+        import tomllib
+        start = text.find(BEGIN)
+        end = text.find(END, start)
+        if start < 0 or end < 0:
+            return {}
+        try:
+            body = tomllib.loads(text[start:end].replace(FAMILY_TABLE, "[[families]]"))
+        except tomllib.TOMLDecodeError:
+            return {}
+        owners: dict[str, set[str]] = {}
+        for family in body.get("families", []):
+            for path in family["paths"]:
+                owners.setdefault(path, set()).update(family["tests"])
+        return owners
+    old, new = mapping(config_text), mapping(block)
+    lines = []
+    for path in sorted(set(old) | set(new)):
+        if path not in new:
+            lines.append(f"{path}: no longer mapped")
+        elif path not in old:
+            lines.append(f"{path}: newly mapped")
+        elif old[path] != new[path]:
+            added, dropped = sorted(new[path] - old[path]), sorted(old[path] - new[path])
+            lines.append(f"{path}: readers +{added[:3]} -{dropped[:3]}")
+    return lines
+
+
+def blocks_on(path: str) -> bool:
+    """A changed path that a stale generated family could bound wrongly."""
+    return (path in {str(CONFIG), str(SCRIPT_INPUTS), "tools/scripts/changed_surface_script_families.py"}
+            or (path.startswith(SCRIPT_DIR) and path.endswith(".py"))
+            or bool(SKILL_DOC_RE.match(path)))
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -44,8 +44,14 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         self.root = Path(self.holder.name)
         source = Path(__file__).resolve().parents[2]
         self.repo = self.root / "repo"
+        # One commit of history, the shape CI's `fetch-depth: 1` checkout gives
+        # the workflow that runs this suite. The derived regenerators resolve
+        # per-path last-owner revisions by walking history, so over a full local
+        # history each regeneration costs tens of seconds; every assertion here
+        # is about the transaction on top of `self.base`, which needs none of it.
         subprocess.run(
-            ["git", "clone", "--quiet", "--shared", str(source), str(self.repo)],
+            ["git", "clone", "--quiet", "--no-local", "--depth", "1",
+             source.as_uri(), str(self.repo)],
             check=True,
         )
         run(self.repo, "config", "user.name", CHECK.BOT_NAME)
@@ -718,6 +724,123 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         self.assertEqual(text.count("--accept-pr-merge-ref"), 1)
         self.assertIn('[ "${BUMP_FASTPATH_PR_MERGE_REF:-}" = 1 ]', text)
         self.assertIn('${accept_pr_merge_ref:+"$accept_pr_merge_ref"}', text)
+
+
+    # -- history-derived ledger reproduced from a shallow CI checkout ---------
+
+    # Stands in for gpu_handoff_provenance.py at the same pinned path and with
+    # the same command shape: it answers a per-path last-owner question from
+    # history and refuses when the answer is a shallow graft boundary, exactly
+    # the refusal that left the real ledger pair stale inside the classify job.
+    HISTORY_REGENERATOR = """#!/usr/bin/env python3
+import hashlib, pathlib, subprocess, sys
+root = pathlib.Path.cwd()
+def git(*args):
+    return subprocess.run(["git", *args], cwd=root, text=True,
+                          capture_output=True, check=True).stdout.strip()
+assert sys.argv[1:] == ["write", "--receipt"], sys.argv
+revision = git("log", "-1", "--format=%H", "HEAD", "--", "docs/history-subject.txt")
+common = pathlib.Path(git("rev-parse", "--git-common-dir"))
+if not common.is_absolute():
+    common = root / common
+shallow = common / "shallow"
+boundaries = shallow.read_text().split() if shallow.exists() else []
+if not revision or revision in boundaries:
+    sys.exit("cannot resolve the owning revision: this checkout's Git history is truncated")
+ledger = root / "docs/status/gpu-vellum-handoff.yaml"
+ledger.write_text('{"revision": "%s"}\\n' % revision)
+receipt = root / "docs/validation/gpu-handoff-provenance/receipt.json"
+receipt.write_text('{"handoff_sha256": "%s"}\\n'
+                   % hashlib.sha256(ledger.read_bytes()).hexdigest())
+"""
+
+    def _commit_all(self, message: str, *paths: str) -> str:
+        subprocess.run(["git", "add", "--", *paths], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "--quiet", "--no-verify", "-m", message],
+                       cwd=self.repo, check=True)
+        return run(self.repo, "rev-parse", "HEAD")
+
+    def _history_ledger_base(self) -> None:
+        """Make a protected base whose ledger pair the bump must re-pin."""
+        regenerator = "tools/scripts/gpu_handoff_provenance.py"
+        (self.repo / regenerator).write_text(self.HISTORY_REGENERATOR, encoding="utf-8")
+        subject = self.repo / "docs" / "history-subject.txt"
+        subject.parent.mkdir(parents=True, exist_ok=True)
+        subject.write_text("first owner\n", encoding="utf-8")
+        self._commit_all("history-derived regenerator", regenerator,
+                         "docs/history-subject.txt")
+        subprocess.run([sys.executable, regenerator, "write", "--receipt"],
+                       cwd=self.repo, check=True)
+        self._commit_all(
+            "pin the ledger pair",
+            "docs/status/gpu-vellum-handoff.yaml",
+            "docs/validation/gpu-handoff-provenance/receipt.json",
+        )
+        # A later commit moves the pinned path, so the ledger is stale at base
+        # and the bot's bump re-pins it -- the 17 refused runs all had this.
+        subject.write_text("second owner\n", encoding="utf-8")
+        self.base = self._commit_all("move a pinned path", "docs/history-subject.txt")
+        for key, value in (
+            ("uploadpack.allowFilter", "true"),
+            ("uploadpack.allowReachableSHA1InWant", "true"),
+        ):
+            run(self.repo, "config", key, value)
+
+    def _shallow_verifier(self, candidate: str, *, origin: str | None = None) -> Path:
+        """The classify job's checkout: one commit deep, candidate fetched."""
+        verifier = self.root / "verifier"
+        verifier.mkdir()
+        run(verifier, "init", "--quiet")
+        run(verifier, "remote", "add", "origin", f"file://{self.repo}")
+        for commit in (self.base, candidate):
+            run(verifier, "fetch", "--quiet", "--no-tags", "--depth=1", "origin", commit)
+        run(verifier, "checkout", "--quiet", "--detach", self.base)
+        self.assertEqual(run(verifier, "rev-parse", "--is-shallow-repository"), "true")
+        if origin is not None:
+            run(verifier, "remote", "set-url", "origin", origin)
+        return verifier
+
+    def _ledger_bump(self, **kwargs: object) -> str:
+        self._history_ledger_base()
+        candidate = self._generated_commit(**kwargs)  # type: ignore[arg-type]
+        changed = run(self.repo, "diff", "--name-only", self.base, candidate).splitlines()
+        # The instrument must see the shape it claims to cover: a bump that
+        # did not re-pin the pair would pass with or without the fix.
+        self.assertIn("docs/status/gpu-vellum-handoff.yaml", changed)
+        self.assertIn("docs/validation/gpu-handoff-provenance/receipt.json", changed)
+        return candidate
+
+    def test_ledger_repin_reproduces_from_a_shallow_checkout(self) -> None:
+        candidate = self._ledger_bump()
+        inputs = self._inputs(candidate)
+        inputs.repo = self._shallow_verifier(candidate)
+        result = CHECK.verify(inputs)
+        self.assertTrue(result["generated_version_bump"])
+        self.assertEqual(run(inputs.repo, "rev-parse", "--is-shallow-repository"), "false")
+
+    def test_shallow_ledger_repin_with_an_extra_byte_is_refused(self) -> None:
+        candidate = self._ledger_bump(extra_path="core/hostile.cpp")
+        inputs = self._inputs(candidate)
+        inputs.repo = self._shallow_verifier(candidate)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "byte regeneration"):
+            CHECK.verify(inputs)
+
+    def test_history_that_cannot_be_deepened_is_refused(self) -> None:
+        candidate = self._ledger_bump()
+        inputs = self._inputs(candidate)
+        inputs.repo = self._shallow_verifier(
+            candidate, origin=f"file://{self.root / 'no-such-remote'}"
+        )
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "complete history"):
+            CHECK.verify(inputs)
+
+    def test_history_is_fetched_only_after_provenance_passes(self) -> None:
+        candidate = self._ledger_bump()
+        inputs = self._inputs(candidate, verified=False)
+        inputs.repo = self._shallow_verifier(candidate)
+        with self.assertRaisesRegex(CHECK.NotGeneratedBump, "signature"):
+            CHECK.verify(inputs)
+        self.assertEqual(run(inputs.repo, "rev-parse", "--is-shallow-repository"), "true")
 
 
 if __name__ == "__main__":

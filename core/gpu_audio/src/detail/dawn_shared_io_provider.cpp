@@ -326,6 +326,7 @@ struct DawnSharedIoProvider::Impl {
         std::atomic<unsigned> scopes_pending{0};
         std::atomic<bool> scope_error{false};
         std::atomic<int> readback{0};
+        std::atomic<int> timestamp{0};
         std::array<std::atomic<bool>, 3> scope_completed{};
         DawnSubmissionTracker tracker;
         SlotToken token;
@@ -337,6 +338,10 @@ struct DawnSharedIoProvider::Impl {
         wgpu::Future queue_future{};
         // ProcessEvents-owned; never mix mapping futures into queue timed waits.
         wgpu::Future readback_future{};
+        // Timestamp mapping is diagnostic-only but remains part of the
+        // accepted submission lifetime. A slot cannot be destroyed while its
+        // map callback is still able to touch the readback buffer.
+        wgpu::Future timestamp_future{};
         std::array<wgpu::Future, 3> scope_futures{};
         std::array<ScopeCallback, 3> scope_callbacks{};
         std::optional<SharedIoTerminalStatus> pending_terminal;
@@ -344,10 +349,13 @@ struct DawnSharedIoProvider::Impl {
         bool queue_consumed = false;
         bool scope_consumed = false;
         bool readback_consumed = false;
+        bool timestamp_consumed = false;
         bool accepted = false;
         int forced_queue_result = 0;
         std::optional<SharedIoTerminalInbox::CompletionClaim> held_busy_claim;
         bool held_busy_released = false;
+        bool timestamp_available = false;
+        std::uint64_t timestamp_elapsed_ns = 0;
     };
     struct Slot {
         std::uint32_t index = 0;
@@ -362,6 +370,9 @@ struct DawnSharedIoProvider::Impl {
         wgpu::Buffer input_buffer;
         wgpu::Buffer output_buffer;
         wgpu::Buffer readback_buffer;
+        wgpu::QuerySet timestamp_queries;
+        wgpu::Buffer timestamp_resolve;
+        wgpu::Buffer timestamp_readback;
         bool input_disposal_expected = false;
         bool output_disposal_expected = false;
         std::uint64_t handle_generation = 1;
@@ -423,6 +434,7 @@ struct DawnSharedIoProvider::Impl {
     };
     std::unique_ptr<WavenetPlan> wavenet;
     CompletionPolicy completion_policy = CompletionPolicy::ProcessEvents;
+    bool timestamps_enabled = false;
     std::uint64_t completion_wait_ns = 0;
     std::size_t wait_any_batch_cursor = 0;
     bool wait_any_disabled = false;
@@ -433,6 +445,7 @@ struct DawnSharedIoProvider::Impl {
     explicit Impl(Options value) : options(std::move(value)) {
         completion_policy = options.completion_policy;
         completion_wait_ns = options.completion_wait_ns;
+        timestamps_enabled = options.enable_timestamps;
     }
 
     bool pump_until(const auto& done, std::chrono::steady_clock::time_point deadline) noexcept {
@@ -654,6 +667,11 @@ struct DawnSharedIoProvider::Impl {
             availability = Availability::Unsupported;
             return false;
         }
+        if (timestamps_enabled && !adapter.HasFeature(wgpu::FeatureName::TimestampQuery)) {
+            reason = "timestamp_query_unavailable";
+            availability = Availability::Unsupported;
+            return false;
+        }
         wgpu::DawnHostMappedPointerLimits host_limits{};
         wgpu::Limits limits{};
         limits.nextInChain = &host_limits;
@@ -671,11 +689,15 @@ struct DawnSharedIoProvider::Impl {
         wgpu::DawnTogglesDescriptor device_toggles{};
         device_toggles.enabledToggleCount = 1;
         device_toggles.enabledToggles = unsafe_toggle;
-        wgpu::FeatureName required[] = {wgpu::FeatureName::HostMappedPointer};
+        const char* disabled_toggles[] = {"timestamp_quantization"};
+        device_toggles.disabledToggleCount = timestamps_enabled ? 1 : 0;
+        device_toggles.disabledToggles = timestamps_enabled ? disabled_toggles : nullptr;
+        wgpu::FeatureName required[] = {wgpu::FeatureName::HostMappedPointer,
+                                        wgpu::FeatureName::TimestampQuery};
         wgpu::DeviceDescriptor device_descriptor{};
         device_descriptor.label = "Pulp shared GPU audio P1 device";
         device_descriptor.nextInChain = &device_toggles;
-        device_descriptor.requiredFeatureCount = 1;
+        device_descriptor.requiredFeatureCount = timestamps_enabled ? 2 : 1;
         device_descriptor.requiredFeatures = required;
         device_descriptor.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType, wgpu::StringView,
@@ -793,6 +815,29 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
             submission.tracker.record_readback(submission.generation, result);
             submission.readback_consumed = true;
             submission.readback_future = {};
+        }
+        if (timestamps_enabled && !submission.timestamp_consumed) {
+            const auto timestamp_value = submission.timestamp.load(std::memory_order_acquire);
+            if (timestamp_value == 0)
+                return;
+            if (timestamp_value == 1 && slot.timestamp_readback) {
+                const auto* mapped = static_cast<const std::uint64_t*>(
+                    slot.timestamp_readback.GetConstMappedRange(0, 2u * sizeof(std::uint64_t)));
+                if (mapped && queue_value == 1 && scope_value == 1 && mapped[1] >= mapped[0] &&
+                    mapped[1] != mapped[0] && !device_lost.load(std::memory_order_acquire) &&
+                    !dawn::native::IsDeviceLost(device.Get())) {
+                    submission.timestamp_elapsed_ns = mapped[1] - mapped[0];
+                    submission.timestamp_available = true;
+                    ++stats.timestamp_samples;
+                } else {
+                    ++stats.timestamp_failures;
+                }
+                slot.timestamp_readback.Unmap();
+            } else {
+                ++stats.timestamp_failures;
+            }
+            submission.timestamp_consumed = true;
+            submission.timestamp_future = {};
         }
         if (!submission.pending_terminal) {
             // Every provider operation is enclosed by validation, OOM, and
@@ -992,6 +1037,11 @@ DawnSharedIoProvider::CreateResult DawnSharedIoProvider::create(const Options& o
     if (options.completion_wait_ns > kMaxCompletionWaitNs) {
         result.availability = Availability::Failed;
         result.reason = "completion_wait_ns_out_of_range";
+        return result;
+    }
+    if (options.enable_timestamps && options.storage_kind == StorageKind::ImportedHostPointer) {
+        result.availability = Availability::Unsupported;
+        result.reason = "timestamps_require_staged_storage";
         return result;
     }
     try {
@@ -1224,6 +1274,30 @@ bool DawnSharedIoProvider::create_slot(std::uint32_t slot_index, std::size_t inp
             return false;
         }
     }
+    if (impl_->timestamps_enabled) {
+        wgpu::QuerySetDescriptor query_descriptor{};
+        query_descriptor.label = "Pulp shared GPU audio timestamps";
+        query_descriptor.type = wgpu::QueryType::Timestamp;
+        query_descriptor.count = 2;
+        wgpu::BufferDescriptor resolve_descriptor{};
+        resolve_descriptor.label = "Pulp shared GPU audio timestamp resolve";
+        resolve_descriptor.size = 2u * sizeof(std::uint64_t);
+        resolve_descriptor.usage = wgpu::BufferUsage::QueryResolve | wgpu::BufferUsage::CopySrc;
+        wgpu::BufferDescriptor readback_descriptor{};
+        readback_descriptor.label = "Pulp shared GPU audio timestamp readback";
+        readback_descriptor.size = 2u * sizeof(std::uint64_t);
+        readback_descriptor.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        impl_->push_error_scopes();
+        slot->timestamp_queries = impl_->device.CreateQuerySet(&query_descriptor);
+        slot->timestamp_resolve = impl_->device.CreateBuffer(&resolve_descriptor);
+        slot->timestamp_readback = impl_->device.CreateBuffer(&readback_descriptor);
+        if (!impl_->pop_error_scopes() || !slot->timestamp_queries || !slot->timestamp_resolve ||
+            !slot->timestamp_readback) {
+            resources.opaque = slot.release();
+            ++impl_->stats.slots_created;
+            return false;
+        }
+    }
     wgpu::BindGroupEntry entries[2]{};
     entries[0].binding = 0;
     entries[0].buffer = slot->input_buffer;
@@ -1271,6 +1345,18 @@ void DawnSharedIoProvider::retire_slot(SlotResources& resources) noexcept {
     if (slot->readback_buffer) {
         slot->readback_buffer.Destroy();
         slot->readback_buffer = nullptr;
+    }
+    if (slot->timestamp_readback) {
+        slot->timestamp_readback.Destroy();
+        slot->timestamp_readback = nullptr;
+    }
+    if (slot->timestamp_resolve) {
+        slot->timestamp_resolve.Destroy();
+        slot->timestamp_resolve = nullptr;
+    }
+    if (slot->timestamp_queries) {
+        slot->timestamp_queries.Destroy();
+        slot->timestamp_queries = nullptr;
     }
 }
 
@@ -1952,46 +2038,52 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
                          wgpu::CallbackMode::AllowProcessEvents,
                          [](wgpu::MapAsyncStatus, wgpu::StringView) {});
     }
+    const bool timestamping = impl_->timestamps_enabled;
+    const auto dispatch_pass = [&](const wgpu::ComputePipeline& pass_pipeline,
+                                   const wgpu::BindGroup& pass_group, std::uint32_t workgroups,
+                                   bool first, bool last) {
+        wgpu::ComputePassDescriptor descriptor{};
+        wgpu::PassTimestampWrites timestamp_writes{};
+        if (timestamping && (first || last)) {
+            timestamp_writes.querySet = slot->timestamp_queries;
+            timestamp_writes.beginningOfPassWriteIndex = first ? 0 : wgpu::kQuerySetIndexUndefined;
+            timestamp_writes.endOfPassWriteIndex = last ? 1 : wgpu::kQuerySetIndexUndefined;
+            descriptor.timestampWrites = &timestamp_writes;
+        }
+        auto pass = encoder.BeginComputePass(&descriptor);
+        pass.SetPipeline(pass_pipeline);
+        pass.SetBindGroup(0, pass_group);
+        pass.DispatchWorkgroups(workgroups);
+        pass.End();
+    };
     if (convolution != nullptr) {
         const auto& plan = *convolution;
         const auto& groups = plan.slots[slot->index];
         const auto fft_wg = (plan.channels * (plan.fft_size / 2u) + 255u) / 256u;
         const auto spectral_dispatch = [&](const wgpu::ComputePipeline& pipeline,
-                                           const wgpu::BindGroup& group, std::uint32_t count) {
-            auto pass = encoder.BeginComputePass();
-            pass.SetPipeline(pipeline);
-            pass.SetBindGroup(0, group);
-            pass.DispatchWorkgroups((count + 63u) / 64u);
-            pass.End();
+                                           const wgpu::BindGroup& group, std::uint32_t count,
+                                           bool first, bool last) {
+            dispatch_pass(pipeline, group, (count + 63u) / 64u, first, last);
         };
         if (plan.spectral_hop) {
-            spectral_dispatch(plan.append, groups.append, plan.channels * plan.spectral_hop);
-            spectral_dispatch(plan.window, groups.window, plan.channels * plan.fft_size);
+            spectral_dispatch(plan.append, groups.append, plan.channels * plan.spectral_hop, true,
+                              false);
+            spectral_dispatch(plan.window, groups.window, plan.channels * plan.fft_size, false,
+                              false);
         }
-        for (const auto& group : groups.forward) {
-            auto pass = encoder.BeginComputePass();
-            pass.SetPipeline(plan.fft);
-            pass.SetBindGroup(0, group);
-            pass.DispatchWorkgroups(fft_wg);
-            pass.End();
+        for (std::size_t stage = 0; stage < groups.forward.size(); ++stage) {
+            dispatch_pass(plan.fft, groups.forward[stage], fft_wg, !plan.spectral_hop && stage == 0,
+                          false);
         }
-        {
-            auto pass = encoder.BeginComputePass();
-            pass.SetPipeline(plan.multiply);
-            pass.SetBindGroup(0, groups.multiply);
-            pass.DispatchWorkgroups((plan.channels * plan.fft_size + 255u) / 256u);
-            pass.End();
-        }
-        for (const auto& group : groups.inverse) {
-            auto pass = encoder.BeginComputePass();
-            pass.SetPipeline(plan.fft);
-            pass.SetBindGroup(0, group);
-            pass.DispatchWorkgroups(fft_wg);
-            pass.End();
+        dispatch_pass(plan.multiply, groups.multiply, (plan.channels * plan.fft_size + 255u) / 256u,
+                      false, false);
+        for (std::size_t stage = 0; stage < groups.inverse.size(); ++stage) {
+            dispatch_pass(plan.fft, groups.inverse[stage], fft_wg, false,
+                          !plan.spectral_hop && stage + 1 == groups.inverse.size());
         }
         if (plan.spectral_hop) {
-            spectral_dispatch(plan.ola, groups.ola, plan.channels * plan.fft_size);
-            spectral_dispatch(plan.output, groups.output, plan.spectral_hop);
+            spectral_dispatch(plan.ola, groups.ola, plan.channels * plan.fft_size, false, false);
+            spectral_dispatch(plan.output, groups.output, plan.spectral_hop, false, true);
         }
     } else if (wavenet != nullptr) {
         const auto& plan = *wavenet;
@@ -2007,7 +2099,16 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
                 encoder.CopyBufferToBuffer(previous.headout, 0, array_groups.headacc, 0,
                                            array_groups.headacc.GetSize());
             }
-            auto pass = encoder.BeginComputePass();
+            wgpu::ComputePassDescriptor descriptor{};
+            wgpu::PassTimestampWrites timestamp_writes{};
+            const bool first = index == 0;
+            if (timestamping && first) {
+                timestamp_writes.querySet = slot->timestamp_queries;
+                timestamp_writes.beginningOfPassWriteIndex = 0;
+                timestamp_writes.endOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+                descriptor.timestampWrites = &timestamp_writes;
+            }
+            auto pass = encoder.BeginComputePass(&descriptor);
             pass.SetPipeline(plan.rechannel);
             pass.SetBindGroup(0, array_groups.rechannel);
             pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
@@ -2021,7 +2122,15 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
             pass.End();
         }
-        auto scale_pass = encoder.BeginComputePass();
+        wgpu::ComputePassDescriptor scale_descriptor{};
+        wgpu::PassTimestampWrites scale_timestamps{};
+        if (timestamping) {
+            scale_timestamps.querySet = slot->timestamp_queries;
+            scale_timestamps.beginningOfPassWriteIndex = wgpu::kQuerySetIndexUndefined;
+            scale_timestamps.endOfPassWriteIndex = 1;
+            scale_descriptor.timestampWrites = &scale_timestamps;
+        }
+        auto scale_pass = encoder.BeginComputePass(&scale_descriptor);
         scale_pass.SetPipeline(plan.scale);
         scale_pass.SetBindGroup(0, groups.scale);
         scale_pass.DispatchWorkgroups((plan.block_size + 63u) / 64u);
@@ -2042,7 +2151,15 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
             }
         }
     } else {
-        auto pass = encoder.BeginComputePass();
+        wgpu::ComputePassDescriptor descriptor{};
+        wgpu::PassTimestampWrites timestamp_writes{};
+        if (timestamping) {
+            timestamp_writes.querySet = slot->timestamp_queries;
+            timestamp_writes.beginningOfPassWriteIndex = 0;
+            timestamp_writes.endOfPassWriteIndex = 1;
+            descriptor.timestampWrites = &timestamp_writes;
+        }
+        auto pass = encoder.BeginComputePass(&descriptor);
         pass.SetPipeline(impl_->pipeline);
         pass.SetBindGroup(0, slot->bind_group);
         const auto samples =
@@ -2057,6 +2174,11 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
         ++impl_->stats.runtime_copy_buffer_calls;
         encoder.CopyBufferToBuffer(slot->output_buffer, 0, slot->readback_buffer, 0,
                                    slot->output_logical_bytes);
+    }
+    if (timestamping) {
+        encoder.ResolveQuerySet(slot->timestamp_queries, 0, 2, slot->timestamp_resolve, 0);
+        encoder.CopyBufferToBuffer(slot->timestamp_resolve, 0, slot->timestamp_readback, 0,
+                                   2u * sizeof(std::uint64_t));
     }
     auto commands = encoder.Finish();
     if (!commands) {
@@ -2081,6 +2203,11 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     submission.readback.store(0, std::memory_order_release);
     submission.readback_future = {};
     submission.readback_consumed = false;
+    submission.timestamp.store(timestamping ? 0 : 1, std::memory_order_release);
+    submission.timestamp_future = {};
+    submission.timestamp_consumed = !timestamping;
+    submission.timestamp_available = false;
+    submission.timestamp_elapsed_ns = 0;
     for (auto& completed : submission.scope_completed)
         completed.store(false, std::memory_order_release);
     for (auto& future : submission.scope_futures)
@@ -2102,6 +2229,18 @@ bool DawnSharedIoProvider::submit_impl(const SlotResources& resources, SlotToken
     }
     impl_->queue.Submit(1, &commands);
     submission.accepted = true;
+    if (timestamping) {
+        ++impl_->stats.timestamp_submissions;
+        submission.timestamp_future = slot->timestamp_readback.MapAsync(
+            wgpu::MapMode::Read, 0, 2u * sizeof(std::uint64_t), Impl::callback_mode(),
+            [](wgpu::MapAsyncStatus status, wgpu::StringView, Impl::Submission* state) {
+                const int value = status == wgpu::MapAsyncStatus::Success             ? 1
+                                  : status == wgpu::MapAsyncStatus::CallbackCancelled ? 2
+                                                                                      : 3;
+                state->timestamp.store(value, std::memory_order_release);
+            },
+            &submission);
+    }
     if (staged) {
         ++impl_->stats.runtime_map_async_calls;
         submission.readback_future = slot->readback_buffer.MapAsync(
@@ -2214,6 +2353,8 @@ bool DawnSharedIoProvider::drain() noexcept {
                 if (slot->submission.accepted &&
                     (slot->submission.queue.load(std::memory_order_acquire) == 0 ||
                      slot->submission.scope.load(std::memory_order_acquire) == 0 ||
+                     (impl_->timestamps_enabled &&
+                      slot->submission.timestamp.load(std::memory_order_acquire) == 0) ||
                      (impl_->options.storage_kind == StorageKind::Staged &&
                       slot->submission.readback.load(std::memory_order_acquire) == 0))) {
                     return false;
@@ -2319,7 +2460,8 @@ bool DawnSharedIoProvider::reconfigure_storage_kind(StorageKind kind) noexcept {
     if (!impl_ || !impl_->accepting || !impl_->reusable || !impl_->slots.empty() ||
         impl_->convolution || impl_->wavenet || device_lost() ||
         impl_->uncaptured_error_generation.load(std::memory_order_acquire) != 0 ||
-        (kind != StorageKind::ImportedHostPointer && kind != StorageKind::Staged))
+        (kind != StorageKind::ImportedHostPointer && kind != StorageKind::Staged) ||
+        (impl_->timestamps_enabled && kind == StorageKind::ImportedHostPointer))
         return false;
     impl_->options.storage_kind = kind;
     return true;
@@ -2331,6 +2473,31 @@ DawnSharedIoProvider::StorageKind DawnSharedIoProvider::storage_kind() const noe
 
 std::uint64_t DawnSharedIoProvider::device_owner_generation() const noexcept {
     return impl_ ? impl_->device_owner_generation : 0;
+}
+
+bool DawnSharedIoProvider::timestamps_enabled() const noexcept {
+    return impl_ && impl_->timestamps_enabled;
+}
+
+std::optional<DawnSharedIoProvider::GpuTimestamp>
+DawnSharedIoProvider::gpu_timestamp(const SlotToken& token) const noexcept {
+    if (!impl_ || !impl_->timestamps_enabled)
+        return std::nullopt;
+    for (const auto* slot : impl_->slots) {
+        if (slot == nullptr || slot->submission.token != token ||
+            !slot->submission.timestamp_available)
+            continue;
+        return GpuTimestamp{token, slot->submission.timestamp_elapsed_ns};
+    }
+    return std::nullopt;
+}
+
+bool DawnSharedIoProvider::gpu_elapsed_ns(SlotToken token, std::uint64_t& elapsed) const noexcept {
+    const auto timestamp = gpu_timestamp(token);
+    if (!timestamp)
+        return false;
+    elapsed = timestamp->elapsed_ns;
+    return true;
 }
 
 } // namespace pulp::gpu_audio::detail

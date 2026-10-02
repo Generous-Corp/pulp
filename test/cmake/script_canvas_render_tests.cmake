@@ -107,7 +107,8 @@ if(_PULP_NODE_FOR_TESTS)
         # this test instead of fetching. Five bundle cases on a cold or
         # contended host need more than 30s.
         TIMEOUT 120
-        LABELS "ios-d3b;node;threejs")
+        # Its outcome follows the installed toolchain, not its inputs.
+        LABELS "ios-d3b;node;threejs;environment-bound")
     # With PULP_OFFLINE_BUILD set the bundler refuses a missing esbuild
     # instead of running `npm install` mid-build. Needs no network and no
     # installed esbuild: it copies the bundler beside a stub npm.

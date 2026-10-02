@@ -174,7 +174,9 @@ class SharedIoConvolutionSession {
     void trace_admit(SharedIoSlotLedger::SlotToken) noexcept;
     void trace_stage(SharedIoSlotLedger::SlotToken, SharedIoTraceStage) noexcept;
     void trace_terminal(SharedIoSlotLedger::SlotToken, SharedIoGpuTerminalDisposition,
-                        SharedIoFallbackReason = SharedIoFallbackReason::None) noexcept;
+                        SharedIoFallbackReason = SharedIoFallbackReason::None,
+                        std::uint64_t gpu_elapsed_ns = 0,
+                        bool gpu_elapsed_available = false) noexcept;
     std::vector<TraceSlot> trace_slots_;
     SharedIoTelemetry trace_telemetry_;
     std::unique_ptr<SharedIoTraceRecorder> trace_recorder_;

@@ -63,7 +63,22 @@ struct BuildGovernance {
 
 BuildGovernance detect_build_governance();
 std::string tartci_agent_lease_id(const TartciAgentLeaseRequest& req);
-std::string apply_agent_build_qos(const std::string& command, const std::string& qos);
+// Run `command` under the lease's QoS on macOS: "background" → `taskpolicy -b`,
+// "utility" → `taskpolicy -c utility`. PULP_TARTCI_TASKPOLICY=0 opts out, unless
+// `required`: an agent-floor lease is granted on condition of its QoS.
+std::string apply_agent_build_qos(const std::string& command, const std::string& qos,
+                                  bool required = false);
+
+// An agent-floor grant parsed from `tartci leases acquire --allow-floor --json`.
+// tartci answers a starved non-gate build with a smaller lease that is not
+// charged against other leases, on condition that it runs at the granted QoS.
+struct TartciFloorGrant {
+    bool ok = false;     // a well-formed grant this caller can size
+    bool floor = false;  // a floor lease (vs an ordinary grant on the retry)
+    int cores = 0;       // lease_size_cores; never above the request
+    std::string qos;     // "utility" or "background" for a floor lease
+};
+TartciFloorGrant parse_tartci_floor_grant(const std::string& json, int requested_cores);
 std::string apply_agent_build_watchdog(const std::string& command,
                                        int jobs,
                                        bool lease_active);
@@ -114,6 +129,7 @@ public:
     int exit_code() const { return exit_code_; }
     int jobs() const { return jobs_; }
     const std::string& qos() const { return qos_; }
+    bool floor() const { return floor_; }
     const std::string& error() const { return error_; }
 
 private:
@@ -125,6 +141,7 @@ private:
     bool active_ = false;
     int exit_code_ = 0;
     int jobs_ = 0;
+    bool floor_ = false;
     std::string error_;
     std::string tartci_bin_;
     std::string lease_id_;

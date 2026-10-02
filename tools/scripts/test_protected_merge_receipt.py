@@ -155,6 +155,7 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             workflow="Build and Test",
             target="macos",
             group_sha=group or self.group,
+            affected_slow_required="false",
         )
 
     def test_identical_group_derives_new_subject_bound_decision(self) -> None:
@@ -343,23 +344,25 @@ class ProtectedMergeReceiptTest(unittest.TestCase):
             decision = receipt.verify_receipt(issued, args)
         return decision, stderr.getvalue()
 
-    def test_group_that_falls_back_to_requiring_proofs_is_reported(self) -> None:
+    def test_group_that_falls_back_to_requiring_proofs_refuses_reuse(self) -> None:
         # The head's classification did not need the slow-affected proofs, so
         # its run used the plain selection; the group's classifier fell back
-        # to requiring them. The mismatch is reported without refusing reuse.
+        # to requiring them. Reuse would skip the proofs entirely.
         issued = receipt.issue(self.issue_args())
         self.assertFalse(receipt.ran_affected_slow_proofs(issued["validation"]))
-        decision, stderr = self.verify_with_requirement(issued, "true")
-        self.assertEqual(decision["verdict"], "reuse")
-        self.assertIn("requires the slow-affected proofs", stderr)
+        for required in ("true", None):
+            with self.subTest(required=required), self.assertRaisesRegex(
+                receipt.ReceiptError, "requires the slow-affected proofs"
+            ):
+                self.verify_with_requirement(issued, required)
 
-    def test_proof_requirement_met_or_absent_reports_nothing(self) -> None:
+    def test_receipt_that_ran_the_proofs_serves_either_requirement(self) -> None:
         plain = receipt.issue(self.issue_args())
         self.write_selection(label_exclude=receipt.AFFECTED_SLOW_LABEL_EXCLUDE)
         with_proofs = receipt.issue(self.issue_args())
         self.assertTrue(receipt.ran_affected_slow_proofs(with_proofs["validation"]))
         for issued, required in ((with_proofs, "true"), (with_proofs, "false"),
-                                 (plain, "false"), (plain, None)):
+                                 (with_proofs, None), (plain, "false")):
             with self.subTest(proofs=receipt.ran_affected_slow_proofs(issued["validation"]),
                               required=required):
                 decision, stderr = self.verify_with_requirement(issued, required)

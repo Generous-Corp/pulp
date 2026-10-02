@@ -341,7 +341,7 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelConfig',
                 target='Pulp::host',
-                header_fingerprint='sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add',
+                header_fingerprint='sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068',
             ),
             binding(
                 role='kernel_descriptor',
@@ -349,7 +349,7 @@ EXPORTS = [
                 include='pulp/host/custom_node_type.hpp',
                 qualified_name='pulp::host::SampleKernelDescriptor',
                 target='Pulp::host',
-                header_fingerprint='sha256:6dd35b2c1ac1242dc46f310d80746d3edb6e381bea261aa4fec4674f49313add',
+                header_fingerprint='sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068',
             ),
             binding(
                 role='graph',
@@ -495,7 +495,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::prove_sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
+                header_fingerprint='sha256:6e1c6c7632a40b27318418acd0a12aaa9ef97d1ec0289223ae1084190130d253',
             ),
             binding(
                 role='graph_sample_region',
@@ -503,7 +503,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_region',
                 target='Pulp::host',
-                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
+                header_fingerprint='sha256:6e1c6c7632a40b27318418acd0a12aaa9ef97d1ec0289223ae1084190130d253',
             ),
             binding(
                 role='graph_sample_regions',
@@ -511,7 +511,7 @@ EXPORTS = [
                 include='pulp/host/signal_graph_runtime.hpp',
                 qualified_name='pulp::host::SignalGraph::sample_regions',
                 target='Pulp::host',
-                header_fingerprint='sha256:ae20946277c87cf72e070ea90ba7f1ad971e60871c5aebcef35bee99bdb8b8cd',
+                header_fingerprint='sha256:6e1c6c7632a40b27318418acd0a12aaa9ef97d1ec0289223ae1084190130d253',
             ),
             binding(
                 role='SampleRegionCandidate',
@@ -854,6 +854,48 @@ EXPORTS = [
                          header_fingerprint="sha256:72536ca7644208062b3769cceddfc8aa935d4b441db999b5a61171947446a9af")],
         _link_probes=[{"role": "entrypoint", "binding": "pulp::signal::DitherQuantizerT<float>",
                        "operation": "member_call", "member": "reset", "arguments": ""}],
+    ),
+    capability(
+        key="signal.custom-node-events", domain="signal",
+        status="experimental",
+        # Emission widens what this capability produces, and the contract gate
+        # classifies any change to a non-binding contract field as breaking, so
+        # the major moves rather than the minor.
+        contract_version={"major": 2, "minor": 0},
+        evolution={"state": "active", "introduced_in": {"major": 1, "minor": 0}},
+        summary="A Custom graph node reads the inbound MIDI the graph already gathered for it.",
+        rt_class="audio",
+        lifecycle={"construction": "control", "prepare": "control", "process": "audio",
+                   "reset": "audio", "release": "control"},
+        state_model="Whatever the registered type's own instance carries; the lane itself holds none.",
+        seed_model="none",
+        # not_promised, not bit_exact: the observable output of this lane is
+        # whatever the registrant's own callback writes, so the graph cannot
+        # promise repeatability on its behalf. What the graph does guarantee is
+        # that the routed path and the reference walk deliver the same events.
+        determinism={"repeatability": "not_promised", "block_partition": "invariant",
+                     "platform_scope": "same_build", "transport_history": "irrelevant"},
+        input_domain="the node's gathered inbound MIDI for the block, which may be absent",
+        output_domain="audio written by the registered callback, plus any MIDI it emits into the block's output buffer",
+        units=["samples"],
+        latency="declared by the registered type", tail="zero",
+        scheduling="block-synchronous",
+        bindings=[
+            binding(role="event_block", kind="cpp_type",
+                    include="pulp/host/custom_node_events.hpp",
+                    qualified_name="pulp::host::CustomNodeEventBlock", target="Pulp::host",
+                    header_fingerprint="sha256:3593ccc6cb772b630fc61bec7014eb5315b5bef7e99d6047206947384c7c6006"),
+            binding(role="node_type", kind="cpp_type",
+                    include="pulp/host/custom_node_type.hpp",
+                    qualified_name="pulp::host::CustomNodeType", target="Pulp::host",
+                    header_fingerprint="sha256:8a75edf4f7f08fede5f6607b1e52f21c427fb787d58d8eb933f7c7699ce2e068"),
+        ],
+        _link_probes=[
+            {"role": "event_block", "binding": "pulp::host::CustomNodeEventBlock",
+             "operation": "construct", "arguments": ""},
+            {"role": "node_type", "binding": "pulp::host::CustomNodeType",
+             "operation": "member_call", "member": "consumes_events", "arguments": ""},
+        ],
     ),
     capability(
         key="signal.stochastic-sources", domain="signal",

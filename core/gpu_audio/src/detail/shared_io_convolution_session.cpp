@@ -141,7 +141,9 @@ void SharedIoConvolutionSession::trace_stage(SharedIoSlotLedger::SlotToken token
 
 void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken token,
                                                 SharedIoGpuTerminalDisposition disposition,
-                                                SharedIoFallbackReason reason) noexcept {
+                                                SharedIoFallbackReason reason,
+                                                std::uint64_t gpu_elapsed_ns,
+                                                bool gpu_elapsed_available) noexcept {
     if (!trace_recorder_ || token.slot >= trace_slots_.size())
         return;
     auto& slot = trace_slots_[token.slot];
@@ -152,6 +154,8 @@ void SharedIoConvolutionSession::trace_terminal(SharedIoSlotLedger::SlotToken to
                                     SharedIoGpuTerminalDisposition::CompletedAccepted);
     auto& record = slot.record;
     record.set(SharedIoTraceStage::RetirementObserved, trace_now_ns());
+    record.gpu_elapsed_ns = gpu_elapsed_ns;
+    record.gpu_elapsed_available = gpu_elapsed_available;
     record.gpu_terminal = disposition;
     record.gpu_reason = record.reason = reason;
     switch (disposition) {
@@ -281,7 +285,8 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
                                ? SharedIoGpuTerminalDisposition::DeviceLost
                                : SharedIoGpuTerminalDisposition::ProviderFailed,
                            provider_->device_lost() ? SharedIoFallbackReason::DeviceLost
-                                                    : SharedIoFallbackReason::CompletionFailed);
+                                                    : SharedIoFallbackReason::CompletionFailed,
+                           completion->gpu_elapsed_ns, completion->gpu_elapsed_available);
             const bool discarded = plan_.discard_completion(*completion);
             const bool recorded =
                 pipeline_.record_terminal(stamp, SharedIoConvolutionPipeline::Terminal::Failed, {});
@@ -329,7 +334,9 @@ bool SharedIoConvolutionSession::drain_completions(std::uint64_t now_ns,
             trace_terminal(token,
                            accepted_terminal == SharedIoConvolutionPipeline::Terminal::Success
                                ? SharedIoGpuTerminalDisposition::CompletedAccepted
-                               : SharedIoGpuTerminalDisposition::ProviderFailed);
+                               : SharedIoGpuTerminalDisposition::ProviderFailed,
+                           SharedIoFallbackReason::None, completion->gpu_elapsed_ns,
+                           completion->gpu_elapsed_available);
         if (recorded)
             ++result.terminal_records;
         else if (!pipeline_.fenced()) {
