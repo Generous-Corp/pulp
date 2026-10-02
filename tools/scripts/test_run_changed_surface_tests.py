@@ -1175,6 +1175,41 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertEqual(second["configure_seconds"], 0.0)
             self.assertEqual(second["digest"], first["digest"])
 
+    def test_a_cached_base_inventory_is_reused_only_for_the_same_configure(self) -> None:
+        # The cache key must cover every input of the base configure: a
+        # different flag set, generator or Python is a different inventory.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            first_calls, _ = self.run_base(build, [0, 0, 0])
+            self.assertTrue(first_calls)
+            reused, _ = self.run_base(build, [])
+            self.assertEqual(reused, [])
+            for label, change in (
+                ("generator", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")),
+                ("python", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/opt/python3\n")),
+            ):
+                with self.subTest(changed=label):
+                    change()
+                    calls, _ = self.run_base(build, [0, 0, 0])
+                    self.assertTrue(calls, f"a changed {label} reused the cached base inventory")
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            flagged = {**policy(), "build_flags": ["-DCMAKE_BUILD_TYPE=Release"]}
+            calls: list = []
+
+            def fake(argv, **_):
+                if "merge-base" in argv:
+                    return subprocess.CompletedProcess(argv, 0, self.BASE + "\n", "")
+                calls.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            with mock.patch.object(runner, "ctest_payload", return_value={"tests": [fixture("smoke")]}):
+                runner.base_projection(self.BASE, flagged, build, Path("/repo"), fake)
+            self.assertTrue(calls, "a changed flag set reused the cached base inventory")
+
     def test_unavailable_base_says_so_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
