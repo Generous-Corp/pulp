@@ -522,6 +522,36 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(out[variant]["executables_rebuilt"], 1, variant)
         self.assertEqual(out["per-entry"]["run"], [])
 
+    def test_a_rebuilt_spawned_executable_reruns_the_test_that_depends_on_it(self):
+        # tb's executable depends (add_dependencies) on the tool test/tool;
+        # only the tool's source drifted.
+        spawned = {"test/b": {"test/tool"}}
+        out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
+                                       self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                       spawned=spawned)
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], ["tb"], variant)
+            self.assertEqual(out[variant]["executables_rebuilt"], 0, variant)  # the tests' own binaries stay
+        self.assertEqual(out["per-entry"]["run"], [])
+
+    def test_a_rebuilt_undeclared_tool_reruns_every_compiled_test(self):
+        out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
+                                       self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                       spawnable=frozenset({"test/tool"}))
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], ["ta", "tb"], variant)
+            self.assertEqual(out[variant]["spawnable_rebuilt"], ["test/tool"], variant)
+        quiet = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb"], self.MAP, {}, {}, set(),
+                                         self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                         spawnable=frozenset({"test/tool"}))
+        self.assertEqual(quiet["cmake-codemodel"]["run"], [])
+
+    def test_executable_dependencies_follow_targets_transitively(self):
+        targets = {"t": {"type": "EXECUTABLE", "artifacts": ["<build>/test/t"], "dependencies": ["lib"]},
+                   "lib": {"type": "STATIC_LIBRARY", "artifacts": ["<build>/libl.a"], "dependencies": ["tool"]},
+                   "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []}}
+        self.assertEqual(rrc.executable_dependencies(targets), {"test/t": {"tools/tool"}, "tools/tool": set()})
+
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)
@@ -617,7 +647,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v2"
+        cache = corpus / "cache" / "record-v4"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -658,7 +688,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v2"
+        cache = corpus / "cache" / "record-v4"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -680,6 +710,92 @@ class RecordedGraphTests(unittest.TestCase):
         keys = {p["group_run_id"]: p["source_key"] for p in rpr.read_jsonl(corpus / "pairs.jsonl")}
         self.assertIn("tb", keys["g2"]["cmake-codemodel-recorded"]["run"])
         self.assertEqual(keys["g2"]["cmake-codemodel-recorded"]["unreached_changed_binaries"], [])
+
+    def annotate_v2(self, drift, head_schema, group_schema, declared=("test/group-c",), headers="ninja-deps",
+                    legacy=False):
+        """One pair whose head and group records carry the given codemodel
+        schemas; the group declares `declared` commit-bound."""
+        import gzip
+        corpus = Path(self.tmp) / f"v2-{head_schema}-{group_schema}-{headers}-{legacy}-{len(drift)}"
+        rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+        rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+        rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b", "group-c")}
+        cache = corpus / "cache" / "record-v4"
+        cache.mkdir(parents=True)
+        common = {"targets": targets, "binaries": None, "generated_headers": headers}
+        recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
+                       "declared_commit_bound": None},
+                "g1": {**common, "link": self.link, "digest_schema": group_schema,
+                       "executables": {"ta": "test/group-a", "tb": "test/group-b", "tc": "test/group-c"},
+                       "declared_commit_bound": list(declared)}}
+        for run_id, rec in recs.items():
+            with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
+                json.dump(rec, fh)
+        result = rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                          {}, None, mock.Mock(), legacy)
+        keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"]
+        return result, keys
+
+    def test_content_keyed_records_retire_the_root_cmakelists_rule(self):
+        v2 = "pulp-codemodel-digest/v2"
+        result, keys = self.annotate_v2(("CMakeLists.txt",), v2, v2)
+        self.assertEqual(result["pairs_content_keyed"], 1)
+        self.assertEqual(keys["run"], ["tc"])                 # only the declared commit-bound one
+        self.assertEqual(keys["executables_rebuilt"], 1)
+
+    def test_v1_mixed_and_unkeyed_records_keep_the_blunt_rules(self):
+        v1, v2 = "pulp-codemodel-digest/v1", "pulp-codemodel-digest/v2"
+        for head_schema, group_schema, headers, legacy in ((v1, v1, None, False), (v1, v2, "ninja-deps", False),
+                                                           (v2, v2, "unavailable", False), (v2, v2, "ninja-deps", True)):
+            result, keys = self.annotate_v2(("CMakeLists.txt",), head_schema, group_schema, headers=headers,
+                                            legacy=legacy)
+            self.assertEqual(result["pairs_content_keyed"], 0, (head_schema, group_schema, headers, legacy))
+            self.assertEqual(set(keys["run"]), {"ta", "tb", "tc"}, (head_schema, group_schema, headers, legacy))
+
+    def test_declared_commit_bound_replaces_the_learned_set(self):
+        v2 = "pulp-codemodel-digest/v2"
+        _, keys = self.annotate_v2(("docs/a.md",), v2, v2, declared=("test/group-b",))
+        self.assertEqual(keys["run"], ["tb"])
+
+    def record_from(self, files: dict) -> dict:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, body in files.items():
+                zf.writestr(name, body)
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.return_value = {"artifacts": [{"name": "reuse-record-macos", "archive_download_url": "u"}]}
+        resp = mock.MagicMock()
+        resp.__enter__.return_value.read.return_value = buf.getvalue()
+        gh._request.return_value = resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.cache, c.gh = Path(self.tmp) / f"rec-{len(files)}-{id(files)}", gh
+        return c.reuse_record("6")
+
+    def test_the_record_reads_commit_bound_from_tests_and_the_codemodel(self):
+        model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps",
+                 "commit_bound_declared": ["stamp"],
+                 "targets": {"z": {"type": "EXECUTABLE", "artifacts": ["<build>/test/z"], "commit_bound": True},
+                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False}}}
+        rows = [{"test_id": "x case", "executable": "<build>/test/x", "commit_bound": True},
+                {"test_id": "y", "executable": "<build>/test/y", "commit_bound": False}]
+        rec = self.record_from({"codemodel-abc.json": json.dumps(model),
+                                "tests.jsonl": "\n".join(json.dumps(r) for r in rows)})
+        self.assertEqual(rec["declared_commit_bound"], ["test/x", "test/z"])
+        self.assertTrue(rrc.content_keyed(rec))
+        self.assertFalse(rrc.content_keyed(dict(rec, generated_headers="unavailable")))
+
+    def test_an_undeclared_build_or_a_null_verdict_declares_nothing(self):
+        model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps", "targets": {}}
+        unavailable = dict(model, commit_bound_declared="unavailable")
+        row = json.dumps({"test_id": "x", "executable": "<build>/test/x", "commit_bound": True})
+        self.assertIsNone(self.record_from({"codemodel-a.json": json.dumps(unavailable),
+                                            "tests.jsonl": row})["declared_commit_bound"])
+        null_row = json.dumps({"test_id": "x", "executable": "<build>/test/x", "commit_bound": None})
+        self.assertIsNone(self.record_from({"codemodel-a.json": json.dumps(dict(model, commit_bound_declared=[])),
+                                            "tests.jsonl": null_row, "job.json": "{}"})["declared_commit_bound"])
 
     def test_the_record_expands_link_members_and_test_executables(self):
         buf = io.BytesIO()
