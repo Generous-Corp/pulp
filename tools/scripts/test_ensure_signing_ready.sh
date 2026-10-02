@@ -356,6 +356,41 @@ OUT="$(SHIM_LOG="$LOG" SHIM_UNLOCK_FAIL_PATH="$LEGACY16" \
 
 echo ""
 
+# 17. Once the unattended sibling exists it is the dedicated keychain on every
+#     run, even where the legacy one still unlocks (an SSH session), and the
+#     legacy keychain leaves the search list: a bare `codesign --sign` that
+#     walks into it while it is locked in the GUI session raises a password
+#     dialog (m5studio and m3, 2026-10-02).
+S="$TMP/s17"; make_secrets "$S"
+LEGACY17="$S/pulp-signing.keychain-db"; : > "$LEGACY17"
+SIBLING17="$S/pulp-signing-unattended.keychain-db"; : > "$SIBLING17"
+LOGIN17="$TMP/login17.keychain-db"; : > "$LOGIN17"
+LOG="$TMP/log17"; ARGV="$TMP/argv17"; : > "$ARGV"; RC=0
+OUT="$(SHIM_LOG="$LOG" SHIM_ARGV_LOG="$ARGV" \
+       SHIM_EXISTING_KEYCHAINS="$(render_existing "$LEGACY17" "$SIBLING17" "$LOGIN17")" \
+       PATH="$SHIMBIN:$PATH" PULP_SECRETS_DIR="$S" SHIM_IDENTITY_IN_DEDICATED=1 \
+       env -u PULP_SIGN_KEYCHAIN -u PULP_NOTARY_KEY_PATH \
+       bash "$DOCTOR" --quiet --print-env 2>&1)" || RC=$?
+kc_paths_of "$ARGV" > "$TMP/paths17"
+{ [ "$RC" -eq 0 ] && grep -q "PULP_SIGN_KEYCHAIN=$SIBLING17" <<<"$OUT" \
+  && grep -q "codesign .*--keychain $SIBLING17" "$LOG" \
+  && grep -Fxq "$SIBLING17" "$TMP/paths17" && grep -Fxq "$LOGIN17" "$TMP/paths17" \
+  && ! grep -Fxq "$LEGACY17" "$TMP/paths17" && [ -f "$LEGACY17" ]; } \
+  && ok "an existing unattended sibling is sticky and the legacy keychain leaves the search list" \
+  || bad "legacy keychain stayed in use or on the search list (rc=$RC)"$'\n'"$OUT"$'\n'"written:"$'\n'"$(cat "$TMP/paths17")"
+
+# 17b. Control: with no sibling the configured keychain is the dedicated one
+#      and stays on the search list.
+S="$TMP/s17b"; make_secrets "$S"
+KC17B="$S/pulp-signing.keychain-db"; : > "$KC17B"
+LOGIN17B="$TMP/login17b.keychain-db"; : > "$LOGIN17B"
+ARGV="$TMP/argv17b"; : > "$ARGV"
+converge_run "$S" "$(render_existing "$KC17B" "$LOGIN17B")" "$ARGV"
+kc_paths_of "$ARGV" > "$TMP/paths17b"
+{ ! [ -s "$TMP/paths17b" ] || grep -Fxq "$KC17B" "$TMP/paths17b"; } \
+  && ok "without a sibling the configured keychain stays dedicated and listed" \
+  || bad "configured keychain was dropped with no sibling"$'\n'"$(cat "$TMP/paths17b")"
+
 # 18. A configured Developer ID Installer identity must be PROVEN usable. A
 #     passing codesign probe says nothing about it: it is a different key
 #     reached through a different tool.

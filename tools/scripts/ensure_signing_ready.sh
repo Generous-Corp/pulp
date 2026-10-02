@@ -90,7 +90,7 @@ err()  { printf 'ERROR: %s\n' "$*" >&2; }
 # script is written against stock `security`, so a PATH shim can drive this logic
 # against a fake list without touching a real keychain.
 converge_keychain_search_list() {
-  local want="$1"
+  local want="$1" retire="${2:-}"
   local line entry i
   local -a current=() converged=() seen=()
 
@@ -119,6 +119,7 @@ converge_keychain_search_list() {
   # Dropping duplicates and dangling (deleted) keychains is the convergence.
   for entry in "${current[@]}"; do
     [ "$entry" = "$want" ] && continue     # already leads the list
+    [ -n "$retire" ] && [ "$entry" = "$retire" ] && continue  # superseded keychain
     _seen_has "$entry" && continue          # dedup
     [ -f "$entry" ] || continue             # prune dangling
     converged+=("$entry"); seen+=("$entry")
@@ -209,13 +210,29 @@ verify_installer_probe() {
 
 # ── 1. dedicated signing keychain (kills the codesign / 1Password prompt) ──────
 KC="${PULP_SIGN_KEYCHAIN:-}"
+RETIRED_KC=""
 if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
+  case "$KC" in
+    *.keychain-db) SIBLING_KC="${KC%.keychain-db}-unattended.keychain-db" ;;
+    *) SIBLING_KC="${KC}-unattended.keychain-db" ;;
+  esac
+  # Once the unattended sibling exists it is THE dedicated keychain, on every
+  # run and in every session. Choosing per run ("the configured one if it
+  # unlocks here") picked different keychains in an SSH session and in the GUI
+  # session. The superseded one also leaves the search list: a bare
+  # `codesign --sign` that walks into it while it is locked in the GUI session
+  # makes securityd show a password dialog for a password only keychain.env
+  # holds (m5studio and m3, 2026-10-02). Its file is kept.
+  if [ "$SIBLING_KC" != "$KC" ] && [ -f "$SIBLING_KC" ]; then
+    RETIRED_KC="$KC"
+    KC="$SIBLING_KC"
+  fi
   # Preserve a legacy dedicated keychain whose recorded password has drifted.
   # The file-backed P12 is the durable authority, so materialize a stable
   # sibling keychain instead of prompting, deleting, or overwriting the old
   # one. Subsequent runs reuse the sibling with the recorded unattended
   # password.
-  if [ -f "$KC" ] && \
+  if [ -z "$RETIRED_KC" ] && [ -f "$KC" ] && \
      ! security unlock-keychain -p "$PULP_SIGN_KEYCHAIN_PW" "$KC" \
        >/dev/null 2>&1; then
     if [ -z "${PULP_SIGN_P12:-}" ] || [ ! -f "${PULP_SIGN_P12:-}" ]; then
@@ -226,6 +243,7 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
       *.keychain-db) KC="${KC%.keychain-db}-unattended.keychain-db" ;;
       *) KC="${KC}-unattended.keychain-db" ;;
     esac
+    RETIRED_KC="${PULP_SIGN_KEYCHAIN}"
     warn "configured signing keychain could not be unlocked; preserving it and using $(basename "$KC") rebuilt from the local P12"
   fi
   if [ ! -f "$KC" ]; then
@@ -265,7 +283,7 @@ if [ -n "$KC" ] && [ -n "${PULP_SIGN_KEYCHAIN_PW:-}" ]; then
   # resolves it even without an explicit --keychain. Converge the list every run
   # (dedup + prune deleted keychains, spaced paths preserved as single tokens) so
   # it never accumulates dangling entries — see converge_keychain_search_list.
-  converge_keychain_search_list "$KC" || exit 1
+  converge_keychain_search_list "$KC" "$RETIRED_KC" || exit 1
 
   if [ -z "${PULP_SIGN_IDENTITY_HASH:-}" ]; then
     err "PULP_SIGN_IDENTITY_HASH is required for unambiguous dedicated-keychain signing"
