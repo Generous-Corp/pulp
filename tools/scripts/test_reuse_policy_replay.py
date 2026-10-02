@@ -617,7 +617,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v3"
+        cache = corpus / "cache" / "record-v4"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -658,7 +658,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v3"
+        cache = corpus / "cache" / "record-v4"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -692,7 +692,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v3"
+        cache = corpus / "cache" / "record-v4"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -729,16 +729,11 @@ class RecordedGraphTests(unittest.TestCase):
         _, keys = self.annotate_v2(("docs/a.md",), v2, v2, declared=("test/group-b",))
         self.assertEqual(keys["run"], ["tb"])
 
-    def test_the_record_reads_declared_commit_bound_registrations(self):
+    def record_from(self, files: dict) -> dict:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("codemodel-abc.json", json.dumps({"schema": "pulp-codemodel-digest/v2",
-                                                          "generated_headers": "ninja-deps", "targets": {}}))
-            zf.writestr("registrations-abc.json", json.dumps({"rows": [
-                {"count": 1, "row": {"command": ["${CMAKE_BINARY_DIR}/test/x", "case"], "kind": "registration",
-                                     "name": "x case", "properties": {"LABELS": ["commit-bound", "gpu"]}}},
-                {"count": 1, "row": {"command": ["${CMAKE_BINARY_DIR}/test/y"], "kind": "registration",
-                                     "name": "y", "properties": {"LABELS": ["pr-fast"]}}}]}))
+            for name, body in files.items():
+                zf.writestr(name, body)
         gh = mock.Mock()
         gh.repository = "o/r"
         gh.json.return_value = {"artifacts": [{"name": "reuse-record-macos", "archive_download_url": "u"}]}
@@ -746,11 +741,31 @@ class RecordedGraphTests(unittest.TestCase):
         resp.__enter__.return_value.read.return_value = buf.getvalue()
         gh._request.return_value = resp
         c = rrc.Collector.__new__(rrc.Collector)
-        c.cache, c.gh = Path(self.tmp), gh
-        rec = c.reuse_record("6")
-        self.assertEqual(rec["declared_commit_bound"], ["test/x"])
+        c.cache, c.gh = Path(self.tmp) / f"rec-{len(files)}-{id(files)}", gh
+        return c.reuse_record("6")
+
+    def test_the_record_reads_commit_bound_from_tests_and_the_codemodel(self):
+        model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps",
+                 "commit_bound_declared": ["stamp"],
+                 "targets": {"z": {"type": "EXECUTABLE", "artifacts": ["<build>/test/z"], "commit_bound": True},
+                             "y": {"type": "EXECUTABLE", "artifacts": ["<build>/test/y"], "commit_bound": False}}}
+        rows = [{"test_id": "x case", "executable": "<build>/test/x", "commit_bound": True},
+                {"test_id": "y", "executable": "<build>/test/y", "commit_bound": False}]
+        rec = self.record_from({"codemodel-abc.json": json.dumps(model),
+                                "tests.jsonl": "\n".join(json.dumps(r) for r in rows)})
+        self.assertEqual(rec["declared_commit_bound"], ["test/x", "test/z"])
         self.assertTrue(rrc.content_keyed(rec))
         self.assertFalse(rrc.content_keyed(dict(rec, generated_headers="unavailable")))
+
+    def test_an_undeclared_build_or_a_null_verdict_declares_nothing(self):
+        model = {"schema": "pulp-codemodel-digest/v2", "generated_headers": "ninja-deps", "targets": {}}
+        unavailable = dict(model, commit_bound_declared="unavailable")
+        row = json.dumps({"test_id": "x", "executable": "<build>/test/x", "commit_bound": True})
+        self.assertIsNone(self.record_from({"codemodel-a.json": json.dumps(unavailable),
+                                            "tests.jsonl": row})["declared_commit_bound"])
+        null_row = json.dumps({"test_id": "x", "executable": "<build>/test/x", "commit_bound": None})
+        self.assertIsNone(self.record_from({"codemodel-a.json": json.dumps(dict(model, commit_bound_declared=[])),
+                                            "tests.jsonl": null_row, "job.json": "{}"})["declared_commit_bound"])
 
     def test_the_record_expands_link_members_and_test_executables(self):
         buf = io.BytesIO()

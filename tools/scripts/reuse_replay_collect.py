@@ -393,8 +393,9 @@ class Collector:
         link pulled, names expanded), `executables` (test id -> the
         executable it ran), `binaries` (executable -> sha256 of the bytes
         the job ran), the codemodel's `digest_schema` and `generated_headers`
-        coverage, and `declared_commit_bound` (executables whose registrations
-        carry the `commit-bound` label). A part the run did not record is None."""
+        coverage, and `declared_commit_bound` (executables whose tests the
+        record marks `commit_bound`, plus codemodel targets flagged so; None
+        when the job did not declare them). A part the run did not record is None."""
         def member(zf: zipfile.ZipFile, prefix: str) -> dict | None:
             name = next((n for n in zf.namelist() if Path(n).name.startswith(prefix)), None)
             return json.loads(zf.read(name)) if name else None
@@ -410,16 +411,27 @@ class Collector:
                 blob = resp.read()
             with zipfile.ZipFile(io.BytesIO(blob)) as zf:
                 model, links, identity = member(zf, "codemodel-"), member(zf, "link-members-"), member(zf, "identity.json")
-                registrations = member(zf, "registrations-")
                 tests = None
+                # Executables of tests the record marks commit_bound. A row
+                # with no verdict (null: the job had no codemodel) makes the
+                # whole declaration unknown.
+                bound_exes: set[str] = set()
+                bound_known = False
                 name = next((n for n in zf.namelist() if Path(n).name == "tests.jsonl"), None)
                 if name:
                     tests = {}
+                    bound_known = True
                     for line in zf.read(name).decode("utf-8", "replace").splitlines():
-                        if line.strip():
-                            row = json.loads(line)
-                            if row.get("executable"):
-                                tests[row["test_id"]] = row["executable"].removeprefix("<build>/")
+                        if not line.strip():
+                            continue
+                        row = json.loads(line)
+                        exe = (row.get("executable") or "").removeprefix("<build>/")
+                        if exe:
+                            tests[row["test_id"]] = exe
+                        if row.get("commit_bound") is None:
+                            bound_known = False
+                        elif row["commit_bound"] and exe:
+                            bound_exes.add(exe)
             link = None
             if links is not None:
                 names = links.get("members") or {}
@@ -436,16 +448,19 @@ class Collector:
             binaries = None if identity is None else {
                 exe.removeprefix("<build>/"): rec.get("sha256")
                 for exe, rec in (identity.get("executables") or {}).items() if exe.startswith("<build>/")}
+            # Declared only when the build said which targets are commit-bound
+            # and every test row carries a verdict; the codemodel's own flags
+            # add bound targets no test of this job ran.
             declared = None
-            if registrations is not None:
-                declared = sorted({(row["row"].get("command") or [""])[0].removeprefix("${CMAKE_BINARY_DIR}/")
-                                   for row in registrations.get("rows") or []
-                                   if COMMIT_BOUND_LABEL in ((row["row"].get("properties") or {}).get("LABELS") or [])})
+            if bound_known and model is not None and isinstance(model.get("commit_bound_declared"), list):
+                declared = sorted(bound_exes | {a.removeprefix("<build>/") for t in (model.get("targets") or {}).values()
+                                                if t.get("commit_bound") and t.get("type") == "EXECUTABLE"
+                                                for a in t.get("artifacts") or []})
             return {"targets": targets, "link": link, "executables": tests, "binaries": binaries,
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
                     "declared_commit_bound": declared}
-        return self._cached(f"record-v3/{run_id}.json.gz", fetch)
+        return self._cached(f"record-v4/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
@@ -863,7 +878,6 @@ CONFIGURE_STAMP_PATHS = frozenset({"CMakeLists.txt"})
 # Ninja dependency log, covers the CONTENT of every build-tree file a target
 # compiles or includes, so a version bump re-keys only its consumers.
 CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
-COMMIT_BOUND_LABEL = "commit-bound"
 
 
 def content_keyed(record: dict | None) -> bool:
