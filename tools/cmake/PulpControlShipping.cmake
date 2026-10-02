@@ -263,8 +263,11 @@ function(_pulp_declare_commit_bound target)
     endif()
     set_property(GLOBAL APPEND PROPERTY PULP_COMMIT_BOUND_TARGETS "${target}")
     set_property(TARGET ${target} PROPERTY PULP_COMMIT_BOUND ON)
-    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/pulp-commit-bound/${target}.json"
-        CONTENT "{\"target\": \"${target}\", \"file\": \"$<TARGET_FILE:${target}>\"}\n")
+    # Names only: a multi-config generator (Xcode, Ninja Multi-Config) would
+    # see a per-configuration artifact path as one file written with
+    # different content. The codemodel maps the name to its artifacts.
+    file(WRITE "${CMAKE_BINARY_DIR}/pulp-commit-bound/${target}.json"
+        "{\"target\": \"${target}\"}\n")
 endfunction()
 
 function(_pulp_attach_control_shipping target artifact_target artifact_format)

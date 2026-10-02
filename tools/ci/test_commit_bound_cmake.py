@@ -9,8 +9,10 @@ and the real helper, then reads ctest's own listing:
 - every test discovered from a declared target carries `commit-bound` beside
   the labels its registration passed; a test of an undeclared target does not;
 - the declaration is written to <build>/pulp-commit-bound/<target>.json naming
-  the target's file, which the CI reuse record reads; an undeclared target has
-  no such file;
+  the target, which the CI reuse record reads; an undeclared target has no
+  such file;
+- the same holds under a multi-config generator (Ninja Multi-Config here, as
+  Xcode for iOS), which evaluates generated files once per configuration;
 - declaring a target twice writes it once.
 
 The executables answer `--list-tests` the way a Catch2 binary does, so the
@@ -67,6 +69,9 @@ def labels(test: dict) -> set[str]:
 @unittest.skipUnless(shutil.which("cmake") and shutil.which("ctest") and (shutil.which("cc") or shutil.which("clang")),
                      "needs cmake, ctest and a C compiler")
 class CommitBoundCMakeTests(unittest.TestCase):
+    GENERATOR: list[str] = []
+    CONFIG: list[str] = []
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = tempfile.TemporaryDirectory()
@@ -75,11 +80,14 @@ class CommitBoundCMakeTests(unittest.TestCase):
         (src / "stub.c").write_text(STUB)
         (src / "CMakeLists.txt").write_text(PROJECT.format(cmake=CMAKE_DIR.as_posix()))
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CMAKE_", "CTEST_"))}
-        for cmd in (["cmake", "-S", str(src), "-B", str(build)], ["cmake", "--build", str(build), "-j2"]):
+        config = ["--config", cls.CONFIG[0]] if cls.CONFIG else []
+        for cmd in (["cmake", "-S", str(src), "-B", str(build), *cls.GENERATOR],
+                    ["cmake", "--build", str(build), "-j2", *config]):
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
             if proc.returncode:
                 raise AssertionError(f"{cmd} failed:\n{proc.stdout}\n{proc.stderr}")
-        listing = subprocess.run(["ctest", "--test-dir", str(build), "--show-only=json-v1"],
+        listing = subprocess.run(["ctest", "--test-dir", str(build), "--show-only=json-v1",
+                                  *(["-C", cls.CONFIG[0]] if cls.CONFIG else [])],
                                  capture_output=True, text=True, timeout=120, env=env, check=True)
         cls.tests = {t["name"]: t for t in json.loads(listing.stdout)["tests"]}
         cls.build = build
@@ -102,9 +110,16 @@ class CommitBoundCMakeTests(unittest.TestCase):
         folder = self.build / "pulp-commit-bound"
         files = sorted(p.name for p in folder.iterdir())
         self.assertEqual(files, ["bound.json"])
-        doc = json.loads((folder / "bound.json").read_text())
-        self.assertEqual(doc["target"], "bound")
-        self.assertEqual(os.path.realpath(doc["file"]), os.path.realpath(self.build / "bound"))
+        self.assertEqual(json.loads((folder / "bound.json").read_text()), {"target": "bound"})
+
+
+@unittest.skipUnless(shutil.which("ninja"), "needs ninja for a multi-config generator")
+class CommitBoundMultiConfigTests(CommitBoundCMakeTests):
+    """Xcode and Ninja Multi-Config evaluate a generated file once per
+    configuration; a declaration must not differ between them."""
+
+    GENERATOR = ["-G", "Ninja Multi-Config"]
+    CONFIG = ["Debug"]
 
 
 if __name__ == "__main__":
