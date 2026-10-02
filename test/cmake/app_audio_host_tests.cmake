@@ -996,8 +996,14 @@ pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.
 pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE) # fork without exec
 
 # pulp-test-host loads PulpGain.clap and PulpSynth.clap when examples are
-# built (the edges are added in the top-level CMakeLists.txt, after examples/);
-# without examples those cases skip and it loads only system or temp plugins.
+# built (the edges and paths are added in the top-level CMakeLists.txt, after
+# examples/); without examples those cases skip and it loads only system or
+# temp plugins.
+# pulp-test-host-regression loads PulpGain.clap the same way and otherwise only
+# fake bundles in a scratch directory; pulp-test-group-app-host loads the
+# in-process built-in instrument.
 if(NOT PULP_BUILD_EXAMPLES)
     pulp_test_spawns(pulp-test-host NONE)
+    pulp_test_spawns(pulp-test-host-regression NONE)
 endif()
+pulp_test_spawns(pulp-test-group-app-host NONE)

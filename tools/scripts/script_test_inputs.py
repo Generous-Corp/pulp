@@ -339,7 +339,7 @@ TEST_DATA_DIR = Path("test") / "test-data"
 # Text in a compiled test source that means it opens files from the checkout.
 DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 
-# Calls that start or load another program. The class names are the repo's
+# Calls that start or load another program or module. The class names are the repo's
 # own process API (core/platform/child_process.hpp,
 # core/events/child_process_manager.hpp; this script's selftest checks every
 # class there that starts a process is listed), plus the C and platform
@@ -348,10 +348,18 @@ DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 # program this repo builds is what its spawn edges, or a reviewed
 # pulp_test_spawns(NONE), say.
 SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
+# The repo's plugin and module loaders (core/host): PluginSlot::load, the CLAP
+# bundle scanner, and the dlopen shim. PluginSlot alone is an interface that
+# tests implement in memory, so only its loader counts.
+LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"dl_open\s*\(")
 SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
     + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
-    + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\(|\bdlopen\s*\(")
+    + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\("
+    # Loading a module or plugin bundle at run time is the same edge as running
+    # a program: the repo's own loaders, then the platform ones.
+    + r"|\b(?:%s)" % "|".join(LOAD_APIS)
+    + r"|\bdlopen\s*\(|\bLoadLibrary(?:Ex)?[AW]?\s*\(|\bCFBundle(?:Create|LoadExecutable)\w*\s*\(")
 EXECUTABLE_SCANS = ("data", "spawns")
 INCLUDE = re.compile(r'^\s*#\s*(?:include|import)\s*"([^"]+)"', re.M)
 # C and C++ comments, so prose such as "the effect system (bloom)" is not a call.

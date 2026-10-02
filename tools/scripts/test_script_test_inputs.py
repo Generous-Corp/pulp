@@ -397,6 +397,8 @@ def spawn_evidence(repo: Repo) -> None:
     write(repo.root, "test/test_reviewed.cpp", "FILE* f = popen(\"git status\", \"r\");\n")
     write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
     write(repo.root, "test/support/runner.hpp", "inline int run_it() { return fork(); }\n")
+    write(repo.root, "test/test_loader.cpp", "auto slot = PluginSlot::load(info);\n")
+    write(repo.root, "test/test_fake_slot.cpp", "struct FakeSlot : PluginSlot { bool is_loaded() const; };\n")
     write(repo.root, "test/test_member.cpp",
           "physics.system(1);\nint my_system(int);\nauto m = ThemeMode::system();\n"
           "// the effect system (bloom) runs popen(cmd) in prose\n/* fork() */\n")
@@ -412,6 +414,8 @@ def spawn_evidence(repo: Repo) -> None:
         "pulp-test-hidden": row("test/test_hidden.cpp"),
         "pulp-test-member": row("test/test_member.cpp"),
         "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"]),
+        "pulp-test-loader": row("test/test_loader.cpp"),
+        "pulp-test-fake-slot": row("test/test_fake_slot.cpp"),
         # Runs a program at a fixed path no edge describes; its own sources
         # show no call (the spawn is in linked library code).
         "pulp-test-untracked": dict(row("test/test_member.cpp", runtime=["pulp-cli"]), spawns_untracked=True)}}),
@@ -435,6 +439,9 @@ class SpawnScanTests(unittest.TestCase):
             # Spawning alone makes an entry; its data side says it reads nothing.
             self.assertEqual((ex["pulp-test-edge"]["data"], ex["pulp-test-edge"]["inputs"]), ("none", []))
             self.assertNotIn("pulp-test-member", ex)
+            # Loading a plugin is a runtime edge; implementing the interface is not.
+            self.assertEqual(ex["pulp-test-loader"]["spawns"], "undeclared")
+            self.assertNotIn("pulp-test-fake-slot", ex)
             self.assertEqual(ex["pulp-test-untracked"]["spawns"], "undeclared")
             self.assertEqual((ex["pulp-test-both"]["data"], ex["pulp-test-both"]["spawns"]), ("declared", "undeclared"))
             summary = sti.data_summary(repo.root, repo.build)
@@ -449,6 +456,13 @@ class SpawnScanTests(unittest.TestCase):
             starters |= {name for name, body in zip(parts[1::2], parts[2::2]) if decl.search(body)}
         self.assertGreaterEqual(len(starters), 3, starters)  # the parse found the API at all
         self.assertLessEqual(starters, set(sti.SPAWN_CLASSES))
+
+    def test_every_listed_loader_still_exists_in_core_host(self) -> None:
+        host = "\n".join(p.read_text(encoding="utf-8")
+                         for p in (HERE.parents[1] / "core/host/include/pulp/host").glob("*.hpp"))
+        for api in sti.LOAD_APIS:
+            name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
+            self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
 
 
 class CompiledDataTests(unittest.TestCase):

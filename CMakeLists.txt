@@ -828,6 +828,8 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
     endforeach()
     # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
     if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
+        target_compile_definitions(pulp-test-host PRIVATE
+            PULP_TEST_PULPSYNTH_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpSynth.clap")
         add_dependencies(pulp-test-host PulpSynth_CLAP)
     endif()
 

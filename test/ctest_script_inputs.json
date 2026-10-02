@@ -701,9 +701,14 @@
     "docs/status/forge-catalog.json"
    ],
    "kind": "compiled",
+   "runtime_targets": [],
    "sources": [
     "test/test_forge_descriptor_audit.cpp"
    ],
+   "spawning_sources": [
+    "test/test_graph_serializer.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-app-view": {
@@ -891,7 +896,20 @@
    "runtime_targets": [],
    "sources": [],
    "spawning_sources": [
-    "test/test_host.cpp"
+    "test/test_host.cpp",
+    "test/test_plugin_slot_au.mm"
+   ],
+   "spawns": "none",
+   "undeclared_sources": []
+  },
+  "pulp-test-host-regression": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_host_regression.cpp"
    ],
    "spawns": "none",
    "undeclared_sources": []
@@ -972,6 +990,7 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "pulp-cli",
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
@@ -980,7 +999,7 @@
    "spawning_sources": [
     "test/test_mcp_server.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "declared",
    "undeclared_sources": [
     "test/test_mcp_server.cpp"
    ]
@@ -989,16 +1008,11 @@
    "data": "undeclared",
    "inputs": [],
    "kind": "compiled",
-   "runtime_targets": [],
    "sources": [
-    "test/test_mcp_timeline_sessions.cpp",
-    "test/test_mcp_timeline_tools.cpp"
+    "test/test_mcp_timeline_sessions.cpp"
    ],
-   "spawning_sources": [],
-   "spawns": "undeclared",
    "undeclared_sources": [
-    "test/test_mcp_timeline_sessions.cpp",
-    "test/test_mcp_timeline_tools.cpp"
+    "test/test_mcp_timeline_sessions.cpp"
    ]
   },
   "pulp-test-modal-spec": {
@@ -1130,6 +1144,18 @@
     "test/test_timeline_document_fuzz.cpp"
    ]
   },
+  "pulp-test-timeline-graph-binding": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_timeline_graph_automation_delivery.cpp"
+   ],
+   "spawns": "undeclared",
+   "undeclared_sources": []
+  },
   "pulp-test-timeline-journal": {
    "data": "none",
    "inputs": [],
@@ -1165,6 +1191,10 @@
    "undeclared_sources": []
   }
  },
+ "executables_scanned_for": [
+  "data",
+  "spawns"
+ ],
  "schema": "pulp-ctest-script-inputs/v1",
  "tests": {
   "a2t-headroom-annotation-selftest": {
@@ -5684,6 +5714,7 @@
    "entry": "tools/scripts/test_script_test_inputs.py",
    "inputs": [
     "core/events/include/pulp/events/child_process_manager.hpp",
+    "core/host/include/pulp/host",
     "core/platform/include/pulp/platform/child_process.hpp",
     "docs/status",
     "docs/status/consumption-profiles.json",
