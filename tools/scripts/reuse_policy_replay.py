@@ -259,6 +259,9 @@ class Decision:
     skip: frozenset = frozenset()
     # (executables not rebuilt, executables) when the policy also skips builds
     build: tuple[int, int] | None = None
+    # (executables whose recorded bytes changed but the policy did not
+    # rebuild, executables compared) where both jobs recorded binary hashes
+    binaries: tuple[int, int] | None = None
 
     def skips(self, test_id: str) -> bool:
         return self.skip_all or test_id in self.skip
@@ -376,7 +379,11 @@ def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
                          if t["test_id"] in passed and t["test_id"] not in must_run)
         total = int(keys.get("executables_total") or 0)
         build = (total - int(keys.get("executables_rebuilt") or 0), total) if total else None
-        return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build)
+        binaries = None
+        if "unreached_changed_binaries" in keys:
+            binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0))
+        return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build,
+                        binaries=binaries)
     return decide
 
 
@@ -509,6 +516,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     statuses: dict[str, int] = {}
     benefits: list[float] = []
     build_fracs: list[float] = []
+    unreached: list[dict] = []
+    binary_pairs = binaries_compared = 0
     build_skipped = build_total = 0
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
@@ -545,6 +554,11 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         evaluable += 1
         if decision.skip_all:
             skipped_groups += 1
+        if decision.binaries is not None:
+            binary_pairs += 1
+            binaries_compared += decision.binaries[1]
+            if decision.binaries[0]:
+                unreached.append({"pr": pair.get("pr"), "group_run_id": group["run_id"], "count": decision.binaries[0]})
         if decision.build is not None:
             build_skipped += decision.build[0]
             build_total += decision.build[1]
@@ -580,6 +594,10 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "benefit_pooled": (skipped_seconds / total_seconds) if total_seconds else None,
         "build_skipped_median": statistics.median(build_fracs) if build_fracs else None,
         "build_skipped_pooled": (build_skipped / build_total) if build_total else None,
+        "unreached_changed_binaries": sum(u["count"] for u in unreached),
+        "unreached_rows": unreached,
+        "binary_control_pairs": binary_pairs,
+        "binaries_compared": binaries_compared,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -591,7 +609,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "build_failures_skipped_rows": build_failures_skipped,
         "rejected_runs": rejected_runs,
         "replay_vs_observed": replay_vs_observed,
-        "verdict": verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20)),
+        "verdict": ("UNSAFE: changed binaries not rebuilt" if unreached else
+                    verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20))),
     }
 
 
@@ -651,6 +670,8 @@ def render(result: dict) -> str:
         f"({result['skipped_test_seconds']:.0f} of {result['group_test_seconds']:.0f} test-seconds)",
         f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
         f"pooled {_fmt(result['build_skipped_pooled'], True)}",
+        f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
+        f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs)",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",
