@@ -990,3 +990,14 @@ pulp_add_test_suite(pulp-test-widget-metrics GROUP pulp-test-group-app-view
 pulp_add_test_suite(pulp-test-forge-descriptor-audit GROUP pulp-test-group-app-host
     LIBRARIES pulp::host)
 pulp_test_data(pulp-test-forge-descriptor-audit PATHS docs/status/forge-catalog.json)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-coreaudio-native-lifetime NONE) # fork without exec
+
+# pulp-test-host loads PulpGain.clap and PulpSynth.clap when examples are
+# built (the edges are added in the top-level CMakeLists.txt, after examples/);
+# without examples those cases skip and it loads only system or temp plugins.
+if(NOT PULP_BUILD_EXAMPLES)
+    pulp_test_spawns(pulp-test-host NONE)
+endif()

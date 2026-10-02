@@ -33,3 +33,7 @@ if(TARGET pulp::authoring-capsule)
     pulp_test_data(pulp-test-authoring-capsule-hostile NO_DEFINE
         PATHS core/authoring_capsule)
 endif()
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-authoring-capsule-hostile NONE) # the calls are a list of forbidden API names

@@ -390,13 +390,16 @@ def spawn_evidence(repo: Repo) -> None:
     """Executables that start a process, as configure records them:
     edge (a runtime target), reviewed (pulp_test_spawns NONE), hidden (the
     call sits in a test/support header it includes, with no edge), member
-    (a `.system(` member call, which is not a process API), and data-and-spawn
-    (reads a declared fixture and spawns with no edge)."""
+    (a `.system(` member call, which is not a process API), data-and-spawn
+    (reads a declared fixture and spawns with no edge), and untracked (a
+    reviewed UNTRACKED: it runs a program no edge describes)."""
     write(repo.root, "test/test_edge.cpp", "auto r = pulp::platform::ChildProcess::run(tool, {});\n")
     write(repo.root, "test/test_reviewed.cpp", "FILE* f = popen(\"git status\", \"r\");\n")
     write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
     write(repo.root, "test/support/runner.hpp", "inline int run_it() { return fork(); }\n")
-    write(repo.root, "test/test_member.cpp", "physics.system(1);\nint my_system(int);\n")
+    write(repo.root, "test/test_member.cpp",
+          "physics.system(1);\nint my_system(int);\nauto m = ThemeMode::system();\n"
+          "// the effect system (bloom) runs popen(cmd) in prose\n/* fork() */\n")
     write(repo.root, "test/test_both.cpp",
           'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\nint rc = std::system(cmd);\n')
     ev = repo.build / "test" / "test-data"
@@ -408,7 +411,11 @@ def spawn_evidence(repo: Repo) -> None:
         "pulp-test-reviewed": row("test/test_reviewed.cpp", none=True),
         "pulp-test-hidden": row("test/test_hidden.cpp"),
         "pulp-test-member": row("test/test_member.cpp"),
-        "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"])}}), encoding="utf-8")
+        "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"]),
+        # Runs a program at a fixed path no edge describes; its own sources
+        # show no call (the spawn is in linked library code).
+        "pulp-test-untracked": dict(row("test/test_member.cpp", runtime=["pulp-cli"]), spawns_untracked=True)}}),
+        encoding="utf-8")
     (ev / "pulp-test-both.inputs.json").write_text(json.dumps({
         "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-both", "kind": "compiled",
         "sources": ["test/test_both.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
@@ -428,6 +435,7 @@ class SpawnScanTests(unittest.TestCase):
             # Spawning alone makes an entry; its data side says it reads nothing.
             self.assertEqual((ex["pulp-test-edge"]["data"], ex["pulp-test-edge"]["inputs"]), ("none", []))
             self.assertNotIn("pulp-test-member", ex)
+            self.assertEqual(ex["pulp-test-untracked"]["spawns"], "undeclared")
             self.assertEqual((ex["pulp-test-both"]["data"], ex["pulp-test-both"]["spawns"]), ("declared", "undeclared"))
             summary = sti.data_summary(repo.root, repo.build)
             self.assertEqual((summary["data_reading"], summary["declared"], summary["undeclared"]), (1, 1, 0))

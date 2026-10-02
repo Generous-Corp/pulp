@@ -701,3 +701,9 @@ if("${_pulp_core_only_links}" MATCHES "pulp(::|-)format-view"
         "${_pulp_core_only_links}")
 endif()
 unset(_pulp_core_only_links)
+
+# pulp_audio_compare runs the CLI it finds at <source root>/build/tools/cli,
+# a fixed path under the checkout rather than this build's own pulp-cli, so no
+# build edge describes what these tests run.
+pulp_test_spawns(pulp-test-mcp-server UNTRACKED)
+pulp_test_spawns(pulp-test-mcp-timeline-tools UNTRACKED)

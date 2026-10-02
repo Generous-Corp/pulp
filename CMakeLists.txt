@@ -826,6 +826,10 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
             add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
         endif()
     endforeach()
+    # pulp-test-host also loads examples/pulpsynth's CLAP from the build tree.
+    if(TARGET pulp-test-host AND TARGET PulpSynth_CLAP)
+        add_dependencies(pulp-test-host PulpSynth_CLAP)
+    endif()
 
     if(TARGET pulp-cli AND TARGET PulpTone_CLAP)
         add_dependencies(pulp-cli PulpGain_CLAP PulpTone_CLAP)

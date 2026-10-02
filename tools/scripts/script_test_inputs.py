@@ -350,9 +350,11 @@ DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
 SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
-    + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?<![\w.>])system\s*\(|\bexec[lv]p?e?\s*\("
+    + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
     + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\(|\bdlopen\s*\(")
 INCLUDE = re.compile(r'^\s*#\s*(?:include|import)\s*"([^"]+)"', re.M)
+# C and C++ comments, so prose such as "the effect system (bloom)" is not a call.
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 
 
 def _read_json(path: Path) -> dict | None:
@@ -405,7 +407,7 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
     for src in sources:
         for f in _test_include_closure(root, src):
             try:
-                if SPAWN_SIGNAL.search((root / f).read_text(encoding="utf-8", errors="replace")):
+                if SPAWN_SIGNAL.search(COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))):
                     hits.add(f)
             except OSError:
                 continue
@@ -414,8 +416,12 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
 
 def spawn_state(root: Path, rec: dict) -> tuple[str | None, list[str]]:
     """(`declared` | `none` | `undeclared` | None, the spawning files) for one
-    executables.json record. None: nothing in it starts a process."""
+    executables.json record. None: nothing in it starts a process. A reviewed
+    UNTRACKED (it runs a program no edge describes) is `undeclared` whatever
+    its sources or edges say."""
     spawning = spawning_sources(root, list(rec.get("sources") or []))
+    if rec.get("spawns_untracked"):
+        return "undeclared", spawning
     if not spawning:
         return None, []
     if rec.get("runtime_targets"):

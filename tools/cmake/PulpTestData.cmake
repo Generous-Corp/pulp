@@ -56,7 +56,10 @@
 #
 # records a reviewed executable whose sources call a process API (ChildProcess,
 # popen, posix_spawn, fork, ...) yet run or load nothing this repo builds:
-# system tools, or a fork of itself. tools/scripts/script_test_inputs.py marks
+# system tools, or a fork of itself. `pulp_test_spawns(<test> UNTRACKED)`
+# records the opposite: it runs a program no edge can describe (one found at a
+# fixed path outside the build tree, say), so it is never skippable whatever
+# its edges say. tools/scripts/script_test_inputs.py marks
 # an executable that calls one with neither an edge nor NONE `spawns:
 # undeclared`, which a selector must never skip. The finalize
 # step then fails the configure when a test executable's compile definitions
@@ -269,6 +272,7 @@ function(_pulp_test_data_finalize)
     file(MAKE_DIRECTORY "${PULP_TEST_DATA_DIR}")
     set(_spawn_errors "")
     get_property(_spawns_none GLOBAL PROPERTY PULP_TEST_SPAWNS_NONE)
+    get_property(_spawns_untracked GLOBAL PROPERTY PULP_TEST_SPAWNS_UNTRACKED)
     _pulp_test_data_collect_targets("${CMAKE_SOURCE_DIR}/test" _targets)
     list(SORT _targets)
     set(_rows "")
@@ -323,7 +327,14 @@ function(_pulp_test_data_finalize)
                 list(APPEND _spawn_errors "${_t} is declared pulp_test_spawns(NONE) but depends on ${_runtime}")
             endif()
         endif()
-        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}}")
+        set(_juntracked false)
+        if(_t IN_LIST _spawns_untracked)
+            set(_juntracked true)
+            if(_jnone)
+                list(APPEND _spawn_errors "${_t} is declared both NONE and UNTRACKED")
+            endif()
+        endif()
+        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}, \"spawns_untracked\": ${_juntracked}}")
     endforeach()
     if(_spawn_errors)
         list(JOIN _spawn_errors "\n  " _spawn_text)
@@ -363,6 +374,10 @@ endfunction()
 function(pulp_test_spawns TEST)
     if(ARGN STREQUAL "NONE")
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_NONE "${TEST}")
+        return()
+    endif()
+    if(ARGN STREQUAL "UNTRACKED")
+        set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_UNTRACKED "${TEST}")
         return()
     endif()
     foreach(_tool IN LISTS ARGN)
