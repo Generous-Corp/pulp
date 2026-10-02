@@ -250,10 +250,29 @@ function(_pulp_configure_control_shipping target bundle_id product_name)
     set(PULP_${target}_CONTROL_MANIFEST_DIGEST "${_manifest_digest}" CACHE INTERNAL "" FORCE)
 endfunction()
 
+# Declare that `target`'s bytes carry a per-configure build identity, so the
+# executable changes on every configure of an identical tree. Marks the target
+# (PULP_COMMIT_BOUND, which catch_discover_tests turns into the `commit-bound`
+# label on every test it discovers from it) and writes
+# <build>/pulp-commit-bound/<target>.json, which the CI reuse record reads to
+# mark the target and everything that depends on it.
+function(_pulp_declare_commit_bound target)
+    get_property(_declared GLOBAL PROPERTY PULP_COMMIT_BOUND_TARGETS)
+    if(target IN_LIST _declared)
+        return()
+    endif()
+    set_property(GLOBAL APPEND PROPERTY PULP_COMMIT_BOUND_TARGETS "${target}")
+    set_property(TARGET ${target} PROPERTY PULP_COMMIT_BOUND ON)
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/pulp-commit-bound/${target}.json"
+        CONTENT "{\"target\": \"${target}\", \"file\": \"$<TARGET_FILE:${target}>\"}\n")
+endfunction()
+
 function(_pulp_attach_control_shipping target artifact_target artifact_format)
     if(NOT TARGET ${artifact_target})
         message(FATAL_ERROR "control shipping target does not exist: ${artifact_target}")
     endif()
+    # The marker source below embeds this build tree's control build nonce.
+    _pulp_declare_commit_bound(${artifact_target})
     if(NOT artifact_format)
         message(FATAL_ERROR "control shipping format is required for ${artifact_target}")
     endif()

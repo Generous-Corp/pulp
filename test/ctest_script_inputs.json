@@ -1430,6 +1430,14 @@
    ],
    "kind": "python"
   },
+  "commit-bound-cmake-selftest": {
+   "entry": "tools/ci/test_commit_bound_cmake.py",
+   "inputs": [
+    "tools/ci/test_commit_bound_cmake.py",
+    "tools/cmake"
+   ],
+   "kind": "python"
+  },
   "commit-bound-labels-selftest": {
    "entry": "tools/ci/test_commit_bound_labels.py",
    "inputs": [

@@ -10,11 +10,17 @@ configure time. A reuse policy must rebuild and rerun such a test by
 declaration; learning the set from history is circular over the window being
 scored. The declaration is the ctest label `commit-bound`.
 
-This reads the test registration manifests (test/cmake/*.cmake), finds every
-literal executable passed to one of those helpers, and requires each
+The helpers themselves are the enforcement point: they call
+`_pulp_declare_commit_bound`, so catch_discover_tests labels every test it
+discovers from such a target (tools/ci/test_commit_bound_cmake.py), and the CI
+reuse record marks every test whose executable is declared or depends on a
+declared target (tools/ci/codemodel_digest.py). This check is the backstop for
+plain `add_test` registrations, which CMake gives no way to label from a
+helper: it reads the test registration manifests (test/cmake/*.cmake), finds
+every literal executable passed to one of those helpers, and requires each
 `add_test(... COMMAND <exe>)` and `catch_discover_tests(<exe> ...)` in the same
-manifest to carry the label. Executables named through a variable are not
-resolvable from text and are counted, not checked.
+manifest to carry the label. Its control is the count of bound executables it
+found, which must be non-zero.
 
 Run:
     python3 tools/ci/test_commit_bound_labels.py
@@ -31,6 +37,12 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 MANIFESTS = ROOT / "test/cmake"
 LABEL = "commit-bound"
+FIX = ("these registrations run an executable that embeds a per-configure build identity: add "
+       "`commit-bound` to the registration's LABELS (add_test: set_tests_properties(<name> PROPERTIES "
+       "LABELS \"commit-bound\")), or route the executable through _pulp_attach_control_shipping / "
+       "_pulp_attach_inspector_shipping / _pulp_attach_a3_control_build_identity, which declare it "
+       "(_pulp_declare_commit_bound) so catch_discover_tests labels its tests and the CI reuse record marks "
+       "every test that runs it. A commit-bound test is never skipped by any reuse policy.")
 # helper -> index of the argument that names the artifact executable
 BINDERS = {"_pulp_attach_a3_control_build_identity": 0, "_pulp_attach_control_shipping": 1,
            "_pulp_attach_inspector_shipping": 1}
@@ -87,7 +99,7 @@ class CommitBoundLabelTests(unittest.TestCase):
                 missing += [f"{name}: {x}" for x in m]
         # Control: the helpers are found, so an empty `missing` is a verdict.
         self.assertGreaterEqual(len(bound), 4, sorted(bound))
-        self.assertEqual(missing, [])
+        self.assertEqual(missing, [], FIX)
 
     def test_a_missing_label_is_reported(self) -> None:
         text = ('_pulp_attach_a3_control_build_identity(t-exe src.cpp)\n'

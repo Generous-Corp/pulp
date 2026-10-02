@@ -23,6 +23,7 @@ Run:
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -160,10 +161,61 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(self.generated(obj_text="o1")["targets"]["t"]["digest"],
                          self.generated(obj_text="o2")["targets"]["t"]["digest"])
 
-    def test_without_a_ninja_log_only_generated_sources_count_and_it_says_so(self) -> None:
+    def test_without_a_ninja_log_generated_inputs_are_unknown_and_it_says_so(self) -> None:
         doc = self.generated(deps=None)
         self.assertEqual(doc["generated_headers"], "unavailable")
-        self.assertIsNotNone(doc["targets"]["t"]["generated"])
+        self.assertTrue(doc["targets"]["t"]["generated"].startswith(cd.UNKNOWN))
+
+    def test_an_unknown_generated_part_never_compares_equal_across_records(self) -> None:
+        # Two records of one identical tree, each written by its own run.
+        script = ("import sys, json, tempfile; sys.path.insert(0, %r); sys.path.insert(0, %r);"
+                  "import test_codemodel_digest as t;"
+                  "d = t.DigestTests().generated(deps=None);"
+                  "print(json.dumps(d['targets']['t']))") % (str(HERE), str(HERE))
+        runs = [json.loads(subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                                          check=True, timeout=60).stdout) for _ in range(2)]
+        self.assertNotEqual(runs[0]["generated"], runs[1]["generated"])
+        self.assertNotEqual(runs[0]["digest"], runs[1]["digest"])
+        # Control: with a Ninja log the same tree digests identically across runs.
+        script_known = script.replace("deps=None", "")
+        known = [json.loads(subprocess.run([sys.executable, "-c", script_known], capture_output=True, text=True,
+                                           check=True, timeout=60).stdout) for _ in range(2)]
+        self.assertEqual(known[0]["digest"], known[1]["digest"])
+
+    def test_a_compiled_target_missing_from_the_ninja_log_is_unknown(self) -> None:
+        # The log records `t` and `a`; `app` compiles sources but has no entry.
+        doc = self.generated()
+        self.assertTrue(doc["targets"]["app"]["generated"].startswith(cd.UNKNOWN))
+        self.assertFalse(doc["targets"]["t"]["generated"].startswith(cd.UNKNOWN))
+
+    def test_a_digest_of_another_schema_never_equals_this_one(self) -> None:
+        before = self.digest()["targets"]["t"]["digest"]
+        original = cd.SCHEMA
+        cd.SCHEMA = "pulp-codemodel-digest/v1"
+        try:
+            after = self.digest()["targets"]["t"]["digest"]
+        finally:
+            cd.SCHEMA = original
+        self.assertNotEqual(before, after)
+
+    def declared(self, names: list[str] | None) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            build, src, tests = materialise(tmp)
+            if names is not None:
+                (build / cd.BOUND_DIR).mkdir()
+                for n in names:
+                    (build / cd.BOUND_DIR / f"{n}.json").write_text(json.dumps({"target": n, "file": "x"}))
+            return cd.digest_targets(build, src, tests)
+
+    def test_a_declared_target_and_everything_depending_on_it_are_commit_bound(self) -> None:
+        doc = self.declared(["f"])
+        bound = sorted(n for n, t in doc["targets"].items() if t["commit_bound"])
+        self.assertEqual(bound, ["f", "t"])  # t links f; app and the others do not
+        self.assertEqual(doc["commit_bound_declared"], ["f"])
+
+    def test_no_declarations_written_reads_as_unavailable_not_as_none_bound(self) -> None:
+        self.assertEqual(self.declared(None)["commit_bound_declared"], "unavailable")
+        self.assertEqual(self.declared([])["commit_bound_declared"], [])
 
     def test_a_build_without_a_reply_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

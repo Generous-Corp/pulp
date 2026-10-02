@@ -56,6 +56,8 @@ endif()
 
 if(PULP_ENABLE_INSPECTOR)
 function(_pulp_attach_a3_control_build_identity target source_path)
+    # The definitions below compile in the commit and the configure time.
+    _pulp_declare_commit_bound(${target})
     set(_revision "0000000000000000000000000000000000000000")
     set(_source_blob "0000000000000000000000000000000000000000")
     set(_dirty true)

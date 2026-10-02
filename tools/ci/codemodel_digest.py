@@ -16,13 +16,22 @@ Per target this records sha256 digests (32 hex characters) of:
     link      the link language and command fragments
     tests     the ctest registrations whose command runs this target's
               artifact (command and properties), or null for none
+    commit_bound
+              the target was declared commit-bound by the build
+              (<build>/pulp-commit-bound/, written by
+              `_pulp_declare_commit_bound`) or depends on such a target;
+              `commit_bound_declared` is "unavailable" when the build wrote
+              no declarations
     generated the CONTENT of every build-tree file the target compiles (a
               generated source) or included when it compiled (Ninja's
               dependency log), or null for none: a configure_file output
               keeps its path when VERSION moves, and a generated marker
-              source carries an embedded build identity. Without a Ninja
-              dependency log the document says `generated_headers:
-              unavailable` and only generated sources are covered
+              source carries an embedded build identity. Where the headers
+              a target included are unknown (no Ninja dependency log, or a
+              compiled target the log never recorded) the part is
+              `unknown:<nonce>`, which never equals another record's, so an
+              input nobody read cannot pass as unchanged. Every digest also
+              covers the schema, so digests of two schema versions never match
     digest    all of the above, the target type and its dependency names
 
 Paths under the build and source roots are written as `<build>/` and `<src>/`
@@ -151,7 +160,8 @@ def ninja_generated_headers(build_dir: Path, generated: _Generated,
                             deps_text=None) -> dict[str, set[str]] | None:
     """Target name -> build-tree headers its objects included, from Ninja's
     recorded dependencies (`ninja -t deps`, exact, written as each object
-    compiled). None when the build has no Ninja dependency log. Headers
+    compiled); every target with a compiled object has an entry, possibly
+    empty. None when the build has no Ninja dependency log. Headers
     under `_deps` (pinned FetchContent builds) are left out; a precompiled
     header under CMakeFiles is kept, since it is the target's own input."""
     if deps_text is None:
@@ -168,6 +178,8 @@ def ninja_generated_headers(build_dir: Path, generated: _Generated,
         if not line.startswith(" "):
             m = _TARGET_DIR.search(line.split(":", 1)[0])
             target = m.group(1) if m else None
+            if target is not None:
+                out.setdefault(target, set())  # compiled, even with no generated header
             continue
         path = line.strip()
         if target is None or not path:
@@ -176,6 +188,47 @@ def ninja_generated_headers(build_dir: Path, generated: _Generated,
         if generated.under_build(full, skip={"_deps"}):
             out.setdefault(target, set()).add(full)
     return out
+
+
+UNKNOWN = "unknown:"
+# One value per digest run: an unknown part differs from every other record,
+# including another record of the same tree.
+NONCE = os.urandom(16).hex()
+BOUND_DIR = "pulp-commit-bound"
+
+
+def commit_bound_declared(build_dir: Path) -> set[str] | None:
+    """Targets the build declared commit-bound (`_pulp_declare_commit_bound`
+    writes <build>/pulp-commit-bound/<target>.json), or None when the build
+    wrote no declarations."""
+    folder = build_dir / BOUND_DIR
+    if not folder.is_dir():
+        return None
+    names = set()
+    for f in sorted(folder.iterdir()):
+        if f.suffix == ".json":
+            try:
+                names.add(json.loads(f.read_text(encoding="utf-8"))["target"])
+            except (OSError, ValueError, KeyError, TypeError):
+                names.add(f.stem)
+    return names
+
+
+def commit_bound_closure(raw: dict[str, dict], names: dict[str, str], declared: set[str]) -> set[str]:
+    """Declared targets and every target that depends on one, directly or
+    through others: a target that builds or runs a commit-bound artifact has
+    it in its runtime closure."""
+    deps = {rec.get("name") or tid: {names.get(d.get("id"), d.get("id")) for d in rec.get("dependencies", [])}
+            for tid, rec in raw.items()}
+    bound = set(declared)
+    changed = True
+    while changed:
+        changed = False
+        for name, ds in deps.items():
+            if name not in bound and ds & bound:
+                bound.add(name)
+                changed = True
+    return bound
 
 
 def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None = None,
@@ -188,6 +241,8 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
     headers = ninja_generated_headers(build_dir, generated, deps_text)
     by_artifact = _tests_by_artifact(tests or [], build_dir)
     names = {tid: rec.get("name", tid) for tid, rec in raw.items()}
+    declared = commit_bound_declared(build_dir)
+    bound = commit_bound_closure(raw, names, declared or set())
     out: dict[str, dict] = {}
     matched: set[str] = set()
     for tid, rec in sorted(raw.items(), key=lambda kv: kv[1].get("name", kv[0])):
@@ -198,6 +253,8 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
         sources = [{"path": p, "group": src.get("compileGroupIndex")}
                    for p, src in zip(source_paths, rec.get("sources", []))]
         gen_files = {p for p in source_paths if generated.under_build(p) and not p.endswith(OBJECT_SUFFIXES)}
+        compiles = any(g.get("sourceIndexes") for g in groups)
+        known = headers is not None and (name in headers or not compiles)
         gen_files |= (headers or {}).get(name, set())
         gen_rows = sorted((_normalise(os.path.realpath(p), roots), generated.file(p)) for p in gen_files)
         compile_ = [{"language": g.get("language"),
@@ -229,15 +286,20 @@ def digest_targets(build_dir: Path, source_root: Path, tests: list[dict] | None 
             "compile": _digest(_normalise(compile_, roots)),
             "link": _digest(_normalise(link_, roots)),
             "tests": _digest(_normalise(sorted(regs, key=lambda r: r["name"] or ""), roots)) if regs else None,
-            "generated": _digest(gen_rows) if gen_rows else None,
+            # A target whose included headers are unknown (no Ninja log, or no
+            # compiled object recorded) must never compare equal to anything:
+            # an input nobody read would otherwise read as unchanged.
+            "generated": (_digest(gen_rows) if gen_rows else None) if known else UNKNOWN + NONCE,
         }
         out[name] = {"type": rec.get("type"), "artifacts": sorted(_normalise(artifacts, roots)),
                      "dependencies": deps, **parts,
-                     "digest": _digest({"type": rec.get("type"), "dependencies": deps, **parts})}
+                     "commit_bound": name in bound,
+                     "digest": _digest({"schema": SCHEMA, "type": rec.get("type"), "dependencies": deps, **parts})}
     # Tests whose command is not a target's artifact (scripts run by an
     # interpreter) are keyed elsewhere; only their count is kept here.
     return {"schema": SCHEMA, "targets": out,
             "generated_headers": "ninja-deps" if headers is not None else "unavailable",
+            "commit_bound_declared": sorted(declared) if declared is not None else "unavailable",
             "tests_unmatched": sum(1 for t in tests if t.get("name") not in matched) if tests is not None else None}
 
 

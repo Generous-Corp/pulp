@@ -693,6 +693,11 @@ if(Python3_Interpreter_FOUND)
         # identity carry the `commit-bound` label a reuse policy keys on.
         add_test(NAME commit-bound-labels-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_labels.py")
+        # The commit-bound helpers label catch-discovered tests and write the
+        # declarations the reuse record reads (configures a small project).
+        add_test(NAME commit-bound-cmake-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_cmake.py")
+        set_tests_properties(commit-bound-cmake-selftest PROPERTIES TIMEOUT 300)
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

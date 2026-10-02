@@ -115,9 +115,15 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   with a fresh build nonce, or `_pulp_attach_a3_control_build_identity`'s
   commit and configure time), so the executable changes on every configure of
   an identical tree. It routes nothing today; it is the declaration a
-  test-reuse policy reads to rebuild and rerun such a test every time instead
-  of learning the set from history. `commit-bound-labels-selftest` fails a
-  registration of such an executable that lacks it.
+  test-reuse policy reads, and a `commit-bound` test is **never skippable by
+  any reuse policy**: it is rebuilt and rerun every time rather than learned
+  from history. The helpers declare it (`_pulp_declare_commit_bound`):
+  `catch_discover_tests` labels every test discovered from a declared target,
+  and the CI reuse record marks every test whose executable is declared or
+  depends on a declared target, which covers tests that run a shipping
+  artifact. A plain `add_test` cannot be labelled from a helper, so
+  `commit-bound-labels-selftest` fails such a registration of a literally
+  named bound executable that lacks the label.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 
