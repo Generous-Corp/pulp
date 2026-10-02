@@ -994,7 +994,14 @@ force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
 requests, with build and source roots written as `<build>/` and `<src>/` so
-the same configuration digests identically on every VM.
+the same configuration digests identically on every VM. A `generated` part
+digests the CONTENT of every build-tree file the target compiles or included
+when it compiled (Ninja's dependency log, `ninja -t deps`), so a VERSION bump
+re-keys only the targets that include the configured version header, and a
+target whose generated marker source or compile definitions embed a build
+identity re-keys on every configure, by declaration rather than by learning it
+from history. Without a Ninja log the record warns that generated headers are
+not keyed.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,

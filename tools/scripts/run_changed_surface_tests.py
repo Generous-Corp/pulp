@@ -353,6 +353,43 @@ def _cache_entries(build_dir: Path) -> dict[str, str]:
     return observed
 
 
+# Cache entries a checkout's environment decides rather than its sources:
+# which SDKs setup.sh linked and whether Skia and WebGPU resolved (PULP_HAS_*),
+# the dependency pins it linked them at, and the generator, Python and build
+# type. A base configured under a different environment registers different
+# tests for reasons no plan can see, so these must agree before any
+# registration is compared.
+PROVISIONING_SWITCH = re.compile(r"PULP_HAS_[A-Z0-9_]+")
+ENVIRONMENT_ENTRIES = ("PULP_CHECKOUT_DEPENDENCY_CONTRACT", "CMAKE_GENERATOR",
+                       "Python3_EXECUTABLE", "CMAKE_BUILD_TYPE")
+
+
+def provisioning(cache_entries: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in sorted(cache_entries.items())
+            if PROVISIONING_SWITCH.fullmatch(k) or k in ENVIRONMENT_ENTRIES}
+
+
+def linked_externals(tree: Path) -> list[str]:
+    """The external/ entries setup.sh linked into the shared source cache."""
+    external = tree / "external"
+    return sorted(entry.name for entry in external.iterdir()
+                  if entry.is_symlink()) if external.is_dir() else []
+
+
+def validate_provisioning(base: dict[str, Any], build_dir: Path) -> None:
+    """Refuse, by name, a base whose provisioning differs from this tree's."""
+
+    head = provisioning(_cache_entries(build_dir))
+    recorded = base.get("provisioning")
+    if not isinstance(recorded, dict):
+        raise SelectionExecutionError("inventory: base_provisioning_mismatch: base provisioning not recorded")
+    differing = [f"{name} base={recorded.get(name, '<unset>')} head={head.get(name, '<unset>')}"
+                 for name in sorted(set(recorded) | set(head)) if recorded.get(name) != head.get(name)]
+    if differing:
+        raise SelectionExecutionError(
+            "inventory: base_provisioning_mismatch: " + "; ".join(differing))
+
+
 def base_projection(
     base_sha: str,
     policy: dict[str, Any],
@@ -393,14 +430,16 @@ def base_projection(
         )
     generator = cache_entries.get("CMAKE_GENERATOR", "")
     python = cache_entries.get("Python3_EXECUTABLE", "")
+    head_provisioning = [f"{k}={v}" for k, v in provisioning(cache_entries).items()]
     key = hashlib.sha256(
-        "\0".join([base_sha, generator, python, *flags]).encode()
+        "\0".join([base_sha, generator, python, *flags, *head_provisioning]).encode()
     ).hexdigest()[:16]
     cache_dir = build_dir / BASE_INVENTORY_CACHE
     cached = cache_dir / f"{base_sha}-{key}.json"
     if cached.is_file():
         reused = json.loads(cached.read_text(encoding="utf-8"))
         reused["configure_seconds"] = 0.0
+        validate_provisioning(reused, build_dir)
         return reused
     started = time.monotonic()
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -408,6 +447,11 @@ def base_projection(
     try:
         steps = [
             ["git", "-C", str(repo_root), "worktree", "add", "--detach", "--force", str(tree), base_sha],
+            # Provision the base as the head checkout was: setup.sh links the
+            # external SDKs from the shared source cache. Git may only read
+            # local objects here, so a pin missing from the cache fails this
+            # step (the plan selects full) instead of cloning mid-plan.
+            ["bash", str(tree / "setup.sh"), "--deps-only", "--non-interactive"],
             # Through the host build governor, like every other build-tree
             # command the lane runs.
             # FetchContent is disconnected: dependencies, including the
@@ -420,8 +464,9 @@ def base_projection(
              *([f"-DPython3_EXECUTABLE={python}"] if python else []),
              "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"],
         ]
+        offline = {**os.environ, "GIT_ALLOW_PROTOCOL": "file"}
         for step in steps:
-            result = runner(step, capture_output=True, text=True, shell=False)
+            result = runner(step, capture_output=True, text=True, shell=False, env=offline)
             if result.returncode != 0:
                 tail = (result.stderr or result.stdout or "").strip().splitlines()[-1:]
                 raise SelectionExecutionError(
@@ -431,6 +476,8 @@ def base_projection(
             projected = inventory.project_registrations(
                 ctest_payload(tree / "build"), tree, tree / "build"
             )
+            projected["provisioning"] = provisioning(_cache_entries(tree / "build"))
+            projected["linked_externals"] = linked_externals(tree)
         except SelectionExecutionError as error:
             raise SelectionExecutionError(f"inventory: base not recorded: {error}") from error
     finally:
@@ -441,6 +488,7 @@ def base_projection(
     projected["configure"] = {"generator": generator, "python": python, "flags": flags}
     cached.write_text(json.dumps(projected, sort_keys=True), encoding="utf-8")
     projected["configure_seconds"] = round(time.monotonic() - started, 1)
+    validate_provisioning(projected, build_dir)
     print(f"changed-surface: base inventory for {base_sha[:12]} configured in "
           f"{projected['configure_seconds']}s ({projected['row_count']} rows)", file=sys.stderr)
     return projected
@@ -1145,6 +1193,11 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     # target), so compared on name, arguments and properties.
                     "base_inventory_name_only_rows": inventory.name_only_rows(base),
                     "base_inventory_configure_seconds": base.get("configure_seconds"),
+                    # The environment the base and this tree were compared
+                    # under, so an equal registration set is shown to come
+                    # from an equal environment.
+                    "base_inventory_environment": base.get("provisioning"),
+                    "base_inventory_linked_externals": base.get("linked_externals"),
                     "prebuild_unbuilt_placeholder_count": (
                         prebuild_unbuilt_placeholder_count
                     ),

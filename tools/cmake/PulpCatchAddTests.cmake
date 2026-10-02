@@ -25,12 +25,20 @@ function(add_command NAME)
   set(script "${script}${NAME}(${_args})\n" PARENT_SCOPE)
 endfunction()
 
+# A target declared commit-bound (_pulp_declare_commit_bound in
+# PulpControlShipping.cmake) labels every test discovered from it. In a CTest
+# file set_tests_properties adds LABELS to those already set, so the
+# registration's own labels stay.
+macro(_pulp_label_commit_bound test_name)
+  add_command(set_tests_properties "${test_name}" PROPERTIES LABELS commit-bound)
+endmacro()
+
 function(catch_discover_tests_impl)
 
   cmake_parse_arguments(
     ""
     ""
-    "TEST_TARGET;TEST_EXECUTABLE;TEST_WORKING_DIR;TEST_OUTPUT_DIR;TEST_OUTPUT_PREFIX;TEST_OUTPUT_SUFFIX;TEST_PREFIX;TEST_REPORTER;TEST_SUFFIX;TEST_LIST;TEST_FAIL_IF_EMPTY;CTEST_FILE"
+    "TEST_TARGET;TEST_EXECUTABLE;TEST_WORKING_DIR;TEST_OUTPUT_DIR;TEST_OUTPUT_PREFIX;TEST_OUTPUT_SUFFIX;TEST_PREFIX;TEST_REPORTER;TEST_SUFFIX;TEST_LIST;TEST_FAIL_IF_EMPTY;TEST_COMMIT_BOUND;CTEST_FILE"
     "TEST_SPEC;TEST_EXTRA_ARGS;TEST_PROPERTIES;TEST_LABELS;TEST_EXECUTOR;TEST_DL_PATHS;TEST_DL_FRAMEWORK_PATHS"
     ${ARGN}
   )
@@ -225,6 +233,9 @@ function(catch_discover_tests_impl)
     endif()
 
     list(APPEND tests "${fallback_name}")
+    if(_TEST_COMMIT_BOUND)
+      _pulp_label_commit_bound("${fallback_name}")
+    endif()
     add_command(set ${_TEST_LIST} ${tests})
     file(WRITE "${_CTEST_FILE}" "${script}")
     return()
@@ -283,6 +294,11 @@ function(catch_discover_tests_impl)
     list(APPEND tests "${prefix}${test}${suffix}")
   endforeach()
 
+  if(_TEST_COMMIT_BOUND)
+    foreach(commit_bound_test IN LISTS tests)
+      _pulp_label_commit_bound("${commit_bound_test}")
+    endforeach()
+  endif()
   add_command(set ${_TEST_LIST} ${tests})
   file(WRITE "${_CTEST_FILE}" "${script}")
 endfunction()
@@ -311,6 +327,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     TEST_DL_PATHS ${TEST_DL_PATHS}
     TEST_DL_FRAMEWORK_PATHS ${TEST_DL_FRAMEWORK_PATHS}
     TEST_FAIL_IF_EMPTY ${TEST_FAIL_IF_EMPTY}
+    TEST_COMMIT_BOUND ${TEST_COMMIT_BOUND}
     CTEST_FILE ${CTEST_FILE}
   )
 endif()

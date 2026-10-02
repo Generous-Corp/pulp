@@ -56,6 +56,8 @@ endif()
 
 if(PULP_ENABLE_INSPECTOR)
 function(_pulp_attach_a3_control_build_identity target source_path)
+    # The definitions below compile in the commit and the configure time.
+    _pulp_declare_commit_bound(${target})
     set(_revision "0000000000000000000000000000000000000000")
     set(_source_blob "0000000000000000000000000000000000000000")
     set(_dirty true)
@@ -118,7 +120,7 @@ _pulp_attach_a3_control_build_identity(
 target_link_libraries(pulp-test-control-gpu-health-provider PRIVATE
     pulp::inspect-ui-runtime pulp::tool-gpu-health-model Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-control-gpu-health-provider
-    PROPERTIES LABELS "inspect;control;gpu;provider")
+    PROPERTIES LABELS "inspect;control;gpu;provider;commit-bound")
 
 if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
         TARGET pulp-inspect-standalone-runtime)
@@ -185,6 +187,6 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
     catch_discover_tests(pulp-test-control-gpu-health-standalone-product
         PROPERTIES
             RESOURCE_LOCK pulp_gpu
-            LABELS "inspect\;control\;gpu\;standalone\;product")
+            LABELS "inspect\;control\;gpu\;standalone\;product\;commit-bound")
 endif()
 endif()

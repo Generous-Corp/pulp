@@ -1148,32 +1148,58 @@ class BaseInventoryTest(unittest.TestCase):
                     runner.validate_registrations_match_base({"tests": tree}, source, build, base)
 
     def run_base(self, build: Path, results: list[int], payload: dict | None = None,
-                 merge_base: str = BASE):
+                 merge_base: str = BASE, base_cache: str | None = None,
+                 envs: list | None = None, base_links: dict | None = None,
+                 base_policy: dict | None = None):
+        """Run base_projection with a fake runner. The fake base configure
+        writes `base_cache` as the scratch tree's CMakeCache.txt; by default it
+        copies the head's provisioning switches, as a correctly provisioned
+        base would."""
         calls: list[list[str]] = []
+        if base_cache is None:
+            head = runner._cache_entries(build)
+            base_cache = "".join(f"{k}:INTERNAL={v}\n" for k, v in runner.provisioning(head).items())
 
-        def fake(argv, **_):
+        def fake(argv, **kwargs):
             if "merge-base" in argv:
                 return subprocess.CompletedProcess(argv, 0, merge_base + "\n", "")
             calls.append(argv)
+            if envs is not None:
+                envs.append(kwargs.get("env"))
             code = results.pop(0) if results else 0
+            if code == 0 and "cmake" in argv and "-B" in argv:
+                tree_build = Path(argv[argv.index("-B") + 1])
+                tree_build.mkdir(parents=True, exist_ok=True)
+                (tree_build / "CMakeCache.txt").write_text(base_cache)
+                for name, real in (base_links or {}).items():
+                    entry = tree_build.parent / "external" / name
+                    entry.parent.mkdir(parents=True, exist_ok=True)
+                    entry.mkdir() if real else entry.symlink_to(tree_build)
             return subprocess.CompletedProcess(argv, code, "", "boom")
 
         with mock.patch.object(runner, "ctest_payload",
                                return_value=payload or {"tests": [fixture("smoke")]}):
-            return calls, runner.base_projection(self.BASE, policy(), build, Path("/repo"), fake)
+            return calls, runner.base_projection(self.BASE, base_policy or policy(), build,
+                                                 Path("/repo"), fake)
 
     def test_base_is_configured_from_the_exact_commit_and_cached(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
             (build / "CMakeCache.txt").write_text(
                 "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
-            calls, first = self.run_base(build, [0, 0, 0])
+            envs: list = []
+            calls, first = self.run_base(build, [0, 0, 0, 0], envs=envs)
             self.assertEqual(calls[0][:6], ["git", "-C", "/repo", "worktree", "add", "--detach"])
             self.assertEqual(calls[0][-1], self.BASE)
-            self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[1])
-            self.assertIn("Ninja", calls[1])
-            self.assertTrue(calls[1][1].endswith("tools/ci/governed-build.sh"), calls[1])
-            self.assertIn("-DFETCHCONTENT_FULLY_DISCONNECTED=ON", calls[1])
+            # The base is provisioned like the head, offline, before configuring.
+            self.assertTrue(calls[1][1].endswith("/setup.sh"), calls[1])
+            self.assertEqual(calls[1][2:], ["--deps-only", "--non-interactive"])
+            self.assertTrue(calls[1][1].startswith(calls[0][-2]), calls[1])
+            self.assertEqual(envs[1]["GIT_ALLOW_PROTOCOL"], "file")
+            self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[2])
+            self.assertIn("Ninja", calls[2])
+            self.assertTrue(calls[2][1].endswith("tools/ci/governed-build.sh"), calls[2])
+            self.assertIn("-DFETCHCONTENT_FULLY_DISCONNECTED=ON", calls[2])
             self.assertEqual(first["configure"]["flags"], ["-DCMAKE_BUILD_TYPE=Debug"])
             self.assertEqual(calls[-1][3:5], ["worktree", "remove"])
             self.assertEqual(first["base_sha"], self.BASE)
@@ -1181,6 +1207,69 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertEqual(again, [])
             self.assertEqual(second["configure_seconds"], 0.0)
             self.assertEqual(second["digest"], first["digest"])
+
+    HEAD_WITH_SDKS = ("CMAKE_GENERATOR:INTERNAL=Ninja\n"
+                      "PULP_HAS_AUSDK:INTERNAL=TRUE\nPULP_HAS_VST3:INTERNAL=TRUE\n"
+                      "PULP_HAS_SKIA:INTERNAL=TRUE\n")
+
+    def test_a_base_provisioned_without_the_heads_sdks_refuses_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS)
+            without_ausdk = ("CMAKE_GENERATOR:INTERNAL=Ninja\nPULP_HAS_AUSDK:INTERNAL=FALSE\n"
+                             "PULP_HAS_VST3:INTERNAL=TRUE\nPULP_HAS_SKIA:INTERNAL=TRUE\n")
+            with self.assertRaisesRegex(
+                    runner.SelectionExecutionError,
+                    r"base_provisioning_mismatch: PULP_HAS_AUSDK base=FALSE head=TRUE$"):
+                self.run_base(build, [0, 0, 0, 0], base_cache=without_ausdk)
+            # The cached base is refused again, not served as if it matched.
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "base_provisioning_mismatch"):
+                self.run_base(build, [])
+            # A switch the base never set is a mismatch too.
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS + "PULP_HAS_LV2:INTERNAL=TRUE\n")
+            with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                        r"PULP_HAS_LV2 base=<unset> head=TRUE"):
+                self.run_base(build, [0, 0, 0, 0], base_cache=self.HEAD_WITH_SDKS)
+
+    def test_a_base_provisioned_like_the_head_is_projected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS)
+            _, base = self.run_base(build, [0, 0, 0, 0],
+                                    base_links={"AudioUnitSDK": False, "vst3sdk": False, "miniz": True})
+            self.assertEqual(base["provisioning"], {"CMAKE_GENERATOR": "Ninja", "PULP_HAS_AUSDK": "TRUE",
+                                                    "PULP_HAS_SKIA": "TRUE", "PULP_HAS_VST3": "TRUE"})
+            # Only the links setup.sh made are recorded, never a tracked directory.
+            self.assertEqual(base["linked_externals"], ["AudioUnitSDK", "vst3sdk"])
+
+    def test_a_dependency_pin_difference_refuses_even_with_the_sdks_linked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            contract = "PULP_CHECKOUT_DEPENDENCY_CONTRACT:INTERNAL=pulp-shared-source-v1;ausdk={}\n"
+            (build / "CMakeCache.txt").write_text(self.HEAD_WITH_SDKS + contract.format("AudioUnitSDK-1.4.0"))
+            with self.assertRaisesRegex(
+                    runner.SelectionExecutionError,
+                    r"base_provisioning_mismatch: PULP_CHECKOUT_DEPENDENCY_CONTRACT "
+                    r"base=pulp-shared-source-v1;ausdk=AudioUnitSDK-1.3.0 "
+                    r"head=pulp-shared-source-v1;ausdk=AudioUnitSDK-1.4.0$"):
+                self.run_base(build, [0, 0, 0, 0],
+                              base_cache=self.HEAD_WITH_SDKS + contract.format("AudioUnitSDK-1.3.0"))
+
+    def test_a_cached_base_records_no_provisioning_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                        "base provisioning not recorded"):
+                runner.validate_provisioning({"rows": []}, Path(directory))
+
+    def test_a_changed_head_provisioning_is_a_different_base_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text(self.HEAD_WITH_SDKS)
+            self.run_base(build, [0, 0, 0, 0])
+            cache.write_text(self.HEAD_WITH_SDKS.replace("AUSDK:INTERNAL=TRUE", "AUSDK:INTERNAL=FALSE"))
+            calls, _ = self.run_base(build, [0, 0, 0, 0])
+            self.assertTrue(calls, "a head with different SDKs reused the cached base inventory")
 
     def test_a_cached_base_inventory_is_reused_only_for_the_same_configure(self) -> None:
         # The cache key must cover every input of the base configure: a
@@ -1205,16 +1294,7 @@ class BaseInventoryTest(unittest.TestCase):
                     self.assertTrue(calls, f"a changed {label} reused the cached base inventory")
             cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
             flagged = {**policy(), "build_flags": ["-DCMAKE_BUILD_TYPE=Release"]}
-            calls: list = []
-
-            def fake(argv, **_):
-                if "merge-base" in argv:
-                    return subprocess.CompletedProcess(argv, 0, self.BASE + "\n", "")
-                calls.append(argv)
-                return subprocess.CompletedProcess(argv, 0, "", "")
-
-            with mock.patch.object(runner, "ctest_payload", return_value={"tests": [fixture("smoke")]}):
-                runner.base_projection(self.BASE, flagged, build, Path("/repo"), fake)
+            calls, _ = self.run_base(build, [0, 0, 0, 0], base_policy=flagged)
             self.assertTrue(calls, "a changed flag set reused the cached base inventory")
 
     def test_unavailable_base_says_so_and_cleans_up(self) -> None:

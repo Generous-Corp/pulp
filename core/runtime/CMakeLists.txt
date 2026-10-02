@@ -31,7 +31,10 @@ set(PULP_GIT_DIRTY "false")
 find_package(Git QUIET)
 if(GIT_FOUND AND EXISTS "${PULP_ROOT_DIR}/.git")
     execute_process(
-        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse --short HEAD
+        # A fixed length: a bare --short grows with the clone's object count
+        # (a shallow CI checkout stamps 7 characters, a full clone 10 or
+        # more for the same commit), which made one commit's binaries differ.
+        COMMAND "${GIT_EXECUTABLE}" -C "${PULP_ROOT_DIR}" rev-parse --short=12 HEAD
         OUTPUT_VARIABLE PULP_GIT_SHA
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET)
