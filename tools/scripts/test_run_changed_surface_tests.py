@@ -1166,6 +1166,7 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[1])
             self.assertIn("Ninja", calls[1])
             self.assertTrue(calls[1][1].endswith("tools/ci/governed-build.sh"), calls[1])
+            self.assertIn("-DFETCHCONTENT_FULLY_DISCONNECTED=ON", calls[1])
             self.assertEqual(first["configure"]["flags"], ["-DCMAKE_BUILD_TYPE=Debug"])
             self.assertEqual(calls[-1][3:5], ["worktree", "remove"])
             self.assertEqual(first["base_sha"], self.BASE)
@@ -1187,6 +1188,21 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertEqual(leftovers, [])
             with self.assertRaisesRegex(runner.SelectionExecutionError, "base not recorded"):
                 runner.base_projection("not-a-sha", policy(), build)
+
+    def test_the_base_comparison_runs_before_any_other_inventory_check(self) -> None:
+        # The placeholder-tolerant path is reachable only after the base
+        # comparison passed; a drifted tree must fail on the base, first.
+        source, build = Path("/repo"), Path("/repo/build")
+        tests = [fixture("smoke"), fixture("core")]
+        base = base_of(tests, source, build)
+        drifted = [*tests, fixture("extra")]
+        with mock.patch.object(runner.inventory, "build_manifest",
+                               side_effect=AssertionError("manifest built before the base check")):
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "protected base"):
+                runner.validate_selection(
+                    selected_names=["smoke", "core"], full_payload={"tests": drifted},
+                    selected_tests=tests, source_root=source, build_dir=build,
+                    policy=policy(), base=base, target="mac")
 
     def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
