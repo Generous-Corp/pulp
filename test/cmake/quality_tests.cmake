@@ -689,6 +689,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_codemodel_digest.py")
         set_tests_properties(codemodel-digest-selftest PROPERTIES TIMEOUT 120)
+        # Registrations of executables that embed a per-configure build
+        # identity carry the `commit-bound` label a reuse policy keys on.
+        add_test(NAME commit-bound-labels-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_labels.py")
         # The two refusals governed-build applies before a lease: a checkout in
         # a temporary directory (it misses the shared ccache on every compile),
         # and a second build into a tree another live build holds.

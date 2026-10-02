@@ -192,6 +192,12 @@
       "timeout": 180.0
     },
     {
+      "name": "commit-bound-labels-selftest",
+      "argv": [
+        "{repo}/tools/ci/test_commit_bound_labels.py"
+      ]
+    },
+    {
       "name": "ctest-gate-args-selftest",
       "argv": [
         "{repo}/tools/ci/test_ctest_gate_args.py"

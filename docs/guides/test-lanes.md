@@ -110,6 +110,14 @@ Routing is driven entirely by CTest `LABELS`, set in each test's
   required `macos` gate on gate events** and run instead by the build-free
   required `Enforce version & skill sync` context. `push` and every other lane
   still run it. See [the source-selftest lane](#the-source-selftest-lane).
+- **`commit-bound`** — the test runs an executable whose bytes carry a
+  per-configure build identity (a control-shipping or inspector marker source
+  with a fresh build nonce, or `_pulp_attach_a3_control_build_identity`'s
+  commit and configure time), so the executable changes on every configure of
+  an identical tree. It routes nothing today; it is the declaration a
+  test-reuse policy reads to rebuild and rerun such a test every time instead
+  of learning the set from history. `commit-bound-labels-selftest` fails a
+  registration of such an executable that lacks it.
 - **no special label** — a normal unit/integration test. Runs on the **required
   gate**. This is where the vast majority of tests belong.
 

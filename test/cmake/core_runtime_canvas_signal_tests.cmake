@@ -18,7 +18,7 @@ if(TARGET pulp::inspect-control)
     add_test(NAME control-shipping-real-component-runs
         COMMAND pulp-test-control-shipping-real-component)
     set_tests_properties(control-shipping-real-component-runs PROPERTIES
-        LABELS "control;ship")
+        LABELS "control;ship;commit-bound")
 endif()
 
 # Grouped executables for this manifest (pulp_add_test_group in
