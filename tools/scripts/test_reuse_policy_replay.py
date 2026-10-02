@@ -619,13 +619,14 @@ class RecordedGraphTests(unittest.TestCase):
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
         cache = corpus / "cache" / "record-v2"
         cache.mkdir(parents=True)
-        # group-a's bytes changed and is rebuilt; group-b's bytes changed but
-        # nothing in the drift reaches it: the control must name it.
+        # group-a is rebuilt but its bytes came out the same (over-approximation);
+        # group-b's bytes changed but nothing in the drift reaches it: the
+        # control must name it.
         for run_id, rec in (("p1", {"targets": targets, "link": None, "executables": None,
                                     "binaries": {"test/group-a": "1", "test/group-b": "2", "test/group-c": "3"}}),
                             ("g1", {"targets": targets, "link": self.link,
                                     "executables": {"ta": "test/group-a", "tb": "test/group-b"},
-                                    "binaries": {"test/group-a": "1x", "test/group-b": "2x", "test/group-c": "3"}})):
+                                    "binaries": {"test/group-a": "1", "test/group-b": "2x", "test/group-c": "3"}})):
             with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
                 json.dump(rec, fh)
         graph = self.index.graph
@@ -637,6 +638,7 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
         self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_changed_binaries"], ["test/group-b"])
         self.assertEqual(keys["cmake-codemodel-recorded"]["binaries_compared"], 3)
+        self.assertEqual(keys["cmake-codemodel-recorded"]["rebuilt_identical_binaries"], 1)
         p2 = dict(pair(drift=("test/t.cpp",)), source_key=keys, source_key_head_run_id="p1")
         result = rpr.score(rpr.Corpus([group(), head()], [p2], tests={"g1": [t("ta"), t("tb")], "p1": [t("ta"), t("tb")]}),
                            "source-key-codemodel-recorded")
@@ -669,6 +671,12 @@ class RecordedGraphTests(unittest.TestCase):
         result = rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
                                           {}, None, mock.Mock())
         self.assertEqual(result["commit_bound_executables"], ["test/group-b"])
+        # g1 checked out the same tree: group-b is rebuilt (commit-bound) and
+        # its bytes did change, so nothing was over-approximated there; g2's
+        # group-a changed and was rebuilt too.
+        over = {p["group_run_id"]: p["source_key"]["cmake-codemodel-recorded"]["rebuilt_identical_binaries"]
+                for p in rpr.read_jsonl(corpus / "pairs.jsonl")}
+        self.assertEqual(over, {"g1": 0, "g2": 0})
         keys = {p["group_run_id"]: p["source_key"] for p in rpr.read_jsonl(corpus / "pairs.jsonl")}
         self.assertIn("tb", keys["g2"]["cmake-codemodel-recorded"]["run"])
         self.assertEqual(keys["g2"]["cmake-codemodel-recorded"]["unreached_changed_binaries"], [])

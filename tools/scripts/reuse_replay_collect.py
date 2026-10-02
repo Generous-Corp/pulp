@@ -1178,6 +1178,9 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     recorded[variant]["binaries_compared"] = len(both)
                     recorded[variant]["binaries_changed"] = len(changed)
                     recorded[variant]["unreached_changed_binaries"] = sorted(changed - set(recorded[variant]["rebuilt"]))
+                    # The inverse: rebuilt although the bytes came out the
+                    # same, the policy's over-approximation.
+                    recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
             pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
             pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
             with_recorded += 1

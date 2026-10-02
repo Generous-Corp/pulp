@@ -260,8 +260,9 @@ class Decision:
     # (executables not rebuilt, executables) when the policy also skips builds
     build: tuple[int, int] | None = None
     # (executables whose recorded bytes changed but the policy did not
-    # rebuild, executables compared) where both jobs recorded binary hashes
-    binaries: tuple[int, int] | None = None
+    # rebuild, executables compared, executables rebuilt with identical
+    # bytes) where both jobs recorded binary hashes
+    binaries: tuple[int, int, int] | None = None
 
     def skips(self, test_id: str) -> bool:
         return self.skip_all or test_id in self.skip
@@ -381,7 +382,8 @@ def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
         build = (total - int(keys.get("executables_rebuilt") or 0), total) if total else None
         binaries = None
         if "unreached_changed_binaries" in keys:
-            binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0))
+            binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0),
+                        int(keys.get("rebuilt_identical_binaries") or 0))
         return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build,
                         binaries=binaries)
     return decide
@@ -517,7 +519,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     benefits: list[float] = []
     build_fracs: list[float] = []
     unreached: list[dict] = []
-    binary_pairs = binaries_compared = 0
+    binary_pairs = binaries_compared = rebuilt_identical = 0
     build_skipped = build_total = 0
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
@@ -557,6 +559,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         if decision.binaries is not None:
             binary_pairs += 1
             binaries_compared += decision.binaries[1]
+            rebuilt_identical += decision.binaries[2]
             if decision.binaries[0]:
                 unreached.append({"pr": pair.get("pr"), "group_run_id": group["run_id"], "count": decision.binaries[0]})
         if decision.build is not None:
@@ -598,6 +601,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "unreached_rows": unreached,
         "binary_control_pairs": binary_pairs,
         "binaries_compared": binaries_compared,
+        "rebuilt_identical_binaries": rebuilt_identical,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -671,7 +675,8 @@ def render(result: dict) -> str:
         f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
         f"pooled {_fmt(result['build_skipped_pooled'], True)}",
         f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
-        f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs)",
+        f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs); "
+        f"{result['rebuilt_identical_binaries']} rebuilt with identical bytes",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",
