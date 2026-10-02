@@ -537,20 +537,23 @@ def build_records(ctx: dict, image_digest: str, suites: list[dict],
     return records, summary
 
 
-def _load_inventory(build_dir: Path, selected_json: Path | None, ran: set[str], every: bool) -> list[dict]:
+def _load_inventory(build_dir: Path, selected_json: Path | None, ran: set[str], every: bool,
+                    listing=None) -> list[dict]:
     """Inventory entries: every registered test when `every`, else those that
     ran. The full suite's selection listing is used where it covers them; the
     build directory's full listing fills in the rest (the fast tiers select
-    tests by label, which the selection listing omits)."""
+    tests by label, which the selection listing omits). `listing` returns the
+    build directory's ctest listing, shared with the other record files."""
     import protected_merge_receipt as pmr
 
+    listing = listing or pmr.ctest_inventory
     tests: list[dict] = []
     if selected_json and selected_json.is_file():
         tests = json.loads(selected_json.read_text(encoding="utf-8")).get("tests", [])
     names = {t.get("name") for t in tests}
     if not every and not ran - names:
         return [t for t in tests if t.get("name") in ran]
-    full = pmr.ctest_inventory(build_dir).get("tests", [])
+    full = listing(build_dir).get("tests", [])
     merged = tests + [t for t in full if t.get("name") not in names]
     return merged if every else [t for t in merged if t.get("name") in ran]
 
@@ -572,6 +575,16 @@ def cmd_write(a: argparse.Namespace) -> int:
         problems.append("no job start time: reports left in the build directory by an earlier job "
                         "cannot be told apart from this job's")
     ran = {c["test_id"] for s in suites for f in suite_files(s["path"], not_before)[0] for c in junit_cases(f)}
+    listed: dict = {}
+
+    def listing(path: Path) -> dict:
+        """One `ctest --show-only` per job, shared by every record file."""
+        import protected_merge_receipt as pmr
+
+        if "payload" not in listed:
+            listed["payload"] = pmr.ctest_inventory(path)
+        return listed["payload"]
+
     identity: dict = {"schema": SCHEMA, "executables": {}, "closure_files": {}, "unresolved_executables": 0}
     by_test: dict[str, str] = {}
     # Every test executable is hashed whenever the build succeeded, whatever
@@ -584,7 +597,8 @@ def cmd_write(a: argparse.Namespace) -> int:
             if a.identity_json and Path(a.identity_json).is_file():
                 ident = json.loads(Path(a.identity_json).read_text(encoding="utf-8"))
                 seed = {os.path.realpath(build_dir / f["path"]): f["sha256"] for f in ident.get("files", [])}
-            inventory = _load_inventory(build_dir, Path(a.selected_json) if a.selected_json else None, ran, every)
+            inventory = _load_inventory(build_dir, Path(a.selected_json) if a.selected_json else None, ran, every,
+                                        listing)
             identity, by_test = executable_identity(build_dir, source_root or build_dir, inventory, seed)
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"executable identity unavailable: {exc}")
@@ -604,16 +618,6 @@ def cmd_write(a: argparse.Namespace) -> int:
             fh.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
     identity_path = out / "identity.json"
     identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-
-    listed: dict = {}
-
-    def listing(path: Path) -> dict:
-        """One `ctest --show-only` per job: every call rewrites LastTest.log."""
-        import protected_merge_receipt as pmr
-
-        if "payload" not in listed:
-            listed["payload"] = pmr.ctest_inventory(path)
-        return listed["payload"]
 
     codemodel = None
     if a.codemodel and build_dir:

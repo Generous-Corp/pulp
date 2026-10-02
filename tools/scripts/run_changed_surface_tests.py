@@ -399,10 +399,14 @@ def base_projection(
             ["git", "-C", str(repo_root), "worktree", "add", "--detach", "--force", str(tree), base_sha],
             # Through the host build governor, like every other build-tree
             # command the lane runs.
+            # FetchContent is disconnected: dependencies resolve from the
+            # machine's shared source cache, and a miss fails this configure
+            # (so the plan selects full) instead of cloning mid-plan.
             ["bash", str(repo_root / "tools" / "ci" / "governed-build.sh"),
              "cmake", "-S", str(tree), "-B", str(tree / "build"),
              *(["-G", generator] if generator else []), *flags,
-             *([f"-DPython3_EXECUTABLE={python}"] if python else [])],
+             *([f"-DPython3_EXECUTABLE={python}"] if python else []),
+             "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"],
         ]
         for step in steps:
             result = runner(step, capture_output=True, text=True, shell=False)

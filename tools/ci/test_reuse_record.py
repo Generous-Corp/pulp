@@ -433,6 +433,31 @@ class CliTests(unittest.TestCase):
         self.assertFalse(job["registration_projection"]["recordable"])
         self.assertIn("registration projection not recordable", stdout)
 
+    def test_one_ctest_listing_serves_identity_codemodel_and_projection(self) -> None:
+        import contextlib
+        import io
+        calls = []
+        original = pmr.ctest_inventory
+
+        def counted(build_dir, ctest_json=None):
+            calls.append(build_dir)
+            return {"tests": [{"name": "a", "command": ["python3", "a.py"], "properties": []}]}
+
+        pmr.ctest_inventory = counted
+        old_env = dict(os.environ)
+        os.environ.update({"GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"})
+        try:
+            with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+                (Path(tmp) / "build").mkdir()
+                rr.main(["reuse_record.py", "write", "--out-dir", f"{tmp}/out", "--build-dir",
+                         f"{tmp}/build", "--source-root", tmp, "--build-outcome", "success",
+                         "--codemodel", "--inventory"])
+        finally:
+            pmr.ctest_inventory = original
+            os.environ.clear()
+            os.environ.update(old_env)
+        self.assertEqual(len(calls), 1)
+
     def test_projection_is_off_unless_asked(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "build").mkdir()
