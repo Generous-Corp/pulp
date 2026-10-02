@@ -7,7 +7,7 @@ being hand-edited or not regenerated after a test or script is added:
 - `test/ctest_script_inputs.json` (`script_test_inputs.py`);
 - `tools/ci/source_selftests.json` (`tools/ci/source_selftests.py write`),
   which must carry each registration's TIMEOUT, RESOURCE_LOCK and argv;
-- the changed-surface script families block in `.shipyard/config.toml`
+- the changed-surface script families file `.shipyard/changed-surface-families.toml`
   (`changed_surface_script_families.py --write`), which must map every new
   script and list every new reader of the skills tree.
 
@@ -69,6 +69,7 @@ def generated_manifest_reasons(changed: set[str]) -> list[str]:
         if (path.endswith(".py") and path.startswith("tools/")) \
                 or path.startswith("test/cmake/") or path.endswith("CMakeLists.txt") \
                 or path in ("tools/ci/source_selftests.json", ".shipyard/config.toml",
+                            ".shipyard/changed-surface-families.toml",
                             "test/ctest_script_inputs.json") \
                 or (path.startswith(".agents/skills/") and path.endswith("/SKILL.md")):
             reasons.append(path)
@@ -232,10 +233,10 @@ def check_families(root: Path, build: Path, shown: str, base: str) -> int:
     if rc == 0:
         return 0
     if rc == 1:
-        say("  changed-surface script families: DRIFT. Regenerate the block from this configured tree "
-            "and commit it (never hand-edit the generated block in .shipyard/config.toml):")
+        say("  changed-surface script families: DRIFT. Regenerate the families file from this "
+            "configured tree and commit it (never hand-edit .shipyard/changed-surface-families.toml):")
         say(f"    python3 tools/scripts/changed_surface_script_families.py --build-dir {shown} --write")
-        say("    git add .shipyard/config.toml")
+        say("    git add .shipyard/changed-surface-families.toml")
         return 1
     say(f"NOT CHECKED locally: {FAMILIES_TEST} (changed_surface_script_families.py --check "
         f"exited {rc} on {shown})")

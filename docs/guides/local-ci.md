@@ -1972,8 +1972,10 @@ Python tool scripts and skill docs select through generated families.
 `tools/scripts/changed_surface_script_families.py` reads
 `test/ctest_script_inputs.json` (each script-driven ctest's entry and the
 inputs it imports or names) and writes one family per group of top-level
-`tools/scripts/*.py` files sharing the same readers into the marked block of
-`.shipyard/config.toml`, plus `agent-skill-docs` for
+`tools/scripts/*.py` files sharing the same readers into
+`.shipyard/changed-surface-families.toml`, which the selection names as its
+`families_file` (Shipyard reads it from the protected base and treats it as a
+policy path), plus `agent-skill-docs` for
 `.agents/skills/*/SKILL.md` and a `script-surface-whole-tree` family that adds
 the drift, lint, registry, sync, guard, census, inventory and probe tests to
 any of those changes. A `script-surface-environment-bound` family likewise
@@ -1992,7 +1994,7 @@ registration, so `tools/scripts/test_*.py` is no longer a test-topology path;
 describe this policy are not policy inputs either. The generator, the
 script-inputs list and the inventory contract are.
 
-`changed-surface-script-families-drift` (macOS) regenerates the block and
+`changed-surface-script-families-drift` (macOS) regenerates the file and
 compares it. Like `script-test-inputs-drift` it is diff-scoped: drift blocks a
 change touching a script, a skill doc, the script-inputs list, the generator or
 the config, reports otherwise, and never fails a merge group. Regenerate with

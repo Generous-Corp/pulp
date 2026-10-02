@@ -126,32 +126,22 @@ class ReferenceGraphTests(unittest.TestCase):
         self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
             "tools/scripts/lane_thing.py"].admitted)
 
-    def test_generated_selector_family_listing_is_not_a_blocker(self) -> None:
+    def test_generated_selector_families_file_is_not_a_blocker(self) -> None:
         repo = self._repo({
             "tools/scripts/lane_thing.py": "X = 1\n",
-            wide.SHIPYARD_CONFIG: (
-                "[targets.mac]\n"
-                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
-                'paths = ["tools/scripts/lane_thing.py"]\n'
-                f"{wide.SELECTOR_BLOCK_END}\n"
-            ),
+            wide.SELECTOR_FAMILIES_FILE: '[[families]]\npaths = ["tools/scripts/lane_thing.py"]\n',
         })
         self.assertTrue(repo.decide("tools/scripts/lane_thing.py")[
             "tools/scripts/lane_thing.py"].admitted)
 
-    def test_shipyard_config_running_a_script_keeps_native(self) -> None:
+    def test_shipyard_config_naming_a_script_keeps_native(self) -> None:
         repo = self._repo({
             "tools/scripts/lane_thing.py": "X = 1\n",
-            wide.SHIPYARD_CONFIG: (
-                'test = "python3 tools/scripts/lane_thing.py"\n'
-                f"{wide.SELECTOR_BLOCK_BEGIN}: generator --write\n"
-                'paths = ["tools/scripts/lane_thing.py"]\n'
-                f"{wide.SELECTOR_BLOCK_END}\n"
-            ),
+            ".shipyard/config.toml": 'test = "python3 tools/scripts/lane_thing.py"\n',
         })
         d = repo.decide("tools/scripts/lane_thing.py")["tools/scripts/lane_thing.py"]
         self.assertFalse(d.admitted)
-        self.assertIn(wide.SHIPYARD_CONFIG, d.reason)
+        self.assertIn(".shipyard/config.toml", d.reason)
 
     def test_gate_side_cmake_registration_keeps_native(self) -> None:
         repo = self._repo({
