@@ -2122,6 +2122,20 @@ the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
 of the generated files, configuring `build-gate` without compiling if no current
 build exists; any check it cannot run is listed NOT CHECKED, never passed.
 
+## An `a2t-scope-history-headroom` warning means: schedule the re-pin
+
+The merge-group and full-suite `macos` jobs carry one
+`a2t-scope-history-headroom` annotation (`tools/ci/a2t_headroom_annotation.py`,
+fed by the guard test via `PULP_A2T_HEADROOM_OUT`). A `::warning` from 60% of
+`A2T_SCOPE_HISTORY_LIMIT` is advance notice; past 75% the required gate is
+already red on every PR for a reason unrelated to any change. Re-pin only
+`A2T_SCOPE_HISTORY_BASE` on protected main (contract row 22), choosing the base
+from a full-history checkout: m3's primary checkout is shallow and a blob:none
+partial clone, so a local walk there can miscount. Do not re-pin the GPU
+handoff ledger in the PR; the version bot regenerates it. A missing annotation
+on a job that ran the suite means the measurement broke, not that there is
+room.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`

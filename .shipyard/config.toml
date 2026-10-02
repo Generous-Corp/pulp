@@ -4496,6 +4496,7 @@ risk_class = "low"
 name = "agent-skill-docs"
 paths = [".agents/skills/*/SKILL.md"]
 tests = [
+  "a2t-headroom-annotation-selftest",
   "affected-tests-shadow-selftest",
   "agent-hook-paths",
   "base-poison-detector-selftest",

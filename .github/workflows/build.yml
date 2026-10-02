@@ -2305,6 +2305,9 @@ jobs:
         # this suite, started first by its COST, not in a step after it.
         env:
           AFFECTED_SLOW: ${{ needs.classify.outputs.agent_capability_installed_sdk_required }}
+          # The A2T history-window guard test writes its measurement here; the
+          # step after this one announces it before the guard fails.
+          PULP_A2T_HEADROOM_OUT: ${{ runner.temp }}/a2t-scope-headroom.json
         run: |
           set -euo pipefail
           # Both event-dependent ctest decisions come from one tested module so
@@ -2448,6 +2451,17 @@ jobs:
             echo '::notice title=shipyard-test-tier::{"schema":"shipyard-test-tier/v1","tier":"full"}'
           fi
           exit "$ctest_exit"
+
+      # Advance notice for a required-gate failure that is a date, not a defect:
+      # the A2T scope-history window fills with ordinary traffic, and
+      # gpu-trace-overhead-acceptance-selftest fails every run once it passes
+      # 75% of its limit. From 60% this warns with the count and the re-pin
+      # (decisions contract row 22); below it, a notice with the numbers.
+      - name: Announce A2T scope-history headroom
+        if: always() && runner.os == 'macOS' && steps.ctest.outcome != 'skipped'
+        continue-on-error: true
+        shell: bash
+        run: python3 tools/ci/a2t_headroom_annotation.py "$RUNNER_TEMP/a2t-scope-headroom.json"
 
       # SHADOW instruments for the merge group, one step (tools/ci/
       # merge_group_shadows.py): binary identity vs the PR head's receipt,

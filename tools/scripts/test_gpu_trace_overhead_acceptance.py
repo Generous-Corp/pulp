@@ -1190,6 +1190,12 @@ class GpuTraceOverheadAcceptanceTests(unittest.TestCase):
         """
         head = MODULE._git_text(ROOT, "rev-parse", "HEAD")
         headroom = MODULE.a2t_scope_history_headroom(ROOT, head)
+        # The gate announces this measurement (tools/ci/a2t_headroom_annotation.py)
+        # from the early-warning share on, so the re-pin is scheduled before the
+        # assertion below fails. Written first, so a failing run still reports it.
+        headroom_out = os.environ.get("PULP_A2T_HEADROOM_OUT")
+        if headroom_out:
+            Path(headroom_out).write_text(json.dumps(headroom) + "\n", encoding="utf-8")
         # Positive control: a shallow or disconnected checkout walks to zero, and
         # a zero would satisfy the bound below while proving nothing ran.
         self.assertGreater(
