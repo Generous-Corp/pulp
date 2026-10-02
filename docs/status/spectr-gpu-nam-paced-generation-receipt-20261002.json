@@ -1,0 +1,55 @@
+{
+  "schema": "pulp.spectr-gpu-nam-paced-generation.v1",
+  "candidate_consumer": "magenta-rt2",
+  "candidate_role": "paced_producer_ring",
+  "status": "blocked",
+  "measurements_claimed": false,
+  "forge_exposure": {
+    "status": "metadata_only",
+    "catalog_registered": false,
+    "named_consumer": null
+  },
+  "blockers": [
+    "no_public_neural_adapter",
+    "no_sustained_pacing_receipt",
+    "no_named_forge_consumer"
+  ],
+  "local_probe": {
+    "checked_at": "2026-10-02",
+    "rechecked_parent_head": "8b10d5ada01466d39de2d519811e7c74bc5b0340",
+    "status": "unavailable",
+    "checked_paths": [
+      "/Users/danielraffel/.pulp/magenta",
+      "/Users/danielraffel/.pulp/magenta/models",
+      "/Users/danielraffel/Library/Application Support/Pulp",
+      "/Users/danielraffel/Code"
+    ],
+    "artifact_extensions": [".mlxfn", ".safetensors", ".ckpt", ".tflite", ".onnx"],
+    "findings": [
+      "no /Users/danielraffel/.pulp/magenta directory",
+      "no /Users/danielraffel/.pulp/magenta/models directory",
+      "no matching Magenta/RT2 model artifact under the checked roots",
+      "test/test_model_download.cpp contains generated mrt2 fixture names only"
+    ],
+    "forge_catalog_rows_for_spectr_gpu_nam": 0,
+    "closure": "closed_without_catalog_promotion"
+  },
+  "minimum_next_experiment": {
+    "paced_blocks": 100000,
+    "streams": 1,
+    "named_model_required": true,
+    "named_apple_silicon_host_required": true,
+    "record": [
+      "callback_period_ms",
+      "time_to_first_audio_ms",
+      "sustained_realtime_ratio",
+      "queue_depth",
+      "underrun_count",
+      "fallback_count",
+      "model_artifact_sha256",
+      "receipt_sha256"
+    ],
+    "adversarial_case": "late_completion_is_rejected_and_declared_fallback_is_delivered"
+  },
+  "exact_next_step": "Run the named Magenta RT2 model for 100000 paced blocks on a named Apple Silicon host, publish the receipt, then review a public neural adapter before any Forge catalog registration."
+}
