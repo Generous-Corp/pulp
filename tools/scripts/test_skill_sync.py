@@ -204,6 +204,33 @@ class RealSkillPathMapOwnershipTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, text)
 
+    # ── agent-capabilities owns its scripts, not the shared manifest ───
+
+    def test_shared_quality_manifest_does_not_demand_agent_capabilities(self) -> None:
+        """test/cmake/quality_tests.cmake registers ~1,000 lines of unrelated
+        ratchets beside a few agent-capability ctests. Claiming the whole
+        file made every unrelated registration demand an agent-capabilities
+        SKILL.md update, which is how a Skip trailer becomes a reflex."""
+        path = "test/cmake/quality_tests.cmake"
+        self.assert_tracked(path)
+        self.assertNotIn("agent-capabilities", self.owners(path))
+
+    def test_agent_capability_scripts_still_demand_agent_capabilities(self) -> None:
+        """The narrowing is a narrowing: every agent-capability script and its
+        tests, including ones the old list never named, still fire."""
+        for path in (
+            "tools/scripts/agent_capability_manifest.py",
+            "tools/scripts/agent_capability_rederive.py",
+            "tools/scripts/agent_capability_installed_sdk_consumers.py",
+            "tools/scripts/test_agent_capability_rederive.py",
+            "tools/scripts/test_agent_capability_installed_sdk_helpers.py",
+            "test/test_agent_capability_compile.cpp",
+            "docs/status/agent-capabilities.json",
+        ):
+            with self.subTest(path=path):
+                self.assert_tracked(path)
+                self.assertIn("agent-capabilities", self.owners(path))
+
     # ── Side 1: engine internals must NOT demand web-plugins ──────────
 
     def test_engine_internal_change_does_not_demand_web_plugins(self) -> None:
