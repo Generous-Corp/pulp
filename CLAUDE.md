@@ -692,26 +692,25 @@ Full Pulp worktrees and their build directories are not temporary-file-sized:
 primary checkout as shown below. This is a per-machine storage decision:
 
 - M3 (`Daniels-Mac-Studio-m3`, formerly `Daniels-Mac-Studio`) must declare
-  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`. Stop rather than
-  falling back if that volume or declaration is unavailable. M3 keeps code,
-  builds, and Tart VMs on Workshop so its internal boot disk cannot fill.
-- M1, M5, and m5s (`Daniels-M5-Studio`) intentionally use their internal disk,
-  so a sibling of the primary checkout remains their default.
+  `PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees`; m5s (`Daniels-M5-Studio`,
+  `Daniels-Mac-Studio-m5`) must declare `/Volumes/Atelier/Code/agent-worktrees`. Stop
+  rather than falling back if that volume or declaration is unavailable; code, builds,
+  and Tart VMs live there so the internal boot disk cannot fill.
+- M1 and M5 intentionally use their internal disk (sibling of the primary checkout).
 
 Before creating parallel lanes, report the resolved root and current free
 space. Do not move an active worktree; let its build finish, capture its git
 state/results, then remove that worktree through `git worktree remove`.
 
 ```bash
-# M3: exported persistently by the host; M1/M5/m5s: sibling default.
-if case "$(hostname -s)" in Daniels-Mac-Studio|Daniels-Mac-Studio-m3) true ;; *) false ;; esac; then
-  : "${PULP_WORKTREES_ROOT:?M3 requires PULP_WORKTREES_ROOT=/Volumes/Workshop/Code/agent-worktrees}"
-  [ "$PULP_WORKTREES_ROOT" = "/Volumes/Workshop/Code/agent-worktrees" ] || {
-    echo "M3 worktree root must be /Volumes/Workshop/Code/agent-worktrees" >&2
-    exit 1
-  }
-  mount | grep -F " on /Volumes/Workshop (" >/dev/null || {
-    echo "Workshop is not mounted; refusing to create an internal-disk fallback" >&2
+# M3/m5s: exported persistently by the host; M1/M5: sibling default.
+case "$(hostname -s)" in Daniels-Mac-Studio|Daniels-Mac-Studio-m3) vol=/Volumes/Workshop ;;
+  Daniels-M5-Studio|Daniels-Mac-Studio-m5) vol=/Volumes/Atelier ;; *) vol= ;; esac
+if [ -n "$vol" ]; then
+  : "${PULP_WORKTREES_ROOT:?this host requires PULP_WORKTREES_ROOT=$vol/Code/agent-worktrees}"
+  [ "$PULP_WORKTREES_ROOT" = "$vol/Code/agent-worktrees" ] || { echo "worktree root must be $vol/Code/agent-worktrees" >&2; exit 1; }
+  mount | grep -F " on $vol (" >/dev/null || {
+    echo "$vol is not mounted; refusing to create an internal-disk fallback" >&2
     exit 1
   }
 else

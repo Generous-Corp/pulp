@@ -368,6 +368,49 @@ def _assert_writer_unchanged(repo: Path, older_base: str, cumulative_base: str) 
             )
 
 
+def _complete_history(repo: Path, commits: list[str]) -> None:
+    """Give the regenerators the full commit graph behind every trusted base.
+
+    The GPU handoff regenerator pins each ledger row to the last commit that
+    touched its path, which is a question about history. The classify job
+    checks out one commit deep, so in that checkout every path's last owner is
+    the shallow graft boundary and the regenerator refuses, leaving the ledger
+    pair at the base's bytes. The bot regenerates from a complete clone, so
+    any bump that re-pinned the pair could never be reproduced here and fell
+    back to full validation every time.
+
+    Deepen in place, blobless: commits and trees are all a per-path `git log`
+    reads, and a missing blob is fetched on demand. Only immutable ids are
+    fetched, never a branch name. A repository still shallow afterwards means
+    reproduction would be measuring a truncated graph, so it refuses.
+    """
+    for commit in commits:
+        if not SHA_RE.fullmatch(commit):
+            raise NotGeneratedBump(f"invalid commit id: {commit!r}")
+    if _git_text(repo, "rev-parse", "--is-shallow-repository") != "true":
+        return
+    detail = ""
+    for _attempt in range(2):
+        fetched = _git(
+            repo,
+            "fetch",
+            "--no-tags",
+            "--unshallow",
+            "--filter=blob:none",
+            "origin",
+            *dict.fromkeys(commits),
+            check=False,
+        )
+        if _git_text(repo, "rev-parse", "--is-shallow-repository") != "true":
+            return
+        lines = (fetched.stderr or fetched.stdout).strip().splitlines()
+        detail = lines[-1] if lines else f"git fetch exited {fetched.returncode}"
+    raise NotGeneratedBump(
+        "could not deepen the shallow checkout to complete history, so the "
+        f"history-derived GPU handoff ledger cannot be regenerated: {detail}"
+    )
+
+
 def _bind_trusted_regenerators(module: Any, worktree: Path) -> None:
     """Make every derived-file subprocess execute from the trusted base tree."""
     scripts = (worktree / TRUSTED_WRITER_ROOT).resolve()
@@ -628,6 +671,11 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     )
     _commit_provenance(
         repo, metadata, candidate_base=candidate_base, candidate=candidate
+    )
+    # Every cheap provenance check has passed; only now pay for history.
+    _complete_history(
+        repo,
+        [candidate_base, args.base] if cumulative_head is not None else [candidate_base],
     )
     assignments = _reproduce_tree(
         repo,

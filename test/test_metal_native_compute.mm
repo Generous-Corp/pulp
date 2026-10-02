@@ -27,7 +27,8 @@ int main() {
 #else
             false;
 #endif
-        const bool metal4_runtime = NSClassFromString(@"MTL4CommandQueue") != nil;
+        const bool metal4_runtime =
+            [device respondsToSelector:NSSelectorFromString(@"newMTL4CommandQueue")];
 
         NSError* error = nil;
         NSString* source = @""

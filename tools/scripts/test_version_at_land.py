@@ -1216,6 +1216,27 @@ class RefreshDerivedTest(unittest.TestCase):
                       "the version write itself must still be reported")
         self.assertNotIn("docs/status/pulp-tooling-disposition.json", edited)
 
+    def test_a_failing_regenerator_names_its_own_cause(self):
+        # The regenerator's output is captured, so the one-line notice is the
+        # only trace a failure leaves in a bump or verifier log. Without the
+        # tail a shallow-history refusal reads like any other failure.
+        self._install_regenerator(
+            "import sys\n"
+            "print('noise before the cause', file=sys.stderr)\n"
+            "sys.exit('history is truncated at the graft boundary')\n"
+        )
+        plan = [val.Assignment(surface="plugin", level="patch",
+                               current="0.5.0", assigned="0.5.1")]
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            val._write_plan(self.repo, CONFIG, plan)
+        notice = [line for line in captured.getvalue().splitlines()
+                  if "derived regenerator failed" in line
+                  and "pulp_tooling_disposition.py" in line]
+        self.assertEqual(len(notice), 1, captured.getvalue())
+        self.assertIn("(exit 1)", notice[0])
+        self.assertIn("history is truncated at the graft boundary", notice[0])
+
 
 if __name__ == "__main__":
     unittest.main()
