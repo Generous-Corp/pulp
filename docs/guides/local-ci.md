@@ -2874,6 +2874,20 @@ and the check's summary says so. A required context with no mapped producer
 widens the report the same way. Treat a flagged pull request as one whose required checks it can grade
 itself, and review those files before it is enqueued.
 
+## The A2T scope-history window announces itself before it fails
+
+`gpu-trace-overhead-acceptance-selftest` runs on the required `macos` gate and
+fails every run once the A2T scope-touching revision count passes 75% of
+`A2T_SCOPE_HISTORY_LIMIT`. The count grows with ordinary traffic (shared docs
+are in scope), so the failure has a date. The guard test writes its measurement
+to `PULP_A2T_HEADROOM_OUT`, which the Test step sets, and the
+`Announce A2T scope-history headroom` step turns it into one annotation:
+`::warning title=a2t-scope-history-headroom` from 60% of the limit, naming the
+re-pin, a `::notice` with the numbers below that, and a warning when the
+measurement is missing after the suite ran. The fix is always the re-pin in
+decisions contract row 22: move only `A2T_SCOPE_HISTORY_BASE` on protected
+main, never the limit.
+
 ## A2T evidence receipts get a nonterminal required-job attestation
 
 When a pull-request head targeting `Generous-Corp/pulp` `main` adds or modifies the exact tracked

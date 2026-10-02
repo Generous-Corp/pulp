@@ -611,6 +611,16 @@
  },
  "schema": "pulp-ctest-script-inputs/v1",
  "tests": {
+  "a2t-headroom-annotation-selftest": {
+   "entry": "tools/ci/test_a2t_headroom_annotation.py",
+   "inputs": [
+    ".github/workflows/build.yml",
+    "tools/ci/a2t_headroom_annotation.py",
+    "tools/ci/test_a2t_headroom_annotation.py",
+    "tools/scripts/test_gpu_trace_overhead_acceptance.py"
+   ],
+   "kind": "python"
+  },
   "advisory-macos-runner-policy": {
    "entry": "tools/scripts/test_advisory_macos_runner_policy.py",
    "inputs": [
