@@ -59,6 +59,7 @@ bool GpuAudioTransport::prepare(GpuAudioNode* node, const Config& config) {
     node_ = node;
     channels_ = desc.output_channels;
     block_size_ = desc.block_size;
+    sample_rate_ = desc.sample_rate;
     latency_blocks_ = desc.latency_blocks;
     ring_blocks_ = config.ring_blocks;
     miss_policy_ = desc.miss_policy;
@@ -234,7 +235,7 @@ void GpuAudioTransport::release() noexcept {
     audio_workgroup_ = nullptr;
     join_audio_workgroup_ = false;
     worker_workgroup_joined_.store(false, std::memory_order_release);
-    channels_ = block_size_ = latency_blocks_ = ring_blocks_ = 0;
+    channels_ = block_size_ = sample_rate_ = latency_blocks_ = ring_blocks_ = 0;
     prepared_ = false;
 }
 
@@ -625,6 +626,43 @@ GpuAudioTransport::Stats GpuAudioTransport::stats() const noexcept {
     s.worker_workgroup_join_failures =
         worker_workgroup_join_failures_.load(std::memory_order_relaxed);
     return s;
+}
+
+GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
+    const auto capability = capability_report();
+    const auto timing = stats();
+    const auto delivery = delivery_snapshot();
+
+    GpuAudioStatus status;
+    status.provider = capability.provider;
+    status.fallback_policy = capability.fallback_policy;
+    status.prepared_lead_blocks = capability.prepared_lead_blocks;
+    status.fallback_available = capability.fallback_available;
+    status.diagnostics_available = capability.diagnostics_available;
+    status.produced_blocks = timing.produced_blocks;
+    status.missed_blocks = timing.miss_blocks;
+    status.fallback_blocks = delivery.cpu_fallback_blocks;
+    status.resynced_blocks = timing.resynced_blocks;
+    status.input_dropped_frames = timing.input_dropped_frames;
+    status.last_block_us = timing.last_block_us;
+    status.avg_block_us = timing.avg_block_us;
+
+    if (!prepared_ || node_ == nullptr) {
+        status.selected_engine = GpuAudioEngine::Unknown;
+        status.provider_state = GpuAudioProviderState::Uninitialized;
+        return status;
+    }
+
+    status.sample_rate = sample_rate_;
+    status.block_size = block_size_;
+    status.latency_samples = latency_samples();
+    status.selected_engine = capability.path == GpuAudioExecutionPath::Cpu
+                                 ? GpuAudioEngine::Cpu
+                                 : GpuAudioEngine::Gpu;
+    status.provider_state = capability.eligibility == GpuAudioEligibility::Eligible
+                                ? GpuAudioProviderState::Ready
+                                : GpuAudioProviderState::Degraded;
+    return status;
 }
 
 GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {

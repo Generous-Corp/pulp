@@ -50,6 +50,23 @@ TEST_CASE("GpuAudioProgramDescriptor validates a prepared shared program", "[gpu
     CHECK(program.provider_owned_resources);
 }
 
+TEST_CASE("GpuAudioStatus preserves provider, delivery, and fallback meanings",
+          "[gpu_audio][status]") {
+    GpuAudioStatus status;
+    status.selected_engine = GpuAudioEngine::Gpu;
+    status.provider_state = GpuAudioProviderState::Ready;
+    status.provider = GpuAudioProvider::Dawn;
+    status.produced_blocks = 17;
+    status.missed_blocks = 3;
+    status.fallback_blocks = 2;
+
+    CHECK(status.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(status.produced_blocks == 17);
+    CHECK(status.missed_blocks == 3);
+    CHECK(status.fallback_blocks == 2);
+    CHECK(status.missed_blocks != status.fallback_blocks);
+}
+
 TEST_CASE("GpuAudioProgramDescriptor rejects incomplete shared preparation",
           "[gpu_audio][program]") {
     auto program = valid_shared_program();
@@ -1303,6 +1320,29 @@ TEST_CASE("GpuAudioTransport ring output never claims GPU execution or stale del
     CHECK(delivery_total(t.delivery_snapshot()) == 5);
     t.process_offline(in, out, 32);
     CHECK(delivery_total(t.delivery_snapshot()) == 5);
+}
+
+TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare",
+          "[gpu_audio][transport][status]") {
+    GainNode node(1, 32, 1.0f, MissPolicy::CpuFallback, 2);
+    GpuAudioTransport t;
+
+    const auto before = t.status_snapshot();
+    CHECK(before.schema_version == GpuAudioStatus::kSchemaVersion);
+    CHECK(before.provider_state == GpuAudioProviderState::Uninitialized);
+    CHECK(before.selected_engine == GpuAudioEngine::Unknown);
+
+    REQUIRE(node.prepare());
+    REQUIRE(t.prepare(&node, {8}));
+    const auto after = t.status_snapshot();
+    CHECK(after.provider_state == GpuAudioProviderState::Ready);
+    CHECK(after.selected_engine == GpuAudioEngine::Gpu);
+    CHECK(after.provider == GpuAudioProvider::Unknown);
+    CHECK(after.sample_rate == 48000);
+    CHECK(after.block_size == 32);
+    CHECK(after.latency_samples == 64);
+    CHECK(after.fallback_available);
+    CHECK(after.fallback_policy == MissPolicy::CpuFallback);
 }
 
 TEST_CASE("GpuAudioTransport delivery snapshot supports concurrent diagnostic reads",
