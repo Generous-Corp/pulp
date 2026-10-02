@@ -1287,6 +1287,16 @@ class BaseInventoryTest(unittest.TestCase):
             with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
                 self.run_base(Path(directory), [], merge_base="b" * 40)
 
+    def test_a_cached_base_inventory_never_answers_for_another_merge_base(self) -> None:
+        # The cache is keyed by base SHA, not by the checkout. A checkout whose
+        # merge base moved must refuse before the cache can serve the old base.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            self.run_base(build, [0, 0, 0])
+            self.assertTrue(list((build / runner.BASE_INVENTORY_CACHE).glob(f"{self.BASE}-*.json")))
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
+                self.run_base(build, [], merge_base="b" * 40)
+
     def test_a_cold_tree_matches_its_base_until_the_full_build(self) -> None:
         # A lane checkout with nothing built yet lists unbuilt targets without a
         # program, exactly as the configure-only base does. That must compare
