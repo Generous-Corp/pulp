@@ -239,6 +239,7 @@ struct GpuWaveNetRealtimeNode::Impl {
             contract.algorithmic_lead_blocks = c.lead_blocks;
             contract.pipeline_depth = c.capacity;
             contract.provider_slots = c.session.slots;
+            contract.max_inflight = c.max_inflight;
             contract.requested_path = detail::SharedIoRequest::RequireSharedHostPointer;
             contract.active_path = detail::SharedIoPath::SharedHostPointer;
             contract.shared_host_pointer_capable = true;
