@@ -223,3 +223,65 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
     CHECK(backend.enqueue(block) == StreamingAdmission::Rejected);
 }
+
+TEST_CASE("micro TCN carries causal convolution state across blocks",
+          "[gpu_audio][streaming_model][tcn]") {
+    using Model = MicroTcnModel<1, 3>;
+    Model::Weights weights;
+    weights.taps[0] = {1.0f, 0.5f, 0.25f};
+    Model model(weights);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "micro-tcn",
+                                                 .artifact_hash = "embedded-test-weights",
+                                                 .max_frames = 64};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 2> first_input{1.0f, 2.0f};
+    std::array<float, 2> first_output{};
+    const float* first_input_channels[] = {first_input.data()};
+    float* first_output_channels[] = {first_output.data()};
+    const auto first_in = pulp::audio::BufferView<const float>(first_input_channels, 1, 2);
+    auto first_out = pulp::audio::BufferView<float>(first_output_channels, 1, 2);
+    model.process_cpu(first_in, first_out, 2, {.epoch = 1, .sequence = 0});
+    const std::array<float, 2> expected_first{1.0f, 2.5f};
+    CHECK(first_output == expected_first);
+
+    std::array<float, 2> second_input{3.0f, 4.0f};
+    std::array<float, 2> second_output{};
+    const float* second_input_channels[] = {second_input.data()};
+    float* second_output_channels[] = {second_output.data()};
+    const auto second_in = pulp::audio::BufferView<const float>(second_input_channels, 1, 2);
+    auto second_out = pulp::audio::BufferView<float>(second_output_channels, 1, 2);
+    model.process_cpu(second_in, second_out, 2, {.epoch = 1, .sequence = 1});
+    const std::array<float, 2> expected_second{4.25f, 6.0f};
+    CHECK(second_output == expected_second);
+
+    model.reset(2, StreamingResetReason::TransportRestart);
+    std::array<float, 1> reset_input{3.0f};
+    std::array<float, 1> reset_output{};
+    const float* reset_input_channels[] = {reset_input.data()};
+    float* reset_output_channels[] = {reset_output.data()};
+    const auto reset_in = pulp::audio::BufferView<const float>(reset_input_channels, 1, 1);
+    auto reset_out = pulp::audio::BufferView<float>(reset_output_channels, 1, 1);
+    model.process_cpu(reset_in, reset_out, 1, {.epoch = 2, .sequence = 0});
+    CHECK(reset_output[0] == 3.0f);
+}
+
+TEST_CASE("micro TCN clears output for incompatible audio shape",
+          "[gpu_audio][streaming_model][tcn]") {
+    MicroTcnModel<2, 2> model;
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "micro-tcn",
+                                                 .artifact_hash = "embedded-test-weights",
+                                                 .max_frames = 64};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 1> input{1.0f};
+    std::array<float, 1> output{9.0f};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 1);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 1);
+    model.process_cpu(in, out, 1, {.epoch = 1, .sequence = 0});
+    CHECK(output[0] == 0.0f);
+}

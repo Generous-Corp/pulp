@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -197,6 +198,114 @@ class StreamingBackend {
     virtual bool reprepare_after_device_loss(std::uint64_t epoch) noexcept = 0;
     virtual bool quiesce() noexcept = 0;
     virtual bool release() noexcept = 0;
+};
+
+/// Small, portable causal-convolution model used to prove that the streaming
+/// contract is not coupled to WaveNet.  The topology is intentionally fixed:
+/// one depthwise dilated-convolution layer followed by ReLU.  Weights and the
+/// ring buffer are owned by the instance, so process_cpu() performs no
+/// allocation and carries state across host blocks.
+template <std::size_t Channels, std::size_t KernelSize>
+struct MicroTcnWeights {
+    static_assert(Channels > 0 && KernelSize > 0);
+    std::array<std::array<float, KernelSize>, Channels> taps{};
+    std::array<float, Channels> bias{};
+};
+
+template <std::size_t Channels, std::size_t KernelSize>
+class MicroTcnModel final : public StreamingModel {
+  public:
+    using Weights = MicroTcnWeights<Channels, KernelSize>;
+
+    explicit MicroTcnModel(Weights weights = {})
+        : weights_(weights),
+          spec_{.model_id = "pulp.micro-tcn",
+                .architecture = "tcn.depthwise-relu",
+                .model_version = "1",
+                .weights_hash = "embedded-test-weights",
+                .runtime_hash = "pulp.micro-tcn.v1",
+                .input_channels = static_cast<std::uint32_t>(Channels),
+                .output_channels = static_cast<std::uint32_t>(Channels),
+                .sample_rate = 48000,
+                .block_size = 64,
+                .feature_rate = 48000,
+                .intrinsic_latency_samples = 0,
+                .receptive_field_samples = static_cast<std::uint32_t>(KernelSize),
+                .state_bytes = Channels * KernelSize * sizeof(float),
+                .state_schema = "causal-ring-v1",
+                .deterministic = true} {
+        reset_state();
+    }
+
+    const StreamingModelSpec& spec() const noexcept override { return spec_; }
+
+    bool prepare(const StreamingPrepareContext& context) noexcept override {
+        prepared_ = valid_streaming_prepare_context(context) &&
+                    context.spec == &spec_ &&
+                    context.spec->input_channels == Channels &&
+                    context.spec->output_channels == Channels &&
+                    context.spec->block_size <= MaxSupportedFrames;
+        if (prepared_)
+            reset_state();
+        return prepared_;
+    }
+
+    void process_cpu(const audio::BufferView<const float>& input,
+                     audio::BufferView<float>& output, std::uint32_t frames,
+                     StreamingBlockStamp stamp) noexcept override {
+        last_stamp_ = stamp;
+        if (!prepared_ || frames > MaxSupportedFrames || input.num_channels() < Channels ||
+            output.num_channels() < Channels || input.num_samples() < frames ||
+            output.num_samples() < frames) {
+            output.clear();
+            return;
+        }
+        for (std::uint32_t frame = 0; frame < frames; ++frame) {
+            for (std::size_t channel = 0; channel < Channels; ++channel) {
+                float value = weights_.bias[channel];
+                const auto input_sample = input.channel_ptr(channel)[frame];
+                value += weights_.taps[channel][0] * input_sample;
+                for (std::size_t tap = 1; tap < KernelSize; ++tap) {
+                    const auto index = (ring_cursor_ + KernelSize - tap) % KernelSize;
+                    value += weights_.taps[channel][tap] * state_[channel][index];
+                }
+                output.channel_ptr(channel)[frame] = value > 0.0f ? value : 0.0f;
+                state_[channel][ring_cursor_] = input_sample;
+            }
+            ring_cursor_ = (ring_cursor_ + 1) % KernelSize;
+        }
+    }
+
+    bool quiesce() noexcept override { return true; }
+
+    void reset(std::uint64_t epoch, StreamingResetReason) noexcept override {
+        reset_state();
+        last_stamp_ = {.epoch = epoch, .sequence = 0};
+    }
+
+    bool release() noexcept override {
+        prepared_ = false;
+        reset_state();
+        return true;
+    }
+
+    StreamingBlockStamp last_stamp() const noexcept { return last_stamp_; }
+
+  private:
+    static constexpr std::size_t MaxSupportedFrames = 4096;
+
+    void reset_state() noexcept {
+        for (auto& channel : state_)
+            channel.fill(0.0f);
+        ring_cursor_ = 0;
+    }
+
+    Weights weights_;
+    StreamingModelSpec spec_;
+    std::array<std::array<float, KernelSize>, Channels> state_{};
+    std::size_t ring_cursor_ = 0;
+    StreamingBlockStamp last_stamp_{};
+    bool prepared_ = false;
 };
 
 static_assert(streaming_method_safety(StreamingModelMethod::ProcessCpu) ==
