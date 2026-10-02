@@ -913,6 +913,13 @@ checkout (names `PULP_SOURCE_DIR`, `test/fixtures`, or a definition pointing
 into the checkout) but no declaration is `data: undeclared`: the shadow
 selects it on every change, and `script-test-inputs-drift` fails a pull
 request that adds a new undeclared source, so the backlog only shrinks.
+A test that runs or loads another built target declares it with
+`pulp_test_spawns(<test> <target>...)`, which adds the `add_dependencies`
+edge after every tool directory has been read. An inline
+`if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
+edge. An executable whose sources call a process API with no such edge and no
+reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
+shadow selects it on every change.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from

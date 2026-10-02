@@ -1992,6 +1992,24 @@ undeclared. Declaring a subset is worse than not declaring, because it
 makes an unsound key look sound. Count with
 `script_test_inputs.py --build-dir <dir> --data-summary`.
 
+A compiled test that runs or loads another target this tree builds (a CLI,
+tool, fixture executable or MODULE) declares it with
+`pulp_test_spawns(<test> <target>...)` (same module). Never write
+`if(TARGET <tool>) add_dependencies(...)` in `test/cmake`: the test directory
+is read before `tools/cli`, `tools/import-design` and `examples/`, so the
+guard is false and the edge silently never exists (cli-import-design ran
+against whatever pulp-cpp was lying around for that reason).
+`pulp_test_spawns` adds the edge once the whole tree is read. The configure
+fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
+`script_test_inputs.py` scans each test's sources and the `test/` headers they
+include, comments stripped, for process API calls. One with no edge and no
+reviewed `pulp_test_spawns(<test> NONE)` (it starts only system tools or a
+fork of itself) is `spawns: undeclared`, and the shadow never skips it.
+`pulp_test_spawns(<test> UNTRACKED)` forces that for a test that runs a
+program no edge describes; the two MCP tests do, because they run the CLI at
+`<source>/build/tools/cli`. The scan cannot see a spawn inside linked library
+code, and "declared" means one edge, not all of them, so mark those by hand.
+
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
 The build graph cannot see what a Python, Node or shell ctest reads, so the
