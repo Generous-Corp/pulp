@@ -2129,9 +2129,11 @@ unsign (`codesign --remove-signature`) copies and map the remaining offsets to
 sections before naming a cause. pulp-test-runtime differed by one `__text`
 instruction: `REQUIRE(kGitSha.size() >= 7)` captures the length of
 `git rev-parse --short HEAD` (build_info.hpp), and git's abbreviation length
-grows with the clone's object count, so the same commit stamps 10 or 12
-characters. The v2 codemodel digest keys build_info.hpp's content, so the
-target re-keys rather than being normalised.
+grows with the clone's object count, so the same commit stamped 7 characters
+in a shallow clone and 10 in a full one. core/runtime now pins
+`--short=12`; a new length-dependent stamp must pin its length too. The v2
+codemodel digest keys build_info.hpp's content either way, so such a target
+re-keys rather than being normalised.
 
 ## A new Python test needs three generators, not three hand edits
 
