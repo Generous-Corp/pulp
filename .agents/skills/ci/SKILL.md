@@ -7312,6 +7312,15 @@ base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
 gap names itself rather than reading as drift. The receipt records the compared
 `base_inventory_environment` and `base_inventory_linked_externals`.
 
+To rank why plans go full across every PR rather than only opt-in mac-lane
+runs, read the shadow plans: `changed-surface-shadow-plan.yml` records one
+`shipyard changed-surface-plan --record` per PR head (advisory, never
+required, builds nothing) and `changed_surface_shadow_plans.py rank --since
+<ISO>` reports plans ÷ PR heads and a per-reason table. These plans never
+execute, so never divide an executed-bounded proxy by them; a head with no
+record counts as `missing_record`, so a low plans ÷ heads means the
+instrument is blind.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
