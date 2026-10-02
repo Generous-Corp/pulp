@@ -2094,6 +2094,25 @@ CMake moves. A ctest registration belongs to the target whose artifact is its
 `command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
 compiled test is missing and only script tests (owned by no target) appear.
 
+## A new Python test needs three generators, not three hand edits
+
+Adding or changing a Python selftest or script drifts three generated files,
+and each one fails a different check on the PR head if it is hand-edited:
+`test/ctest_script_inputs.json` (`script-test-inputs-drift`),
+`tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
+compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
+the changed-surface script families block in `.shipyard/config.toml`
+(`changed-surface-script-families-drift`, which must map every new script and
+list every new reader of `.agents/skills/*/SKILL.md`). Regenerate all three from
+a configured build: `script_test_inputs.py --build-dir B --write`,
+`source_selftests.py write --build-dir B` (`--add <name>` for a new entry), and
+`changed_surface_script_families.py --build-dir B --write` (the build needs a
+codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
+`gates.sh` runs all three checks in one lane (`gates_script_inputs.py`) whenever
+the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
+of the generated files, configuring `build-gate` without compiling if no current
+build exists; any check it cannot run is listed NOT CHECKED, never passed.
+
 ## The flake-exoneration shadow annotation exonerates nothing
 
 A failed merge-group `macos` job carries `pulp-flake-exoneration-shadow/v1`
