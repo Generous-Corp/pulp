@@ -141,9 +141,8 @@ TEST_CASE("public WaveNet session accepts a reusable slot-depth matrix",
     const std::array<float, 2> input{1.0f, 2.0f};
 
     for (const auto slots : slot_depths) {
-        const auto result = GpuWaveNetSession::create({.descriptor = fixture.descriptor(),
-                                                        .weights = fixture.weights,
-                                                        .slots = slots});
+        const auto result = GpuWaveNetSession::create(
+            {.descriptor = fixture.descriptor(), .weights = fixture.weights, .slots = slots});
         if (!result.session) {
             CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
             return;
@@ -160,10 +159,10 @@ TEST_CASE("public WaveNet session accepts a reusable slot-depth matrix",
         std::array<float, 2> output{};
         std::size_t received = 0;
         for (int attempt = 0; attempt < 500 && received < slots; ++attempt) {
-            session.service(static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count()));
+            session.service(
+                static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now().time_since_epoch())
+                                               .count()));
             if (const auto completion = session.receive(output)) {
                 REQUIRE(completion->status == GpuWaveNetBlockStatus::GpuDelivered);
                 REQUIRE(completion->sequence >= 1);
