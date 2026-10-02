@@ -2353,6 +2353,32 @@ supported_build_types = [
 risk_class = "low"
 
 [[targets.mac.changed_surface_selection.families]]
+name = "script-readers-f5a200112e4c"
+paths = ["tools/scripts/test_git_read_memo.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "git-read-memo-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[targets.mac.changed_surface_selection.families]]
 name = "script-readers-b08e5179f34d"
 paths = ["tools/scripts/test_git_stdin_pipe_deadlock.py"]
 tests = [
@@ -4801,6 +4827,7 @@ paths = [
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
   "tools/scripts/test_generated_version_bump_check.py",
+  "tools/scripts/test_git_read_memo.py",
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",
@@ -5262,6 +5289,7 @@ paths = [
   "tools/scripts/test_generate_vellum_ownership_projection.py",
   "tools/scripts/test_generate_widget_bridge_api.py",
   "tools/scripts/test_generated_version_bump_check.py",
+  "tools/scripts/test_git_read_memo.py",
   "tools/scripts/test_git_safe_push.py",
   "tools/scripts/test_git_stdin_pipe_deadlock.py",
   "tools/scripts/test_github_app_jwt.py",

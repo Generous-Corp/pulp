@@ -25,6 +25,7 @@ ROOT = SCRIPT_DIR.parent.parent
 # report. Child processes inherit it.
 os.environ["GIT_NO_LAZY_FETCH"] = "1"
 sys.path.insert(0, str(SCRIPT_DIR))
+import git_read_memo  # noqa: E402
 import gpu_first_visible_a3_acceptance as a3  # noqa: E402
 import gpu_first_visible_a3_trace_producer_overhead as trace_producer_overhead  # noqa: E402
 import gpu_trace_overhead_acceptance as a2t  # noqa: E402
@@ -718,6 +719,14 @@ raise SystemExit(2)
 
 
 def main() -> int:
+    with git_read_memo.memoized_git_reads() as stats:
+        result = run_checks()
+    # The memo must have answered something, or it is not what makes this fast.
+    assert stats.hits > 0, stats
+    return result
+
+
+def run_checks() -> int:
     with tempfile.TemporaryDirectory(prefix="pulp-a3-source-loader-") as temporary:
         source_root = Path(temporary)
         source = source_root / "planted.py"

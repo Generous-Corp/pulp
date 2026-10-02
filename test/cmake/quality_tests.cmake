@@ -1080,6 +1080,10 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_verify_gpu_trace_overhead_acceptance.py")
     set_tests_properties(gpu-trace-overhead-verifier-selftest PROPERTIES
         TIMEOUT 300)
+    # The shared memo the GPU acceptance selftests use for repeated Git reads
+    # by full SHA: never HEAD, never a working-tree read, never a failure.
+    add_test(NAME git-read-memo-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_git_read_memo.py")
     # Typed, GPU-free negative controls for the DPR experiment evidence
     # envelope. Real trials remain separately gated on A2T trace coverage and
     # A3 budget receipts; this test proves only the portable contract.
