@@ -9,6 +9,35 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08940"></a>
+## [0.894.0] - 2026-10-02
+
+- release/version bump ([#9263](https://github.com/Generous-Corp/pulp/pull/9263))
+- test/version at land stale queue landing ([#9261](https://github.com/Generous-Corp/pulp/pull/9261))
+- ci/schedule backstop manifest ([#9252](https://github.com/Generous-Corp/pulp/pull/9252))
+- codex/e120 manifest reconcile 20261003 ([#9257](https://github.com/Generous-Corp/pulp/pull/9257))
+- codex/retirement slot test 20261002 ([#9209](https://github.com/Generous-Corp/pulp/pull/9209))
+- release/version bump ([#9256](https://github.com/Generous-Corp/pulp/pull/9256))
+- fix/version at land heal narrow ([#9255](https://github.com/Generous-Corp/pulp/pull/9255))
+- fix/base compare cold tree ([#9254](https://github.com/Generous-Corp/pulp/pull/9254))
+- ci/reuse replay binary control ([#9253](https://github.com/Generous-Corp/pulp/pull/9253))
+- release/version bump ([#9251](https://github.com/Generous-Corp/pulp/pull/9251))
+- feature/base inventory cache key test ([#9249](https://github.com/Generous-Corp/pulp/pull/9249))
+- fix/governed build real reason ([#9248](https://github.com/Generous-Corp/pulp/pull/9248))
+- fix/signing sibling sticky and off search list ([#9247](https://github.com/Generous-Corp/pulp/pull/9247))
+- feature/projection control test ([#9245](https://github.com/Generous-Corp/pulp/pull/9245))
+- ci/reuse replay recorded graph ([#9244](https://github.com/Generous-Corp/pulp/pull/9244))
+- release/version bump ([#9243](https://github.com/Generous-Corp/pulp/pull/9243))
+- ci/a2t headroom early warning ([#9225](https://github.com/Generous-Corp/pulp/pull/9225))
+- feature/base configure no universal ([#9241](https://github.com/Generous-Corp/pulp/pull/9241))
+- ci/required check machinery committed ruleset ([#9234](https://github.com/Generous-Corp/pulp/pull/9234))
+- ci/skill map quality tests ([#9226](https://github.com/Generous-Corp/pulp/pull/9226))
+- ci/reuse replay codemodel ([#9240](https://github.com/Generous-Corp/pulp/pull/9240))
+- release/version bump ([#9238](https://github.com/Generous-Corp/pulp/pull/9238))
+- ci/no lazy fetch selftests ([#9223](https://github.com/Generous-Corp/pulp/pull/9223))
+- ci/gates generated manifests ([#9235](https://github.com/Generous-Corp/pulp/pull/9235))
+- feature/compiled test data backlog ([#9233](https://github.com/Generous-Corp/pulp/pull/9233))
+
 <a id="v08930"></a>
 ## [0.893.0] - 2026-10-02
 
@@ -9441,6 +9470,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.894.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.894.0
 [0.893.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.893.0
 [0.892.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.892.0
 [0.891.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.891.0
