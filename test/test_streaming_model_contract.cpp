@@ -3,6 +3,7 @@
 #include "detail/streaming_model.hpp"
 
 #include <array>
+#include <optional>
 
 namespace {
 
@@ -60,6 +61,63 @@ class IdentityModel final : public StreamingModel {
     StreamingModelSpec spec_;
     StreamingBlockStamp last_stamp_{};
     bool prepared_ = false;
+};
+
+class EchoBackend final : public StreamingBackend {
+  public:
+    bool prepare(const StreamingPrepareContext& context) noexcept override {
+        prepared_ = valid_streaming_prepare_context(context);
+        epoch_ = prepared_ ? context.spec->sample_rate : 0;
+        return prepared_;
+    }
+
+    StreamingAdmission enqueue(const StreamingBlock& block) noexcept override {
+        if (!prepared_ || pending_ || block.stamp.epoch != epoch_)
+            return StreamingAdmission::Rejected;
+        pending_ = &block;
+        return StreamingAdmission::Accepted;
+    }
+
+    std::size_t service_until(std::uint64_t) noexcept override {
+        if (!pending_)
+            return 0;
+        for (std::size_t i = 0; i < pending_->input.size() && i < pending_->output.size(); ++i)
+            pending_->output[i] = pending_->input[i];
+        terminal_ = StreamingTerminal{.stamp = pending_->stamp,
+                                      .disposition = StreamingBackendTerminalDisposition::Completed};
+        pending_ = nullptr;
+        return 1;
+    }
+
+    bool receive(StreamingTerminal& terminal) noexcept override {
+        if (!terminal_)
+            return false;
+        terminal = *terminal_;
+        terminal_.reset();
+        return true;
+    }
+
+    bool begin_epoch(std::uint64_t epoch, StreamingResetReason) noexcept override {
+        if (pending_) {
+            terminal_ = StreamingTerminal{.stamp = pending_->stamp,
+                                          .disposition = StreamingBackendTerminalDisposition::Stale};
+            pending_ = nullptr;
+        }
+        epoch_ = epoch;
+        return true;
+    }
+
+    bool reprepare_after_device_loss(std::uint64_t epoch) noexcept override {
+        return begin_epoch(epoch, StreamingResetReason::DeviceLoss);
+    }
+    bool quiesce() noexcept override { pending_ = nullptr; return true; }
+    bool release() noexcept override { prepared_ = false; pending_ = nullptr; return true; }
+
+  private:
+    bool prepared_ = false;
+    std::uint64_t epoch_ = 0;
+    const StreamingBlock* pending_ = nullptr;
+    std::optional<StreamingTerminal> terminal_;
 };
 
 } // namespace
@@ -126,4 +184,42 @@ TEST_CASE("streaming terminal carries the exact admitted stamp",
                                      .disposition = StreamingBackendTerminalDisposition::Stale};
     CHECK(terminal.stamp == StreamingBlockStamp{.epoch = 3, .sequence = 19});
     CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
+}
+
+TEST_CASE("streaming backend carries audio leases and fences epochs",
+          "[gpu_audio][streaming_model]") {
+    IdentityModel model;
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "test.identity",
+                                                 .artifact_hash = "test",
+                                                 .max_frames = 4};
+    EchoBackend backend;
+    REQUIRE(backend.prepare(context));
+    std::array<float, 4> input{1, 2, 3, 4};
+    std::array<float, 4> output{};
+    const StreamingBlock block{.stamp = {.epoch = 48000, .sequence = 9},
+                               .input = input,
+                               .output = output,
+                               .channels = 1,
+                               .frames = 4};
+    CHECK(backend.enqueue(block) == StreamingAdmission::Accepted);
+    CHECK(backend.service_until(0) == 1);
+    StreamingTerminal terminal;
+    REQUIRE(backend.receive(terminal));
+    CHECK(terminal.stamp == block.stamp);
+    CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Completed);
+    CHECK(output == input);
+    CHECK(backend.begin_epoch(12, StreamingResetReason::ModelSwap));
+    CHECK(!backend.receive(terminal));
+    const StreamingBlock queued{.stamp = {.epoch = 12, .sequence = 10},
+                                .input = input,
+                                .output = output,
+                                .channels = 1,
+                                .frames = 4};
+    CHECK(backend.enqueue(queued) == StreamingAdmission::Accepted);
+    CHECK(backend.begin_epoch(13, StreamingResetReason::TransportRestart));
+    REQUIRE(backend.receive(terminal));
+    CHECK(terminal.stamp == queued.stamp);
+    CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
+    CHECK(backend.enqueue(block) == StreamingAdmission::Rejected);
 }
