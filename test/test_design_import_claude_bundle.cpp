@@ -197,6 +197,38 @@ TEST_CASE("materialized browser document binds packaged fonts fail closed",
     REQUIRE_FALSE(parse_materialized_browser_document(missing).has_value());
 }
 
+TEST_CASE("template <script src> scanning keeps the regex's matching rules",
+          "[view][import]") {
+    // The scanner replaced std::regex <script\b[^>]*\bsrc=(?:"..."|'...')
+    // (case-insensitive). Each line pins one rule of that pattern.
+    std::ostringstream manifest;
+    manifest << "{";
+    const char* ids[] = {"u-plain", "u-upper", "u-single", "u-last", "u-data",
+                         "u-not-word", "u-spaced", "u-unquoted", "u-scripts"};
+    for (size_t i = 0; i < std::size(ids); ++i) {
+        if (i) manifest << ",";
+        manifest << manifest_entry(ids[i], "text/javascript", "void 0;", false);
+    }
+    manifest << "}";
+    const std::string body =
+        R"(<script src="u-plain"></script>)"
+        R"(<SCRIPT TYPE="x" SRC="u-upper"></SCRIPT>)"
+        R"(<script src='u-single'></script>)"
+        R"(<script src="u-first" src="u-last"></script>)"     // greedy: last wins
+        R"(<script data-src="u-data"></script>)"              // '-' is a \b
+        R"(<script xsrc="u-not-word"></script>)"              // no \b: skipped
+        R"(<script src = "u-spaced"></script>)"               // spaces: skipped
+        R"(<script src=u-unquoted></script>)"                 // unquoted: skipped
+        R"(<scripts src="u-scripts"></scripts>)";             // \b after script
+    auto bundle = parse_claude_bundle(build_envelope(manifest.str(), body));
+    REQUIRE(bundle.has_value());
+    std::vector<std::string> order;
+    for (auto index : bundle->javascript_indices)
+        order.push_back(bundle->assets[index].uuid);
+    CHECK(order == std::vector<std::string>{
+        "u-plain", "u-upper", "u-single", "u-last", "u-data"});
+}
+
 TEST_CASE("parse_claude_bundle decodes a base64-gzip envelope",
           "[view][import][issue-468]") {
     const std::string js_a = "console.log('asset A');";

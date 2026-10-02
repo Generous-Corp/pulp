@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20261002-font-register-content-dedup",
+  "kind": "change",
+  "created_at": "2026-10-02T23:18:35Z",
+  "slices": [
+    "canvas-kernel"
+  ],
+  "rationale": "Registering a font whose bytes are identical to a face already registered under the same family now returns the existing registration instead of decoding the woff2 again and appending a duplicate face. A captured plug-in editor registers its packaged fonts on every editor open, and a variable font captured once per @font-face weight rule named the same file many times, so each open decoded and appended the same faces repeatedly. The registration result, the family a caller asks for, and what a lookup returns are unchanged; no API is added or removed, no authority boundary moves, and no alternate renderer appears. Pulp-only because Pulp still builds and ships this implementation independently and there is no counterpart Vellum commit to backport from.",
+  "tests": [
+    "Vellum freeze",
+    "Vellum trusted freeze",
+    "pulp-test-group-canvas re-registering identical font bytes adds no face and keeps caches valid",
+    "tools/scripts/confirm_failure.sh"
+  ],
+  "disposition": "pulp-only"
+}

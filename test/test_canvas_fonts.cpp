@@ -357,6 +357,46 @@ TEST_CASE("register_font is idempotent — re-registering the same family is "
     REQUIRE(face != nullptr);
 }
 
+TEST_CASE("re-registering identical font bytes adds no face and keeps caches valid",
+          "[canvas][skia][fonts]") {
+    // A captured design registers its @font-face files every time its editor
+    // opens, and several @font-face rules commonly name one variable file.
+    // Each registration builds a fresh SkTypeface, so a pointer-identity check
+    // never saw the repeat: the family grew by one face per registration and
+    // every registration bumped the generation, invalidating every typeface
+    // cache and making the next FontCollection rebuild clone each accumulated
+    // variable face again.
+    const std::string family = "PulpRegistrationContentDedupTest";
+    const auto faces_of = [&](const std::string& name) {
+        std::size_t n = 0;
+        for (const auto& r : pulp::canvas::registered_typefaces_snapshot())
+            if (r.family == name && r.typeface) ++n;
+        return n;
+    };
+
+    if (!pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH, family))
+        SKIP("Soft-fail on this build (no platform SkFontMgr).");
+    REQUIRE(faces_of(family) == 1);
+    const auto generation = pulp::canvas::font_registration_generation();
+
+    // Same bytes, same family, many times: success, one face, no bump.
+    for (int i = 0; i < 5; ++i)
+        REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH,
+                                                 family));
+    CHECK(faces_of(family) == 1);
+    CHECK(pulp::canvas::font_registration_generation() == generation);
+
+    // Different bytes under the same family are a genuinely new face.
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_FONT_PATH, family));
+    CHECK(faces_of(family) == 2);
+    CHECK(pulp::canvas::font_registration_generation() > generation);
+
+    // The same bytes under a DIFFERENT family are a separate registration.
+    const std::string other = family + "-Other";
+    REQUIRE(pulp::canvas::register_font_file(PULP_TEST_VARIABLE_FONT_PATH, other));
+    CHECK(faces_of(other) == 1);
+}
+
 TEST_CASE("Unregistered families don't resolve through the registry (#1150)",
           "[canvas][skia][fonts][issue-1150]") {
     // Negative case: an unknown family must miss the registry. The

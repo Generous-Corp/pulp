@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261002-font-register-content-dedup-watch",
+  "created_at": "2026-10-02T23:19:48Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "design-source-ingest",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record two editor-open performance changes that cross these families' selectors. core/canvas/src/bundled_fonts.cpp returns the existing registration when a font is registered again with byte-identical data under the same family, instead of decoding the woff2 again and appending a duplicate face. core/view/src/claude_bundle.cpp scans a materialized template for packaged asset references and font bindings with string search instead of std::regex; the accepted and rejected inputs are unchanged. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-group-canvas re-registering identical font bytes adds no face and keeps caches valid",
+    "pulp-test-group-design-import-tool template <script src> scanning keeps the regex's matching rules"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
