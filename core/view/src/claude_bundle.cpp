@@ -40,6 +40,7 @@
 #include <cctype>
 #include <functional>
 #include <regex>
+#include <string_view>
 #include <unordered_set>
 #include <cmath>
 
@@ -147,22 +148,69 @@ std::optional<std::string> extract_bundler_tag_content(const std::string& html,
 
 // Pull every <script src="..."> uuid out of the template HTML, in order.
 // The template is JSON-encoded HTML — `<` characters are literal, not
-// escaped — so a regex over the raw string is fine.
+// escaped — so a plain scan over the raw string is fine.
+//
+// Equivalent to the ECMAScript regex
+//   <script\b[^>]*\bsrc=(?:"([^"]+)"|'([^']+)')        (case-insensitive)
+// iterated over the template, including its greedy choice of the LAST
+// matching `src=` inside a tag. It is a hand scan rather than std::regex
+// because libc++'s regex costs ~100 ms per pass over a 0.5 MB captured
+// document, and this runs synchronously while a plug-in host waits for the
+// editor view.
+namespace {
+bool ascii_ieq(const std::string& text, size_t at, std::string_view word) {
+    if (at + word.size() > text.size()) return false;
+    for (size_t i = 0; i < word.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(text[at + i])) != word[i])
+            return false;
+    }
+    return true;
+}
+bool is_regex_word_char(char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+}
+// A quoted src value starting at the `=`'s successor: returns the value end
+// (one past the closing quote) and fills `value`, or npos.
+size_t quoted_value(const std::string& text, size_t at, std::string& value) {
+    if (at >= text.size() || (text[at] != '"' && text[at] != '\'')) return std::string::npos;
+    const char quote = text[at];
+    const size_t close = text.find(quote, at + 1);
+    if (close == std::string::npos || close == at + 1) return std::string::npos;
+    value = text.substr(at + 1, close - at - 1);
+    return close + 1;
+}
+} // namespace
+
 std::vector<std::string> extract_template_script_srcs(const std::string& template_html) {
     std::vector<std::string> srcs;
-    // C++ ECMAScript regex: explicit alternation handles single-quote
-    // and double-quote attribute values. The character classes inside
-    // a raw string literal would be brittle (`["']` reads as four chars
-    // `"`, `'` rather than the intended class) — alternation keeps
-    // the parse unambiguous.
-    static const std::regex re(
-        R"RX(<script\b[^>]*\bsrc=(?:"([^"]+)"|'([^']+)'))RX",
-        std::regex::icase);
-    auto begin = std::sregex_iterator(template_html.begin(), template_html.end(), re);
-    auto end = std::sregex_iterator();
-    for (auto it = begin; it != end; ++it) {
-        if ((*it)[1].matched) srcs.push_back((*it)[1].str());
-        else if ((*it)[2].matched) srcs.push_back((*it)[2].str());
+    const std::string& t = template_html;
+    size_t pos = 0;
+    while ((pos = t.find('<', pos)) != std::string::npos) {
+        const size_t tag = pos;
+        if (!ascii_ieq(t, tag + 1, "script")
+            || (tag + 7 < t.size() && is_regex_word_char(t[tag + 7]))) {
+            ++pos;
+            continue;
+        }
+        // [^>]* — the attribute region ends at the first '>'.
+        const size_t region_begin = tag + 7;
+        size_t region_end = t.find('>', region_begin);
+        if (region_end == std::string::npos) region_end = t.size();
+        // Greedy [^>]* then \bsrc= : the regex settles on the rightmost
+        // candidate whose quoted value parses.
+        bool matched = false;
+        for (size_t at = region_end; at-- > region_begin;) {
+            if (at + 4 > t.size() || !ascii_ieq(t, at, "src=")) continue;
+            if (is_regex_word_char(t[at - 1])) continue;  // \b before src
+            std::string value;
+            const size_t after = quoted_value(t, at + 4, value);
+            if (after == std::string::npos) continue;
+            srcs.push_back(std::move(value));
+            pos = after;
+            matched = true;
+            break;
+        }
+        if (!matched) ++pos;
     }
     return srcs;
 }
@@ -412,12 +460,28 @@ std::optional<ClaudeBundle> parse_materialized_browser_document(
     if (bundle.template_html.find("blob:") != std::string::npos) {
         return std::nullopt;
     }
-    static const std::regex asset_ref(
-        R"(pulp-materialized-asset-[0-9a-f]{64})");
-    for (std::sregex_iterator it(bundle.template_html.begin(),
-                                 bundle.template_html.end(), asset_ref), end;
-         it != end; ++it) {
-        if (!asset_ids.contains(it->str())) return std::nullopt;
+    // Every `pulp-materialized-asset-<64 hex>` reference must name a packaged
+    // asset. A find() scan, not std::regex: see extract_template_script_srcs.
+    {
+        static constexpr std::string_view kAssetPrefix = "pulp-materialized-asset-";
+        const auto& html = bundle.template_html;
+        for (size_t at = html.find(kAssetPrefix); at != std::string::npos;
+             at = html.find(kAssetPrefix, at + 1)) {
+            const size_t hex = at + kAssetPrefix.size();
+            if (hex + 64 > html.size()) continue;
+            bool all_hex = true;
+            for (size_t i = hex; i < hex + 64; ++i) {
+                const char c = html[i];
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                    all_hex = false;
+                    break;
+                }
+            }
+            if (!all_hex) continue;
+            if (!asset_ids.contains(html.substr(at, kAssetPrefix.size() + 64)))
+                return std::nullopt;
+            at = hex + 63;  // the regex resumes after the whole match
+        }
     }
     if (root.hasObjectMember("font_bindings")) {
         const auto bindings = root["font_bindings"];
