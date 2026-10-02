@@ -1335,8 +1335,10 @@ TEST_CASE("GpuAudioTransport status snapshot is stable before and after prepare"
     REQUIRE(node.prepare());
     REQUIRE(t.prepare(&node, {8}));
     const auto after = t.status_snapshot();
-    CHECK(after.provider_state == GpuAudioProviderState::Ready);
-    CHECK(after.selected_engine == GpuAudioEngine::Gpu);
+    // A generic staged node does not prove a GPU provider. Its worker may be
+    // CPU-backed, so status must remain honest instead of claiming GPU/Ready.
+    CHECK(after.provider_state == GpuAudioProviderState::Degraded);
+    CHECK(after.selected_engine == GpuAudioEngine::Unknown);
     CHECK(after.provider == GpuAudioProvider::Unknown);
     CHECK(after.sample_rate == 48000);
     CHECK(after.block_size == 32);
