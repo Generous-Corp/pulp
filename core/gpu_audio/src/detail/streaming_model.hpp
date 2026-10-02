@@ -244,7 +244,8 @@ class MicroTcnModel final : public StreamingModel {
                     context.spec == &spec_ &&
                     context.spec->input_channels == Channels &&
                     context.spec->output_channels == Channels &&
-                    context.spec->block_size <= MaxSupportedFrames;
+                    context.spec->block_size <= MaxSupportedFrames &&
+                    context.max_frames <= MaxSupportedFrames;
         if (prepared_)
             reset_state();
         return prepared_;

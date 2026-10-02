@@ -285,3 +285,13 @@ TEST_CASE("micro TCN clears output for incompatible audio shape",
     model.process_cpu(in, out, 1, {.epoch = 1, .sequence = 0});
     CHECK(output[0] == 0.0f);
 }
+
+TEST_CASE("micro TCN rejects an unsupported host frame limit at preparation",
+          "[gpu_audio][streaming_model][tcn]") {
+    MicroTcnModel<1, 3> model;
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "micro-tcn",
+                                                 .artifact_hash = "embedded-test-weights",
+                                                 .max_frames = 8192};
+    CHECK_FALSE(model.prepare(context));
+}
