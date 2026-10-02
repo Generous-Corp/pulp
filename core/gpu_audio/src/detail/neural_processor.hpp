@@ -84,9 +84,12 @@ class NeuralProcessor final {
             // A failed prepare may have acquired partial model resources. The
             // model contract makes release idempotent and retryable so the
             // failed transaction cannot leak into the next admission.
-            (void)model_.release();
+            cleanup_required_ = true;
+            if (model_.release())
+                cleanup_required_ = false;
             return false;
         }
+        cleanup_required_ = false;
 
         pending_ = {};
         pending_.entry = &entry_;
@@ -100,7 +103,7 @@ class NeuralProcessor final {
             preference == NeuralProviderPreference::PreferDawn || capabilities.mlx ||
             capabilities.dawn;
         pending_.max_frames = context.max_frames;
-        pending_.generation = active_.generation == 0 ? 1 : active_.generation + 1;
+        pending_.generation = ++next_generation_;
         pending_.prepared = true;
         return true;
     }
@@ -133,12 +136,13 @@ class NeuralProcessor final {
         if (next == 0)
             return false;
         model_.reset(next, reason);
+        next_generation_ = next;
         active_.generation = next;
         return true;
     }
 
     bool release() noexcept {
-        const bool owns_model = active_.prepared || pending_.prepared;
+        const bool owns_model = active_.prepared || pending_.prepared || cleanup_required_;
         if (!owns_model)
             return true;
         if (!model_.quiesce())
@@ -147,6 +151,7 @@ class NeuralProcessor final {
             return false;
         pending_ = {};
         active_ = {};
+        cleanup_required_ = false;
         return true;
     }
 
@@ -155,6 +160,8 @@ class NeuralProcessor final {
     NeuralModelEntry entry_{};
     NeuralProcessorSnapshot active_{};
     NeuralProcessorSnapshot pending_{};
+    std::uint64_t next_generation_ = 0;
+    bool cleanup_required_ = false;
 };
 
 static_assert(noexcept(std::declval<NeuralProcessor&>().publish()));
