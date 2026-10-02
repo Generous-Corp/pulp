@@ -24,9 +24,8 @@ That over-approximates, which costs reuse and never correctness.
 
 Input is the recorded target shape that tools/ci/codemodel_digest.py writes
 and the reuse record keeps: `{name: {"type", "artifacts", "dependencies"}}`,
-artifacts spelled `<build>/<path>`. Every consumer (the merge-group
-affected-tests shadow, the reuse replay, the reuse key) reads spawn edges
-through this one function.
+artifacts spelled `<build>/<path>`, so the merge-group affected-tests shadow,
+the reuse replay and the reuse key can all read spawn edges through it.
 """
 from __future__ import annotations
 

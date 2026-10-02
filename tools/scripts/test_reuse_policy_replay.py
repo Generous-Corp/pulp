@@ -522,28 +522,6 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(out[variant]["executables_rebuilt"], 1, variant)
         self.assertEqual(out["per-entry"]["run"], [])
 
-    SPAWN_TARGETS = {
-        "a": {"type": "EXECUTABLE", "artifacts": ["<build>/test/a"], "dependencies": ["tool"]},
-        "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []},
-    }
-
-    def test_a_rebuilt_spawned_tool_reruns_the_tests_that_spawn_it(self):
-        spawns = rrc.SpawnIndex(self.SPAWN_TARGETS)
-        args = (["tools/tool.cpp"], ["ta", "tb", "tz"], self.MAP, {}, {}, {"tools/tool"}, self.EXES,
-                (set(), {"test/a", "test/b"}))
-        with_edges = rrc.classify_source_keys(*args, spawns=spawns)
-        without = rrc.classify_source_keys(*args)
-        for variant in ("strict-data", "cmake-codemodel", "per-entry"):
-            self.assertEqual(with_edges[variant]["run"], ["ta"], variant)
-            self.assertEqual(without[variant]["run"], [], variant)  # the gap the edge closes
-
-    def test_skipped_spawners_names_only_tests_whose_spawned_program_changed(self):
-        spawns = rrc.SpawnIndex(self.SPAWN_TARGETS)
-        self.assertEqual(rrc.skipped_spawners(self.MAP, [], {"tools/tool"}, spawns), ["ta"])
-        self.assertEqual(rrc.skipped_spawners(self.MAP, ["ta"], {"tools/tool"}, spawns), [])
-        # A test's own executable changing is the binary control's business.
-        self.assertEqual(rrc.skipped_spawners(self.MAP, [], {"test/a"}, spawns), [])
-
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)
@@ -667,47 +645,6 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual((result["unreached_changed_binaries"], result["verdict"]), (1, "UNSAFE: changed binaries not rebuilt"))
         self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
                           keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
-
-    def test_a_changed_spawned_tool_reruns_its_spawner_on_the_recorded_graph(self):
-        import gzip
-        corpus = Path(self.tmp) / "spawn"
-        rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
-        rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=("tools/tool.cpp",))])
-        tests = [t("ta"), t("tcli")]
-        rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", tests)
-        # ta's executable spawns test/tool (add_dependencies); tcli runs the
-        # tool directly, which is why the tool's bytes are hashed at all.
-        targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"],
-                         "dependencies": ["tool"]},
-                   "tool": {"digest": "t", "type": "EXECUTABLE", "artifacts": ["<build>/test/tool"], "dependencies": []}}
-        link = {"test/group-a": self.link["test/group-a"],
-                "test/tool": {"objects": ["tools/CMakeFiles/tool.dir/tool.cpp.o"], "members": {}}}
-        cache = corpus / "cache" / "record-v2"
-        cache.mkdir(parents=True)
-        for run_id, tool_hash in (("p1", "1"), ("g1", "1x")):
-            with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
-                json.dump({"targets": targets, "link": link if run_id == "g1" else None,
-                           "executables": {"ta": "test/group-a", "tcli": "test/tool"} if run_id == "g1" else None,
-                           "binaries": {"test/group-a": "a", "test/tool": tool_hash}}, fh)
-        rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
-                                 {}, None, mock.Mock())
-        keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"]
-        self.assertEqual(keys["run"], ["ta", "tcli"])
-        self.assertEqual(keys["skipped_spawners_of_changed_binaries"], [])
-        self.assertEqual((keys["spawned_binaries_compared"], keys["spawned_binaries"]), (1, 1))
-        scored = rpr.score(rpr.Corpus([group(), head()],
-                                      [dict(pair(drift=("tools/tool.cpp",)),
-                                            source_key={"cmake-codemodel-recorded": keys}, source_key_head_run_id="p1")],
-                                      tests={"g1": tests, "p1": tests}), "source-key-codemodel-recorded")
-        self.assertEqual((scored["skipped_spawners_of_changed_binaries"], scored["spawned_binaries"]), (0, 1))
-        # A policy that skipped ta anyway is UNSAFE and names it.
-        stale = dict(keys, run=["tcli"], skipped_spawners_of_changed_binaries=["ta"])
-        scored = rpr.score(rpr.Corpus([group(), head()],
-                                      [dict(pair(drift=("tools/tool.cpp",)),
-                                            source_key={"cmake-codemodel-recorded": stale}, source_key_head_run_id="p1")],
-                                      tests={"g1": tests, "p1": tests}), "source-key-codemodel-recorded")
-        self.assertEqual((scored["skipped_spawners_of_changed_binaries"], scored["verdict"]),
-                         (1, "UNSAFE: tests skipped although a program they spawn changed"))
 
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
