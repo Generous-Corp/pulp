@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include <pulp/audio/buffer.hpp>
@@ -44,17 +45,14 @@ struct StreamingModelSpec {
     std::uint32_t intrinsic_latency_samples = 0;
     std::uint32_t receptive_field_samples = 0;
     std::uint64_t state_bytes = 0;
-    StreamingFallbackStrategy fallback = StreamingFallbackStrategy::NoFallback;
+    std::string_view state_schema{};
     bool deterministic = true;
-    bool supports_cpu = true;
-    bool supports_worker_backend = false;
 };
 
 enum class StreamingModelSpecError : std::uint8_t {
     None,
     MissingIdentity,
     InvalidShape,
-    CpuFallbackUnavailable,
 };
 
 struct StreamingModelSpecValidation {
@@ -71,10 +69,27 @@ validate_streaming_model_spec(const StreamingModelSpec& spec) noexcept {
     if (spec.input_channels == 0 || spec.output_channels == 0 || spec.sample_rate == 0 ||
         spec.block_size == 0)
         return {StreamingModelSpecError::InvalidShape};
-    if (spec.fallback == StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow &&
-        !spec.supports_cpu)
-        return {StreamingModelSpecError::CpuFallbackUnavailable};
+    if (spec.state_bytes != 0 && spec.state_schema.empty())
+        return {StreamingModelSpecError::InvalidShape};
     return {};
+}
+
+/// Preparation is control-thread-only. The artifact and all string views must
+/// outlive the prepared model/backend and remain immutable until release.
+struct StreamingPrepareContext {
+    const StreamingModelSpec* spec = nullptr;
+    std::string_view artifact_id{};
+    std::string_view artifact_hash{};
+    StreamingFallbackStrategy fallback = StreamingFallbackStrategy::NoFallback;
+    std::uint32_t max_frames = 0;
+    std::uint32_t lead_blocks = 0;
+    bool worker_backend_requested = false;
+};
+
+constexpr bool valid_streaming_prepare_context(const StreamingPrepareContext& context) noexcept {
+    return context.spec != nullptr && validate_streaming_model_spec(*context.spec).accepted() &&
+           !context.artifact_id.empty() && !context.artifact_hash.empty() &&
+           context.max_frames >= context.spec->block_size;
 }
 
 struct StreamingBlockStamp {
@@ -84,11 +99,33 @@ struct StreamingBlockStamp {
     friend constexpr bool operator==(StreamingBlockStamp, StreamingBlockStamp) noexcept = default;
 };
 
+struct StreamingBlock {
+    StreamingBlockStamp stamp{};
+    std::span<const float> input{};
+    std::span<float> output{};
+    std::uint32_t channels = 0;
+    std::uint32_t frames = 0;
+};
+
+enum class StreamingAdmission : std::uint8_t {
+    Accepted,
+    Rejected,
+};
+
+enum class StreamingBackendTerminalDisposition : std::uint8_t {
+    Completed,
+    ProviderFailed,
+    DeviceLost,
+    Cancelled,
+    Stale,
+};
+
 /// One worker/backend terminal. Exactly one terminal must be published for
 /// every admitted stamp; a later result cannot fill a missing sequence hole.
 struct StreamingTerminal {
     StreamingBlockStamp stamp{};
-    GpuAudioTerminalDisposition disposition = GpuAudioTerminalDisposition::Unknown;
+    StreamingBackendTerminalDisposition disposition =
+        StreamingBackendTerminalDisposition::Cancelled;
 };
 
 enum class StreamingModelMethod : std::uint8_t {
@@ -106,7 +143,7 @@ enum class StreamingModelMethod : std::uint8_t {
     StreamingModelMethod method) noexcept {
     switch (method) {
         case StreamingModelMethod::Describe:
-            return audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs;
+            return audio::RtSafetyClass::ControlThreadOnly;
         case StreamingModelMethod::ProcessCpu:
             return audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
         case StreamingModelMethod::Prepare:
@@ -130,13 +167,16 @@ class StreamingModel {
     virtual ~StreamingModel() = default;
 
     virtual const StreamingModelSpec& spec() const noexcept = 0;
-    virtual bool prepare() noexcept = 0;
+    virtual bool prepare(const StreamingPrepareContext&) noexcept = 0;
     virtual void process_cpu(const audio::BufferView<const float>& input,
                              audio::BufferView<float>& output,
                              std::uint32_t frames,
                              StreamingBlockStamp stamp) noexcept = 0;
+    // The owner must stop admission and fence callback/worker users before
+    // quiesce, reset, or release. These methods never race process_cpu().
+    virtual bool quiesce() noexcept = 0;
     virtual void reset(std::uint64_t epoch, StreamingResetReason reason) noexcept = 0;
-    virtual void release() noexcept = 0;
+    virtual bool release() noexcept = 0;
 };
 
 /// Optional worker-only seam reserved for a later MLX/Dawn adapter. Keeping it
@@ -144,12 +184,19 @@ class StreamingModel {
 class StreamingBackend {
   public:
     virtual ~StreamingBackend() = default;
-    virtual bool prepare(const StreamingModelSpec&) noexcept = 0;
-    virtual bool enqueue(const StreamingBlockStamp&) noexcept = 0;
+    virtual bool prepare(const StreamingPrepareContext&) noexcept = 0;
+    // On Accepted, the transport retains the block's input/output leases until
+    // receive() publishes exactly one terminal for the same stamp. Rejected
+    // blocks carry no terminal obligation.
+    virtual StreamingAdmission enqueue(const StreamingBlock&) noexcept = 0;
     virtual std::size_t service_until(std::uint64_t deadline_ns) noexcept = 0;
     virtual bool receive(StreamingTerminal&) noexcept = 0;
+    // Host/quiescent only: stop admission, fence/drain or cancel queued work,
+    // then advance the backend epoch so old terminals are stale.
+    virtual bool begin_epoch(std::uint64_t epoch, StreamingResetReason reason) noexcept = 0;
     virtual bool reprepare_after_device_loss(std::uint64_t epoch) noexcept = 0;
-    virtual void release() noexcept = 0;
+    virtual bool quiesce() noexcept = 0;
+    virtual bool release() noexcept = 0;
 };
 
 static_assert(streaming_method_safety(StreamingModelMethod::ProcessCpu) ==

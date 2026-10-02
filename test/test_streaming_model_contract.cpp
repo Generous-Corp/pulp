@@ -25,13 +25,14 @@ class IdentityModel final : public StreamingModel {
                 .intrinsic_latency_samples = 0,
                 .receptive_field_samples = 1,
                 .state_bytes = 0,
-                .fallback = StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
-                .deterministic = true,
-                .supports_cpu = true,
-                .supports_worker_backend = false} {}
+                .state_schema = {},
+                .deterministic = true} {}
 
     const StreamingModelSpec& spec() const noexcept override { return spec_; }
-    bool prepare() noexcept override { prepared_ = true; return true; }
+    bool prepare(const StreamingPrepareContext& context) noexcept override {
+        prepared_ = context.spec == &spec_ && context.max_frames >= spec_.block_size;
+        return prepared_;
+    }
 
     void process_cpu(const pulp::audio::BufferView<const float>& input,
                      pulp::audio::BufferView<float>& output, std::uint32_t frames,
@@ -45,11 +46,13 @@ class IdentityModel final : public StreamingModel {
             output.channel_ptr(0)[i] = input.channel_ptr(0)[i];
     }
 
+    bool quiesce() noexcept override { return true; }
+
     void reset(std::uint64_t epoch, StreamingResetReason) noexcept override {
         last_stamp_ = {.epoch = epoch, .sequence = 0};
     }
 
-    void release() noexcept override { prepared_ = false; }
+    bool release() noexcept override { prepared_ = false; return true; }
 
     StreamingBlockStamp last_stamp() const noexcept { return last_stamp_; }
 
@@ -82,15 +85,27 @@ TEST_CASE("streaming model spec fails closed before preparation",
     spec.block_size = 0;
     CHECK(validate_streaming_model_spec(spec).error == StreamingModelSpecError::InvalidShape);
     spec = model.spec();
-    spec.supports_cpu = false;
-    CHECK(validate_streaming_model_spec(spec).error ==
-          StreamingModelSpecError::CpuFallbackUnavailable);
+    spec.state_bytes = 32;
+    CHECK(validate_streaming_model_spec(spec).error == StreamingModelSpecError::InvalidShape);
+    const auto valid = model.spec();
+    CHECK(!valid_streaming_prepare_context({.spec = &valid,
+                                            .artifact_id = "id",
+                                            .artifact_hash = "hash",
+                                            .max_frames = 1}));
 }
 
 TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
           "[gpu_audio][streaming_model]") {
     IdentityModel model;
-    REQUIRE(model.prepare());
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "test.identity",
+                                                 .artifact_hash = "test",
+                                                 .fallback = StreamingFallbackStrategy::ContinuouslyPrimedCpuShadow,
+                                                 .max_frames = 4,
+                                                 .lead_blocks = 0,
+                                                 .worker_backend_requested = false};
+    CHECK(valid_streaming_prepare_context(context));
+    REQUIRE(model.prepare(context));
     std::array<float, 4> input{1.0f, 2.0f, 3.0f, 4.0f};
     std::array<float, 4> output{};
     const float* input_channels[] = {input.data()};
@@ -108,7 +123,7 @@ TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
 TEST_CASE("streaming terminal carries the exact admitted stamp",
           "[gpu_audio][streaming_model]") {
     const StreamingTerminal terminal{.stamp = {.epoch = 3, .sequence = 19},
-                                     .disposition = GpuAudioTerminalDisposition::LateRejected};
+                                     .disposition = StreamingBackendTerminalDisposition::Stale};
     CHECK(terminal.stamp == StreamingBlockStamp{.epoch = 3, .sequence = 19});
-    CHECK(terminal.disposition == GpuAudioTerminalDisposition::LateRejected);
+    CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
 }
