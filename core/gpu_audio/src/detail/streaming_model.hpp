@@ -47,6 +47,7 @@ struct StreamingModelSpec {
     std::uint32_t receptive_field_samples = 0;
     std::uint64_t state_bytes = 0;
     std::string_view state_schema{};
+    std::uint32_t state_schema_version = 0;
     bool deterministic = true;
 };
 
@@ -70,7 +71,8 @@ validate_streaming_model_spec(const StreamingModelSpec& spec) noexcept {
     if (spec.input_channels == 0 || spec.output_channels == 0 || spec.sample_rate == 0 ||
         spec.block_size == 0)
         return {StreamingModelSpecError::InvalidShape};
-    if (spec.state_bytes != 0 && spec.state_schema.empty())
+    if ((spec.state_bytes != 0) != (!spec.state_schema.empty()) ||
+        (spec.state_bytes != 0 && spec.state_schema_version == 0))
         return {StreamingModelSpecError::InvalidShape};
     return {};
 }
@@ -104,7 +106,8 @@ struct StreamingBlock {
     StreamingBlockStamp stamp{};
     std::span<const float> input{};
     std::span<float> output{};
-    std::uint32_t channels = 0;
+    std::uint32_t input_channels = 0;
+    std::uint32_t output_channels = 0;
     std::uint32_t frames = 0;
     // Explicit sample strides make the worker contract compatible with
     // planar BufferView leases as well as interleaved shared-I/O buffers.
@@ -115,7 +118,7 @@ struct StreamingBlock {
 };
 
 constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcept {
-    if (block.channels == 0 || block.frames == 0 || block.input.empty() ||
+    if (block.input_channels == 0 || block.output_channels == 0 || block.frames == 0 || block.input.empty() ||
         block.output.empty() || block.input_channel_stride == 0 ||
         block.output_channel_stride == 0 || block.input_frame_stride == 0 ||
         block.output_frame_stride == 0)
@@ -127,9 +130,9 @@ constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcep
                           static_cast<std::size_t>(frames - 1) * frame_stride;
         return last < size;
     };
-    return covers(block.input.size(), block.channels, block.frames,
+    return covers(block.input.size(), block.input_channels, block.frames,
                    block.input_channel_stride, block.input_frame_stride) &&
-           covers(block.output.size(), block.channels, block.frames,
+           covers(block.output.size(), block.output_channels, block.frames,
                   block.output_channel_stride, block.output_frame_stride);
 }
 
@@ -260,6 +263,7 @@ class MicroTcnModel final : public StreamingModel {
                 .receptive_field_samples = static_cast<std::uint32_t>(KernelSize),
                 .state_bytes = Channels * KernelSize * sizeof(float),
                 .state_schema = "causal-ring-v1",
+                .state_schema_version = 1,
                 .deterministic = true} {
         reset_state();
     }

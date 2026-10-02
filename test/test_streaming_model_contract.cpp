@@ -29,6 +29,7 @@ class IdentityModel final : public StreamingModel {
                 .receptive_field_samples = 1,
                 .state_bytes = 0,
                 .state_schema = {},
+                .state_schema_version = 0,
                 .deterministic = true} {}
 
     const StreamingModelSpec& spec() const noexcept override { return spec_; }
@@ -161,7 +162,8 @@ TEST_CASE("streaming block requires explicit planar or interleaved strides",
     StreamingBlock block{.stamp = {.epoch = 1, .sequence = 0},
                          .input = input,
                          .output = output,
-                         .channels = 2,
+                         .input_channels = 2,
+                         .output_channels = 2,
                          .frames = 4,
                          .input_channel_stride = 4,
                          .output_channel_stride = 4};
@@ -218,7 +220,8 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     const StreamingBlock block{.stamp = {.epoch = 48000, .sequence = 9},
                                .input = input,
                                .output = output,
-                               .channels = 1,
+                               .input_channels = 1,
+                               .output_channels = 1,
                                .frames = 4};
     CHECK(backend.enqueue(block) == StreamingAdmission::Accepted);
     CHECK(backend.service_until(0) == 1);
@@ -232,7 +235,8 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     const StreamingBlock queued{.stamp = {.epoch = 12, .sequence = 10},
                                 .input = input,
                                 .output = output,
-                                .channels = 1,
+                                .input_channels = 1,
+                                .output_channels = 1,
                                 .frames = 4};
     CHECK(backend.enqueue(queued) == StreamingAdmission::Accepted);
     CHECK(backend.begin_epoch(13, StreamingResetReason::TransportRestart));
