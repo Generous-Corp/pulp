@@ -30,6 +30,10 @@ TEST_CASE("neural manifest accepts immutable, redistributable artifact metadata"
 TEST_CASE("neural manifest rejects missing or malformed provenance",
           "[gpu_audio][neural][manifest]") {
     auto manifest = valid_manifest();
+    manifest.model_id = {};
+    CHECK(validate_neural_model_manifest(manifest).error ==
+          NeuralModelManifestError::MissingIdentity);
+    manifest = valid_manifest();
     manifest.artifact_sha256 = "short";
     CHECK(validate_neural_model_manifest(manifest).error ==
           NeuralModelManifestError::InvalidArtifactHash);
