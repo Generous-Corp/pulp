@@ -13,6 +13,7 @@
 #include <pulp/audio/workgroup.hpp>
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 
 namespace pulp::gpu_audio {
 
@@ -153,6 +154,11 @@ class GpuAudioTransport {
 
     Stats stats() const noexcept;
 
+    /// Allocation-free host/UI snapshot with stable, versioned field
+    /// semantics.  This is a projection of the transport and capability
+    /// snapshots; it does not claim that a GPU result met an audio deadline.
+    GpuAudioStatus status_snapshot() const noexcept;
+
     /// Allocation-free independent atomic loads: approximate while process()
     /// runs, exact once its caller has stopped. No coherent multi-field instant
     /// is promised. Successful prepare() resets counters; release() and a false
@@ -176,6 +182,7 @@ class GpuAudioTransport {
     // the RT path so it never calls the (allocating) descriptor().
     uint32_t channels_ = 0;
     uint32_t block_size_ = 0;
+    uint32_t sample_rate_ = 0;
     uint32_t latency_blocks_ = 0;
     uint32_t ring_blocks_ = 0;
     // Fails closed until prepare() copies the node's declared policy in.
