@@ -500,6 +500,28 @@ class CodemodelTests(unittest.TestCase):
         out = self.classify(["tools/fixture.json"], set())
         self.assertEqual(set(out["cmake-codemodel"]["run"]), {"ta", "tb", "tz"})
 
+    def test_a_dependency_pin_bump_rekeys_every_consumer(self):
+        for pin in ("tools/deps/manifest.json", "tools/cmake/PulpDependencies.cmake", "tools/cmake/PulpFetchContent.cmake"):
+            out = self.classify([pin], set())
+            for variant in ("strict-data", "cmake-codemodel"):
+                self.assertEqual(set(out[variant]["run"]), {"ta", "tb", "tz"}, (pin, variant))
+                self.assertEqual(out[variant]["executables_rebuilt"], 3, (pin, variant))
+
+    def test_a_root_cmakelists_change_rekeys_every_consumer(self):
+        out = self.classify(["CMakeLists.txt"], set())
+        self.assertEqual(set(out["cmake-codemodel"]["run"]), {"ta", "tb", "tz"})
+        self.assertEqual(out["cmake-codemodel"]["executables_rebuilt"], 3)
+        out = self.classify(["test/cmake/x_tests.cmake"], set())
+        self.assertEqual(set(out["cmake-codemodel"]["run"]), {"tz"})  # a manifest edit stays target-granular
+
+    def test_commit_bound_executables_rebuild_and_rerun_in_every_pair(self):
+        out = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb", "tz"], self.MAP, {}, {}, set(), self.EXES,
+                                       (set(), {"test/a", "test/b"}), frozenset({"test/b"}))
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], ["tb"], variant)
+            self.assertEqual(out[variant]["executables_rebuilt"], 1, variant)
+        self.assertEqual(out["per-entry"]["run"], [])
+
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)
@@ -595,21 +617,69 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record"
+        cache = corpus / "cache" / "record-v2"
         cache.mkdir(parents=True)
-        for run_id, rec in (("p1", {"targets": targets, "link": None, "executables": None}),
+        # group-a is rebuilt but its bytes came out the same (over-approximation);
+        # group-b's bytes changed but nothing in the drift reaches it: the
+        # control must name it.
+        for run_id, rec in (("p1", {"targets": targets, "link": None, "executables": None,
+                                    "binaries": {"test/group-a": "1", "test/group-b": "2", "test/group-c": "3"}}),
                             ("g1", {"targets": targets, "link": self.link,
-                                    "executables": {"ta": "test/group-a", "tb": "test/group-b"}})):
+                                    "executables": {"ta": "test/group-a", "tb": "test/group-b"},
+                                    "binaries": {"test/group-a": "1", "test/group-b": "2x", "test/group-c": "3"}})):
             with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
                 json.dump(rec, fh)
         graph = self.index.graph
         result = rrc.annotate_source_keys(corpus, Path(self.tmp), graph, Path(self.root), Path(self.build),
                                           {}, None, mock.Mock())
+        self.assertEqual(result["commit_bound_executables"], [])  # no pair checked out the same tree
         self.assertEqual(result["pairs_with_recorded_graph"], 1)
         keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
         self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
+        self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_changed_binaries"], ["test/group-b"])
+        self.assertEqual(keys["cmake-codemodel-recorded"]["binaries_compared"], 3)
+        self.assertEqual(keys["cmake-codemodel-recorded"]["rebuilt_identical_binaries"], 1)
+        p2 = dict(pair(drift=("test/t.cpp",)), source_key=keys, source_key_head_run_id="p1")
+        result = rpr.score(rpr.Corpus([group(), head()], [p2], tests={"g1": [t("ta"), t("tb")], "p1": [t("ta"), t("tb")]}),
+                           "source-key-codemodel-recorded")
+        self.assertEqual((result["unreached_changed_binaries"], result["verdict"]), (1, "UNSAFE: changed binaries not rebuilt"))
         self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
                           keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
+
+    def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
+        import gzip
+        corpus = Path(self.tmp) / "learn"
+        g2 = group(run_id="g2", group_sha="m2", checkout_sha="m2")
+        rpr.write_jsonl(corpus / "runs.jsonl", [group(), g2, head()])
+        same = pair(drift=())
+        moved = dict(pair(drift=("test/t.cpp",)), group_run_id="g2")
+        rpr.write_jsonl(corpus / "pairs.jsonl", [same, moved])
+        rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+        rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
+        targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
+                   "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
+        cache = corpus / "cache" / "record-v2"
+        cache.mkdir(parents=True)
+        recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
+                "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
+                       "executables": {"ta": "test/group-a"}},
+                "g2": {"binaries": {"test/group-a": "1x", "test/group-b": "2-stamped-again"}, "link": self.link,
+                       "executables": {"ta": "test/group-a", "tb": "test/group-b"}}}
+        for run_id, rec in recs.items():
+            with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
+                json.dump({"targets": targets, **rec}, fh)
+        result = rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                          {}, None, mock.Mock())
+        self.assertEqual(result["commit_bound_executables"], ["test/group-b"])
+        # g1 checked out the same tree: group-b is rebuilt (commit-bound) and
+        # its bytes did change, so nothing was over-approximated there; g2's
+        # group-a changed and was rebuilt too.
+        over = {p["group_run_id"]: p["source_key"]["cmake-codemodel-recorded"]["rebuilt_identical_binaries"]
+                for p in rpr.read_jsonl(corpus / "pairs.jsonl")}
+        self.assertEqual(over, {"g1": 0, "g2": 0})
+        keys = {p["group_run_id"]: p["source_key"] for p in rpr.read_jsonl(corpus / "pairs.jsonl")}
+        self.assertIn("tb", keys["g2"]["cmake-codemodel-recorded"]["run"])
+        self.assertEqual(keys["g2"]["cmake-codemodel-recorded"]["unreached_changed_binaries"], [])
 
     def test_the_record_expands_link_members_and_test_executables(self):
         buf = io.BytesIO()
