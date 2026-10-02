@@ -243,6 +243,36 @@ class VersionAtLandTest(unittest.TestCase):
         )
 
 
+    def test_stale_bump_landing_leaves_later_merges_to_the_next_drain(self):
+        """A bump PR cut before a later merge must not swallow that merge.
+
+        The bump is cut at H; a feat merges; then the bump PR merges. The next
+        drain starts from the bump's marker. Starting after the bump's
+        integration merge would skip the feat, which sits before it on the
+        first-parent chain, and the SDK would never be released. The window
+        starts after the cut point instead and skips only the bump merge."""
+        g = lambda *a: _git(self.repo, *a, env=self.r.env)  # noqa: E731
+        g("switch", "-q", "-c", "release-bump")
+        self.r.write(".claude-plugin/plugin.json", '{\n  "version": "0.5.1"\n}\n')
+        marker = self.r.commit("chore: bump versions", "Version-Bump-Applied: H")
+        g("switch", "-q", "main")
+        g("switch", "-q", "-c", "feat")
+        self.r.write("core/audio/src/mixer.cpp", "int mix() { return 8; }\n")
+        self.r.commit("feat(audio): mixer")
+        g("switch", "-q", "main")
+        g("merge", "-q", "--no-ff", "feat", "-m", "Merge feat")
+        g("merge", "-q", "--no-ff", "release-bump", "-m", "Merge release bump")
+
+        head = self.r.head()
+        base = val.drain_base(self.repo, head)
+        self.assertEqual(base, marker)
+        plan = val.plan_for_range(self.repo, CONFIG, base, head)
+        self.assertEqual(
+            {(a.surface, a.current, a.assigned) for a in plan},
+            {("sdk", "1.2.3", "1.3.0")},
+            "the feat that merged while the bump PR was open was dropped",
+        )
+
 # ── Git-fixture tests (real range walk + real push transaction) ──────────
 
 # NOTE: only `Fixture` is imported here — the module-local `_git` above returns
@@ -437,6 +467,14 @@ class ConcurrentDrainRaceTest(unittest.TestCase):
         self.assertEqual(self._origin_bump_commit_count(), 1)
 
 
+def _check(name: str, conclusion: str | None, *, required: bool = True,
+           at: str = "2026-10-02T10:00:00Z") -> dict:
+    """One CheckRun node of a statusCheckRollup, as the liveness query reads it.
+    A None conclusion is a check still queued or running."""
+    return {"__typename": "CheckRun", "name": name, "conclusion": conclusion,
+            "startedAt": at, "isRequired": required}
+
+
 class _FakeGh:
     """Stub for `version_at_land._gh`. The PR-route's git ops (push to the bump
     branch) hit a real local bare remote; only the GitHub-facing `gh` calls are
@@ -451,12 +489,16 @@ class _FakeGh:
                  merge_rc: int = 0, draft_pr: bool = False,
                  covers: bool = True, armed: bool = True,
                  in_queue: bool = False, graphql_rc: int = 0,
-                 close_rc: int = 0) -> None:
-        # In-flight state of the open bump PR, read by the stale-PR heal. The
-        # default (armed) is a PR still on its way to landing; an ejection from
-        # the merge queue leaves armed=False, in_queue=False.
+                 close_rc: int = 0, ejected: bool = False,
+                 checks: list[dict] | None = None) -> None:
+        # In-flight state of the open bump PR, read by the stale-PR liveness
+        # check. The default (armed, never ejected, no check reported yet) is a
+        # PR still on its way to landing. `checks` is the head commit's
+        # statusCheckRollup context list; None means nothing has reported.
         self.armed = armed
         self.in_queue = in_queue
+        self.ejected = ejected
+        self.checks = checks
         self.graphql_rc = graphql_rc
         self.close_rc = close_rc
         # Does the open bump PR's branch already contain the merge being
@@ -520,7 +562,12 @@ class _FakeGh:
             pr = {"state": "OPEN", "isDraft": self.draft_pr,
                   "isInMergeQueue": self.in_queue,
                   "autoMergeRequest": ({"enabledAt": "2026-09-26T01:26:01Z"}
-                                       if self.armed else None)}
+                                       if self.armed else None),
+                  "timelineItems": {"totalCount": 1 if self.ejected else 0},
+                  "commits": {"nodes": [{"commit": {"statusCheckRollup": (
+                      None if self.checks is None else
+                      {"contexts": {"pageInfo": {"hasNextPage": False},
+                                    "nodes": self.checks}})}}]}}
             return subprocess.CompletedProcess(
                 args, 0, stderr="",
                 stdout=json.dumps({"data": {"repository": {"pullRequest": pr}}}))
@@ -632,33 +679,33 @@ class PrRouteTest(unittest.TestCase):
         self.assertTrue(fake.did("pr", "merge"))
         self.assertIn("--merge", fake.calls[-1])
 
-    def test_pr_route_refuses_to_defer_to_a_bump_pr_cut_before_this_merge(self) -> None:
-        """deferring to an older bump PR DROPS this merge's intent.
+    def test_pr_route_never_reports_a_stale_bump_pr_as_covering(self) -> None:
+        """A bump PR cut before this merge does not carry its intent.
 
         The 2026-09-03 sequence: #8041 was opened at 09:05 for an earlier
         change; #8031 merged at 09:39 touching an SDK trigger path; the run
-        deferred to #8041; #8041 landed at 10:20 carrying only its own range;
-        and the next run reported "no version intent in range". Net effect:
-        main stayed at VERSION 0.829.0 and the newest tag pointed at a commit
-        that predates the change. Because Forge pins Pulp by exact SHA and
-        validates that the SHA resolves to a released tag, that change could
-        never be adopted downstream at all.
+        deferred to #8041 as if it covered the merge; #8041 landed at 10:20
+        carrying only its own range; and the next run reported "no version
+        intent in range". Main stayed at VERSION 0.829.0, and because Forge
+        pins Pulp by exact SHA to a released tag the change could never be
+        adopted downstream.
 
-        So a defer is only safe when the open PR's branch already contains this
-        merge. Here it does not, and the run must NOT report a green "pending".
+        A stale PR that can still land is waited for ("stale-wait"), never
+        treated as covering ("pending"): it is not re-armed as the carrier,
+        and the drain after it lands bumps the remainder (see
+        test_stale_bump_landing_leaves_later_merges_to_the_next_drain).
         """
         fake = _FakeGh(open_prs=1, covers=False)
         val._gh = fake
-        status, plan = val.apply_via_pr(self.clone, self._cfg())
-        self.assertEqual(
-            status, "stale-defer",
-            "deferring to a bump PR cut before this merge silently drops the "
-            "merge's version intent; it must fail loudly instead",
-        )
+        report: dict[str, str] = {}
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), report=report)
+        self.assertEqual(status, "stale-wait")
+        self.assertEqual(report.get("pr"), "1")
         # The plan is still returned, so the intent is visible rather than lost.
         self.assertTrue(plan)
         # The lock is respected either way: no rival PR is opened.
         self.assertFalse(fake.did("pr", "create"))
+        self.assertFalse(fake.did("pr", "merge"))
 
     def test_pr_route_treats_unknown_pr_coverage_as_unsafe(self) -> None:
         """An unresolvable PR tip must not be read as "covers"."""
@@ -700,7 +747,8 @@ class PrRouteTest(unittest.TestCase):
         stale_sha = self._push_stale_bump_branch()
         # Top lock check sees the stale PR; after it is closed, the reclaim
         # lookup confirms no open PR.
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False)
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False,
+                       ejected=True)
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
         self.assertEqual(status, "pr-opened", plan)
@@ -731,8 +779,8 @@ class PrRouteTest(unittest.TestCase):
         self.assertFalse(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
 
-    def test_heal_replaces_an_armed_stale_bump_pr_that_is_not_queued(self) -> None:
-        """Armed is not a reason to keep a stale bump PR.
+    def test_heal_replaces_an_armed_stale_bump_pr_with_a_failed_required_check(self) -> None:
+        """Armed is not a reason to keep a stale bump PR whose checks failed.
 
         An armed PR whose required checks failed never enqueues, so it never
         lands: #9038 on 2026-09-29 was stale, armed, not queued, with red
@@ -740,12 +788,15 @@ class PrRouteTest(unittest.TestCase):
         generated bump is always safely regenerable; closing drops auto-merge.
         """
         stale_sha = self._push_stale_bump_branch()
-        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True)
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True,
+                       checks=[_check("macos", "FAILURE"),
+                               _check("drift-fast", "SUCCESS")])
         val._gh = fake
         status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
         self.assertEqual(status, "pr-opened", plan)
-        self.assertEqual([c[2] for c in fake.calls if c[:2] == ("pr", "close")],
-                         ["1"])
+        close = [c for c in fake.calls if c[:2] == ("pr", "close")]
+        self.assertEqual([c[2] for c in close], ["1"])
+        self.assertIn("macos", close[0][-1])
         self.assertTrue(fake.did("pr", "create"))
         self.assertIn("--merge", fake.calls[-1])
         tip = subprocess.run(
@@ -753,6 +804,50 @@ class PrRouteTest(unittest.TestCase):
             capture_output=True, text=True, check=True).stdout.strip()
         self.assertNotEqual(tip, stale_sha)
         self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+    def test_heal_replaces_an_ejected_stale_bump_pr_even_if_armed(self) -> None:
+        self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=True,
+                       ejected=True, checks=[_check("macos", "SUCCESS")])
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        self.assertTrue(fake.did("pr", "close"))
+        self.assertTrue(fake.did("pr", "create"))
+
+    def test_heal_replaces_an_unarmed_stale_bump_pr(self) -> None:
+        self._push_stale_bump_branch()
+        fake = _FakeGh(open_prs_seq=[1, 0], covers=False, armed=False,
+                       checks=[_check("macos", None)])
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "pr-opened", plan)
+        self.assertTrue(fake.did("pr", "close"))
+
+    def test_heal_keeps_a_healthy_stale_bump_pr(self) -> None:
+        """A stale bump PR that is armed with required checks pending or green
+        will enqueue on its own. Closing it restarts 8 to 36 minutes of checks,
+        long enough for the next main push to stale the replacement too (20 of
+        21 heal closes between 2026-09-29 and 2026-10-02 hit PRs that had not
+        yet reached the queue). It is waited for instead."""
+        for checks in (None,
+                       [_check("macos", None), _check("drift-fast", "SUCCESS")],
+                       [_check("macos", "SUCCESS"), _check("drift-fast", "SKIPPED")],
+                       # A failed check that is not required does not block.
+                       [_check("advisory", "FAILURE", required=False),
+                        _check("macos", None)],
+                       # A cancelled run that was re-run is judged by the re-run.
+                       [_check("macos", "CANCELLED", at="2026-10-02T10:00:00Z"),
+                        _check("macos", None, at="2026-10-02T10:05:00Z")]):
+            with self.subTest(checks=checks):
+                fake = _FakeGh(open_prs=1, covers=False, armed=True,
+                               checks=checks)
+                val._gh = fake
+                status, _ = val.apply_via_pr(self.clone, self._cfg(),
+                                             heal_stale=True)
+                self.assertEqual(status, "stale-wait")
+                self.assertFalse(fake.did("pr", "close"))
+                self.assertFalse(fake.did("pr", "create"))
 
     def test_heal_leaves_an_armed_covering_bump_pr_alone(self) -> None:
         """A bump PR that already covers the merge is deferred to and re-armed."""
@@ -765,20 +860,42 @@ class PrRouteTest(unittest.TestCase):
         self.assertTrue(fake.did("pr", "merge"))
 
     def test_heal_never_closes_a_queued_or_draft_or_unknown_pr(self) -> None:
-        """In the merge queue, a draft, or unreadable: the stale PR is held."""
-        for kwargs in ({"armed": True, "in_queue": True},
-                       {"armed": False, "in_queue": True},
-                       {"armed": False, "draft_pr": True},
-                       {"armed": True, "draft_pr": True},
-                       {"armed": False, "graphql_rc": 1}):
+        """In the merge queue it is waited for; a draft or unreadable state
+        fails closed. None of them is ever closed."""
+        cases = (({"armed": True, "in_queue": True}, "stale-wait"),
+                 ({"armed": False, "in_queue": True,
+                   "checks": [_check("macos", "FAILURE")]}, "stale-wait"),
+                 ({"armed": False, "draft_pr": True}, "stale-defer"),
+                 ({"armed": True, "draft_pr": True}, "stale-defer"),
+                 ({"armed": False, "graphql_rc": 1}, "stale-defer"))
+        for kwargs, expected in cases:
             with self.subTest(**kwargs):
                 fake = _FakeGh(open_prs=1, covers=False, **kwargs)
                 val._gh = fake
                 status, _ = val.apply_via_pr(self.clone, self._cfg(),
                                              heal_stale=True)
-                self.assertEqual(status, "stale-defer")
+                self.assertEqual(status, expected)
                 self.assertFalse(fake.did("pr", "close"))
                 self.assertFalse(fake.did("pr", "create"))
+
+    def test_incomplete_check_list_is_unknown_not_healthy(self) -> None:
+        fake = _FakeGh(open_prs=1, covers=False, checks=[])
+        val._gh = fake
+        payload = {"data": {"repository": {"pullRequest": {
+            "state": "OPEN", "isDraft": False, "isInMergeQueue": False,
+            "autoMergeRequest": {"enabledAt": "x"},
+            "timelineItems": {"totalCount": 0},
+            "commits": {"nodes": [{"commit": {"statusCheckRollup": {
+                "contexts": {"pageInfo": {"hasNextPage": True},
+                             "nodes": []}}}}]}}}}}
+        original = fake.__call__
+        val._gh = lambda repo, *a, check=True: (
+            subprocess.CompletedProcess(a, 0, stdout=json.dumps(payload),
+                                        stderr="")
+            if a[:2] == ("api", "graphql") else original(repo, *a, check=check))
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "stale-defer")
+        self.assertFalse(fake.did("pr", "close"))
 
     def test_heal_needs_confirmed_staleness(self) -> None:
         """Unknown coverage is not proof the PR is stale; never close on it."""
@@ -800,6 +917,55 @@ class PrRouteTest(unittest.TestCase):
         self.assertEqual(status, "stale-defer")
         self.assertTrue(fake.did("pr", "close"))
         self.assertFalse(fake.did("pr", "create"))
+
+    def _main_exit(self, status: str, report: dict[str, str]) -> tuple[int, str, str]:
+        """Run the CLI's --push --route pr outcome handling for `status`."""
+        original = val.apply_via_pr
+
+        def fake_apply(*args, **kwargs):
+            kwargs["report"].update(report)
+            return status, [val.Assignment("sdk", "minor", "0.1.0", "0.2.0")]
+
+        val.apply_via_pr = fake_apply
+        # The selftest lanes run this file from a copy outside any checkout,
+        # so the CLI's repo-root probe is pointed at the fixture clone.
+        root_probe = val._repo_root
+        val._repo_root = lambda: self.clone
+        out, err = io.StringIO(), io.StringIO()
+        summary = self.root / "summary.md"
+        env_prev = os.environ.get("GITHUB_STEP_SUMMARY")
+        os.environ["GITHUB_STEP_SUMMARY"] = str(summary)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = val.main(["--push", "--route", "pr", "--config",
+                               str(HERE / "versioning.json")])
+        finally:
+            val.apply_via_pr = original
+            val._repo_root = root_probe
+            if env_prev is None:
+                os.environ.pop("GITHUB_STEP_SUMMARY", None)
+            else:
+                os.environ["GITHUB_STEP_SUMMARY"] = env_prev
+        text = summary.read_text() if summary.exists() else ""
+        return rc, out.getvalue() + err.getvalue(), text
+
+    def test_waiting_for_a_live_stale_bump_pr_is_not_a_failed_run(self) -> None:
+        """Waiting for a bump PR that is queued or on its way is routine: every
+        such wait used to fail the run (18 red drains in 3.4 days, all waits)."""
+        rc, out, summary = self._main_exit(
+            "stale-wait", {"pr": "9243", "reason": "the bump PR is in the merge queue"})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("::notice", out)
+        self.assertIn("#9243", summary)
+
+    def test_a_drain_that_cannot_move_past_its_bump_pr_still_fails(self) -> None:
+        for reason in ("the bump PR is a draft", "the bump PR state query failed"):
+            with self.subTest(reason=reason):
+                rc, out, _ = self._main_exit("stale-defer",
+                                             {"pr": "9", "reason": reason})
+                self.assertEqual(rc, 1)
+                self.assertIn(reason, out)
+                self.assertIn("was cut BEFORE this merge", out)
 
     def test_pr_route_defers_when_create_races(self) -> None:
         # Lock check passes but `pr create` loses the race → GitHub rejects the
