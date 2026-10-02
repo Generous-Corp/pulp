@@ -145,14 +145,14 @@ struct GpuWaveNetRealtimeNode::Impl {
                 continue;
             if (pending.outcome != detail::SharedIoTraceOutcome::Success)
                 trace_terminal(pending, pending.outcome,
-                           detail::SharedIoGpuTerminalDisposition::ProviderFailed,
-                           pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
-                               ? detail::SharedIoFallbackReason::SubmissionRejected
-                               : detail::SharedIoFallbackReason::CompletionFailed);
+                               detail::SharedIoGpuTerminalDisposition::ProviderFailed,
+                               pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
+                                   ? detail::SharedIoFallbackReason::SubmissionRejected
+                                   : detail::SharedIoFallbackReason::CompletionFailed);
             else
                 trace_terminal(pending, detail::SharedIoTraceOutcome::Cancelled,
-                           detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
-                           detail::SharedIoFallbackReason::Teardown);
+                               detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
+                               detail::SharedIoFallbackReason::Teardown);
         }
     }
     void close_trace() noexcept {
@@ -197,9 +197,8 @@ struct GpuWaveNetRealtimeNode::Impl {
         const auto& c = config;
         return c.channels > 0 && c.channels <= 64 && c.lead_blocks > 0 &&
                c.capacity > c.lead_blocks && c.max_inflight > 0 &&
-               c.max_inflight <= c.session.slots &&
-               c.max_inflight <= c.capacity - c.lead_blocks && c.session.slots >= 2 &&
-               c.completion_service_wait_ns <= 1'000'000 &&
+               c.max_inflight <= c.session.slots && c.max_inflight <= c.capacity - c.lead_blocks &&
+               c.session.slots >= 2 && c.completion_service_wait_ns <= 1'000'000 &&
                validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
                weights.size() == c.session.descriptor.weight_count &&
                (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
@@ -297,8 +296,7 @@ struct GpuWaveNetRealtimeNode::Impl {
                         pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
                     fail(detail::SharedIoRecoveryReason::ProviderFailure);
                 } else {
-                    std::copy_n(worker_output.data() + ch * n, n,
-                                pending->output.data() + ch * n);
+                    std::copy_n(worker_output.data() + ch * n, n, pending->output.data() + ch * n);
                 }
             }
         }
