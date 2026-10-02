@@ -775,6 +775,8 @@ _pulp_attach_inspector_shipping(
     pulp-test-inspector-stripped-artifact pulp-test-inspector-stripped-artifact)
 add_test(NAME inspector-stripped-artifact-runs
     COMMAND pulp-test-inspector-stripped-artifact)
+# Its marker source embeds a per-configure build identity (commit-bound).
+set_tests_properties(inspector-stripped-artifact-runs PROPERTIES LABELS "commit-bound")
 unset(_pulp_inspector_symbol_tool)
 set(_pulp_inspector_symbol_mode "NM")
 if(MSVC)

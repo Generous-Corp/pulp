@@ -2130,6 +2130,14 @@ CMake moves. A ctest registration belongs to the target whose artifact is its
 `command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
 compiled test is missing and only script tests (owned by no target) appear.
 
+Key a generated file by its CONTENT, never its path: `configure_file` keeps
+the path when VERSION moves, and the control-shipping / inspector marker
+sources carry a per-configure build nonce. Do not widen "what a target can
+include" to every header under a build-tree include directory: core/runtime's
+generated `build_info.hpp` (configure timestamp) sits in an include directory
+629 targets inherit, which re-keys 560 of 789 targets on every configure; the
+Ninja dependency log says which few actually include it.
+
 ## A new Python test needs three generators, not three hand edits
 
 Adding or changing a Python selftest or script drifts three generated files,
@@ -7206,6 +7214,18 @@ command after the build, or any difference from the base. The receipt records
 `base_inventory_rows`, `base_inventory_name_only_rows` (rows whose program the
 unbuilt base could not list, compared on name, arguments and properties) and
 `base_inventory_configure_seconds`.
+
+The scratch base is provisioned like the head before it configures: `setup.sh
+--deps-only` links `external/` from the shared source cache with git limited to
+local objects. A worktree never inherits the untracked SDK links, and a base
+without them configures without AudioUnitSDK, at C++20 instead of C++23, which
+changes the `test-pch-wiring` registration and refused every bounded plan.
+Every `PULP_HAS_*` entry, `PULP_CHECKOUT_DEPENDENCY_CONTRACT` (the linked pins),
+the generator, Python and build type must then agree between base and head (an
+entry on one side only counts), or the run refuses with `inventory:
+base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
+gap names itself rather than reading as drift. The receipt records the compared
+`base_inventory_environment` and `base_inventory_linked_externals`.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The

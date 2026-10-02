@@ -14,7 +14,9 @@ in the neutral record the replay harness reads:
                      dispatch), pr, head_sha, base_sha, merge_tree, suite
                      (full|pr-fast|pr-affected), test_id, executable, outcome
                      (pass|fail|timeout|skipped|notrun), attempts, duration_s,
-                     runner_image, output_key
+                     runner_image, output_key, commit_bound (the test's executable
+                     embeds a build identity, by label or declaration; null
+                     without a codemodel)
     identity.json    per registered test executable (whatever this job
                      ran, so a fast-tier head's hashes can be compared with a
                      merge group's): sha256 (the same digest
@@ -88,7 +90,7 @@ SCHEMA = "pulp-reuse-record/v1"
 TITLE = "reuse-record"
 RECORD_FIELDS = ("run_id", "run_attempt", "run_kind", "pr", "head_sha", "base_sha", "merge_tree",
                  "suite", "test_id", "executable", "outcome", "attempts", "duration_s",
-                 "runner_image", "output_key")
+                 "runner_image", "output_key", "commit_bound")
 OUTCOMES = ("pass", "fail", "timeout", "skipped", "notrun")
 RUN_KINDS = {"pull_request": "pr_head", "merge_group": "merge_group", "push": "push",
              "workflow_dispatch": "dispatch"}
@@ -528,6 +530,7 @@ def build_records(ctx: dict, image_digest: str, suites: list[dict],
                     "attempts": attempts_for(case["outcome"], name, counts, suite["repeat"]),
                     "duration_s": case["duration_s"], "runner_image": image_digest,
                     "output_key": keys.get(name),
+                    "commit_bound": None,  # set once the codemodel says which targets are
                 })
         summary[suite["name"]] = {
             "reports": len(files), "stale_reports": stale, "tests": n, "outcomes": per,
@@ -535,6 +538,14 @@ def build_records(ctx: dict, image_digest: str, suites: list[dict],
                 "unknown (repeat without log)" if suite["repeat"] else "single-run"),
         }
     return records, summary
+
+
+def _labels(test: dict) -> set[str]:
+    for prop in test.get("properties", []):
+        if prop.get("name") == "LABELS":
+            value = prop.get("value") or []
+            return set(value if isinstance(value, list) else str(value).split(";"))
+    return set()
 
 
 def _load_inventory(build_dir: Path, selected_json: Path | None, ran: set[str], every: bool,
@@ -612,14 +623,11 @@ def cmd_write(a: argparse.Namespace) -> int:
         if info["reports"] == 0:
             problems.append(f"suite {name} ran but left no report from this job "
                             f"({info['stale_reports']} older report(s) ignored)")
-    tests_path = out / "tests.jsonl"
-    with tests_path.open("w", encoding="utf-8") as fh:
-        for r in records:
-            fh.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
     identity_path = out / "identity.json"
     identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")), encoding="utf-8")
 
     codemodel = None
+    commit_bound_artifacts: list[str] = []
     if a.codemodel and build_dir:
         import codemodel_digest as cmd_digest
 
@@ -630,13 +638,41 @@ def cmd_write(a: argparse.Namespace) -> int:
             doc = cmd_digest.digest_targets(build_dir, source_root or build_dir, registrations)
             name = f"codemodel-{ctx['merge_sha'] or 'unknown'}.json"
             (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            commit_bound_artifacts = [a for t in doc["targets"].values() if t.get("commit_bound")
+                                      for a in t["artifacts"]]
             codemodel = {"file": name, "targets": len(doc["targets"]),
+                         "commit_bound_targets": sum(1 for t in doc["targets"].values() if t.get("commit_bound")),
+                         "commit_bound_declared": (len(doc["commit_bound_declared"])
+                                                   if isinstance(doc.get("commit_bound_declared"), list)
+                                                   else doc.get("commit_bound_declared")),
                          "executables": sum(1 for t in doc["targets"].values() if t["type"] == "EXECUTABLE"),
                          "with_tests": sum(1 for t in doc["targets"].values() if t["tests"]),
                          "tests_unmatched": doc["tests_unmatched"],
+                         "with_generated": sum(1 for t in doc["targets"].values() if t.get("generated")),
+                         "generated_headers": doc.get("generated_headers"),
                          "bytes": (out / name).stat().st_size}
+            if doc.get("commit_bound_declared") == "unavailable" and a.build_outcome in (None, "success"):
+                problems.append("codemodel digest found no commit-bound declarations: tests whose "
+                                "executables embed a build identity are not marked")
+            if doc.get("generated_headers") != "ninja-deps" and a.build_outcome in (None, "success"):
+                problems.append("codemodel digest has no Ninja dependency log: generated headers are not "
+                                "keyed, so a target that includes one may keep its digest when it changes")
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"codemodel digest unavailable: {exc}")
+
+    # A test is commit-bound when its registration says so (the `commit-bound`
+    # label) or its executable belongs to a target the build declared
+    # commit-bound or that depends on one. Unknown (null) without a codemodel.
+    if codemodel is not None:
+        bound_files = set(commit_bound_artifacts)
+        labelled = {t.get("name") for t in listing(build_dir).get("tests", [])
+                    if "commit-bound" in _labels(t)} if build_dir else set()
+        for r in records:
+            r["commit_bound"] = r["test_id"] in labelled or r["executable"] in bound_files
+    tests_path = out / "tests.jsonl"
+    with tests_path.open("w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
 
     link_members = None
     if a.link_members and build_dir:

@@ -65,11 +65,15 @@ missing GPU output.
 
 `gpu.audio.session` identifies the engine generation (the stream epoch), path,
 block shape, algorithmic lead, logical pipeline depth, physical provider-slot
-count, sampling policy, and clock provenance. `pipeline_depth` is the logical
+count, configured multi-flight depth, sampling policy, and clock provenance.
+`pipeline_depth` is the logical
 bridge/completion-record capacity and must exceed `lead_blocks` so the callback
 currently being published has its own record. `provider_slots` is the physical
 provider-arena slot count; completed slots can be reused within that logical
-window, so it is not another spelling of pipeline depth. Earlier schema-2
+window, so it is not another spelling of pipeline depth. `max_inflight` is the
+maximum number of submitted blocks intentionally kept pending by the consumer;
+it is independent of both capacity fields and is the field that proves a run
+actually exercised multi-flight dispatch. Earlier schema-2
 captures predate `provider_slots` and expose SQL `NULL`, meaning unavailable,
 never zero. Terminal and delivery events carry the exact `(engine_id,
 generation, sequence)` identity; `sequence` is the block sequence. Terminal

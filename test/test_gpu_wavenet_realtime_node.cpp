@@ -26,9 +26,13 @@ class Channel final : public detail::WaveNetRealtimeChannel {
         ++control_.submits;
         if (control_.reject)
             return false;
-        std::copy(input.begin(), input.end(), data_.begin());
-        sequence_ = sequence;
-        pending_ = true;
+        auto pending = std::find_if(pending_.begin(), pending_.end(),
+                                    [](const auto& value) { return !value.active; });
+        if (pending == pending_.end())
+            return false;
+        std::copy(input.begin(), input.end(), pending->data.begin());
+        pending->sequence = sequence;
+        pending->active = true;
         return true;
     }
     void service(std::uint64_t) noexcept override {
@@ -45,12 +49,16 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     }
     std::optional<GpuWaveNetBlockResult> receive(std::span<float> output) noexcept override {
         ++control_.receives;
-        if (!pending_ || !control_.complete)
+        if (!control_.complete)
             return {};
-        pending_ = false;
+        auto pending = std::find_if(pending_.begin(), pending_.end(),
+                                    [](const auto& value) { return value.active; });
+        if (pending == pending_.end())
+            return {};
+        pending->active = false;
         if (!control_.fail)
-            std::copy_n(data_.data(), output.size(), output.data());
-        return GpuWaveNetBlockResult{sequence_ + (control_.wrong_sequence ? 1 : 0),
+            std::copy_n(pending->data.data(), output.size(), output.data());
+        return GpuWaveNetBlockResult{pending->sequence + (control_.wrong_sequence ? 1 : 0),
                                      control_.fail ? GpuWaveNetBlockStatus::ProviderFailed
                                                    : GpuWaveNetBlockStatus::GpuDelivered,
                                      control_.late};
@@ -61,10 +69,13 @@ class Channel final : public detail::WaveNetRealtimeChannel {
     }
 
   private:
+    struct Pending {
+        std::array<float, 2> data{};
+        std::uint64_t sequence = 0;
+        bool active = false;
+    };
     Control& control_;
-    std::array<float, 2> data_{};
-    std::uint64_t sequence_ = 0;
-    bool pending_ = false;
+    std::array<Pending, 16> pending_{};
 };
 // Observe the real sole-consumer drain, including release and reprepare drains.
 // Fixed storage keeps the observer safe even in noexcept release paths.
@@ -158,16 +169,19 @@ struct Shape {
                                     .tanh_activation = true};
     std::array<float, 9> weights{};
     GpuWaveNetRealtimeNode::Config config(std::uint32_t lead = 1, std::uint32_t channels = 1,
-                                          std::uint64_t wait_ns = 0) {
+                                          std::uint64_t wait_ns = 0,
+                                          std::uint32_t max_inflight = 1) {
         return {.session = {.descriptor = {.block_size = 2,
                                            .sample_rate = 48000,
                                            .stream_instances = 1,
                                            .layers = {&layer, 1},
                                            .weight_count = weights.size()},
-                            .weights = weights},
+                            .weights = weights,
+                            .slots = std::max(2u, max_inflight)},
                 .channels = channels,
                 .lead_blocks = lead,
                 .capacity = lead + 3,
+                .max_inflight = max_inflight,
                 .completion_service_wait_ns = wait_ns};
     }
 };
@@ -182,8 +196,8 @@ struct Harness {
     std::array<const float*, 2> inputs{a.data(), b.data()};
     std::array<float*, 2> outputs{outa.data(), outb.data()};
     explicit Harness(std::uint32_t lead = 1, std::uint32_t count = 1, std::uint64_t wait_ns = 0,
-                     bool trace = false)
-        : node(shape.config(lead, count, wait_ns)), channels(count) {
+                     bool trace = false, std::uint32_t max_inflight = 1)
+        : node(shape.config(lead, count, wait_ns, max_inflight)), channels(count) {
         if (trace)
             REQUIRE(node.configure_trace(
                 {.enabled = true, .capture_admissions = true, .capture_callback_timing = true}));
@@ -300,6 +314,28 @@ TEST_CASE("WaveNet timed service counts both publications without admitting a th
     CHECK(h.outa[0] == 1);
     REQUIRE(h.callback(5) == detail::kRealtimeGpuReady);
     CHECK(h.outa[0] == 2);
+}
+
+TEST_CASE("WaveNet bounded multi-flight retires contiguous results in order",
+          "[gpu_audio][wavenet][realtime]") {
+    Harness h(3, 1, 0, false, 3);
+    h.controls[0].complete = false;
+    CHECK(h.callback(1) == detail::kRealtimeGpuPriming);
+    h.service();
+    CHECK(h.callback(2) == detail::kRealtimeGpuPriming);
+    h.service();
+    CHECK(h.callback(3) == detail::kRealtimeGpuPriming);
+    h.service();
+    CHECK(h.controls[0].submits == 3);
+
+    h.controls[0].complete = true;
+    CHECK(h.service() == 3);
+    REQUIRE(h.callback(4) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 1);
+    REQUIRE(h.callback(5) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 2);
+    REQUIRE(h.callback(6) == detail::kRealtimeGpuReady);
+    CHECK(h.outa[0] == 3);
 }
 
 TEST_CASE("WaveNet incomplete timed submission stops after two service passes",

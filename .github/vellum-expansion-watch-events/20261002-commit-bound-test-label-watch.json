@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261002-commit-bound-test-label-watch",
+  "created_at": "2026-10-02T18:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record a ctest label added in test/cmake/view_widget_bridge_tests.cmake under visual-proof-harness: inspector-stripped-artifact-runs now carries the `commit-bound` label, because its executable's inspector marker source holds a per-configure build nonce and its bytes change on every configure of an identical tree. The label routes nothing; it is the declaration a test-reuse policy reads to rebuild and rerun the test every time. No test body, detector, threshold, fixture, proof artifact or harness behaviour changes. Registered as watch-only so family coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "commit-bound-labels-selftest"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
