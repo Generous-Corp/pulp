@@ -1922,10 +1922,28 @@ aggregate trials without reconstructing the originating agent. A receipt is
 alone does not prove both suites found the same failure. Receipt publication
 fsyncs both the file and containing directory.
 
-The checked-in macOS Debug inventory binds the exact filtered CTest census
-recorded in `.shipyard/changed-surface-inventory.json`. Any topology change
-must regenerate the canonical multiset contract and update the matching policy
-count together; editing only the count cannot satisfy the digest check.
+Nothing pins the exact CTest inventory. A bounded run configures the protected
+base commit (the merge base the plan verified) in a scratch worktree under the
+build directory, with the same generator, Python and policy `build_flags`, and
+requires this tree's registrations to equal the base's. A configure lists every
+registration without building, so this costs one configure (about 20 to 30
+seconds through the build governor), cached per base and flag set. The
+comparison uses the configuration-neutral projection in
+`changed_surface_inventory.project_registrations`: source, build and Python
+paths and the build type become tokens, discovered Catch2 cases are one row per
+executable (their case list is the executable's content, not its
+registration), and a build-tree program is folded to one token because an
+unbuilt base lists none; the run's receipt counts those name-only rows. A base
+that cannot be configured, a checkout whose merge base is not the plan's base,
+a registration left without a command after the build, or any difference from
+the base selects the full suite with the reason (`inventory: base not
+recorded`, `inventory: base mismatch`). A bounded plan never carries a
+registration change of its own: CMake and `test/cmake/**` are test-topology
+paths, which select the full suite. The required gate also records the same
+projection as `registrations-<sha>.json` in each job's `reuse-record-macos`
+artifact, `recordable` only when no registration lacks a command, for
+measurement; it is not on the validation path, because Shipyard's validation
+commands carry no GitHub credentials.
 
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,
@@ -2012,27 +2030,19 @@ their existing event policy remains unchanged. Keep the condition inside the
 required job: path-filtering the workflow or job would prevent the stable
 required context from reporting.
 
-CTest display names are not identities: the authoritative target currently has
-21,960 registrations but only 21,900 unique names. The inventory validator
+CTest display names are not identities: the authoritative target registers
+some names more than once. The inventory validator
 therefore fingerprints a canonical `{name, executable, argv,
 working_directory, properties}` composite and treats the suite as a multiset.
-Literal selection expands every composite with the requested name. The pinned
-`.shipyard/changed-surface-inventory.json` count and digest must match exactly;
-missing commands, duplicate properties, duplicate composite identities, or
-digest drift require the full suite. The contract also pins stable target
-semantics. Source-head, source-tree, and toolchain provenance remain in the
-emitted manifest for comparison, but otherwise-valid Python or CTest patch
-updates are not repository-contract failures. External executables use a
-portable basename in the registration fingerprint while the toolchain digest
-binds their raw and resolved paths plus a bounded content digest, so same-named
-tools remain distinguishable. Raw worktree paths and CTest registration order
-are intentionally excluded from portable identity.
-
-Regenerate this contract only after merging the current target branch and
-reconfiguring its exact tree. The JSON inventory, Shipyard `full_test_count`,
-pinned policy assertions, and these documented counts move together; deriving
-any of them from a stale PR build can silently omit tests already present on
-`main`.
+Literal selection expands every composite with the requested name; missing
+commands, duplicate properties or duplicate composite identities require the
+full suite. Source-head, source-tree, and toolchain provenance remain in the
+emitted manifest for comparison. External executables use a portable basename
+in the registration fingerprint while the toolchain digest binds their raw and
+resolved paths plus a bounded content digest, so same-named tools remain
+distinguishable. Raw worktree paths and CTest registration order are
+intentionally excluded from portable identity. `full_test_count` is an upper
+bound for the declared literal tests and receipt telemetry, not a pin.
 
 Do not promote selection from shadow to authoritative based on a few green
 runs. Graduation requires per-risk-class comparison evidence showing that the
