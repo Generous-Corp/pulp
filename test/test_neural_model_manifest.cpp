@@ -58,6 +58,11 @@ TEST_CASE("neural manifest requires a versioned schema for retained state",
     CHECK(validate_neural_model_manifest(manifest).error ==
           NeuralModelManifestError::InvalidStateSchema);
     manifest = valid_manifest();
+    manifest.state_schema = "causal-ring-v1";
+    manifest.state_schema_version = 0;
+    CHECK(validate_neural_model_manifest(manifest).error ==
+          NeuralModelManifestError::InvalidStateSchema);
+    manifest = valid_manifest();
     manifest.state_bytes = 0;
     manifest.state_schema = {};
     manifest.state_schema_version = 0;
