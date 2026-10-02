@@ -99,9 +99,24 @@ inline EditorUiInstance build_editor_ui_with_value_channel_access(
         options.enable_theme_reload = enable_hot_reload || has_configured_theme;
         options.value_channel_access = std::move(value_channel_access);
         auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
+        // A deferred load (view::ScopedDeferredDocumentLoad) reports failure
+        // here, after open() has handed the host this root, so the AutoUi
+        // fallback goes INTO the root instead of replacing it.
+        if (view::ScopedDeferredDocumentLoad::active()) {
+            scripted_ui->set_document_loaded_callback(
+                [root_ptr = root.get(), &store, path = *script_path](
+                    bool loaded, const std::string& load_error) {
+                    if (loaded) return;
+                    runtime::log_error(
+                        "Scripted editor UI failed to load from '{}': {}. "
+                        "Falling back to AutoUi.", path.string(), load_error);
+                    if (auto fallback = view::AutoUi::build(store))
+                        root_ptr->add_child(std::move(fallback));
+                });
+        }
 
         std::string load_error;
-        if (scripted_ui->load(&load_error)) {
+        if (scripted_ui->load_deferrable(&load_error)) {
             return {std::move(root), std::move(scripted_ui), true};
         }
 

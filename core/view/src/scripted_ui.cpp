@@ -214,19 +214,96 @@ void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     // passes the same surface into the freshly-constructed WidgetBridge.
 }
 
+namespace {
+thread_local bool deferred_document_load_active = false;
+} // namespace
+
+ScopedDeferredDocumentLoad::ScopedDeferredDocumentLoad()
+    : previous_(deferred_document_load_active) {
+    deferred_document_load_active = true;
+}
+
+ScopedDeferredDocumentLoad::~ScopedDeferredDocumentLoad() {
+    deferred_document_load_active = previous_;
+}
+
+bool ScopedDeferredDocumentLoad::active() noexcept {
+    return deferred_document_load_active;
+}
+
 bool ScriptedUiSession::load(std::string* error) {
     if (runtime_realm_quarantined_) {
         if (error) *error = "scripted UI runtime realm is quarantined";
         return false;
     }
-    auto code = read_text_file(script_path_);
-    if (code.empty()) {
-        if (error) *error = "could not read script file: " + script_path_.string();
+    if (!ScopedDeferredDocumentLoad::active())
+        return load_now(error);
+    // An immediate load inside a host's view-creation call: the host shows
+    // nothing of the editor until this returns. Say so once, with the fix,
+    // when it is slow enough for a user to see.
+    const auto started = std::chrono::steady_clock::now();
+    const bool loaded = load_now(error);
+    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started).count();
+    if (elapsed_ms >= kBlockingLoadWarningMs) {
+        static std::once_flag warned;
+        std::call_once(warned, [&] {
+            runtime::log_warn(
+                "Scripted UI '{}' evaluated its document inside the host's "
+                "view-creation call ({:.0f} ms); the host shows no editor until "
+                "it returns. Call load_deferrable() and do post-load work in "
+                "set_document_loaded_callback() to return the view first.",
+                script_path_.string(), elapsed_ms);
+        });
+    }
+    return loaded;
+}
+
+bool ScriptedUiSession::load_deferrable(std::string* error) {
+    if (runtime_realm_quarantined_) {
+        if (error) *error = "scripted UI runtime realm is quarantined";
         return false;
     }
+    if (ScopedDeferredDocumentLoad::active() && !bridge_) {
+        // View-first: answer the host now and evaluate from poll(). The
+        // readability check keeps a missing script a synchronous failure, so
+        // a caller's fallback (AutoUi) still runs for the cheap error.
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(script_path_, ec)
+            || std::filesystem::file_size(script_path_, ec) == 0 || ec) {
+            if (error) *error = "could not read script file: " + script_path_.string();
+            return false;
+        }
+        document_load_pending_ = true;
+        deferred_load_polls_ = 0;
+        return true;
+    }
+    return load_now(error);
+}
 
-    if (!rebuild_from_code(code, script_path_, false, error)) {
-        return false;
+bool ScriptedUiSession::complete_pending_load(std::string* error) {
+    if (!document_load_pending_) return bridge_ != nullptr;
+    return load_now(error);
+}
+
+bool ScriptedUiSession::load_now(std::string* error) {
+    document_load_pending_ = false;
+    PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_document_load");
+    std::string local_error;
+    std::string* sink = error ? error : &local_error;
+    const auto report = [&](bool loaded) {
+        if (auto callback = document_loaded_callback_)
+            callback(loaded, loaded ? std::string{} : *sink);
+        return loaded;
+    };
+    auto code = read_text_file(script_path_);
+    if (code.empty()) {
+        *sink = "could not read script file: " + script_path_.string();
+        return report(false);
+    }
+
+    if (!rebuild_from_code(code, script_path_, false, sink)) {
+        return report(false);
     }
 
     if (hot_reload_enabled_) {
@@ -255,7 +332,8 @@ bool ScriptedUiSession::load(std::string* error) {
 
     last_theme_exists_ = std::filesystem::exists(theme_path_);
     last_theme_write_time_ = last_theme_exists_ ? safe_last_write_time(theme_path_) : std::nullopt;
-    return true;
+    root_.request_repaint();
+    return report(true);
 }
 
 bool ScriptedUiSession::reload(std::string* error) {
@@ -263,6 +341,8 @@ bool ScriptedUiSession::reload(std::string* error) {
         if (error) *error = "scripted UI runtime realm is quarantined";
         return false;
     }
+    // A reload before the deferred first load ran is that first load.
+    if (document_load_pending_) return load_now(error);
     auto code = read_text_file(script_path_);
     if (code.empty()) {
         if (error) *error = "could not read script file: " + script_path_.string();
@@ -283,6 +363,24 @@ bool ScriptedUiSession::reload_from(std::filesystem::path script_path, std::stri
 }
 
 bool ScriptedUiSession::poll(std::string* error) {
+    if (document_load_pending_) {
+        // The first poll after a deferred load() lets the host present one
+        // frame of the empty, correctly sized editor; the second evaluates the
+        // document. Evaluating on the first would hold that first frame
+        // behind the whole mount, which is the wait deferral exists to remove.
+        if (deferred_load_polls_++ < 1) {
+            root_.request_repaint();
+            return true;
+        }
+        std::string load_error;
+        if (!load_now(&load_error)) {
+            runtime::log_error("Scripted UI document failed to load from '{}': {}",
+                               script_path_.string(), load_error);
+            if (error) *error = load_error;
+            return false;
+        }
+        return true;
+    }
     // A completed Runtime.evaluate owes a realm reset. Discharge it first, at
     // the top of the frame: before this frame's bridge pump could execute a
     // timer, animation frame, Promise job, or patched callback the evaluated

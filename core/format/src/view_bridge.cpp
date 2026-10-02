@@ -1,4 +1,5 @@
 #include <pulp/format/view_bridge.hpp>
+#include <optional>
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/runtime/exceptions.hpp>
 #include <pulp/view/design_frame_view.hpp>
@@ -92,6 +93,14 @@ bool ViewBridge::open(std::string* error) {
     }
     if (view_raw_) return true;
     last_error_.clear();
+
+    // A host-embedded editor returns its view before the scripted document is
+    // evaluated: the host is blocked in this call and shows nothing of the
+    // editor until it returns. Covers the default scripted editor below and a
+    // processor-built editor that loads its session with load_deferrable(); a
+    // processor that calls plain load() here is warned once when it blocks.
+    std::optional<view::ScopedDeferredDocumentLoad> defer_document_load;
+    if (options_.defer_document_load) defer_document_load.emplace();
 
     // First chance: let the processor supply a fully custom view.
     auto custom = safe_create_view(processor_);
