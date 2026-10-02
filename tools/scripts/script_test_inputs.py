@@ -352,6 +352,7 @@ SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
     + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
     + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\(|\bdlopen\s*\(")
+EXECUTABLE_SCANS = ("data", "spawns")
 INCLUDE = re.compile(r'^\s*#\s*(?:include|import)\s*"([^"]+)"', re.M)
 # C and C++ comments, so prose such as "the effect system (bloom)" is not a call.
 COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
@@ -517,6 +518,10 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
     compiled = compiled_entries(root, build_dir)
     if compiled is not None:
         doc["executables"] = compiled
+        # What every test executable was scanned for. An executable with no
+        # entry was scanned and showed neither, which a list written before a
+        # scan existed cannot say: a reader treats a missing scan as unknown.
+        doc["executables_scanned_for"] = list(EXECUTABLE_SCANS)
     return doc
 
 

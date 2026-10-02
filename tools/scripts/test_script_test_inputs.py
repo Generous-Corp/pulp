@@ -471,6 +471,7 @@ class CompiledDataTests(unittest.TestCase):
                 "kind": "compiled", "data": "declared", "inputs": ["test/fixtures/a"],
                 "sources": ["test/test_a.cpp"], "undeclared_sources": []})
             self.assertIn("alpha", lst["tests"])  # script entries unchanged, same file
+            self.assertEqual(lst["executables_scanned_for"], ["data", "spawns"])
 
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
