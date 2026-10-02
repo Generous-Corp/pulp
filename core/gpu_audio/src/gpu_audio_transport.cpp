@@ -656,9 +656,8 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     status.sample_rate = sample_rate_;
     status.block_size = block_size_;
     status.latency_samples = latency_samples();
-    status.selected_engine = capability.path == GpuAudioExecutionPath::Cpu
-                                 ? GpuAudioEngine::Cpu
-                                 : GpuAudioEngine::Gpu;
+    status.selected_engine =
+        capability.path == GpuAudioExecutionPath::Cpu ? GpuAudioEngine::Cpu : GpuAudioEngine::Gpu;
     status.provider_state = capability.eligibility == GpuAudioEligibility::Eligible
                                 ? GpuAudioProviderState::Ready
                                 : GpuAudioProviderState::Degraded;
