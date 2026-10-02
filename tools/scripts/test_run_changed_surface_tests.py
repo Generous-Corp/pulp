@@ -381,6 +381,8 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 selected_build_targets=["pulp-test-build-check"],
             )
         validate_exact.assert_called_once()
+        # Only the selected targets are built here, so unbuilt programs are fine.
+        self.assertIs(validate_exact.call_args.kwargs["require_built"], False)
         validate_deferred.assert_not_called()
         validate_projection.assert_called_once()
 
@@ -526,7 +528,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                     runner,
                     "validate_selection",
                     side_effect=[inventory.InventoryError("has no unambiguous command"), None],
-                ),
+                ) as validate_calls,
                 mock.patch.object(
                     runner.inventory,
                     "split_proven_unbuilt_placeholders",
@@ -542,6 +544,11 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 mock.patch.object(runner, "clear_build_sentinel", return_value=0),
             ):
                 self.assertEqual(runner.run_locked(args, build), 0)
+            # Before any build the comparison tolerates unbuilt programs; after
+            # the full build it requires every registration to have one.
+            prebuild, post_full = validate_calls.call_args_list
+            self.assertIs(prebuild.kwargs["require_built"], False)
+            self.assertNotIn("require_built", post_full.kwargs)
 
             self.assertEqual(
                 [
@@ -1279,6 +1286,20 @@ class BaseInventoryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
                 self.run_base(Path(directory), [], merge_base="b" * 40)
+
+    def test_a_cold_tree_matches_its_base_until_the_full_build(self) -> None:
+        # A lane checkout with nothing built yet lists unbuilt targets without a
+        # program, exactly as the configure-only base does. That must compare
+        # equal before the build, or every cold run falls back to the full suite.
+        source, build = Path("/repo"), Path("/repo/build")
+        cold = [fixture("smoke"), fixture("core"), fixture("neighbor")]
+        for test in cold:
+            test["command"][0] = ""
+        base = base_of(copy.deepcopy(cold), source, build)
+        runner.validate_registrations_match_base({"tests": cold}, source, build, base,
+                                                 require_built=False)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
+            runner.validate_registrations_match_base({"tests": cold}, source, build, base)
 
     def test_a_registration_left_without_a_command_after_the_build_refuses(self) -> None:
         source, build = Path("/repo"), Path("/repo/build")
