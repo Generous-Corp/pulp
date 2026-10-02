@@ -133,3 +133,52 @@ TEST_CASE("WaveNet completion policy is explicit non-realtime configuration",
     wait_for_completion(2);
     CHECK(result.session->release());
 }
+
+TEST_CASE("public WaveNet session accepts a reusable slot-depth matrix",
+          "[gpu_audio][wavenet][session][slots]") {
+    Fixture fixture;
+    const std::array<std::uint32_t, 3> slot_depths{2, 4, 8};
+    const std::array<float, 2> input{1.0f, 2.0f};
+
+    for (const auto slots : slot_depths) {
+        const auto result = GpuWaveNetSession::create({.descriptor = fixture.descriptor(),
+                                                        .weights = fixture.weights,
+                                                        .slots = slots});
+        if (!result.session) {
+            CHECK(result.error == GpuWaveNetSessionError::ProviderUnavailable);
+            return;
+        }
+        REQUIRE(result);
+        auto& session = *result.session;
+        CHECK(session.completion_policy() == GpuWaveNetCompletionPolicy::ProcessEvents);
+        CHECK(session.completion_policy_supported());
+
+        for (std::uint64_t sequence = 1; sequence <= slots; ++sequence)
+            REQUIRE(session.submit_block(input, sequence));
+
+        std::array<bool, 8> seen{};
+        std::array<float, 2> output{};
+        std::size_t received = 0;
+        for (int attempt = 0; attempt < 500 && received < slots; ++attempt) {
+            session.service(static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count()));
+            if (const auto completion = session.receive(output)) {
+                REQUIRE(completion->status == GpuWaveNetBlockStatus::GpuDelivered);
+                REQUIRE(completion->sequence >= 1);
+                REQUIRE(completion->sequence <= slots);
+                const auto index = static_cast<std::size_t>(completion->sequence - 1);
+                CHECK_FALSE(seen[index]);
+                seen[index] = true;
+                ++received;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        REQUIRE(received == slots);
+        for (std::size_t index = 0; index < slots; ++index)
+            CHECK(seen[index]);
+        REQUIRE(session.release());
+    }
+}
