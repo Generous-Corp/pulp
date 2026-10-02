@@ -391,8 +391,10 @@ class Collector:
         `targets` (per CMake target: digest, type, artifacts, dependencies),
         `link` (per executable: direct objects and the archive members its
         link pulled, names expanded), `executables` (test id -> the
-        executable it ran) and `binaries` (executable -> sha256 of the bytes
-        the job ran). A part the run did not record is None."""
+        executable it ran), `binaries` (executable -> sha256 of the bytes
+        the job ran), the codemodel's `digest_schema` and `generated_headers`
+        coverage, and `declared_commit_bound` (executables whose registrations
+        carry the `commit-bound` label). A part the run did not record is None."""
         def member(zf: zipfile.ZipFile, prefix: str) -> dict | None:
             name = next((n for n in zf.namelist() if Path(n).name.startswith(prefix)), None)
             return json.loads(zf.read(name)) if name else None
@@ -402,11 +404,13 @@ class Collector:
             art = next((a for a in listing.get("artifacts", [])
                         if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
             if art is None:
-                return {"targets": None, "link": None, "executables": None, "binaries": None}
+                return {"targets": None, "link": None, "executables": None, "binaries": None,
+                        "digest_schema": None, "generated_headers": None, "declared_commit_bound": None}
             with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
                 blob = resp.read()
             with zipfile.ZipFile(io.BytesIO(blob)) as zf:
                 model, links, identity = member(zf, "codemodel-"), member(zf, "link-members-"), member(zf, "identity.json")
+                registrations = member(zf, "registrations-")
                 tests = None
                 name = next((n for n in zf.namelist() if Path(n).name == "tests.jsonl"), None)
                 if name:
@@ -432,8 +436,16 @@ class Collector:
             binaries = None if identity is None else {
                 exe.removeprefix("<build>/"): rec.get("sha256")
                 for exe, rec in (identity.get("executables") or {}).items() if exe.startswith("<build>/")}
-            return {"targets": targets, "link": link, "executables": tests, "binaries": binaries}
-        return self._cached(f"record-v2/{run_id}.json.gz", fetch)
+            declared = None
+            if registrations is not None:
+                declared = sorted({(row["row"].get("command") or [""])[0].removeprefix("${CMAKE_BINARY_DIR}/")
+                                   for row in registrations.get("rows") or []
+                                   if COMMIT_BOUND_LABEL in ((row["row"].get("properties") or {}).get("LABELS") or [])})
+            return {"targets": targets, "link": link, "executables": tests, "binaries": binaries,
+                    "digest_schema": None if model is None else model.get("schema"),
+                    "generated_headers": None if model is None else model.get("generated_headers"),
+                    "declared_commit_bound": declared}
+        return self._cached(f"record-v3/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
@@ -847,6 +859,16 @@ DEPENDENCY_PIN_PATHS = frozenset({"tools/deps/manifest.json", "tools/cmake/PulpD
 # stamps into generated headers; the codemodel digests the generated file's
 # path, not its content, so a version bump moves bytes no digest covers.
 CONFIGURE_STAMP_PATHS = frozenset({"CMakeLists.txt"})
+# A codemodel digest of this schema, with generated headers read from the
+# Ninja dependency log, covers the CONTENT of every build-tree file a target
+# compiles or includes, so a version bump re-keys only its consumers.
+CONTENT_KEYED_SCHEMA = "pulp-codemodel-digest/v2"
+COMMIT_BOUND_LABEL = "commit-bound"
+
+
+def content_keyed(record: dict | None) -> bool:
+    return bool(record) and record.get("digest_schema") == CONTENT_KEYED_SCHEMA \
+        and record.get("generated_headers") == "ninja-deps"
 # Registration labels that mean the test drives a shared host resource.
 ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 
@@ -896,7 +918,8 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                          head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
                          rebuilt: set[str], all_executables: set[str],
                          codemodel: tuple[set[str], set[str]] | None = None,
-                         commit_bound: frozenset[str] = frozenset()) -> dict[str, dict]:
+                         commit_bound: frozenset[str] = frozenset(),
+                         generated_keyed: bool = False) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
 
     `rebuilt` is the set of executables (relative to the build dir) the drift
@@ -918,7 +941,10 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     # Executables whose bytes change with no input change (they embed the
     # commit) are rebuilt, and their tests run, in every pair.
     rekeyed = set(rekeyed) | set(commit_bound)
-    stamped = bool(CONFIGURE_STAMP_PATHS & set(drift))
+    # Without content-keyed digests a root CMakeLists.txt change (its
+    # project(VERSION) reaches generated headers) re-keys everything; with
+    # them the digests re-key exactly the consumers.
+    stamped = bool(CONFIGURE_STAMP_PATHS & set(drift)) and not generated_keyed
     variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel",) if codemodel is not None else ())
     for variant in variants:
         exact_cmake = variant == "cmake-codemodel"
@@ -1080,7 +1106,7 @@ def load_graph(build_dir: Path | None, pickle_path: Path | None):
 
 def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,
                          test_map: dict[str, dict], only_runs: set[str] | None = None,
-                         gh: "GitHub | None" = None) -> dict:
+                         gh: "GitHub | None" = None, legacy_rules: bool = False) -> dict:
     """Write the source-key variants into each pair that has a valid head run
     with per-test records; with `gh`, also the cmake-codemodel variant for
     pairs whose head and group jobs both recorded a codemodel. Returns counts
@@ -1092,7 +1118,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     collector._git_lock, collector._commit_cache = threading.Lock(), {}
     collector.gh = gh
     entries_cache: dict[str, dict | None] = {}
-    with_codemodel = with_recorded = 0
+    with_codemodel = with_recorded = with_v2 = 0
     index = GraphIndex(graph, graph_source_root, graph_build_dir) if gh is not None else None
 
     unread: list[str] = []
@@ -1165,12 +1191,20 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             recorded_map = {name: {**(test_map.get(name) or {}), "sources": [],
                                    "executables": [e] if (e := group_record["executables"].get(name)) in link else []}
                             for name in test_ids}
+            # Both jobs recorded content-keyed digests and the group declared
+            # its commit-bound registrations: the blunt rules retire for this
+            # pair. Anything less keeps them.
+            head_record = collector.reuse_record(head["run_id"])
+            v2 = (not legacy_rules and content_keyed(head_record) and content_keyed(group_record)
+                  and group_record.get("declared_commit_bound") is not None)
+            bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                recorded_rebuilt(link, drift, index), set(link), codemodel, commit_bound_set)
+                recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2)
+            with_v2 += int(v2)
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
-            head_bins, group_bins = collector.reuse_record(head["run_id"])["binaries"], group_record["binaries"]
+            head_bins, group_bins = head_record["binaries"], group_record["binaries"]
             for variant in ("strict-data", "cmake-codemodel"):
                 if head_bins is not None and group_bins is not None:
                     both = (set(head_bins) & set(group_bins) & set(link))
@@ -1191,4 +1225,5 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     # name the commits so a low number is traceable to its cause.
     return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel, "pairs_with_recorded_graph": with_recorded,
             "commit_bound_executables": sorted(commit_bound), "commit_bound_learned_from_pairs": learned_from,
+            "pairs_content_keyed": with_v2,
             "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}
