@@ -8,10 +8,16 @@ A small synthetic Ninja graph stands in for the real one:
     core/a.hpp ─┘                  test/t_b.cpp ──► t_b.o ──► test/pulp-test-b
     (header dep recorded by ninja -t deps, not by build.ninja)
 
-plus a script-driven test (`python3 tools/scripts/check.py`). What must hold:
+plus a tool `tools/tool` (from core/tool.cpp) that pulp-test-b spawns at run
+time: the codemodel records it as one of pulp-test-b's `dependencies`
+(add_dependencies), and nothing in build.ninja connects the two, and a
+script-driven test (`python3 tools/scripts/check.py`). What must hold:
 - a source change reaches the executables that link it, through the
   recorded header deps, and only those;
 - order-only (`||`) inputs never propagate;
+- a change to a spawned tool reaches the tests that spawn it through the
+  codemodel edge and not through the graph, and with no codemodel every test
+  is selected;
 - a CMake change, an empty diff, or a changed file no edge reads (and that is
   not a known non-input) selects every test;
 - script-driven tests are selected whenever a script surface changed, and not
@@ -35,18 +41,25 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import affected_tests_shadow as ats  # noqa: E402
+from spawn_closure import SpawnIndex  # noqa: E402
+
+NO_SPAWNS = SpawnIndex({})
+SPAWNS = SpawnIndex({
+    "pulp-test-b": {"type": "EXECUTABLE", "artifacts": ["<build>/test/pulp-test-b"], "dependencies": ["tool"]},
+    "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []},
+})
 
 
 class Fixture:
     def __init__(self, tmp: Path) -> None:
         self.src = tmp / "src"
         self.build = tmp / "src" / "build"
-        for rel in ("core/a.cpp", "core/a.hpp", "test/t_a.cpp", "test/t_b.cpp",
+        for rel in ("core/a.cpp", "core/a.hpp", "core/tool.cpp", "test/t_a.cpp", "test/t_b.cpp",
                     "tools/scripts/check.py", "docs/x.md", "CMakeLists.txt", "misc/data.bin"):
             p = self.src / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("x\n", encoding="utf-8")
-        for rel in ("test/pulp-test-a", "test/pulp-test-b"):
+        for rel in ("test/pulp-test-a", "test/pulp-test-b", "tools/tool"):
             p = self.build / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("", encoding="utf-8")
@@ -64,7 +77,9 @@ class Fixture:
             build test/t_a.o: CXX_COMPILER {s}/test/t_a.cpp || cmake_object_order_depends_target_a
             build test/t_b.o: CXX_COMPILER {s}/test/t_b.cpp || core/liba.a
             build test/pulp-test-a | test/pulp-test-a.stamp: CXX_EXECUTABLE_LINKER test/t_a.o core/liba.a
-            build test/pulp-test-b | test/pulp-test-b.stamp: CXX_EXECUTABLE_LINKER test/t_b.o
+            build test/pulp-test-b | test/pulp-test-b.stamp: CXX_EXECUTABLE_LINKER test/t_b.o || tools/tool
+            build core/tool.o: CXX_COMPILER {s}/core/tool.cpp
+            build tools/tool: CXX_EXECUTABLE_LINKER core/tool.o
             """)
         self.deps = textwrap.dedent(f"""\
             core/a.o: #deps 2, deps mtime 1 (VALID)
@@ -76,6 +91,9 @@ class Fixture:
 
             test/t_b.o: #deps 1, deps mtime 1 (VALID)
                 {s}/test/t_b.cpp
+
+            core/tool.o: #deps 1, deps mtime 1 (VALID)
+                {s}/core/tool.cpp
             """)
         b = str(self.build)
         self.inventory = {"tests": [
@@ -89,10 +107,11 @@ class Fixture:
         ]}
         self.script_inputs = {"declared-script": ["tools/scripts/declared.py", "tools/scripts/lib/"]}
 
-    def compute(self, changed: list[str], failed: list[str] = (), script_inputs=None) -> dict:
+    def compute(self, changed: list[str], failed: list[str] = (), script_inputs=None,
+                spawns: SpawnIndex | None = NO_SPAWNS) -> dict:
         return ats.compute(self.build, self.src, ats.parse_build_ninja(self.ninja),
                            ats.parse_ninja_deps(self.deps), self.inventory, changed, list(failed),
-                           self.script_inputs if script_inputs is None else script_inputs)
+                           self.script_inputs if script_inputs is None else script_inputs, None, spawns)
 
 
 class AffectedSetTests(unittest.TestCase):
@@ -121,6 +140,21 @@ class AffectedSetTests(unittest.TestCase):
         self.assertEqual(n, 2, r)
         r, n = self.selected(["test/t_b.cpp"])
         self.assertEqual(n, 1, r)
+
+    def test_a_spawned_tool_change_reaches_the_tests_that_spawn_it(self) -> None:
+        # The graph alone: test/pulp-test-b reaches tools/tool only through
+        # `||`, so a tool change selects nothing. That is the stale-pass gap.
+        r = self.fx.compute(["core/tool.cpp"])
+        self.assertEqual((r["selected"], r["compiled_selected_by_spawn"]), (0, 0), r)
+        # With the codemodel edge, both B cases and only those.
+        r = self.fx.compute(["core/tool.cpp"], spawns=SPAWNS)
+        self.assertEqual((r["selected"], r["compiled_selected_by_spawn"], r["reason"]), (1, 1, "graph"), r)
+        self.assertEqual(self.fx.compute(["core/a.cpp"], spawns=SPAWNS)["compiled_selected_by_spawn"], 0)
+
+    def test_no_codemodel_selects_everything(self) -> None:
+        r = self.fx.compute(["core/tool.cpp"], spawns=None)
+        self.assertEqual((r["selected"], r["select_all"], r["reason"]),
+                         (5, True, "no codemodel: spawn edges unknown"), r)
 
     def test_cmake_change_selects_everything(self) -> None:
         r, n = self.selected(["CMakeLists.txt"])
@@ -169,7 +203,7 @@ class AffectedSetTests(unittest.TestCase):
     def compiled(self, changed, data):
         return ats.compute(self.fx.build, self.fx.src, ats.parse_build_ninja(self.fx.ninja),
                            ats.parse_ninja_deps(self.fx.deps), self.fx.inventory, changed, [],
-                           self.fx.script_inputs, data)
+                           self.fx.script_inputs, data, NO_SPAWNS)
 
     def test_declared_compiled_data_selects_its_executable_by_its_inputs(self) -> None:
         data = {"pulp-test-a": {"kind": "compiled", "data": "declared",
@@ -222,7 +256,7 @@ class ParsersAndCliTests(unittest.TestCase):
         self.assertNotIn("::notice", proc.stdout)
         self.assertIn("no verdict", proc.stderr)
 
-    def test_cli_annotates_a_computed_verdict(self) -> None:
+    def run_cli(self, touched: str, codemodel: bool = True) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             fx = Fixture(Path(tmp))
             (fx.build / "build.ninja").write_text(fx.ninja, encoding="utf-8")
@@ -230,13 +264,15 @@ class ParsersAndCliTests(unittest.TestCase):
             (fx.build / "selected.json").write_text(json.dumps(fx.inventory), encoding="utf-8")
             (fx.build / "ctest.junit.xml").write_text(
                 '<testsuite><testcase name="B: one"><failure/></testcase></testsuite>', encoding="utf-8")
+            if codemodel:
+                write_reply(fx.build, fx.src)
             env = {"PATH": "/usr/bin:/bin:/opt/homebrew/bin", "GIT_AUTHOR_NAME": "t",
                    "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
             git = lambda *a: subprocess.run(["git", "-C", str(fx.src), *a], check=True, env=env,
                                             capture_output=True, text=True)
             git("init", "-q"); git("add", "-A"); git("commit", "-q", "-m", "base")
-            (fx.src / "core/a.cpp").write_text("y\n", encoding="utf-8")
-            git("commit", "-q", "-am", "touch a")
+            (fx.src / touched).write_text("y\n", encoding="utf-8")
+            git("commit", "-q", "-am", f"touch {touched}")
             proc = subprocess.run([sys.executable, str(HERE / "affected_tests_shadow.py"),
                                    "--build-dir", str(fx.build), "--source-root", str(fx.src),
                                    "--base", "HEAD~1", "--head", "HEAD",
@@ -247,11 +283,42 @@ class ParsersAndCliTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         line = [ln for ln in proc.stdout.splitlines() if ln.startswith("::notice title=affected-tests-shadow::")]
         self.assertEqual(len(line), 1, proc.stdout)
-        rec = json.loads(line[0].split("::", 2)[2])
+        return json.loads(line[0].split("::", 2)[2])
+
+    def test_cli_annotates_a_computed_verdict(self) -> None:
+        rec = self.run_cli("core/a.cpp")
         self.assertEqual((rec["schema"], rec["selected"], rec["total"]), (ats.SCHEMA, 2, 5))
         self.assertEqual(rec["failed_outside_selection"], 1)
         self.assertEqual(rec["event"], "merge_group")
 
+    def test_cli_reads_spawn_edges_from_the_codemodel(self) -> None:
+        rec = self.run_cli("core/tool.cpp")
+        self.assertEqual((rec["selected"], rec["compiled_selected_by_spawn"], rec["reason"]), (1, 1, "graph"), rec)
+        self.assertEqual(rec["failed_outside_selection"], 0)
+
+    def test_cli_without_a_codemodel_selects_everything(self) -> None:
+        rec = self.run_cli("core/a.cpp", codemodel=False)
+        self.assertEqual((rec["selected"], rec["reason"]), (5, "no codemodel: spawn edges unknown"), rec)
+
+
+def write_reply(build: Path, src: Path) -> None:
+    """A CMake file-API reply in which pulp-test-b depends on the tool it spawns."""
+    reply = build / ".cmake" / "api" / "v1" / "reply"
+    reply.mkdir(parents=True)
+    targets = {
+        "pulp-test-a": {"type": "EXECUTABLE", "artifacts": [{"path": "test/pulp-test-a"}]},
+        "pulp-test-b": {"type": "EXECUTABLE", "artifacts": [{"path": "test/pulp-test-b"}],
+                        "dependencies": [{"id": "tool::@1"}]},
+        "tool": {"type": "EXECUTABLE", "artifacts": [{"path": "tools/tool"}]},
+    }
+    refs = []
+    for name, record in targets.items():
+        (reply / f"target-{name}.json").write_text(json.dumps({"name": name, **record}), encoding="utf-8")
+        refs.append({"id": f"{name}::@1", "jsonFile": f"target-{name}.json"})
+    (reply / "codemodel-v2.json").write_text(json.dumps({
+        "configurations": [{"targets": refs}], "paths": {"build": str(build), "source": str(src)}}), encoding="utf-8")
+    (reply / "index-1.json").write_text(json.dumps(
+        {"reply": {"codemodel-v2": {"jsonFile": "codemodel-v2.json"}}}), encoding="utf-8")
 
 if __name__ == "__main__":
     unittest.main()

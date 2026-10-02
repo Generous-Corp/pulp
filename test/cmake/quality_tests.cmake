@@ -706,6 +706,12 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/ci/test_affected_tests_shadow.py")
     set_tests_properties(affected-tests-shadow-selftest PROPERTIES TIMEOUT 120)
 
+    # Runtime spawn edges from the CMake codemodel, shared by the shadow, the
+    # reuse replay and the reuse key.
+    add_test(NAME spawn-closure-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/ci/test_spawn_closure.py")
+    set_tests_properties(spawn-closure-selftest PROPERTIES TIMEOUT 60)
+
     # Per-job ccache delta printed by build.yml's "Ccache stats" step. The
     # cumulative `ccache --show-stats` counters belong to the host-shared cache
     # directory, so only the before/after difference describes one job.

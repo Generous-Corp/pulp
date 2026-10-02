@@ -263,6 +263,11 @@ class Decision:
     # rebuild, executables compared, executables rebuilt with identical
     # bytes) where both jobs recorded binary hashes
     binaries: tuple[int, int, int] | None = None
+    # tests the policy skips although a program they run or load at run time
+    # came out with different bytes (tools/ci/spawn_closure.py)
+    stale_spawners: tuple[str, ...] = ()
+    # (spawned programs whose bytes were compared, spawned programs)
+    spawned: tuple[int, int] | None = None
 
     def skips(self, test_id: str) -> bool:
         return self.skip_all or test_id in self.skip
@@ -384,8 +389,11 @@ def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
         if "unreached_changed_binaries" in keys:
             binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0),
                         int(keys.get("rebuilt_identical_binaries") or 0))
+        stale = tuple(t for t in keys.get("skipped_spawners_of_changed_binaries") or [] if t in skip)
+        spawned = ((int(keys["spawned_binaries_compared"]), int(keys["spawned_binaries"]))
+                   if "spawned_binaries" in keys else None)
         return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build,
-                        binaries=binaries)
+                        binaries=binaries, stale_spawners=stale, spawned=spawned)
     return decide
 
 
@@ -519,6 +527,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     benefits: list[float] = []
     build_fracs: list[float] = []
     unreached: list[dict] = []
+    stale_spawners: list[dict] = []
+    spawned_compared = spawned_total = 0
     binary_pairs = binaries_compared = rebuilt_identical = 0
     build_skipped = build_total = 0
     false_skips: list[dict] = []
@@ -562,6 +572,11 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
             rebuilt_identical += decision.binaries[2]
             if decision.binaries[0]:
                 unreached.append({"pr": pair.get("pr"), "group_run_id": group["run_id"], "count": decision.binaries[0]})
+        stale_spawners.extend({"pr": pair.get("pr"), "group_run_id": group["run_id"], "test_id": t}
+                              for t in decision.stale_spawners)
+        if decision.spawned is not None:
+            spawned_compared += decision.spawned[0]
+            spawned_total += decision.spawned[1]
         if decision.build is not None:
             build_skipped += decision.build[0]
             build_total += decision.build[1]
@@ -602,6 +617,10 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "binary_control_pairs": binary_pairs,
         "binaries_compared": binaries_compared,
         "rebuilt_identical_binaries": rebuilt_identical,
+        "skipped_spawners_of_changed_binaries": len(stale_spawners),
+        "skipped_spawner_rows": stale_spawners,
+        "spawned_binaries_compared": spawned_compared,
+        "spawned_binaries": spawned_total,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -614,6 +633,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "rejected_runs": rejected_runs,
         "replay_vs_observed": replay_vs_observed,
         "verdict": ("UNSAFE: changed binaries not rebuilt" if unreached else
+                    "UNSAFE: tests skipped although a program they spawn changed" if stale_spawners else
                     verdict_for(false_skips, scored, evaluable, opts.get("min_sample", 20))),
     }
 
@@ -676,7 +696,9 @@ def render(result: dict) -> str:
         f"pooled {_fmt(result['build_skipped_pooled'], True)}",
         f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
         f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs); "
-        f"{result['rebuilt_identical_binaries']} rebuilt with identical bytes",
+        f"{result['rebuilt_identical_binaries']} rebuilt with identical bytes; "
+        f"{result['skipped_spawners_of_changed_binaries']} tests skipped although a program they spawn changed "
+        f"({result['spawned_binaries_compared']} of {result['spawned_binaries']} spawned programs hashed)",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",

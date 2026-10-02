@@ -852,6 +852,7 @@ ENVIRONMENT_LABELS = frozenset({"gpu", "browser-capture"})
 
 
 sys.path.insert(0, str(HERE.parent / "ci"))
+from spawn_closure import SpawnIndex  # noqa: E402  (tools/ci: runtime spawn edges)
 
 
 def _is_cmake(path: str) -> bool:
@@ -892,18 +893,31 @@ def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict]) -> tuple[se
     return exes(changed), exes(group)
 
 
+def skipped_spawners(test_map: dict[str, dict], run: Iterable[str], changed: set[str],
+                     spawns: SpawnIndex) -> list[str]:
+    """Tests left out of `run` although a program they run or load at run
+    time (not their own executable) is among the `changed` binaries."""
+    must = set(run)
+    return sorted(name for name, mapped in test_map.items() if name not in must
+                  and any(spawns.closure(e) & changed for e in mapped.get("executables") or []))
+
+
 def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
                          head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
                          rebuilt: set[str], all_executables: set[str],
                          codemodel: tuple[set[str], set[str]] | None = None,
-                         commit_bound: frozenset[str] = frozenset()) -> dict[str, dict]:
+                         commit_bound: frozenset[str] = frozenset(),
+                         spawns: SpawnIndex | None = None) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
 
     `rebuilt` is the set of executables (relative to the build dir) the drift
     reaches through the graph; `all_executables` the ones the graph builds.
     The build share counts only the executables the group's own tests run,
     so a graph configured with more targets than the gate (examples) does
-    not dilute it. Pure: the graph and git reads happen before."""
+    not dilute it. `spawns` adds, to each test's executables, the programs
+    it runs or loads at run time, so a rebuilt tool re-runs the tests that
+    spawn it; without it only the test's own executables count. Pure: the
+    graph and git reads happen before."""
     import test_receipts_shadow  # tools/ci: the always-run names and the runtime-surface rule
     always_run = test_receipts_shadow.ALWAYS_RUN_NAME_RE
     surface = test_receipts_shadow.is_runtime_surface
@@ -932,11 +946,12 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
         for name in group_tests:
             mapped = test_map.get(name) or {}
             exes = mapped.get("executables") or []
+            reach = spawns.expand(exes) if spawns is not None else set(exes)
             if strict and (always_run.search(name) or environment_bound(mapped)):
                 run.append(name)
             elif exes:
                 if (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
-                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])):
+                        or reach & rebuilt or drift_set & set(mapped.get("sources") or [])):
                     run.append(name)
             elif group_entries is not None and name in group_entries and head_entries is not None:
                 entry = group_entries[name]
@@ -1149,15 +1164,18 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
         rebuilt = {os.path.relpath(p, build_real) for p in reached if p.startswith(build_real + os.sep)}
         codemodel = None
         group_record = None
+        spawns = None
         if gh is not None:
             head_cm, group_record = collector.codemodel_targets(head["run_id"]), collector.reuse_record(group["run_id"])
             if head_cm is not None and group_record["targets"] is not None:
                 codemodel = codemodel_rekeyed(head_cm, group_record["targets"])
+                spawns = SpawnIndex(group_record["targets"])
                 with_codemodel += 1
         test_ids = [t["test_id"] for t in tests]
         head_entries, group_entries = entries(head["checkout_sha"]), entries(group["checkout_sha"])
         pair["source_key"] = classify_source_keys(
-            drift, test_ids, test_map, head_entries, group_entries, rebuilt, all_exes, codemodel)
+            drift, test_ids, test_map, head_entries, group_entries, rebuilt, all_exes, codemodel,
+            spawns=spawns)
         if codemodel is not None and group_record["link"] and group_record["executables"]:
             # The same variants with executables, test mapping and rebuilds
             # taken from the group job's own record instead of the graph's build.
@@ -1167,7 +1185,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                             for name in test_ids}
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                recorded_rebuilt(link, drift, index), set(link), codemodel, commit_bound_set)
+                recorded_rebuilt(link, drift, index), set(link), codemodel, commit_bound_set, spawns)
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
             head_bins, group_bins = collector.reuse_record(head["run_id"])["binaries"], group_record["binaries"]
@@ -1181,6 +1199,15 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     # The inverse: rebuilt although the bytes came out the
                     # same, the policy's over-approximation.
                     recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
+                    # The spawn control: a test that would be skipped although
+                    # a program it runs or loads came out with different bytes.
+                    recorded[variant]["skipped_spawners_of_changed_binaries"] = skipped_spawners(
+                        recorded_map, recorded[variant]["run"], changed, spawns)
+                    # Only tested executables are hashed, so a spawned program
+                    # that no test runs directly is invisible to that control.
+                    spawned = {s for m in recorded_map.values() for e in m["executables"] for s in spawns.closure(e)}
+                    recorded[variant]["spawned_binaries"] = len(spawned)
+                    recorded[variant]["spawned_binaries_compared"] = len(spawned & both)
             pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
             pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
             with_recorded += 1
