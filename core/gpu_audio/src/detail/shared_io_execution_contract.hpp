@@ -13,7 +13,10 @@ namespace pulp::gpu_audio::detail {
 // completion-table capacity, so it must cover the declared lead plus the
 // callback currently being published. `provider_slots` is the independent
 // number of physical provider-arena slots; retired slots may be reused within
-// the lead window.
+// the lead window. `max_inflight` is the maximum number of submitted blocks
+// that the consumer intentionally keeps pending at once. It is independent
+// from both capacity values so a receipt can distinguish a deeper provider
+// arena from actual multi-flight dispatch.
 enum class SharedIoPath : std::uint8_t { Cpu, StagedAsync, SharedHostPointer };
 enum class SharedIoRequest : std::uint8_t {
     Auto,
@@ -58,6 +61,7 @@ struct SharedIoExecutionContract {
     std::uint32_t algorithmic_lead_blocks = 0;
     std::uint32_t pipeline_depth = 0;
     std::uint32_t provider_slots = 0;
+    std::uint32_t max_inflight = 1;
     SharedIoRequest requested_path = SharedIoRequest::Auto;
     SharedIoPath active_path = SharedIoPath::Cpu;
     MissPolicy miss_policy = MissPolicy::Silence;
