@@ -380,6 +380,7 @@ TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
     CHECK(inactive.provider == GpuAudioProvider::Unknown);
     CHECK(inactive.eligibility == GpuAudioEligibility::Unavailable);
     CHECK_FALSE(inactive.prepared);
+    CHECK(inactive.prepared_latency_blocks == 0);
     CHECK(inactive.prepared_lead_blocks == 0);
     CHECK_FALSE(inactive.fallback_available);
     CHECK_FALSE(inactive.diagnostics_available);
@@ -395,7 +396,8 @@ TEST_CASE("GpuAudioTransport capability report is an honest staged snapshot",
     CHECK(report.provider == GpuAudioProvider::Unknown);
     CHECK(report.eligibility == GpuAudioEligibility::Eligible);
     CHECK(report.prepared);
-    CHECK(report.prepared_lead_blocks == 3);
+    CHECK(report.prepared_latency_blocks == 3);
+    CHECK(report.prepared_lead_blocks == 0);
     CHECK(report.fallback_policy == MissPolicy::CpuFallback);
     CHECK(report.fallback_available);
     CHECK(report.diagnostics_available);

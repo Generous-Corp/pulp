@@ -38,6 +38,12 @@ struct GpuAudioCapabilityReport {
     GpuAudioProvider provider = GpuAudioProvider::Unknown;
     GpuAudioEligibility eligibility = GpuAudioEligibility::Unavailable;
     MissPolicy fallback_policy = MissPolicy::Silence;
+    // The fixed output/PDC delay established by the transport. This is
+    // available for every prepared node and must not be read as algorithmic
+    // pipeline lead.
+    std::uint32_t prepared_latency_blocks = 0;
+    // Algorithmic lead is reported only when an authenticated concrete
+    // provider establishes it. Generic staged nodes leave this at zero.
     std::uint32_t prepared_lead_blocks = 0;
     bool prepared = false;
     bool fallback_available = false;

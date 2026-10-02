@@ -113,7 +113,8 @@ int main() {
         report.provider != GpuAudioProvider::Unknown ||
         report.eligibility != GpuAudioEligibility::Eligible ||
         report.fallback_policy != MissPolicy::CpuFallback ||
-        report.prepared_lead_blocks != 2 || !report.prepared ||
+        report.prepared_latency_blocks != 2 ||
+        report.prepared_lead_blocks != 0 || !report.prepared ||
         !report.fallback_available || !report.diagnostics_available) return 11;
     const auto status = transport.status_snapshot();
     // The installed status contract must not infer GPU execution from a

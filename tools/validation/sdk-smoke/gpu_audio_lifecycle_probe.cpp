@@ -75,13 +75,15 @@ int main() {
     // An installed consumer must be able to make an explicit engine choice
     // without reaching into private provider handles.  This generic node has
     // no authenticated shared-memory provider, so the report must honestly
-    // describe the staged path and its prepared lead/fallback contract.
+    // describe the staged path and its fixed latency/fallback contract. A
+    // generic staged node has no provider-authenticated algorithmic lead.
     const auto prepared_report = transport.capability_report();
     if (prepared_report.path != pulp::gpu_audio::GpuAudioExecutionPath::Staged ||
         prepared_report.provider != pulp::gpu_audio::GpuAudioProvider::Unknown ||
         prepared_report.eligibility != pulp::gpu_audio::GpuAudioEligibility::Eligible ||
         prepared_report.fallback_policy != MissPolicy::CpuFallback ||
-        prepared_report.prepared_lead_blocks != LifecycleNode::kLatency ||
+        prepared_report.prepared_latency_blocks != LifecycleNode::kLatency ||
+        prepared_report.prepared_lead_blocks != 0 ||
         !prepared_report.prepared || !prepared_report.fallback_available ||
         !prepared_report.diagnostics_available)
         return 111;
