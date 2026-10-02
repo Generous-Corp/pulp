@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "detail/nam_tcn_adapter.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
 
 #include <array>
 
@@ -76,16 +77,55 @@ TEST_CASE("NAM/TCN adapter delegates stateful CPU blocks without allocation",
     float* output_channels[] = {output.data()};
     const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 2);
     auto out = pulp::audio::BufferView<float>(output_channels, 1, 2);
-    model.process_cpu(in, out, 2, {.epoch = 1, .sequence = 0});
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        model.process_cpu(in, out, 2, {.epoch = 1, .sequence = 0});
+        CHECK(probe.allocation_count() == 0);
+    }
     CHECK(output == std::array<float, 2>{1.0f, 3.0f});
 
     model.reset(2, StreamingResetReason::ModelSwap);
     output.fill(0.0f);
-    model.process_cpu(in, out, 2, {.epoch = 2, .sequence = 0});
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        model.process_cpu(in, out, 2, {.epoch = 2, .sequence = 0});
+        CHECK(probe.allocation_count() == 0);
+    }
     CHECK(output == std::array<float, 2>{1.0f, 3.0f});
     REQUIRE(model.quiesce());
     REQUIRE(model.release());
     CHECK_FALSE(state.prepared);
+}
+
+TEST_CASE("NAM/TCN adapter rejects blocks larger than prepared capacity",
+          "[gpu_audio][neural][nam][streaming_model]") {
+    TestKernel state;
+    NamTcnStreamingAdapter model(
+        spec(), {.state = &state,
+                 .prepare = prepare,
+                 .process = process,
+                 .reset = reset,
+                 .quiesce = quiesce,
+                 .release = release});
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "fixture.nam",
+                                                 .artifact_hash = "fixture-hash",
+                                                 .max_frames = 2};
+    REQUIRE(model.prepare(context));
+
+    std::array<float, 3> input{1.0f, 2.0f, 3.0f};
+    std::array<float, 3> output{9.0f, 9.0f, 9.0f};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 3);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 3);
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        model.process_cpu(in, out, 3, {.epoch = 1, .sequence = 0});
+        CHECK(probe.allocation_count() == 0);
+    }
+    CHECK(output == std::array<float, 3>{0.0f, 0.0f, 0.0f});
+    CHECK(state.previous == 0.0f);
 }
 
 TEST_CASE("NAM/TCN adapter rejects non-mono buffers at the private boundary",

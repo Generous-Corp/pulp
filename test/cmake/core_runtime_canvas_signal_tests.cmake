@@ -620,10 +620,16 @@ pulp_add_test_suite(pulp-test-neural-model-manifest GROUP pulp-test-group-core-g
     SOURCES test_neural_model_manifest.cpp
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
-pulp_add_test_suite(pulp-test-nam-tcn-adapter GROUP pulp-test-group-core-runtime
+# Keep this adapter on its own test binary so the callback contract is enforced
+# by the same allocation/lock trap as the model-neutral streaming contract.
+pulp_add_test_suite(pulp-test-nam-tcn-adapter
     SOURCES test_nam_tcn_adapter.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
-                 ${CMAKE_SOURCE_DIR}/core/audio/include)
+                 ${CMAKE_SOURCE_DIR}/core/audio/include
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # CPU-only receipt for the model-neutral callback lane. The executable owns
 # all model/audio storage before entering the allocation probe and reports a
