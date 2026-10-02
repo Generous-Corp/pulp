@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -46,6 +47,8 @@ enum class StrumSpacingSync : std::uint8_t {
 struct StrumSpec {
     StrumDirection direction = StrumDirection::Up;
     StrumShape shape = StrumShape::Linear;
+    /// Continuous spread exponent. Two preserves the legacy curved shapes.
+    double shape_exponent = 2.0;
     StrumSpacingSync sync = StrumSpacingSync::Milliseconds;
     /// Cluster window in samples: how close two notes must be to be one chord.
     std::int64_t window_samples = 0;
@@ -54,6 +57,8 @@ struct StrumSpec {
     /// Forward-only timing jitter per note, in samples.
     std::int64_t timing_jitter_samples = 0;
     std::uint8_t velocity_jitter = 0;
+    /// Signed velocity tilt across the ordered cluster, in MIDI velocity units.
+    std::int16_t velocity_tilt = 0;
     std::uint64_t seed = 0;
     constexpr auto operator<=>(const StrumSpec&) const = default;
 };
@@ -72,7 +77,9 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
     }
 
     static constexpr bool valid_spec(StrumSpec spec) noexcept {
-        if (spec.window_samples < 0 || spec.timing_jitter_samples < 0 || spec.velocity_jitter > 127)
+        if (spec.window_samples < 0 || spec.timing_jitter_samples < 0 ||
+            spec.velocity_jitter > 127 || !std::isfinite(spec.shape_exponent) ||
+            spec.shape_exponent <= 0.0 || spec.velocity_tilt < -127 || spec.velocity_tilt > 127)
             return false;
         return spec.sync == StrumSpacingSync::Division ? spec.spacing_interval.value > 0
                                                        : spec.spacing_milliseconds > 0;
@@ -88,21 +95,35 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
     /// Position of the note at ordered index `index` in a cluster of `count`,
     /// expressed in whole spacing steps. Integer arithmetic throughout, so the
     /// spread is bit-exact and a test can derive it independently.
-    static constexpr std::int64_t shaped_step(StrumShape shape, std::size_t index,
-                                              std::size_t count) noexcept {
+    static std::int64_t shaped_step(StrumShape shape, double exponent, std::size_t index,
+                                    std::size_t count) noexcept {
         if (count <= 1 || index == 0)
             return 0;
         const auto last = static_cast<std::int64_t>(count - 1);
         const auto position = static_cast<std::int64_t>(index);
         switch (shape) {
         case StrumShape::Accelerate:
-            return position * position / last;
+            exponent = std::max(0.0, exponent);
+            return static_cast<std::int64_t>(std::llround(
+                std::pow(static_cast<double>(position) / static_cast<double>(last), exponent) *
+                static_cast<double>(last)));
         case StrumShape::Decelerate:
-            return last - (last - position) * (last - position) / last;
+            exponent = std::max(0.0, exponent);
+            return last -
+                   static_cast<std::int64_t>(std::llround(
+                       std::pow(static_cast<double>(last - position) / static_cast<double>(last),
+                                exponent) *
+                       static_cast<double>(last)));
         case StrumShape::Linear:
             break;
         }
         return position;
+    }
+
+    /// Legacy shape-only helper; preserves the quadratic curve law.
+    static std::int64_t shaped_step(StrumShape shape, std::size_t index,
+                                    std::size_t count) noexcept {
+        return shaped_step(shape, 2.0, index, count);
     }
 
     explicit constexpr Strum(StrumSpec spec = {}) noexcept
@@ -270,7 +291,7 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
             utility_detail::saturating_sample_add(cluster_start_, spec_.window_samples);
         for (std::size_t index = 0; index < members_count; ++index) {
             auto* slot = members[index];
-            const auto step = shaped_step(spec_.shape, index, members_count);
+            const auto step = shaped_step(spec_.shape, spec_.shape_exponent, index, members_count);
             auto at = utility_detail::saturating_sample_add(base, spacing * step);
             if (spec_.timing_jitter_samples > 0) {
                 const auto lane = static_cast<std::uint64_t>(
@@ -285,6 +306,8 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
             slot->scheduled_yet = true;
             if (spec_.velocity_jitter != 0)
                 apply_velocity_jitter(*slot);
+            if (spec_.velocity_tilt != 0)
+                apply_velocity_tilt(*slot, index, members_count);
         }
         alternate_flip_ = !alternate_flip_;
     }
@@ -296,6 +319,20 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
         const auto value = static_cast<std::int32_t>(
             draw(spec_.seed, slot.arrival, lane, kVelocityStream, span));
         const auto offset = value - static_cast<std::int32_t>(spec_.velocity_jitter);
+        const auto velocity = static_cast<std::uint8_t>(
+            std::clamp(static_cast<std::int32_t>(slot.event.velocity()) + offset, 1, 127));
+        auto shaped = MidiEvent::note_on(slot.event.channel(), slot.event.note(), velocity);
+        shaped.timestamp = slot.event.timestamp;
+        slot.event = shaped;
+    }
+
+    void apply_velocity_tilt(Slot& slot, std::size_t index, std::size_t count) noexcept {
+        if (count <= 1)
+            return;
+        const auto numerator = static_cast<std::int32_t>(index);
+        const auto denominator = static_cast<std::int32_t>(count - 1);
+        const auto tilt = static_cast<std::int32_t>(spec_.velocity_tilt);
+        const auto offset = (tilt * numerator) / denominator;
         const auto velocity = static_cast<std::uint8_t>(
             std::clamp(static_cast<std::int32_t>(slot.event.velocity()) + offset, 1, 127));
         auto shaped = MidiEvent::note_on(slot.event.channel(), slot.event.note(), velocity);

@@ -39,6 +39,27 @@ on:
   # so pending intent is always drained within the cadence.
   schedule:
     - cron: '*/15 * * * *'
+  # Dead-end bump PRs are healed when they die, not on the next main push.
+  # A drain that finds a stale bump PR still able to land waits for it (exit 0);
+  # if that PR is then ejected from the merge queue, or one of its required
+  # checks fails, nothing else would re-run the drain until main moves. These
+  # two events re-run it at that moment. Both are scoped in the job `if` to the
+  # bot's own bump branch in this repository on the PR route, and the job always
+  # checks out main, never PR code. `pull_request` branch filters match the
+  # BASE branch, so the head-branch scope lives in the `if`.
+  pull_request:
+    types: [dequeued]
+  workflow_run:
+    # The workflows that report the required checks on a bump PR.
+    workflows:
+      - Build and Test
+      - Drift fast
+      - Vellum freeze
+      - Vellum trusted gate
+      - Versioning & Skill-Sync
+      - WebCLAP Cloudflare
+    types: [completed]
+    branches: [release/version-bump]
   workflow_dispatch: {}
 
 concurrency:
@@ -67,7 +88,19 @@ permissions:
 
 jobs:
   drain-dry-run:
-    if: github.event_name != 'schedule' || github.repository == vars.PULP_PRIMARY_REPO
+    if: >-
+      (github.event_name != 'schedule'
+        || github.repository == vars.PULP_PRIMARY_REPO)
+      && (github.event_name != 'pull_request'
+        || (vars.PULP_BUMP_ROUTE == 'pr'
+          && github.event.pull_request.head.ref == 'release/version-bump'
+          && github.event.pull_request.head.repo.full_name == github.repository))
+      && (github.event_name != 'workflow_run'
+        || (vars.PULP_BUMP_ROUTE == 'pr'
+          && github.event.workflow_run.head_repository.full_name == github.repository
+          && github.event.workflow_run.conclusion != 'success'
+          && github.event.workflow_run.conclusion != 'skipped'
+          && github.event.workflow_run.conclusion != 'neutral'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,9 +135,10 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
           BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
-          # Opt-in (default off): replace a stale bump PR that is not in the
-          # merge queue and not a draft (armed or not) instead of
-          # stale-deferring forever.
+          # Opt-in (default off): replace a stale bump PR that is a dead end
+          # (ejected from the merge queue, not armed, or a required check
+          # failed). A stale bump PR still able to land is waited for either
+          # way, and that wait exits 0.
           HEAL_STALE_PR: ${{ vars.PULP_BUMP_HEAL_STALE_PR || 'false' }}
         run: |
           # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does

@@ -98,6 +98,20 @@ Only rows marked macro-exposable in
 structural modes, and reserved controls stay fixed so automation cannot rebuild
 prepared models on the audio callback.
 
+### Strum shape and velocity controls
+
+The public `pulp::midi::StrumSpec` exposes the same bounded strum operation to
+native nodes. `shape_exponent` is finite and greater than zero: `1` gives a
+linear placement for the accelerate/decelerate modes, values above `1` bunch
+notes toward the selected edge, and the default `2` retains the original
+curved behavior. `velocity_tilt` is signed MIDI velocity units from `-127` to
+`127`; it is applied across the ordered cluster, so a positive value ramps
+toward the last note and a negative value ramps toward the first. The default
+exponent and zero tilt are compatibility controls and preserve legacy output
+bit-for-bit. Invalid values are refused before processing and never mutate a
+prepared kernel. Cluster balancing, seeded timing jitter, and one-window
+latency remain unchanged.
+
 ## Pattern data
 
 `pattern_gate`, `step_seq`, `note_gen`, `morph_seq`, and `drum_gen` consume

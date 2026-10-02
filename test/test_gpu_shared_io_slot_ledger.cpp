@@ -828,6 +828,45 @@ TEST_CASE("shared IO arena expiry retains terminal credit and allocation until l
     CHECK(provider.live_allocations == 0);
 }
 
+TEST_CASE("shared IO capacity stays pinned until service and output release",
+          "[gpu_audio][shared_io][arena][capacity][retirement]") {
+    FakeSharedIoProvider provider;
+    SharedIoArena arena;
+    REQUIRE(arena.prepare(provider, arena_config(2)));
+
+    // Filling both fixed slots is an admission limit, not an allocation event.
+    const auto first = publish_and_submit(arena, 125);
+    const auto second = publish_and_submit(arena, 126);
+    CHECK(provider.create_calls == 2);
+    CHECK(provider.live_allocations == 2);
+    CHECK_FALSE(arena.grant_write(127));
+
+    // A backend completion publication alone does not return the slot. The
+    // serialized service must consume it, and its output lease must be released
+    // before the same persistent resource can be admitted again.
+    REQUIRE(provider.complete(first.slot, SharedIoTerminalStatus::RetiredSuccess) ==
+            SharedIoTerminalInbox::PushResult::Accepted);
+    CHECK_FALSE(arena.grant_write(127));
+
+    REQUIRE(arena.drain_completions().accepted == 1);
+    CHECK_FALSE(arena.grant_write(127));
+    const auto output = arena.acquire_output(first.preparation_epoch, first.stream_sequence);
+    REQUIRE(output);
+    REQUIRE(arena.release_output({output->token}));
+
+    const auto reused = arena.grant_write(127);
+    REQUIRE(reused);
+    CHECK(reused->token.slot == first.slot);
+    CHECK(provider.create_calls == 2);
+    CHECK(provider.destroy_calls == 0);
+    CHECK(provider.live_allocations == 2);
+    REQUIRE(arena.discard(reused->token));
+    (void)second;
+    REQUIRE(arena.release());
+    CHECK(provider.destroy_calls == 2);
+    CHECK(provider.live_allocations == 0);
+}
+
 TEST_CASE("shared IO arena completion drain polls the provider before reading terminals",
           "[gpu_audio][shared_io][arena][completion][poll]") {
     FakeSharedIoProvider provider;

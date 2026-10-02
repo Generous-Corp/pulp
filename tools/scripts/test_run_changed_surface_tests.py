@@ -381,6 +381,8 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 selected_build_targets=["pulp-test-build-check"],
             )
         validate_exact.assert_called_once()
+        # Only the selected targets are built here, so unbuilt programs are fine.
+        self.assertIs(validate_exact.call_args.kwargs["require_built"], False)
         validate_deferred.assert_not_called()
         validate_projection.assert_called_once()
 
@@ -526,7 +528,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                     runner,
                     "validate_selection",
                     side_effect=[inventory.InventoryError("has no unambiguous command"), None],
-                ),
+                ) as validate_calls,
                 mock.patch.object(
                     runner.inventory,
                     "split_proven_unbuilt_placeholders",
@@ -542,6 +544,11 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 mock.patch.object(runner, "clear_build_sentinel", return_value=0),
             ):
                 self.assertEqual(runner.run_locked(args, build), 0)
+            # Before any build the comparison tolerates unbuilt programs; after
+            # the full build it requires every registration to have one.
+            prebuild, post_full = validate_calls.call_args_list
+            self.assertIs(prebuild.kwargs["require_built"], False)
+            self.assertNotIn("require_built", post_full.kwargs)
 
             self.assertEqual(
                 [
@@ -1175,6 +1182,41 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertEqual(second["configure_seconds"], 0.0)
             self.assertEqual(second["digest"], first["digest"])
 
+    def test_a_cached_base_inventory_is_reused_only_for_the_same_configure(self) -> None:
+        # The cache key must cover every input of the base configure: a
+        # different flag set, generator or Python is a different inventory.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            cache = build / "CMakeCache.txt"
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            first_calls, _ = self.run_base(build, [0, 0, 0])
+            self.assertTrue(first_calls)
+            reused, _ = self.run_base(build, [])
+            self.assertEqual(reused, [])
+            for label, change in (
+                ("generator", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Unix Makefiles\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")),
+                ("python", lambda: cache.write_text(
+                    "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/opt/python3\n")),
+            ):
+                with self.subTest(changed=label):
+                    change()
+                    calls, _ = self.run_base(build, [0, 0, 0])
+                    self.assertTrue(calls, f"a changed {label} reused the cached base inventory")
+            cache.write_text("CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            flagged = {**policy(), "build_flags": ["-DCMAKE_BUILD_TYPE=Release"]}
+            calls: list = []
+
+            def fake(argv, **_):
+                if "merge-base" in argv:
+                    return subprocess.CompletedProcess(argv, 0, self.BASE + "\n", "")
+                calls.append(argv)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            with mock.patch.object(runner, "ctest_payload", return_value={"tests": [fixture("smoke")]}):
+                runner.base_projection(self.BASE, flagged, build, Path("/repo"), fake)
+            self.assertTrue(calls, "a changed flag set reused the cached base inventory")
+
     def test_unavailable_base_says_so_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory)
@@ -1244,6 +1286,30 @@ class BaseInventoryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
                 self.run_base(Path(directory), [], merge_base="b" * 40)
+
+    def test_a_cached_base_inventory_never_answers_for_another_merge_base(self) -> None:
+        # The cache is keyed by base SHA, not by the checkout. A checkout whose
+        # merge base moved must refuse before the cache can serve the old base.
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            self.run_base(build, [0, 0, 0])
+            self.assertTrue(list((build / runner.BASE_INVENTORY_CACHE).glob(f"{self.BASE}-*.json")))
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
+                self.run_base(build, [], merge_base="b" * 40)
+
+    def test_a_cold_tree_matches_its_base_until_the_full_build(self) -> None:
+        # A lane checkout with nothing built yet lists unbuilt targets without a
+        # program, exactly as the configure-only base does. That must compare
+        # equal before the build, or every cold run falls back to the full suite.
+        source, build = Path("/repo"), Path("/repo/build")
+        cold = [fixture("smoke"), fixture("core"), fixture("neighbor")]
+        for test in cold:
+            test["command"][0] = ""
+        base = base_of(copy.deepcopy(cold), source, build)
+        runner.validate_registrations_match_base({"tests": cold}, source, build, base,
+                                                 require_built=False)
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
+            runner.validate_registrations_match_base({"tests": cold}, source, build, base)
 
     def test_a_registration_left_without_a_command_after_the_build_refuses(self) -> None:
         source, build = Path("/repo"), Path("/repo/build")
