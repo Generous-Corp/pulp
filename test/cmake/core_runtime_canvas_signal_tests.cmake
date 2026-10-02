@@ -609,7 +609,16 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
 pulp_add_test_suite(pulp-test-streaming-model-contract GROUP pulp-test-group-core-gpu-audio-private
-    SOURCES test_streaming_model_contract.cpp
+    SOURCES test_streaming_model_contract.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::gpu-audio pulp::audio
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+
+# CPU-only receipt for the model-neutral callback lane. The executable owns
+# all model/audio storage before entering the allocation probe and reports a
+# reproducible channel/kernel matrix without requiring Dawn or a GPU device.
+pulp_add_test_suite(pulp-test-streaming-model-benchmark
+    SOURCES test_streaming_model_benchmark.cpp harness/rt_allocation_probe.cpp
+    GROUP pulp-test-group-core-gpu-audio-private
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
