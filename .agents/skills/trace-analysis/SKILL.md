@@ -410,6 +410,66 @@ A good answer reads like this:
 > per editor open) and cache the compiled JS module. Re-opens should drop from
 > ~2.4 s to well under 500 ms.
 
+### Editor-open recipe for a scripted / imported plug-in editor
+
+Measure the open the way the host does it, and measure the *full UI drawn*,
+not just the view-creation call:
+
+1. **Drive the real format path, off-screen, without stealing focus.** For
+   AU v2, load the `.component` in-process, ask `kAudioUnitProperty_CocoaUI`,
+   call `-uiViewForAudioUnit:withSize:`, put the view in a borderless window
+   ordered in with `-orderFrontRegardless` off every screen, Accessory
+   activation policy, `PULP_AUDIO_DEVICE=null`. Timestamp: factory call
+   (what the host blocks on), first drawable/present, *content present*
+   (first present after the document mounted), idle (main thread answers a
+   2 ms heartbeat for 250 ms). Open 1 is cold; reopen N≥2 times for warm.
+   Spectr's `tools/editor_open_probe.mm` is a working implementation.
+2. **A/B with alternating rounds**: best and median of ≥5 rounds per
+   variant, alternating variants each round so host-load drift hits all of
+   them alike. Report cold and warm separately.
+3. **Capture** with a traced SDK (`PULP_TRACING=ON`, kept under
+   `~/.pulp/sdk-trace/`), `PULP_TRACE_PATH=… PULP_TRACE_RING_KB=524288
+   PULP_TRACE_SECONDS=60`.
+4. **Rank the phases** of the Nth open (OFFSET picks the open):
+
+```sql
+SELECT ROUND((s.ts - r.ts)/1e6,1) t_ms, s.depth - r.depth d, s.category, s.name,
+       ROUND(s.dur/1e6,1) ms
+FROM slice s JOIN (SELECT * FROM slice WHERE name = 'scripted_ui_document_load'
+                   ORDER BY ts LIMIT 1 OFFSET 1) r
+  ON s.track_id = r.track_id AND s.ts >= r.ts AND s.ts <= r.ts + r.dur
+WHERE s.dur > 2e6 AND s.depth <= r.depth + 3 ORDER BY s.ts;
+```
+
+Spans Pulp emits on this path: `scripted_ui_document_load`,
+`scripted_ui_probe_realm` (should be ABSENT on a first load — if present the
+document is evaluated twice), `scripted_ui_live_realm`, `script_compile` vs
+`script_bytecode_read` (a warm open should read, not compile),
+`script_execute`, `runtime_import_parse` / `runtime_import_fonts` /
+`runtime_import_payload_eval` / `runtime_import_inline_eval`,
+`frame_callback_pump` → `raf_flush` (the post-mount settle).
+
+Fingerprints and what they mean:
+
+- **Two copies of the whole load per open** (compile → import → settle,
+  twice): a probe realm evaluated the document. Fixed in Pulp for first
+  loads; if you see it, the session is being *reloaded*, not loaded.
+- **A long `raf_flush` / `frame_callback_pump` with trivial bridge calls
+  under it**: React work inside frame callbacks. Count commits, not natives:
+  a LegacyRoot commits every `setState` made outside a batch. Pulp runs every
+  rAF/timer callback through `__pulpBatchUpdates__`; a vendored bundle older
+  than @pulp/react runtime revision 3 never installs it
+  (`pulp_check_vendored_react_runtime()` says so). Promise-job and
+  passive-effect commits are NOT batched by this — look for `.then(setX)`
+  chains and mount effects that set state.
+- **`js_native` spans that start a script-driven span** corrupt nesting:
+  `__traceBegin__` inside a `js_native` scope closes on the native's end.
+  For JS-level attribution of a bundled runtime, wrap functions with a
+  timing accumulator (`performance.now()` deltas into a global table dumped
+  with `console.log` from a `setTimeout`) instead of trace spans.
+- `getLayoutBoxMetrics` counts are a symptom, not the cost; measure the
+  commit (see `getLayoutRect` coalescing in view-bridge).
+
 The other canonical case is the offline DSP reveal — "CPU pinned but the meter
 looks calm — which node?" — run against a deterministic `offline_process()`
 render (`examples/trace-demo`) so the answer reproduces exactly. See
