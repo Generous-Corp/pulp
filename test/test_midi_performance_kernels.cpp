@@ -813,7 +813,7 @@ TEST_CASE("strum supports continuous shape exponents and signed velocity tilt",
     REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Accelerate, 3.0, 1, 4) == 0);
     REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Decelerate, 1.0, 2, 4) == 2);
 
-    const std::array input{on(0, 60, 40), on(0, 64, 40), on(0, 67, 40),
+    const std::array input{on(0, 60, 40),   on(0, 64, 40),   on(0, 67, 40),
                            off(20'000, 60), off(20'000, 64), off(20'000, 67)};
     midi::StrumSpec spec{};
     spec.sync = midi::StrumSpacingSync::Milliseconds;
@@ -823,11 +823,10 @@ TEST_CASE("strum supports continuous shape exponents and signed velocity tilt",
     spec.shape_exponent = 1.0;
     spec.velocity_tilt = 30;
     midi::Strum<> strum{spec};
-    const auto out = render(
-        [&](const auto& in, auto& o, std::int64_t start, std::int32_t count) {
-            strum.process(in, o, constant_block(start, count));
-        },
-        21'000, kWholeBlock, input);
+    const auto out =
+        render([&](const auto& in, auto& o, std::int64_t start,
+                   std::int32_t count) { strum.process(in, o, constant_block(start, count)); },
+               21'000, kWholeBlock, input);
     REQUIRE(attack_velocities(out) == std::vector<std::uint8_t>{40, 55, 70});
     EventLedger ledger;
     for (const auto& event : out)

@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cmath>
 #include <optional>
 
 namespace pulp::midi {
@@ -77,9 +77,9 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
     }
 
     static constexpr bool valid_spec(StrumSpec spec) noexcept {
-        if (spec.window_samples < 0 || spec.timing_jitter_samples < 0 || spec.velocity_jitter > 127 ||
-            !std::isfinite(spec.shape_exponent) || spec.shape_exponent <= 0.0 ||
-            spec.velocity_tilt < -127 || spec.velocity_tilt > 127)
+        if (spec.window_samples < 0 || spec.timing_jitter_samples < 0 ||
+            spec.velocity_jitter > 127 || !std::isfinite(spec.shape_exponent) ||
+            spec.shape_exponent <= 0.0 || spec.velocity_tilt < -127 || spec.velocity_tilt > 127)
             return false;
         return spec.sync == StrumSpacingSync::Division ? spec.spacing_interval.value > 0
                                                        : spec.spacing_milliseconds > 0;
@@ -105,13 +105,15 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
         case StrumShape::Accelerate:
             exponent = std::max(0.0, exponent);
             return static_cast<std::int64_t>(std::llround(
-                std::pow(static_cast<double>(position) / static_cast<double>(last),
-                         exponent) * static_cast<double>(last)));
+                std::pow(static_cast<double>(position) / static_cast<double>(last), exponent) *
+                static_cast<double>(last)));
         case StrumShape::Decelerate:
             exponent = std::max(0.0, exponent);
-            return last - static_cast<std::int64_t>(std::llround(
-                std::pow(static_cast<double>(last - position) / static_cast<double>(last),
-                         exponent) * static_cast<double>(last)));
+            return last -
+                   static_cast<std::int64_t>(std::llround(
+                       std::pow(static_cast<double>(last - position) / static_cast<double>(last),
+                                exponent) *
+                       static_cast<double>(last)));
         case StrumShape::Linear:
             break;
         }
@@ -331,8 +333,8 @@ template <std::size_t MaximumClusterNotes = 16> class Strum {
         const auto denominator = static_cast<std::int32_t>(count - 1);
         const auto tilt = static_cast<std::int32_t>(spec_.velocity_tilt);
         const auto offset = (tilt * numerator) / denominator;
-        const auto velocity = static_cast<std::uint8_t>(std::clamp(
-            static_cast<std::int32_t>(slot.event.velocity()) + offset, 1, 127));
+        const auto velocity = static_cast<std::uint8_t>(
+            std::clamp(static_cast<std::int32_t>(slot.event.velocity()) + offset, 1, 127));
         auto shaped = MidiEvent::note_on(slot.event.channel(), slot.event.note(), velocity);
         shaped.timestamp = slot.event.timestamp;
         slot.event = shaped;
