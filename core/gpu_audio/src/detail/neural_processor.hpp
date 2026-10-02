@@ -3,6 +3,7 @@
 #include "streaming_model.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <utility>
 
 namespace pulp::gpu_audio::detail {
@@ -65,7 +66,9 @@ class NeuralProcessor final {
     bool prepare(const StreamingPrepareContext& context,
                  NeuralProviderPreference preference = NeuralProviderPreference::Auto,
                  NeuralProviderCapabilities capabilities = {}) noexcept {
-        if (active_.prepared || pending_.prepared)
+        if (active_.prepared || pending_.prepared || cleanup_required_)
+            return false;
+        if (next_generation_ == std::numeric_limits<std::uint64_t>::max())
             return false;
         if (context.spec != &model_.spec() || !valid_streaming_prepare_context(context))
             return false;
