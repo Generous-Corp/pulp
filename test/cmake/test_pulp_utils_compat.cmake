@@ -36,7 +36,7 @@ if(NOT _install_result EQUAL 0)
         "${_install_output}\n${_install_error}")
 endif()
 
-file(GLOB _installed_utils LIST_DIRECTORIES false
+file(GLOB_RECURSE _installed_utils LIST_DIRECTORIES false
     "${_prefix}/lib*/cmake/Pulp/PulpUtils.cmake")
 if(NOT _installed_utils)
     message(FATAL_ERROR
@@ -72,25 +72,12 @@ foreach(_helper IN LISTS _relative_helpers)
     endif()
 endforeach()
 
-# Keep this list explicit: these are the functions that downstream projects
-# have historically received by including PulpUtils (including the two helper
-# functions imported by the shim's existing AppIcon/MidiTuning includes).
-set(_public_functions
-    pulp_add_plugin
-    pulp_add_plugin_bundle
-    pulp_add_reload_logic
-    pulp_reload_host
-    pulp_reload_host_ui
-    pulp_use_kit_ui
-    pulp_app_icon
-    pulp_enable_midi_tuning_provider)
-
 file(WRITE "${_consumer_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.24)
 project(PulpUtilsCompatConsumer LANGUAGES CXX)
 
 find_package(Pulp CONFIG REQUIRED)
-include(PulpUtils)
+include("${Pulp_DIR}/PulpUtils.cmake")
 
 set(_expected_functions
     pulp_add_plugin
@@ -100,7 +87,14 @@ set(_expected_functions
     pulp_reload_host_ui
     pulp_use_kit_ui
     pulp_app_icon
-    pulp_enable_midi_tuning_provider)
+    pulp_enable_midi_tuning_provider
+    pulp_add_app
+    pulp_declare_standalone_document_type
+    pulp_add_binary_data
+    pulp_register_font
+    pulp_add_ios_auv3
+    pulp_add_ios_host_app
+    pulp_check_vendored_react_runtime)
 foreach(_function IN LISTS _expected_functions)
     if(NOT COMMAND ${_function})
         message(FATAL_ERROR
@@ -130,7 +124,7 @@ endif()
 list(SORT _required_targets)
 string(REPLACE ";" "\n" _target_receipt "${_required_targets}")
 file(WRITE "${PULP_UTILS_TARGET_RECEIPT}" "${_target_receipt}\n")
-message(STATUS "pulp_utils_compat_commands=8")
+message(STATUS "pulp_utils_compat_commands=15")
 message(STATUS "pulp_utils_compat_targets=${_required_targets}")
 ]=])
 
@@ -155,6 +149,7 @@ if(NOT _configure_result EQUAL 0)
         "Installed PulpUtils consumer configure failed (${_configure_result})\n"
         "${_configure_output}\n${_configure_error}")
 endif()
+file(WRITE "${_root}/configure.log" "${_configure_output}${_configure_error}")
 
 if(NOT EXISTS "${_root}/target-list.txt")
     message(FATAL_ERROR "PulpUtils consumer did not write target-list.txt")

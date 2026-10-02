@@ -724,6 +724,9 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpLinkFontconfig.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUiAssets.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInstall.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpReload.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMidiTuning.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPluginMetadata.cmake"
     # PulpUtils.cmake includes PulpBuildInfo.cmake, which resolves the
