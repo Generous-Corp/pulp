@@ -388,7 +388,7 @@ failure (grep exits first, printf takes SIGPIPE). Either one silently clears a w
 with a live build in it. Uncommitted content is reported AT RISK and never removed, and a
 deleted upstream branch is still not merge proof.
 
-Fleet hosts may export `PULP_WORKTREES_ROOT` (the M3/M5 agent-worktrees location),
+Fleet hosts may export `PULP_WORKTREES_ROOT` (M3: `/Volumes/Workshop/Code/agent-worktrees`; m5s: `/Volumes/Atelier/Code/agent-worktrees`),
 while the helper's canonical local override is `PULP_WT_ROOT`; the helper accepts
 both, with `PULP_WT_ROOT` taking precedence. Always verify the resolved root in
 `pulp-worktree.sh list` before interpreting an age or budget report. The
