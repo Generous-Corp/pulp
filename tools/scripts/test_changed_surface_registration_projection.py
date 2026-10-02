@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import changed_surface_inventory as inventory
 
@@ -26,21 +28,20 @@ def payload(tests: list[dict], files: list[str] | None = None) -> dict:
 class ProjectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        base = Path(self.tmp.name)
-        self.source = base / "src"
-        self.source.mkdir()
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
     def tree(self, name: str, build_type: str) -> Path:
-        build = Path(self.tmp.name) / name
-        build.mkdir()
+        # Each configuration is its own checkout with its build inside, as on
+        # the gate VM and the lane host.
+        build = Path(self.tmp.name) / name / "build"
+        build.mkdir(parents=True)
         (build / "CMakeCache.txt").write_text(f"CMAKE_BUILD_TYPE:STRING={build_type}\n")
         return build
 
     def lane_tests(self, build: Path, python: str, build_type: str, examples: bool) -> list[dict]:
-        src, bld = str(self.source), str(build)
+        src, bld = str(build.parent), str(build)
         tests = [
             {"name": "policy-selftest",
              "command": [python, f"{src}/tools/scripts/test_policy.py", "--config", build_type],
@@ -68,9 +69,9 @@ class ProjectionTest(unittest.TestCase):
         return tests
 
     def project(self, build: Path, tests: list[dict]) -> dict:
-        files = [str(self.source / "test" / "cmake" / "tests.cmake"),
+        files = [str(build.parent / "test" / "cmake" / "tests.cmake"),
                  str(build / "test" / "pulp-test-widgets_include-1.cmake")]
-        return inventory.project_registrations(payload(tests, files), self.source, build)
+        return inventory.project_registrations(payload(tests, files), build.parent, build)
 
     def test_gate_and_lane_configurations_project_equal(self) -> None:
         gate = self.tree("build-gate", "Release")
@@ -86,12 +87,34 @@ class ProjectionTest(unittest.TestCase):
             self.assertIn(token, rendered)
         self.assertNotIn(str(gate), rendered)
 
-    def test_raw_listings_differ_so_the_equality_is_the_projection(self) -> None:
+    def test_each_normalization_is_load_bearing(self) -> None:
+        # Equal digests prove nothing unless the raw listings really differ
+        # and each normalization is what makes them meet: remove one and the
+        # gate and lane projections must part again.
         gate = self.tree("build-gate", "Release")
         lane = self.tree("build-lane", "Debug")
-        raw_a = [t["command"] for t in self.lane_tests(gate, "python3.13", "Release", False)]
-        raw_b = [t["command"] for t in self.lane_tests(lane, "python3.14", "Debug", True)]
-        self.assertNotEqual(raw_a, raw_b[: len(raw_a)])
+        gate_tests = self.lane_tests(gate, "/usr/local/bin/python3.13", "Release", False)
+        lane_tests = self.lane_tests(lane, "/opt/homebrew/bin/python3.14", "Debug", True)
+        lane_shared = {t["name"]: t for t in lane_tests}
+        for test in gate_tests:
+            with self.subTest(raw=test["name"]):
+                self.assertNotEqual(test["command"], lane_shared[test["name"]]["command"])
+        self.assertEqual(self.project(gate, gate_tests)["digest"],
+                         self.project(lane, lane_tests)["digest"])
+        never = re.compile(r"(?!x)x")
+        for label, patch in (
+            ("python path", mock.patch.object(inventory, "PYTHON_PATH", never)),
+            ("build type", mock.patch.object(inventory, "_cache_value", lambda *_: "")),
+        ):
+            with self.subTest(without=label), patch:
+                self.assertNotEqual(self.project(gate, gate_tests)["digest"],
+                                    self.project(lane, lane_tests)["digest"])
+        with self.subTest(without="source root"):
+            elsewhere = Path(self.tmp.name) / "elsewhere"
+            unrooted = [inventory.project_registrations(
+                payload(tests, [str(build.parent / "test" / "cmake" / "tests.cmake")]), elsewhere, build)
+                for build, tests in ((gate, gate_tests), (lane, lane_tests))]
+            self.assertNotEqual(unrooted[0]["digest"], unrooted[1]["digest"])
 
     def test_a_real_difference_survives_the_projection(self) -> None:
         build = self.tree("build", "Release")
