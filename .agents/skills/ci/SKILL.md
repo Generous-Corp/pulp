@@ -1979,7 +1979,14 @@ pointing into the checkout, with no declaration covering it, marks its
 executable `data: undeclared` (the shadow selects it on every change). The
 pr-fast `script-test-inputs-drift` check fails a PR head that adds a NEW
 undeclared source (one not undeclared in the base list); the backlog can only
-shrink. Declare only what the code opens: a test that hands the whole
+shrink. A test that reaches its data through its own definition
+(`PULP_REPO_ROOT`, a fixture-dir macro, `__FILE__`, a walk up from its
+working directory) declares with `NO_DEFINE` so its flags stay identical;
+`SOURCES` narrows a declaration to some of an executable's sources (a group
+or multi-source target), and `NONE` records a reviewed source whose
+`test/fixtures` text is only a comment or a temp-staged fixture. A test that
+spawns the `pulp` / import-design CLI or a compiler against the checkout
+stays undeclared: the child's reads are not the test's to bound. Declare only what the code opens: a test that hands the whole
 checkout to a CLI subprocess or doctor walk is not boundable and stays
 undeclared. Declaring a subset is worse than not declaring, because it
 makes an unsound key look sound. Count with
@@ -2095,6 +2102,25 @@ target record, whose `backtrace` indices move whenever an unrelated line of
 CMake moves. A ctest registration belongs to the target whose artifact is its
 `command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
 compiled test is missing and only script tests (owned by no target) appear.
+
+## A new Python test needs three generators, not three hand edits
+
+Adding or changing a Python selftest or script drifts three generated files,
+and each one fails a different check on the PR head if it is hand-edited:
+`test/ctest_script_inputs.json` (`script-test-inputs-drift`),
+`tools/ci/source_selftests.json` (`source-selftest-lane-contract`, which also
+compares each entry's TIMEOUT, RESOURCE_LOCK and argv to the registration), and
+the changed-surface script families block in `.shipyard/config.toml`
+(`changed-surface-script-families-drift`, which must map every new script and
+list every new reader of `.agents/skills/*/SKILL.md`). Regenerate all three from
+a configured build: `script_test_inputs.py --build-dir B --write`,
+`source_selftests.py write --build-dir B` (`--add <name>` for a new entry), and
+`changed_surface_script_families.py --build-dir B --write` (the build needs a
+codemodel reply: touch `B/.cmake/api/v1/query/codemodel-v2` and reconfigure).
+`gates.sh` runs all three checks in one lane (`gates_script_inputs.py`) whenever
+the diff touches a Python file under `tools/`, `test/cmake/`, a skill doc or one
+of the generated files, configuring `build-gate` without compiling if no current
+build exists; any check it cannot run is listed NOT CHECKED, never passed.
 
 ## The flake-exoneration shadow annotation exonerates nothing
 

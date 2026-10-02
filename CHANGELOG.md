@@ -9,6 +9,19 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08930"></a>
+## [0.893.0] - 2026-10-02
+
+- release/version bump ([#9232](https://github.com/Generous-Corp/pulp/pull/9232))
+- feature/reuse record single listing ([#9230](https://github.com/Generous-Corp/pulp/pull/9230))
+- feature/overlay trigger toggle ([#9222](https://github.com/Generous-Corp/pulp/pull/9222))
+- fix/aax definition store before latency ([#9221](https://github.com/Generous-Corp/pulp/pull/9221))
+- release/version bump ([#9220](https://github.com/Generous-Corp/pulp/pull/9220))
+- feature/changed surface base inventory ([#9219](https://github.com/Generous-Corp/pulp/pull/9219))
+- feature/m5s atelier worktree root ([#9218](https://github.com/Generous-Corp/pulp/pull/9218))
+- fix/bump fastpath complete history ([#9217](https://github.com/Generous-Corp/pulp/pull/9217))
+- fix/metal4 runtime probe 20261002 ([#9216](https://github.com/Generous-Corp/pulp/pull/9216))
+
 <a id="v08920"></a>
 ## [0.892.0] - 2026-10-02
 
@@ -9428,6 +9441,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.893.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.893.0
 [0.892.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.892.0
 [0.891.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.891.0
 [0.890.2]: https://github.com/Generous-Corp/pulp/releases/tag/v0.890.2

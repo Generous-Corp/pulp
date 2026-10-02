@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import contextlib
 import importlib.util
 import copy
 import json
@@ -10,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+
+import git_read_memo
 
 
 SCRIPT = Path(__file__).with_name("gpu_trace_overhead_acceptance.py")
@@ -47,7 +50,24 @@ def setUpModule() -> None:
     _connected_git_history().require_connected_history(
         ROOT, "the GPU trace overhead acceptance selftest"
     )
+    _start_git_memo()
 
+
+
+_GIT_MEMO = contextlib.ExitStack()
+_GIT_MEMO_STATS = None
+
+
+def _start_git_memo() -> None:
+    global _GIT_MEMO_STATS
+    _GIT_MEMO_STATS = _GIT_MEMO.enter_context(git_read_memo.memoized_git_reads())
+
+
+def tearDownModule() -> None:
+    _GIT_MEMO.close()
+    # The memo must have answered something, or it is not what makes this fast.
+    if _GIT_MEMO_STATS is not None and _GIT_MEMO_STATS.hits == 0:
+        raise AssertionError(f"git read memo was never consulted: {_GIT_MEMO_STATS}")
 
 
 class GpuTraceOverheadAcceptanceTests(unittest.TestCase):

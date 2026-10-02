@@ -470,7 +470,11 @@ if [ -f "$ROOT/tools/deps/test_audit.py" ]; then
     fi
 fi
 
-# ── 7a-inputs. script-test inputs list (configures build-gate if needed) ──
+# ── 7a-inputs. generated test manifests (configures build-gate if needed) ──
+# The same lane also checks tools/ci/source_selftests.json against the
+# registrations and the generated changed-surface script families in
+# .shipyard/config.toml, both of which drift when a Python test or script is
+# added without running their generators (tools/scripts/gates_script_inputs.py).
 # `script-test-inputs-drift` reads the ctest inventory, so without a configured
 # build it used to be NOT CHECKED here and a stale or hand-edited
 # test/ctest_script_inputs.json surfaced only on the PR head. When the diff can
@@ -481,7 +485,7 @@ fi
 # NOT CHECKED instead of configuring.
 if [ -f "$ROOT/tools/scripts/gates_script_inputs.py" ]; then
     echo "" >&2
-    echo "▸ script-test inputs list (diff-scoped; configures build-gate when the diff can drift it)" >&2
+    echo "▸ generated test manifests: script inputs, source-selftest manifest, changed-surface families (configures build-gate when the diff can drift them)" >&2
     sti_log="$(mktemp "${TMPDIR:-/tmp}/pulp-gates-script-inputs.XXXXXX")"
     if ! "$PYTHON" "$ROOT/tools/scripts/gates_script_inputs.py" --base "$BASE" --repo-root "$ROOT" >"$sti_log" 2>&1; then
         fail=1

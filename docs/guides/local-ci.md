@@ -1937,7 +1937,18 @@ unbuilt base lists none; the run's receipt counts those name-only rows. A base
 that cannot be configured, a checkout whose merge base is not the plan's base,
 a registration left without a command after the build, or any difference from
 the base selects the full suite with the reason (`inventory: base not
-recorded`, `inventory: base mismatch`). A bounded plan never carries a
+recorded`, `inventory: base mismatch`). The base configure runs with
+`FETCHCONTENT_FULLY_DISCONNECTED=ON`, so dependencies resolve from the
+machine's shared FetchContent source cache and a miss fails the configure
+instead of cloning mid-plan. That includes the prebuilt WebGPU runtime archive,
+which the webgpu dependency fetches through FetchContent: with its cache entry
+removed, the disconnected configure fails ("requires source directory for
+dependency wgpu-macos-aarch64-release to already be populated") and downloads
+nothing. Its "Fetching WebGPU implementation" status line prints either way. A cold lane build directory refuses by design ("no command
+after the build"): bounded runs need the lane's normal warm build. The cached
+base inventories live inside the lane's build directory, which pull-request
+code can write; that is acceptable while the lane runs PR code and is not a
+required gate, and must be revisited if it is ever promoted. A bounded plan never carries a
 registration change of its own: CMake and `test/cmake/**` are test-topology
 paths, which select the full suite. The required gate also records the same
 projection as `registrations-<sha>.json` in each job's `reuse-record-macos`
