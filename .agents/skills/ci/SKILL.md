@@ -7185,9 +7185,12 @@ The scratch base is provisioned like the head before it configures: `setup.sh
 local objects. A worktree never inherits the untracked SDK links, and a base
 without them configures without AudioUnitSDK, at C++20 instead of C++23, which
 changes the `test-pch-wiring` registration and refused every bounded plan.
-Every `PULP_HAS_*` cache entry must then agree between base and head, or the run
-refuses with `inventory: base_provisioning_mismatch: <switch> base=... head=...`,
-so the next provisioning gap names itself rather than reading as drift.
+Every `PULP_HAS_*` entry, `PULP_CHECKOUT_DEPENDENCY_CONTRACT` (the linked pins),
+the generator, Python and build type must then agree between base and head (an
+entry on one side only counts), or the run refuses with `inventory:
+base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
+gap names itself rather than reading as drift. The receipt records the compared
+`base_inventory_environment` and `base_inventory_linked_externals`.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The

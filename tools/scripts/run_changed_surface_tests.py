@@ -353,15 +353,27 @@ def _cache_entries(build_dir: Path) -> dict[str, str]:
     return observed
 
 
-# Cache entries a checkout's provisioning decides (which SDKs setup.sh linked,
-# whether Skia and WebGPU resolved) rather than its sources. A base configured
-# with a different provisioning registers different tests for reasons no plan
-# can see, so the two must agree before any registration is compared.
+# Cache entries a checkout's environment decides rather than its sources:
+# which SDKs setup.sh linked and whether Skia and WebGPU resolved (PULP_HAS_*),
+# the dependency pins it linked them at, and the generator, Python and build
+# type. A base configured under a different environment registers different
+# tests for reasons no plan can see, so these must agree before any
+# registration is compared.
 PROVISIONING_SWITCH = re.compile(r"PULP_HAS_[A-Z0-9_]+")
+ENVIRONMENT_ENTRIES = ("PULP_CHECKOUT_DEPENDENCY_CONTRACT", "CMAKE_GENERATOR",
+                       "Python3_EXECUTABLE", "CMAKE_BUILD_TYPE")
 
 
 def provisioning(cache_entries: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in sorted(cache_entries.items()) if PROVISIONING_SWITCH.fullmatch(k)}
+    return {k: v for k, v in sorted(cache_entries.items())
+            if PROVISIONING_SWITCH.fullmatch(k) or k in ENVIRONMENT_ENTRIES}
+
+
+def linked_externals(tree: Path) -> list[str]:
+    """The external/ entries setup.sh linked into the shared source cache."""
+    external = tree / "external"
+    return sorted(entry.name for entry in external.iterdir()
+                  if entry.is_symlink()) if external.is_dir() else []
 
 
 def validate_provisioning(base: dict[str, Any], build_dir: Path) -> None:
@@ -465,6 +477,7 @@ def base_projection(
                 ctest_payload(tree / "build"), tree, tree / "build"
             )
             projected["provisioning"] = provisioning(_cache_entries(tree / "build"))
+            projected["linked_externals"] = linked_externals(tree)
         except SelectionExecutionError as error:
             raise SelectionExecutionError(f"inventory: base not recorded: {error}") from error
     finally:
@@ -1180,6 +1193,11 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                     # target), so compared on name, arguments and properties.
                     "base_inventory_name_only_rows": inventory.name_only_rows(base),
                     "base_inventory_configure_seconds": base.get("configure_seconds"),
+                    # The environment the base and this tree were compared
+                    # under, so an equal registration set is shown to come
+                    # from an equal environment.
+                    "base_inventory_environment": base.get("provisioning"),
+                    "base_inventory_linked_externals": base.get("linked_externals"),
                     "prebuild_unbuilt_placeholder_count": (
                         prebuild_unbuilt_placeholder_count
                     ),
