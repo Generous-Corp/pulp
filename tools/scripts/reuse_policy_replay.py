@@ -259,6 +259,8 @@ class Decision:
     skip: frozenset = frozenset()
     # (executables not rebuilt, executables) when the policy also skips builds
     build: tuple[int, int] | None = None
+    # (pair fired the spawnable fallback, tests that ran only because of it)
+    fallback: tuple[bool, int] | None = None
     # (executables whose recorded bytes changed but the policy did not
     # rebuild, executables compared, executables rebuilt with identical
     # bytes) where both jobs recorded binary hashes
@@ -384,8 +386,11 @@ def _source_key(variant: str) -> Callable[[dict, Corpus, dict], Decision]:
         if "unreached_changed_binaries" in keys:
             binaries = (len(keys["unreached_changed_binaries"]), int(keys.get("binaries_compared") or 0),
                         int(keys.get("rebuilt_identical_binaries") or 0))
+        fallback = None
+        if "spawnable_fallback" in keys:
+            fallback = (bool(keys["spawnable_fallback"]), int(keys.get("fallback_only_tests") or 0))
         return Decision(True, f"source key ({variant}): {len(skip)} tests unchanged", skip=skip, build=build,
-                        binaries=binaries)
+                        binaries=binaries, fallback=fallback)
     return decide
 
 
@@ -520,6 +525,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     build_fracs: list[float] = []
     unreached: list[dict] = []
     binary_pairs = binaries_compared = rebuilt_identical = 0
+    fallback_pairs = fallback_only_pairs = 0
     build_skipped = build_total = 0
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
@@ -556,6 +562,9 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         evaluable += 1
         if decision.skip_all:
             skipped_groups += 1
+        if decision.fallback is not None:
+            fallback_pairs += int(decision.fallback[0])
+            fallback_only_pairs += int(decision.fallback[1] > 0)
         if decision.binaries is not None:
             binary_pairs += 1
             binaries_compared += decision.binaries[1]
@@ -602,6 +611,8 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "binary_control_pairs": binary_pairs,
         "binaries_compared": binaries_compared,
         "rebuilt_identical_binaries": rebuilt_identical,
+        "spawnable_fallback_pairs": fallback_pairs,
+        "fallback_only_rerun_pairs": fallback_only_pairs,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -677,6 +688,8 @@ def render(result: dict) -> str:
         f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
         f"({result['binaries_compared']} compared over {result['binary_control_pairs']} pairs); "
         f"{result['rebuilt_identical_binaries']} rebuilt with identical bytes",
+        f"  spawnable fallback fired in {result['spawnable_fallback_pairs']} pairs; the only reason tests "
+        f"ran in {result['fallback_only_rerun_pairs']} (0 = free; above 0 = the source-scan guard is due)",
         f"  FALSE SKIPS {result['false_skips']}  flake-skips {result['flake_skips']}  "
         f"build_failed {result['build_failed']} (skipped by policy {result['build_failures_skipped']})  "
         f"rejected runs {result['rejected_runs']}",

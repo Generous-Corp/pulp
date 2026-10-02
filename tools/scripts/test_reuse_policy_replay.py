@@ -541,6 +541,18 @@ class CodemodelTests(unittest.TestCase):
         for variant in ("strict-data", "cmake-codemodel"):
             self.assertEqual(out[variant]["run"], ["ta", "tb"], variant)
             self.assertEqual(out[variant]["spawnable_rebuilt"], ["test/tool"], variant)
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual((out[variant]["spawnable_fallback"], out[variant]["fallback_only_tests"]), (True, 2))
+        # The same fallback under a data drift costs nothing: the data rule already reruns them.
+        free = rrc.classify_source_keys(["tools/x/tool.cpp", "tools/x/fixture.json"], ["ta", "tb"], self.MAP, {}, {},
+                                        {"test/tool"}, self.EXES | {"test/tool"},
+                                        (set(), {"test/a", "test/b", "test/tool"}), spawnable=frozenset({"test/tool"}))
+        self.assertEqual((free["cmake-codemodel"]["spawnable_fallback"], free["cmake-codemodel"]["fallback_only_tests"]),
+                         (True, 0))
+        p = dict(pair(), source_key={"cmake-codemodel-recorded": out["cmake-codemodel"]}, source_key_head_run_id="p1")
+        result = rpr.score(rpr.Corpus([group(), head()], [p], tests={"g1": [t("ta"), t("tb")], "p1": [t("ta"), t("tb")]}),
+                           "source-key-codemodel-recorded")
+        self.assertEqual((result["spawnable_fallback_pairs"], result["fallback_only_rerun_pairs"]), (1, 1))
         quiet = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb"], self.MAP, {}, {}, set(),
                                          self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
                                          spawnable=frozenset({"test/tool"}))
