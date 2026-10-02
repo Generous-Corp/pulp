@@ -2002,13 +2002,21 @@ against whatever pulp-cpp was lying around for that reason).
 `pulp_test_spawns` adds the edge once the whole tree is read. The configure
 fails when a definition names `$<TARGET_FILE:x>` without an edge to x.
 `script_test_inputs.py` scans each test's sources and the `test/` headers they
-include, comments stripped, for process API calls. One with no edge and no
-reviewed `pulp_test_spawns(<test> NONE)` (it starts only system tools or a
-fork of itself) is `spawns: undeclared`, and the shadow never skips it.
-`pulp_test_spawns(<test> UNTRACKED)` forces that for a test that runs a
-program no edge describes; the two MCP tests do, because they run the CLI at
-`<source>/build/tools/cli`. The scan cannot see a spawn inside linked library
-code, and "declared" means one edge, not all of them, so mark those by hand.
+include, comments stripped, for process API calls and for runtime loads
+(`PluginSlot::load`, the CLAP bundle scanner, `dlopen` and its shim,
+`LoadLibrary`, `CFBundle`). One with no edge and no reviewed
+`pulp_test_spawns(<test> NONE)` (it starts only system tools, a fork of
+itself, or an in-process plugin) is `spawns: undeclared`, and the shadow
+never skips it. `pulp_test_spawns(<test> UNTRACKED)` forces that for a test
+that runs a program no edge describes. Pass a built artifact's path in from
+CMake (`$<TARGET_FILE:x>`, or the bundle path beside its edge); never find it
+by a path relative to the working directory. pulp-test-host's PulpSynth case
+did that and silently skipped for its whole life. The scan cannot see a
+spawn inside linked library code (the MCP audio tools shell out from
+tools/mcp), and "declared" means one edge, not all of them, so read what a
+test runs before marking it. The MCP audio tests now stage this build's CLI
+under a temp project root (`CliProjectRoot`) and assert text only a real run
+prints.
 
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
