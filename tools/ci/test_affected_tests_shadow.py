@@ -226,6 +226,14 @@ class AffectedSetTests(unittest.TestCase):
         self.assertEqual(r["compiled_data_undeclared"], 1, r)
         self.assertEqual(self.compiled(["docs/guide.md"], {})["selected"], 0)
 
+    def test_an_undeclared_spawner_is_never_skipped(self) -> None:
+        undeclared = {"pulp-test-b": {"kind": "compiled", "data": "none", "inputs": [], "spawns": "undeclared"}}
+        r = self.compiled(["docs/guide.md"], undeclared)                    # nothing any graph reads
+        self.assertEqual((r["selected"], r["compiled_spawns_undeclared"]), (1, 1), r)
+        for state in ("declared", "none"):                                  # an edge, or a reviewed NONE
+            r = self.compiled(["docs/guide.md"], {"pulp-test-b": dict(undeclared["pulp-test-b"], spawns=state)})
+            self.assertEqual((r["selected"], r["compiled_spawns_undeclared"]), (0, 0), (state, r))
+
     def test_failures_outside_the_selection_are_counted_by_name(self) -> None:
         r, _ = self.selected(["core/a.cpp"], failed=["A: one", "B: one", "check-script"])
         self.assertEqual(r["failed_outside_selection"], 2)
