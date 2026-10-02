@@ -1266,6 +1266,7 @@
       "source_kind": "fetchcontent",
       "repository": "https://github.com/eliemichel/WebGPU-distribution.git",
       "upstream": { "kind": "git-branch", "ref": "main" },
+      "offline_fetch": { "cache_name": "webgpu" },
       "documented_in_dependencies_md": true,
       "documented_in_notice_md": true,
       "source_files": [

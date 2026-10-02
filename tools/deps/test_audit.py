@@ -428,6 +428,67 @@ class LicenseVerificationTests(unittest.TestCase):
         _, problems = audit.verify_dep_license({"name": "x", "license": "MIT"})
         self.assertEqual(problems, [])
 
+    def _offline_tree(self, files: dict[str, str]) -> Path:
+        tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        for rel, body in files.items():
+            (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tree / rel).write_text(body)
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: tree
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+        return tree
+
+    OFFLINE_DEP = {"name": "x", "version": "abc", "offline_fetch": {"cache_name": "x"}}
+    FETCH = "FetchContent_Declare(rt URL https://example.invalid/rt.zip)\nFetchContent_MakeAvailable(rt)\n"
+
+    def test_offline_fetch_accepts_fetchcontent_only(self) -> None:
+        self._offline_tree({"rt/Fetch.cmake": self.FETCH,
+                            "rt/CMakeLists.txt": "# file(DOWNLOAD) is only mentioned here\n"})
+        self.assertEqual(audit.verify_offline_fetch(self.OFFLINE_DEP), ("verified", []))
+
+    def test_offline_fetch_rejects_a_raw_download(self) -> None:
+        self._offline_tree({"rt/Fetch.cmake": self.FETCH + 'file(DOWNLOAD "https://x/y.zip" "${z}")\n'})
+        status, problems = audit.verify_offline_fetch(self.OFFLINE_DEP)
+        self.assertEqual(status, "verified")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("rt/Fetch.cmake:3", problems[0])
+        self.assertIn("base_projection", problems[0])
+
+    def test_offline_fetch_that_read_no_fetchcontent_is_not_a_pass(self) -> None:
+        self._offline_tree({"CMakeLists.txt": "project(x)\n"})
+        _, problems = audit.verify_offline_fetch(self.OFFLINE_DEP)
+        self.assertTrue(any("read nothing" in p for p in problems), problems)
+
+    def test_offline_fetch_without_a_tree_is_unverified_and_only_when_required(self) -> None:
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: None
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+        empty = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        cache = audit.FETCHCONTENT_CACHE
+        audit.FETCHCONTENT_CACHE = empty
+        self.addCleanup(lambda: setattr(audit, "FETCHCONTENT_CACHE", cache))
+        self.assertEqual(audit.verify_offline_fetch(self.OFFLINE_DEP), ("unverified", []))
+        self.assertEqual(audit.verify_offline_fetch({"name": "y"}), ("not-required", []))
+
+    def test_offline_fetch_finds_the_cache_entry_by_name_and_ref_prefix(self) -> None:
+        original = audit.local_source_tree
+        audit.local_source_tree = lambda dep: None
+        self.addCleanup(lambda: setattr(audit, "local_source_tree", original))
+        cache_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        cache = audit.FETCHCONTENT_CACHE
+        audit.FETCHCONTENT_CACHE = cache_dir
+        self.addCleanup(lambda: setattr(audit, "FETCHCONTENT_CACHE", cache))
+        (cache_dir / ("x-abc" + "0" * 37)).mkdir()
+        (cache_dir / "x-def0").mkdir()
+        self.assertEqual(audit.offline_fetch_tree(self.OFFLINE_DEP, {"cache_name": "x"}).name,
+                         "x-abc" + "0" * 37)
+        (cache_dir / "x-abc1").mkdir()  # two candidates: ambiguous, so unverified
+        self.assertIsNone(audit.offline_fetch_tree(self.OFFLINE_DEP, {"cache_name": "x"}))
+
+    def test_webgpu_is_held_to_the_offline_fetch_contract(self) -> None:
+        dep = next(d for d in audit.load_manifest() if d["name"] == "WebGPU-distribution")
+        self.assertEqual(dep.get("offline_fetch"), {"cache_name": "webgpu"})
+
     def test_missing_tree_reports_unverified_not_pass(self) -> None:
         """An absent tree is not evidence of a correct license."""
         original = audit.local_source_tree
