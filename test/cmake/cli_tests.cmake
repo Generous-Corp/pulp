@@ -192,9 +192,7 @@ target_compile_definitions(pulp-test-cli-shellout PRIVATE
 if(TARGET pulp-test-cli-run-fixture)
     add_dependencies(pulp-test-cli-shellout pulp-test-cli-run-fixture)
 endif()
-if(TARGET pulp-import-design)
-    add_dependencies(pulp-test-cli-shellout pulp-import-design)
-endif()
+pulp_test_spawns(pulp-test-cli-shellout pulp-import-design)
 if(APPLE)
     catch_discover_tests(pulp-test-cli-shellout TEST_SPEC "~[hdiutil]")
     catch_discover_tests(pulp-test-cli-shellout

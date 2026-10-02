@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -383,6 +384,63 @@ def compiled_evidence(repo: Repo, *, declare_b: bool = False) -> None:
         (ev / f"{exe}.inputs.json").write_text(json.dumps({
             "schema": "pulp-test-data-inputs/v1", "executable": exe, "kind": "compiled",
             "sources": srcs, "inputs": paths}), encoding="utf-8")
+
+
+def spawn_evidence(repo: Repo) -> None:
+    """Executables that start a process, as configure records them:
+    edge (a runtime target), reviewed (pulp_test_spawns NONE), hidden (the
+    call sits in a test/support header it includes, with no edge), member
+    (a `.system(` member call, which is not a process API), and data-and-spawn
+    (reads a declared fixture and spawns with no edge)."""
+    write(repo.root, "test/test_edge.cpp", "auto r = pulp::platform::ChildProcess::run(tool, {});\n")
+    write(repo.root, "test/test_reviewed.cpp", "FILE* f = popen(\"git status\", \"r\");\n")
+    write(repo.root, "test/test_hidden.cpp", '#include "support/runner.hpp"\nint x = run_it();\n')
+    write(repo.root, "test/support/runner.hpp", "inline int run_it() { return fork(); }\n")
+    write(repo.root, "test/test_member.cpp", "physics.system(1);\nint my_system(int);\n")
+    write(repo.root, "test/test_both.cpp",
+          'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\nint rc = std::system(cmd);\n')
+    ev = repo.build / "test" / "test-data"
+    ev.mkdir(parents=True, exist_ok=True)
+    row = lambda src, runtime=(), none=False, defines=(): {
+        "sources": [src], "tree_defines": list(defines), "runtime_targets": list(runtime), "spawns_none": none}
+    (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+        "pulp-test-edge": row("test/test_edge.cpp", runtime=["pulp-cli"]),
+        "pulp-test-reviewed": row("test/test_reviewed.cpp", none=True),
+        "pulp-test-hidden": row("test/test_hidden.cpp"),
+        "pulp-test-member": row("test/test_member.cpp"),
+        "pulp-test-both": row("test/test_both.cpp", defines=["PULP_SOURCE_DIR"])}}), encoding="utf-8")
+    (ev / "pulp-test-both.inputs.json").write_text(json.dumps({
+        "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-both", "kind": "compiled",
+        "sources": ["test/test_both.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
+
+
+class SpawnScanTests(unittest.TestCase):
+    def test_each_spawn_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); spawn_evidence(repo)
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual((ex["pulp-test-edge"]["spawns"], ex["pulp-test-edge"]["runtime_targets"]),
+                             ("declared", ["pulp-cli"]))
+            self.assertEqual(ex["pulp-test-reviewed"]["spawns"], "none")
+            self.assertEqual(ex["pulp-test-hidden"]["spawns"], "undeclared")
+            # The call is found in the header the source includes, not the source.
+            self.assertEqual(ex["pulp-test-hidden"]["spawning_sources"], ["test/support/runner.hpp"])
+            # Spawning alone makes an entry; its data side says it reads nothing.
+            self.assertEqual((ex["pulp-test-edge"]["data"], ex["pulp-test-edge"]["inputs"]), ("none", []))
+            self.assertNotIn("pulp-test-member", ex)
+            self.assertEqual((ex["pulp-test-both"]["data"], ex["pulp-test-both"]["spawns"]), ("declared", "undeclared"))
+            summary = sti.data_summary(repo.root, repo.build)
+            self.assertEqual((summary["data_reading"], summary["declared"], summary["undeclared"]), (1, 1, 0))
+
+    def test_every_process_starting_class_of_the_repo_api_is_a_signal(self) -> None:
+        decl = re.compile(r"^\s*(?:static\s+|virtual\s+)*[\w:<>&*]+\s+(?:run|start\w*|launch)\s*\(", re.M)
+        starters = set()
+        for rel in ("core/platform/include/pulp/platform/child_process.hpp",
+                    "core/events/include/pulp/events/child_process_manager.hpp"):
+            parts = re.split(r"\n(?:class|struct)\s+(\w+)[^;{]*\{", (HERE.parents[1] / rel).read_text(encoding="utf-8"))
+            starters |= {name for name, body in zip(parts[1::2], parts[2::2]) if decl.search(body)}
+        self.assertGreaterEqual(len(starters), 3, starters)  # the parse found the API at all
+        self.assertLessEqual(starters, set(sti.SPAWN_CLASSES))
 
 
 class CompiledDataTests(unittest.TestCase):

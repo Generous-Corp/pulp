@@ -39,6 +39,30 @@
 #                             repo-relative sources and the names of the
 #                             compile definitions whose value points into the
 #                             checkout.
+# executables.json also lists each executable's `runtime_targets`: the built
+# executables and modules it depends on through add_dependencies, which is how
+# a test that spawns or loads one at run time names it.
+#
+# A test that runs or loads another built target at run time declares it:
+#
+#     pulp_test_spawns(pulp-test-cli-import-design pulp-cli pulp-import-design)
+#
+# Test manifests are read before tools/cli, tools/import-design and examples,
+# so an `if(TARGET <tool>)` written next to the test is false and the edge is
+# silently never created. pulp_test_spawns() adds the edge once the whole tree
+# has been read, and only for a tool this configuration builds.
+#
+#     pulp_test_spawns(pulp-test-group-native-platform NONE)
+#
+# records a reviewed executable whose sources call a process API (ChildProcess,
+# popen, posix_spawn, fork, ...) yet run or load nothing this repo builds:
+# system tools, or a fork of itself. tools/scripts/script_test_inputs.py marks
+# an executable that calls one with neither an edge nor NONE `spawns:
+# undeclared`, which a selector must never skip. The finalize
+# step then fails the configure when a test executable's compile definitions
+# name `$<TARGET_FILE:x>` but x is neither a dependency nor a linked library,
+# because a selector working from the build graph cannot see that spawn.
+#
 # tools/scripts/script_test_inputs.py folds both into
 # test/ctest_script_inputs.json as `kind: compiled` entries. A source that
 # reads the checkout (it names PULP_SOURCE_DIR, test/fixtures, or one of its
@@ -203,8 +227,48 @@ function(_pulp_test_data_tree_defines out defs)
     set(${out} "${_names}" PARENT_SCOPE)
 endfunction()
 
+# The built executables and modules TARGET depends on through
+# add_dependencies (`runtime`), and one error line per `$<TARGET_FILE:x>` in
+# its definitions whose x it neither depends on nor links (`unbound`).
+function(_pulp_test_data_runtime_targets runtime unbound TARGET defs)
+    get_target_property(_manual ${TARGET} MANUALLY_ADDED_DEPENDENCIES)
+    get_target_property(_linked ${TARGET} LINK_LIBRARIES)
+    if(NOT _manual)
+        set(_manual "")
+    endif()
+    if(NOT _linked)
+        set(_linked "")
+    endif()
+    set(_run "")
+    foreach(_dep IN LISTS _manual)
+        if(TARGET ${_dep})
+            get_target_property(_dep_type ${_dep} TYPE)
+            if(_dep_type STREQUAL "EXECUTABLE" OR _dep_type STREQUAL "MODULE_LIBRARY")
+                list(APPEND _run "${_dep}")
+            endif()
+        endif()
+    endforeach()
+    list(SORT _run)
+    set(_errors "")
+    string(REGEX MATCHALL "\\$<TARGET_FILE:[^>]+>" _files "${defs}")
+    foreach(_file IN LISTS _files)
+        string(REGEX REPLACE "^\\$<TARGET_FILE:([^>]+)>$" "\\1" _named "${_file}")
+        if(NOT _named IN_LIST _manual AND NOT _named IN_LIST _linked)
+            list(APPEND _errors "${TARGET} -> ${_named}")
+        endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _errors)
+    set(${runtime} "${_run}" PARENT_SCOPE)
+    set(${unbound} "${_errors}" PARENT_SCOPE)
+endfunction()
+
 function(_pulp_test_data_finalize)
+    # Runs deferred in the top-level directory, where the variable set when
+    # this module was included under test/ is not in scope.
+    set(PULP_TEST_DATA_DIR "${CMAKE_BINARY_DIR}/test/test-data")
     file(MAKE_DIRECTORY "${PULP_TEST_DATA_DIR}")
+    set(_spawn_errors "")
+    get_property(_spawns_none GLOBAL PROPERTY PULP_TEST_SPAWNS_NONE)
     _pulp_test_data_collect_targets("${CMAKE_SOURCE_DIR}/test" _targets)
     list(SORT _targets)
     set(_rows "")
@@ -243,14 +307,32 @@ function(_pulp_test_data_finalize)
         list(REMOVE_DUPLICATES _rels)
         list(SORT _rels)
         _pulp_test_data_tree_defines(_names "${_defs}")
+        _pulp_test_data_runtime_targets(_runtime _unbound ${_t} "${_defs}")
+        list(APPEND _spawn_errors ${_unbound})
         if(_names)
             list(REMOVE_DUPLICATES _names)
             list(SORT _names)
         endif()
         _pulp_test_data_json_list(_jsrc ${_rels})
         _pulp_test_data_json_list(_jdef ${_names})
-        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}}")
+        _pulp_test_data_json_list(_jrun ${_runtime})
+        set(_jnone false)
+        if(_t IN_LIST _spawns_none)
+            set(_jnone true)
+            if(_runtime)
+                list(APPEND _spawn_errors "${_t} is declared pulp_test_spawns(NONE) but depends on ${_runtime}")
+            endif()
+        endif()
+        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}}")
     endforeach()
+    if(_spawn_errors)
+        list(JOIN _spawn_errors "\n  " _spawn_text)
+        message(FATAL_ERROR
+            "A test's runtime spawn edges are inconsistent. Either it names a built target through "
+            "$<TARGET_FILE:...> without depending on it, so the build graph cannot see that it runs "
+            "or loads that target, or it is declared NONE yet depends on one:\n  ${_spawn_text}\n"
+            "Declare the edge with pulp_test_spawns(<test> <target>) (tools/cmake/PulpTestData.cmake).")
+    endif()
     list(JOIN _rows ",\n" _body)
     file(CONFIGURE OUTPUT "${PULP_TEST_DATA_DIR}/executables.json"
         CONTENT "{\"schema\": \"pulp-test-executables/v1\", \"executables\": {\n${_body}\n}}\n"
@@ -278,10 +360,40 @@ function(_pulp_test_data_finalize)
     endif()
 endfunction()
 
+function(pulp_test_spawns TEST)
+    if(ARGN STREQUAL "NONE")
+        set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_NONE "${TEST}")
+        return()
+    endif()
+    foreach(_tool IN LISTS ARGN)
+        # A deferred call evaluates its arguments when it runs, after this
+        # function's variables are gone, so the names are written in literally.
+        cmake_language(EVAL CODE
+            "cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]] CALL _pulp_test_spawns_apply [[${TEST}]] [[${_tool}]])")
+    endforeach()
+endfunction()
+
+function(_pulp_test_spawns_apply TEST TOOL)
+    if(NOT TARGET ${TEST})
+        message(FATAL_ERROR "pulp_test_spawns: ${TEST} is not a target")
+    endif()
+    if(TARGET ${TOOL})
+        add_dependencies(${TEST} ${TOOL})
+    endif()
+endfunction()
+
 function(pulp_test_data_arm)
     get_property(_armed GLOBAL PROPERTY PULP_TEST_DATA_ARMED)
     if(NOT _armed)
         set_property(GLOBAL PROPERTY PULP_TEST_DATA_ARMED TRUE)
-        cmake_language(DEFER CALL _pulp_test_data_finalize)
+        # At the end of the top-level directory, once every tool directory
+        # has defined its targets.
+        cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_test_data_finalize_after_spawns)
     endif()
+endfunction()
+
+# pulp_test_spawns() edges are deferred to the same point and queued after
+# this call; deferring once more runs the finalize after all of them.
+function(_pulp_test_data_finalize_after_spawns)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _pulp_test_data_finalize)
 endfunction()

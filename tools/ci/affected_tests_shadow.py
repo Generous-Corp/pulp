@@ -34,7 +34,9 @@ input the graph cannot see:
   list is also affected when one of its declared data inputs changed
   (`pulp_test_data()`, globs allowed); an executable marked
   `data: undeclared` reads the checkout without a declaration and is always
-  affected;
+  affected, and so is one marked `spawns: undeclared` (it starts a process
+  with no spawn edge and no reviewed `pulp_test_spawns(NONE)`, so what it runs
+  is unknown);
 - a changed file that no edge reads and that is not under a known non-input
   prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test;
 - a compiled test is also affected when a program it runs or loads at run
@@ -269,14 +271,19 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
     spawned_selected = 0
     selected = []
     declared = undeclared = sel_declared = sel_undeclared = 0
-    data_undeclared = sel_data_declared = 0
+    data_undeclared = sel_data_declared = spawns_undeclared = 0
     for t in tests:
         name = t.get("name", "")
         binary = is_binary_test(t, build_dir)
         data = compiled_data.get(executable_name(t)) if binary else None
-        if data and data.get("data") != "declared":
+        if data and data.get("data") not in ("declared", "none"):
             # Reads the checkout without a declaration: never skippable.
             data_undeclared += 1
+            selected.append(name)
+            continue
+        if data and data.get("spawns") not in (None, "declared", "none"):
+            # Starts a process with no edge to what it runs: never skippable.
+            spawns_undeclared += 1
             selected.append(name)
             continue
         if not binary:
@@ -313,7 +320,8 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             "script_declared": declared, "script_undeclared": undeclared,
             "script_selected_declared": sel_declared, "script_selected_undeclared": sel_undeclared,
             "compiled_data_undeclared": data_undeclared, "compiled_selected_by_data": sel_data_declared,
-            "compiled_selected_by_spawn": spawned_selected, **flags}
+            "compiled_selected_by_spawn": spawned_selected, "compiled_spawns_undeclared": spawns_undeclared,
+            **flags}
 
 
 def _spawned(test: dict, build_real: str, spawns: SpawnIndex) -> set[str]:
