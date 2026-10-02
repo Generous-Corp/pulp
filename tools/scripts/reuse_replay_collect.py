@@ -1004,6 +1004,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
         else:
             rebuilt_all = set(rebuilt)
         spawn_all = strict and bool(spawnable & rebuilt_all)
+        fallback_only = 0  # compiled tests that run only because of the spawnable fallback
         spawn_hit = (lambda exes: any((spawned or {}).get(e, set()) & rebuilt_all for e in exes)) if strict \
             else (lambda exes: False)
         # The re-key rule a CMake change triggers: everything, or only the
@@ -1018,10 +1019,12 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             if strict and (always_run.search(name) or environment_bound(mapped)):
                 run.append(name)
             elif exes:
-                if (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
-                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])
-                        or spawn_all or spawn_hit(exes)):
+                keyed = (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
+                         or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or []) or spawn_hit(exes))
+                if keyed or spawn_all:
                     run.append(name)
+                if spawn_all and not keyed:
+                    fallback_only += 1
             elif group_entries is not None and name in group_entries and head_entries is not None:
                 entry = group_entries[name]
                 if (head_entries.get(name) != entry or _declared_hit(entry.get("inputs") or [], drift)
@@ -1034,7 +1037,10 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
         rebuilt_set = rebuilt_all & counted
         out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": len(rebuilt_set),
                         "cmake_changed": cmake, "data_changed": data[:20],
-                        "spawnable_rebuilt": sorted(spawnable & rebuilt_all)[:20]}
+                        "spawnable_rebuilt": sorted(spawnable & rebuilt_all)[:20],
+                        # The interim spawnable fallback's cost: when it is the
+                        # only reason tests run, the source-scan guard is due.
+                        "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only}
         if codemodel is not None:
             # The same counts over the executables the recorded build
             # describes, where the variants can be compared exactly, and the
