@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -521,6 +522,118 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(c.codemodel_targets("9"), {"a": self.HEAD["a"]})
             gh.json.return_value = {"artifacts": []}
             self.assertIsNone(c.codemodel_targets("10"))
+
+
+class FakeGraph:
+    """A Ninja graph in the affected_tests_shadow shape: sources and headers
+    map to objects, objects to archives."""
+    def __init__(self, root: str, build: str) -> None:
+        self.root, self.build_dir = root, build
+        self.src_to_out = {
+            f"{root}/core/a.cpp": {"core/CMakeFiles/a.dir/a.cpp.o"},
+            f"{root}/core/a.hpp": {"core/CMakeFiles/a.dir/a.cpp.o"},
+            f"{root}/core/b.cpp": {"core/CMakeFiles/a.dir/b.cpp.o"},
+            f"{root}/test/t.cpp": {"test/CMakeFiles/old-name.dir/t.cpp.o"},
+        }
+        self.fwd = {"core/CMakeFiles/a.dir/a.cpp.o": {"core/liba.a"},
+                    "core/CMakeFiles/a.dir/b.cpp.o": {"core/liba.a"}}
+
+    def norm(self, p: str) -> str:
+        return p if os.path.isabs(p) else os.path.join(self.build_dir, p)
+
+    def affected_outputs(self, changed: list[str]) -> set[str]:
+        return {self.norm(o) for f in changed for o in self.src_to_out.get(f, ())}
+
+
+class RecordedGraphTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.root, self.build = os.path.join(self.tmp, "src"), os.path.join(self.tmp, "build")
+        os.makedirs(self.root), os.makedirs(self.build)
+        self.index = rrc.GraphIndex(FakeGraph(os.path.realpath(self.root), os.path.realpath(self.build)),
+                                    Path(self.root), Path(self.build))
+        # Executables named as the CURRENT build names them; the graph knew
+        # the test source under another target.
+        self.link = {
+            "test/group-a": {"objects": ["test/CMakeFiles/group-a.dir/t.cpp.o"], "members": {"core/liba.a": ["a.cpp.o"]}},
+            "test/group-b": {"objects": ["test/CMakeFiles/group-b.dir/new_test.cpp.o"],
+                             "members": {"core/liba.a": ["b.cpp.o"], "/sdk/libskia.a": ["x.o"]}},
+            "test/group-c": {"objects": [], "members": {"core/liba.a": ["added_since.cpp.o"]}},
+        }
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp)
+
+    def test_object_paths_name_their_sources(self):
+        self.assertEqual(rrc.object_source("test/CMakeFiles/x.dir/support/w.cpp.o"), "test/support/w.cpp")
+        self.assertEqual(rrc.object_source("tools/cli/CMakeFiles/x.dir/__/__/core/a.cpp.o"), "core/a.cpp")
+        self.assertIsNone(rrc.object_source("CMakeFiles/x.dir/__/__/outside.cpp.o"))
+        self.assertIsNone(rrc.object_source("libfoo.a"))
+
+    def test_a_header_reaches_executables_through_the_members_they_pulled(self):
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/a.hpp"], self.index),
+                         {"test/group-a", "test/group-b", "test/group-c"})  # b, c: header drift reaches unknown sources
+
+    def test_a_source_reaches_only_its_own_objects_under_a_new_executable_name(self):
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["test/t.cpp"], self.index), {"test/group-a"})
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/b.cpp"], self.index), {"test/group-b"})
+
+    def test_an_unknown_member_or_object_is_reached_by_its_own_source(self):
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/added_since.cpp"], self.index), {"test/group-c"})
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["test/new_test.cpp"], self.index), {"test/group-b"})
+
+    def test_docs_and_pinned_archives_rebuild_nothing(self):
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["docs/a.md", "tools/x.json"], self.index), set())
+
+    def test_annotate_writes_recorded_variants_from_the_group_record(self):
+        import gzip
+        corpus = Path(self.tmp) / "corpus"
+        rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+        p = pair(drift=("test/t.cpp",))
+        rpr.write_jsonl(corpus / "pairs.jsonl", [p])
+        rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
+        targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
+                   "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
+        cache = corpus / "cache" / "record"
+        cache.mkdir(parents=True)
+        for run_id, rec in (("p1", {"targets": targets, "link": None, "executables": None}),
+                            ("g1", {"targets": targets, "link": self.link,
+                                    "executables": {"ta": "test/group-a", "tb": "test/group-b"}})):
+            with gzip.open(cache / f"{run_id}.json.gz", "wt") as fh:
+                json.dump(rec, fh)
+        graph = self.index.graph
+        result = rrc.annotate_source_keys(corpus, Path(self.tmp), graph, Path(self.root), Path(self.build),
+                                          {}, None, mock.Mock())
+        self.assertEqual(result["pairs_with_recorded_graph"], 1)
+        keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
+        self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
+        self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
+                          keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
+
+    def test_the_record_expands_link_members_and_test_executables(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("link-members-abc.json", json.dumps({
+                "members": {"<build>/core/liba.a": ["a.cpp.o", "b.cpp.o"]},
+                "executables": {"<build>/test/x": {"objects": ["<build>/test/CMakeFiles/x.dir/t.cpp.o"],
+                                                   "archives": {"<build>/core/liba.a": {"members": [1], "whole": False}}},
+                                "<build>/test/y": {"objects": [],
+                                                   "archives": {"<build>/core/liba.a": {"members": [], "whole": True}}}}}))
+            zf.writestr("tests.jsonl", json.dumps({"test_id": "t1", "executable": "<build>/test/x"}) + "\n")
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.return_value = {"artifacts": [{"name": "reuse-record-macos", "archive_download_url": "u"}]}
+        resp = mock.MagicMock()
+        resp.__enter__.return_value.read.return_value = buf.getvalue()
+        gh._request.return_value = resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.cache, c.gh = Path(self.tmp), gh
+        rec = c.reuse_record("5")
+        self.assertIsNone(rec["targets"])
+        self.assertEqual(rec["executables"], {"t1": "test/x"})
+        self.assertEqual(rec["link"]["test/x"], {"objects": ["test/CMakeFiles/x.dir/t.cpp.o"], "members": {"core/liba.a": ["b.cpp.o"]}})
+        self.assertEqual(rec["link"]["test/y"]["members"], {"core/liba.a": ["a.cpp.o", "b.cpp.o"]})
 
 
 class SourceKeyPolicyTests(unittest.TestCase):
