@@ -186,6 +186,54 @@ private:
     static inline int latency_samples_ = 0;
 };
 
+// A processor whose reported latency is a parameter default -- a look-ahead
+// length, an FFT size, a render-mode switch. latency_samples() reads state(),
+// so it is only answerable once a parameter store is bound.
+class ParameterLatencyEffect final : public pulp::format::Processor {
+public:
+    static constexpr pulp::state::ParamID kLookahead = 7;
+    static constexpr float kDefaultLookahead = 96.0f;
+
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "LookaheadEffect",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.lookahead-effect",
+            .version = "1.0.0",
+            .category = pulp::format::PluginCategory::Effect,
+            .input_buses = {{"Main In", 2, false}},
+            .output_buses = {{"Main Out", 2, false}},
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({
+            .id = kLookahead,
+            .name = "Lookahead",
+            .unit = "samples",
+            .range = {0.0f, 512.0f, kDefaultLookahead, 1.0f},
+        });
+    }
+
+    int latency_samples() const override {
+        return static_cast<int>(state().get_value(kLookahead));
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(
+        pulp::audio::BufferView<float>&,
+        const pulp::audio::BufferView<const float>&,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const pulp::format::ProcessContext&) override
+    {}
+};
+
+std::unique_ptr<pulp::format::Processor> make_parameter_latency_effect() {
+    return std::make_unique<ParameterLatencyEffect>();
+}
+
 std::unique_ptr<pulp::format::Processor> make_configured_processor() {
     return std::make_unique<ConfigurableProcessor>();
 }
@@ -650,4 +698,18 @@ TEST_CASE("AAX model assigns stable unique ids in declaration order", "[aax][mod
     REQUIRE(p[0].aax_id != p[1].aax_id);
     REQUIRE(p[1].aax_id != p[2].aax_id);
     REQUIRE(p[0].aax_id != p[2].aax_id);
+}
+
+TEST_CASE("AAX model binds a parameter store before reading latency", "[aax][model][latency]") {
+    // The definition is built from a fresh factory() instance. A processor
+    // whose latency_samples() reads a parameter must see a bound store with its
+    // defaults -- as it does in every other format -- not an unbound one,
+    // which would crash the plug-in during Pro Tools registration.
+    auto result = pulp::format::aax::build_plugin_definition(
+        make_parameter_latency_effect, valid_codes());
+    REQUIRE(result.ok);
+    CHECK(result.definition.latency_samples
+          == static_cast<int>(ParameterLatencyEffect::kDefaultLookahead));
+    REQUIRE(result.definition.parameters.size() == 1);
+    CHECK(result.definition.parameters[0].id == ParameterLatencyEffect::kLookahead);
 }

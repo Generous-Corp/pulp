@@ -110,6 +110,8 @@ pulp_add_test_suite(pulp-test-design-import-w3c-tokens GROUP pulp-test-group-des
 # generated artifacts.
 find_program(PULP_SWIFTC swiftc)
 add_executable(pulp-test-design-swift-codegen test_design_swift_codegen.cpp)
+pulp_test_data(pulp-test-design-swift-codegen NO_DEFINE
+    PATHS apple/Sources/PulpSwift)
 target_link_libraries(pulp-test-design-swift-codegen
     PRIVATE pulp::view-core pulp::platform Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-swift-codegen PRIVATE
@@ -125,6 +127,9 @@ catch_discover_tests(pulp-test-design-swift-codegen
 # parse_pencil_react. Shared contract: parse fixture, materialize via
 # host React shim, accept sanitized TSX, reject out-of-matrix surfaces.
 add_executable(pulp-test-design-import-react-runtime test_design_import_react_runtime.cpp)
+pulp_test_data(pulp-test-design-import-react-runtime NO_DEFINE
+    PATHS planning test/fixtures/figma test/fixtures/pencil test/fixtures/rn
+        test/fixtures/stitch test/fixtures/v0-dev)
 target_link_libraries(pulp-test-design-import-react-runtime PRIVATE pulp::view Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-design-import-react-runtime PRIVATE PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-design-import-react-runtime
@@ -137,6 +142,8 @@ pulp_add_test_suite(pulp-test-design-import-anchors GROUP pulp-test-group-design
     LIBRARIES pulp::view
     COMPILE_DEFINITIONS PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}"
     LABELS "parser-import")
+pulp_test_data(pulp-test-design-import-anchors NO_DEFINE
+    PATHS test/fixtures/anchor_vectors.json)
 
 # Inspector lock-to-source, Path A (generated-TSX/JS rewrite).
 # Proves the tweak -> lock-to-source -> re-import round-trip.
@@ -158,6 +165,9 @@ add_executable(pulp-test-design-import-designmd
     test_design_import_designmd.cpp
     test_design_import_designmd_040.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp)
+pulp_test_data(pulp-test-design-import-designmd NO_DEFINE
+    SOURCES test_design_import_designmd.cpp test_design_import_designmd_040.cpp
+    PATHS test/fixtures/imports/designmd/alpha)
 target_include_directories(pulp-test-design-import-designmd PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/import-design

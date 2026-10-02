@@ -27,6 +27,7 @@
 // state mutates as the heuristic fires.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/overlay_dismissal.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -744,6 +745,133 @@ TEST_CASE("a press on ordinary content still consumes the dismissal (web-compat)
         pulp::view::route_press_to_active_overlay(h.root, press_point);
     CHECK(on_plain.routing == pulp::view::OverlayPressRouting::dismissed);
     CHECK(on_plain.consume_press);
+}
+
+// ── A menu button toggles its own menu ────────────────────────────────────
+//
+// The shape a materialized design ships: a `<button aria-haspopup>` whose
+// click handler toggles a `role="listbox"` popup. A second press on that
+// button must close the popup and leave it closed. Before the overlay learned
+// its own trigger, the native policy dismissed the popup (its JS owner closed
+// the app's menu in response) and then delivered the same press to the
+// trigger as a "switch menus" press, whose click opened the menu again.
+
+namespace {
+
+// Mounts the menu button and returns the press point on it.
+Point mount_menu_button(Harness& h) {
+    h.eval(R"(
+        var popup = null;
+        var opens = 0;
+        var trigger = document.createElement('button');
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.style.position = 'absolute';
+        trigger.style.left = '10px';
+        trigger.style.top = '10px';
+        trigger.style.width = '80px';
+        trigger.style.height = '24px';
+        trigger.textContent = 'GLIDE';
+        function togglePopup() {
+            if (popup) {
+                popup.parentNode.removeChild(popup);
+                popup = null;
+                return;
+            }
+            ++opens;
+            popup = document.createElement('div');
+            popup.setAttribute('role', 'listbox');
+            popup.style.position = 'absolute';
+            popup.style.left = '10px';
+            popup.style.top = '60px';
+            popup.style.width = '120px';
+            popup.style.height = '80px';
+            ['A', 'B'].forEach(function(label) {
+                var option = document.createElement('button');
+                option.setAttribute('role', 'option');
+                option.textContent = label;
+                popup.appendChild(option);
+            });
+            document.body.appendChild(popup);
+        }
+        trigger.addEventListener('click', togglePopup);
+        document.body.appendChild(trigger);
+    )");
+    h.root.layout_children();
+    return {40.0f, 20.0f};
+}
+
+bool popup_open(Harness& h) {
+    return !h.engine.evaluate("popup === null").getWithDefault<bool>(true);
+}
+
+int popup_opens(Harness& h) {
+    return h.engine.evaluate("opens").getWithDefault<int>(-1);
+}
+
+}  // namespace
+
+TEST_CASE("pressing a menu button again closes its open menu and keeps it closed",
+          "[view][web-compat][trigger][pointer][toggle]") {
+    OverlayGuard g;
+    Harness h;
+    const Point on_trigger = mount_menu_button(h);
+    REQUIRE(count_overlay_triggers(h.root) == 1);
+
+    h.root.simulate_click(on_trigger);
+    h.root.layout_children();
+    REQUIRE(popup_open(h));
+    REQUIRE(popup_opens(h) == 1);
+    auto* claimed = h.root.interaction().active_overlay;
+    REQUIRE(claimed != nullptr);
+
+    h.root.simulate_click(on_trigger);
+    h.root.layout_children();
+    CHECK_FALSE(popup_open(h));
+    // The release and click of that press were spent on the close, so the
+    // trigger's handler never ran a second time to reopen the menu.
+    CHECK(popup_opens(h) == 1);
+    CHECK(h.root.overlay_depth() == 0);
+
+    // Closed, the button opens it again.
+    h.root.simulate_click(on_trigger);
+    h.root.layout_children();
+    CHECK(popup_open(h));
+    CHECK(popup_opens(h) == 2);
+}
+
+TEST_CASE("Enter and Space on a focused menu button toggle its menu",
+          "[view][web-compat][trigger][keyboard][toggle]") {
+    OverlayGuard g;
+    Harness h;
+    const Point on_trigger = mount_menu_button(h);
+    h.eval("trigger.focus();");
+    REQUIRE(h.root.accepts_navigation_input());
+
+    const int key = GENERATE(static_cast<int>(KeyCode::enter),
+                             static_cast<int>(KeyCode::space));
+    REQUIRE(WidgetBridge::dispatch_key_for_root(h.root, key, 0, true));
+    h.root.layout_children();
+    REQUIRE(popup_open(h));
+    REQUIRE(h.root.overlay_depth() >= 1);
+
+    REQUIRE(WidgetBridge::dispatch_key_for_root(h.root, key, 0, true));
+    h.root.layout_children();
+    CHECK_FALSE(popup_open(h));
+    CHECK(h.root.overlay_depth() == 0);
+    CHECK(h.engine.evaluate("document.activeElement === trigger")
+              .getWithDefault<bool>(false));
+
+    // A keyboard-opened menu has no opening press to learn its trigger from,
+    // so the popup owner names it; a click on the trigger then closes it
+    // rather than closing and reopening it.
+    REQUIRE(WidgetBridge::dispatch_key_for_root(h.root, key, 0, true));
+    h.root.layout_children();
+    REQUIRE(popup_open(h));
+    const int opens_before = popup_opens(h);
+    h.root.simulate_click(on_trigger);
+    h.root.layout_children();
+    CHECK_FALSE(popup_open(h));
+    CHECK(popup_opens(h) == opens_before);
 }
 
 // ── A lifted submenu declares the overlay it stacks on ────────────────────

@@ -420,13 +420,28 @@ void View::simulate_click(Point root_pos) {
 }
 
 void View::simulate_click(Point root_pos, const SimulatedPointer& pointer) {
-    if (auto* overlay = interaction().active_overlay;
-        overlay && !overlay->overlay_contains(root_pos)) {
+    View* routed = nullptr;
+    if (parent_ == nullptr) {
+        // A click on a tree root is the press a platform host would route, so
+        // it goes through the same policy the hosts call: inside presses reach
+        // the overlay's own subtree, a press on a different trigger switches
+        // menus, and a press on the trigger that opened the overlay toggles it
+        // shut without reopening it. A headless test therefore exercises the
+        // dismissal behaviour users actually get.
+        const auto overlay_press = route_press_to_active_overlay(*this, root_pos);
+        if (overlay_press.consume_press) return;
+        if (overlay_press.routing == OverlayPressRouting::routed)
+            routed = overlay_press.target;
+    } else if (auto* overlay = interaction().active_overlay;
+               overlay && !overlay->overlay_contains(root_pos)) {
+        // A click on a subtree: `root_pos` is in this subtree's space, which
+        // the root-space policy cannot interpret, so only the outside-press
+        // rule applies.
         const bool consume = overlay->overlay_consumes_outside_click();
         overlay->dismiss_claimed_overlay();
         if (consume) return;
     }
-    auto* target = hit_test(root_pos);
+    auto* target = routed != nullptr ? routed : hit_test(root_pos);
     // Record the synthetic input into the active motion fixture before
     // dispatch so replay sees the same target lookup the original recording
     // captured: target id is what we resolve, not "wherever this click would
@@ -743,6 +758,9 @@ void View::prepare_for_reuse() {
     // A recycled view must not remain the process-global overlay owner; the
     // static back-pointer would otherwise dangle at a parked instance.
     release_overlay();
+    // Nor keep the opener of the popover it used to be.
+    overlay_anchor_id_ = 0;
+    overlay_anchor_explicit_ = false;
 
     // Clear EVERY base-class callback. A recycled view that keeps a stale
     // std::function fires it into freed/torn-down closure state on the next
@@ -1975,6 +1993,15 @@ void View::claim_overlay(const View* stacks_on) {
         // a whole nest of menus closes every level, not only the top. It is
         // compared, never dereferenced, and cleared when the claim leaves.
         overlay_nested_on_ = s.overlay_stack.empty() ? nullptr : s.overlay_stack.back();
+        // A claim that follows a press on an overlay trigger was opened by
+        // that trigger, so a later press on the same trigger closes it instead
+        // of reopening it (see `set_overlay_anchor`). The record is left in
+        // place rather than spent: a popover and the menu nested in it are
+        // often claimed by one press, and each needs to know its opener. The
+        // next press replaces it.
+        if (!overlay_anchor_explicit_ && s.pending_overlay_opener != 0 &&
+            s.pending_overlay_opener != import_binding_instance_id())
+            overlay_anchor_id_ = s.pending_overlay_opener;
         s.overlay_stack.push_back(this);
         ++overlay_claims_live_;
     }
@@ -1982,6 +2009,18 @@ void View::claim_overlay(const View* stacks_on) {
     // overlay is idempotent rather than a second copy of the same view.
     republish_overlay(s);
     active_overlay_ = this;  // process-global shim mirror
+}
+
+void View::set_overlay_anchor(const View* anchor) {
+    // Held as the anchor's instance id, so a destroyed anchor can never match
+    // a new view that happens to reuse its address.
+    overlay_anchor_id_ = anchor ? anchor->import_binding_instance_id() : 0;
+    overlay_anchor_explicit_ = anchor != nullptr;
+}
+
+bool View::overlay_anchored_at(const View* candidate) const {
+    return candidate != nullptr && overlay_anchor_id_ != 0 &&
+           candidate->import_binding_instance_id() == overlay_anchor_id_;
 }
 
 void View::release_overlay() {

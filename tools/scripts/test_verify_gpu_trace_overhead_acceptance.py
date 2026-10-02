@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import importlib.util
 import json
 import tempfile
 import unittest
 from pathlib import Path
+
+import git_read_memo
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +21,26 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 CONTRACT = MODULE.contract
+
+
+_GIT_MEMO = contextlib.ExitStack()
+_GIT_MEMO_STATS = None
+
+
+def _start_git_memo() -> None:
+    global _GIT_MEMO_STATS
+    _GIT_MEMO_STATS = _GIT_MEMO.enter_context(git_read_memo.memoized_git_reads())
+
+
+def tearDownModule() -> None:
+    _GIT_MEMO.close()
+    # The memo must have answered something, or it is not what makes this fast.
+    if _GIT_MEMO_STATS is not None and _GIT_MEMO_STATS.hits == 0:
+        raise AssertionError(f"git read memo was never consulted: {_GIT_MEMO_STATS}")
+
+
+def setUpModule() -> None:
+    _start_git_memo()
 
 
 class VerifyGpuTraceOverheadAcceptanceTests(unittest.TestCase):

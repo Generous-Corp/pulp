@@ -367,6 +367,8 @@ catch_discover_tests(pulp-test-cli-docs-command)
 # itself is plain POSIX shell, so wgpu/macOS don't factor in.
 if(NOT WIN32)
     add_executable(pulp-test-cli-skew-banner test_cli_skew_banner.cpp)
+    pulp_test_data(pulp-test-cli-skew-banner NO_DEFINE
+        PATHS tools/scripts/cli_version_check.sh .claude-plugin/plugin.json)
     target_link_libraries(pulp-test-cli-skew-banner PRIVATE
         pulp::platform Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-cli-skew-banner PRIVATE
@@ -444,6 +446,8 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 # upgrading into a Rust archive must install sibling payloads such as
 # pulp-cpp before replacing the user-facing pulp binary.
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
+pulp_test_data(pulp-test-cli-upgrade-install NO_DEFINE
+    PATHS tools/import-design/browser_capture tools/cli/cmd_upgrade.cpp)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
     PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")

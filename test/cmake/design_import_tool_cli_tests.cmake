@@ -161,6 +161,11 @@ add_executable(pulp-test-browser-capture-import
     ${CMAKE_SOURCE_DIR}/tools/import-design/html_intake.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/sprite_skins.cpp
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_png_codec.cpp)
+pulp_test_data(pulp-test-browser-capture-import NO_DEFINE
+    SOURCES test_browser_capture_backdrop_filter.cpp test_browser_capture_ir.cpp
+        test_browser_capture_text_metrics.cpp test_browser_capture_tree.cpp
+        test_browser_capture_svg_render.cpp
+    PATHS "test/fixtures/browser-capture-*")
 target_include_directories(pulp-test-browser-capture-import PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/external/miniz)

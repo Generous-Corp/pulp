@@ -1523,6 +1523,9 @@ public:
         /// time. Which claims nest and which replace is decided in
         /// `claim_overlay()`.
         std::vector<View*> overlay_stack;
+        /// Instance id of the trigger the latest press reached (0: none); a
+        /// claim with no anchor of its own adopts it. See `set_overlay_anchor`.
+        std::uint64_t pending_overlay_opener = 0;
     };
     /// Root-owned interaction state for this view's tree. Root-aware code should
     /// prefer this over the process-global shim statics below.
@@ -1585,6 +1588,13 @@ public:
     /// marked by its authoring surface.
     void set_overlay_trigger(bool is_trigger) { overlay_trigger_ = is_trigger; }
     bool overlay_trigger() const { return overlay_trigger_; }
+    /// Declare the control that OPENED this overlay. A press on it while the
+    /// overlay is open toggles the overlay shut; see `overlay_dismissal.hpp`.
+    /// A press-opened overlay learns it automatically; `nullptr` clears it.
+    void set_overlay_anchor(const View* anchor);
+    /// Instance id of the anchor (never a recyclable address), or 0 for none.
+    std::uint64_t overlay_anchor_id() const { return overlay_anchor_id_; }
+    bool overlay_anchored_at(const View* candidate) const;
     /// Guarded release — clears the root slot AND the shim mirror only when
     /// `this` currently holds them. A non-holder is a no-op, so one widget's
     /// teardown cannot blur an unrelated focused widget.
@@ -2905,6 +2915,8 @@ private:
     bool overlay_consumes_outside_click_ = false;
     const View* overlay_nested_on_ = nullptr;  // compared only; see claim_overlay
     bool overlay_trigger_ = false;
+    bool overlay_anchor_explicit_ = false;
+    std::uint64_t overlay_anchor_id_ = 0;  // instance id; see set_overlay_anchor
     FrameClock* frame_clock_ = nullptr;
     // Lazily allocated on the first set_meter_source / set_scalar_source, so a
     // view that shows no live value costs one null pointer.

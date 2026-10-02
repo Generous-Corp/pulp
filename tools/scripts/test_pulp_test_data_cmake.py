@@ -12,7 +12,10 @@ What must hold:
   definitions that point into the checkout, but not those pointing into the
   build tree even when it lives inside the checkout;
 - a path that matches nothing fails the configure; a glob that matches passes;
-- a stale `<exe>.inputs.json` from an earlier configure is removed.
+- a stale `<exe>.inputs.json` from an earlier configure is removed;
+- NO_DEFINE records paths without touching the target's definitions, NONE
+  records a reviewed source with no paths, and SOURCES narrows a declaration
+  to some of an executable's sources (and refuses one that is not its own).
 
 Run:
     python3 tools/scripts/test_pulp_test_data_cmake.py
@@ -112,6 +115,36 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet PATHS ../outside)")
             proc = self.configure(src2, Path(t) / "build2")
             self.assertIn("must be relative to the checkout root", proc.stderr)
+
+    def test_no_define_none_and_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            extra = ("add_executable(multi m1.c m2.c)\n"
+                     "pulp_test_data(multi NO_DEFINE SOURCES m1.c PATHS fixtures/other.json)\n"
+                     "add_executable(reviewed r.c)\n"
+                     "pulp_test_data(reviewed NONE)\n")
+            src = self.project(Path(t), extra=extra)
+            for name in ("m1", "m2", "r"):
+                write(src, f"test/{name}.c", "int main(void) { return 0; }\n")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            out = build / "test" / "test-data"
+            multi = json.loads((out / "multi.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual((multi["sources"], multi["inputs"]), (["test/m1.c"], ["fixtures/other.json"]))
+            reviewed = json.loads((out / "reviewed.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual((reviewed["sources"], reviewed["inputs"]), (["test/r.c"], []))
+            for target in ("multi", "reviewed"):
+                flags = (build / "test" / "CMakeFiles" / f"{target}.dir" / "flags.make").read_text(encoding="utf-8")
+                self.assertNotIn("PULP_SOURCE_DIR", flags, target)
+
+    def test_sources_must_belong_to_the_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet SOURCES solo.c PATHS fixtures)")
+            proc = self.configure(src, Path(t) / "build")
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("'solo.c' is not one of its sources", proc.stderr)
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet NONE PATHS fixtures)")
+            self.assertIn("NONE and PATHS are exclusive", self.configure(src2, Path(t) / "build2").stderr)
 
     def test_a_dropped_declaration_removes_its_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as t:

@@ -15,7 +15,12 @@ What must hold:
 - a diff touching no declared input does not configure;
 - a current configured build is reused, not reconfigured;
 - PULP_GATES_NO_CONFIGURE=1 does not configure and says NOT CHECKED loudly;
-- drift fails gates.sh and prints the exact `--write` command.
+- drift fails gates.sh and prints the exact `--write` command;
+- the same lane checks tools/ci/source_selftests.json against the registrations
+  and the changed-surface script families: a selftest added without
+  regenerating the manifest fails with the `write` command, family drift fails
+  with the `--write` command, and a build without a codemodel reply is
+  reconfigured once (no compile) rather than skipped.
 
 Run:
     python3 tools/scripts/test_gates_script_inputs.py
@@ -39,7 +44,15 @@ COPIED = [
     "tools/scripts/gates_script_inputs.py",
     "tools/scripts/script_test_inputs.py",
     "tools/ci/source_selftests.py",
+    "tools/ci/ctest_gate_args.py",
 ]
+
+# Stands in for changed_surface_script_families.py: its own suite covers what it
+# derives; here only the lane's handling of each exit code is under test.
+FAKE_FAMILIES = """import os, sys
+print(os.environ.get("FAKE_FAMILIES_SAYS", "changed-surface script families: OK"))
+sys.exit(int(os.environ.get("FAKE_FAMILIES_RC", "0")))
+"""
 STUBS = ["tools/scripts/version_bump_check.py", "tools/scripts/skill_sync_check.py"]
 
 FAKE_CMAKE = r"""#!/bin/sh
@@ -89,8 +102,18 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.write("tools/scripts/alpha_lib.py", "X = 1\n")
         self.write("test/CMakeLists.txt", "# registrations\n")
         self.write("README.md", "readme\n")
-        inventory = {"tests": [{"name": "alpha", "properties": [],
-                                "command": ["/usr/bin/python3", "@ROOT@/tools/scripts/test_alpha.py"]}]}
+        self.write("tools/scripts/changed_surface_script_families.py", FAKE_FAMILIES)
+        self.write(".github/workflows/version-skill-check.yml",
+                   "jobs:\n  lane:\n    steps:\n      - run: python3 tools/ci/source_selftests.py run\n")
+        self.write("tools/ci/test_beta.py", "print('beta')\n")
+        self.write("tools/ci/source_selftests.json", json.dumps({"schema_version": 1, "tests": [
+            {"name": "beta", "argv": ["{repo}/tools/ci/test_beta.py"], "timeout": 120.0}]}) + "\n")
+        inventory = {"tests": [
+            {"name": "alpha", "properties": [],
+             "command": ["/usr/bin/python3", "@ROOT@/tools/scripts/test_alpha.py"]},
+            {"name": "beta", "properties": [{"name": "LABELS", "value": ["source-selftest"]},
+                                            {"name": "TIMEOUT", "value": 120.0}],
+             "command": ["/usr/bin/python3", "@ROOT@/tools/ci/test_beta.py"]}]}
         self.inventory = self.tmp / "inventory.json"
         self.inventory.write_text(json.dumps(inventory), encoding="utf-8")
         self.cmake_log = self.tmp / "cmake.log"
@@ -124,7 +147,7 @@ class GatesScriptInputsTests(unittest.TestCase):
     def env(self, **extra: str) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PULP_GATES", "PULP_SCRIPT_INPUTS", "GITHUB_"))}
-        env.update(PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}", FAKE_ROOT=str(self.root),
+        env.update(PATH=f"{self.bin}{os.pathsep}{env.get('PATH', '')}", FAKE_ROOT=str(self.root.resolve()),
                    FAKE_CTEST_INVENTORY=str(self.inventory), FAKE_CMAKE_LOG=str(self.cmake_log),
                    PYTHON=str(self.bin / "python"), PULP_GATES_SETUP="",
                    PULP_SKIP_SOURCE_SELFTESTS="1")
@@ -164,10 +187,26 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.commit()
         subprocess.run([str(self.bin / "cmake"), "-S", str(self.root), "-B", str(self.root / "build-gate")],
                        check=True, env=self.env(FAKE_CMAKE_LOG=str(self.tmp / "pre.log")))
+        query = self.root / "build-gate/.cmake/api/v1/query/codemodel-v2"
+        query.parent.mkdir(parents=True)
+        query.touch()
         r = self.gates()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("script-test-inputs: OK", r.stderr)
+
+    def test_a_reused_build_without_a_codemodel_query_is_reconfigured_once(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        subprocess.run([str(self.bin / "cmake"), "-S", str(self.root), "-B", str(self.root / "build-gate")],
+                       check=True, env=self.env(FAKE_CMAKE_LOG=str(self.tmp / "pre.log")))
+        r = self.gates()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = self.configures()
+        self.assertEqual(len(calls), 1, r.stderr)
+        self.assertNotIn("-G", calls[0].split())  # a reconfigure of the same tree, not a fresh one
+        self.assertIn("changed-surface script families: OK", r.stderr)
+        self.assertNotIn("NOT CHECKED", r.stderr)
 
     def test_opt_out_keeps_not_checked_and_says_so_loudly(self) -> None:
         self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
@@ -176,8 +215,10 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.configures(), [])
         self.assertIn("!!! PULP_GATES_NO_CONFIGURE=1", r.stderr)
-        self.assertIn("[script-inputs] NOT CHECKED locally: script-test-inputs-drift", r.stderr)
-        self.assertIn("PASSED WITH 1 NOT CHECKED", r.stderr)
+        for test in ("script-test-inputs-drift", "source-selftest-lane-contract",
+                     "changed-surface-script-families-drift"):
+            self.assertIn(f"[script-inputs] NOT CHECKED locally: {test}", r.stderr)
+        self.assertIn("PASSED WITH 3 NOT CHECKED", r.stderr)
 
     def test_hand_edited_list_fails_and_prints_the_write_command(self) -> None:
         self.write("tools/scripts/test_alpha.py", "import alpha_lib\nprint('alpha')\n")
@@ -188,6 +229,37 @@ class GatesScriptInputsTests(unittest.TestCase):
         self.assertIn("stale entry: alpha", r.stderr)
         self.assertIn("python3 tools/scripts/script_test_inputs.py --build-dir build-gate --write",
                       r.stderr)
+
+
+    def test_selftest_added_without_regenerating_the_manifest_fails(self) -> None:
+        # The registration gains TIMEOUT 300; the hand-kept manifest still says 120.
+        inventory = json.loads(self.inventory.read_text())
+        inventory["tests"][1]["properties"][1]["value"] = 300.0
+        self.inventory.write_text(json.dumps(inventory), encoding="utf-8")
+        self.write("tools/ci/test_beta.py", "print('beta, slower')\n")
+        self.commit("change a selftest's budget without regenerating the manifest")
+        r = self.gates()
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("beta: TIMEOUT 300.0 != manifest 120.0", r.stderr)
+        self.assertIn("python3 tools/ci/source_selftests.py write --build-dir build-gate", r.stderr)
+
+    def test_family_drift_fails_with_the_write_command(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_FAMILIES_RC="1",
+                       FAKE_FAMILIES_SAYS="  tools/scripts/test_alpha.py: newly mapped")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("tools/scripts/test_alpha.py: newly mapped", r.stderr)
+        self.assertIn("python3 tools/scripts/changed_surface_script_families.py --build-dir build-gate --write",
+                      r.stderr)
+
+    def test_a_families_skip_is_not_checked_not_a_pass(self) -> None:
+        self.write("tools/scripts/test_alpha.py", "print('alpha, edited')\n")
+        self.commit()
+        r = self.gates(FAKE_FAMILIES_RC="77", FAKE_FAMILIES_SAYS="SKIP: no codemodel reply")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("[script-inputs] NOT CHECKED locally: changed-surface-script-families-drift", r.stderr)
+        self.assertIn("PASSED WITH 1 NOT CHECKED", r.stderr)
 
 
 class TouchReasonsTests(unittest.TestCase):

@@ -305,6 +305,12 @@
       "timeout": 120.0
     },
     {
+      "name": "git-read-memo-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_git_read_memo.py"
+      ]
+    },
+    {
       "name": "governed-build-selftest",
       "argv": [
         "{repo}/tools/ci/test_governed_build.py"

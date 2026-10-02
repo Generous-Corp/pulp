@@ -216,6 +216,8 @@ if(APPLE AND NOT PULP_IOS)
         SOURCES test_coreaudio_input_only.mm
         LIBRARIES pulp::audio
         PROPERTIES RUN_SERIAL TRUE)
+    pulp_test_data(pulp-test-coreaudio-input-only NO_DEFINE
+        PATHS core/audio/platform/mac/coreaudio_device.mm)
     target_link_libraries(pulp-test-coreaudio-input-only PRIVATE "-framework CoreAudio")
     # The RT-safety case reads the device source to assert the render callback
     # actually USES the clamp — arithmetic alone would keep passing if the call
@@ -811,6 +813,8 @@ endif()
 # `pulp-test-real-plugins` shares via integration/real_plugin_fixture.hpp.
 add_executable(pulp-test-real-plugin-runner-cache
     integration/test_real_plugin_fixture.cpp)
+pulp_test_data(pulp-test-real-plugin-runner-cache NO_DEFINE
+    PATHS test/integration/real_plugins.toml)
 target_link_libraries(pulp-test-real-plugin-runner-cache
     PRIVATE Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-real-plugin-runner-cache PRIVATE
