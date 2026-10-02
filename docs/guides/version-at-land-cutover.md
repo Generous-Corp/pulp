@@ -286,18 +286,28 @@ The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
     collapses to a single constant so all drains run one-at-a-time — the
     shared-branch reclaim is only race-free without a competing drain. The
     `direct` path keeps its event-scoped group unchanged.
-  - **Stale bump PR.** A drain never defers to an open bump PR cut before the
-    merge it is draining (that PR would land without the merge's intent), so it
-    fails `stale-defer` and retries. That exit relies on the stale PR landing,
-    which it never does when it was ejected from the merge queue, or when it is
-    armed but its required checks failed (an armed PR with red checks never
-    enqueues). With the `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off)
-    the drain closes a stale PR unless a merge group holds it or it
-    is a draft; arming alone does not protect it, because a stale generated bump
-    is always safely regenerable and closing drops its auto-merge. It acts only
-    on CONFIRMED stale AND CONFIRMED not held, opens a fresh bump that covers the
-    whole range, and reclaims the branch through the normal
-    confirmed-no-PR `--force-with-lease` path.
+  - **Stale bump PR.** A bump PR cut before the merge being drained does not
+    carry that merge's intent, so the drain never treats it as covering. It
+    still does not need replacing while it can land on its own: when it lands,
+    the push re-runs the drain, which assesses every first-parent merge after
+    the bump's cut point (the marker commit's parent) and skips only the bump's
+    own integration merge. So a stale bump PR that is in the merge queue, or
+    armed with its required checks pending or green, is waited for
+    (`stale-wait`, exit 0 with a `::notice::` naming the PR). Closing it would
+    restart 8 to 36 minutes of checks, long enough for the next main push to
+    stale its replacement too.
+  - **Dead-end bump PR.** A stale bump PR that was ejected from the merge
+    queue, is not armed, or has a failed required check never lands. With the
+    `PULP_BUMP_HEAL_STALE_PR=true` repo variable (default off) the drain closes
+    it, opens a fresh bump covering the whole range, and reclaims the branch
+    through the normal confirmed-no-PR `--force-with-lease` path. It acts only on
+    CONFIRMED stale AND CONFIRMED dead. A draft (an explicit release hold) or an
+    unreadable state fails the run (`stale-defer`, exit 1) and is never closed.
+    The workflow also runs on the bump PR's `dequeued` event and on a non-green
+    completion of a workflow reporting its required checks (`workflow_run`,
+    scoped to `release/version-bump`), so a dead end is healed when it dies
+    rather than on the next push to main. Those runs check out main, never PR
+    code.
   - **No regression / no double-bump.** `_strictly_increasing` drops any
     assignment that does not exceed the surface's version at the fresh head, so a
     stale drain can never walk a version backward (independent of whether the

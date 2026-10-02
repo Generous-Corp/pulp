@@ -4029,14 +4029,23 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
-    - Stale bump PR: a drain that finds an open bump PR cut BEFORE its merge
-      fails `stale-defer` and waits for that PR to land. An ejected PR, or an
-      ARMED PR whose required checks failed, never lands, so every drain stays
-      red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true` (default off,
-      `--heal-stale-pr`) closes a CONFIRMED-stale bump PR unless it
-      is in the merge queue or a draft (armed does not protect it; closing drops
-      auto-merge, so no disarm is needed) and opens a fresh one.
-      An unknown coverage or queue/draft reading always fails closed.
+    - Stale bump PR: one cut BEFORE the merge being drained does not carry
+      that merge's intent, but it is safe to WAIT for while it can still land:
+      its landing re-runs the drain, which assesses every first-parent merge
+      after the bump's cut point (the marker commit's parent), skipping only
+      the bump's own merge. Starting after that integration merge instead
+      silently drops every merge that landed while the bump PR was open. A
+      queued stale PR, or one armed with required checks pending or green, is
+      `stale-wait` (exit 0 plus a `::notice::`), not a red run.
+      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) closes a
+      CONFIRMED-stale DEAD END only: ejected from the merge queue, unarmed, or a
+      required check failed (newest run per name). Closing a healthy one just
+      restarts its 8-36 min of checks so the replacement goes stale too. Drafts
+      and unreadable state fail closed (`stale-defer`, exit 1). `dequeued` and
+      non-green `workflow_run` events on `release/version-bump` re-run the
+      drain so a dead end heals when it dies, not on the next main push.
+      When grepping run logs for waits, match `was cut BEFORE this merge`:
+      the literal `stale-defer` also appears in a branch name in fetch output.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
