@@ -283,9 +283,12 @@ Perfetto work without deriving the result from a loose collection of events.
 For host diagnostics, `capability_report()` returns an allocation-free snapshot
 of the selected path. `path` distinguishes the ordinary staged worker from the
 experimental shared-memory path, while `provider` is `Dawn` only when the exact
-shared Dawn path is active and is otherwise `Unknown`. The snapshot
-also carries the prepared lead, miss policy, fallback availability, and whether
-transport diagnostics are available. `GpuConvolver::backend()` reports the
+shared Dawn path is active and is otherwise `Unknown`. The snapshot carries
+`prepared_latency_blocks` for the transport's fixed output/PDC delay. It carries
+`prepared_lead_blocks` only when an authenticated concrete provider establishes
+an algorithmic lead; generic staged nodes report zero there. It also carries the
+miss policy, fallback availability, and whether transport diagnostics are
+available. `GpuConvolver::backend()` reports the
 underlying native backend (`Metal` for this Dawn path), while `provider` reports
 the API implementation (`Dawn`). `Eligible` means the path was accepted by
 `prepare()`; it is not a hard real-time scheduling guarantee. The report is

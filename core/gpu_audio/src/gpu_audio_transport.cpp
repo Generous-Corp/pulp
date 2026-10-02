@@ -656,11 +656,31 @@ GpuAudioStatus GpuAudioTransport::status_snapshot() const noexcept {
     status.sample_rate = sample_rate_;
     status.block_size = block_size_;
     status.latency_samples = latency_samples();
-    status.selected_engine =
-        capability.path == GpuAudioExecutionPath::Cpu ? GpuAudioEngine::Cpu : GpuAudioEngine::Gpu;
-    status.provider_state = capability.eligibility == GpuAudioEligibility::Eligible
-                                ? GpuAudioProviderState::Ready
-                                : GpuAudioProviderState::Degraded;
+
+    // A prepared transport is not, by itself, evidence that work executes on
+    // a GPU. Generic GpuAudioNode implementations use the staged worker path
+    // and may be entirely CPU-backed; that path deliberately reports an
+    // unknown provider. Keep the public status honest instead of turning an
+    // unknown provider into a false "GPU/Ready" indicator. Concrete providers
+    // establish the engine only when their identity is authenticated.
+    if (capability.path == GpuAudioExecutionPath::Cpu) {
+        status.selected_engine = GpuAudioEngine::Cpu;
+    } else if (capability.provider != GpuAudioProvider::Unknown &&
+               capability.path != GpuAudioExecutionPath::Unavailable) {
+        status.selected_engine = GpuAudioEngine::Gpu;
+    } else {
+        status.selected_engine = GpuAudioEngine::Unknown;
+    }
+
+    if (capability.eligibility != GpuAudioEligibility::Eligible) {
+        status.provider_state = GpuAudioProviderState::Unavailable;
+    } else if (status.selected_engine == GpuAudioEngine::Unknown) {
+        // The transport is prepared, but its execution provider cannot be
+        // identified. This is a degraded diagnostic state, not GPU readiness.
+        status.provider_state = GpuAudioProviderState::Degraded;
+    } else {
+        status.provider_state = GpuAudioProviderState::Ready;
+    }
     return status;
 }
 
@@ -677,7 +697,12 @@ GpuAudioCapabilityReport GpuAudioTransport::capability_report() const noexcept {
                                                                : GpuAudioExecutionPath::Staged;
     report.eligibility = GpuAudioEligibility::Eligible;
     report.fallback_policy = miss_policy_;
-    report.prepared_lead_blocks = latency_blocks_;
+    report.prepared_latency_blocks = latency_blocks_;
+    // `latency_blocks_` is the transport's fixed PDC delay. It is also the
+    // algorithmic lead for authenticated concrete shared providers, but a
+    // generic staged node has no lead declaration at this boundary.
+    report.prepared_lead_blocks =
+        report.provider == GpuAudioProvider::Unknown ? 0 : latency_blocks_;
     report.prepared = true;
     report.fallback_available = miss_policy_ == MissPolicy::CpuFallback;
     report.diagnostics_available = true;

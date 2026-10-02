@@ -72,6 +72,7 @@ file(WRITE "${_root}/src/lifecycle_probe.cpp" [=[
 #include <pulp/audio/buffer.hpp>
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/gpu_audio/gpu_audio_transport.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -112,8 +113,21 @@ int main() {
         report.provider != GpuAudioProvider::Unknown ||
         report.eligibility != GpuAudioEligibility::Eligible ||
         report.fallback_policy != MissPolicy::CpuFallback ||
-        report.prepared_lead_blocks != 2 || !report.prepared ||
+        report.prepared_latency_blocks != 2 ||
+        report.prepared_lead_blocks != 0 || !report.prepared ||
         !report.fallback_available || !report.diagnostics_available) return 11;
+    const auto status = transport.status_snapshot();
+    // The installed status contract must not infer GPU execution from a
+    // generic staged node whose provider identity is unknown.
+    if (status.schema_version != GpuAudioStatus::kSchemaVersion ||
+        status.requested_engine != GpuAudioEngine::Unknown ||
+        status.selected_engine != GpuAudioEngine::Unknown ||
+        status.provider_state != GpuAudioProviderState::Degraded ||
+        status.provider != GpuAudioProvider::Unknown ||
+        status.sample_rate != 48000 || status.block_size != 32 ||
+        status.latency_samples != 64 ||
+        status.fallback_policy != MissPolicy::CpuFallback ||
+        !status.fallback_available || !status.diagnostics_available) return 16;
     Buffer<float> input(1, 32), output(1, 32);
     for (std::uint32_t block = 1; block <= 4; ++block) {
         std::fill(input.channel(0).begin(), input.channel(0).end(), static_cast<float>(block));
