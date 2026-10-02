@@ -170,6 +170,14 @@ public:
         double total_ms = 0.0;     ///< end-to-end
     };
     const ReloadMetrics& last_reload_metrics() const { return last_reload_metrics_; }
+    /// How many times this session evaluated a script on a throwaway probe
+    /// realm. A reload probes so a broken script cannot take down the live
+    /// editor; the first load has nothing to protect and never probes, so an
+    /// editor open evaluates its document exactly once. Exposed so tests and
+    /// editor-open budgets can assert that by count rather than by wall time.
+    std::uint64_t probe_realm_evaluations() const noexcept {
+        return probe_realm_evaluations_;
+    }
     /// Convenience: total wall-clock of the last reload, ms.
     double last_reload_ms() const { return last_reload_metrics_.total_ms; }
 
@@ -253,6 +261,7 @@ private:
     bool runtime_realm_quarantined_ = false;
     bool accessibility_retirement_pending_ = false;
     ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)
+    std::uint64_t probe_realm_evaluations_ = 0;
     bool last_theme_exists_ = false;
     std::optional<std::filesystem::file_time_type> last_theme_write_time_;
 

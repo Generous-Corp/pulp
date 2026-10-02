@@ -2,6 +2,7 @@
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/value_channel_set.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -562,32 +563,46 @@ bool ScriptedUiSession::rebuild_from_code(
             ? last_good_effective_theme_
             : (preserve_state ? base_theme_ : root_.theme());
         check_deadline();
-        auto probe_engine = make_engine();
-        install_native_message_handlers(*probe_engine, true);
-        check_deadline();
-        View probe_root;
-        probe_root.set_theme(theme_for_reload);
-        probe_root.flex().direction = FlexDirection::column;
-        state::StateStore probe_store;
-        for (const auto& group : store_.all_groups()) {
+        // The probe realm exists to protect a LIVE editor: a reload evaluates
+        // the new code on a throwaway tree first so a script that throws leaves
+        // the current UI untouched. The first load has no live editor to
+        // protect, so probing there only evaluates the whole script twice —
+        // for a captured document that doubled the editor-open cost (runtime
+        // compile, import, mount and settle all ran on a tree nobody sees).
+        // A first load that fails still fails closed: the catch below clears
+        // the provisional realm out of root_, exactly as a failed reload's
+        // provisional realm is cleared.
+        const bool needs_probe = bridge_ != nullptr || deadline.has_value();
+        if (needs_probe) {
+            PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_probe_realm");
+            ++probe_realm_evaluations_;
+            auto probe_engine = make_engine();
+            install_native_message_handlers(*probe_engine, true);
             check_deadline();
-            probe_store.add_group(group);
-        }
-        for (const auto& param : store_.all_params()) {
+            View probe_root;
+            probe_root.set_theme(theme_for_reload);
+            probe_root.flex().direction = FlexDirection::column;
+            state::StateStore probe_store;
+            for (const auto& group : store_.all_groups()) {
+                check_deadline();
+                probe_store.add_group(group);
+            }
+            for (const auto& param : store_.all_params()) {
+                check_deadline();
+                probe_store.add_parameter(param);
+                probe_store.set_value(param.id, store_.get_value(param.id));
+            }
             check_deadline();
-            probe_store.add_parameter(param);
-            probe_store.set_value(param.id, store_.get_value(param.id));
+            auto probe_bridge = std::make_unique<WidgetBridge>(
+                *probe_engine, probe_root, probe_store, nullptr, granted_capabilities_);
+            check_deadline();
+            if (runtime_import_enabled_)
+                probe_bridge->install_runtime_import_handlers();
+            probe_bridge->set_asset_roots(asset_roots_);
+            probe_bridge->set_script_base_dir(source_path.parent_path());
+            probe_bridge->set_host_kind(host_kind_);
+            load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         }
-        check_deadline();
-        auto probe_bridge = std::make_unique<WidgetBridge>(
-            *probe_engine, probe_root, probe_store, nullptr, granted_capabilities_);
-        check_deadline();
-        if (runtime_import_enabled_)
-            probe_bridge->install_runtime_import_handlers();
-        probe_bridge->set_asset_roots(asset_roots_);
-        probe_bridge->set_script_base_dir(source_path.parent_path());
-        probe_bridge->set_host_kind(host_kind_);
-        load_script_before_deadline(*probe_bridge, *probe_engine, code, deadline);
         const auto t_probe = clock::now();
 
         // Pre-resolve the theme override HERE — the last FALLIBLE step — BEFORE
@@ -656,7 +671,10 @@ bool ScriptedUiSession::rebuild_from_code(
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
         }
-        load_script_before_deadline(*next_bridge, *next_engine, code, deadline);
+        {
+            PULP_TRACE_SCOPE_NAMED("js", "scripted_ui_live_realm");
+            load_script_before_deadline(*next_bridge, *next_engine, code, deadline);
+        }
         check_deadline();
         if (!deadline)
             base_theme_ = root_.theme();
