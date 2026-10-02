@@ -169,8 +169,7 @@ class Latch {
         }
         if (spec_.mode == LatchMode::Hold && physical_down_ == 0)
             release_all_owned(event.sample_offset, output, report);
-        if (spec_.mode == LatchMode::Hold &&
-            physical_depth_[static_cast<std::size_t>(key)] == 0 &&
+        if (spec_.mode == LatchMode::Hold && physical_depth_[static_cast<std::size_t>(key)] == 0 &&
             owned_depth_[static_cast<std::size_t>(key)] != 0) {
             // Hold mode keeps one sounding voice per key. A re-press while
             // another physical key is held updates physical ownership but

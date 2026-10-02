@@ -262,12 +262,12 @@ TEST_CASE("latch counts retention depth so repeats stay balanced", "[midi][latch
 }
 
 TEST_CASE("latch hold suppresses a re-press of an already latched key", "[midi][latch][e126]") {
-    const std::array input{on(0, 60), on(10, 64), off(20, 60), on(30, 60),
-                           off(40, 64), off(50, 60)};
+    const std::array input{on(0, 60),  on(10, 64),  off(20, 60),
+                           on(30, 60), off(40, 64), off(50, 60)};
     midi::Latch latch{{midi::LatchMode::Hold}};
-    auto out = render([&](const auto& in, auto& o, std::int64_t, std::int32_t) {
-        latch.process(in, o);
-    }, 1'000, kWholeBlock, input);
+    auto out =
+        render([&](const auto& in, auto& o, std::int64_t, std::int32_t) { latch.process(in, o); },
+               1'000, kWholeBlock, input);
     REQUIRE(count_attacks(out) == 2);
     REQUIRE(attack_notes(out) == std::vector<std::uint8_t>{60, 64});
     REQUIRE(latch.owned_depth(0, 60) == 1);
