@@ -42,6 +42,27 @@ std::uint64_t now_ns() noexcept {
 } // namespace
 
 struct GpuWaveNetRealtimeNode::Impl {
+    struct Pending {
+        Bridge::Stamp stamp;
+        std::vector<float> output;
+        detail::SharedIoTraceRecord trace_record;
+        std::uint64_t completed_mask = 0;
+        detail::SharedIoTraceOutcome outcome = detail::SharedIoTraceOutcome::Success;
+        bool occupied = false;
+        bool trace_pending = false;
+        bool suppress = false;
+
+        void reset() noexcept {
+            stamp = {};
+            completed_mask = 0;
+            outcome = detail::SharedIoTraceOutcome::Success;
+            occupied = false;
+            trace_pending = false;
+            suppress = false;
+            trace_record = {};
+        }
+    };
+
     Config config;
     GpuWaveNetTraceConfig trace_config;
     std::uint64_t trace_engine = 0;
@@ -51,8 +72,6 @@ struct GpuWaveNetRealtimeNode::Impl {
     detail::SharedIoTraceDrainObserver trace_observer;
     std::uint32_t unresolved_channel_count = 0;
     detail::SharedIoTraceRecord trace_record;
-    bool trace_pending = false;
-    detail::SharedIoTraceOutcome pending_outcome = detail::SharedIoTraceOutcome::Success;
 
     void drain_trace() noexcept {
         if (trace)
@@ -61,39 +80,40 @@ struct GpuWaveNetRealtimeNode::Impl {
                 static_cast<std::uint32_t>(detail::SharedIoTraceRecorder::capacity),
                 &trace_observer);
     }
-    void trace_admit(const Bridge::Lease& input) noexcept {
+    void trace_admit(Pending& pending, const Bridge::Lease& input) noexcept {
         if (!trace)
             return;
-        trace_record = {};
-        trace_record.generation = epoch;
-        trace_record.sequence = input.stamp().sequence;
-        trace_record.gpu_work_admitted = true;
-        trace_record.callback_ingress_ns = input.callback_ingress_ns();
-        trace_record.set(detail::SharedIoTraceStage::WorkerEntry, now_ns());
-        trace_pending = true;
+        pending.trace_record = {};
+        pending.trace_record.generation = epoch;
+        pending.trace_record.sequence = input.stamp().sequence;
+        pending.trace_record.gpu_work_admitted = true;
+        pending.trace_record.callback_ingress_ns = input.callback_ingress_ns();
+        pending.trace_record.set(detail::SharedIoTraceStage::WorkerEntry, now_ns());
+        pending.trace_pending = true;
         (void)trace->publish_admission(epoch, input.stamp().sequence);
     }
-    void trace_stage(detail::SharedIoTraceStage stage) noexcept {
-        if (trace_pending && trace)
-            trace_record.set(stage, now_ns());
+    void trace_stage(Pending& pending, detail::SharedIoTraceStage stage) noexcept {
+        if (pending.trace_pending && trace)
+            pending.trace_record.set(stage, now_ns());
     }
-    void trace_terminal(detail::SharedIoTraceOutcome outcome,
+    void trace_terminal(Pending& pending, detail::SharedIoTraceOutcome outcome,
                         detail::SharedIoGpuTerminalDisposition terminal,
                         detail::SharedIoFallbackReason reason, bool observed = false) noexcept {
-        if (!trace_pending || !trace)
+        if (!pending.trace_pending || !trace)
             return;
-        trace_pending = false;
-        trace_record.outcome = outcome;
-        trace_record.gpu_terminal = terminal;
-        trace_record.reason = trace_record.gpu_reason = reason;
+        pending.trace_pending = false;
+        pending.trace_record.outcome = outcome;
+        pending.trace_record.gpu_terminal = terminal;
+        pending.trace_record.reason = pending.trace_record.gpu_reason = reason;
         if (observed)
-            trace_record.set(detail::SharedIoTraceStage::CompletionObserved, now_ns());
+            pending.trace_record.set(detail::SharedIoTraceStage::CompletionObserved, now_ns());
         // Retirement is the host-side point at which this admitted block has
         // a final GPU disposition. It is deliberately separate from
         // CompletionObserved: a provider can fail, go stale, or be cancelled
         // without ever producing a completion.
-        trace_record.set(detail::SharedIoTraceStage::RetirementObserved, now_ns());
-        (void)trace->publish_worker(trace_record);
+        pending.trace_record.set(detail::SharedIoTraceStage::RetirementObserved, now_ns());
+        trace_record = pending.trace_record;
+        (void)trace->publish_worker(pending.trace_record);
         telemetry.record_retired(outcome == detail::SharedIoTraceOutcome::Success);
     }
     detail::SharedIoFallbackReason recovery_trace_reason() const noexcept {
@@ -120,15 +140,20 @@ struct GpuWaveNetRealtimeNode::Impl {
     void close_pending_trace() noexcept {
         // Physical drain closes ownership; it must not erase a failure already
         // observed before teardown. No completion timestamp is inferred here.
-        if (pending_outcome != detail::SharedIoTraceOutcome::Success)
-            trace_terminal(pending_outcome, detail::SharedIoGpuTerminalDisposition::ProviderFailed,
-                           pending_outcome == detail::SharedIoTraceOutcome::SubmissionRejected
-                               ? detail::SharedIoFallbackReason::SubmissionRejected
-                               : detail::SharedIoFallbackReason::CompletionFailed);
-        else
-            trace_terminal(detail::SharedIoTraceOutcome::Cancelled,
-                           detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
-                           detail::SharedIoFallbackReason::Teardown);
+        for (auto& pending : pending_ring) {
+            if (!pending.occupied)
+                continue;
+            if (pending.outcome != detail::SharedIoTraceOutcome::Success)
+                trace_terminal(pending, pending.outcome,
+                               detail::SharedIoGpuTerminalDisposition::ProviderFailed,
+                               pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
+                                   ? detail::SharedIoFallbackReason::SubmissionRejected
+                                   : detail::SharedIoFallbackReason::CompletionFailed);
+            else
+                trace_terminal(pending, detail::SharedIoTraceOutcome::Cancelled,
+                               detail::SharedIoGpuTerminalDisposition::CancelledTeardown,
+                               detail::SharedIoFallbackReason::Teardown);
+        }
     }
     void close_trace() noexcept {
         if (!trace)
@@ -149,11 +174,12 @@ struct GpuWaveNetRealtimeNode::Impl {
     std::vector<std::unique_ptr<detail::WaveNetRealtimeChannel>> channels;
     std::unique_ptr<Bridge> bridge;
     std::vector<float> callback_input, callback_output, worker_output;
-    std::vector<std::uint8_t> completed;
+    std::vector<Pending> pending_ring;
     Bridge::Callback callback;
-    Bridge::Stamp pending;
+    std::size_t pending_head = 0, pending_count = 0;
     std::uint64_t next_input = 0, sequence = 0, epoch = 0;
-    bool prepared = false, inflight = false, production_provider = false, suppress_pending = false;
+    std::uint64_t all_channels_mask = 0;
+    bool prepared = false, production_provider = false;
 
     explicit Impl(const Config& source)
         : config(source),
@@ -170,8 +196,9 @@ struct GpuWaveNetRealtimeNode::Impl {
     bool valid_config(bool include_prewarm = true) const noexcept {
         const auto& c = config;
         return c.channels > 0 && c.channels <= 64 && c.lead_blocks > 0 &&
-               c.capacity > c.lead_blocks && c.session.slots >= 2 &&
-               c.completion_service_wait_ns <= 1'000'000 &&
+               c.capacity > c.lead_blocks && c.max_inflight > 0 &&
+               c.max_inflight <= c.session.slots && c.max_inflight <= c.capacity - c.lead_blocks &&
+               c.session.slots >= 2 && c.completion_service_wait_ns <= 1'000'000 &&
                validate_gpu_wavenet_descriptor(c.session.descriptor).accepted() &&
                weights.size() == c.session.descriptor.weight_count &&
                (c.miss_policy != MissPolicy::CpuFallback || c.supports_cpu_fallback) &&
@@ -196,9 +223,12 @@ struct GpuWaveNetRealtimeNode::Impl {
         callback_input.assign(count, 0.f);
         callback_output.assign(count, 0.f);
         worker_output.assign(count, 0.f);
-        completed.assign(c.channels, 0);
+        pending_ring.assign(c.max_inflight, {});
+        for (auto& pending : pending_ring)
+            pending.output.assign(count, 0.f);
+        pending_head = pending_count = 0;
+        all_channels_mask = c.channels == 64 ? UINT64_MAX : (UINT64_C(1) << c.channels) - 1;
         next_input = sequence;
-        inflight = false;
         if (trace_config.enabled) {
             if (!trace_engine)
                 trace_engine = detail::next_shared_io_trace_engine_id();
@@ -235,53 +265,80 @@ struct GpuWaveNetRealtimeNode::Impl {
                 channels[ch]->service_until(service_now, deadline);
             else
                 channels[ch]->service(service_now);
-            if (inflight && !completed[ch]) {
-                if (auto result = channels[ch]->receive({worker_output.data() + ch * n, n})) {
-                    completed[ch] = 1;
-                    suppress_pending = suppress_pending || result->late;
-                    if (result->sequence != pending.sequence ||
-                        result->status != GpuWaveNetBlockStatus::GpuDelivered) {
-                        if (pending_outcome == detail::SharedIoTraceOutcome::Success)
-                            pending_outcome = detail::SharedIoTraceOutcome::CompletionFailed;
-                        fail(detail::SharedIoRecoveryReason::ProviderFailure);
+            std::size_t received = 0;
+            while (received < pending_count) {
+                auto result = channels[ch]->receive({worker_output.data() + ch * n, n});
+                if (!result)
+                    break;
+                ++received;
+                Pending* pending = nullptr;
+                for (std::size_t offset = 0; offset < pending_count; ++offset) {
+                    auto& candidate = pending_ring[(pending_head + offset) % pending_ring.size()];
+                    if (candidate.occupied && candidate.stamp.sequence == result->sequence) {
+                        pending = &candidate;
+                        break;
                     }
+                }
+                if (pending == nullptr) {
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                    continue;
+                }
+                const auto bit = UINT64_C(1) << ch;
+                if ((pending->completed_mask & bit) != 0) {
+                    pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                    continue;
+                }
+                pending->completed_mask |= bit;
+                pending->suppress = pending->suppress || result->late;
+                if (result->status != GpuWaveNetBlockStatus::GpuDelivered) {
+                    if (pending->outcome == detail::SharedIoTraceOutcome::Success)
+                        pending->outcome = detail::SharedIoTraceOutcome::CompletionFailed;
+                    fail(detail::SharedIoRecoveryReason::ProviderFailure);
+                } else {
+                    std::copy_n(worker_output.data() + ch * n, n, pending->output.data() + ch * n);
                 }
             }
         }
         std::uint32_t produced = 0;
-        if (inflight &&
-            std::all_of(completed.begin(), completed.end(), [](auto v) { return v != 0; })) {
-            inflight = false;
-            if (pending_outcome != detail::SharedIoTraceOutcome::Success) {
-                trace_terminal(pending_outcome,
+        while (pending_count != 0) {
+            auto& pending = pending_ring[pending_head];
+            if (!pending.occupied || pending.completed_mask != all_channels_mask)
+                break;
+            if (pending.outcome != detail::SharedIoTraceOutcome::Success) {
+                trace_terminal(pending, pending.outcome,
                                detail::SharedIoGpuTerminalDisposition::ProviderFailed,
-                               pending_outcome == detail::SharedIoTraceOutcome::SubmissionRejected
+                               pending.outcome == detail::SharedIoTraceOutcome::SubmissionRejected
                                    ? detail::SharedIoFallbackReason::SubmissionRejected
                                    : detail::SharedIoFallbackReason::CompletionFailed,
                                true);
-            } else if (suppress_pending) {
-                trace_terminal(detail::SharedIoTraceOutcome::LateRejected,
+            } else if (pending.suppress) {
+                trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                detail::SharedIoGpuTerminalDisposition::LateRejected,
                                detail::SharedIoFallbackReason::DeadlineExceeded, true);
-            } else if (bridge->delivery_epoch() != pending.epoch) {
-                trace_terminal(detail::SharedIoTraceOutcome::StaleRejected,
+            } else if (bridge->delivery_epoch() != pending.stamp.epoch) {
+                trace_terminal(pending, detail::SharedIoTraceOutcome::StaleRejected,
                                detail::SharedIoGpuTerminalDisposition::StaleRejected,
                                recovery_trace_reason(), true);
             }
-            if (!suppress_pending && bridge->delivery_epoch() == pending.epoch) {
-                const auto publication = bridge->publish_output(pending, worker_output);
-                produced = publication == Bridge::Publication::Published ? 1 : 0;
+            if (!pending.suppress && bridge->delivery_epoch() == pending.stamp.epoch &&
+                pending.outcome == detail::SharedIoTraceOutcome::Success) {
+                const auto publication = bridge->publish_output(pending.stamp, pending.output);
+                produced += publication == Bridge::Publication::Published ? 1 : 0;
                 if (publication != Bridge::Publication::Published) {
-                    trace_terminal(detail::SharedIoTraceOutcome::LateRejected,
+                    trace_terminal(pending, detail::SharedIoTraceOutcome::LateRejected,
                                    detail::SharedIoGpuTerminalDisposition::LateRejected,
                                    detail::SharedIoFallbackReason::InputSaturated, true);
                     fail(detail::SharedIoRecoveryReason::InputSaturated);
                 } else {
-                    trace_terminal(detail::SharedIoTraceOutcome::Success,
+                    trace_terminal(pending, detail::SharedIoTraceOutcome::Success,
                                    detail::SharedIoGpuTerminalDisposition::CompletedAccepted,
                                    detail::SharedIoFallbackReason::None, true);
                 }
             }
+            pending.reset();
+            pending_head = (pending_head + 1) % pending_ring.size();
+            --pending_count;
         }
         return produced;
     }
@@ -393,7 +450,8 @@ bool GpuWaveNetRealtimeNode::release() noexcept {
     s.close_trace();
     s.channels.clear();
     s.bridge.reset();
-    s.inflight = false;
+    s.pending_ring.clear();
+    s.pending_head = s.pending_count = 0;
     return true;
 }
 void GpuWaveNetRealtimeNode::process_block(const audio::BufferView<const float>&,
@@ -455,45 +513,50 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         }
     } drain{s};
     auto produced = s.service_and_collect(pump_now, deadline);
-    if (s.inflight || !s.bridge->begin_worker_admission())
+    if (!s.bridge->begin_worker_admission())
         return produced;
     bool all_submitted = false;
-    auto input = s.bridge->acquire_input();
-    if (input) {
+    while (s.pending_count < s.pending_ring.size()) {
+        auto input = s.bridge->acquire_input();
+        if (!input)
+            break;
+        auto& pending = s.pending_ring[(s.pending_head + s.pending_count) % s.pending_ring.size()];
+        pending.reset();
+        pending.occupied = true;
         const auto stamp = input->stamp();
-        s.trace_admit(*input);
+        s.trace_admit(pending, *input);
         if (stamp.epoch != s.bridge->delivery_epoch() || stamp.sequence != s.next_input) {
-            s.trace_terminal(detail::SharedIoTraceOutcome::StaleRejected,
+            s.trace_terminal(pending, detail::SharedIoTraceOutcome::StaleRejected,
                              detail::SharedIoGpuTerminalDisposition::StaleRejected,
                              detail::SharedIoFallbackReason::SequenceGap);
+            pending.reset();
             s.fail(detail::SharedIoRecoveryReason::SequenceGap);
-        } else {
-            s.pending = stamp;
-            s.suppress_pending = false;
-            s.pending_outcome = detail::SharedIoTraceOutcome::Success;
-            std::fill(s.completed.begin(), s.completed.end(), 0);
-            s.inflight = true;
-            all_submitted = true;
-            s.trace_stage(detail::SharedIoTraceStage::EncodeBegin);
-            // WaveNet's provider path does not expose a separate command
-            // encoder. The channel submit boundary is the authenticated host
-            // submission region, so keep encode and submit timestamps distinct
-            // without claiming either is a GPU timestamp.
-            s.trace_stage(detail::SharedIoTraceStage::EncodeEnd);
-            s.trace_stage(detail::SharedIoTraceStage::SubmitBegin);
-            for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
-                if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
-                    all_submitted = false;
-                    s.completed[ch] = 1;
-                    s.pending_outcome = detail::SharedIoTraceOutcome::SubmissionRejected;
-                    s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
-                }
-            }
-            s.trace_stage(detail::SharedIoTraceStage::SubmitEnd);
-            if (s.trace)
-                s.telemetry.record_submit();
-            ++s.next_input;
+            (void)s.bridge->release_input(*input);
+            break;
         }
+        pending.stamp = stamp;
+        s.trace_stage(pending, detail::SharedIoTraceStage::EncodeBegin);
+        // WaveNet's provider path does not expose a separate command encoder.
+        // The channel submit boundary is the authenticated host submission
+        // region, so keep encode and submit timestamps distinct without
+        // claiming either is a GPU timestamp.
+        s.trace_stage(pending, detail::SharedIoTraceStage::EncodeEnd);
+        s.trace_stage(pending, detail::SharedIoTraceStage::SubmitBegin);
+        bool submission_ok = true;
+        for (std::size_t ch = 0; ch < s.channels.size(); ++ch) {
+            if (!s.channels[ch]->submit(input->samples().subspan(ch * n, n), stamp.sequence)) {
+                submission_ok = false;
+                pending.completed_mask |= UINT64_C(1) << ch;
+                pending.outcome = detail::SharedIoTraceOutcome::SubmissionRejected;
+                s.fail(detail::SharedIoRecoveryReason::ProviderFailure);
+            }
+        }
+        s.trace_stage(pending, detail::SharedIoTraceStage::SubmitEnd);
+        if (s.trace)
+            s.telemetry.record_submit();
+        ++s.next_input;
+        ++s.pending_count;
+        all_submitted = all_submitted || submission_ok;
         (void)s.bridge->release_input(*input);
     }
     s.bridge->end_worker_admission();
@@ -501,6 +564,7 @@ std::uint32_t GpuWaveNetRealtimeNode::service(void* self, std::uint64_t) noexcep
         produced += s.service_and_collect(now_ns(), deadline);
     return produced;
 }
+
 bool GpuWaveNetRealtimeNode::fence(void* self) noexcept {
     auto& s = *static_cast<GpuWaveNetRealtimeNode*>(self)->impl_;
     if (!s.bridge)
