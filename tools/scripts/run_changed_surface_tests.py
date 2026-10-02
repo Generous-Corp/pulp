@@ -370,6 +370,19 @@ def base_projection(
 
     if not re.fullmatch(r"[0-9a-f]{40}", base_sha or ""):
         raise SelectionExecutionError(f"inventory: base not recorded: invalid base {base_sha!r}")
+    flags = [str(flag) for flag in policy.get("build_flags", [])]
+    cache_entries = _cache_entries(build_dir)
+    # A universal macOS build lipos a second WebGPU slice that
+    # tools/cmake/PulpWgpuUniversal.cmake downloads with file(DOWNLOAD), which
+    # FETCHCONTENT_FULLY_DISCONNECTED does not govern. Refuse rather than let a
+    # base configure reach the network.
+    architectures = [
+        flag.split("=", 1)[1] for flag in flags if flag.startswith("-DCMAKE_OSX_ARCHITECTURES=")
+    ] + [cache_entries.get("CMAKE_OSX_ARCHITECTURES", "")]
+    if any(len([arch for arch in value.split(";") if arch.strip()]) > 1 for value in architectures):
+        raise SelectionExecutionError(
+            "inventory: base not recorded: a universal build cannot be configured disconnected"
+        )
     # The plan verified this base as the PR's merge base on the protected ref;
     # a checkout whose merge base is anything else is not the tree it planned.
     merge_base = runner(["git", "-C", str(repo_root), "merge-base", "HEAD", base_sha],
@@ -378,8 +391,6 @@ def base_projection(
         raise SelectionExecutionError(
             f"inventory: base mismatch: {base_sha} is not this checkout's merge base"
         )
-    flags = [str(flag) for flag in policy.get("build_flags", [])]
-    cache_entries = _cache_entries(build_dir)
     generator = cache_entries.get("CMAKE_GENERATOR", "")
     python = cache_entries.get("Python3_EXECUTABLE", "")
     key = hashlib.sha256(
