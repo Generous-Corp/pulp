@@ -440,6 +440,21 @@ TEST_CASE("neural processor does not call CPU-only auto selection a fallback",
     CHECK_FALSE(processor.snapshot().fell_back_to_cpu);
 }
 
+TEST_CASE("neural processor honors an explicit CPU-only preference",
+          "[gpu_audio][neural_processor]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context, NeuralProviderPreference::CpuOnly,
+                              {.cpu = true, .mlx = true, .dawn = true}));
+    REQUIRE(processor.publish());
+    CHECK(processor.snapshot().provider == NeuralProvider::Cpu);
+    CHECK_FALSE(processor.snapshot().fell_back_to_cpu);
+}
+
 TEST_CASE("neural processor releases a pending preparation transaction",
           "[gpu_audio][neural_processor]") {
     IdentityModel model;

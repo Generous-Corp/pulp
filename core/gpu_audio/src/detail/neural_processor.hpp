@@ -103,8 +103,9 @@ class NeuralProcessor final {
         // that this CPU-only facade cannot yet execute) records fallback.
         pending_.fell_back_to_cpu =
             preference == NeuralProviderPreference::PreferMlx ||
-            preference == NeuralProviderPreference::PreferDawn || capabilities.mlx ||
-            capabilities.dawn;
+            preference == NeuralProviderPreference::PreferDawn ||
+            (preference == NeuralProviderPreference::Auto &&
+             (capabilities.mlx || capabilities.dawn));
         pending_.max_frames = context.max_frames;
         pending_.generation = ++next_generation_;
         pending_.prepared = true;
