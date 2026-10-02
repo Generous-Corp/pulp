@@ -7180,6 +7180,15 @@ command after the build, or any difference from the base. The receipt records
 unbuilt base could not list, compared on name, arguments and properties) and
 `base_inventory_configure_seconds`.
 
+The scratch base is provisioned like the head before it configures: `setup.sh
+--deps-only` links `external/` from the shared source cache with git limited to
+local objects. A worktree never inherits the untracked SDK links, and a base
+without them configures without AudioUnitSDK, at C++20 instead of C++23, which
+changes the `test-pch-wiring` registration and refused every bounded plan.
+Every `PULP_HAS_*` cache entry must then agree between base and head, or the run
+refuses with `inventory: base_provisioning_mismatch: <switch> base=... head=...`,
+so the next provisioning gap names itself rather than reading as drift.
+
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The
 lock is persistent by design (removing it can split lock identity under queued
