@@ -18,8 +18,10 @@ struct NeuralModelManifest {
     std::string_view artifact_id{};
     std::string_view artifact_sha256{};
     std::string_view license{};
+    std::string_view runtime{};
     std::string_view state_schema{};
     std::uint64_t artifact_size_bytes = 0;
+    std::uint32_t sample_rate_hz = 0;
     std::uint64_t state_bytes = 0;
     std::uint32_t state_schema_version = 0;
     bool redistributable = false;
@@ -31,6 +33,8 @@ enum class NeuralModelManifestError : std::uint8_t {
     InvalidArtifactHash,
     MissingLicense,
     NonRedistributableArtifact,
+    InvalidArtifactSize,
+    MissingCompatibilityMetadata,
     InvalidStateSchema,
 };
 
@@ -64,10 +68,14 @@ validate_neural_model_manifest(const NeuralModelManifest& manifest,
         return {NeuralModelManifestError::MissingIdentity};
     if (!is_sha256(manifest.artifact_sha256))
         return {NeuralModelManifestError::InvalidArtifactHash};
+    if (manifest.artifact_size_bytes == 0)
+        return {NeuralModelManifestError::InvalidArtifactSize};
     if (manifest.license.empty())
         return {NeuralModelManifestError::MissingLicense};
     if (use == NeuralModelUse::Shipped && !manifest.redistributable)
         return {NeuralModelManifestError::NonRedistributableArtifact};
+    if (manifest.runtime.empty() || manifest.sample_rate_hz == 0)
+        return {NeuralModelManifestError::MissingCompatibilityMetadata};
     if ((manifest.state_bytes != 0) != (!manifest.state_schema.empty()) ||
         (manifest.state_bytes != 0 && manifest.state_schema_version == 0))
         return {NeuralModelManifestError::InvalidStateSchema};
@@ -79,7 +87,8 @@ validate_neural_model_manifest(const NeuralModelManifest& manifest,
 /// policy.  This seam does not change ModelEntry or weaken existing catalogs;
 /// callers opt into strict neural admission after resolving their policy.
 inline NeuralModelManifestValidation validate_neural_model_entry(
-    const pulp::runtime::ModelEntry& entry, bool redistributable) noexcept {
+    const pulp::runtime::ModelEntry& entry, bool redistributable,
+    std::uint32_t sample_rate_hz, std::string_view runtime) noexcept {
     NeuralModelManifest manifest{
         .model_id = entry.model_id,
         .architecture = entry.backend,
@@ -87,8 +96,10 @@ inline NeuralModelManifestValidation validate_neural_model_entry(
         .artifact_id = entry.checkpoint_ref,
         .artifact_sha256 = entry.sha256,
         .license = entry.license,
+        .runtime = runtime,
         .state_schema = {},
         .artifact_size_bytes = entry.size_bytes,
+        .sample_rate_hz = sample_rate_hz,
         .state_bytes = 0,
         .state_schema_version = 0,
         .redistributable = redistributable,
