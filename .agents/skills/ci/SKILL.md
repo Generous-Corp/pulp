@@ -2111,6 +2111,28 @@ generated `build_info.hpp` (configure timestamp) sits in an include directory
 629 targets inherit, which re-keys 560 of 789 targets on every configure; the
 Ninja dependency log says which few actually include it.
 
+`file(GENERATE)` whose CONTENT holds a per-configuration generator expression
+(`$<TARGET_FILE:...>`, `$<CONFIG>`, anything under a config-dependent output
+directory) breaks every multi-config generator: Xcode and Ninja Multi-Config
+evaluate the file once per configuration, and the configure fails with
+"Evaluation file to be written multiple times with different content". The
+macOS gate is single-config Ninja, so only the iOS compile gate (Xcode) sees
+it. Write configuration-free content (a target NAME, resolved later through
+the codemodel), or put `$<CONFIG>` in the OUTPUT path. Reproduce with a
+`-G "Ninja Multi-Config"` configure before pushing; tools/ci/
+test_commit_bound_cmake.py carries that case.
+
+A byte difference between two builds of identical recorded inputs is not
+automatically a link or host artifact. Release links carry no N_OSO debug map,
+and LC_UUID and the code signature follow content, so strip (`strip -S`) and
+unsign (`codesign --remove-signature`) copies and map the remaining offsets to
+sections before naming a cause. pulp-test-runtime differed by one `__text`
+instruction: `REQUIRE(kGitSha.size() >= 7)` captures the length of
+`git rev-parse --short HEAD` (build_info.hpp), and git's abbreviation length
+grows with the clone's object count, so the same commit stamps 10 or 12
+characters. The v2 codemodel digest keys build_info.hpp's content, so the
+target re-keys rather than being normalised.
+
 ## A new Python test needs three generators, not three hand edits
 
 Adding or changing a Python selftest or script drifts three generated files,
