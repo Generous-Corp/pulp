@@ -15,6 +15,7 @@ import concurrent.futures
 import datetime as dt
 import gzip
 import http.client
+import io
 import json
 import os
 import re
@@ -26,6 +27,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
@@ -143,6 +145,7 @@ API = "https://api.github.com"
 REPOSITORY = "Generous-Corp/pulp"
 WORKFLOW = "build.yml"
 QUEUE_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(?P<pr>\d+)-(?P<base>[0-9a-f]{40})$")
+REUSE_RECORD_ARTIFACT = "reuse-record-macos"
 CTEST_JOB_NAMES = (re.compile(r"^macOS \(ARM64\)"), re.compile(r"^macos$"))
 
 
@@ -382,6 +385,27 @@ class Collector:
             elif cr.get("conclusion") not in GREEN_CONCLUSIONS:
                 out["red"].append(context)
         return out
+
+    def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
+        """The per-target codemodel digests a run's `reuse-record-macos`
+        artifact holds (name -> digest, type, artifacts, dependencies), or
+        None when the run recorded none."""
+        def fetch() -> dict:
+            listing = self.gh.json(f"repos/{self.gh.repository}/actions/runs/{run_id}/artifacts?per_page=100")
+            art = next((a for a in listing.get("artifacts", [])
+                        if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
+            if art is None:
+                return {"targets": None}
+            with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
+                blob = resp.read()
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                name = next((n for n in zf.namelist() if Path(n).name.startswith("codemodel-")), None)
+                if name is None:
+                    return {"targets": None}
+                doc = json.loads(zf.read(name))
+            return {"targets": {n: {k: t.get(k) for k in ("digest", "type", "artifacts", "dependencies")}
+                                for n, t in (doc.get("targets") or {}).items()}}
+        return self._cached(f"codemodel/{run_id}.json.gz", fetch)["targets"]
 
     def merged_at(self, since: dt.datetime) -> dict[int, str | None]:
         """merged_at per closed pull request updated since `since`."""
@@ -767,6 +791,15 @@ def _required_contexts(repo: Path) -> tuple[str, ...]:
 #   list-level   per-entry, except a script test also runs whenever the
 #                list file itself changed. A negative control: it must read
 #                lower than per-entry.
+#   cmake-codemodel
+#                strict-data, except a CMake change no longer re-keys every
+#                target: only executables whose recorded file-API codemodel
+#                digest (sources, compile groups, link line, test
+#                registrations) differs between the head job and the group
+#                job, or that depend on such a target, are re-keyed. Written
+#                only when both jobs recorded a codemodel; an executable the
+#                group's codemodel does not describe (a name the graph knows
+#                but the recorded build does not) keeps the strict rule.
 #
 # A test the map does not know (an unmapped compiled test, an executable
 # the graph does not build, a script test with no entry) always runs.
@@ -792,13 +825,42 @@ def environment_bound(mapped: dict) -> bool:
     return bool(mapped.get("resource_locks")) or bool(ENVIRONMENT_LABELS & set(mapped.get("labels") or []))
 
 
+def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict]) -> tuple[set[str], set[str]]:
+    """(executables re-keyed by a codemodel change, executables the group's
+    codemodel describes), both relative to the build dir.
+
+    A target is re-keyed when its digest differs from the head job's or it
+    is new, and so is every target that depends on one, transitively: the
+    digest names its dependencies but does not cover their content."""
+    changed = {n for n, t in group.items() if n not in head or head[n].get("digest") != t.get("digest")}
+    dependents: dict[str, set[str]] = {}
+    for n, t in group.items():
+        for d in t.get("dependencies") or []:
+            dependents.setdefault(d, set()).add(n)
+    stack = list(changed)
+    while stack:
+        for n in dependents.get(stack.pop(), ()):
+            if n not in changed:
+                changed.add(n)
+                stack.append(n)
+
+    def exes(names: Iterable[str]) -> set[str]:
+        return {a.removeprefix("<build>/") for n in names for a in group[n].get("artifacts") or []
+                if group[n].get("type") == "EXECUTABLE"}
+    return exes(changed), exes(group)
+
+
 def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
                          head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
-                         rebuilt: set[str], all_executables: set[str]) -> dict[str, dict]:
+                         rebuilt: set[str], all_executables: set[str],
+                         codemodel: tuple[set[str], set[str]] | None = None) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
 
     `rebuilt` is the set of executables (relative to the build dir) the drift
-    reaches through the graph. Pure: the graph and git reads happen before."""
+    reaches through the graph; `all_executables` the ones the graph builds.
+    The build share counts only the executables the group's own tests run,
+    so a graph configured with more targets than the gate (examples) does
+    not dilute it. Pure: the graph and git reads happen before."""
     import test_receipts_shadow  # tools/ci: the always-run names and the runtime-surface rule
     always_run = test_receipts_shadow.ALWAYS_RUN_NAME_RE
     surface = test_receipts_shadow.is_runtime_surface
@@ -807,8 +869,16 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     data = sorted(f for f in drift if surface(f) and not _is_cmake(f) and f != SCRIPT_INPUTS_PATH)
     list_changed = SCRIPT_INPUTS_PATH in drift_set
     out: dict[str, dict] = {}
-    for variant in SOURCE_KEY_VARIANTS:
-        strict = variant == "strict-data"
+    counted = {e for name in group_tests for e in (test_map.get(name) or {}).get("executables") or []} & all_executables
+    rekeyed, described = codemodel or (set(), set())
+    variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel",) if codemodel is not None else ())
+    for variant in variants:
+        exact_cmake = variant == "cmake-codemodel"
+        strict = variant in ("strict-data", "cmake-codemodel")
+        # The re-key rule a CMake change triggers: everything, or only the
+        # executables whose codemodel entry moved (and the undescribed ones).
+        cmake_hit = (lambda exes: bool(set(exes) & rekeyed) or (cmake and not set(exes) <= described)) \
+            if exact_cmake else (lambda exes: cmake)
         run: list[str] = []
         for name in group_tests:
             mapped = test_map.get(name) or {}
@@ -816,7 +886,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             if strict and (always_run.search(name) or environment_bound(mapped)):
                 run.append(name)
             elif exes:
-                if (not set(exes) <= all_executables or (strict and (cmake or data))
+                if (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
                         or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])):
                     run.append(name)
             elif group_entries is not None and name in group_entries and head_entries is not None:
@@ -827,10 +897,18 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                     run.append(name)
             else:
                 run.append(name)  # unknown inputs: never skippable
-        total = len(all_executables)
-        rebuilt_n = total if (strict and cmake) else len(rebuilt & all_executables)
-        out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": rebuilt_n,
+        total = len(counted)
+        if exact_cmake:
+            rebuilt_set = (rebuilt | rekeyed | ((counted - described) if cmake else set())) & counted
+        else:
+            rebuilt_set = counted if (strict and cmake) else rebuilt & counted
+        out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": len(rebuilt_set),
                         "cmake_changed": cmake, "data_changed": data[:20]}
+        if codemodel is not None:
+            # The same counts over the executables the recorded build
+            # describes, where the variants can be compared exactly.
+            out[variant]["described_total"] = len(counted & described)
+            out[variant]["described_rebuilt"] = len(rebuilt_set & described)
     return out
 
 
@@ -850,15 +928,20 @@ def load_graph(build_dir: Path | None, pickle_path: Path | None):
 
 
 def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root: Path, graph_build_dir: Path,
-                         test_map: dict[str, dict], only_runs: set[str] | None = None) -> dict:
-    """Write the three source-key variants into each pair that has a valid
-    head run with per-test records; return counts for the manifest."""
+                         test_map: dict[str, dict], only_runs: set[str] | None = None,
+                         gh: "GitHub | None" = None) -> dict:
+    """Write the source-key variants into each pair that has a valid head run
+    with per-test records; with `gh`, also the cmake-codemodel variant for
+    pairs whose head and group jobs both recorded a codemodel. Returns counts
+    for the manifest."""
     import reuse_policy_replay as rpr
     corpus = rpr.Corpus.load(corpus_dir)
     collector = Collector.__new__(Collector)
     collector.repo, collector.cache = repo, corpus_dir / "cache"
     collector._git_lock, collector._commit_cache = threading.Lock(), {}
+    collector.gh = gh
     entries_cache: dict[str, dict | None] = {}
+    with_codemodel = 0
 
     unread: list[str] = []
 
@@ -896,12 +979,19 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
         changed_abs = [os.path.realpath(os.path.join(graph_source_root, f)) for f in drift]
         reached = graph.affected_outputs(changed_abs)
         rebuilt = {os.path.relpath(p, build_real) for p in reached if p.startswith(build_real + os.sep)}
+        codemodel = None
+        if gh is not None:
+            head_cm, group_cm = collector.codemodel_targets(head["run_id"]), collector.codemodel_targets(group["run_id"])
+            if head_cm is not None and group_cm is not None:
+                codemodel = codemodel_rekeyed(head_cm, group_cm)
+                with_codemodel += 1
         pair["source_key"] = classify_source_keys(
             drift, [t["test_id"] for t in tests], test_map, entries(head["checkout_sha"]),
-            entries(group["checkout_sha"]), rebuilt, all_exes)
+            entries(group["checkout_sha"]), rebuilt, all_exes, codemodel)
         pair["source_key_head_run_id"] = head_row["run_id"]
         done += 1
     write_jsonl(corpus_dir / "pairs.jsonl", corpus.pairs)
     # A list that cannot be read makes every script test unknown (it runs);
     # name the commits so a low number is traceable to its cause.
-    return {"pairs_annotated": done, "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}
+    return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel,
+            "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}
