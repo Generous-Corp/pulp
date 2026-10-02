@@ -554,19 +554,49 @@ try_floor_lease() {
 # Sets GRANTED_CORES on success; on denial clears LEASE_ID so nothing this
 # process does not hold is ever heartbeated or released.
 GRANTED_CORES=""
+# Why the last class-aware acquire produced no usable lease. Every failure falls
+# back the same way, but a denial is contention on the host while a tartci that
+# errors, hangs, or answers garbage is a broken governor, and the log has to say
+# which one the operator is looking at.
+LEASE_FAIL_REASON=""
 acquire_class_lease() {
-  local class="$1" cores="$2" min="$3" wait="$4" out size
+  local class="$1" cores="$2" min="$3" wait="$4" out size rc errf err detail reason started took
   GRANTED_CORES=""
+  LEASE_FAIL_REASON=""
+  errf="$(mktemp "${TMPDIR:-/tmp}/governed-build-acquire.XXXXXX" 2>/dev/null)" || errf=""
+  started=$SECONDS
+  rc=0
   out="$("$TARTCI_BIN" leases acquire \
     --id "$LEASE_ID" --cores "$cores" --priority build --class "$class" \
     --min-cores "$min" --wait-secs "$wait" \
     --kind shipyard-local --owner "governed-build" --pid "$$" \
-    --job-id "${GITHUB_RUN_ID:-}" --json 2>/dev/null)" || { LEASE_ID=""; return 1; }
-  printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true' || { LEASE_ID=""; return 1; }
+    --job-id "${GITHUB_RUN_ID:-}" --json 2>"${errf:-/dev/null}")" || rc=$?
+  took=$((SECONDS - started))
+  err=""
+  if [ -n "$errf" ]; then
+    err="$(cat "$errf" 2>/dev/null || true)"
+    rm -f "$errf"
+  fi
+  if ! printf '%s' "$out" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
+    reason="$(printf '%s' "$out" \
+      | grep -o '"reason"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 \
+      | sed 's/.*"\([^"]*\)"$/\1/' || true)"
+    detail="$(printf '%s\n' "$err" | awk 'NF {print; exit}' | cut -c1-200)"
+    if [ -n "$reason" ] || [ "$rc" = 75 ]; then
+      LEASE_FAIL_REASON="denied by tartci after ${took}s (asked $cores, min $min, waited up to ${wait}s): ${reason:-no reason given}"
+    elif [ "$rc" != 0 ]; then
+      LEASE_FAIL_REASON="tartci leases acquire failed rc=$rc after ${took}s${detail:+: $detail}"
+    else
+      LEASE_FAIL_REASON="tartci leases acquire returned no grant after ${took}s${detail:+: $detail}"
+    fi
+    LEASE_ID=""
+    return 1
+  fi
   size="$(printf '%s' "$out" \
     | grep -o '"lease_size_cores"[[:space:]]*:[[:space:]]*[0-9][0-9]*' \
     | grep -o '[0-9][0-9]*$' | head -n 1 || true)"
   if ! positive_int "$size" || [ "$size" -gt "$cores" ]; then
+    LEASE_FAIL_REASON="tartci granted an unusable size (lease_size_cores=${size:-missing}, asked $cores); handed it back"
     "$TARTCI_BIN" leases release --id "$LEASE_ID" --json >/dev/null 2>&1 || true
     LEASE_ID=""
     return 1
@@ -592,7 +622,14 @@ if [ "${PULP_TARTCI_LEASES:-}" != "0" ]; then
   TARTCI_BIN="$(find_tartci)"
 fi
 
-if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; then
+profile=""
+profile_rc=""
+if [ -n "$TARTCI_BIN" ]; then
+  profile_rc=0
+  profile="$("$TARTCI_BIN" host-profile 2>/dev/null)" || profile_rc=$?
+fi
+
+if [ "$profile_rc" = 0 ]; then
   # Child validation can exercise the exact lease implementation on which this
   # invocation relied, even when tartci was found outside the child's PATH.
   export PULP_GOVERNED_TARTCI_BIN="$TARTCI_BIN"
@@ -636,7 +673,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
       start_heartbeat
     else
       jobs="$(min_jobs)"
-      log "interactive lease denied after ${iwait}s — proceeding leaseless at -j$jobs (normal QoS)"
+      log "interactive lease not acquired: $LEASE_FAIL_REASON — proceeding leaseless at -j$jobs (normal QoS)"
       log_lease_holders
     fi
   elif positive_int "$governor_schema"; then
@@ -647,6 +684,7 @@ if [ -n "$TARTCI_BIN" ] && profile="$("$TARTCI_BIN" host-profile 2>/dev/null)"; 
       log "background lease acquired id=$LEASE_ID cores=$jobs (asked $admission_jobs)"
       start_heartbeat
     else
+      log "background lease not acquired: $LEASE_FAIL_REASON"
       LEASE_ID="pulp-shipyard-local-$$-$(date +%s 2>/dev/null || echo 0)"
       if try_floor_lease "$admission_jobs"; then
         :
@@ -693,7 +731,14 @@ else
   # directly rather than through $(...) so its explanation survives the call.
   compute_tier0
   jobs="$TIER0_JOBS"
-  log "no tartci host profile — bounded local build at -j$jobs [$TIER0_EXPLAIN]"
+  if [ "${PULP_TARTCI_LEASES:-}" = "0" ]; then
+    why="leases disabled by PULP_TARTCI_LEASES=0"
+  elif [ -z "$TARTCI_BIN" ]; then
+    why="tartci not found"
+  else
+    why="$TARTCI_BIN host-profile failed rc=$profile_rc"
+  fi
+  log "no tartci host profile ($why) — bounded local build at -j$jobs [$TIER0_EXPLAIN]"
 fi
 
 # The no-profile and lease-denied fallbacks never pass through the admission
