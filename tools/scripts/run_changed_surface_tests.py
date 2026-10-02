@@ -447,17 +447,22 @@ def base_projection(
 
 
 def validate_registrations_match_base(
-    full_payload: dict[str, Any], source_root: Path, build_dir: Path, base: dict[str, Any]
+    full_payload: dict[str, Any], source_root: Path, build_dir: Path, base: dict[str, Any],
+    require_built: bool = True,
 ) -> None:
     """This tree's registrations must equal the base's. A bounded plan never
     carries a registration change: CMake and test/cmake edits are
     test-topology paths, which select the full suite, so any difference here
-    is drift the plan cannot account for."""
+    is drift the plan cannot account for.
+
+    Before the full build a cold or partly built tree still lists unbuilt
+    targets without a command; the comparison already folds those programs,
+    so only `require_built` (after the full build) refuses them."""
 
     live = inventory.project_registrations(full_payload, source_root, build_dir)
     unresolved = [name for name in live["incomplete"]
                   if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
-    if unresolved:
+    if require_built and unresolved:
         raise SelectionExecutionError(
             "ctest registrations have no command after the build; require full suite: "
             + ", ".join(unresolved[:12])
@@ -480,6 +485,7 @@ def validate_selection(
     policy: dict[str, Any],
     base: dict[str, Any],
     target: str,
+    require_built: bool = True,
 ) -> None:
     """Fail closed unless CTest's file selection equals the reviewed expansion."""
 
@@ -491,7 +497,7 @@ def validate_selection(
         raise SelectionExecutionError(f"selection contains undeclared names: {undeclared}")
 
     full_tests = full_payload["tests"]
-    validate_registrations_match_base(full_payload, source_root, build_dir, base)
+    validate_registrations_match_base(full_payload, source_root, build_dir, base, require_built)
     live_manifest = inventory.build_manifest(
         full_tests,
         source_root,
@@ -593,6 +599,8 @@ def validate_after_selected_build(
             policy=policy,
             base=base,
             target=target,
+            # Only the selected targets are built at this point.
+            require_built=False,
         )
     validate_build_target_projection(
         build_dir=build_dir,
@@ -976,6 +984,8 @@ def run_locked(args: argparse.Namespace, build_dir: Path) -> int:
                 policy=policy,
                 base=base,
                 target=args.target,
+                # Nothing is built yet; the full build is checked strictly.
+                require_built=False,
             )
         except inventory.InventoryError as error:
             if (
