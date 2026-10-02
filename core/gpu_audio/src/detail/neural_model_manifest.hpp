@@ -39,6 +39,11 @@ struct NeuralModelManifestValidation {
     constexpr bool accepted() const noexcept { return error == NeuralModelManifestError::None; }
 };
 
+enum class NeuralModelUse : std::uint8_t {
+    Shipped,
+    LocalResearch,
+};
+
 constexpr bool is_hex(char c) noexcept {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
            (c >= 'A' && c <= 'F');
@@ -52,7 +57,8 @@ constexpr bool is_sha256(std::string_view hash) noexcept {
 }
 
 constexpr NeuralModelManifestValidation
-validate_neural_model_manifest(const NeuralModelManifest& manifest) noexcept {
+validate_neural_model_manifest(const NeuralModelManifest& manifest,
+                               NeuralModelUse use = NeuralModelUse::Shipped) noexcept {
     if (manifest.model_id.empty() || manifest.architecture.empty() ||
         manifest.model_version.empty() || manifest.artifact_id.empty())
         return {NeuralModelManifestError::MissingIdentity};
@@ -60,7 +66,7 @@ validate_neural_model_manifest(const NeuralModelManifest& manifest) noexcept {
         return {NeuralModelManifestError::InvalidArtifactHash};
     if (manifest.license.empty())
         return {NeuralModelManifestError::MissingLicense};
-    if (!manifest.redistributable)
+    if (use == NeuralModelUse::Shipped && !manifest.redistributable)
         return {NeuralModelManifestError::NonRedistributableArtifact};
     if ((manifest.state_bytes != 0) != (!manifest.state_schema.empty()) ||
         (manifest.state_bytes != 0 && manifest.state_schema_version == 0))

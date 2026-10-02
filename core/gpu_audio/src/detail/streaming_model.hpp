@@ -106,7 +106,32 @@ struct StreamingBlock {
     std::span<float> output{};
     std::uint32_t channels = 0;
     std::uint32_t frames = 0;
+    // Explicit sample strides make the worker contract compatible with
+    // planar BufferView leases as well as interleaved shared-I/O buffers.
+    std::uint32_t input_channel_stride = 0;
+    std::uint32_t output_channel_stride = 0;
+    std::uint32_t input_frame_stride = 1;
+    std::uint32_t output_frame_stride = 1;
 };
+
+constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcept {
+    if (block.channels == 0 || block.frames == 0 || block.input.empty() ||
+        block.output.empty() || block.input_channel_stride == 0 ||
+        block.output_channel_stride == 0 || block.input_frame_stride == 0 ||
+        block.output_frame_stride == 0)
+        return false;
+    const auto covers = [](std::size_t size, std::uint32_t channels,
+                           std::uint32_t frames, std::uint32_t channel_stride,
+                           std::uint32_t frame_stride) constexpr noexcept {
+        const auto last = static_cast<std::size_t>(channels - 1) * channel_stride +
+                          static_cast<std::size_t>(frames - 1) * frame_stride;
+        return last < size;
+    };
+    return covers(block.input.size(), block.channels, block.frames,
+                   block.input_channel_stride, block.input_frame_stride) &&
+           covers(block.output.size(), block.channels, block.frames,
+                  block.output_channel_stride, block.output_frame_stride);
+}
 
 enum class StreamingAdmission : std::uint8_t {
     Accepted,
@@ -175,6 +200,8 @@ class StreamingModel {
                              StreamingBlockStamp stamp) noexcept = 0;
     // The owner must stop admission and fence callback/worker users before
     // quiesce, reset, or release. These methods never race process_cpu().
+    // release() is idempotent and retryable after a failed prepare/release;
+    // callers retain ownership until it returns true.
     virtual bool quiesce() noexcept = 0;
     virtual void reset(std::uint64_t epoch, StreamingResetReason reason) noexcept = 0;
     virtual bool release() noexcept = 0;

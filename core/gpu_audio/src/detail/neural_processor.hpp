@@ -78,14 +78,27 @@ class NeuralProcessor final {
         entry_.spec = model_.spec();
         entry_.artifact_id = context.artifact_id;
         entry_.artifact_hash = context.artifact_hash;
-        if (!entry_.valid() || !model_.prepare(context))
+        if (!entry_.valid())
             return false;
+        if (!model_.prepare(context)) {
+            // A failed prepare may have acquired partial model resources. The
+            // model contract makes release idempotent and retryable so the
+            // failed transaction cannot leak into the next admission.
+            (void)model_.release();
+            return false;
+        }
 
         pending_ = {};
         pending_.entry = &entry_;
         pending_.preference = preference;
         pending_.provider = NeuralProvider::Cpu;
-        pending_.fell_back_to_cpu = preference != NeuralProviderPreference::CpuOnly;
+        // Auto on a CPU-only host is an honest CPU selection, not a fallback.
+        // An explicit non-CPU preference (or an advertised non-CPU capability
+        // that this CPU-only facade cannot yet execute) records fallback.
+        pending_.fell_back_to_cpu =
+            preference == NeuralProviderPreference::PreferMlx ||
+            preference == NeuralProviderPreference::PreferDawn || capabilities.mlx ||
+            capabilities.dawn;
         pending_.max_frames = context.max_frames;
         pending_.generation = active_.generation == 0 ? 1 : active_.generation + 1;
         pending_.prepared = true;
@@ -108,7 +121,7 @@ class NeuralProcessor final {
             return;
         }
         active_.entry->model->process_cpu(input, output, frames,
-                                          {.epoch = active_.generation, .sequence = stamp.sequence});
+                                          stamp);
     }
 
     bool reset(StreamingResetReason reason) noexcept {
@@ -125,9 +138,16 @@ class NeuralProcessor final {
     }
 
     bool release() noexcept {
+        const bool owns_model = active_.prepared || pending_.prepared;
+        if (!owns_model)
+            return true;
+        if (!model_.quiesce())
+            return false;
+        if (!model_.release())
+            return false;
         pending_ = {};
-        active_.prepared = false;
-        return model_.release();
+        active_ = {};
+        return true;
     }
 
   private:

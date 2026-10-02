@@ -154,6 +154,22 @@ TEST_CASE("streaming model spec fails closed before preparation",
                                             .max_frames = 1}));
 }
 
+TEST_CASE("streaming block requires explicit planar or interleaved strides",
+          "[gpu_audio][streaming_model]") {
+    std::array<float, 8> input{};
+    std::array<float, 8> output{};
+    StreamingBlock block{.stamp = {.epoch = 1, .sequence = 0},
+                         .input = input,
+                         .output = output,
+                         .channels = 2,
+                         .frames = 4,
+                         .input_channel_stride = 4,
+                         .output_channel_stride = 4};
+    CHECK(valid_streaming_block_layout(block));
+    block.output_channel_stride = 8;
+    CHECK_FALSE(valid_streaming_block_layout(block));
+}
+
 TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
           "[gpu_audio][streaming_model]") {
     IdentityModel model;
@@ -358,6 +374,34 @@ TEST_CASE("neural processor publishes an immutable preparation snapshot",
     CHECK_FALSE(processor.prepare(context));
 }
 
+TEST_CASE("neural processor does not call CPU-only auto selection a fallback",
+          "[gpu_audio][neural_processor]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context, NeuralProviderPreference::Auto,
+                              {.cpu = true, .mlx = false, .dawn = false}));
+    REQUIRE(processor.publish());
+    CHECK(processor.snapshot().provider == NeuralProvider::Cpu);
+    CHECK_FALSE(processor.snapshot().fell_back_to_cpu);
+}
+
+TEST_CASE("neural processor releases a pending preparation transaction",
+          "[gpu_audio][neural_processor]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context));
+    REQUIRE(processor.release());
+    REQUIRE(processor.prepare(context));
+}
+
 TEST_CASE("neural processor reset advances the callback generation",
           "[gpu_audio][neural_processor]") {
     IdentityModel model;
@@ -393,4 +437,5 @@ TEST_CASE("neural processor callback path performs no allocation",
     processor.process_cpu(in, out, 4, {.epoch = 999, .sequence = 5});
     CHECK(probe.allocation_count() == 0);
     CHECK(output == input);
+    CHECK(model.last_stamp() == StreamingBlockStamp{.epoch = 999, .sequence = 5});
 }

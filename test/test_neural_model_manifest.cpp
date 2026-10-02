@@ -64,6 +64,15 @@ TEST_CASE("neural manifest requires a versioned schema for retained state",
     CHECK(validate_neural_model_manifest(manifest).accepted());
 }
 
+TEST_CASE("neural manifest permits licensed local research weights",
+          "[gpu_audio][neural][manifest]") {
+    auto manifest = valid_manifest();
+    manifest.redistributable = false;
+    CHECK(validate_neural_model_manifest(manifest, NeuralModelUse::LocalResearch).accepted());
+    CHECK(validate_neural_model_manifest(manifest, NeuralModelUse::Shipped).error ==
+          NeuralModelManifestError::NonRedistributableArtifact);
+}
+
 TEST_CASE("ModelStore entry admits only verified neural artifacts",
           "[gpu_audio][neural][manifest]") {
     pulp::runtime::ModelEntry entry{.model_id = "demo.tcn",
