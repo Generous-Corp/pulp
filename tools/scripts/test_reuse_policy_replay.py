@@ -522,6 +522,36 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(out[variant]["executables_rebuilt"], 1, variant)
         self.assertEqual(out["per-entry"]["run"], [])
 
+    def test_a_rebuilt_spawned_executable_reruns_the_test_that_depends_on_it(self):
+        # tb's executable depends (add_dependencies) on the tool test/tool;
+        # only the tool's source drifted.
+        spawned = {"test/b": {"test/tool"}}
+        out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
+                                       self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                       spawned=spawned)
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], ["tb"], variant)
+            self.assertEqual(out[variant]["executables_rebuilt"], 0, variant)  # the tests' own binaries stay
+        self.assertEqual(out["per-entry"]["run"], [])
+
+    def test_a_rebuilt_undeclared_tool_reruns_every_compiled_test(self):
+        out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
+                                       self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                       spawnable=frozenset({"test/tool"}))
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], ["ta", "tb"], variant)
+            self.assertEqual(out[variant]["spawnable_rebuilt"], ["test/tool"], variant)
+        quiet = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb"], self.MAP, {}, {}, set(),
+                                         self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                         spawnable=frozenset({"test/tool"}))
+        self.assertEqual(quiet["cmake-codemodel"]["run"], [])
+
+    def test_executable_dependencies_follow_targets_transitively(self):
+        targets = {"t": {"type": "EXECUTABLE", "artifacts": ["<build>/test/t"], "dependencies": ["lib"]},
+                   "lib": {"type": "STATIC_LIBRARY", "artifacts": ["<build>/libl.a"], "dependencies": ["tool"]},
+                   "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []}}
+        self.assertEqual(rrc.executable_dependencies(targets), {"test/t": {"tools/tool"}, "tools/tool": set()})
+
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)

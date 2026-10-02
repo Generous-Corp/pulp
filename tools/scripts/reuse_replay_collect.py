@@ -928,13 +928,44 @@ def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict]) -> tuple[se
     return exes(changed), exes(group)
 
 
+def executable_dependencies(targets: dict[str, dict]) -> dict[str, set[str]]:
+    """Executable -> the other executables its target depends on, transitively,
+    from the codemodel's dependency list (which carries add_dependencies edges:
+    a test that spawns a built tool usually names it only there)."""
+    by_name = {n: {a.removeprefix("<build>/") for a in t.get("artifacts") or []}
+               for n, t in targets.items() if t.get("type") == "EXECUTABLE"}
+    out: dict[str, set[str]] = {}
+    for name, artifacts in by_name.items():
+        seen: set[str] = set()
+        stack = list(targets[name].get("dependencies") or [])
+        while stack:
+            dep = stack.pop()
+            if dep in seen or dep not in targets:
+                continue
+            seen.add(dep)
+            stack.extend(targets[dep].get("dependencies") or [])
+        reached = {a for d in seen for a in by_name.get(d, ())}
+        for artifact in artifacts:
+            out[artifact] = reached
+    return out
+
+
 def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dict[str, dict],
                          head_entries: dict[str, dict] | None, group_entries: dict[str, dict] | None,
                          rebuilt: set[str], all_executables: set[str],
                          codemodel: tuple[set[str], set[str]] | None = None,
                          commit_bound: frozenset[str] = frozenset(),
-                         generated_keyed: bool = False) -> dict[str, dict]:
+                         generated_keyed: bool = False,
+                         spawned: dict[str, set[str]] | None = None,
+                         spawnable: frozenset[str] = frozenset()) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
+
+    A test can run other built executables. `spawned` maps an executable to
+    the executables its target depends on (add_dependencies included); a
+    test whose executable depends on a rebuilt one runs. `spawnable` names
+    the executables no test runs as its own (tools, helpers, fixtures): a
+    test may spawn one without any declared edge, so when one is rebuilt
+    every compiled test runs in the strict variants.
 
     `rebuilt` is the set of executables (relative to the build dir) the drift
     reaches through the graph; `all_executables` the ones the graph builds.
@@ -963,6 +994,18 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     for variant in variants:
         exact_cmake = variant == "cmake-codemodel"
         strict = variant in ("strict-data", "cmake-codemodel")
+        # Every executable this variant rebuilds, before narrowing to the
+        # ones the group's tests run: a spawned tool counts too.
+        if exact_cmake:
+            rebuilt_all = all_executables if (pins or stamped) else \
+                rebuilt | rekeyed | ((all_executables - described) if cmake else set())
+        elif strict:
+            rebuilt_all = all_executables if cmake else rebuilt | commit_bound
+        else:
+            rebuilt_all = set(rebuilt)
+        spawn_all = strict and bool(spawnable & rebuilt_all)
+        spawn_hit = (lambda exes: any((spawned or {}).get(e, set()) & rebuilt_all for e in exes)) if strict \
+            else (lambda exes: False)
         # The re-key rule a CMake change triggers: everything, or only the
         # executables whose codemodel entry moved (and the undescribed ones).
         cmake_hit = (lambda exes: pins or stamped or bool(set(exes) & rekeyed)
@@ -976,7 +1019,8 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                 run.append(name)
             elif exes:
                 if (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
-                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])):
+                        or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or [])
+                        or spawn_all or spawn_hit(exes)):
                     run.append(name)
             elif group_entries is not None and name in group_entries and head_entries is not None:
                 entry = group_entries[name]
@@ -987,13 +1031,10 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             else:
                 run.append(name)  # unknown inputs: never skippable
         total = len(counted)
-        if exact_cmake:
-            rebuilt_set = counted if (pins or stamped) else \
-                (rebuilt | rekeyed | ((counted - described) if cmake else set())) & counted
-        else:
-            rebuilt_set = counted if (strict and cmake) else (rebuilt | (commit_bound if strict else set())) & counted
+        rebuilt_set = rebuilt_all & counted
         out[variant] = {"run": sorted(run), "executables_total": total, "executables_rebuilt": len(rebuilt_set),
-                        "cmake_changed": cmake, "data_changed": data[:20]}
+                        "cmake_changed": cmake, "data_changed": data[:20],
+                        "spawnable_rebuilt": sorted(spawnable & rebuilt_all)[:20]}
         if codemodel is not None:
             # The same counts over the executables the recorded build
             # describes, where the variants can be compared exactly, and the
@@ -1214,7 +1255,9 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2)
+                recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2,
+                spawned=executable_dependencies(group_record["targets"]),
+                spawnable=frozenset(set(link) - set(group_record["executables"].values())))
             with_v2 += int(v2)
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
