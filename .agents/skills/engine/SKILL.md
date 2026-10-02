@@ -1021,6 +1021,22 @@ Two traps around that ownership:
   app has already removed, and dismisses the state the in-flight branch still
   needs to hand focus back to its trigger.
 
+- **A press on a menu's OWN trigger is a toggle, not a switch.** The native
+  policy (`route_press_to_active_overlay`) lets a press on an overlay trigger
+  through so switching to a DIFFERENT dropdown costs one press. Applied to the
+  trigger that opened the menu, that pass-through was a reopen: the dismissal
+  made this owner `clickSelf` the trigger shut, then the same press's click
+  reached the app's toggle and opened it again, so a dropdown button could
+  never close its own menu. The overlay now knows its anchor
+  (`View::set_overlay_anchor`): a claim that follows a press on a trigger
+  adopts it natively, and `adopt()` names it as `claimOverlay`'s fourth
+  argument so a KEYBOARD-opened menu, which had no press to learn from, knows it
+  too. A press on the anchor is dismissed and consumed (`trigger_closed`).
+  Enter/Space on a focused `<button>` trigger open a closed menu and, while no
+  row is revealed, close an open one — scoped to real buttons because a browser
+  gives `role="button"` no key activation and its author handles the key in
+  script, so activating it here as well toggles twice.
+
 Restoring a row's background is its own trap: `parseCSSColor("")` returns null
 and `_applyPaintProp` silently drops it, so assigning the empty string leaves
 the highlight on every visited row, while `"transparent"` parses to `#00000000`

@@ -21,6 +21,7 @@
 // invariants pure C++ so the test runs on every CI lane.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <pulp/canvas/recording_canvas.hpp>
 #include <pulp/view/hover_cursor.hpp>
 #include <pulp/view/modal.hpp>
@@ -2069,4 +2070,389 @@ TEST_CASE("root_overlay_owns_keyboard ignores a declared popover that is hidden"
     overlay->set_visible(false);
     CHECK_FALSE(pulp::view::root_overlay_owns_keyboard(root));
     overlay->release_overlay();
+}
+
+// ── A trigger toggles its own overlay ───────────────────────────────────────
+//
+// Pressing the button that opened a dropdown closes it, exactly as a press
+// outside it or Escape does. The press is spent on the close: delivered, the
+// trigger's own handler would run on the same press and open the menu it had
+// just closed, so the dropdown could never be closed from its own button. A
+// press on a DIFFERENT trigger still switches menus in one press.
+
+namespace {
+
+// A dropdown the way a React component writes one: the trigger's click handler
+// flips `open`, `open` claims the popover, and the framework's dismissal flips
+// it back through `on_overlay_dismissed`.
+struct ToggleDropdown {
+    View* trigger = nullptr;
+    View* label = nullptr;
+    View* popover = nullptr;
+    bool open = false;
+    int trigger_clicks = 0;
+    int dismissals = 0;
+    // A handler written as `setOpen(true)` rather than `setOpen(o => !o)`.
+    bool open_only = false;
+    bool consumes = true;
+
+    Point trigger_point() const {
+        const auto b = trigger->bounds();
+        return {b.x + 2.0f, b.y + 2.0f};
+    }
+    Point label_point() const {
+        const auto t = trigger->bounds();
+        const auto l = label->bounds();
+        return {t.x + l.x + 2.0f, t.y + l.y + 2.0f};
+    }
+    void set_open(bool next) {
+        open = next;
+        popover->set_visible(next);
+        if (next) {
+            popover->claim_overlay();
+            popover->set_overlay_consumes_outside_click(consumes);
+        } else {
+            popover->release_overlay();
+        }
+    }
+};
+
+std::unique_ptr<ToggleDropdown> add_toggle_dropdown(View& root, float x,
+                                                    bool consumes = true) {
+    auto d = std::make_unique<ToggleDropdown>();
+    d->consumes = consumes;
+    auto* raw = d.get();
+
+    auto trigger = std::make_unique<TestView>();
+    trigger->set_bounds({x, 20.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    trigger->on_click = [raw] {
+        ++raw->trigger_clicks;
+        raw->set_open(raw->open_only ? true : !raw->open);
+    };
+    auto label = std::make_unique<TestView>();
+    label->set_bounds({30.0f, 4.0f, 60.0f, 16.0f});
+    raw->label = label.get();
+    trigger->add_child(std::move(label));
+    raw->trigger = trigger.get();
+    root.add_child(std::move(trigger));
+
+    auto popover = std::make_unique<TestView>();
+    popover->set_bounds({x, 50.0f, 160.0f, 120.0f});
+    popover->set_visible(false);
+    popover->on_overlay_dismissed = [raw] {
+        ++raw->dismissals;
+        raw->set_open(false);
+    };
+    raw->popover = popover.get();
+    root.add_child(std::move(popover));
+    return d;
+}
+
+}  // namespace
+
+TEST_CASE("pressing the trigger of an open dropdown closes it and the release "
+          "does not reopen it",
+          "[view][overlay][pointer][trigger][toggle]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    const bool consumes = GENERATE(true, false);
+    const bool open_only = GENERATE(false, true);
+    auto d = add_toggle_dropdown(root, 40.0f, consumes);
+    d->open_only = open_only;
+
+    root.simulate_click(d->trigger_point());
+    REQUIRE(d->open);
+    REQUIRE(d->trigger_clicks == 1);
+    REQUIRE(root.overlay_depth() == 1);
+    // The press that opened it is what the popover learns as its anchor.
+    REQUIRE(d->popover->overlay_anchored_at(d->trigger));
+
+    // Down AND up: simulate_click delivers the whole press-release-click
+    // sequence, so a handler bound to either half would have reopened it.
+    root.simulate_click(d->trigger_point());
+    CHECK_FALSE(d->open);
+    CHECK(d->dismissals == 1);
+    CHECK(d->trigger_clicks == 1);
+    CHECK(root.overlay_depth() == 0);
+
+    // Closed, the same trigger opens it again; through the label that wins
+    // the hit test as well as on the trigger itself.
+    root.simulate_click(d->label_point());
+    REQUIRE(d->open);
+    REQUIRE(d->trigger_clicks == 2);
+    root.simulate_click(d->label_point());
+    CHECK_FALSE(d->open);
+    CHECK(d->dismissals == 2);
+    CHECK(d->trigger_clicks == 2);
+}
+
+TEST_CASE("a press on an overlay's own trigger reports a toggle and is consumed",
+          "[view][overlay][pointer][trigger][toggle]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto a = add_toggle_dropdown(root, 40.0f, /*consumes=*/false);
+    auto b = add_toggle_dropdown(root, 300.0f, /*consumes=*/false);
+
+    root.simulate_click(a->trigger_point());
+    REQUIRE(a->open);
+
+    // The host-facing verb: what every platform host calls on a press.
+    const auto own = pulp::view::route_press_to_active_overlay(root, a->trigger_point());
+    CHECK(own.routing == pulp::view::OverlayPressRouting::dismissed);
+    CHECK(own.trigger_closed);
+    // Consumed even though this overlay lets its outside presses through.
+    CHECK(own.consume_press);
+    CHECK_FALSE(a->open);
+
+    // Control: a press on the OTHER trigger is a switch, not a toggle.
+    root.simulate_click(a->trigger_point());
+    REQUIRE(a->open);
+    const auto other = pulp::view::route_press_to_active_overlay(root, b->trigger_point());
+    CHECK(other.routing == pulp::view::OverlayPressRouting::dismissed);
+    CHECK_FALSE(other.trigger_closed);
+    CHECK_FALSE(other.consume_press);
+}
+
+TEST_CASE("a press on a different trigger closes the open dropdown and opens its "
+          "own in one press",
+          "[view][overlay][pointer][trigger][toggle]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto a = add_toggle_dropdown(root, 40.0f);
+    auto b = add_toggle_dropdown(root, 300.0f);
+
+    root.simulate_click(a->trigger_point());
+    REQUIRE(a->open);
+
+    root.simulate_click(b->trigger_point());
+    CHECK_FALSE(a->open);
+    CHECK(a->dismissals == 1);
+    CHECK(b->open);
+    CHECK(b->trigger_clicks == 1);
+    CHECK(root.overlay_depth() == 1);
+    CHECK(b->popover->overlay_anchored_at(b->trigger));
+    CHECK_FALSE(b->popover->overlay_anchored_at(a->trigger));
+
+    // And back: B's own anchor is B, so A is still a switch.
+    root.simulate_click(a->trigger_point());
+    CHECK_FALSE(b->open);
+    CHECK(a->open);
+    CHECK(a->trigger_clicks == 2);
+
+    // And A's own press still toggles it shut.
+    root.simulate_click(a->trigger_point());
+    CHECK_FALSE(a->open);
+    CHECK(a->trigger_clicks == 2);
+    CHECK(root.overlay_depth() == 0);
+}
+
+TEST_CASE("an outside press and Escape still close an anchored dropdown",
+          "[view][overlay][pointer][trigger][toggle][escape]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    int content_clicks = 0;
+    View* content = add_child_at(root, std::make_unique<TestView>(),
+                                 {0.0f, 300.0f, 800.0f, 300.0f});
+    content->on_click = [&content_clicks] { ++content_clicks; };
+    auto d = add_toggle_dropdown(root, 40.0f);
+
+    root.simulate_click(d->trigger_point());
+    REQUIRE(d->open);
+    root.simulate_click({600.0f, 500.0f});
+    CHECK_FALSE(d->open);
+    CHECK(content_clicks == 0);  // the overlay consumes its outside press
+
+    root.simulate_click(d->trigger_point());
+    REQUIRE(d->open);
+    CHECK(pulp::view::route_escape_to_active_overlay(root) ==
+          pulp::view::OverlayEscapeResult::overlay);
+    CHECK_FALSE(d->open);
+
+    // After either, the next press on the trigger opens it.
+    root.simulate_click(d->trigger_point());
+    CHECK(d->open);
+    CHECK(d->trigger_clicks == 3);
+}
+
+TEST_CASE("a trigger toggles its overlay under the strict dismissal policy too",
+          "[view][overlay][pointer][trigger][toggle]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::OverlayDismissalPolicy strict;
+    strict.trigger_press_passes_through = false;
+    pulp::view::set_overlay_dismissal_policy(strict);
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto d = add_toggle_dropdown(root, 40.0f, /*consumes=*/false);
+
+    root.simulate_click(d->trigger_point());
+    REQUIRE(d->open);
+    root.simulate_click(d->trigger_point());
+    CHECK_FALSE(d->open);
+    CHECK(d->trigger_clicks == 1);
+}
+
+TEST_CASE("an explicit anchor makes an unmarked opener toggle its overlay",
+          "[view][overlay][pointer][trigger][toggle]") {
+    // An overlay opened from the keyboard or a timer has no press to learn its
+    // opener from, and an opener need not be marked as a trigger at all.
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    int button_clicks = 0;
+    View* button = add_child_at(root, std::make_unique<TestView>(),
+                                {400.0f, 20.0f, 120.0f, 24.0f});
+    button->on_click = [&button_clicks] { ++button_clicks; };
+    REQUIRE_FALSE(button->overlay_trigger());
+    View* popover = add_child_at(root, std::make_unique<TestView>(),
+                                 {400.0f, 50.0f, 160.0f, 120.0f});
+
+    // Control: without an anchor, a non-consuming overlay lets the press on the
+    // button through, so the button's handler runs.
+    popover->claim_overlay();
+    root.simulate_click({410.0f, 30.0f});
+    REQUIRE(root.overlay_depth() == 0);
+    REQUIRE(button_clicks == 1);
+
+    popover->set_overlay_anchor(button);
+    popover->claim_overlay();
+    root.simulate_click({410.0f, 30.0f});
+    CHECK(root.overlay_depth() == 0);
+    CHECK(button_clicks == 1);
+
+    // Clearing it restores the pass-through.
+    popover->set_overlay_anchor(nullptr);
+    popover->claim_overlay();
+    root.simulate_click({410.0f, 30.0f});
+    CHECK(button_clicks == 2);
+}
+
+TEST_CASE("an overlay opened without a trigger press does not adopt a stale "
+          "trigger", "[view][overlay][pointer][trigger][toggle]") {
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    int trigger_clicks = 0;
+    View* trigger = add_child_at(root, std::make_unique<TestView>(),
+                                 {40.0f, 20.0f, 120.0f, 24.0f});
+    trigger->set_overlay_trigger(true);
+    trigger->on_click = [&trigger_clicks] { ++trigger_clicks; };  // opens nothing
+    View* content = add_child_at(root, std::make_unique<TestView>(),
+                                 {0.0f, 300.0f, 800.0f, 300.0f});
+    content->on_click = [] {};
+    View* popover = add_child_at(root, std::make_unique<TestView>(),
+                                 {400.0f, 50.0f, 160.0f, 120.0f});
+
+    root.simulate_click({50.0f, 30.0f});   // trigger, which opens nothing
+    root.simulate_click({600.0f, 500.0f}); // ordinary content clears the record
+    popover->claim_overlay();               // opened by something else
+    popover->set_overlay_consumes_outside_click(true);
+    CHECK(popover->overlay_anchor_id() == 0);
+
+    // So the trigger is a different trigger: it switches, it does not toggle.
+    root.simulate_click({50.0f, 30.0f});
+    CHECK(root.overlay_depth() == 0);
+    CHECK(trigger_clicks == 2);
+}
+
+TEST_CASE("a trigger nearer the press than an overlay's anchor switches menus",
+          "[view][overlay][pointer][trigger][toggle]") {
+    // A toolbar that is itself the anchor of a panel can hold its own
+    // dropdown buttons; a press on one of those means that button.
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    View* toolbar = add_child_at(root, std::make_unique<TestView>(),
+                                 {0.0f, 0.0f, 800.0f, 60.0f});
+    toolbar->set_overlay_trigger(true);
+    int inner_clicks = 0;
+    View* inner = add_child_at(*toolbar, std::make_unique<TestView>(),
+                               {400.0f, 10.0f, 100.0f, 24.0f});
+    inner->set_overlay_trigger(true);
+    inner->on_click = [&inner_clicks] { ++inner_clicks; };
+    View* panel = add_child_at(root, std::make_unique<TestView>(),
+                               {0.0f, 100.0f, 300.0f, 200.0f});
+    panel->set_overlay_anchor(toolbar);
+    panel->claim_overlay();
+    panel->set_overlay_consumes_outside_click(true);
+
+    root.simulate_click({410.0f, 20.0f});
+    CHECK(root.overlay_depth() == 0);
+    CHECK(inner_clicks == 1);
+
+    // Control: a press on the toolbar itself is the anchor, so it toggles.
+    panel->claim_overlay();
+    root.simulate_click({100.0f, 20.0f});
+    CHECK(root.overlay_depth() == 0);
+    CHECK(inner_clicks == 1);
+}
+
+TEST_CASE("a native ComboBox header toggles its own dropdown",
+          "[view][overlay][pointer][trigger][toggle][combo]") {
+    // Parity reference: the native dropdown has always toggled from its own
+    // header; the generalized overlay slot now matches it.
+    OverlayGuard g;
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto combo_owned = std::make_unique<pulp::view::ComboBox>();
+    auto* combo = combo_owned.get();
+    combo->set_bounds({10.0f, 10.0f, 160.0f, 24.0f});
+    combo->set_items({"One", "Two", "Three"});
+    root.add_child(std::move(combo_owned));
+    const int before = combo->selected();
+
+    root.simulate_click({60.0f, 20.0f});
+    REQUIRE(combo->is_open());
+    root.simulate_click({60.0f, 20.0f});
+    CHECK_FALSE(combo->is_open());
+    CHECK(combo->selected() == before);
+}
+
+TEST_CASE("a context menu opened from a trigger does not make it a toggle",
+          "[view][overlay][pointer][trigger][toggle][consumption]") {
+    // A right-click opens no trigger's menu. A context menu summoned on a
+    // dropdown button must not adopt that button as its anchor, or the next
+    // left press on the button would only close the context menu.
+    OverlayGuard g;
+    PolicyGuard p;
+    pulp::view::set_overlay_dismissal_policy(pulp::view::OverlayDismissalPolicy{});
+    TestView root;
+    root.set_bounds({0.0f, 0.0f, 800.0f, 600.0f});
+    auto d = add_toggle_dropdown(root, 40.0f);
+    View* context_menu = add_child_at(root, std::make_unique<TestView>(),
+                                      {400.0f, 300.0f, 160.0f, 120.0f});
+    d->trigger->on_context_menu = [context_menu](Point) {
+        context_menu->claim_overlay();
+        context_menu->set_overlay_consumes_outside_click(true);
+    };
+
+    const auto context = pulp::view::route_context_press(root, d->trigger_point());
+    REQUIRE(context.handled);
+    REQUIRE(root.overlay_depth() == 1);
+    CHECK(context_menu->overlay_anchor_id() == 0);
+
+    // One left press closes the context menu and opens the dropdown.
+    root.simulate_click(d->trigger_point());
+    CHECK(d->open);
+    CHECK(d->trigger_clicks == 1);
+    CHECK(root.overlay_depth() == 1);
 }

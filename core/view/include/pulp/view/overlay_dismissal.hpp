@@ -37,6 +37,25 @@
 
 namespace pulp::view {
 
+// ── An overlay's anchor: the trigger that opened it ─────────────────────────
+//
+// A press on an overlay's own anchor while it is open means "close it", exactly
+// like a press outside it or Escape: the overlay is dismissed and the press is
+// spent on the close, so the trigger's handler cannot run on the same press and
+// open it again. That is what makes a dropdown button TOGGLE. A press on a
+// DIFFERENT trigger still switches menus in one press
+// (`OverlayDismissalPolicy::trigger_press_passes_through`).
+//
+// Most overlays never declare one. `route_press_to_active_overlay` records the
+// `View::overlay_trigger()` each press is delivered to
+// (`RootInteractionState::pending_overlay_opener`), and a claim that follows
+// adopts it, which covers every press-opened `@pulp/react`, web-compat, and
+// imported popover. Declare it with `View::set_overlay_anchor` when the
+// overlay opens some other way — from the keyboard, from a timer — or when its
+// opener is not marked as a trigger; an explicit anchor is never replaced by
+// the recorded one. The press's NEAREST trigger decides: a trigger between the
+// hit view and the anchor means that nearer trigger, not the anchor.
+
 /// What consulting the generalized overlay slot decided about a press.
 enum class OverlayPressRouting {
     /// Nothing claimed the root's overlay slot; the caller proceeds normally.
@@ -68,7 +87,16 @@ struct OverlayPressTarget {
     /// False even for such an overlay when the press landed on an overlay
     /// TRIGGER and `OverlayDismissalPolicy::trigger_press_passes_through` is
     /// set: switching dropdowns is one press, not two.
+    ///
+    /// Always true when the press landed on the trigger that OPENED a dismissed
+    /// overlay (`trigger_closed`), whatever that overlay's own setting.
     bool consume_press = false;
+    /// The press landed on the anchor of an overlay it dismissed — the button
+    /// that opened that dropdown — so it was a TOGGLE: the overlay closed, and
+    /// the press is consumed so the trigger cannot reopen it on the same
+    /// gesture. The third dismissal reason alongside an outside press and
+    /// Escape; see the anchor section above.
+    bool trigger_closed = false;
 };
 
 /// Tunable defaults for the dismissal policy. One configuration for the
@@ -76,7 +104,7 @@ struct OverlayPressTarget {
 /// and it is read-only on the press path.
 struct OverlayDismissalPolicy {
     /// A press that dismisses an open overlay is delivered to the control
-    /// under it when that control is an overlay TRIGGER
+    /// under it when that control is a DIFFERENT overlay TRIGGER
     /// (`View::overlay_trigger()`), so switching from one dropdown to a
     /// sibling costs one press rather than two — the behaviour of the macOS
     /// menu bar and of every multi-menu toolbar.
@@ -86,6 +114,10 @@ struct OverlayDismissalPolicy {
     /// happens to sit under the click, which is a real hazard rather than a
     /// hypothetical one; an overlay that asked to consume its outside click
     /// still consumes it everywhere else.
+    ///
+    /// A press on the trigger that opened the overlay is never passed
+    /// through: that press is a toggle, and delivering it would reopen the
+    /// menu it closed. See the anchor section above.
     ///
     /// Set false to restore strict consume-everywhere dismissal.
     bool trigger_press_passes_through = true;
@@ -106,6 +138,12 @@ void set_overlay_dismissal_policy(const OverlayDismissalPolicy& policy);
 /// Call this AFTER the ComboBox popup routing — which stays exact-as-was, per
 /// the regression in `test_combo_dropdown.cpp` — and BEFORE the regular tree
 /// `hit_test`.
+///
+/// Call it for EVERY press, including one with nothing open: it also records
+/// which overlay trigger the press is about to reach, so a popover that
+/// trigger's handler opens learns its anchor, and a second press on the same
+/// trigger closes it (`OverlayPressTarget::trigger_closed`) rather than
+/// closing and reopening it.
 OverlayPressTarget route_press_to_active_overlay(View& root, Point root_pt);
 
 /// The view a HOVER at `root_pt` lands on: the deepest hit inside the topmost
