@@ -2040,6 +2040,17 @@ affected whenever a script surface changed; a changed file no edge reads
 selects all) are the contract any real selector inherits. The ctest step takes
 no input from it; do not wire it into `-R`/`-L` without a contract decision.
 
+A test that spawns another built program (pulp-cli, pulp-import-design, a
+fixture runner) or loads a module at run time is reached only through the
+`add_dependencies(<test> <tool>)` edge, which Ninja records as order-only and
+the graph drops. `tools/ci/spawn_closure.py` reads that edge from the CMake
+codemodel's `dependencies`; the shadow and the reuse replay both go through
+it, and any new consumer of "which tests does this change reach" must too.
+Give every spawned tool an `add_dependencies` on its test, or the closure
+cannot see it. The replay's `skipped_spawners_of_changed_binaries` control
+only sees spawned programs some ctest runs directly (only tested executables
+are hashed), so read it beside `spawned_binaries_compared`.
+
 ## The gate's "Hits: N / N (99.7%)" line is the host's history, not the job's
 
 `ccache --show-stats` counts for the life of the cache directory, and the

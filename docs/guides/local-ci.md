@@ -919,7 +919,12 @@ After the full ctest run, a merge-group `macos` job also annotates the
 `tools/ci/affected_tests_shadow.py`): the ctest entries the build graph and
 recorded header dependencies say the group's change could reach, with
 script-driven tests counted as affected whenever any script surface changed
-and every test selected when a CMake file changed. It selects nothing; the
+and every test selected when a CMake file changed. A compiled test is also
+affected when a program it runs or loads at run time is: a tool it spawns
+through `$<TARGET_FILE:x>` or a path it computes, reached through the
+`add_dependencies(<test> x)` edge that the CMake codemodel records and Ninja
+keeps only as order-only (`tools/ci/spawn_closure.py`; without a readable
+codemodel every test is selected). It selects nothing; the
 number to watch is `failed_outside_selection`, which must stay at zero over a
 long window before selection could gate anything.
 

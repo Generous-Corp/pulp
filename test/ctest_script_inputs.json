@@ -660,6 +660,8 @@
    "inputs": [
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_affected_tests_shadow.py",
     "tools/cmake",
     "tools/scripts/lib",
@@ -4905,9 +4907,11 @@
     "test/test_control_phase15_aggregate_e2e.cpp",
     "test/test_coremidi_shared_client.cpp",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/ios_gate_digest.py",
     "tools/ci/source_selftests.json",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
@@ -5309,6 +5313,14 @@
    ],
    "kind": "python"
   },
+  "spawn-closure-selftest": {
+   "entry": "tools/ci/test_spawn_closure.py",
+   "inputs": [
+    "tools/ci/spawn_closure.py",
+    "tools/ci/test_spawn_closure.py"
+   ],
+   "kind": "python"
+  },
   "spectr-roundtrip-window-only-capture": {
    "entry": "test/test_spectr_roundtrip_window_only_capture.sh",
    "inputs": [
@@ -5367,7 +5379,9 @@
     ".github/workflows/build.yml",
     "docs/status",
     "tools/ci/affected_tests_shadow.py",
+    "tools/ci/codemodel_digest.py",
     "tools/ci/ctest_gate_args.py",
+    "tools/ci/spawn_closure.py",
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/test_test_receipts_shadow.py",
     "tools/cmake",
