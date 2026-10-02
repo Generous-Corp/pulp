@@ -273,6 +273,25 @@ class VersionAtLandTest(unittest.TestCase):
             "the feat that merged while the bump PR was open was dropped",
         )
 
+    def test_bump_landing_with_nothing_in_between_keeps_the_old_window(self):
+        """Identity control: when no merge lands between a bump's cut and its
+        landing, the window is exactly the first-parent units after the bump's
+        integration merge, as it was before the cut-point window existed."""
+        marker = self._integrate_marker_pr()
+        boundary = self.r.head()
+        for name in ("after-a", "after-b"):
+            _git(self.repo, "switch", "-q", "-c", name, env=self.r.env)
+            self.r.write(f"core/audio/src/{name}.cpp", "int f() { return 1; }\n")
+            self.r.commit(f"fix(audio): {name}")
+            _git(self.repo, "switch", "-q", "main", env=self.r.env)
+            _git(self.repo, "merge", "-q", "--no-ff", name, "-m", f"Merge {name}",
+                 env=self.r.env)
+        head = self.r.head()
+        expected = _git(self.repo, "rev-list", "--first-parent", "--reverse",
+                        f"{boundary}..{head}").split()
+        self.assertEqual(len(expected), 2)
+        self.assertEqual(val._undrained_units(self.repo, marker, head), expected)
+
 # ── Git-fixture tests (real range walk + real push transaction) ──────────
 
 # NOTE: only `Fixture` is imported here — the module-local `_git` above returns
@@ -966,6 +985,48 @@ class PrRouteTest(unittest.TestCase):
                 self.assertEqual(rc, 1)
                 self.assertIn(reason, out)
                 self.assertIn("was cut BEFORE this merge", out)
+
+    def test_a_queued_stale_bump_landing_leaves_the_rest_to_the_next_drain(self) -> None:
+        """End to end on the live path: a bump PR is open, another feat lands,
+        the drain waits for the queued bump, the bump lands through a merge
+        commit, and the next drain bumps the feat that landed while it was
+        queued. Starting that drain after the bump's integration merge instead
+        reports nothing to bump, and the feat ships unversioned."""
+        val._gh = _FakeGh(open_prs=0)
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pr-opened")
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+
+        land = self.root / "land2"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(land)],
+                       check=True)
+        self._config(land)
+        (land / "core/runtime/src/bar.cpp").write_text("int bar(){return 1;}\n")
+        _git(land, "add", "--", "core/runtime/src/bar.cpp")
+        _git(land, "commit", "-q", "-m",
+             "feat(core): lands while the bump PR is queued\n\n"
+             "Version-Bump: sdk=minor\n")
+        _git(land, "push", "-q", "origin", "HEAD:main")
+
+        fake = _FakeGh(open_prs=1, covers=False, in_queue=True)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg(), heal_stale=True)
+        self.assertEqual(status, "stale-wait")
+        self.assertFalse(fake.did("pr", "close"))
+
+        # The merge queue lands the stale bump as a merge commit on main.
+        _git(land, "fetch", "-q", "origin", val.BUMP_BRANCH)
+        _git(land, "merge", "-q", "--no-ff", "FETCH_HEAD",
+             "-m", "Merge pull request from release/version-bump")
+        _git(land, "push", "-q", "origin", "HEAD:main")
+        _git(self.clone, "push", "-q", "origin", f":{val.BUMP_BRANCH}")
+
+        val._gh = _FakeGh(open_prs=0)
+        status, plan = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pr-opened", plan)
+        self.assertEqual({(a.surface, a.current, a.assigned) for a in plan
+                          if a.surface == "sdk"}, {("sdk", "0.2.0", "0.3.0")})
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.3.0")
 
     def test_pr_route_defers_when_create_races(self) -> None:
         # Lock check passes but `pr create` loses the race → GitHub rejects the
