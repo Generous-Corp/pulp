@@ -460,6 +460,12 @@
       "timeout": 300.0
     },
     {
+      "name": "git-read-memo-selftest",
+      "argv": [
+        "{repo}/tools/scripts/test_git_read_memo.py"
+      ]
+    },
+    {
       "name": "inspector-truth-check-selftest",
       "argv": [
         "{repo}/tools/scripts/test_inspector_truth_check.py"

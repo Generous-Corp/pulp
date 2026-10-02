@@ -1971,6 +1971,14 @@
    ],
    "kind": "python"
   },
+  "git-read-memo-selftest": {
+   "entry": "tools/scripts/test_git_read_memo.py",
+   "inputs": [
+    "tools/scripts/git_read_memo.py",
+    "tools/scripts/test_git_read_memo.py"
+   ],
+   "kind": "python"
+  },
   "git-stdin-pipe-deadlock-selftest": {
    "entry": "tools/scripts/test_git_stdin_pipe_deadlock.py",
    "inputs": [
@@ -2234,6 +2242,7 @@
     "tools/scripts/cli_mcp_parity_baseline.json",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_dpr_evidence.py",
     "tools/scripts/gpu_dpr_experiment.py",
@@ -2434,6 +2443,7 @@
     "tools/scripts/cli_mcp_parity_baseline.json",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_build_verifier.py",
@@ -2571,6 +2581,7 @@
     "tools/scripts/cli_mcp_parity_baseline.json",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_build_verifier.py",
@@ -2665,6 +2676,7 @@
     "tools/scripts/cli_mcp_parity_baseline.json",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_build_verifier.py",
@@ -2763,6 +2775,7 @@
     "tools/scripts/cli_mcp_parity_baseline.json",
     "tools/scripts/fetch_skia_for_release.py",
     "tools/scripts/fetch_v8_for_release.py",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/gpu_contained_process.py",
     "tools/scripts/gpu_first_visible_a3_acceptance.py",
     "tools/scripts/gpu_first_visible_a3_build_verifier.py",
@@ -3067,6 +3080,7 @@
     "inspect/src/control_gpu_health_provider.cpp",
     "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
     "tools/cli/gpu_probe/src/dpr_measurement_session.cpp",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/test_gpu_trace_overhead_acceptance.py"
    ],
    "kind": "python"
@@ -3077,6 +3091,7 @@
     "experimental/pulp-rs/src/cmd/trace_gpu_analysis.rs",
     "test/fixtures/perfetto-gpu",
     "test/fixtures/perfetto-gpu/first-frame-pipeline-upload-stall.pftrace",
+    "tools/scripts/git_read_memo.py",
     "tools/scripts/sdk_provenance.py",
     "tools/scripts/test_verify_gpu_trace_overhead_acceptance.py"
    ],
