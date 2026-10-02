@@ -66,7 +66,9 @@ function(pulp_check_vendored_react_runtime bundle)
     file(READ "${_bundle}" _text)
     set(_bundle_revision 0)
     set(_stamp "no revision banner")
-    if(_text MATCHES "@pulp/react runtime revision ([0-9]+)")
+    # The banner is the bundle's first line (runtime_fingerprint.mjs). Anchored
+    # so a comment that only mentions a revision cannot claim its fixes.
+    if(_text MATCHES "^/\\* @pulp/react runtime revision ([0-9]+) \\*/")
         set(_bundle_revision "${CMAKE_MATCH_1}")
         set(_stamp "revision ${_bundle_revision}")
     endif()
