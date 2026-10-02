@@ -76,6 +76,11 @@ POLICIES
   source-key-per-entry
                  the same with script tests keyed on their own entry and
                  compiled tests' data reads assumed declared: the estimate.
+  source-key-codemodel
+                 source-key, except a CMake change re-keys only executables
+                 whose recorded file-API codemodel digest moved between the
+                 head and group jobs (or that depend on one). Unevaluable
+                 where either job recorded no codemodel.
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
@@ -435,6 +440,8 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 1a: per-executable source key, fail closed on undeclared data and whole-tree tests"),
     Policy("source-key-per-entry", _source_key("per-entry"), True,
            "tier 1a estimate: script tests keyed on their own entry, data reads assumed declared"),
+    Policy("source-key-codemodel", _source_key("cmake-codemodel"), True,
+           "tier 1a strict with exact CMake granularity: re-key only targets whose recorded codemodel moved"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
     Policy("suite-source-key", None, True,
@@ -668,6 +675,10 @@ def main(argv: list[str]) -> int:
     k.add_argument("--source-root", type=Path, help="checkout the graph's paths are under (default: the build dir's parent)")
     k.add_argument("--repo", default=str(REPO_ROOT), type=Path)
     k.add_argument("--runs", type=Path, help="JSON list of group runs ([{run: id}] or ids) to restrict to")
+    k.add_argument("--codemodel", action="store_true",
+                   help="also write the cmake-codemodel variant from each job's recorded reuse-record codemodel")
+    k.add_argument("--repository", default="Generous-Corp/pulp")
+    k.add_argument("--token", default=None)
     s = sub.add_parser("score", help="score policies over a corpus or the scenario fixtures")
     group = s.add_mutually_exclusive_group(required=True)
     group.add_argument("--corpus", type=Path)
@@ -708,8 +719,9 @@ def main(argv: list[str]) -> int:
         only = None
         if a.runs:
             only = {str(x["run"] if isinstance(x, dict) else x) for x in json.loads(a.runs.read_text())}
+        gh = rrc.GitHub(a.repository, a.token) if a.codemodel else None
         result = rrc.annotate_source_keys(a.corpus, a.repo, graph, a.source_root or build_dir.parent,
-                                          build_dir, doc["tests"], only)
+                                          build_dir, doc["tests"], only, gh)
         print(json.dumps(result))
         return 0 if result["pairs_annotated"] else 1
 

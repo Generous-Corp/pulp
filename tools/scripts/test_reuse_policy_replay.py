@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -446,6 +447,80 @@ class SourceKeyClassifyTests(unittest.TestCase):
         self.assertIn("script", runs["per-entry"])
         out = rrc.classify_source_keys(["docs/a.md"], ["script"], self.MAP, None, self.ENTRIES, set(), self.EXES)
         self.assertEqual(out["per-entry"]["run"], ["script"])
+
+
+class CodemodelTests(unittest.TestCase):
+    HEAD = {
+        "lib": {"digest": "L1", "type": "STATIC_LIBRARY", "artifacts": ["<build>/libx.a"], "dependencies": []},
+        "a": {"digest": "A1", "type": "EXECUTABLE", "artifacts": ["<build>/test/a"], "dependencies": ["lib"]},
+        "b": {"digest": "B1", "type": "EXECUTABLE", "artifacts": ["<build>/test/b"], "dependencies": []},
+    }
+
+    def group(self, **digests):
+        g = json.loads(json.dumps(self.HEAD))
+        for name, d in digests.items():
+            g.setdefault(name, {"type": "EXECUTABLE", "artifacts": [f"<build>/test/{name}"], "dependencies": []})
+            g[name]["digest"] = d
+        return g
+
+    def test_unchanged_codemodel_rekeys_nothing(self):
+        self.assertEqual(rrc.codemodel_rekeyed(self.HEAD, self.group()), (set(), {"test/a", "test/b"}))
+
+    def test_a_changed_library_rekeys_its_dependents(self):
+        rekeyed, _ = rrc.codemodel_rekeyed(self.HEAD, self.group(lib="L2"))
+        self.assertEqual(rekeyed, {"test/a"})
+
+    def test_a_changed_or_new_executable_is_rekeyed(self):
+        self.assertEqual(rrc.codemodel_rekeyed(self.HEAD, self.group(b="B2"))[0], {"test/b"})
+        self.assertEqual(rrc.codemodel_rekeyed(self.HEAD, self.group(c="C1"))[0], {"test/c"})
+
+    MAP = {"ta": {"executables": ["test/a"], "sources": []}, "tb": {"executables": ["test/b"], "sources": []},
+           "tz": {"executables": ["test/z"], "sources": []}}
+    EXES = {"test/a", "test/b", "test/z"}
+
+    def classify(self, drift, rekeyed):
+        return rrc.classify_source_keys(drift, ["ta", "tb", "tz"], self.MAP, {}, {}, set(), self.EXES,
+                                        (rekeyed, {"test/a", "test/b"}))
+
+    def test_a_cmake_change_rekeys_only_what_the_codemodel_moved(self):
+        out = self.classify(["test/cmake/x_tests.cmake"], {"test/a"})
+        self.assertEqual(set(out["strict-data"]["run"]), {"ta", "tb", "tz"})
+        self.assertEqual(set(out["cmake-codemodel"]["run"]), {"ta", "tz"})  # tz: undescribed, keeps strict
+        self.assertEqual(out["strict-data"]["executables_rebuilt"], 3)
+        self.assertEqual(out["cmake-codemodel"]["executables_rebuilt"], 2)
+        self.assertEqual((out["cmake-codemodel"]["described_total"], out["cmake-codemodel"]["described_rebuilt"]), (2, 1))
+
+    def test_without_cmake_drift_an_undescribed_executable_is_not_rebuilt(self):
+        out = self.classify(["docs/a.md"], set())
+        self.assertEqual(out["cmake-codemodel"]["run"], [])
+        self.assertEqual(out["cmake-codemodel"]["executables_rebuilt"], 0)
+
+    def test_the_data_rule_still_holds(self):
+        out = self.classify(["tools/fixture.json"], set())
+        self.assertEqual(set(out["cmake-codemodel"]["run"]), {"ta", "tb", "tz"})
+
+    def test_no_codemodel_writes_no_variant(self):
+        out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
+        self.assertNotIn("cmake-codemodel", out)
+
+    def test_codemodel_targets_read_from_the_reuse_record_artifact(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("codemodel-abc.json", json.dumps({"targets": {"a": dict(self.HEAD["a"], sources="s")}}))
+            zf.writestr("job.json", "{}")
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.return_value = {"artifacts": [{"name": "reuse-record-macos", "expired": False,
+                                               "archive_download_url": "https://x/zip"}]}
+        resp = mock.MagicMock()
+        resp.__enter__.return_value.read.return_value = buf.getvalue()
+        gh._request.return_value = resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertEqual(c.codemodel_targets("9"), {"a": self.HEAD["a"]})
+            gh.json.return_value = {"artifacts": []}
+            self.assertIsNone(c.codemodel_targets("10"))
 
 
 class SourceKeyPolicyTests(unittest.TestCase):
