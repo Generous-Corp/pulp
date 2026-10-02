@@ -1944,7 +1944,12 @@ instead of cloning mid-plan. That includes the prebuilt WebGPU runtime archive,
 which the webgpu dependency fetches through FetchContent: with its cache entry
 removed, the disconnected configure fails ("requires source directory for
 dependency wgpu-macos-aarch64-release to already be populated") and downloads
-nothing. Its "Fetching WebGPU implementation" status line prints either way. A cold lane build directory refuses by design ("no command
+nothing. Its "Fetching WebGPU implementation" status line prints either way. The one
+download FetchContent does not govern is the second WebGPU slice a universal
+(`arm64;x86_64`) build lipos in `tools/cmake/PulpWgpuUniversal.cmake`; a
+universal policy flag set or build cache therefore refuses before any
+configure, and a test keeps that the only raw `file(DOWNLOAD)` in the CMake
+tree. A cold lane build directory refuses by design ("no command
 after the build"): bounded runs need the lane's normal warm build. The cached
 base inventories live inside the lane's build directory, which pull-request
 code can write; that is acceptable while the lane runs PR code and is not a

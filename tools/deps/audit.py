@@ -249,6 +249,67 @@ def verify_dep_license(dep: dict) -> tuple[str, list[str]]:
     return "verified", problems
 
 
+RAW_DOWNLOAD = re.compile(r"\bfile\s*\(\s*DOWNLOAD\b", re.IGNORECASE)
+FETCHCONTENT_DECLARE = re.compile(r"\bFetchContent_Declare\s*\(", re.IGNORECASE)
+
+
+def _cmake_files(tree: Path) -> list[Path]:
+    return sorted(p for p in tree.rglob("*")
+                  if p.is_file() and (p.suffix == ".cmake" or p.name == "CMakeLists.txt"))
+
+
+def offline_fetch_tree(dep: dict, contract: dict) -> Path | None:
+    """The pinned tree to scan. FetchContent names its shared-cache entry after
+    the CMake dependency name and the full ref (`webgpu-<40-hex sha>`), which
+    neither the manifest name nor its short pinned ref spell, so the contract
+    names the cache entry and the pin is matched as a ref prefix."""
+    tree = local_source_tree(dep)
+    if tree is not None:
+        return tree
+    name, version = contract.get("cache_name", ""), dep.get("version", "")
+    if not (name and version and FETCHCONTENT_CACHE.is_dir()):
+        return None
+    matches = sorted(p for p in FETCHCONTENT_CACHE.iterdir()
+                     if p.is_dir() and p.name.startswith(f"{name}-{version}"))
+    return matches[0] if len(matches) == 1 else None
+
+
+def verify_offline_fetch(dep: dict) -> tuple[str, list[str]]:
+    """A dependency marked `offline_fetch` must fetch only through FetchContent.
+
+    A changed-surface bounded run derives its base inventory with a
+    FETCHCONTENT_FULLY_DISCONNECTED configure
+    (tools/scripts/run_changed_surface_tests.py base_projection), so a miss
+    in the shared source cache fails instead of downloading. A raw
+    file(DOWNLOAD) anywhere in the pinned tree escapes that and could reach
+    the network mid-plan. Returns (status, problems); a tree that is not
+    checked out is "unverified", never a pass.
+    """
+    contract = dep.get("offline_fetch")
+    if not contract:
+        return "not-required", []
+    tree = offline_fetch_tree(dep, contract)
+    if tree is None:
+        return "unverified", []
+    files = _cmake_files(tree)
+    problems = []
+    for path in files:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            if RAW_DOWNLOAD.search(line.split("#", 1)[0]):
+                problems.append(
+                    f"{path.relative_to(tree)}:{number} uses a raw file(DOWNLOAD), which a "
+                    "FETCHCONTENT_FULLY_DISCONNECTED configure does not govern; the bounded "
+                    "run's base inventory (run_changed_surface_tests.base_projection) needs "
+                    "every download to go through FetchContent, or to be refused there"
+                )
+    if not any(FETCHCONTENT_DECLARE.search(p.read_text(encoding="utf-8", errors="replace"))
+               for p in files):
+        problems.append("no FetchContent_Declare found in its CMake files: the offline-fetch "
+                        "check read nothing it could vouch for")
+    return "verified", problems
+
+
 def parse_dependencies_md() -> set[str]:
     text = DEPENDENCIES_MD.read_text()
     names: set[str] = set()
@@ -895,6 +956,9 @@ def main() -> int:
     truncated_notices: list[tuple[str, list[str]]] = []
     license_problems: list[tuple[str, list[str]]] = []
     unverified: list[str] = []
+    offline_problems: list[tuple[str, list[str]]] = []
+    offline_unverified: list[str] = []
+    offline_verified: list[str] = []
     if args.verify_licenses:
         truncated_notices = find_notice_truncations()
         for dep in manifest:
@@ -903,6 +967,14 @@ def main() -> int:
                 unverified.append(dep["name"])
             if problems:
                 license_problems.append((dep["name"], problems))
+            # Same mode: both read the checked-out trees and nothing else.
+            status, problems = verify_offline_fetch(dep)
+            if status == "unverified":
+                offline_unverified.append(dep["name"])
+            elif status == "verified":
+                offline_verified.append(dep["name"])
+            if problems:
+                offline_problems.append((dep["name"], problems))
 
     if args.format == "markdown":
         output = render_markdown(
@@ -953,10 +1025,21 @@ def main() -> int:
                     print(f"  - {name}")
             if not (license_problems or truncated_notices):
                 print("\nLicense verification: no problems found")
+            if offline_problems:
+                print("\nOffline-fetch contract broken:")
+                for name, problems in offline_problems:
+                    for problem in problems:
+                        print(f"  - {name}: {problem}")
+            if offline_unverified:
+                print("\nOffline fetch not verified (tree not checked out): "
+                      + ", ".join(offline_unverified))
+            if offline_verified and not offline_problems:
+                print("Offline-fetch contract: FetchContent only in "
+                      + ", ".join(offline_verified))
 
     if args.strict and (
         missing_deps or missing_notice or missing_licensing or uncovered
-        or license_problems or truncated_notices
+        or license_problems or truncated_notices or offline_problems
     ):
         return 1
     return 0

@@ -1204,6 +1204,42 @@ class BaseInventoryTest(unittest.TestCase):
                     selected_tests=tests, source_root=source, build_dir=build,
                     policy=policy(), base=base, target="mac")
 
+    def test_a_universal_build_refuses_before_any_configure(self) -> None:
+        for cache, flags in [
+            ("CMAKE_OSX_ARCHITECTURES:STRING=arm64;x86_64\n", ["-DCMAKE_BUILD_TYPE=Debug"]),
+            ("", ["-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"]),
+        ]:
+            with self.subTest(cache=cache, flags=flags), tempfile.TemporaryDirectory() as directory:
+                build = Path(directory)
+                (build / "CMakeCache.txt").write_text(cache)
+                universal = {**policy(), "build_flags": flags}
+                calls: list = []
+                with self.assertRaisesRegex(runner.SelectionExecutionError, "universal build"):
+                    runner.base_projection(self.BASE, universal, build, Path("/repo"),
+                                           lambda argv, **_: calls.append(argv))
+                self.assertEqual(calls, [])
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text("CMAKE_OSX_ARCHITECTURES:STRING=arm64\n")
+            calls, _ = self.run_base(build, [0, 0, 0])
+            self.assertTrue(calls)
+
+    def test_the_only_raw_download_in_cmake_is_the_universal_webgpu_slice(self) -> None:
+        # Every other dependency fetch goes through FetchContent, which the
+        # base configure disconnects. A new file(DOWNLOAD) needs its own guard.
+        listed = subprocess.run(["git", "-C", str(runner.REPO_ROOT), "grep", "-l", "file(DOWNLOAD",
+                                 "--", "*.cmake", "*CMakeLists.txt"],
+                                capture_output=True, text=True)
+        self.assertEqual(
+            listed.stdout.split(), ["tools/cmake/PulpWgpuUniversal.cmake"],
+            "a new raw file(DOWNLOAD) can reach the network during a bounded run's "
+            "disconnected base configure: fetch it through FetchContent instead, or gate "
+            "it like PulpWgpuUniversal.cmake and make base_projection refuse that "
+            "configuration, then list it here",
+        )
+        guard = (runner.REPO_ROOT / "tools/cmake/PulpWgpuUniversal.cmake").read_text()
+        self.assertIn('if(NOT (_want_arm64 AND _want_x86_64))', guard)
+
     def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):

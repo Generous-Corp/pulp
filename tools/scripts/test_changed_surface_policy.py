@@ -177,6 +177,13 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             if family["risk_class"] == "medium":
                 self.assertTrue(family.get("extended_tests"))
 
+    def test_the_lane_build_is_not_universal(self) -> None:
+        # A universal build downloads a WebGPU slice outside FetchContent, so
+        # a bounded run could not derive its base inventory offline.
+        architectures = [flag for flag in self.policy["build_flags"]
+                         if flag.startswith("-DCMAKE_OSX_ARCHITECTURES=")]
+        self.assertFalse(any(";" in flag for flag in architectures), architectures)
+
     def test_shadow_policy_cannot_replace_full_execution_or_authorize_merge(self) -> None:
         config = load_config()
         full_test = config["validation"]["default"]["test"]
