@@ -109,6 +109,15 @@ public:
     // Throws std::runtime_error on parse/runtime errors.
     virtual choc::value::Value evaluate(const std::string& code) = 0;
 
+    // Evaluate a whole script — a bundle or prelude loaded once per realm, not
+    // an expression probe. Same result and error semantics as evaluate(). An
+    // engine may reuse the compiled form of a script it has already compiled
+    // in this process (QuickJS keeps its bytecode), so a second realm loading
+    // the same bundle skips parsing it.
+    virtual choc::value::Value evaluate_script(const std::string& code) {
+        return evaluate(code);
+    }
+
     // Evaluate and serialize directly inside the backend while enforcing the
     // byte/depth/cycle bounds during traversal. Backends that cannot provide
     // that resource guarantee must leave this unsupported.
@@ -287,5 +296,25 @@ bool is_engine_available(JsEngineType type);
 // C++ view path did not initialize a scripting backend while building/rendering.
 JsEngineCreationStats js_engine_creation_stats();
 void reset_js_engine_creation_stats_for_tests();
+
+/// Process-wide reuse of compiled script bytecode (QuickJS backend).
+///
+/// The first realm that evaluates a large script (a bundled UI runtime, a big
+/// prelude) compiles it and keeps the bytecode; every later realm in the same
+/// process that evaluates byte-identical source reads the bytecode back instead
+/// of parsing again. Keyed by the full source text, so a hit is never a
+/// different script. Process-local and in-memory only: bytecode is never
+/// written to disk, because QuickJS does not validate untrusted bytecode.
+/// `PULP_JS_BYTECODE_CACHE=0` disables it.
+struct ScriptBytecodeCacheStats {
+    std::uint64_t compiles = 0;   ///< scripts compiled and stored
+    std::uint64_t hits = 0;       ///< evaluations served from stored bytecode
+    std::uint64_t bypassed = 0;   ///< too small to cache, or cache disabled
+    std::size_t entries = 0;
+    std::size_t bytes = 0;        ///< bytecode + key bytes held
+};
+ScriptBytecodeCacheStats script_bytecode_cache_stats();
+/// Drop every stored script (tests; a host that wants the memory back).
+void clear_script_bytecode_cache();
 
 } // namespace pulp::view

@@ -33,6 +33,10 @@ choc::value::Value ScriptEngine::evaluate(const std::string& code) {
     return engine_->evaluate(code);
 }
 
+choc::value::Value ScriptEngine::evaluate_script(const std::string& code) {
+    return engine_->evaluate_script(code);
+}
+
 bool ScriptEngine::supports_bounded_json_evaluation() const {
     return engine_ && engine_->supports_bounded_json_evaluation();
 }
