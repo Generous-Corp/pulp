@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "detail/streaming_model.hpp"
+#include "detail/neural_processor.hpp"
+#include "harness/rt_allocation_probe.hpp"
 
 #include <array>
 #include <optional>
@@ -294,4 +296,101 @@ TEST_CASE("micro TCN rejects an unsupported host frame limit at preparation",
                                                  .artifact_hash = "embedded-test-weights",
                                                  .max_frames = 8192};
     CHECK_FALSE(model.prepare(context));
+}
+
+TEST_CASE("causal max pool has explicit zero-lookahead streaming semantics",
+          "[gpu_audio][streaming_model][pool]") {
+    using Pool = CausalMaxPool<1, 3>;
+    STATIC_REQUIRE(Pool::lookahead_samples == 0);
+    STATIC_REQUIRE(Pool::intrinsic_latency_samples == 0);
+    STATIC_REQUIRE(Pool::receptive_field_samples == 3);
+
+    Pool pool;
+    std::array<float, 2> first_input{1.0f, 4.0f};
+    std::array<float, 2> first_output{};
+    const float* first_input_channels[] = {first_input.data()};
+    float* first_output_channels[] = {first_output.data()};
+    const auto first_in = pulp::audio::BufferView<const float>(first_input_channels, 1, 2);
+    auto first_out = pulp::audio::BufferView<float>(first_output_channels, 1, 2);
+    pool.process(first_in, first_out, 2);
+    const std::array<float, 2> expected_first{1.0f, 4.0f};
+    CHECK(first_output == expected_first);
+
+    std::array<float, 2> second_input{-2.0f, 3.0f};
+    std::array<float, 2> second_output{};
+    const float* second_input_channels[] = {second_input.data()};
+    float* second_output_channels[] = {second_output.data()};
+    const auto second_in = pulp::audio::BufferView<const float>(second_input_channels, 1, 2);
+    auto second_out = pulp::audio::BufferView<float>(second_output_channels, 1, 2);
+    pool.process(second_in, second_out, 2);
+    const std::array<float, 2> expected_second{4.0f, 4.0f};
+    CHECK(second_output == expected_second);
+
+    pool.reset();
+    std::array<float, 1> reset_input{-2.0f};
+    std::array<float, 1> reset_output{};
+    const float* reset_input_channels[] = {reset_input.data()};
+    float* reset_output_channels[] = {reset_output.data()};
+    const auto reset_in = pulp::audio::BufferView<const float>(reset_input_channels, 1, 1);
+    auto reset_out = pulp::audio::BufferView<float>(reset_output_channels, 1, 1);
+    pool.process(reset_in, reset_out, 1);
+    CHECK(reset_output[0] == -2.0f);
+}
+
+TEST_CASE("neural processor publishes an immutable preparation snapshot",
+          "[gpu_audio][neural_processor]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context, NeuralProviderPreference::PreferMlx,
+                              {.cpu = true, .mlx = true, .dawn = false}));
+    CHECK_FALSE(processor.snapshot().prepared);
+    REQUIRE(processor.publish());
+    const auto& entry = processor.model_entry();
+    CHECK(entry.valid());
+    CHECK(entry.artifact_id == "identity-v1");
+    CHECK(processor.snapshot().provider == NeuralProvider::Cpu);
+    CHECK(processor.snapshot().fell_back_to_cpu);
+    CHECK(processor.snapshot().generation == 1);
+    CHECK_FALSE(processor.prepare(context));
+}
+
+TEST_CASE("neural processor reset advances the callback generation",
+          "[gpu_audio][neural_processor]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context));
+    REQUIRE(processor.publish());
+    CHECK(processor.reset(StreamingResetReason::DeviceLoss));
+    CHECK(processor.snapshot().generation == 2);
+    CHECK(processor.snapshot().prepared);
+}
+
+TEST_CASE("neural processor callback path performs no allocation",
+          "[gpu_audio][neural_processor][realtime]") {
+    IdentityModel model;
+    NeuralProcessor processor(model);
+    const auto context = StreamingPrepareContext{.spec = &model.spec(),
+                                                 .artifact_id = "identity-v1",
+                                                 .artifact_hash = "weights-hash",
+                                                 .max_frames = 4};
+    REQUIRE(processor.prepare(context));
+    REQUIRE(processor.publish());
+    std::array<float, 4> input{1, 2, 3, 4};
+    std::array<float, 4> output{};
+    const float* input_channels[] = {input.data()};
+    float* output_channels[] = {output.data()};
+    const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 4);
+    auto out = pulp::audio::BufferView<float>(output_channels, 1, 4);
+    pulp::test::RtAllocationProbe probe;
+    processor.process_cpu(in, out, 4, {.epoch = 999, .sequence = 5});
+    CHECK(probe.allocation_count() == 0);
+    CHECK(output == input);
 }
