@@ -142,11 +142,24 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
         return result;
     }
 
+    // The store outlives the processor (declared first, destroyed last), so a
+    // processor destructor that still touches state() never sees a dangling
+    // store.
+    pulp::state::StateStore store;
     auto processor = factory();
     if (!processor) {
         result.error = "AAX factory did not return a processor instance";
         return result;
     }
+
+    // Wire a parameter store before asking the processor anything. Every other
+    // format adapter binds a store and defines parameters before it reads
+    // descriptor() or latency_samples(); a processor whose latency depends on a
+    // parameter default reads state() here, and an unbound store would crash
+    // the plug-in while Pro Tools (or the AAX validator) is still registering
+    // it. Latency is therefore reported for the default parameter values.
+    processor->set_state_store(&store);
+    processor->define_parameters(store);
 
     PluginDefinition definition;
     definition.codes = codes;
@@ -237,10 +250,6 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
         result.error = "AAX MIDI effects must declare MIDI input support";
         return result;
     }
-
-    pulp::state::StateStore store;
-    processor->set_state_store(&store);
-    processor->define_parameters(store);
 
     for (const auto& param : store.all_params()) {
         ParameterBinding binding;

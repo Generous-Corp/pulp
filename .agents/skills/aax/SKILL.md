@@ -341,6 +341,26 @@ helper; a shared bit-exact fixture in `test_adapter_boundary_parity.cpp`
 (`[bypass]`) covers it since the real AAX runtime can't build without the Avid
 SDK.
 
+### Bind a parameter store before asking the processor anything
+
+`build_plugin_definition()` (`aax_model.cpp`) describes the plug-in from a
+fresh `factory()` instance during registration — before Pro Tools or the AAX
+validator ever prepares it. A plug-in whose `latency_samples()` (or
+`descriptor()`) reads a parameter calls `state()`, which dereferences the
+processor's store pointer; with no store bound that is a SIGSEGV at
+registration, and the host reports the plug-in as failing its describe step
+with no Pulp log. Every other adapter binds a store and calls
+`define_parameters()` before these reads, so a plug-in that works in
+VST3/AU/CLAP crashed only in AAX.
+
+The definition builder now binds a scratch `StateStore` (declared before the
+processor, so it outlives it) and runs `define_parameters()` immediately after
+`factory()`, then reads `descriptor()` and `latency_samples()`. The registered
+latency is therefore the latency at default parameter values. Any new
+adapter-side code that instantiates a throwaway processor to read metadata must
+do the same; `[aax][model][latency]` in `test_aax_model.cpp` covers it SDK-free
+with a processor whose latency is a parameter default.
+
 ### The editor's GPU surface is a SUBSCRIPTION, not a one-shot read
 
 `aax_effect_gui.cpp` must not sample `host_->gpu_surface()` once and hand
