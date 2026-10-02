@@ -2,10 +2,19 @@
 
 #include "detail/streaming_model.hpp"
 #include "detail/neural_processor.hpp"
-#include "harness/rt_allocation_probe.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
 
 #include <array>
 #include <optional>
+
+#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+#include <csignal>
+#include <cstdlib>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -74,7 +83,7 @@ class EchoBackend final : public StreamingBackend {
         return prepared_;
     }
 
-    StreamingAdmission enqueue(const StreamingBlock& block) noexcept override {
+    StreamingAdmission enqueue_validated(const StreamingBlock& block) noexcept override {
         if (!prepared_ || pending_ || block.stamp.epoch != epoch_)
             return StreamingAdmission::Rejected;
         pending_ = &block;
@@ -170,6 +179,12 @@ TEST_CASE("streaming block requires explicit planar or interleaved strides",
     CHECK(valid_streaming_block_layout(block));
     block.output_channel_stride = 8;
     CHECK_FALSE(valid_streaming_block_layout(block));
+
+    // Bounds alone are insufficient: channel/frame strides can address the
+    // same sample more than once while still staying inside the span.
+    block.output_channel_stride = 1;
+    block.output_frame_stride = 1;
+    CHECK_FALSE(valid_streaming_block_layout(block));
 }
 
 TEST_CASE("streaming model owns deterministic CPU state and explicit epochs",
@@ -215,14 +230,20 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
                                                  .max_frames = 4};
     EchoBackend backend;
     REQUIRE(backend.prepare(context));
-    std::array<float, 4> input{1, 2, 3, 4};
-    std::array<float, 4> output{};
+    std::array<float, 8> input{1, 2, 3, 4, 5, 6, 7, 8};
+    std::array<float, 8> output{};
     const StreamingBlock block{.stamp = {.epoch = 48000, .sequence = 9},
                                .input = input,
                                .output = output,
-                               .input_channels = 1,
-                               .output_channels = 1,
-                               .frames = 4};
+                               .input_channels = 2,
+                               .output_channels = 2,
+                               .frames = 4,
+                               .input_channel_stride = 4,
+                               .output_channel_stride = 4};
+    auto malformed = block;
+    malformed.output_channel_stride = 1;
+    malformed.output_frame_stride = 1;
+    CHECK(backend.enqueue(malformed) == StreamingAdmission::Rejected);
     CHECK(backend.enqueue(block) == StreamingAdmission::Accepted);
     CHECK(backend.service_until(0) == 1);
     StreamingTerminal terminal;
@@ -237,7 +258,9 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
                                 .output = output,
                                 .input_channels = 1,
                                 .output_channels = 1,
-                                .frames = 4};
+                                .frames = 4,
+                                .input_channel_stride = 4,
+                                .output_channel_stride = 4};
     CHECK(backend.enqueue(queued) == StreamingAdmission::Accepted);
     CHECK(backend.begin_epoch(13, StreamingResetReason::TransportRestart));
     REQUIRE(backend.receive(terminal));
@@ -245,6 +268,30 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
     CHECK(backend.enqueue(block) == StreamingAdmission::Rejected);
 }
+
+#if PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS
+TEST_CASE("streaming callback probe traps a planted blocking lock",
+          "[gpu_audio][streaming_model][realtime][negative]") {
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    const auto child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        // Resolve the interposed symbol before entering the scope. The child
+        // must die from the planted lock, not from first-call loader work.
+        REQUIRE(::pthread_mutex_lock(&mutex) == 0);
+        REQUIRE(::pthread_mutex_unlock(&mutex) == 0);
+        pulp::test::ScopedRtProcessProbe probe;
+        (void)::pthread_mutex_lock(&mutex);
+        _exit(EXIT_FAILURE);
+    }
+
+    int status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    CHECK(WIFSIGNALED(status));
+    CHECK((WTERMSIG(status) == SIGABRT || WTERMSIG(status) == SIGTRAP));
+    REQUIRE(::pthread_mutex_destroy(&mutex) == 0);
+}
+#endif
 
 TEST_CASE("micro TCN carries causal convolution state across blocks",
           "[gpu_audio][streaming_model][tcn]") {
@@ -437,7 +484,7 @@ TEST_CASE("neural processor callback path performs no allocation",
     float* output_channels[] = {output.data()};
     const auto in = pulp::audio::BufferView<const float>(input_channels, 1, 4);
     auto out = pulp::audio::BufferView<float>(output_channels, 1, 4);
-    pulp::test::RtAllocationProbe probe;
+    pulp::test::ScopedRtProcessProbe probe;
     processor.process_cpu(in, out, 4, {.epoch = 999, .sequence = 5});
     CHECK(probe.allocation_count() == 0);
     CHECK(output == input);

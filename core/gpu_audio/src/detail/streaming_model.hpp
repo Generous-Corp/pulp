@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <numeric>
 #include <span>
 #include <string_view>
 
@@ -130,8 +132,23 @@ constexpr bool valid_streaming_block_layout(const StreamingBlock& block) noexcep
                           static_cast<std::size_t>(frames - 1) * frame_stride;
         return last < size;
     };
-    return covers(block.input.size(), block.input_channels, block.frames,
-                   block.input_channel_stride, block.input_frame_stride) &&
+    // Bounds do not prove that the affine channel/frame address map is
+    // injective. For positive strides, the smallest duplicate displacement is
+    // (frame_stride/gcd, channel_stride/gcd); reject it whenever both
+    // displacements fit inside the declared channel/frame extents.
+    const auto injective = [](std::uint32_t channels, std::uint32_t frames,
+                              std::uint32_t channel_stride,
+                              std::uint32_t frame_stride) constexpr noexcept {
+        const auto divisor = std::gcd(channel_stride, frame_stride);
+        return frame_stride / divisor >= channels ||
+               channel_stride / divisor >= frames;
+    };
+    return injective(block.input_channels, block.frames,
+                     block.input_channel_stride, block.input_frame_stride) &&
+           injective(block.output_channels, block.frames,
+                     block.output_channel_stride, block.output_frame_stride) &&
+           covers(block.input.size(), block.input_channels, block.frames,
+                  block.input_channel_stride, block.input_frame_stride) &&
            covers(block.output.size(), block.output_channels, block.frames,
                   block.output_channel_stride, block.output_frame_stride);
 }
@@ -219,7 +236,14 @@ class StreamingBackend {
     // On Accepted, the transport retains the block's input/output leases until
     // receive() publishes exactly one terminal for the same stamp. Rejected
     // blocks carry no terminal obligation.
-    virtual StreamingAdmission enqueue(const StreamingBlock&) noexcept = 0;
+    // Admission owns the layout safety check so every backend rejects
+    // out-of-bounds or aliasing leases before retaining them. Implementations
+    // only receive a validated block through enqueue_validated().
+    StreamingAdmission enqueue(const StreamingBlock& block) noexcept {
+        if (!valid_streaming_block_layout(block))
+            return StreamingAdmission::Rejected;
+        return enqueue_validated(block);
+    }
     virtual std::size_t service_until(std::uint64_t deadline_ns) noexcept = 0;
     virtual bool receive(StreamingTerminal&) noexcept = 0;
     // Host/quiescent only: stop admission, fence/drain or cancel queued work,
@@ -228,6 +252,9 @@ class StreamingBackend {
     virtual bool reprepare_after_device_loss(std::uint64_t epoch) noexcept = 0;
     virtual bool quiesce() noexcept = 0;
     virtual bool release() noexcept = 0;
+
+  protected:
+    virtual StreamingAdmission enqueue_validated(const StreamingBlock&) noexcept = 0;
 };
 
 /// Small, portable causal-convolution model used to prove that the streaming
@@ -338,6 +365,56 @@ class MicroTcnModel final : public StreamingModel {
     std::size_t ring_cursor_ = 0;
     StreamingBlockStamp last_stamp_{};
     bool prepared_ = false;
+};
+
+/// Allocation-free causal max pooling for model fixtures and learned-filter
+/// adapters. The current sample is included in the window, so the primitive
+/// has zero lookahead and zero intrinsic latency; WindowSize describes the
+/// number of current/previous samples retained in its persistent state.
+template <std::size_t Channels, std::size_t WindowSize>
+class CausalMaxPool {
+  public:
+    static_assert(Channels > 0 && WindowSize > 0);
+    static constexpr std::size_t lookahead_samples = 0;
+    static constexpr std::size_t intrinsic_latency_samples = 0;
+    static constexpr std::size_t receptive_field_samples = WindowSize;
+    static constexpr std::size_t state_bytes = Channels * WindowSize * sizeof(float);
+
+    CausalMaxPool() noexcept { reset(); }
+
+    void process(const audio::BufferView<const float>& input,
+                 audio::BufferView<float>& output, std::uint32_t frames) noexcept {
+        if (frames > MaxSupportedFrames || input.num_channels() < Channels ||
+            output.num_channels() < Channels || input.num_samples() < frames ||
+            output.num_samples() < frames) {
+            output.clear();
+            return;
+        }
+        for (std::uint32_t frame = 0; frame < frames; ++frame) {
+            for (std::size_t channel = 0; channel < Channels; ++channel) {
+                const auto sample = input.channel_ptr(channel)[frame];
+                auto maximum = sample;
+                for (std::size_t offset = 1; offset < WindowSize; ++offset) {
+                    const auto index = (cursor_ + WindowSize - offset) % WindowSize;
+                    maximum = maximum > state_[channel][index] ? maximum : state_[channel][index];
+                }
+                output.channel_ptr(channel)[frame] = maximum;
+                state_[channel][cursor_] = sample;
+            }
+            cursor_ = (cursor_ + 1) % WindowSize;
+        }
+    }
+
+    void reset() noexcept {
+        for (auto& channel : state_)
+            channel.fill(std::numeric_limits<float>::lowest());
+        cursor_ = 0;
+    }
+
+  private:
+    static constexpr std::size_t MaxSupportedFrames = 4096;
+    std::array<std::array<float, WindowSize>, Channels> state_{};
+    std::size_t cursor_ = 0;
 };
 
 static_assert(streaming_method_safety(StreamingModelMethod::ProcessCpu) ==

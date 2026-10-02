@@ -608,10 +608,13 @@ pulp_add_test_suite(pulp-test-gpu-audio-execution-contract GROUP pulp-test-group
     LIBRARIES pulp::gpu-audio pulp::audio
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
 
-pulp_add_test_suite(pulp-test-streaming-model-contract GROUP pulp-test-group-core-gpu-audio-private
-    SOURCES test_streaming_model_contract.cpp harness/rt_allocation_probe.cpp
+pulp_add_test_suite(pulp-test-streaming-model-contract
+    SOURCES test_streaming_model_contract.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::gpu-audio pulp::audio
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 pulp_add_test_suite(pulp-test-neural-model-manifest GROUP pulp-test-group-core-gpu-audio-private
     SOURCES test_neural_model_manifest.cpp
@@ -621,10 +624,12 @@ pulp_add_test_suite(pulp-test-neural-model-manifest GROUP pulp-test-group-core-g
 # all model/audio storage before entering the allocation probe and reports a
 # reproducible channel/kernel matrix without requiring Dawn or a GPU device.
 pulp_add_test_suite(pulp-test-streaming-model-benchmark
-    SOURCES test_streaming_model_benchmark.cpp harness/rt_allocation_probe.cpp
-    GROUP pulp-test-group-core-gpu-audio-private
+    SOURCES test_streaming_model_benchmark.cpp
+            $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+            $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::gpu-audio pulp::audio
-    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src)
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # Public, backend-neutral WaveNet adapter boundary. This is deliberately a
 # shape/fallback contract; provider handles remain private until an execution
