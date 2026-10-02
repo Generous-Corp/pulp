@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static, mutation, and exact-inventory contract for changed-surface policy."""
+"""Static, mutation, and live-inventory contract for changed-surface policy."""
 
 from __future__ import annotations
 
@@ -95,10 +95,6 @@ def load_policy() -> dict:
     return load_config()["targets"]["mac"]["changed_surface_selection"]
 
 
-def load_inventory_contract() -> dict:
-    return json.loads(INVENTORY_CONTRACT_PATH.read_text(encoding="utf-8"))
-
-
 def matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
 
@@ -159,7 +155,6 @@ def fixture(
 class ChangedSurfacePolicyTest(unittest.TestCase):
     def setUp(self) -> None:
         self.policy = load_policy()
-        self.contract = load_inventory_contract()
         self.source_root = Path("/repo")
         self.build_dir = Path("/repo/build")
 
@@ -167,9 +162,8 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         self.assertEqual(self.policy["schema_version"], 3)
         self.assertEqual(self.policy["build_type"], "debug")
         self.assertGreater(self.policy["full_test_count"], 20_000)
-        self.assertEqual(
-            self.policy["full_test_count"], self.contract["registration_count"]
-        )
+        self.assertFalse(INVENTORY_CONTRACT_PATH.exists(),
+                         "the committed inventory pin is retired; bounded runs compare with the base")
         self.assertTrue(self.policy["baseline_tests"])
         self.assertTrue(self.policy["baseline_build_targets"])
         self.assertIn("changed-surface-policy-selftest", self.policy["baseline_tests"])
@@ -205,7 +199,7 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "tools/rack/provenance_check.py": "full_required",
             "test/cmake/quality_tests.cmake": "test_topology",
             ".shipyard/config.toml": "selector_policy",
-            ".shipyard/changed-surface-inventory.json": "selector_policy",
+            "tools/scripts/run_changed_surface_tests.py": "selector_policy",
             "tools/scripts/changed_surface_inventory.py": "selector_policy",
             "core/future_subsystem/new_runtime.cpp": "unknown_full",
         }
@@ -441,20 +435,11 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
             "full",
         )
 
-    def test_contract_pins_registration_multiset_not_unique_names(self) -> None:
-        self.assertEqual(self.contract["schema_version"], 1)
-        self.assertEqual(self.contract["registration_count"], 21_960)
-        self.assertEqual(self.contract["unique_name_count"], 21_900)
-        self.assertEqual(self.contract["unique_composite_count"], 21_960)
-        self.assertEqual(self.contract["duplicate_name_group_count"], 56)
-        self.assertEqual(self.contract["duplicate_name_excess_count"], 60)
-        self.assertEqual(self.contract["duplicate_composite_group_count"], 0)
+    def test_authoritative_filter_digest_is_stable(self) -> None:
         self.assertEqual(
-            self.contract["authoritative_filter_digest"],
-            inventory.authoritative_filter_digest(),
+            inventory.authoritative_filter_digest(), inventory.authoritative_filter_digest()
         )
-        self.assertRegex(self.contract["target_contract_digest"], r"^[0-9a-f]{64}$")
-        self.assertRegex(self.contract["inventory_digest"], r"^[0-9a-f]{64}$")
+        self.assertRegex(inventory.authoritative_filter_digest(), r"^[0-9a-f]{64}$")
 
     def test_authoritative_filter_matches_validation_command(self) -> None:
         tests = [
@@ -725,16 +710,10 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
         )
         self.assertEqual(first_group, second_group)
 
-    def test_contract_digest_drift_forces_full(self) -> None:
-        observed = dict(self.contract)
-        observed["inventory_digest"] = "0" * 64
-        with self.assertRaisesRegex(inventory.InventoryError, "require full suite"):
-            inventory.validate_manifest(observed, self.contract)
-
-    def test_toolchain_patch_drift_is_telemetry_not_a_repository_failure(self) -> None:
-        observed = dict(self.contract)
-        observed["toolchain_digest"] = "f" * 64
-        inventory.validate_manifest(observed, self.contract)
+    def test_duplicate_composite_identity_is_refused(self) -> None:
+        with self.assertRaisesRegex(inventory.InventoryError, "ambiguous"):
+            inventory.require_unambiguous({"duplicate_composite_group_count": 1})
+        inventory.require_unambiguous({"duplicate_composite_group_count": 0})
 
     def test_literal_selection_rejects_missing_or_repeated_requests(self) -> None:
         groups = inventory.inventory_groups(
@@ -748,15 +727,26 @@ class ChangedSurfacePolicyTest(unittest.TestCase):
 
 
 def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = None) -> None:
+    """A built tree's registrations must be complete and name every literal
+    test the policy declares. Whether they match the protected base is decided
+    per plan, against that base (run_changed_surface_tests.base_projection)."""
     policy = load_policy()
     source_root = inventory.source_root_for_build(build_dir)
+    payload = inventory.load_ctest_payload(build_dir)
+    projection = inventory.project_registrations(payload, source_root, build_dir)
+    unresolved = [name for name in projection["incomplete"]
+                  if not inventory.NOT_BUILT_PLACEHOLDER.match(name)]
+    if unresolved:
+        raise inventory.InventoryError(
+            f"registrations without a command after the build: {unresolved[:12]}"
+        )
     manifest = inventory.build_manifest(
-        inventory.load_ctest_json(build_dir),
+        payload["tests"],
         source_root,
         Path(os.path.abspath(build_dir)),
         policy,
     )
-    inventory.validate_manifest(manifest, load_inventory_contract())
+    inventory.require_unambiguous(manifest)
     missing = sorted(
         literal_tests(policy)
         - {group["composite"]["name"] for group in manifest["groups"]}
@@ -767,7 +757,7 @@ def validate_ctest_inventory(build_dir: Path, manifest_output: Path | None = Non
         )
     inventory.expand_literal_selection(manifest, literal_tests(policy))
     if manifest_output is not None:
-        manifest_output.write_bytes(inventory.canonical_json(manifest) + b"\n")
+        manifest_output.write_bytes(inventory.canonical_json(projection) + b"\n")
 
 
 def main() -> int:

@@ -376,7 +376,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual([t["name"] for t in only], ["ran"])
 
 
-    def write_in_process(self, tmp: str, build: Path, src: Path, tests: list[dict]) -> tuple[str, dict]:
+    def write_in_process(self, tmp: str, build: Path, src: Path, tests: list[dict],
+                         extra: tuple[str, ...] = ()) -> tuple[str, dict]:
         import contextlib
         import io
         original = pmr.ctest_inventory
@@ -387,7 +388,8 @@ class CliTests(unittest.TestCase):
         try:
             with contextlib.redirect_stdout(out):
                 rc = rr.main(["reuse_record.py", "write", "--out-dir", f"{tmp}/out", "--build-dir", str(build),
-                              "--source-root", str(src), "--codemodel", "--identity-scope", "ran"])
+                              "--source-root", str(src), "--codemodel", "--identity-scope", "ran",
+                              *extra])
         finally:
             pmr.ctest_inventory = original
             os.environ.clear()
@@ -413,6 +415,29 @@ class CliTests(unittest.TestCase):
             stdout, job = self.write_in_process(tmp, Path(tmp) / "build", Path(tmp), [])
         self.assertIsNone(job["codemodel"])
         self.assertIn("::warning title=reuse-record incomplete::codemodel digest unavailable", stdout)
+
+
+    def test_registration_projection_is_written_and_marks_incomplete_builds(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            ok = [{"name": "a", "command": ["python3", f"{tmp}/a.py"], "properties": []}]
+            _, job = self.write_in_process(tmp, build, Path(tmp), ok, ("--inventory",))
+            rec = job["registration_projection"]
+            doc = json.loads((Path(tmp) / "out" / rec["file"]).read_text())
+            self.assertEqual((rec["rows"], rec["recordable"], rec["incomplete"]), (1, True, 0))
+            self.assertEqual(doc["digest"], rec["digest"])
+            self.assertEqual(job["bytes"]["registration_projection"], rec["bytes"])
+            unbuilt = [{"name": "cli-help", "command": [""], "properties": []}]
+            stdout, job = self.write_in_process(tmp, build, Path(tmp), unbuilt, ("--inventory",))
+        self.assertFalse(job["registration_projection"]["recordable"])
+        self.assertIn("registration projection not recordable", stdout)
+
+    def test_projection_is_off_unless_asked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "build").mkdir()
+            _, job = self.write_in_process(tmp, Path(tmp) / "build", Path(tmp), [])
+        self.assertIsNone(job["registration_projection"])
 
 
 class WorkflowContractTests(unittest.TestCase):
@@ -478,6 +503,7 @@ class WorkflowContractTests(unittest.TestCase):
         record = self.blocks("Record per-test results for reuse replay (macOS)")[0]
         self.assertIn("--link-members", record)
         self.assertIn("--codemodel", record)
+        self.assertIn("--inventory", record)
         self.assertIn('.cmake/api/v1/query/codemodel-v2"', self.text)
 
 

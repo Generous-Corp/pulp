@@ -636,27 +636,11 @@ def build_manifest(
     }
 
 
-def validate_manifest(manifest: dict[str, Any], contract: dict[str, Any]) -> None:
+def require_unambiguous(manifest: dict[str, Any]) -> None:
+    """Two registrations with one composite identity cannot be told apart, so
+    no literal selection over them is safe."""
     if manifest["duplicate_composite_group_count"]:
         raise InventoryError("duplicate composite registration identity is ambiguous")
-    fields = (
-        "registration_count",
-        "unique_name_count",
-        "unique_composite_count",
-        "duplicate_name_group_count",
-        "duplicate_name_excess_count",
-        "duplicate_composite_group_count",
-        "target_contract_digest",
-        "authoritative_filter_digest",
-        "inventory_digest",
-    )
-    mismatches = [
-        f"{field}: expected {contract.get(field)!r}, observed {manifest.get(field)!r}"
-        for field in fields
-        if contract.get(field) != manifest.get(field)
-    ]
-    if mismatches:
-        raise InventoryError("inventory contract drift; require full suite: " + "; ".join(mismatches))
 
 
 def expand_literal_selection(
@@ -1448,3 +1432,226 @@ def project_working_diff(build_dir: Path, source_root: Path | None, base: str,
     inventory = load_projection_ctest_entries(build_dir) if with_tests else None
     return project_affected(model, changed, deleted, deps_db, inventory, threshold, stale,
                             families)
+
+
+# ── Configuration-neutral registration projection ──
+#
+# The same tree configured for the required gate (Release, examples OFF) and
+# for the Shipyard lane (Debug, examples ON) registers the same tests, but
+# their ctest listings differ in build paths, the build type, the Python
+# interpreter and the examples' own registrations. This projection removes
+# exactly those differences, so a base inventory recorded by one job can be
+# compared with another's. Discovered Catch2 cases are one row per
+# executable: the case list is a function of the executable's bytes, which a
+# binary identity key covers, not of the registration.
+
+REGISTRATION_PROJECTION_SCHEMA = "pulp.changed-surface-registration-projection/v1"
+BUILD_TYPE_TOKEN = "${CMAKE_BUILD_TYPE}"
+SOURCE_DIR_TOKEN = "${CMAKE_SOURCE_DIR}"
+PYTHON_TOKEN = "${PYTHON}"
+PYTHON_PATH = re.compile(r"(?:/[^\s=:;,'\"]*)?/python3(?:\.\d+)?(?![\w.])")
+PYTHON_NAME = re.compile(r"^python3(?:\.\d+)?$")
+BUILD_TYPES = ("Debug", "Release", "RelWithDebInfo", "MinSizeRel")
+IGNORED_PROJECTION_PROPERTIES = frozenset({"WORKING_DIRECTORY", "_BACKTRACE_TRIPLES"})
+# Build-tree directories holding example executables and plugin bundles, which
+# exist only when examples are configured.
+EXAMPLE_PRODUCT_DIRS = ("examples", "AU", "AUv3", "CLAP", "VST3", "LV2")
+# Registrations whose arguments depend on PULP_CHANGED_SURFACE_INVENTORY_TARGET,
+# which only the Shipyard lane enables: the selector's own inventory check.
+INVENTORY_TARGET_GATED = frozenset({"changed-surface-policy-selftest"})
+
+
+def load_ctest_payload(build_dir: Path) -> dict[str, Any]:
+    """The whole ``--show-only=json-v1`` document, backtrace graph included."""
+    result = subprocess.run(
+        ["ctest", "--test-dir", str(build_dir), "--show-only=json-v1"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    if not isinstance(payload.get("tests"), list):
+        raise InventoryError("CTest JSON has no tests array")
+    return payload
+
+
+def _cache_value(build_dir: Path, key: str) -> str:
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.is_file():
+        return ""
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith(f"{key}:") and "=" in line:
+            return line.split("=", 1)[1]
+    return ""
+
+
+def _neutral(value: Any, roots: list[tuple[str, str]], build_type: str) -> Any:
+    if isinstance(value, list):
+        return [_neutral(item, roots, build_type) for item in value]
+    if not isinstance(value, str):
+        return value
+    for root, token in roots:
+        value = value.replace(root, token)
+    value = PYTHON_PATH.sub(PYTHON_TOKEN, value)
+    if build_type:
+        # Only a whole value or an `=`-assigned value names the build type;
+        # a test called "Release notes" keeps its name.
+        if value == build_type:
+            value = BUILD_TYPE_TOKEN
+        value = re.sub(rf"(?<==){re.escape(build_type)}(?![\w-])", BUILD_TYPE_TOKEN, value)
+    return value
+
+
+def _build_relative(test: dict[str, Any], command: list[str], build: str) -> str:
+    """Where in the build tree a registration lives: its working directory,
+    else its program's directory; "" when outside the build tree."""
+    candidates = [
+        prop.get("value")
+        for prop in test.get("properties") or []
+        if prop.get("name") == "WORKING_DIRECTORY"
+    ]
+    if command:
+        candidates.append(os.path.dirname(command[0]))
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate:
+            path = os.path.realpath(candidate)
+            if path.startswith(build + os.sep):
+                return os.path.relpath(path, build)
+    return ""
+
+
+def project_registrations(
+    payload: dict[str, Any], source_root: Path, build_dir: Path
+) -> dict[str, Any]:
+    """The configuration-neutral multiset of a ctest listing.
+
+    ``incomplete`` lists registrations whose command is missing: an
+    unbuilt target, or an unbuilt Catch2 executable's placeholder. A
+    projection with any is not ``recordable`` as a base inventory, so a
+    half-built tree can never pin one."""
+    import script_test_inputs as sti  # tools/scripts: the gate-profile filter
+
+    source = os.path.realpath(source_root)
+    build = os.path.realpath(build_dir)
+    # Both spellings of each root: ctest records the configured path, which
+    # may run through a symlink (/var -> /private/var on macOS).
+    roots = sorted(
+        {
+            (path, token)
+            for root, token in ((build_dir, sti.BINARY_DIR_TOKEN), (source_root, SOURCE_DIR_TOKEN))
+            for path in (os.path.abspath(root), os.path.realpath(root))
+        },
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    build_type = _cache_value(build_dir, "CMAKE_BUILD_TYPE")
+    outside = sti.outside_gate_profile(payload, Path(source))
+    rows: Counter[str] = Counter()
+    incomplete: list[str] = []
+    config_gated: list[str] = []
+    discovered: dict[str, dict[str, Any]] = {}
+    for test in payload.get("tests", []):
+        name = test.get("name", "")
+        if name in outside:
+            continue
+        command = [str(part) for part in test.get("command") or []]
+        registered = sti.registered_from(test, payload) or ""
+        placeholder = NOT_BUILT_PLACEHOLDER.match(name)
+        generated = registered and os.path.realpath(registered).startswith(build + os.sep)
+        location = _build_relative(test, command, build)
+        if location.split("/", 1)[0] == "examples":
+            continue  # an example's own suite: registered only with examples ON
+        if placeholder or generated:
+            # A discovered case, or the placeholder that stands for an unbuilt
+            # executable's cases: one row per executable.
+            executable = (
+                placeholder.group("target") if placeholder else os.path.basename(command[0] if command else "")
+            )
+            if placeholder or not command:
+                incomplete.append(name)
+            discovered.setdefault(executable, {"kind": "discovered", "executable": executable})
+            continue
+        if not command or not command[0]:
+            incomplete.append(name)
+        program = _neutral(command[0], roots, build_type) if command else ""
+        if not program.startswith((sti.BINARY_DIR_TOKEN + "/", SOURCE_DIR_TOKEN + "/")):
+            program = os.path.basename(program)
+        if PYTHON_NAME.match(program):
+            program = PYTHON_TOKEN
+        properties = {
+            prop.get("name"): _neutral(prop.get("value"), roots, build_type)
+            for prop in test.get("properties") or []
+            if prop.get("name") not in IGNORED_PROJECTION_PROPERTIES
+        }
+        row = {
+            "kind": "registration",
+            "name": name,
+            "command": [program] + [_neutral(part, roots, build_type) for part in command[1:]],
+            "properties": dict(sorted(properties.items())),
+        }
+        encoded = json.dumps(row, sort_keys=True, separators=(",", ":"))
+        example_product = any(
+            f"{sti.BINARY_DIR_TOKEN}/{directory}/" in encoded for directory in EXAMPLE_PRODUCT_DIRS
+        )
+        if example_product or name in INVENTORY_TARGET_GATED:
+            # Recorded, never compared: its shape follows a configure switch.
+            config_gated.append(name)
+            continue
+        rows[encoded] += 1
+    for row in discovered.values():
+        rows[json.dumps(row, sort_keys=True, separators=(",", ":"))] += 1
+    ordered = sorted(rows.items())
+    return {
+        "schema": REGISTRATION_PROJECTION_SCHEMA,
+        "build_type": build_type,
+        "rows": [{"row": json.loads(key), "count": count} for key, count in ordered],
+        "row_count": sum(count for _, count in ordered),
+        "incomplete": sorted(incomplete),
+        "config_gated": sorted(config_gated),
+        "recordable": not incomplete,
+        "digest": hashlib.sha256(
+            "\n".join(f"{count}\t{key}" for key, count in ordered).encode()
+        ).hexdigest(),
+    }
+
+
+BUILD_PRODUCT_TOKEN = "${BUILD_PRODUCT}"
+
+
+def comparable_rows(projection: dict[str, Any]) -> Counter[str]:
+    """The projection's multiset with every build-tree program folded to one
+    token. A configure-only tree lists an unbuilt target's program as an empty
+    command, and a built one as its path; both name the same registration, and
+    the program's bytes are a binary identity concern, not the inventory's."""
+    import script_test_inputs as sti
+
+    rows: Counter[str] = Counter()
+    for entry in projection.get("rows", []):
+        row = dict(entry["row"])
+        if row.get("kind") == "registration":
+            command = list(row.get("command") or [""])
+            if command[0] == "" or command[0].startswith(sti.BINARY_DIR_TOKEN + "/"):
+                command[0] = BUILD_PRODUCT_TOKEN
+            row["command"] = command
+        rows[json.dumps(row, sort_keys=True, separators=(",", ":"))] += int(entry["count"])
+    return rows
+
+
+def projection_differences(base: dict[str, Any], live: dict[str, Any], limit: int = 12) -> list[str]:
+    """Rows one projection has and the other lacks, base first; [] when equal."""
+    if base.get("schema") != live.get("schema"):
+        return [f"projection schema {base.get('schema')!r} != {live.get('schema')!r}"]
+    a, b = comparable_rows(base), comparable_rows(live)
+    lines = [f"only in base: {key}" for key in sorted((a - b).elements())]
+    lines += [f"only in this tree: {key}" for key in sorted((b - a).elements())]
+    return lines[:limit] + ([f"... {len(lines) - limit} more"] if len(lines) > limit else [])
+
+
+def name_only_rows(projection: dict[str, Any]) -> int:
+    """Registrations a projection lists without a program: compared on name,
+    arguments and properties alone."""
+    return sum(
+        int(entry["count"])
+        for entry in projection.get("rows", [])
+        if entry["row"].get("kind") == "registration" and not (entry["row"].get("command") or [""])[0]
+    )

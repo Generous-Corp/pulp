@@ -350,8 +350,8 @@ rebuild. Keep the two sides in step:
   projection shares `changed_surface_inventory.py` with Shipyard's exact-head
   plan, also run `test_changed_surface_policy.py` and
   `test_run_changed_surface_tests.py` after touching it, and never change the
-  `EXCLUDED_*` filter constants from the projection side: they are pinned by
-  `.shipyard/changed-surface-inventory.json`.
+  `EXCLUDED_*` filter constants from the projection side: the bounded run's
+  base comparison and the authoritative suite both read them.
 
 ### A tartci capacity denial retries for the agent floor; its QoS is mandatory
 

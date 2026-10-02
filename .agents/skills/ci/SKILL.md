@@ -7089,59 +7089,31 @@ Keep these tests registered and runnable for hardware acceptance, main,
 release, or audit work; exclude them from default PR CTest selection rather
 than deleting them or weakening their assertions.
 
-When a change deliberately adds or removes CTest registrations, refresh the
-inventory contract in the same commit: update
-`.shipyard/changed-surface-inventory.json`, the matching `full_test_count` and
-count comment in `.shipyard/config.toml`, the pinned-count assertions in
-`tools/scripts/test_changed_surface_policy.py`, and the current inventory
-counts in `docs/guides/local-ci.md`. Derive the digest from the configured
-build's canonical inventory, then run
-`python3 tools/scripts/test_changed_surface_policy.py --build-dir build`.
-Otherwise the full suite can finish almost entirely green and fail only at the
-inventory self-test, forcing a needless second admission cycle.
+There is no inventory pin to refresh any more. A committed exact multiset
+(`.shipyard/changed-surface-inventory.json`) went stale with every test that
+landed on main: 21,960 pinned against 22,560 to 22,703 live, and
+`changed-surface-policy-selftest` failed 15 of 15 Shipyard-lane runs, so no
+bounded plan could ever execute. A bounded run now configures the protected
+base itself (`run_changed_surface_tests.base_projection`, a scratch worktree
+under the build directory, through the governor, cached per base and flags)
+and requires this tree's registrations to equal the base's, compared through
+`changed_surface_inventory.project_registrations`. Adding, removing or
+renaming a registration, including a Catch2 `TEST_CASE`, needs no extra edit:
+CMake and `test/cmake/**` already select the full suite, and a discovered
+executable's cases are one row keyed by the executable.
 
-`--build-dir` is the whole verification. Run bare, that script skips inventory
-validation entirely and still reports `Ran 28 tests ... OK` in well under a
-second against a contract that is provably stale — a green run proving only
-that the policy tables parse. Treat a sub-second pass as "not yet verified",
-and confirm the validating mode can fail: before re-pinning, the same command
-against the same build directory must report `inventory contract drift` naming
-the stale fields. A refresh whose validating run was never seen red has not
-been checked.
+`test_changed_surface_policy.py --build-dir build` now checks the live tree
+only: every registration has a command after the build, no composite identity
+is ambiguous, and every literal test the policy names exists. A run bare
+checks the policy tables alone.
 
-Deriving the inventory needs a complete build, not a configure: discovery
-registers per test case by executing the built binaries, so an incomplete tree
-yields a nonzero `placeholder_count` and junk counts. Verify
-`placeholder_count == 0` before trusting any number. `CMAKE_BUILD_TYPE` also
-feeds the toolchain digest, so the refresh must use the `build_flags` pinned in
-`.shipyard/config.toml` (Debug) — a Release tree cannot reproduce the contract.
-In a fresh worktree note that `setup.sh` configures the shared `build/`
-directory as Release with examples OFF and then runs the entire suite, so
-running it first both costs a full test cycle and leaves the cache wrong for
-this purpose; reconfigure explicitly with the pinned flags afterward and
-confirm the cache reads `Debug` before measuring.
-
-Merge the current target branch before deriving that inventory. A configured
-tree from a stale PR head can be internally consistent and still omit tests
-that landed on `main`; refreshing the pinned count and digest from it merely
-replaces one stale contract with another. Reconfigure after the merge, derive
-the inventory from that exact tree, and keep the JSON, Shipyard count, policy
-assertions, and local-CI guide in the same commit.
-
-Catch2 `TEST_CASE` additions, removals, and renames are CTest topology changes
-too: discovery materializes each case as a registration even when no CMake
-manifest changed. A 2026-08-28 sequence added four cases and removed one after
-the last inventory refresh, leaving main's contract three registrations stale
-until the next unrelated full proof exposed it. Treat changes to discovered test
-sources exactly like explicit `add_test` changes for this refresh requirement.
-
-If two independent exact-head full proofs report the same inventory counts and
-digest while the candidate diff adds, removes, or renames no CTest registration,
-treat that agreement as current-main inventory drift rather than warm-build
-contamination. Derive the canonical manifest from either configured build,
-refresh all four mirrors above together, and rerun the inventory self-test. Do
-not spend another unchanged full-suite admission: a 2026-09-01 pair of proofs
-repeated the same 191-registration delta before this distinction was recorded.
+Reasons a bounded run selects the full suite instead: `inventory: base not
+recorded` (the base did not configure), `inventory: base mismatch` (the
+checkout's merge base is not the plan's base), a registration left without a
+command after the build, or any difference from the base. The receipt records
+`base_inventory_rows`, `base_inventory_name_only_rows` (rows whose program the
+unbuilt base could not list, compared on name, arguments and properties) and
+`base_inventory_configure_seconds`.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The

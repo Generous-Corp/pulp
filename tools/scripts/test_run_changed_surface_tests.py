@@ -47,22 +47,9 @@ def policy() -> dict:
     }
 
 
-def manifest_contract(tests: list[dict], source_root: Path, build_dir: Path) -> dict:
-    manifest = inventory.build_manifest(tests, source_root, build_dir, policy())
-    return {
-        key: manifest[key]
-        for key in (
-            "registration_count",
-            "unique_name_count",
-            "unique_composite_count",
-            "duplicate_name_group_count",
-            "duplicate_name_excess_count",
-            "duplicate_composite_group_count",
-            "target_contract_digest",
-            "authoritative_filter_digest",
-            "inventory_digest",
-        )
-    }
+def base_of(tests: list[dict], source_root: Path, build_dir: Path) -> dict:
+    """The base projection a tree with exactly these registrations would record."""
+    return inventory.project_registrations({"tests": tests}, source_root, build_dir)
 
 
 def selection_receipt(
@@ -305,15 +292,15 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         source = Path("/repo")
         build = Path("/repo/build")
         tests = [fixture("smoke"), fixture("core"), fixture("neighbor")]
-        contract = manifest_contract(tests, source, build)
+        base = base_of(tests, source, build)
         runner.validate_selection(
             selected_names=["smoke", "core"],
-            full_tests=tests,
+            full_payload={"tests": tests},
             selected_tests=[tests[0], tests[1]],
             source_root=source,
             build_dir=build,
             policy=policy(),
-            contract=contract,
+            base=base,
             target="mac",
         )
 
@@ -384,12 +371,12 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         ):
             runner.validate_after_selected_build(
                 selected_names=["smoke", "core"],
-                full_tests=selected,
+                full_payload={"tests": selected},
                 selected_tests=selected,
                 source_root=Path("/repo"),
                 build_dir=Path("/repo/build"),
                 policy=policy(),
-                contract={"inventory_digest": "exact"},
+                base={},
                 target="mac",
                 selected_build_targets=["pulp-test-build-check"],
             )
@@ -403,12 +390,9 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             build = root / "build"
             build.mkdir()
             config = root / "config.toml"
-            contract = root / "contract.json"
             config.write_text("# mocked\n", encoding="utf-8")
-            contract.write_text("{}\n", encoding="utf-8")
             args = mock.Mock(
                 config=config,
-                inventory_contract=contract,
                 selection_receipt_b64="encoded",
                 selection_receipt_sha256="0" * 64,
                 target="mac",
@@ -441,7 +425,8 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                     return_value=runner.REPO_ROOT,
                 ),
                 mock.patch.object(runner, "validate_build_configuration"),
-                mock.patch.object(runner, "ctest_json", return_value=selected),
+                mock.patch.object(runner, "ctest_payload", return_value={"tests": selected}),
+                mock.patch.object(runner, "base_projection", return_value={}),
                 mock.patch.object(
                     runner,
                     "validate_selection",
@@ -467,12 +452,9 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             build = root / "build"
             build.mkdir()
             config = root / "config.toml"
-            contract = root / "contract.json"
             config.write_text("# mocked\n", encoding="utf-8")
-            contract.write_text("{}\n", encoding="utf-8")
             args = mock.Mock(
                 config=config,
-                inventory_contract=contract,
                 selection_receipt_b64="encoded",
                 selection_receipt_sha256="0" * 64,
                 target="mac",
@@ -536,9 +518,10 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 mock.patch.object(runner, "validate_build_configuration"),
                 mock.patch.object(
                     runner,
-                    "ctest_json",
-                    side_effect=lambda *_: next(ctest_results),
+                    "ctest_payload",
+                    side_effect=lambda *_: {"tests": next(ctest_results)},
                 ),
+                mock.patch.object(runner, "base_projection", return_value={}),
                 mock.patch.object(
                     runner,
                     "validate_selection",
@@ -585,7 +568,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         source = Path("/repo")
         build = Path("/repo/build")
         tests = [fixture("smoke"), fixture("core"), fixture("neighbor")]
-        contract = manifest_contract(tests, source, build)
+        base = base_of(tests, source, build)
         cases = [
             (["core"], [tests[1]], "baseline"),
             (["smoke", "attacker .*"], [tests[0]], "undeclared"),
@@ -596,12 +579,12 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 with self.assertRaisesRegex(runner.SelectionExecutionError, message):
                     runner.validate_selection(
                         selected_names=selected,
-                        full_tests=tests,
+                        full_payload={"tests": tests},
                         selected_tests=observed,
                         source_root=source,
                         build_dir=build,
                         policy=policy(),
-                        contract=contract,
+                        base=base,
                         target="mac",
                     )
 
@@ -609,18 +592,20 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         source = Path("/repo")
         build = Path("/repo/build")
         tests = [fixture("smoke"), fixture("core"), fixture("neighbor")]
-        contract = manifest_contract(tests, source, build)
+        base = base_of(tests, source, build)
         drifted = copy.deepcopy(tests)
-        drifted[1]["command"][0] = "/repo/build/bin/changed"
-        with self.assertRaisesRegex(inventory.InventoryError, "inventory contract drift"):
+        # A build-tree program is not compared (an unbuilt base lists none);
+        # its arguments and properties are.
+        drifted[1]["command"].append("--changed")
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "differ from the protected base"):
             runner.validate_selection(
                 selected_names=["smoke", "core"],
-                full_tests=drifted,
+                full_payload={"tests": drifted},
                 selected_tests=[drifted[0], drifted[1]],
                 source_root=source,
                 build_dir=build,
                 policy=policy(),
-                contract=contract,
+                base=base,
                 target="mac",
             )
 
@@ -634,42 +619,26 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         ]
         duplicate_policy = policy()
         duplicate_policy["full_test_count"] = 3
-        contract_manifest = inventory.build_manifest(
-            tests, source, build, duplicate_policy
-        )
-        contract = {
-            key: contract_manifest[key]
-            for key in (
-                "registration_count",
-                "unique_name_count",
-                "unique_composite_count",
-                "duplicate_name_group_count",
-                "duplicate_name_excess_count",
-                "duplicate_composite_group_count",
-                "target_contract_digest",
-                "authoritative_filter_digest",
-                "inventory_digest",
-            )
-        }
+        base = base_of(tests, source, build)
         runner.validate_selection(
             selected_names=["smoke", "core"],
-            full_tests=tests,
+            full_payload={"tests": tests},
             selected_tests=tests,
             source_root=source,
             build_dir=build,
             policy=duplicate_policy,
-            contract=contract,
+            base=base,
             target="mac",
         )
         with self.assertRaisesRegex(runner.SelectionExecutionError, "differs"):
             runner.validate_selection(
                 selected_names=["smoke", "core"],
-                full_tests=tests,
+                full_payload={"tests": tests},
                 selected_tests=tests[:2],
                 source_root=source,
                 build_dir=build,
                 policy=duplicate_policy,
-                contract=contract,
+                base=base,
                 target="mac",
             )
 
@@ -1144,6 +1113,122 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         self.assertEqual(summary["commands"], ["cmake", "sentinel", "ctest"])
         self.assertEqual(summary["disposition"], "refused_fallback_full")
         self.assertFalse(summary["graduation_eligible"])
+
+
+class BaseInventoryTest(unittest.TestCase):
+    """A bounded run compares this tree's registrations with the base's own."""
+
+    BASE = "a" * 40
+
+    def test_unbuilt_base_matches_built_tree_and_any_untouched_difference_refuses(self) -> None:
+        source, build = Path("/repo"), Path("/repo/build")
+        built = [fixture("smoke"), fixture("core"), fixture("neighbor")]
+        unbuilt = copy.deepcopy(built)
+        for test in unbuilt:
+            test["command"][0] = ""  # a configure-only tree lists no program yet
+        base = base_of(unbuilt, source, build)
+        self.assertFalse(base["recordable"])
+        runner.validate_registrations_match_base({"tests": built}, source, build, base)
+        for label, tree in [
+            ("deleted", built[:2]),
+            ("added", [*built, fixture("extra")]),
+            ("renamed", [built[0], built[1], fixture("neighbour")]),
+            ("relabelled", [*built[:2], {**built[2], "properties": [
+                *built[2]["properties"], {"name": "LABELS", "value": ["slow"]}]}]),
+        ]:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(runner.SelectionExecutionError, "protected base"):
+                    runner.validate_registrations_match_base({"tests": tree}, source, build, base)
+
+    def run_base(self, build: Path, results: list[int], payload: dict | None = None,
+                 merge_base: str = BASE):
+        calls: list[list[str]] = []
+
+        def fake(argv, **_):
+            if "merge-base" in argv:
+                return subprocess.CompletedProcess(argv, 0, merge_base + "\n", "")
+            calls.append(argv)
+            code = results.pop(0) if results else 0
+            return subprocess.CompletedProcess(argv, code, "", "boom")
+
+        with mock.patch.object(runner, "ctest_payload",
+                               return_value=payload or {"tests": [fixture("smoke")]}):
+            return calls, runner.base_projection(self.BASE, policy(), build, Path("/repo"), fake)
+
+    def test_base_is_configured_from_the_exact_commit_and_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            (build / "CMakeCache.txt").write_text(
+                "CMAKE_GENERATOR:INTERNAL=Ninja\nPython3_EXECUTABLE:FILEPATH=/usr/bin/python3\n")
+            calls, first = self.run_base(build, [0, 0, 0])
+            self.assertEqual(calls[0][:6], ["git", "-C", "/repo", "worktree", "add", "--detach"])
+            self.assertEqual(calls[0][-1], self.BASE)
+            self.assertIn("-DCMAKE_BUILD_TYPE=Debug", calls[1])
+            self.assertIn("Ninja", calls[1])
+            self.assertTrue(calls[1][1].endswith("tools/ci/governed-build.sh"), calls[1])
+            self.assertEqual(first["configure"]["flags"], ["-DCMAKE_BUILD_TYPE=Debug"])
+            self.assertEqual(calls[-1][3:5], ["worktree", "remove"])
+            self.assertEqual(first["base_sha"], self.BASE)
+            again, second = self.run_base(build, [])
+            self.assertEqual(again, [])
+            self.assertEqual(second["configure_seconds"], 0.0)
+            self.assertEqual(second["digest"], first["digest"])
+
+    def test_unavailable_base_says_so_and_cleans_up(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory)
+            for results in ([1], [0, 1]):
+                with self.subTest(results=results):
+                    calls = []
+                    with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                                "inventory: base not recorded"):
+                        calls, _ = self.run_base(build, list(results))
+            leftovers = [p for p in (build / runner.BASE_INVENTORY_CACHE).iterdir()]
+            self.assertEqual(leftovers, [])
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "base not recorded"):
+                runner.base_projection("not-a-sha", policy(), build)
+
+    def test_a_base_that_is_not_the_checkouts_merge_base_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(runner.SelectionExecutionError, "inventory: base mismatch"):
+                self.run_base(Path(directory), [], merge_base="b" * 40)
+
+    def test_a_registration_left_without_a_command_after_the_build_refuses(self) -> None:
+        source, build = Path("/repo"), Path("/repo/build")
+        tests = [fixture("smoke"), fixture("core")]
+        base = base_of(tests, source, build)
+        hollow = copy.deepcopy(tests)
+        hollow[1]["command"] = [""]
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
+            runner.validate_registrations_match_base({"tests": hollow}, source, build, base)
+        self.assertEqual(inventory.name_only_rows(base_of(hollow, source, build)), 1)
+
+    def test_unavailable_base_falls_back_to_the_full_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            build.mkdir()
+            (root / "config.toml").write_text("# mocked\n", encoding="utf-8")
+            args = mock.Mock(config=root / "config.toml", selection_receipt_b64="e",
+                             selection_receipt_sha256="0" * 64, target="mac")
+            with (
+                mock.patch.object(runner, "decode_selection_receipt", return_value=(
+                    ["smoke"], b"smoke\n", [], b"", selection_receipt())),
+                mock.patch.object(runner, "validate_receipt_identity"),
+                mock.patch.object(runner, "require_ctest_version"),
+                mock.patch.object(runner, "load_policy", return_value=policy()),
+                mock.patch.object(runner.inventory, "source_root_for_build",
+                                  return_value=runner.REPO_ROOT),
+                mock.patch.object(runner, "validate_build_configuration"),
+                mock.patch.object(runner, "base_projection", side_effect=runner.SelectionExecutionError(
+                    "inventory: base not recorded: cmake failed")),
+                mock.patch.object(runner.subprocess, "run") as execute,
+            ):
+                with self.assertRaisesRegex(runner.SelectionExecutionError, "base not recorded"):
+                    runner.run_locked(args, build)
+            # Raised after the fallback boundary: the caller runs the full suite.
+            self.assertTrue(args._changed_surface_fallback_safe)
+            execute.assert_not_called()
 
 
 if __name__ == "__main__":

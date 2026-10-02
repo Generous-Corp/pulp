@@ -330,9 +330,10 @@ timeout_secs = 14400
 
 [targets.mac.changed_surface_selection]
 schema_version = 3
-# Exact current-main registration count. CTest permits duplicate display names,
-# so this is deliberately not the unique-name count. The canonical multiset
-# contract in changed-surface-inventory.json pins all 21,960 registrations.
+# An upper bound on the authoritative registration count: it caps the declared
+# literal tests and is reported in receipts. Nothing pins the exact inventory;
+# a bounded run configures the protected base and requires this tree's ctest
+# registrations to equal the base's (tools/scripts/run_changed_surface_tests.py).
 # Test-topology changes force a full-suite decision. This remains shadow-only:
 # [validation.default] is still the authoritative execution.
 full_test_count = 21960
@@ -413,7 +414,7 @@ full_required_paths = [
 # policy do not, so editing them selects through the generated skill-doc family
 # below instead of forcing the full suite.
 policy_paths = [
-  ".shipyard/changed-surface-inventory.json",
+  "tools/scripts/run_changed_surface_tests.py",
   "tools/scripts/changed_surface_inventory.py",
   "tools/scripts/changed_surface_script_families.py",
   "tools/scripts/test_changed_surface_policy.py",
@@ -1550,6 +1551,32 @@ tests = [
   "build-parallelism-guard",
   "ccache-pch-isolation",
   "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[targets.mac.changed_surface_selection.families]]
+name = "script-readers-eecab2b4d634"
+paths = ["tools/scripts/test_changed_surface_registration_projection.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-registration-projection-selftest",
   "changed-surface-script-families-drift",
   "changed-surface-script-families-selftest",
   "gpu-audio-provider-identity-selftest",
@@ -4689,6 +4716,7 @@ paths = [
   "tools/scripts/test_catch_multilabel_properties.py",
   "tools/scripts/test_ccache_pch_isolation.py",
   "tools/scripts/test_changed_surface_policy.py",
+  "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",
@@ -5149,6 +5177,7 @@ paths = [
   "tools/scripts/test_catch_multilabel_properties.py",
   "tools/scripts/test_ccache_pch_isolation.py",
   "tools/scripts/test_changed_surface_policy.py",
+  "tools/scripts/test_changed_surface_registration_projection.py",
   "tools/scripts/test_changed_surface_script_families.py",
   "tools/scripts/test_check_au_component_preflight.py",
   "tools/scripts/test_check_bundle_architectures.py",

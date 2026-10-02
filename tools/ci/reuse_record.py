@@ -30,6 +30,12 @@ in the neutral record the replay harness reads:
                      per executable, the archive members its link pulled and
                      which archives it loads whole (tools/ci/link_members.py),
                      when the build recorded them (--link-members)
+    registrations-<sha>.json
+                     the configuration-neutral ctest registration multiset
+                     (changed_surface_inventory.project_registrations), with
+                     --inventory: the base inventory a changed-surface plan
+                     compares a pull request's registrations against. It is
+                     `recordable` only when no registration lacks a command
     job.json         the run context, per-suite counts, the runner image
                      fingerprint, the declared script-input list's blob id,
                      and the byte size of each file
@@ -599,6 +605,16 @@ def cmd_write(a: argparse.Namespace) -> int:
     identity_path = out / "identity.json"
     identity_path.write_text(json.dumps(identity, sort_keys=True, separators=(",", ":")), encoding="utf-8")
 
+    listed: dict = {}
+
+    def listing(path: Path) -> dict:
+        """One `ctest --show-only` per job: every call rewrites LastTest.log."""
+        import protected_merge_receipt as pmr
+
+        if "payload" not in listed:
+            listed["payload"] = pmr.ctest_inventory(path)
+        return listed["payload"]
+
     codemodel = None
     if a.codemodel and build_dir:
         import codemodel_digest as cmd_digest
@@ -606,7 +622,7 @@ def cmd_write(a: argparse.Namespace) -> int:
         try:
             import protected_merge_receipt as pmr
 
-            registrations = pmr.ctest_inventory(build_dir).get("tests", [])
+            registrations = listing(build_dir).get("tests", [])
             doc = cmd_digest.digest_targets(build_dir, source_root or build_dir, registrations)
             name = f"codemodel-{ctx['merge_sha'] or 'unknown'}.json"
             (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
@@ -636,6 +652,26 @@ def cmd_write(a: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"link members unavailable: {exc}")
 
+    registration_projection = None
+    if a.inventory and build_dir:
+        import changed_surface_inventory as csi
+
+        try:
+            doc = csi.project_registrations(listing(build_dir), source_root or build_dir,
+                                            build_dir)
+            name = f"registrations-{ctx['merge_sha'] or 'unknown'}.json"
+            (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            registration_projection = {"file": name, "rows": doc["row_count"], "digest": doc["digest"],
+                                        "recordable": doc["recordable"],
+                                        "incomplete": len(doc["incomplete"]),
+                                        "config_gated": len(doc["config_gated"]),
+                                        "bytes": (out / name).stat().st_size}
+            if not doc["recordable"] and a.build_outcome in (None, "success"):
+                problems.append(f"registration projection not recordable: {len(doc['incomplete'])} "
+                                "registration(s) have no command after a successful build")
+        except Exception as exc:  # noqa: BLE001 - results are still worth writing
+            problems.append(f"registration projection unavailable: {exc}")
+
     script_inputs_blob = _git(source_root, "rev-parse", f"HEAD:{SCRIPT_INPUTS_LIST}") if source_root else None
     job = {
         "schema": SCHEMA, **ctx,
@@ -651,11 +687,13 @@ def cmd_write(a: argparse.Namespace) -> int:
                      "output_keys": sum(1 for r in records if r["output_key"])},
         "link_members": link_members,
         "codemodel": codemodel,
+        "registration_projection": registration_projection,
         "problems": problems,
     }
     job["bytes"] = {"tests_jsonl": tests_path.stat().st_size, "identity_json": identity_path.stat().st_size,
                     "link_members": link_members["bytes"] if link_members else 0,
-                    "codemodel": codemodel["bytes"] if codemodel else 0}
+                    "codemodel": codemodel["bytes"] if codemodel else 0,
+                    "registration_projection": registration_projection["bytes"] if registration_projection else 0}
     job["seconds"] = round(time.monotonic() - t0, 1)
     (out / "job.json").write_text(json.dumps(job, sort_keys=True, indent=1), encoding="utf-8")
 
@@ -664,6 +702,7 @@ def cmd_write(a: argparse.Namespace) -> int:
             "executables": job["identity"]["executables"], "bytes": sum(job["bytes"].values()),
             "linked": link_members["executables"] if link_members else None,
             "codemodel_targets": codemodel["targets"] if codemodel else None,
+            "registration_rows": registration_projection["rows"] if registration_projection else None,
             "runner_image": image["digest"], "seconds": job["seconds"]}
     print(f"::notice title={TITLE}::{json.dumps(note, sort_keys=True)}")
     for p in problems:
@@ -689,6 +728,9 @@ def main(argv: list[str]) -> int:
                    help="hash every registered test executable (default) or only those that ran")
     w.add_argument("--codemodel", action="store_true",
                    help="digest every CMake codemodel target (tools/ci/codemodel_digest.py) into codemodel-<sha>.json")
+    w.add_argument("--inventory", action="store_true",
+                   help="also write the configuration-neutral ctest registration projection "
+                        "(changed_surface_inventory.project_registrations)")
     w.add_argument("--link-members", action="store_true",
                    help="collect <build>/link-members (tools/ci/link_members.py) into link-members-<sha>.json")
     w.add_argument("--context", action="append", default=[],
