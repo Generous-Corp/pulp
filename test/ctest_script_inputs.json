@@ -99,6 +99,7 @@
     "tools/cli/content_commands.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "undeclared_sources": []
@@ -267,6 +268,7 @@
     "tools/cli/cli_fs_util.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "spawning_sources": [

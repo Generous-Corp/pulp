@@ -20,6 +20,7 @@ add_executable(pulp-test-cli-kit-commands
     test_cli_kit_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/kit_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/kit_manifest_validation.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/kit_profile_verification.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_fs_util.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
 target_include_directories(pulp-test-cli-kit-commands PRIVATE
@@ -39,6 +40,7 @@ add_executable(pulp-test-cli-content-commands
     ${CMAKE_SOURCE_DIR}/tools/cli/content_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/kit_commands.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/kit_manifest_validation.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/kit_profile_verification.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_fs_util.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp)
 target_include_directories(pulp-test-cli-content-commands PRIVATE
