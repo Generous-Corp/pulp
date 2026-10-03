@@ -1,0 +1,81 @@
+{
+  "id": "imp-092-linear-step-player-early-nudge",
+  "title": "Step player exposes bounded early-of-grid micro-timing",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "7dfc95d2-1b4e-43c0-a958-ecb2d5bfc7d6",
+  "owned_paths": [
+    "core/midi/include/pulp/midi/step_player.hpp",
+    "test/test_midi_step_player.cpp",
+    "docs/status/sequencer-exposure/rows/imp-092-linear-step-player-early-nudge.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/include/pulp/midi/step_player.hpp",
+      "needles": [
+        "std::int32_t timing_offset_ticks = 0;",
+        "static constexpr StepPlayerError validate_step",
+        "bounded_timing_offset"
+      ]
+    },
+    {
+      "path": "test/test_midi_step_player.cpp",
+      "needles": [
+        "StepPlayer admits pushed early groove offsets"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public StepPlayerStep timing offset accepts bounded signed early and late offsets while refusing prior-grid crossings.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/midi/include/pulp/midi/step_player.hpp",
+          "needles": [
+            "std::int32_t timing_offset_ticks = 0;",
+            "class StepPlayer"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline Timeline command is added."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP operation is added."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "The kernel adds no live control grant."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "midi.linear-step-player remains the typed capability key.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "midi.linear-step-player"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

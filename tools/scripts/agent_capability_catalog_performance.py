@@ -482,7 +482,7 @@ EXPORTS = [
         domain="midi",
         summary=(
             "Bounded sample-accurate linear multi-lane step player with per-step gate, pitch "
-            "offset, velocity, probability, ratchet, tie/slide, and per-lane direction modes."
+            "offset, velocity, probability, ratchet, tie/slide, signed early or late micro-timing offsets, and per-lane direction modes."
         ),
         rt_class="audio",
         lifecycle={
@@ -515,7 +515,7 @@ EXPORTS = [
             include="pulp/midi/step_player.hpp",
             qualified_name="pulp::midi::StepPlayer<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:eb2d26f9aa1d2d1414daa30c302cc59093e741df2d3dbeedc78d9ae28a7a731b",
+            header_fingerprint="sha256:b6589ba86b12b13f051e0cf662324b4b0aa08a952b92ea41ce3aba3f4cab5325",
         )],
         _link_probes=[{
             "role": "entrypoint",
