@@ -971,7 +971,9 @@ def _is_cmake(path: str) -> bool:
 
 
 def _declared_hit(inputs: Iterable[str], changed: Iterable[str]) -> bool:
-    inputs = [i.rstrip("/") for i in inputs]
+    # `!path` (pulp_test_data ABSENT) is a probed path expected missing; a
+    # change to it is its creation.
+    inputs = [(i[1:] if i.startswith("!") else i).rstrip("/") for i in inputs]
     return any(f == i or f.startswith(i + "/") for f in changed for i in inputs)
 
 

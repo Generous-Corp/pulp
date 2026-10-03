@@ -717,6 +717,10 @@ class CodemodelTests(unittest.TestCase):
                                drift=("CMakeLists.txt", "cmake/x.cmake"))
         self.assertIn("test/mod.so", widened["strict-data"]["spawnable_rebuilt"])  # a CMake change rebuilds all
 
+    def test_an_absent_input_is_hit_by_its_creation(self):
+        self.assertTrue(rrc._declared_hit(["!pulp.toml"], ["pulp.toml"]))
+        self.assertFalse(rrc._declared_hit(["!pulp.toml"], ["docs/pulp.toml.md"]))
+
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)

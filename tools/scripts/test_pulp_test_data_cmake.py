@@ -13,6 +13,8 @@ What must hold:
   build tree even when it lives inside the checkout;
 - a path that matches nothing fails the configure; a glob that matches passes;
 - a stale `<exe>.inputs.json` from an earlier configure is removed;
+- ABSENT records `!<path>` for a path the test probes and expects missing,
+  refusing one that exists or is a glob;
 - NO_DEFINE records paths without touching the target's definitions, NONE
   records a reviewed source with no paths, and SOURCES narrows a declaration
   to some of an executable's sources (and refuses one that is not its own);
@@ -145,6 +147,21 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             for target in ("multi", "reviewed"):
                 flags = (build / "test" / "CMakeFiles" / f"{target}.dir" / "flags.make").read_text(encoding="utf-8")
                 self.assertNotIn("PULP_SOURCE_DIR", flags, target)
+
+    def test_absent_paths_are_recorded_and_must_not_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet ABSENT pulp.toml fixtures/missing.lock)")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            quiet = json.loads((build / "test" / "test-data" / "quiet.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual(quiet["inputs"], ["!fixtures/missing.lock", "!pulp.toml"])
+            # A path that exists is a read, not an absence.
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet ABSENT fixtures/solo.json)")
+            self.assertIn("ABSENT 'fixtures/solo.json' exists in the checkout",
+                          self.configure(src2, Path(t) / "build2").stderr)
+            src3 = self.project(Path(t) / "c", extra="pulp_test_data(quiet ABSENT fixtures/*.toml)")
+            self.assertIn("must be a plain path", self.configure(src3, Path(t) / "build3").stderr)
 
     def test_sources_must_belong_to_the_executable(self) -> None:
         with tempfile.TemporaryDirectory() as t:

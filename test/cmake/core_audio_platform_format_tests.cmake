@@ -716,7 +716,9 @@ if(TARGET pulp-test-mcp-server)
         core/timeline/schema/timeline_mcp_tools.json
         test/fixtures/gpu-ux
         test/fixtures/timeline/v1/minimal.json
-        test/fixtures/timeline/v4/sequence-markers.json)
+        test/fixtures/timeline/v4/sequence-markers.json
+        # pulp_compat checks the root for an SDK-pinning pulp.toml first.
+        ABSENT pulp.toml)
 endif()
 
 # The session cases read two timeline fixtures from the checkout.

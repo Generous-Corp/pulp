@@ -66,7 +66,9 @@ pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
     fixtures/packages/gain-dsp-kit
     tools/templates/gain
     tools/templates/standalone
-    tools/packages/registry.json)
+    tools/packages/registry.json
+    # The package dependency root is found by a packages.lock.json probe.
+    ABSENT packages.lock.json)
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import

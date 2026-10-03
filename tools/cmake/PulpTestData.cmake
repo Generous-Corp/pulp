@@ -13,6 +13,7 @@
 #     PATHS <repo-relative path or glob> ... | NONE
 #     [SOURCES <source> ...]                   # default: all of the suite's
 #     [DEFINE <macro> | NO_DEFINE]             # default DEFINE PULP_SOURCE_DIR
+#     [ABSENT <path> ...]                      # probed for, expected missing
 # )
 #
 # It defines <macro> as the checkout root for the declaring sources (the
@@ -104,15 +105,15 @@ function(_pulp_test_data_json_list out)
 endfunction()
 
 function(pulp_test_data NAME)
-    cmake_parse_arguments(D "NONE;NO_DEFINE" "DEFINE" "PATHS;SOURCES" ${ARGN})
+    cmake_parse_arguments(D "NONE;NO_DEFINE" "DEFINE" "PATHS;SOURCES;ABSENT" ${ARGN})
     if(D_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "pulp_test_data(${NAME}): unparsed arguments: ${D_UNPARSED_ARGUMENTS}")
     endif()
     if(D_NONE AND D_PATHS)
         message(FATAL_ERROR "pulp_test_data(${NAME}): NONE and PATHS are exclusive")
     endif()
-    if(NOT D_PATHS AND NOT D_NONE)
-        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS (or NONE) is required")
+    if(NOT D_PATHS AND NOT D_NONE AND NOT D_ABSENT)
+        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS (or NONE or ABSENT) is required")
     endif()
     if(D_NO_DEFINE AND D_DEFINE)
         message(FATAL_ERROR "pulp_test_data(${NAME}): DEFINE and NO_DEFINE are exclusive")
@@ -172,6 +173,21 @@ function(pulp_test_data NAME)
         endif()
     endforeach()
 
+    # A path the test probes for and expects not to find. It is recorded as
+    # `!<path>`, so a change that creates it re-selects the test; one that
+    # already exists is a read and belongs under PATHS.
+    set(_absent "")
+    foreach(_p IN LISTS D_ABSENT)
+        if(IS_ABSOLUTE "${_p}" OR _p MATCHES "(^|/)\\.\\.(/|$)" OR _p MATCHES "[*?[]")
+            message(FATAL_ERROR "pulp_test_data(${NAME}): ABSENT '${_p}' must be a plain path relative to the checkout root")
+        endif()
+        if(EXISTS "${CMAKE_SOURCE_DIR}/${_p}")
+            message(FATAL_ERROR "pulp_test_data(${NAME}): ABSENT '${_p}' exists in the checkout; "
+                                "the test now reads it, so declare it under PATHS")
+        endif()
+        list(APPEND _absent "!${_p}")
+    endforeach()
+
     # A grouped member's definition goes on its own sources, so the macro
     # never leaks into its neighbours' translation units; a standalone
     # executable takes it target-wide, as its COMPILE_DEFINITIONS did.
@@ -192,7 +208,7 @@ function(pulp_test_data NAME)
         endif()
     endforeach()
     set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_SOURCES_${_exe} ${_rel_sources})
-    set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_PATHS_${_exe} ${D_PATHS})
+    set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_PATHS_${_exe} ${D_PATHS} ${_absent})
     get_property(_declared GLOBAL PROPERTY PULP_TEST_DATA_EXECUTABLES)
     if(NOT _exe IN_LIST _declared)
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_EXECUTABLES ${_exe})
