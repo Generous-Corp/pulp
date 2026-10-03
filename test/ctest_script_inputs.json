@@ -3141,6 +3141,7 @@
     "test/test_runtime_utils.cpp",
     "tools/ci/build_dir_lock.py",
     "tools/ci/changed_surface_lane_reds.json",
+    "tools/ci/lane_reuse_record.py",
     "tools/cli/cmd_forge.cpp",
     "tools/cli/cmd_misc.cpp",
     "tools/cmake/PulpDependencies.cmake",
@@ -5647,6 +5648,14 @@
    ],
    "kind": "python"
   },
+  "lane-reuse-record-selftest": {
+   "entry": "tools/ci/test_lane_reuse_record.py",
+   "inputs": [
+    "tools/ci/lane_reuse_record.py",
+    "tools/ci/test_lane_reuse_record.py"
+   ],
+   "kind": "python"
+  },
   "link-members-selftest": {
    "entry": "tools/ci/test_link_members.py",
    "inputs": [
@@ -5911,6 +5920,7 @@
     "tools/ci/cmake_registration_impact.py",
     "tools/ci/ctest_gate_args.py",
     "tools/ci/install_visual_python_deps.sh",
+    "tools/ci/lane_reuse_record.py",
     "tools/ci/pr_head_affected_tests.py",
     "tools/ci/source_selftests.json",
     "tools/ci/source_selftests.py",
@@ -7146,6 +7156,13 @@
     "test/test_signal.cpp",
     "tools/scripts/repo_source_scan.py",
     "tools/scripts/test_repo_source_scan.py"
+   ],
+   "kind": "python"
+  },
+  "require-build-generator-selftest": {
+   "entry": "tools/ci/test_require_build_generator.py",
+   "inputs": [
+    "tools/ci/test_require_build_generator.py"
    ],
    "kind": "python"
   },

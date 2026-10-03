@@ -6734,6 +6734,36 @@ every build; they catch real regressions and do not care about the optimizer.
 
 ---
 
+## The Shipyard macOS lane writes its own reuse records
+
+Live test reuse keys each executable against an earlier build's reuse record,
+and that record must come from a run on the same toolchain, so the local mac
+lane keeps its own. `[validation.default.overrides.macos]` sets
+`reuse_record = true`; Shipyard then exports a fresh `SHIPYARD_REUSE_RECORD_DIR`
+to each run's stages and files it in its host-local store afterwards, only when
+a parsing `job.json` was written (Shipyard's
+`docs/changed-surface-selection.md`, "Host-local reuse records"). The lane
+lists no GitHub credentials, so nothing is uploaded.
+
+- The test stage runs ctest through `tools/ci/lane_reuse_record.py test`, which
+  adds `--output-junit` into the record, keeps ctest's `LastTest.log`, and calls
+  `tools/ci/reuse_record.py write --run-kind lane` with the run id taken from
+  the directory's name and the same `--link-members --object-deps --codemodel
+  --inventory` flags `build.yml` uses. A bounded changed-surface plan is
+  recorded by `run_changed_surface_tests.py`, including the full run it falls
+  back to when a plan is refused.
+- Recording never changes a verdict. The stage exits with ctest's status, a
+  recorder failure is a warning, and Shipyard's run log ends with one
+  `=== reuse-record: ... ===` line saying whether a record was kept.
+- The lane configures with `-DPULP_RECORD_LINK_MAPS=ON` and with Ninja: the
+  record reads per-object dependencies from Ninja's dependency log, which the
+  Makefiles generator does not keep. `tools/ci/require_build_generator.sh`
+  removes a build directory left on another generator before configure, since
+  CMake will not switch in place; the first run on such a worktree is a cold
+  build.
+- Cost: writing a record on a Debug, examples-on tree takes about 20 s and
+  7 MB, most of it hashing test binaries and projecting registrations.
+
 ## "Can this PR actually land?" — the two-detector wedge check
 
 `shipyard status` answers *"did my validation pass"*. It does not answer

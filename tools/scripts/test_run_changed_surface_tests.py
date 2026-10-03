@@ -493,17 +493,30 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 ]
             )
             commands: list[list[str]] = []
+            record_dir = root / "record"
+            record_dir.mkdir()
+            recorded: list[tuple[list[str], bool, str]] = []
 
             def run_command(argv: list[str], **_: object) -> subprocess.CompletedProcess:
                 commands.append(argv)
                 return subprocess.CompletedProcess(argv, 0)
 
+            def record_legs(_build, _source, legs, outcome) -> int:
+                # The legs' reports live in the runner's private directory,
+                # which must still exist when they are recorded.
+                recorded.append(([name for name, _, _ in legs], legs[0][1].parent.is_dir(), outcome))
+                return 0
+
             with (
                 mock.patch.dict(
                     runner.os.environ,
-                    {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1"},
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        runner.lane_reuse_record.RECORD_DIR_ENV: str(record_dir),
+                    },
                     clear=False,
                 ),
+                mock.patch.object(runner.lane_reuse_record, "record_legs", side_effect=record_legs),
                 mock.patch.object(
                     runner,
                     "decode_selection_receipt",
@@ -552,6 +565,7 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
                 self.assertEqual(runner.run_locked(args, build), 0)
             # Before any build the comparison tolerates unbuilt programs; after
             # the full build it requires every registration to have one.
+            self.assertEqual(recorded, [(["pr-affected", "full"], True, "success")])
             prebuild, post_full = validate_calls.call_args_list
             self.assertIs(prebuild.kwargs["require_built"], False)
             self.assertNotIn("require_built", post_full.kwargs)
@@ -821,6 +835,55 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
             self.assertIsNone(fallback["selected_registration_count"])
             self.assertIsNone(fallback["full_registration_count"])
             self.assertIsNone(fallback["selected_returncode"])
+
+    def test_a_refused_plans_full_fallback_is_recorded_when_asked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build = root / "build"
+            results = root / "results"
+            record_dir = root / "record"
+            build.mkdir()
+            record_dir.mkdir()
+            receipt = selection_receipt(selected_build_targets=["pulp-test-build-check"])
+            encoded, digest = encode_receipt(receipt)
+            args = mock.Mock(
+                build_dir=build,
+                selection_receipt_b64=encoded,
+                selection_receipt_sha256=digest,
+                _changed_surface_full_authority_started=False,
+                _changed_surface_fallback_safe=True,
+                _changed_surface_receipt_identity_verified=True,
+            )
+            commands: list[list[str]] = []
+
+            def execute(argv: list[str], **_: object) -> subprocess.CompletedProcess:
+                commands.append(argv)
+                return subprocess.CompletedProcess(argv, 0)
+
+            with (
+                mock.patch.dict(
+                    runner.os.environ,
+                    {
+                        "SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                        "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results),
+                        runner.lane_reuse_record.RECORD_DIR_ENV: str(record_dir),
+                    },
+                    clear=False,
+                ),
+                mock.patch.object(
+                    runner,
+                    "run_locked",
+                    side_effect=runner.SelectionExecutionError("selected native CTest executable has no CMake producer"),
+                ),
+                mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                mock.patch.object(runner, "clear_build_sentinel", return_value=0),
+                mock.patch.object(runner.lane_reuse_record, "record") as record,
+            ):
+                self.assertEqual(runner.run(args), 0)
+            junit = record_dir / "suites" / "full" / "ctest.junit.xml"
+            self.assertEqual(commands[1][-2:], ["--output-junit", str(junit)])
+            record.assert_called_once()
+            self.assertEqual([suite[0] for suite in record.call_args.args[2]], ["full"])
 
     def test_authoritative_mode_refusal_never_uses_shadow_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -684,6 +684,15 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME reuse-record-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_reuse_record.py")
         set_tests_properties(reuse-record-selftest PROPERTIES TIMEOUT 120)
+        # The local mac lane's own record: the test-stage wrapper and the
+        # changed-surface runner's recording, and the generator guard that
+        # keeps the lane on Ninja, whose dependency log the record reads.
+        add_test(NAME lane-reuse-record-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_lane_reuse_record.py")
+        set_tests_properties(lane-reuse-record-selftest PROPERTIES TIMEOUT 120)
+        add_test(NAME require-build-generator-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_require_build_generator.py")
+        set_tests_properties(require-build-generator-selftest PROPERTIES TIMEOUT 60)
         # Link-map recording: the map parser, whole-archive detection, and the
         # linker launcher's pass-through of the link's status.
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
