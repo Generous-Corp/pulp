@@ -1153,7 +1153,7 @@
    "spawning_sources": [
     "test/test_timeline_graph_automation_delivery.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-timeline-journal": {
@@ -1165,7 +1165,7 @@
    "spawning_sources": [
     "test/test_timeline_file_journal.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-widget-bridge-api-contracts": {
