@@ -9,6 +9,14 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v08960"></a>
+## [0.896.0] - 2026-10-03
+
+- release/version bump ([#9291](https://github.com/Generous-Corp/pulp/pull/9291))
+- feat/spawn closure edges ([#9269](https://github.com/Generous-Corp/pulp/pull/9269))
+- fix/bump fastpath complete history ([#9229](https://github.com/Generous-Corp/pulp/pull/9229))
+- feature/audit require offline trees ([#9246](https://github.com/Generous-Corp/pulp/pull/9246))
+
 <a id="v08951"></a>
 ## [0.895.1] - 2026-10-03
 
@@ -9494,6 +9502,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.896.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.896.0
 [0.895.1]: https://github.com/Generous-Corp/pulp/releases/tag/v0.895.1
 [0.895.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.895.0
 [0.894.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.894.0
