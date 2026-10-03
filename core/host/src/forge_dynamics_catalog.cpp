@@ -11,7 +11,6 @@ float feedforward_compressor_worst_case_gain() {
     return static_cast<float>(std::pow(10.0, signal::FeedforwardCompressor::kMakeupDbMax / 20.0));
 }
 
-
 CustomNodeType make_feedforward_compressor_node(float lookahead_ms) {
     using Comp = signal::FeedforwardCompressor;
     const double fixed_lookahead_ms = std::clamp(
@@ -23,7 +22,7 @@ CustomNodeType make_feedforward_compressor_node(float lookahead_ms) {
     if (fixed_lookahead_ms != 0.0)
         t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms);
     t.version = 1;
-    t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
+    t.num_input_ports = 2; // 0 = left, 1 = right (ONE logical stereo wire)
     t.num_output_ports = 2;
     t.default_name = "Compressor";
     t.lowerable = true;
@@ -107,7 +106,6 @@ CustomNodeType make_feedforward_compressor_node(float lookahead_ms) {
     return t;
 }
 
-
 ForgeNodeDescriptor feedforward_compressor_descriptor() {
     ForgeNodeDescriptor d;
     d.key = "feedforward_compressor";
@@ -177,7 +175,6 @@ ForgeNodeDescriptor feedforward_compressor_descriptor() {
     return d;
 }
 
-
 namespace true_peak {
 
 double Instance::table_value(const std::array<double, kControlTableSize>& table, double value,
@@ -195,8 +192,8 @@ void Instance::prepare(double sample_rate) {
         const double unit = static_cast<double>(i) / static_cast<double>(kControlTableSize - 1);
         const double ceiling = -24.0 + 24.0 * unit;
         const double release = 5.0 + 1995.0 * unit;
-        ceiling_table[i] = std::pow(
-            10.0, (ceiling - signal::TruePeakLimiter::detector_guard_db()) / 20.0);
+        ceiling_table[i] =
+            std::pow(10.0, (ceiling - signal::TruePeakLimiter::detector_guard_db()) / 20.0);
         release_table[i] = signal::dynamics::one_pole_retain(release * 0.001, sample_rate);
     }
     last_ceiling_dbtp = -1.0f;
@@ -257,8 +254,7 @@ CustomNodeType make_node(float lookahead_ms, bool linked) {
         auto& instance = *static_cast<Instance*>(pointer);
         if (!instance.prepared) {
             for (int channel = 0; channel < 2; ++channel)
-                std::copy_n(input.channel_ptr(channel), frames,
-                            output.channel_ptr(channel));
+                std::copy_n(input.channel_ptr(channel), frames, output.channel_ptr(channel));
             return;
         }
         for (int frame = 0; frame < frames; ++frame) {
@@ -274,7 +270,6 @@ CustomNodeType make_node(float lookahead_ms, bool linked) {
     };
     return type;
 }
-
 
 ForgeNodeDescriptor descriptor() {
     ForgeNodeDescriptor descriptor;
@@ -316,8 +311,7 @@ ForgeNodeDescriptor descriptor() {
     return descriptor;
 }
 
-
-}  // namespace true_peak
+} // namespace true_peak
 
 namespace vca {
 
@@ -325,15 +319,13 @@ float vca_compressor_worst_case_gain() {
     return static_cast<float>(std::pow(10.0, Comp::kMakeupDbMax / 20.0));
 }
 
-
-CustomNodeType make_vca_compressor_node(float lookahead_ms,
-                                               double attack_release_k) {
+CustomNodeType make_vca_compressor_node(float lookahead_ms, double attack_release_k) {
     const double fixed_lookahead_ms = std::clamp(
         std::isfinite(static_cast<double>(lookahead_ms)) ? static_cast<double>(lookahead_ms) : 0.0,
         0.0, Comp::kLookaheadMsMax);
     const double fixed_attack_release_k =
         std::clamp(std::isfinite(attack_release_k) ? attack_release_k : Comp::kRatioKDefault,
-        Comp::kRatioKMin, Comp::kRatioKMax);
+                   Comp::kRatioKMin, Comp::kRatioKMax);
     CustomNodeType t;
     t.type_id = kTypeId;
     if (fixed_lookahead_ms != 0.0 || fixed_attack_release_k != Comp::kRatioKDefault) {
@@ -407,7 +399,6 @@ CustomNodeType make_vca_compressor_node(float lookahead_ms,
     return t;
 }
 
-
 ForgeNodeDescriptor vca_compressor_descriptor() {
     ForgeNodeDescriptor d;
     d.key = "vca_compressor";
@@ -473,8 +464,7 @@ ForgeNodeDescriptor vca_compressor_descriptor() {
     return d;
 }
 
-
-}  // namespace vca
+} // namespace vca
 
 namespace fet {
 
@@ -485,7 +475,6 @@ float fet_compressor_worst_case_gain() {
     probe.set_mix(1.0);
     return static_cast<float>(probe.worst_case_gain());
 }
-
 
 CustomNodeType make_fet_compressor_node() {
     CustomNodeType t;
@@ -530,7 +519,7 @@ CustomNodeType make_fet_compressor_node() {
             s->compressor.set_output_gain_db(params.value_at(kOutputGainDb, offset));
             const int step =
                 std::clamp(static_cast<int>(std::lround(params.value_at(kRatio, offset))), 0,
-                static_cast<int>(kRatioSteps));
+                           static_cast<int>(kRatioSteps));
             s->compressor.set_ratio(static_cast<signal::FetRatio>(step));
             s->compressor.set_attack_us(params.value_at(kAttackUs, offset));
             s->compressor.set_release_ms(params.value_at(kReleaseMs, offset));
@@ -543,7 +532,6 @@ CustomNodeType make_fet_compressor_node() {
     };
     return t;
 }
-
 
 ForgeNodeDescriptor fet_compressor_descriptor() {
     ForgeNodeDescriptor d;
@@ -584,15 +572,13 @@ ForgeNodeDescriptor fet_compressor_descriptor() {
     return d;
 }
 
-
-}  // namespace fet
+} // namespace fet
 
 namespace diode {
 
 float diode_bridge_compressor_worst_case_gain() {
     return static_cast<float>(Comp::worst_case_gain());
 }
-
 
 CustomNodeType make_diode_bridge_compressor_node(bool feedback, bool adaa) {
     CustomNodeType t;
@@ -655,7 +641,6 @@ CustomNodeType make_diode_bridge_compressor_node(bool feedback, bool adaa) {
     return t;
 }
 
-
 ForgeNodeDescriptor diode_bridge_compressor_descriptor() {
     ForgeNodeDescriptor d;
     d.key = "diode_bridge_compressor";
@@ -702,7 +687,6 @@ ForgeNodeDescriptor diode_bridge_compressor_descriptor() {
     return d;
 }
 
+} // namespace diode
 
-}  // namespace diode
-
-}  // namespace pulp::host::dynamics
+} // namespace pulp::host::dynamics

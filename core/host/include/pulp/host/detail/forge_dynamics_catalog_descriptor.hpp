@@ -15,18 +15,18 @@ ForgeNodeDescriptor feedforward_compressor_descriptor();
 
 namespace true_peak {
 ForgeNodeDescriptor descriptor();
-}  // namespace true_peak
+} // namespace true_peak
 
 namespace vca {
 ForgeNodeDescriptor vca_compressor_descriptor();
-}  // namespace vca
+} // namespace vca
 
 namespace fet {
 ForgeNodeDescriptor fet_compressor_descriptor();
-}  // namespace fet
+} // namespace fet
 
 namespace diode {
 ForgeNodeDescriptor diode_bridge_compressor_descriptor();
-}  // namespace diode
+} // namespace diode
 
-}  // namespace pulp::host::dynamics
+} // namespace pulp::host::dynamics

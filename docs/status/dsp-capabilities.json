@@ -1,10 +1,10 @@
 {
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
-    "catalogs": 31,
+    "catalogs": 32,
     "type_ids": 115,
-    "factories": 77,
-    "baked_params": 400
+    "factories": 72,
+    "baked_params": 360
   },
   "catalogs": [
     {
@@ -522,273 +522,7 @@
           "value": "dynamics.diode_bridge_compressor_feedforward"
         }
       ],
-      "nodes": [
-        {
-          "factory": "make_feedforward_compressor_node",
-          "baked_params": [
-            {
-              "id": "kThresholdDb",
-              "min": "static_cast<float>(Comp::kThresholdDbMin)",
-              "max": "static_cast<float>(Comp::kThresholdDbMax)",
-              "default": "-18.0f"
-            },
-            {
-              "id": "kRatio",
-              "min": "static_cast<float>(Comp::kRatioMin)",
-              "max": "static_cast<float>(Comp::kRatioMax)",
-              "default": "4.0f"
-            },
-            {
-              "id": "kKneeDb",
-              "min": "static_cast<float>(Comp::kKneeDbMin)",
-              "max": "static_cast<float>(Comp::kKneeDbMax)",
-              "default": "6.0f"
-            },
-            {
-              "id": "kAttackMs",
-              "min": "static_cast<float>(Comp::kAttackMsMin)",
-              "max": "static_cast<float>(Comp::kAttackMsMax)",
-              "default": "10.0f"
-            },
-            {
-              "id": "kReleaseMs",
-              "min": "static_cast<float>(Comp::kReleaseMsMin)",
-              "max": "static_cast<float>(Comp::kReleaseMsMax)",
-              "default": "120.0f"
-            },
-            {
-              "id": "kDetectorMode",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "0.0f"
-            },
-            {
-              "id": "kRmsWindowMs",
-              "min": "static_cast<float>(Comp::kRmsWindowMsMin)",
-              "max": "static_cast<float>(Comp::kRmsWindowMsMax)",
-              "default": "10.0f"
-            },
-            {
-              "id": "kProgramDependent",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "1.0f"
-            },
-            {
-              "id": "kMakeupDb",
-              "min": "-static_cast<float>(Comp::kMakeupDbMax)",
-              "max": "static_cast<float>(Comp::kMakeupDbMax)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kAutoMakeup",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "1.0f"
-            },
-            {
-              "id": "kStereoLink",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "1.0f"
-            }
-          ]
-        },
-        {
-          "factory": "make_node",
-          "baked_params": [
-            {
-              "id": "kCeilingDbtp",
-              "min": "-24.0f",
-              "max": "0.0f",
-              "default": "-1.0f"
-            },
-            {
-              "id": "kReleaseMs",
-              "min": "5.0f",
-              "max": "2000.0f",
-              "default": "100.0f"
-            }
-          ]
-        },
-        {
-          "factory": "make_vca_compressor_node",
-          "baked_params": [
-            {
-              "id": "kThresholdDb",
-              "min": "static_cast<float>(Comp::kThresholdDbMin)",
-              "max": "static_cast<float>(Comp::kThresholdDbMax)",
-              "default": "-20.0f"
-            },
-            {
-              "id": "kRatio",
-              "min": "static_cast<float>(Comp::kRatioMin)",
-              "max": "static_cast<float>(Comp::kRatioMax)",
-              "default": "4.0f"
-            },
-            {
-              "id": "kKneeDb",
-              "min": "static_cast<float>(Comp::kKneeDbMin)",
-              "max": "static_cast<float>(Comp::kKneeDbMax)",
-              "default": "10.0f"
-            },
-            {
-              "id": "kTimeMs",
-              "min": "static_cast<float>(Comp::kTimeMsMin)",
-              "max": "static_cast<float>(Comp::kTimeMsMax)",
-              "default": "30.0f"
-            },
-            {
-              "id": "kMakeupDb",
-              "min": "-static_cast<float>(Comp::kMakeupDbMax)",
-              "max": "static_cast<float>(Comp::kMakeupDbMax)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kMix",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "1.0f"
-            },
-            {
-              "id": "kNegativeRatio",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "0.0f"
-            },
-            {
-              "id": "kNegRatioAmount",
-              "min": "static_cast<float>(Comp::kNegRatioMin)",
-              "max": "static_cast<float>(Comp::kNegRatioMax)",
-              "default": "-4.0f"
-            },
-            {
-              "id": "kCeilingDb",
-              "min": "static_cast<float>(Comp::kCeilingDbMin)",
-              "max": "static_cast<float>(Comp::kCeilingDbMax)",
-              "default": "static_cast<float>(Comp::kCeilingDbDefault)"
-            }
-          ]
-        },
-        {
-          "factory": "make_fet_compressor_node",
-          "baked_params": [
-            {
-              "id": "kInputGainDb",
-              "min": "static_cast<float>(Comp::kInputGainDbMin)",
-              "max": "static_cast<float>(Comp::kInputGainDbMax)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kOutputGainDb",
-              "min": "static_cast<float>(Comp::kOutputGainDbMin)",
-              "max": "static_cast<float>(Comp::kOutputGainDbMax)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kRatio",
-              "min": "0.0f",
-              "max": "kRatioSteps",
-              "default": "0.0f"
-            },
-            {
-              "id": "kAttackUs",
-              "min": "static_cast<float>(Comp::kAttackUsMin)",
-              "max": "static_cast<float>(Comp::kAttackUsMax)",
-              "default": "200.0f"
-            },
-            {
-              "id": "kReleaseMs",
-              "min": "static_cast<float>(Comp::kReleaseMsMin)",
-              "max": "static_cast<float>(Comp::kReleaseMsMax)",
-              "default": "300.0f"
-            },
-            {
-              "id": "kKneeDb",
-              "min": "static_cast<float>(Comp::kKneeDbMin)",
-              "max": "static_cast<float>(Comp::kKneeDbMax)",
-              "default": "1.0f"
-            },
-            {
-              "id": "kTransformerAmount",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "0.6f"
-            },
-            {
-              "id": "kMix",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "1.0f"
-            }
-          ]
-        },
-        {
-          "factory": "make_diode_bridge_compressor_node",
-          "baked_params": [
-            {
-              "id": "kThresholdDb",
-              "min": "static_cast<float>(Comp::kThresholdDbMin)",
-              "max": "static_cast<float>(Comp::kThresholdDbMax)",
-              "default": "-12.0f"
-            },
-            {
-              "id": "kRatio",
-              "min": "static_cast<float>(Comp::kRatioMin)",
-              "max": "static_cast<float>(Comp::kRatioMax)",
-              "default": "4.0f"
-            },
-            {
-              "id": "kKneeDb",
-              "min": "static_cast<float>(Comp::kKneeDbMin)",
-              "max": "static_cast<float>(Comp::kKneeDbMax)",
-              "default": "6.0f"
-            },
-            {
-              "id": "kAttackMs",
-              "min": "static_cast<float>(Comp::kAttackMsMin)",
-              "max": "static_cast<float>(Comp::kAttackMsMax)",
-              "default": "3.0f"
-            },
-            {
-              "id": "kReleaseMs",
-              "min": "static_cast<float>(Comp::kReleaseMsMin)",
-              "max": "static_cast<float>(Comp::kReleaseMsMax)",
-              "default": "400.0f"
-            },
-            {
-              "id": "kMakeupDb",
-              "min": "0.0f",
-              "max": "static_cast<float>(Comp::kMakeupDbMax)",
-              "default": "0.0f"
-            },
-            {
-              "id": "kCharacter",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "0.35f"
-            },
-            {
-              "id": "kMixPercent",
-              "min": "0.0f",
-              "max": "100.0f",
-              "default": "100.0f"
-            },
-            {
-              "id": "kScHpfHz",
-              "min": "static_cast<float>(Comp::kScHpfHzMin)",
-              "max": "static_cast<float>(Comp::kScHpfHzMax)",
-              "default": "100.0f"
-            },
-            {
-              "id": "kAutoRelease",
-              "min": "0.0f",
-              "max": "1.0f",
-              "default": "0.0f"
-            }
-          ]
-        }
-      ]
+      "nodes": []
     },
     {
       "header": "core/host/include/pulp/host/forge_effect_modulation_catalog.hpp",
@@ -3308,6 +3042,11 @@
     },
     {
       "header": "core/host/include/pulp/host/detail/forge_drum_catalog_processing.hpp",
+      "type_ids": [],
+      "nodes": []
+    },
+    {
+      "header": "core/host/include/pulp/host/detail/forge_dynamics_catalog_descriptor.hpp",
       "type_ids": [],
       "nodes": []
     },

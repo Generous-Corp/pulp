@@ -1,7 +1,7 @@
 #include "forge_catalog_export_detail.hpp"
 
-#include <pulp/host/forge_dynamics_catalog.hpp>
 #include <pulp/host/detail/forge_dynamics_catalog_descriptor.hpp>
+#include <pulp/host/forge_dynamics_catalog.hpp>
 
 namespace pulp::host::forge_catalog_export_detail {
 

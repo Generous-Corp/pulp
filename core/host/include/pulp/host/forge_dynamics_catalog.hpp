@@ -55,9 +55,9 @@
 // correct shape for it — the dry path in that topology is the mix bus, not
 // something this node should own.
 
+#include <pulp/host/detail/forge_dynamics_catalog_descriptor.hpp>
 #include <pulp/host/detail/forge_realization_identity.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
-#include <pulp/host/detail/forge_dynamics_catalog_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/diode_bridge_compressor.hpp>
@@ -66,8 +66,8 @@
 #include <pulp/signal/true_peak_limiter.hpp>
 #include <pulp/signal/vca_compressor.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -187,7 +187,7 @@ float vca_compressor_worst_case_gain();
 /// range at `prepare()`, so any value in range is allocation-free — it is frozen
 /// here for the host's sake, not the allocator's.
 CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
-                                               double attack_release_k = Comp::kRatioKDefault);
+                                        double attack_release_k = Comp::kRatioKDefault);
 
 }  // namespace vca
 
