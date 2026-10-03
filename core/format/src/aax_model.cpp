@@ -323,11 +323,26 @@ DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginC
             layout_sidechain);
         definition.components.push_back(std::move(component));
     }
-    definition.packet_float_count = definition.parameters.size() + 1u;
+    definition.packet_float_count = definition.parameters.size() + 2u;
 
     result.ok = true;
     result.definition = std::move(definition);
     return result;
+}
+
+std::size_t render_mode_packet_slot(const PluginDefinition& definition) noexcept {
+    return definition.parameters.size() + 1u;
+}
+
+float render_mode_packet_value(bool offline) noexcept {
+    return offline ? 1.0f : 0.0f;
+}
+
+ProcessMode process_mode_from_packet(const PluginDefinition& definition,
+                                     const float* packet) noexcept {
+    const auto slot = render_mode_packet_slot(definition);
+    if (!packet || slot >= definition.packet_float_count) return ProcessMode::Realtime;
+    return packet[slot] >= 0.5f ? ProcessMode::Offline : ProcessMode::Realtime;
 }
 
 } // namespace pulp::format::aax

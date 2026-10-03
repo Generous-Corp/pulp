@@ -655,6 +655,16 @@ public:
             }
         }
 
+        // An AudioSuite instance renders offline (file-based, not paced by the
+        // audio clock); publish that so the algorithm reports
+        // ProcessMode::Offline to the processor. Insert instances stay realtime.
+        AAX_CBoolean is_audiosuite = false;
+        if (controller->GetIsAudioSuite(&is_audiosuite) != AAX_SUCCESS) {
+            is_audiosuite = false;
+        }
+        packet[render_mode_packet_slot(definition_)] =
+            render_mode_packet_value(is_audiosuite != 0);
+
         controller->SetSignalLatency(aax_reported_latency(definition_.latency_samples));
         return controller->PostPacket(
             kParameterPacketField,
@@ -937,11 +947,15 @@ void AAX_CALLBACK process_callback(AlgorithmContext* const instances_begin[],
             decode_midi_node(context->midi_input_node, &state.midi_in);
         }
 
+        const auto process_mode =
+            process_mode_from_packet(definition, context->parameter_packet);
         ProcessContext process_context{
             .sample_rate = sample_rate,
             .num_samples = process_count,
-            .process_mode = ProcessMode::Realtime,
-            .render_speed_hint = RenderSpeedHint::Realtime,
+            .process_mode = process_mode,
+            .render_speed_hint = process_mode == ProcessMode::Offline
+                ? RenderSpeedHint::FasterThanRealtime
+                : RenderSpeedHint::Realtime,
         };
         if (definition.uses_transport && context->transport_node) {
             read_transport(context->transport_node->GetTransport(), &process_context);

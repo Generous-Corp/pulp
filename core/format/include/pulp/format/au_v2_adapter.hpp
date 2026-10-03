@@ -357,6 +357,10 @@ private:
     // after init reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
 
+    // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
+    // the host before a faster-than-realtime bounce and read each render block.
+    OfflineRenderProperty offline_render_;
+
     // MIDI input path — AU v2 effects that declare accepts_midi are packaged as
     // aumf (kAudioUnitType_MusicEffect). The host routes inbound MIDI through
     // AUMIDIBase::MIDIEvent / SysEx → HandleMIDIEvent / HandleSysEx. Those are

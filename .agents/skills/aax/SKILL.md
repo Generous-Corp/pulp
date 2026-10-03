@@ -394,6 +394,17 @@ Reset the subscription in `teardown()` before `bridge_->close()` — the
 observer writes into the session that call destroys. Full contract:
 the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge".
 
+### Offline render is visible only for AudioSuite instances
+
+AAX gives an Insert no offline-bounce signal, so a Pro Tools bounce of an insert
+still reports `ProcessMode::Realtime`. An AudioSuite instance does render
+offline: `GenerateCoefficients()` asks `AAX_IController::GetIsAudioSuite()` and
+writes the answer into the **last** parameter-packet slot
+(`render_mode_packet_slot()`, after bypass at 0 and the parameters at 1..N), and
+the algorithm decodes it with `process_mode_from_packet()`. The packet is
+therefore `parameters + 2` floats; a change to the packet layout must keep the
+render-mode slot last and update `test_aax_model.cpp`.
+
 ## Review Checklist
 
 ### Parameter semantics and declared layouts

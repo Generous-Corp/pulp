@@ -1169,8 +1169,9 @@ The processor's offline path should drive that work **synchronously** (blocking
 readback is fine offline — no RT deadline). Trust model is the same as bypass: the
 host is expected to clear `renderingOffline` when returning to live playback; a host
 that leaves it set would keep the processor on the (blocking) offline path during
-realtime. VST3 already surfaces this via `ProcessSetup.processMode == kOffline`;
-AU v2 and CLAP do not surface offline intent (documented limitation).
+realtime. VST3 surfaces this via `ProcessSetup.processMode == kOffline`, AU v2 via
+`kAudioUnitProperty_OfflineRender`, CLAP via `clap.render`, and AAX for AudioSuite
+instances (see the `auv2` / `clap` / `aax` skills).
 
 ### Latency / tail change notifications
 

@@ -449,6 +449,16 @@ native-core processors forward it as `playhead_frames`, so leaving it at the
 default 0 makes CLAP-only playhead-sensitive processors think every block
 starts at the song origin.
 
+### Render mode (`clap.render`)
+
+The adapter offers `CLAP_EXT_RENDER` from `clap_get_extension()`:
+`has_hard_realtime_requirement()` returns false (a Pulp processor can always
+render offline) and `set()` stores the mode in `PulpClapPlugin::render_offline`
+(atomic — hosts may switch while active). `clap_phase_build_context()` maps it to
+`ProcessMode::Offline` + `RenderSpeedHint::FasterThanRealtime`. `set()` refuses
+any value other than `CLAP_RENDER_REALTIME` / `CLAP_RENDER_OFFLINE` and keeps the
+current mode. Test: `test_clap_midi_events.cpp` `[clap][render][offline]`.
+
 ### Editor
 
 Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared
