@@ -416,9 +416,69 @@ def spawn_evidence(repo: Repo) -> None:
         "pulp-test-loader": row("test/test_loader.cpp"),
         "pulp-test-fake-slot": row("test/test_fake_slot.cpp"),
         }}), encoding="utf-8")
+    (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {}}),
+                                             encoding="utf-8")
     (ev / "pulp-test-both.inputs.json").write_text(json.dumps({
         "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-both", "kind": "compiled",
         "sources": ["test/test_both.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
+
+
+def named_program_evidence(repo: Repo) -> None:
+    """Spawners whose code names programs this tree builds. `pulp-cli` builds
+    pulp-cpp; the broker runs the host; one plugin builds as AU and CLAP under
+    one artifact name."""
+    write(repo.root, "test/test_direct.cpp", 'ChildProcess::run(dir / "pulp-cpp.exe", {});\n')
+    write(repo.root, "test/test_missing.cpp", 'ChildProcess::run(dir / "helper-tool", {});\n')
+    write(repo.root, "test/test_through.cpp", 'ChildProcess::run(broker, {"--host", dir + "/control-host"});\n')
+    write(repo.root, "test/test_fake.cpp", 'auto fake = dir / "pulp-screenshot";\nauto r = popen(cmd, "r");\n')
+    write(repo.root, "test/test_plugin.cpp", 'info.path = "PulpGain.clap";\nauto slot = PluginSlot::load(info);\n')
+    ev = repo.build / "test" / "test-data"
+    ev.mkdir(parents=True, exist_ok=True)
+    row = lambda src, runtime=(), none=False, not_run=(): {
+        "sources": [src], "tree_defines": [], "runtime_targets": list(runtime), "spawns_none": none,
+        "named_not_run": list(not_run)}
+    (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+        "direct": row("test/test_direct.cpp", runtime=["pulp-cli"]),
+        "missing": row("test/test_missing.cpp", runtime=["pulp-cli"]),
+        "through": row("test/test_through.cpp", runtime=["broker"]),
+        "fake": row("test/test_fake.cpp", none=True, not_run=["pulp-screenshot"]),
+        "plugin": row("test/test_plugin.cpp", runtime=["PulpGain_CLAP"]),
+        # Declares a tool this configuration does not build, and has no other edge.
+        "absent": dict(row("test/test_direct.cpp"), absent_spawns=["pulp-cli"])}}), encoding="utf-8")
+    art = lambda name, runtime=(): {"artifact": name, "runtime_targets": list(runtime)}
+    (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {
+        "pulp-cli": art("pulp-cpp"), "helper-tool": art("helper-tool"), "broker": art("broker", ["control-host"]),
+        "control-host": art("control-host"), "pulp-screenshot": art("pulp-screenshot"),
+        "PulpGain_AU": art("PulpGain"), "PulpGain_CLAP": art("PulpGain")}}), encoding="utf-8")
+
+
+class NamedProgramTests(unittest.TestCase):
+    def test_every_named_program_needs_an_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); named_program_evidence(repo)
+            ex = sti.compiled_entries(repo.root, repo.build)
+            # "pulp-cpp.exe" is pulp-cli's artifact, and the test has that edge.
+            self.assertEqual(ex["direct"]["spawns"], "declared")
+            self.assertNotIn("unmatched_programs", ex["direct"])
+            # An edge to something else does not cover a second program.
+            self.assertEqual((ex["missing"]["spawns"], ex["missing"]["unmatched_programs"]),
+                             ("undeclared", ["helper-tool"]))
+            # The host is reached through the broker the test runs.
+            self.assertEqual(ex["through"]["spawns"], "declared")
+            # A reviewed "named, not run" answers the name; NONE stays NONE.
+            self.assertEqual(ex["fake"]["spawns"], "none")
+            # One plugin built in several formats is one name in the code.
+            self.assertEqual(ex["plugin"]["spawns"], "declared")
+            # A declared tool this configuration does not build is not an edge.
+            self.assertEqual((ex["absent"]["spawns"], ex["absent"]["unmatched_programs"]), ("undeclared", ["pulp-cli"]))
+
+    def test_without_the_runtime_index_every_spawner_is_undeclared(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); named_program_evidence(repo)
+            (repo.build / "test" / "test-data" / "runtime-targets.json").unlink()
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual({k: v["spawns"] for k, v in ex.items()},
+                             dict.fromkeys(("direct", "missing", "through", "fake", "plugin", "absent"), "undeclared"))
 
 
 class SpawnScanTests(unittest.TestCase):

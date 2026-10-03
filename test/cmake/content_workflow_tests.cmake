@@ -47,3 +47,6 @@ pulp_test_data(pulp-test-cli-content-commands PATHS fixtures/packages/basic-cont
 target_link_libraries(pulp-test-cli-content-commands PRIVATE
     pulp::platform pulp::runtime pulp::state pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-content-commands)
+
+# The path it stages its fake screenshot tool at is named for the real one.
+pulp_test_spawns(pulp-test-cli-kit-commands NOT_RUN pulp-screenshot)

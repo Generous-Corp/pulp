@@ -332,7 +332,27 @@ function(_pulp_test_data_finalize)
                 list(APPEND _spawn_errors "${_t} is declared pulp_test_spawns(NONE) but depends on ${_runtime}")
             endif()
         endif()
-        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}}")
+        get_property(_not_run GLOBAL PROPERTY PULP_TEST_SPAWNS_NOT_RUN_${_t})
+        foreach(_named IN LISTS _not_run)
+            if(_named IN_LIST _runtime)
+                list(APPEND _spawn_errors "${_t} declares ${_named} NOT_RUN but depends on it")
+            endif()
+        endforeach()
+        if(_not_run)
+            list(REMOVE_DUPLICATES _not_run)
+            list(SORT _not_run)
+        endif()
+        _pulp_test_data_json_list(_jnotrun ${_not_run})
+        get_property(_absent GLOBAL PROPERTY PULP_TEST_SPAWNS_ABSENT_${_t})
+        if(_absent)
+            list(REMOVE_DUPLICATES _absent)
+            list(SORT _absent)
+            list(JOIN _absent ", " _absent_text)
+            message(STATUS "pulp_test_spawns: ${_t} runs ${_absent_text}, which this configuration does not build; "
+                           "it is recorded as spawns: undeclared")
+        endif()
+        _pulp_test_data_json_list(_jabsent ${_absent})
+        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}, \"named_not_run\": ${_jnotrun}, \"absent_spawns\": ${_jabsent}}")
     endforeach()
     if(_spawn_errors)
         list(JOIN _spawn_errors "\n  " _spawn_text)
@@ -345,6 +365,34 @@ function(_pulp_test_data_finalize)
     list(JOIN _rows ",\n" _body)
     file(CONFIGURE OUTPUT "${PULP_TEST_DATA_DIR}/executables.json"
         CONTENT "{\"schema\": \"pulp-test-executables/v1\", \"executables\": {\n${_body}\n}}\n"
+        @ONLY)
+
+    # Every program or module this tree builds, by the file name its artifact
+    # carries, with the programs and modules it in turn depends on, so a test
+    # that spawns one by name rather than through $<TARGET_FILE:...> can still
+    # be matched to an edge, direct or through another program it runs.
+    _pulp_test_data_collect_targets("${CMAKE_SOURCE_DIR}" _all_targets)
+    list(SORT _all_targets)
+    set(_artifact_rows "")
+    foreach(_t IN LISTS _all_targets)
+        get_target_property(_type ${_t} TYPE)
+        get_target_property(_imported ${_t} IMPORTED)
+        if(_imported OR NOT (_type STREQUAL "EXECUTABLE" OR _type STREQUAL "MODULE_LIBRARY"))
+            continue()
+        endif()
+        get_target_property(_artifact ${_t} OUTPUT_NAME)
+        if(NOT _artifact)
+            set(_artifact "${_t}")
+        endif()
+        string(REPLACE "\\" "\\\\" _artifact "${_artifact}")
+        string(REPLACE "\"" "\\\"" _artifact "${_artifact}")
+        _pulp_test_data_runtime_targets(_target_runtime _ignored ${_t} "")
+        _pulp_test_data_json_list(_jtarget_runtime ${_target_runtime})
+        list(APPEND _artifact_rows "  \"${_t}\": {\"artifact\": \"${_artifact}\", \"runtime_targets\": ${_jtarget_runtime}}")
+    endforeach()
+    list(JOIN _artifact_rows ",\n" _artifact_body)
+    file(CONFIGURE OUTPUT "${PULP_TEST_DATA_DIR}/runtime-targets.json"
+        CONTENT "{\"schema\": \"pulp-runtime-targets/v1\", \"artifacts\": {\n${_artifact_body}\n}}\n"
         @ONLY)
 
     get_property(_declared GLOBAL PROPERTY PULP_TEST_DATA_EXECUTABLES)
@@ -374,6 +422,13 @@ function(pulp_test_spawns TEST)
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_NONE "${TEST}")
         return()
     endif()
+    set(_args ${ARGN})
+    list(GET _args 0 _first)
+    if(_first STREQUAL "NOT_RUN")
+        list(REMOVE_AT _args 0)
+        set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_NOT_RUN_${TEST} ${_args})
+        return()
+    endif()
     foreach(_tool IN LISTS ARGN)
         # A deferred call evaluates its arguments when it runs, after this
         # function's variables are gone, so the names are written in literally.
@@ -382,12 +437,20 @@ function(pulp_test_spawns TEST)
     endforeach()
 endfunction()
 
-# A test or tool this configuration does not build (a platform-specific suite,
-# an optional tool) has no edge to add.
+# A test this configuration does not build has no edge to add. A built test
+# whose tool is not built is recorded as such, and the scan leaves it
+# undeclared.
 function(_pulp_test_spawns_apply TEST TOOL)
-    if(TARGET ${TEST} AND TARGET ${TOOL})
+    if(NOT TARGET ${TEST})
+        return()
+    endif()
+    if(TARGET ${TOOL})
         add_dependencies(${TEST} ${TOOL})
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_OF_${TEST} "${TOOL}")
+    else()
+        # The test is built but the program it runs is not: nothing records
+        # what it runs here, so it must not read as declared.
+        set_property(GLOBAL APPEND PROPERTY PULP_TEST_SPAWNS_ABSENT_${TEST} "${TOOL}")
     endif()
 endfunction()
 
