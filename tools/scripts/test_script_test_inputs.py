@@ -705,6 +705,25 @@ class CompiledDataTests(unittest.TestCase):
             lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
             self.assertEqual(lst["executables"]["pulp-test-b"]["data"], "declared")
 
+    def test_a_change_that_adds_a_spawn_owns_the_new_entry(self) -> None:
+        """A spawns-only entry has no data `sources`; its spawn site still
+        makes the drift the change's own."""
+        for pr_adds_the_spawn in (True, False):
+            with self.subTest(pr_adds_the_spawn=pr_adds_the_spawn), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+                self.git_repo(repo)
+                write(repo.root, "test/test_d.cpp", "int x = 1;\npid_t child = fork();\n")
+                if pr_adds_the_spawn:
+                    self.g("add", "-A"); self.g("commit", "-q", "-m", "pr adds a fork")
+                else:  # main already moved; this change touches something else
+                    self.g("add", "-A"); self.g("commit", "-q", "-m", "main adds a fork")
+                    self.g("branch", "-f", "base-ref", "HEAD")
+                    write(repo.root, "README.md", "unrelated\n"); self.g("add", "-A"); self.g("commit", "-q", "-m", "pr")
+                proc = self.run_tool(repo, "--check", "--base", "base-ref")
+                self.assertIn("missing compiled entry: pulp-test-d", proc.stdout)
+                self.assertEqual(proc.returncode, 1 if pr_adds_the_spawn else 0, proc.stdout)
+
     def test_a_stale_compiled_entry_is_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
