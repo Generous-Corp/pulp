@@ -194,8 +194,25 @@ def _step(job: str, _offset: int, lines: list[tuple[int, str]]) -> Step:
     return Step(job=job, line=first, condition=condition, run="\n".join(run))
 
 
+def _strip_comment(line: str) -> str:
+    """The line without its shell comment: a `#` that starts a word outside
+    quotes. A `#` inside a word (a URL fragment) or inside quotes is kept."""
+    quote = ""
+    for index, char in enumerate(line):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            return line[:index]
+    return line
+
+
 def _shell_lines(script: str) -> list[str]:
-    return [l for l in script.splitlines() if not l.strip().startswith("#")]
+    """Executed shell text: comment lines dropped and trailing comments cut, so a
+    script, URL or package manager named only in a comment is never followed."""
+    return [code for code in (_strip_comment(l) for l in script.splitlines()) if code.strip()]
 
 
 def required_hosts(workflow_text: str, repo_root: Path = REPO_ROOT
