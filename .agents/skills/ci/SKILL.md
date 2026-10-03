@@ -2103,6 +2103,38 @@ CMake moves. A ctest registration belongs to the target whose artifact is its
 `command[0]`; on an unbuilt tree Catch2 discovery has listed nothing, so every
 compiled test is missing and only script tests (owned by no target) appear.
 
+Key a generated file by its CONTENT, never its path: `configure_file` keeps
+the path when VERSION moves, and the control-shipping / inspector marker
+sources carry a per-configure build nonce. Do not widen "what a target can
+include" to every header under a build-tree include directory: core/runtime's
+generated `build_info.hpp` (configure timestamp) sits in an include directory
+629 targets inherit, which re-keys 560 of 789 targets on every configure; the
+Ninja dependency log says which few actually include it.
+
+`file(GENERATE)` whose CONTENT holds a per-configuration generator expression
+(`$<TARGET_FILE:...>`, `$<CONFIG>`, anything under a config-dependent output
+directory) breaks every multi-config generator: Xcode and Ninja Multi-Config
+evaluate the file once per configuration, and the configure fails with
+"Evaluation file to be written multiple times with different content". The
+macOS gate is single-config Ninja, so only the iOS compile gate (Xcode) sees
+it. Write configuration-free content (a target NAME, resolved later through
+the codemodel), or put `$<CONFIG>` in the OUTPUT path. Reproduce with a
+`-G "Ninja Multi-Config"` configure before pushing; tools/ci/
+test_commit_bound_cmake.py carries that case.
+
+A byte difference between two builds of identical recorded inputs is not
+automatically a link or host artifact. Release links carry no N_OSO debug map,
+and LC_UUID and the code signature follow content, so strip (`strip -S`) and
+unsign (`codesign --remove-signature`) copies and map the remaining offsets to
+sections before naming a cause. pulp-test-runtime differed by one `__text`
+instruction: `REQUIRE(kGitSha.size() >= 7)` captures the length of
+`git rev-parse --short HEAD` (build_info.hpp), and git's abbreviation length
+grows with the clone's object count, so the same commit stamped 7 characters
+in a shallow clone and 10 in a full one. core/runtime now pins
+`--short=12`; a new length-dependent stamp must pin its length too. The v2
+codemodel digest keys build_info.hpp's content either way, so such a target
+re-keys rather than being normalised.
+
 ## A new Python test needs three generators, not three hand edits
 
 Adding or changing a Python selftest or script drifts three generated files,
@@ -3777,6 +3809,20 @@ uses, or the golden warms a cache the real jobs never touch.
 
 ## GitHub workflow gotchas
 
+- **An hourly-or-faster cron here fires about once every five hours.** GitHub
+  delays `schedule` events under load and drops the backlog; daily crons still
+  fire daily, five to seven hours late. Never assume a `*/15` or `*/30` safety
+  net ran recently because its cron says so: read its last run. The fix is
+  `.github/schedule-backstop.json` plus tartci's schedule-backstop agent, which
+  dispatches listed workflows at their cadence; `schedule_backstop_check.py`
+  fails a new hourly-or-faster cron that is neither listed nor excluded, and a
+  listed one whose cadence, dispatch inputs, concurrency group, or runner no
+  longer match what the dispatcher assumes.
+  - **Do not filter workflow-run listings with `branch=` when freshness
+    matters.** A cold `actions/workflows/<file>/runs?branch=main` read returned a
+    page days to weeks old in 6 of 26 tries; the unfiltered listing was current
+    in 26 of 26. Filter `head_branch` client-side.
+
 - **An `upload-artifact` with no `retention-days` inherits 90 days, and Actions
   storage is billed per ACCOUNT and shared across every repository in it.** That
   makes it the rare CI cost that becomes a *different repo's* outage: when the
@@ -4029,14 +4075,23 @@ bisectable.
       shared-branch reclaim is only race-free without a competing drain). Plan +
       rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
       This is the path back to the merge queue we moved to an org for.
-    - Stale bump PR: a drain that finds an open bump PR cut BEFORE its merge
-      fails `stale-defer` and waits for that PR to land. An ejected PR, or an
-      ARMED PR whose required checks failed, never lands, so every drain stays
-      red until someone closes it. `PULP_BUMP_HEAL_STALE_PR=true` (default off,
-      `--heal-stale-pr`) closes a CONFIRMED-stale bump PR unless it
-      is in the merge queue or a draft (armed does not protect it; closing drops
-      auto-merge, so no disarm is needed) and opens a fresh one.
-      An unknown coverage or queue/draft reading always fails closed.
+    - Stale bump PR: one cut BEFORE the merge being drained does not carry
+      that merge's intent, but it is safe to WAIT for while it can still land:
+      its landing re-runs the drain, which assesses every first-parent merge
+      after the bump's cut point (the marker commit's parent), skipping only
+      the bump's own merge. Starting after that integration merge instead
+      silently drops every merge that landed while the bump PR was open. A
+      queued stale PR, or one armed with required checks pending or green, is
+      `stale-wait` (exit 0 plus a `::notice::`), not a red run.
+      `PULP_BUMP_HEAL_STALE_PR=true` (`--heal-stale-pr`) closes a
+      CONFIRMED-stale DEAD END only: ejected from the merge queue, unarmed, or a
+      required check failed (newest run per name). Closing a healthy one just
+      restarts its 8-36 min of checks so the replacement goes stale too. Drafts
+      and unreadable state fail closed (`stale-defer`, exit 1). `dequeued` and
+      non-green `workflow_run` events on `release/version-bump` re-run the
+      drain so a dead end heals when it dies, not on the next main push.
+      When grepping run logs for waits, match `was cut BEFORE this merge`:
+      the literal `stale-defer` also appears in a branch name in fetch output.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
@@ -7156,6 +7211,18 @@ command after the build, or any difference from the base. The receipt records
 `base_inventory_rows`, `base_inventory_name_only_rows` (rows whose program the
 unbuilt base could not list, compared on name, arguments and properties) and
 `base_inventory_configure_seconds`.
+
+The scratch base is provisioned like the head before it configures: `setup.sh
+--deps-only` links `external/` from the shared source cache with git limited to
+local objects. A worktree never inherits the untracked SDK links, and a base
+without them configures without AudioUnitSDK, at C++20 instead of C++23, which
+changes the `test-pch-wiring` registration and refused every bounded plan.
+Every `PULP_HAS_*` entry, `PULP_CHECKOUT_DEPENDENCY_CONTRACT` (the linked pins),
+the generator, Python and build type must then agree between base and head (an
+entry on one side only counts), or the run refuses with `inventory:
+base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
+gap names itself rather than reading as drift. The receipt records the compared
+`base_inventory_environment` and `base_inventory_linked_externals`.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The

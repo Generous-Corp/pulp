@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "ref": "main",
+  "workflows": [
+    {"file": "coverage-upload-watchdog.yml", "cadence_minutes": 60},
+    {"file": "landing-watchdog.yml", "cadence_minutes": 30},
+    {"file": "main-health-detector.yml", "cadence_minutes": 30},
+    {"file": "merge-stall-check.yml", "cadence_minutes": 30},
+    {"file": "pending-intent-liveness.yml", "cadence_minutes": 30},
+    {"file": "release-cadence-check.yml", "cadence_minutes": 30},
+    {"file": "release-reconcile.yml", "cadence_minutes": 30},
+    {"file": "required-gate-liveness.yml", "cadence_minutes": 30},
+    {"file": "runner-health-check.yml", "cadence_minutes": 30},
+    {"file": "runner-topology-check.yml", "cadence_minutes": 60},
+    {"file": "stale-run-reaper.yml", "cadence_minutes": 30},
+    {"file": "version-at-land.yml", "cadence_minutes": 15},
+    {"file": "webhook-endpoint-watchdog.yml", "cadence_minutes": 30}
+  ],
+  "excluded": []
+}

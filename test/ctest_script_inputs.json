@@ -1430,6 +1430,22 @@
    ],
    "kind": "python"
   },
+  "commit-bound-cmake-selftest": {
+   "entry": "tools/ci/test_commit_bound_cmake.py",
+   "inputs": [
+    "tools/ci/test_commit_bound_cmake.py",
+    "tools/cmake"
+   ],
+   "kind": "python"
+  },
+  "commit-bound-labels-selftest": {
+   "entry": "tools/ci/test_commit_bound_labels.py",
+   "inputs": [
+    "test/cmake",
+    "tools/ci/test_commit_bound_labels.py"
+   ],
+   "kind": "python"
+  },
   "component-visual-regression": {
    "entry": "tools/scripts/component_regression.py",
    "inputs": [
@@ -4918,7 +4934,10 @@
     "tools/ci/test_receipts_shadow.py",
     "tools/ci/wide_non_native_checks.json",
     "tools/cmake",
+    "tools/cmake/PulpDependencies.cmake",
+    "tools/cmake/PulpFetchContent.cmake",
     "tools/cmake/PulpInstallRules.cmake",
+    "tools/deps/manifest.json",
     "tools/dsp_vocabulary.py",
     "tools/import-validation",
     "tools/scripts",

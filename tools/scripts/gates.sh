@@ -114,6 +114,7 @@ LIVE_BUILD_CHECK="$ROOT/tools/scripts/live_build_check.py"
 DESIGNATED_INIT_LINT="$ROOT/tools/scripts/designated_initializer_lint.py"
 WIN32_INCLUDE_LINT="$ROOT/tools/scripts/win32_include_lint.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
+SCHEDULE_BACKSTOP="$ROOT/tools/scripts/schedule_backstop_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 UNBOUNDED_WAIT_LINT="$ROOT/tools/scripts/unbounded_wait_lint.py"
 FORCED_RESTORE_LINT="$ROOT/tools/scripts/forced_restore_lint.py"
@@ -701,6 +702,16 @@ if [ -f "$FORK_GUARD" ]; then
     echo "" >&2
     echo "▸ scheduled-workflow fork-guard check" >&2
     if ! "$PYTHON" "$FORK_GUARD"; then
+        fail=1
+    fi
+fi
+
+# Every hourly-or-faster cron is either dispatched by the external schedule
+# backstop (and then must match what that dispatcher assumes) or excluded.
+if [ -f "$SCHEDULE_BACKSTOP" ]; then
+    echo "" >&2
+    echo "▸ schedule-backstop manifest check" >&2
+    if ! "$PYTHON" "$SCHEDULE_BACKSTOP" --root "$ROOT"; then
         fail=1
     fi
 fi

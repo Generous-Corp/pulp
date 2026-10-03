@@ -994,7 +994,14 @@ force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
 requests, with build and source roots written as `<build>/` and `<src>/` so
-the same configuration digests identically on every VM.
+the same configuration digests identically on every VM. A `generated` part
+digests the CONTENT of every build-tree file the target compiles or included
+when it compiled (Ninja's dependency log, `ninja -t deps`), so a VERSION bump
+re-keys only the targets that include the configured version header, and a
+target whose generated marker source or compile definitions embed a build
+identity re-keys on every configure, by declaration rather than by learning it
+from history. Without a Ninja log the record warns that generated headers are
+not keyed.
 
 When a merge-group `macos` ctest fails, the job also annotates a **flake
 exoneration verdict in shadow mode** (`pulp-flake-exoneration-shadow/v1`,
@@ -3991,6 +3998,40 @@ shipyard update --dry-run                 # plan only
 
 # Wait after handoff/rescue without depending solely on GraphQL
 shipyard wait pr <PR> --state green       # REST fallback as of v0.56.2
+```
+
+### Frequent safety nets do not run at their cron cadence
+
+GitHub delays `schedule` events under load and drops the ones that pile up. On
+this repository every hourly-or-faster cron fires roughly once every five hours,
+whatever it says: over 2026-10-01 00:00Z to 2026-10-02 17:00Z each `*/15` and
+`*/30` workflow got 7 or 8 scheduled runs (82 to 164 expected) and each hourly
+one got 6. Daily crons are the control: they fire every day, five to seven
+hours late. Run numbers stay contiguous, so the runs are never created; this is
+GitHub-side, not a disabled job or a deleted run.
+
+`.github/schedule-backstop.json` lists the frequent safety nets (the
+watchdogs in this section, the release reconciler and cadence check,
+`version-at-land`, and the rest). An external dispatcher, tartci's
+schedule-backstop agent, runs on one fleet host every five minutes and calls
+`workflow_dispatch` on a listed workflow when the newest `main` run of that
+workflow, from any event, is older than its `cadence_minutes` and none is
+queued or running. It only dispatches; the workflows still run on
+GitHub-hosted runners. The cron stays as the backstop's own backstop, so with
+the agent off or its host down the behaviour is exactly the throttled cron.
+Because the freshness test counts every event, a workflow that an event trigger
+already keeps fresh is never dispatched.
+
+`tools/scripts/schedule_backstop_check.py` (in `workflow-lint.yml` and
+`gates.sh`) holds every listed workflow to what the dispatcher assumes:
+`workflow_dispatch` with no required input, a cadence equal to its cron, a
+top-level concurrency group, and no self-hosted runner label. A new
+hourly-or-faster cron must be listed or added to `excluded` with a reason.
+
+To judge it, count runs per workflow per day against `1440 / cadence_minutes`:
+
+```bash
+ghapp api "repos/Generous-Corp/pulp/actions/workflows/merge-stall-check.yml/runs?per_page=1&created=>=2026-10-03T00:00:00Z" --jq .total_count
 ```
 
 ### Off-fleet queue-age watchdog (`runner-health-check.yml`)

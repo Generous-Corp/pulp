@@ -807,6 +807,33 @@ TEST_CASE("strum shape curves match integer step arithmetic", "[midi][strum]") {
     REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Accelerate, 0, 1) == 0);
 }
 
+TEST_CASE("strum supports continuous shape exponents and signed velocity tilt",
+          "[midi][strum][e120]") {
+    REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Accelerate, 1.0, 1, 4) == 1);
+    REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Accelerate, 3.0, 1, 4) == 0);
+    REQUIRE(midi::Strum<>::shaped_step(midi::StrumShape::Decelerate, 1.0, 2, 4) == 2);
+
+    const std::array input{on(0, 60, 40),   on(0, 64, 40),   on(0, 67, 40),
+                           off(20'000, 60), off(20'000, 64), off(20'000, 67)};
+    midi::StrumSpec spec{};
+    spec.sync = midi::StrumSpacingSync::Milliseconds;
+    spec.spacing_milliseconds = 10;
+    spec.window_samples = 64;
+    spec.shape = midi::StrumShape::Accelerate;
+    spec.shape_exponent = 1.0;
+    spec.velocity_tilt = 30;
+    midi::Strum<> strum{spec};
+    const auto out =
+        render([&](const auto& in, auto& o, std::int64_t start,
+                   std::int32_t count) { strum.process(in, o, constant_block(start, count)); },
+               21'000, kWholeBlock, input);
+    REQUIRE(attack_velocities(out) == std::vector<std::uint8_t>{40, 55, 70});
+    EventLedger ledger;
+    for (const auto& event : out)
+        ledger.feed(event);
+    REQUIRE(ledger.balanced());
+}
+
 TEST_CASE("strum with zero jitter is exactly deterministic", "[midi][strum][parity]") {
     const std::array input{on(0, 60, 100), on(0, 64, 100), on(0, 67, 100),
                            off(20'000, 60), off(20'000, 64), off(20'000, 67)};
@@ -1308,6 +1335,12 @@ TEST_CASE("every MIDI utility kernel rejects a spec it cannot honour", "[midi][p
 
     midi::StrumSpec strum{};
     strum.window_samples = -1;
+    REQUIRE_FALSE(midi::Strum<>::valid_spec(strum));
+    strum = {};
+    strum.shape_exponent = 0.0;
+    REQUIRE_FALSE(midi::Strum<>::valid_spec(strum));
+    strum.shape_exponent = 1.0;
+    strum.velocity_tilt = 128;
     REQUIRE_FALSE(midi::Strum<>::valid_spec(strum));
 
     // An invalid spec must leave the kernel refusing to run rather than

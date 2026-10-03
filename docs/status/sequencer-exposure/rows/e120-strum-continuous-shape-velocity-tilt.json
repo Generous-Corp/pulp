@@ -1,0 +1,101 @@
+{
+  "id": "e120-strum-continuous-shape-velocity-tilt",
+  "title": "Strum exposes continuous shape and signed velocity tilt through the public MIDI kernel",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "93b2d0fc-5591-466e-a299-a021c5422045",
+  "owned_paths": [
+    "core/midi/include/pulp/midi/strum.hpp",
+    "test/test_midi_performance_kernels.cpp",
+    "docs/guides/midi-fx.md",
+    "docs/status/sequencer-exposure/rows/e120-strum-continuous-shape-velocity-tilt.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/include/pulp/midi/strum.hpp",
+      "needles": [
+        "double shape_exponent = 2.0",
+        "std::int16_t velocity_tilt = 0",
+        "static std::int64_t shaped_step(StrumShape shape, double exponent",
+        "apply_velocity_tilt"
+      ]
+    },
+    {
+      "path": "test/test_midi_performance_kernels.cpp",
+      "needles": [
+        "strum supports continuous shape exponents and signed velocity tilt",
+        "shape_exponent = 0.0",
+        "velocity_tilt = 128"
+      ]
+    },
+    {
+      "path": "docs/guides/midi-fx.md",
+      "needles": [
+        "Strum shape and velocity controls",
+        "velocity_tilt",
+        "default `2`"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The existing midi.strum-spread public binding now carries bounded shape_exponent and signed velocity_tilt fields in pulp::midi::StrumSpec; defaults preserve the prior quadratic shape and zero tilt.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/midi/include/pulp/midi/strum.hpp",
+          "needles": [
+            "struct StrumSpec",
+            "double shape_exponent = 2.0",
+            "std::int16_t velocity_tilt = 0"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No offline timeline command or node schema is added; the bounded kernel remains an SDK primitive consumed by an owning transform."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP request or response shape changes; the existing midi.strum-spread capability remains discoverable through the SDK manifest."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "This packet adds no Product A operation, executor binding, grant, or profile policy."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The existing midi.strum-spread design-time capability and public header binding remain the authoritative discovery surface; this row documents the newly bounded fields without creating a duplicate capability key.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"midi.strum-spread\""
+          ]
+        },
+        {
+          "kind": "agent_manifest",
+          "path": "docs/status/agent-capability-surface.json",
+          "needles": [
+            "\"source\": \"core/midi/include/pulp/midi/strum.hpp\""
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}
