@@ -689,6 +689,10 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Per-object header dependencies from the Ninja log, for the reuse record.
+        add_test(NAME object-deps-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_object_deps.py")
+        set_tests_properties(object-deps-selftest PROPERTIES TIMEOUT 120)
         # Test read audit: strace log parsing, path resolution and the diff of
         # measured checkout reads against pulp_test_data declarations.
         add_test(NAME read-audit-selftest COMMAND ${Python3_EXECUTABLE}

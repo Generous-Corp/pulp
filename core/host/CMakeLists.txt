@@ -28,6 +28,7 @@ target_sources(pulp-host PRIVATE
     src/forge_catalog_export_effects.cpp
     src/forge_catalog_export_eurorack_drums.cpp
     src/forge_catalog_export_dynamics.cpp
+    src/forge_dynamics_catalog.cpp
     src/forge_catalog_export_modulation.cpp
     src/forge_catalog_export_lofi.cpp
     src/forge_catalog_export_pitch_sequencing.cpp

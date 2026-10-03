@@ -103,6 +103,16 @@ class ReducedPublicSurfaceTests(unittest.TestCase):
         errors = inspector_truth_check.public_surface_errors(self.root)
         self.assertTrue(any("retired live route: list" in error for error in errors))
 
+    def test_reads_code_not_comments(self) -> None:
+        path = self.root / "tools/cli/cmd_inspect.cpp"
+        # A retired route mentioned in a comment is not a restored route...
+        path.write_text(path.read_text() + '// the old `if (verb == "list")` route was removed\n')
+        self.assertEqual(inspector_truth_check.public_surface_errors(self.root), [])
+        # ...and a required help line surviving only in a comment is missing.
+        path.write_text('/* "pulp inspect profiles [--json]" */\n"pulp inspect audit ARTIFACT [--json]"\n')
+        errors = inspector_truth_check.public_surface_errors(self.root)
+        self.assertTrue(any("pulp inspect profiles" in error for error in errors))
+
     def test_rejects_restored_motion_tool(self) -> None:
         path = self.root / "tools/mcp/pulp_mcp.cpp"
         path.write_text(path.read_text() + '"name":"pulp_motion_record"\n')

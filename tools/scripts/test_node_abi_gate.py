@@ -53,7 +53,7 @@ class NodeAbiParserUnitTests(unittest.TestCase):
             self.assertIsNone(nag.git_show("origin/main", "foo.hpp"))
 
     def test_strip_comments_and_class_body_errors(self) -> None:
-        stripped = nag.strip_comments("class A { /* block */ int x; // tail\n};")
+        stripped = nag.strip_c_comments("class A { /* block */ int x; // tail\n};")
         self.assertNotIn("block", stripped)
         self.assertNotIn("tail", stripped)
         nested = nag.class_body("class WithBody { void f() { if (ok) { call(); } } };", "WithBody")

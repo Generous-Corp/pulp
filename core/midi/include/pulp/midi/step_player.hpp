@@ -70,13 +70,10 @@ struct StepPlayerStep {
     /// a caller wanting swing has to run its own scheduler, which is the
     /// duplication this kernel exists to remove.
     ///
-    /// The nudge is late-only, and a negative value is refused rather than
-    /// honoured. A step is discovered when its own interval opens, so pulling
-    /// it earlier would ask it to sound before the block that found it —
-    /// whether it survived would then depend on where the host happened to put
-    /// its callback boundaries, and the kernel's whole timing contract is that
-    /// it does not. A caller wanting a symmetric groove biases the lane late
-    /// and varies around that bias, which costs one constant and stays exact.
+    /// Negative values pull a step toward the preceding grid line. The kernel
+    /// admits the step from its authored grid coordinate, so the result is
+    /// independent of callback boundaries. An offset that would cross the
+    /// preceding grid line is refused when the step is authored.
     ///
     /// A nudge is held inside the step's own interval at fire time, so it can
     /// never reach the next step's grid position and the sequence cannot be
@@ -340,7 +337,8 @@ class StepPlayer {
             return StepPlayerError::InvalidRatchetCount;
         if (step.pitch_offset < -48 || step.pitch_offset > 48)
             return StepPlayerError::InvalidPitchOffset;
-        if (step.timing_offset_ticks < 0 || step.timing_offset_ticks > kMaximumTimingOffsetTicks)
+        if (step.timing_offset_ticks < -kMaximumTimingOffsetTicks ||
+            step.timing_offset_ticks > kMaximumTimingOffsetTicks)
             return StepPlayerError::InvalidTimingOffset;
         return StepPlayerError::None;
     }
@@ -355,6 +353,10 @@ class StepPlayer {
             return StepPlayerError::InvalidStepIndex;
         if (const auto error = validate_step(step); error != StepPlayerError::None)
             return error;
+        const auto interval = spec_.lanes[lane].step_duration.value;
+        if (step.timing_offset_ticks < 0 &&
+            static_cast<std::int64_t>(-step.timing_offset_ticks) >= interval)
+            return StepPlayerError::InvalidTimingOffset;
         steps_[lane * MaxSteps + index] = step;
         return StepPlayerError::None;
     }
@@ -832,10 +834,10 @@ class StepPlayer {
     /// same question and get the same answer from one place.
     std::int64_t bounded_timing_offset(const StepPlayerStep& step,
                                        std::int64_t interval_ticks) const noexcept {
-        if (!step.on || step.timing_offset_ticks <= 0)
+        if (!step.on || step.timing_offset_ticks == 0)
             return 0;
-        return std::min<std::int64_t>(static_cast<std::int64_t>(step.timing_offset_ticks),
-                                      std::max<std::int64_t>(0, interval_ticks - 1));
+        const auto limit = std::max<std::int64_t>(0, interval_ticks - 1);
+        return std::clamp(static_cast<std::int64_t>(step.timing_offset_ticks), -limit, limit);
     }
 
     /// The sample a lane's next step actually speaks at, displacement included.

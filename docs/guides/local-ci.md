@@ -930,7 +930,10 @@ measures them. On a GitHub-hosted Linux runner it builds the tree, runs every
 compiled test executable's ctest registrations under `strace -f`, and diffs
 the tracked checkout files they open, list or probe against the executable's
 declared inputs. It uses the selector's own prefix-or-glob match, and CMake
-files count as covered because a CMake change already reruns everything. Each
+files count as covered because a CMake change already reruns everything. Listing a directory
+above a declared input (Python's import scan of its own script directory)
+is covered, but opening a file there never is. A submodule gitlink is a
+directory, not a file. Each
 undeclared access is reported with its executable, its test and the program
 that made it. Before the tests, a control program goes through the same
 ctest and strace path. It reads one undeclared and one declared tracked
@@ -1048,7 +1051,15 @@ set on archives the link line force-loads (`-force_load`, `-all_load`,
 `-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
 calls `link_members.unusable()` first and treats an unknown schema, a `shared`
 link (its content reaches the binaries that load it without changing their
-maps) or an unrecorded link as no record at all, and the record job warns. `codemodel-<sha>.json`
+maps) or an unrecorded link as no record at all, and the record job warns. `object-deps-<sha>.json`
+(`tools/ci/object_deps.py`, `--object-deps`) holds, per object file, the
+in-tree headers Ninja recorded it including (`ninja -t deps`, as `<src>/` and
+`<build>/` paths, headers under `<build>/_deps` left out), and which objects
+each static archive member comes from. A changed header then reaches exactly
+the objects that included it in the build that ran. A build with no Ninja
+log writes no file and warns. An object Ninja marks STALE is listed in
+`stale` with no headers, and a reader treats it, or any object the file does
+not list, as changed. `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
@@ -2026,6 +2037,16 @@ projection as `registrations-<sha>.json` in each job's `reuse-record-macos`
 artifact, `recordable` only when no registration lacks a command, for
 measurement; it is not on the validation path, because Shipyard's validation
 commands carry no GitHub credentials.
+
+When the lane's full suite carries known reds, two failing legs are compared
+per test from each leg's `ctest --output-junit` report. The plan is
+`matched_fail` (never `matched_pass`) when the selected leg failed nothing the
+full suite passed and saw every full-suite failure inside its selection, and it
+graduates only if every full-suite failure outside the selection is an
+unexpired row of `tools/ci/changed_surface_lane_reds.json`, read from the
+protected base. That file is a policy path, so a PR editing it runs in full and
+cannot allowlist its own regression; owners delete their row when they fix the
+test.
 
 The mandatory kernel always runs, including the selector's own
 `changed-surface-policy-selftest`. Known build-system, CI, ABI, public-header,

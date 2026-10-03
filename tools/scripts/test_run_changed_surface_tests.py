@@ -8,11 +8,13 @@ import base64
 import copy
 import hashlib
 import json
-import stat
 import os
+import re
+import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1513,6 +1515,63 @@ class BaseInventoryTest(unittest.TestCase):
 
 
 
+class FailureSetTest(unittest.TestCase):
+    FIXTURE = Path(__file__).resolve().parent / "fixtures/changed_surface/ctest-junit.xml"
+
+    def test_ctest_junit_failures_exclude_passes_and_skips(self) -> None:
+        # A report ctest --output-junit wrote for one pass, two fails (one
+        # named with spaces) and one SKIP_RETURN_CODE skip.
+        self.assertEqual(runner.junit_failures(self.FIXTURE), {"fails", "has spaces fails"})
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(runner.junit_failures(Path(directory) / "absent.xml"))
+            broken = Path(directory) / "broken.xml"
+            broken.write_text("<testsuite>", encoding="utf-8")
+            self.assertIsNone(runner.junit_failures(broken))
+
+    def test_two_failing_legs_without_sets_stay_unproven(self) -> None:
+        self.assertEqual(runner.comparison_verdict(8, 8), "failure_overlap_unproven")
+        self.assertEqual(runner.comparison_verdict(8, 8, ({"a"}, set(), {"a"})),
+                         "failure_overlap_unproven")
+
+    def test_the_allowlist_is_read_from_the_base_commit_not_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True,
+                                            capture_output=True, text=True).stdout.strip()
+            git("init", "-q")
+            git("config", "user.email", "t@example.invalid")
+            git("config", "user.name", "t")
+            target = repo / runner.LANE_RED_ALLOWLIST
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps({"tests": [
+                {"name": "b", "expires": "2026-10-17"}, {"name": "a", "expires": "2026-10-17"},
+                {"name": "fixed", "expires": "2026-10-01"}]}), encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            # The working tree, which a PR controls, says something else.
+            target.write_text(json.dumps({"tests": [{"name": "new-regression", "expires": "2099-01-01"}]}),
+                              encoding="utf-8")
+            names, digest = runner.lane_red_allowlist(base, repo, today="2026-10-03")
+            # An expired entry is dropped: a fixed red cannot hide a new failure.
+            self.assertEqual(names, {"a": "2026-10-17", "b": "2026-10-17"})
+            self.assertEqual(digest, hashlib.sha256(
+                subprocess.run(["git", "-C", str(repo), "show", f"{base}:{runner.LANE_RED_ALLOWLIST}"],
+                               capture_output=True, check=True).stdout).hexdigest())
+            self.assertIsNone(runner.lane_red_allowlist("0" * 40, repo))
+
+    def test_the_checked_in_allowlist_parses_and_is_a_policy_path(self) -> None:
+        doc = json.loads((runner.REPO_ROOT / runner.LANE_RED_ALLOWLIST).read_text(encoding="utf-8"))
+        names = [entry["name"] for entry in doc["tests"]]
+        self.assertTrue(names and all(entry.get("reason") and entry.get("owner_issue")
+                                      and re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry.get("expires", ""))
+                                      for entry in doc["tests"]))
+        self.assertEqual(len(names), len(set(names)))
+        config = (runner.REPO_ROOT / ".shipyard/config.toml").read_text(encoding="utf-8")
+        policy_paths = tomllib.loads(config)["targets"]["mac"]["changed_surface_selection"]["policy_paths"]
+        self.assertIn(runner.LANE_RED_ALLOWLIST, policy_paths)
+
+
 class SelectedLegPipelineTest(unittest.TestCase):
     """Every gate of the selected leg, in the lane's order, across the three
     states a cold lane checkout passes through: configured only, selected
@@ -1547,7 +1606,11 @@ class SelectedLegPipelineTest(unittest.TestCase):
         return {"cold": [*direct, placeholder, validator],
                 "built": [*direct, *discovered, validator]}
 
-    def run_pipeline(self, late_registration: bool = False) -> tuple[int, list[str], dict]:
+    def run_pipeline(self, late_registration: bool = False, failures: dict | None = None,
+                     allowlist: tuple[list[str], str] | None = None) -> tuple[int, list[str], dict]:
+        """`failures` maps "selected tests" / "full tests" to the names that leg
+        fails; each leg writes them as ctest's JUnit report and exits 8."""
+        failures = failures or {}
         with tempfile.TemporaryDirectory() as directory:
             build = Path(directory).resolve()
             states = self.tree(build)
@@ -1582,6 +1645,15 @@ class SelectedLegPipelineTest(unittest.TestCase):
                         current["state"] = "built"
                 else:
                     step = "selected tests" if "--tests-from-file" in text else "full tests"
+                    failed = failures.get(step, [])
+                    if "--output-junit" in argv:
+                        cases = "".join(
+                            f'<testcase name="{name}" status="fail"><failure message="Failed"/></testcase>'
+                            for name in failed)
+                        Path(argv[argv.index("--output-junit") + 1]).write_text(
+                            f"<testsuite>{cases}</testsuite>", encoding="utf-8")
+                    steps.append(step)
+                    return subprocess.CompletedProcess(argv, 8 if failed else 0)
                 steps.append(step)
                 return subprocess.CompletedProcess(argv, 0)
 
@@ -1605,6 +1677,7 @@ class SelectedLegPipelineTest(unittest.TestCase):
                 mock.patch.object(runner, "ctest_payload", side_effect=lambda b: listing(b)),
                 mock.patch.object(runner, "ctest_json", side_effect=listing),
                 mock.patch.object(runner.subprocess, "run", side_effect=execute),
+                mock.patch.object(runner, "lane_red_allowlist", return_value=allowlist),
             ):
                 code = runner.run_locked(args, build)
             receipts = sorted(results.glob("*.json")) if results.is_dir() else []
@@ -1619,6 +1692,43 @@ class SelectedLegPipelineTest(unittest.TestCase):
         self.assertIs(result.get("graduation_eligible"), True)
         self.assertEqual(result.get("selected_returncode"), 0)
         self.assertEqual(result.get("prebuild_unbuilt_placeholder_count"), 1)
+
+    LANE_REDS = ({"lane-red": "2026-10-17"}, "f" * 64)
+
+    def test_matching_failure_sets_are_a_matched_fail_that_graduates_on_the_base_allowlist(self) -> None:
+        code, _, result = self.run_pipeline(
+            failures={"selected tests": ["core"], "full tests": ["core", "lane-red"]},
+            allowlist=self.LANE_REDS)
+        self.assertEqual(result["comparison_verdict"], "matched_fail", result)
+        self.assertIs(result["graduation_eligible"], True)
+        self.assertEqual(result["selected_tests"], ["smoke", "core"])
+        self.assertEqual(result["selected_failures"], ["core"])
+        self.assertEqual(result["full_failures"], ["core", "lane-red"])
+        self.assertEqual(result["full_failures_outside_selection"], ["lane-red"])
+        self.assertEqual(result["lane_red_allowlist"], ["lane-red"])
+        self.assertEqual(result["lane_red_allowlist_expires"], {"lane-red": "2026-10-17"})
+        self.assertEqual(result["allowlisted_failure_count"], 1)
+        self.assertEqual(code, 8)
+
+    def test_a_full_failure_outside_the_allowlist_never_graduates(self) -> None:
+        _, _, result = self.run_pipeline(
+            failures={"selected tests": ["core"], "full tests": ["core", "new-regression"]},
+            allowlist=self.LANE_REDS)
+        self.assertEqual(result["comparison_verdict"], "matched_fail")
+        self.assertIs(result["graduation_eligible"], False)
+        _, _, unread = self.run_pipeline(
+            failures={"selected tests": ["core"], "full tests": ["core", "lane-red"]}, allowlist=None)
+        self.assertIs(unread["graduation_eligible"], False)
+
+    def test_mismatched_failure_sets_are_named(self) -> None:
+        for failures, verdict in (
+            ({"selected tests": ["core", "smoke"], "full tests": ["core"]}, "selected_only_failure"),
+            ({"selected tests": ["core"], "full tests": ["core", "smoke"]}, "missed_full_failure"),
+        ):
+            with self.subTest(verdict=verdict):
+                _, _, result = self.run_pipeline(failures=failures, allowlist=self.LANE_REDS)
+                self.assertEqual(result["comparison_verdict"], verdict)
+                self.assertIs(result["graduation_eligible"], False)
 
     def test_a_registration_added_by_the_build_refuses_against_the_prebuild_snapshot(self) -> None:
         with self.assertRaisesRegex(runner.SelectionExecutionError,

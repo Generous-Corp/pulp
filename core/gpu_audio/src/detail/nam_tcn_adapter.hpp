@@ -4,9 +4,10 @@
 
 namespace pulp::gpu_audio::detail {
 
-/// Adapter for a causal CPU kernel whose parsed weights and state are owned by
-/// the caller. Pulp owns lifecycle and BufferView/StreamingModel admission;
-/// kernel headers and model formats remain outside the Pulp ABI.
+/// Bridge for a stateful single-channel causal-convolution kernel supplied by a
+/// consumer. The kernel owns parsed weights and causal state; Pulp owns
+/// lifecycle and BufferView/StreamingModel admission. No model headers or
+/// model format are part of the Pulp ABI.
 struct NamTcnCpuKernel {
     void* state = nullptr;
     bool (*prepare)(void*, const StreamingPrepareContext&) noexcept = nullptr;

@@ -630,6 +630,9 @@ pulp_add_test_suite(pulp-test-nam-tcn-adapter
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/core/gpu_audio/src ${CMAKE_SOURCE_DIR}/core/gpu_audio/include
                  ${CMAKE_SOURCE_DIR}/core/audio/include
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_test_data(pulp-test-nam-tcn-adapter
+    PATHS test/fixtures/neural/example.nam
+    SOURCES test_nam_tcn_adapter.cpp)
 
 # CPU-only receipt for the model-neutral callback lane. The executable owns
 # all model/audio storage before entering the allocation probe and reports a

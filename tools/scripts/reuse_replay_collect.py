@@ -1089,9 +1089,12 @@ def spawn_scan_of(doc: dict | None, kind: str = "spawns") -> dict | None:
 
 # A data scan that finds no reads in an executable is trusted only when it
 # demonstrably detects the readers it already knows: this share of the
-# executables with declared reads must carry a source the scan itself
-# matched (`detected_sources`), or every executable falls to the broad rule.
+# executables with declared reads, and at least this many of them, must
+# carry a source the scan itself matched (`detected_sources`), or every
+# executable falls to the broad rule. The floor keeps a list with a handful
+# of declared readers from passing on the share alone.
 DATA_SCAN_MIN_DETECTED = 0.85
+DATA_SCAN_MIN_DETECTED_READERS = 20
 
 
 def data_scan_saw_readers(entries: dict[str, dict]) -> bool:
@@ -1101,7 +1104,7 @@ def data_scan_saw_readers(entries: dict[str, dict]) -> bool:
     if not declared or any("detected_sources" not in e for e in declared):
         return False
     seen = sum(1 for e in declared if e["detected_sources"])
-    return seen / len(declared) >= DATA_SCAN_MIN_DETECTED
+    return seen >= DATA_SCAN_MIN_DETECTED_READERS and seen / len(declared) >= DATA_SCAN_MIN_DETECTED
 
 
 def _scan_entry(executable: str, scan: dict) -> tuple[dict | None, bool]:

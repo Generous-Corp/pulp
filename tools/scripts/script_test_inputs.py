@@ -58,6 +58,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Comments are dropped before a source is scanned, so prose such as "the
+# effect system (bloom)" or a program named in a comment is not a call.
+from gate_common import strip_c_comments  # noqa: E402
+
 SCHEMA = "pulp-ctest-script-inputs/v1"
 DEFAULT_LIST = Path("test") / "ctest_script_inputs.json"
 INTERPRETERS = ("python", "python3", "node", "bash", "sh", "zsh")
@@ -412,8 +417,6 @@ SPAWN_SIGNAL = re.compile(
     + r"|\bdlopen\s*\(|\bLoadLibrary(?:Ex)?[AW]?\s*\(|\bCFBundle(?:Create|LoadExecutable)\w*\s*\(")
 EXECUTABLE_SCANS = ("data", "spawns")
 INCLUDE = re.compile(r'^\s*#\s*(?:include|import)\s*"([^"]+)"', re.M)
-# C and C++ comments, so prose such as "the effect system (bloom)" is not a call.
-COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 
 
 def _read_json(path: Path) -> dict | None:
@@ -470,7 +473,7 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
     for src in sources:
         for f in _test_include_closure(root, src):
             try:
-                if SPAWN_SIGNAL.search(COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))):
+                if SPAWN_SIGNAL.search(strip_c_comments((root / f).read_text(encoding="utf-8", errors="replace"))):
                     hits.add(f)
             except OSError:
                 continue
@@ -562,7 +565,7 @@ def named_programs(root: Path, sources: list[str], artifacts: dict[str, dict]) -
     for src in sources:
         for f in _test_include_closure(root, src):
             try:
-                text = COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))
+                text = strip_c_comments((root / f).read_text(encoding="utf-8", errors="replace"))
             except OSError:
                 continue
             for literal in STRING_LITERAL.finditer(text):

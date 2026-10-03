@@ -7,6 +7,10 @@ import argparse
 import collections
 import pathlib
 import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gate_common import strip_c_comments  # noqa: E402
 
 
 # Tolerate a newline anywhere the macro allows whitespace. `control_manifest.cpp`
@@ -304,11 +308,6 @@ RETIRED_MCP_TOOLS = (
 )
 
 
-def _without_source_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return re.sub(r"//[^\n]*", "", text)
-
-
 def _contains_in_order(text: str, fragments: tuple[str, ...]) -> bool:
     offset = 0
     for fragment in fragments:
@@ -345,7 +344,7 @@ def public_surface_errors(root: pathlib.Path) -> list[str]:
     """Pin the intentionally reduced Phase 3 CLI/MCP surface."""
     errors: list[str] = []
     inspect_source = (root / "tools/cli/cmd_inspect.cpp").read_text(encoding="utf-8")
-    help_text = _without_source_comments(inspect_source)
+    help_text = strip_c_comments(inspect_source)
     for required in (
         "pulp inspect profiles [--json]",
         "pulp inspect audit ARTIFACT [--json]",

@@ -178,6 +178,21 @@ if(_pulp_ubsan_enabled AND CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
 endif()
 unset(_pulp_ubsan_enabled)
 
+# SHA-256 hashes whole artifacts: the trusted-host inventory digests every
+# executable it prepares or launches, and a Debug standalone is ~90 MB. At -O0
+# that costs ~8 s per digest, which puts a Debug launch past the control
+# protocol's 10 s management budget on a loaded host. The kernel is portable
+# arithmetic with nothing to step through, so it is optimized in every
+# configuration. MSVC is left alone: /O2 conflicts with Debug's /RTC1.
+# Single-config generators only: Xcode rejects a per-config source option,
+# and a plain -O2 would lower Release's -O3 for this file.
+get_property(_pulp_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(NOT _pulp_multi_config AND CMAKE_BUILD_TYPE STREQUAL "Debug"
+        AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    set_source_files_properties(src/sha256.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
+unset(_pulp_multi_config)
+
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 # The vectorized kernels live in pulp-simd; <pulp/runtime/simd.hpp> forwards to
 # them, so every runtime consumer keeps resolving the old spelling.

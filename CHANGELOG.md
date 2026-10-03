@@ -9,6 +9,49 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09030"></a>
+## [0.903.0] - 2026-10-03
+
+- release/version bump ([#9420](https://github.com/Generous-Corp/pulp/pull/9420))
+- fix/reuse record platform sdk ([#9416](https://github.com/Generous-Corp/pulp/pull/9416))
+- feature/changed surface matched fail ([#9414](https://github.com/Generous-Corp/pulp/pull/9414))
+- fix/read audit ancestor listings gitlinks ([#9402](https://github.com/Generous-Corp/pulp/pull/9402))
+- codex/e092 step player early 20261003 ([#9410](https://github.com/Generous-Corp/pulp/pull/9410))
+- fix/9382 lane reds ([#9399](https://github.com/Generous-Corp/pulp/pull/9399))
+- ci/reuse replay detected floor ([#9411](https://github.com/Generous-Corp/pulp/pull/9411))
+- refactor/script inputs shared comment strip ([#9394](https://github.com/Generous-Corp/pulp/pull/9394))
+
+<a id="v09020"></a>
+## [0.902.0] - 2026-10-03
+
+- release/version bump ([#9409](https://github.com/Generous-Corp/pulp/pull/9409))
+- feat/reuse record object deps ([#9408](https://github.com/Generous-Corp/pulp/pull/9408))
+- codex/forge dynamics pilot ([#9319](https://github.com/Generous-Corp/pulp/pull/9319))
+- feature/auv2 offline render session ([#9405](https://github.com/Generous-Corp/pulp/pull/9405))
+- feature/editor first frame host size ([#9403](https://github.com/Generous-Corp/pulp/pull/9403))
+- fix/script inputs gate profile ([#9388](https://github.com/Generous-Corp/pulp/pull/9388))
+- fix/test data fixture runner ([#9400](https://github.com/Generous-Corp/pulp/pull/9400))
+- codex/gpu audio status diagnostics 20261003 ([#9395](https://github.com/Generous-Corp/pulp/pull/9395))
+- feature/auv2 sidechain input ([#9397](https://github.com/Generous-Corp/pulp/pull/9397))
+- feature/sparkle standalone updater ([#9283](https://github.com/Generous-Corp/pulp/pull/9283))
+- release/version bump ([#9398](https://github.com/Generous-Corp/pulp/pull/9398))
+- fix/null device pacing ([#9390](https://github.com/Generous-Corp/pulp/pull/9390))
+- test/changed surface linked externals shape ([#9393](https://github.com/Generous-Corp/pulp/pull/9393))
+- fix/install shipyard repair test ([#9389](https://github.com/Generous-Corp/pulp/pull/9389))
+- release/version bump ([#9392](https://github.com/Generous-Corp/pulp/pull/9392))
+- ci/reuse replay whole checkout ([#9381](https://github.com/Generous-Corp/pulp/pull/9381))
+- fix/mac lane visual python deps ([#9387](https://github.com/Generous-Corp/pulp/pull/9387))
+- fix/relay step script comments ([#9385](https://github.com/Generous-Corp/pulp/pull/9385))
+- feat/test data artifact keys ([#9386](https://github.com/Generous-Corp/pulp/pull/9386))
+- fix/policy selftest partial build ([#9384](https://github.com/Generous-Corp/pulp/pull/9384))
+- release/version bump ([#9383](https://github.com/Generous-Corp/pulp/pull/9383))
+- feat/test data read audit gaps ([#9380](https://github.com/Generous-Corp/pulp/pull/9380))
+- feat/read audit stage0 counts ([#9378](https://github.com/Generous-Corp/pulp/pull/9378))
+- ci/reuse replay link propagation ([#9379](https://github.com/Generous-Corp/pulp/pull/9379))
+- release/version bump ([#9377](https://github.com/Generous-Corp/pulp/pull/9377))
+- release/version bump ([#9376](https://github.com/Generous-Corp/pulp/pull/9376))
+- ci/windows cli compile poka yoke ([#9375](https://github.com/Generous-Corp/pulp/pull/9375))
+
 <a id="v09010"></a>
 ## [0.901.0] - 2026-10-03
 
@@ -9590,6 +9633,8 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.903.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.903.0
+[0.902.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.902.0
 [0.901.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.901.0
 [0.900.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.900.0
 [0.899.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.899.0

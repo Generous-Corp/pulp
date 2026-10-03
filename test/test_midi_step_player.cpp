@@ -803,6 +803,38 @@ TEST_CASE("StepPlayer keeps a nudged step's gate length", "[midi][step-player][g
     CHECK(releases[0].sample - attacks[0].sample == kStepSamples / 2);
 }
 
+TEST_CASE("StepPlayer admits pushed early groove offsets", "[midi][step-player][grid][oracle]") {
+    constexpr std::int32_t kPushTicks = static_cast<std::int32_t>(kStepTicks / 4);
+    constexpr std::int64_t kPushSamples = kStepSamples / 4;
+    const auto map = constant_tempo_map();
+    auto build = [&] {
+        PlayerFixture<> fixture(1);
+        auto player = fixture.make();
+        for (std::size_t index = 0; index < 4; ++index) {
+            auto step = basic_step();
+            step.pitch_offset = static_cast<std::int8_t>(index);
+            step.timing_offset_ticks = index % 2 == 1 ? -kPushTicks : 0;
+            REQUIRE(player.set_step(0, index, step) == midi::StepPlayerError::None);
+        }
+        return player;
+    };
+    const std::array whole{std::int32_t{24'000}};
+    const std::array chopped{std::int32_t{137}, std::int32_t{999}, std::int32_t{4'096},
+                             std::int32_t{1}};
+    auto reference_player = build();
+    auto partitioned_player = build();
+    const auto reference = attacks_of(render(reference_player, map, 24'000, whole));
+    const auto partitioned = attacks_of(render(partitioned_player, map, 24'000, chopped));
+    REQUIRE(reference.size() == partitioned.size());
+    REQUIRE(reference.size() == 4);
+    for (std::size_t index = 0; index < reference.size(); ++index) {
+        const auto expected =
+            static_cast<std::int64_t>(index) * kStepSamples - (index % 2 == 1 ? kPushSamples : 0);
+        CHECK(reference[index].sample == expected);
+        CHECK(reference[index].identity() == partitioned[index].identity());
+    }
+}
+
 TEST_CASE("StepPlayer rejects a timing offset beyond its declared bound",
           "[midi][step-player][parity]") {
     PlayerFixture<> fixture(1);
@@ -817,15 +849,12 @@ TEST_CASE("StepPlayer rejects a timing offset beyond its declared bound",
     step.timing_offset_ticks = midi::StepPlayer<>::kMaximumTimingOffsetTicks + 1;
     CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
 
-    // An early nudge is refused, not clamped. A step is discovered when its own
-    // interval opens, so pulling it earlier asks it to sound before the block
-    // that found it — and whether it then survived would depend on where the
-    // host put its callback boundaries, which is what this kernel promises not
-    // to depend on. Refusing says so at authoring time instead of producing a
-    // stream that is right at one block size and wrong at another.
+    // Early nudges are admitted while they remain inside the step interval.
     step.timing_offset_ticks = -1;
-    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::None);
     step.timing_offset_ticks = -midi::StepPlayer<>::kMaximumTimingOffsetTicks;
+    CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
+    step.timing_offset_ticks = -static_cast<std::int32_t>(kStepTicks);
     CHECK(player.set_step(0, 0, step) == midi::StepPlayerError::InvalidTimingOffset);
 
     // The bound must be wide enough to express swing on a sixteenth grid, which

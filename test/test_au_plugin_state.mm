@@ -2072,6 +2072,99 @@ TEST_CASE("AU v2 effect reports host offline rendering through ProcessContext",
     effect.DoCleanup();
 }
 
+// The host's flag lasts one render session. A host that set it for a bounce
+// and never wrote it back must not leave every later realtime block offline,
+// so Initialize() keeps only a write made since the previous Initialize().
+TEST_CASE("AU v2 effect scopes host offline rendering to one render session",
+          "[au][auv2][offline]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                          kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+    REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0,
+                                       &max_frames, sizeof(max_frames)) == noErr);
+
+    float in_l[kFrames] = {};
+    float in_r[kFrames] = {};
+    float out_l[kFrames] = {};
+    float out_r[kFrames] = {};
+    struct StereoBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[1];
+    };
+    auto render = [&] {
+        StereoBufferList input{};
+        input.list.mNumberBuffers = 2;
+        input.list.mBuffers[0] = {1, kFrames * sizeof(float), in_l};
+        input.list.mBuffers[1] = {1, kFrames * sizeof(float), in_r};
+        StereoBufferList output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0] = {1, kFrames * sizeof(float), out_l};
+        output.list.mBuffers[1] = {1, kFrames * sizeof(float), out_r};
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.ProcessBufferLists(flags, input.list, output.list,
+                                          kFrames) == noErr);
+        return processor->last_context;
+    };
+    auto reinitialize = [&] {
+        effect.DoCleanup();
+        REQUIRE(effect.DoInitialize() == noErr);
+    };
+
+    // A write before the first Initialize() starts that first session offline.
+    REQUIRE(set_auv2_offline(effect, 1) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+    REQUIRE(get_auv2_offline(effect) == 1);
+    REQUIRE(render().is_offline());
+
+    // Reset() is a transport start, not a new session: the flag stays.
+    REQUIRE(effect.Reset(kAudioUnitScope_Global, 0) == noErr);
+    REQUIRE(get_auv2_offline(effect) == 1);
+    REQUIRE(render().is_offline());
+
+    // The host never wrote it back. The next session is realtime.
+    reinitialize();
+    REQUIRE(get_auv2_offline(effect) == 0);
+    REQUIRE(render().is_realtime());
+
+    // Set for the bounce, then re-initialized for it: the write survives that
+    // one Initialize() and not the one after.
+    REQUIRE(set_auv2_offline(effect, 1) == noErr);
+    reinitialize();
+    REQUIRE(get_auv2_offline(effect) == 1);
+    REQUIRE(render().is_offline());
+    reinitialize();
+    REQUIRE(get_auv2_offline(effect) == 0);
+    REQUIRE(render().is_realtime());
+
+    // The host's own clear is a write too, and it is kept.
+    REQUIRE(set_auv2_offline(effect, 1) == noErr);
+    REQUIRE(set_auv2_offline(effect, 0) == noErr);
+    reinitialize();
+    REQUIRE(get_auv2_offline(effect) == 0);
+    REQUIRE(render().is_realtime());
+
+    effect.DoCleanup();
+}
+
 TEST_CASE("AU v2 instrument reports host offline rendering through ProcessContext",
           "[au][auv2][instrument][offline]") {
     ScopedFactoryRegistration registration(create_instrument_processor);
@@ -2115,6 +2208,22 @@ TEST_CASE("AU v2 instrument reports host offline rendering through ProcessContex
             pulp::format::RenderSpeedHint::FasterThanRealtime);
 
     REQUIRE(set_auv2_offline(instrument, 0) == noErr);
+    timestamp.mSampleTime += kFrames;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->last_context.is_realtime());
+
+    // The flag lasts one render session: a write survives the next
+    // Initialize() and is dropped by the one after unless the host writes again.
+    REQUIRE(set_auv2_offline(instrument, 1) == noErr);
+    instrument.DoCleanup();
+    REQUIRE(instrument.DoInitialize() == noErr);
+    REQUIRE(get_auv2_offline(instrument) == 1);
+    timestamp.mSampleTime += kFrames;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->last_context.is_offline());
+    instrument.DoCleanup();
+    REQUIRE(instrument.DoInitialize() == noErr);
+    REQUIRE(get_auv2_offline(instrument) == 0);
     timestamp.mSampleTime += kFrames;
     REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
     REQUIRE(processor->last_context.is_realtime());

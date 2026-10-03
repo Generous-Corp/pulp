@@ -332,6 +332,21 @@ TEST_CASE("AU v2 MIDI processor reports host offline rendering to the processor"
     REQUIRE(live.unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
                                           kAudioUnitScope_Input, 0, &offline,
                                           sizeof(offline)) == kAudioUnitErr_InvalidScope);
+
+    // The flag lasts one render session: a write survives the next
+    // Initialize() and is dropped by the one after unless the host writes again.
+    offline = 1;
+    REQUIRE(live.unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                          kAudioUnitScope_Global, 0, &offline,
+                                          sizeof(offline)) == noErr);
+    live.unit.DoCleanup();
+    REQUIRE(live.unit.DoInitialize() == noErr);
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_live_processor->last_process_mode == format::ProcessMode::Offline);
+    live.unit.DoCleanup();
+    REQUIRE(live.unit.DoInitialize() == noErr);
+    REQUIRE(live.render() == noErr);
+    REQUIRE(g_live_processor->last_process_mode == format::ProcessMode::Realtime);
 }
 
 TEST_CASE("AU v2 MIDI processor round-trips SysEx",
