@@ -784,6 +784,11 @@ class CodemodelTests(unittest.TestCase):
         self.assertTrue(rrc._declared_hit(["!pulp.toml"], ["pulp.toml"]))
         self.assertFalse(rrc._declared_hit(["!pulp.toml"], ["docs/pulp.toml.md"]))
 
+    def test_a_directory_input_is_hit_by_files_beneath_it(self):
+        self.assertTrue(rrc._declared_hit(["test/fixtures/timeline"], ["test/fixtures/timeline/a/b.json"]))
+        self.assertTrue(rrc._declared_hit(["tools/x/"], ["tools/x/tool.cpp"]))
+        self.assertFalse(rrc._declared_hit(["tools/x"], ["tools/xy/a.cpp"]))     # a sibling with the same prefix
+
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
         self.assertNotIn("cmake-codemodel", out)
