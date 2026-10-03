@@ -57,6 +57,35 @@ class GeneratedVersionBumpCheckTest(unittest.TestCase):
         run(self.repo, "config", "user.name", CHECK.BOT_NAME)
         run(self.repo, "config", "user.email", CHECK.BOT_EMAIL)
         run(self.repo, "config", "commit.gpgsign", "false")
+        # Re-root that one commit so the fixture is a COMPLETE one-commit
+        # history rather than a shallow clone. The verifier deepens a shallow
+        # checkout from origin before reproducing; production's origin is the
+        # full GitHub repository, but a shallow fixture's origin is the
+        # checkout running the suite, itself shallow in CI and a partial clone
+        # locally, so the deepening could never succeed and every
+        # reproduction test failed for the fixture's shape. The shallow
+        # checkout tests build their verifier from this complete repository,
+        # which is the production shape.
+        root = run(self.repo, "commit-tree", run(self.repo, "rev-parse", "HEAD^{tree}"),
+                   "-m", "fixture base: the checkout's tree as a root commit")
+        run(self.repo, "reset", "--quiet", "--hard", root)
+        run(self.repo, "remote", "remove", "origin")
+        run(self.repo, "update-ref", "-d", "ORIG_HEAD")
+        (self.repo / ".git" / "shallow").unlink(missing_ok=True)
+        self.assertEqual(run(self.repo, "rev-parse", "--is-shallow-repository"), "false")
+        # The checked-in GPU handoff ledger pins real history this one-commit
+        # repository lacks, so every bump here would re-pin it. Pin it to the
+        # fixture's own history once, as main's ledger is pinned to main's:
+        # an ordinary bump then leaves the pair alone, which is the common
+        # case the transaction tests are about.
+        subprocess.run(
+            [sys.executable, "tools/scripts/gpu_handoff_provenance.py", "write", "--receipt"],
+            cwd=self.repo, check=True, capture_output=True,
+        )
+        run(self.repo, "add", "--", "docs/status/gpu-vellum-handoff.yaml",
+            "docs/validation/gpu-handoff-provenance/receipt.json")
+        run(self.repo, "commit", "--quiet", "--no-verify", "--allow-empty",
+            "-m", "fixture: pin the GPU handoff ledger to this history")
         self.base = run(self.repo, "rev-parse", "HEAD")
 
     def tearDown(self) -> None:
