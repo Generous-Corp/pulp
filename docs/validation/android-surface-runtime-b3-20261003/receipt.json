@@ -2,7 +2,7 @@
   "receipt_version": 1,
   "status": "BLOCKED",
   "scope": "B3 Android SurfaceRuntime",
-  "tested_commit": "0782d778afabd42bce73ff8fb23c237e6437bac8 plus Android MIDI JNI retention in tools/cmake/PulpAndroid.cmake (committed with this receipt)",
+  "tested_commit": "350d79e0b919ceff9b5a2bd4dc369c727e94c920",
   "worktree_branch": "codex/b3-android-surface-runtime-20261003",
   "scope_audit": {
     "android_files": [
