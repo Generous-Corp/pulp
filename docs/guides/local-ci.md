@@ -6934,7 +6934,9 @@ declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
 `tools/ci/install_visual_python_deps.sh <build-dir>`, which every job that runs
 a broad ctest calls after configuring, the sanitizer jobs included; those once
 ran ctest without it, so the check failed in every ASan, TSan, UBSan and RTSan
-run. It used to pass
+run. The opt-in Shipyard `mac` lane calls it too, at the end of its macOS
+configure stage in `.shipyard/config.toml`, so the host interpreter that
+configure records gets the same set. It used to pass
 `--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
 already met* — turning "pypi.org is reachable from this VM" into a precondition
 of the **required** `macos` check.

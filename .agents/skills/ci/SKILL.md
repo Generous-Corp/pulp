@@ -1901,12 +1901,17 @@ run's workflow commit carries the event-commit fallback at all.
 Every job that runs a broad ctest installs the set through
 `tools/ci/install_visual_python_deps.sh <build-dir>`; a workflow that runs ctest
 without it makes `visual-python-deps-present` red in every run (the sanitizer
-jobs did, main-wide). `test_visual_python_deps_step.py` pins both the script's
-behaviour and which jobs call it.
+jobs did, main-wide). The Shipyard `mac` lane runs ctest outside any workflow,
+so it calls the script at the end of its macOS configure stage in
+`.shipyard/config.toml`. `test_visual_python_deps_step.py` pins both the
+script's behaviour and which jobs and lanes call it.
 `relay_contract_check.py` scans a shell script a gate step runs (`bash
 tools/...sh`) as part of the step, so moving the install into the script kept
 `pypi.org` derived; without that, the relay contract would have stopped
 requiring PyPI egress for the gate.
+Comments are stripped first (comment lines and a trailing `#` that starts a
+word outside quotes), so a script, URL or package manager named only in a
+comment never adds a required host.
 
 `test-pch-wiring` reads compile flags back from the generator. Ninja lists one
 compile line per object; the Makefile generator, which the hosted sanitizer jobs
@@ -7422,6 +7427,16 @@ executable's cases are one row keyed by the executable.
 only: every registration has a command after the build, no composite identity
 is ambiguous, and every literal test the policy names exists. A run bare
 checks the policy tables alone.
+
+The selftest also runs inside a bounded leg, where only the selected targets
+are built, so a registration without a command passes only with the runner's
+proof that it is merely unbuilt (`split_proven_unbuilt_placeholders`: a Catch2
+NOT_BUILT placeholder with its include file, or a direct test whose program is
+a CMake artifact not built yet). A built registration without a command, or one
+with no proof, still refuses. Literal names that may be undiscovered Catch2
+cases are checked once no placeholder remains, which the same test does in the
+full suite. Without this it failed in every bounded leg and passed in the full
+run, so no plan could compare cleanly.
 
 Reasons a bounded run selects the full suite instead: `inventory: base not
 recorded` (the base did not configure), `inventory: base mismatch` (the

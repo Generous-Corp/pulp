@@ -1,4 +1,9 @@
 {
+ "executable_targets": {
+  "Pulp Test (dev) Plugin": "PulpBundleNameQuoting_Standalone",
+  "pulp-cli-run-fixture": "pulp-test-cli-run-fixture",
+  "pulp-cpp": "pulp-cli"
+ },
  "executables": {
   "pulp-control-broker-crash-fixture": {
    "data": "none",
@@ -2023,9 +2028,10 @@
   }
  },
  "executables_scanned": [
-  "PulpBundleNameQuoting_Standalone",
+  "Pulp Test (dev) Plugin",
   "pulp-browser-capture-launcher-fixture",
   "pulp-child-process-input-fixture",
+  "pulp-cli-run-fixture",
   "pulp-connected-child-process-fixture",
   "pulp-control-broker-crash-fixture",
   "pulp-control-enrollment-host-fixture",
@@ -2143,7 +2149,6 @@
   "pulp-test-cli-project-bump-all",
   "pulp-test-cli-project-command",
   "pulp-test-cli-projects-registry",
-  "pulp-test-cli-run-fixture",
   "pulp-test-cli-run-options",
   "pulp-test-cli-sdk-tarball-filename",
   "pulp-test-cli-shell-quote",
@@ -5470,6 +5475,14 @@
    ],
    "kind": "python"
   },
+  "install-shipyard-queue-repair": {
+   "entry": "tools/scripts/test_install_shipyard_queue_repair.py",
+   "inputs": [
+    "tools/install-shipyard.sh",
+    "tools/scripts/test_install_shipyard_queue_repair.py"
+   ],
+   "kind": "python"
+  },
   "interchange-capability-emit-selftest": {
    "entry": "core/interchange/tools/test_capability_emit.py",
    "inputs": [
@@ -7066,6 +7079,7 @@
     "test/cmake/plugin_lab_clap_roundtrip.cmake",
     "test/cmake/quality_tests.cmake",
     "test/ctest_script_inputs.json",
+    "test/fixtures/timeline",
     "test/gpu_health_scene3d_acceptance.cpp",
     "test/mac_objc_coload_probe.cpp",
     "test/test_agent_capability_compile.cpp",

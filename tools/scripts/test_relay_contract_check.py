@@ -161,6 +161,25 @@ class StepScripts(unittest.TestCase):
         self.assertIn("pypi.org", need)
         self.assertNotIn("in-a-comment.example.org", need)
 
+    def test_a_script_named_only_in_a_comment_is_never_followed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "tools/ci").mkdir(parents=True)
+            (root / "tools/ci/fetch.sh").write_text(
+                "curl -fsSL https://downloads.example.com/x\n", encoding="utf-8")
+            for run in ("# bash tools/ci/fetch.sh build", "make all  # bash tools/ci/fetch.sh build"):
+                with self.subTest(run=run):
+                    workflow = add_macos_step(f"      - name: Build\n        run: {run}\n")
+                    need, errors = rc.required_hosts(workflow, root)
+                    self.assertNotIn("downloads.example.com", need)
+                    self.assertEqual([e for e in errors if "fetch.sh" in e], [])
+
+    def test_a_hash_inside_a_word_or_quotes_is_not_a_comment(self):
+        self.assertEqual(rc._strip_comment("curl https://a.example.com/p#frag"),
+                         "curl https://a.example.com/p#frag")
+        self.assertEqual(rc._strip_comment('echo "a # b" # real'), 'echo "a # b" ')
+        self.assertEqual(rc._strip_comment("echo 'a # b' # real"), "echo 'a # b' ")
+
     def test_a_step_running_a_missing_script_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             workflow = add_macos_step(
