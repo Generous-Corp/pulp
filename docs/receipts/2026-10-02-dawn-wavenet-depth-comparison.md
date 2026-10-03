@@ -1,7 +1,13 @@
-# Dawn production WaveNet depth comparison (2026-10-02)
+# Historical Dawn production WaveNet depth comparison (2026-10-02)
 
-> **Audit-only synthetic negative control.** This receipt records the landed
-> telemetry/test seam, not an exact-provider hardware result.
+> **Audit-only synthetic negative control.** This receipt records a temporary
+> test seam from before the production multi-flight implementation landed. It
+> is superseded for source capability by commits
+> [`794d54f8d4`](https://github.com/Generous-Corp/pulp/commit/794d54f8d417ef76c5b7f66e281286beb68a0b45)
+> and
+> [`9f37814c22`](https://github.com/Generous-Corp/pulp/commit/9f37814c225902c6f273c189e439e1ad712e221c),
+> and remains historical evidence only. It is not an exact-provider hardware
+> result.
 
 ## Claim under test
 
@@ -18,8 +24,12 @@ preserved private telemetry/test diff applied in the worktree. It exercises the
 production node owner and its private `WaveNetRealtimeChannel` seam; it does
 not modify the public `GraphNode` or SDK ABI.
 
-The node currently owns one `inflight` stamp. `Config::capacity` enlarges the
-stamped ingress ring, but does not create additional provider submissions.
+At the receipt's source boundary, the node owned one `inflight` stamp.
+`794d54f8d4` replaced that seam with bounded per-submission pending state and a
+`max_inflight` configuration; `9f37814c22` corrected the telemetry assertion
+to use `in_flight_high_water` and recorded the pending count. Current source
+capability must be assessed against those landed commits, not this historical
+one-flight snapshot.
 
 ## Method and results
 
@@ -39,7 +49,7 @@ build-dawn-probe/test/pulp-test-gpu-wavenet-realtime-node \
   '[gpu_audio][wavenet][realtime][depth]'
 ```
 
-The depth comparison passed **87 assertions in 1 test case**. Both requested
+The pre-landing depth comparison passed **87 assertions in 1 test case**. Both requested
 capacities admitted 6 blocks and delivered 5 in order:
 
 | requested capacity | submitted | delivered | high-water in-flight | ordered | fallback | late | deadline misses | GPU timestamps |
@@ -52,11 +62,9 @@ cases**.
 
 ## Disposition
 
-This is a valid **synthetic production-owner negative control**: the fake
-channel path serializes physical submissions at depth one even when ingress
-capacity is eight. It does not prove exact-provider behavior, concurrent GPU
-execution, GPU speedup, or a deadline-margin benefit. It is not reproducible
-from this closeout tree until an owned source patch is implemented. The Phase 4
-performance gate remains open; implementing it requires per-submission
-state/output tracking and an authenticated provider-slot mapping before a depth
-greater than one can be measured honestly.
+This remains a valid **historical synthetic production-owner negative control**
+for the pre-`794d54f8d4` implementation. It does not prove exact-provider
+behavior, concurrent GPU execution, GPU speedup, or a deadline-margin benefit.
+The landed replacement adds bounded multi-flight source coverage, but an
+authenticated provider-backed throughput/deadline result is still a separate
+gate.

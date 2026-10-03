@@ -9,6 +9,18 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09030"></a>
+## [0.903.0] - 2026-10-03
+
+- release/version bump ([#9420](https://github.com/Generous-Corp/pulp/pull/9420))
+- fix/reuse record platform sdk ([#9416](https://github.com/Generous-Corp/pulp/pull/9416))
+- feature/changed surface matched fail ([#9414](https://github.com/Generous-Corp/pulp/pull/9414))
+- fix/read audit ancestor listings gitlinks ([#9402](https://github.com/Generous-Corp/pulp/pull/9402))
+- codex/e092 step player early 20261003 ([#9410](https://github.com/Generous-Corp/pulp/pull/9410))
+- fix/9382 lane reds ([#9399](https://github.com/Generous-Corp/pulp/pull/9399))
+- ci/reuse replay detected floor ([#9411](https://github.com/Generous-Corp/pulp/pull/9411))
+- refactor/script inputs shared comment strip ([#9394](https://github.com/Generous-Corp/pulp/pull/9394))
+
 <a id="v09020"></a>
 ## [0.902.0] - 2026-10-03
 
@@ -9621,6 +9633,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.903.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.903.0
 [0.902.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.902.0
 [0.901.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.901.0
 [0.900.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.900.0

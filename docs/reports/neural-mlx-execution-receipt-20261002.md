@@ -25,12 +25,14 @@ to Pulp.
 
 ## Private harness
 
-`tools/validation/mlx_worker_harness.py` is a tools-only, default-off probe. It
+`tools/validation/mlx_worker_harness.py` is a tools-only, default-off probe on
+the feature lineage. It
 creates/evaluates/releases synthetic arrays on one dedicated Python thread per
 instance and reports owner-thread identity, service-time percentiles, deadline
 misses, and a conservative synthetic weight size. It does not expose MLX types,
 handles, streams, or paths through Pulp's public ABI and is not wired into a
-plugin build.
+plugin build. Its absence from the audited `origin/main` ref is recorded in the
+provenance audit; this receipt does not claim that the probe is shipped.
 
 The host-default invocation correctly reports MLX unavailable. In the isolated
 venv, the following run completed:
