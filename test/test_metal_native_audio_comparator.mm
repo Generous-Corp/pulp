@@ -9,6 +9,14 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
+#if __has_include("detail/dawn_shared_io_provider.hpp")
+#include "detail/dawn_shared_io_provider.hpp"
+#include "detail/shared_io_compute_plan.hpp"
+#define PULP_HAS_DAWN_COMPARATOR 1
+#else
+#define PULP_HAS_DAWN_COMPARATOR 0
+#endif
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -102,6 +110,7 @@ struct Result {
     const char* mode = "unknown";
     std::vector<Record> records;
     bool unavailable = false;
+    bool gpu_timestamps_available = true;
     std::string reason;
 };
 
@@ -355,14 +364,141 @@ Result run_metal4(id<MTLDevice> device, id<MTLComputePipelineState> pipeline)
 }
 #endif
 
+#if PULP_HAS_DAWN_COMPARATOR
+Result run_dawn() {
+    using pulp::gpu_audio::detail::DawnSharedIoProvider;
+    using pulp::gpu_audio::detail::SharedIoArena;
+    using pulp::gpu_audio::detail::SharedIoComputePlan;
+    Result result{.mode = "dawn_wait_any", .gpu_timestamps_available = false};
+    DawnSharedIoProvider::Options options;
+    options.completion_policy = DawnSharedIoProvider::CompletionPolicy::WaitAny;
+    auto created = DawnSharedIoProvider::create(options);
+    if (!created.provider) {
+        result.unavailable = true;
+        result.reason = created.reason;
+        return result;
+    }
+
+    // A one-sample impulse makes the prepared FFT convolution an identity
+    // transform while retaining the production shared-I/O program path.
+    constexpr std::uint32_t fft_size = kFrames * 2;
+    std::vector<float> normalized_spectrum(static_cast<std::size_t>(fft_size) * 2, 0.0f);
+    for (std::uint32_t bin = 0; bin < fft_size; ++bin)
+        normalized_spectrum[static_cast<std::size_t>(bin) * 2] = 1.0f / fft_size;
+    const auto bytes = static_cast<std::size_t>(kChannels) * fft_size * 2 * sizeof(float);
+    auto program =
+        created.provider->make_convolution_program({.fft_size = fft_size,
+                                                    .channels = kChannels,
+                                                    .logical_frames = kFrames,
+                                                    .ir_length = 1,
+                                                    .normalized_ir_spectrum = normalized_spectrum});
+    SharedIoComputePlan plan;
+    if (!program ||
+        !plan.prepare(
+            *created.provider,
+            {.slots = kFlightDepth, .input_bytes_per_slot = bytes, .output_bytes_per_slot = bytes},
+            std::move(program))) {
+        result.unavailable = true;
+        result.reason = "prepare_failed";
+        return result;
+    }
+
+    std::array<Record, kFlightDepth> pending{};
+    std::array<std::array<float, kChannels * kFrames>, kFlightDepth> expected{};
+    result.records.reserve(kTrials);
+    auto settle = [&](std::uint64_t sequence) {
+        std::optional<SharedIoComputePlan::Completion> completion;
+        while (!completion) {
+            created.provider->service_until(now_ns() + 1'000'000);
+            plan.drain(now_ns());
+            while (auto candidate = plan.pop_completion()) {
+                if (candidate->token.slot.stream_sequence == sequence + 1) {
+                    completion = *candidate;
+                    break;
+                }
+            }
+        }
+        auto record = pending[sequence % kFlightDepth];
+        record.completion_observed_ns = now_ns();
+        auto output = plan.acquire_output(*completion);
+        record.oracle = output.has_value() &&
+                        completion->status == SharedIoArena::CompletionStatus::RetiredSuccess;
+        if (output) {
+            const auto* values = reinterpret_cast<const float*>(output->bytes.data());
+            for (std::uint32_t channel = 0; record.oracle && channel < kChannels; ++channel)
+                for (std::uint32_t frame = 0; frame < kFrames; ++frame) {
+                    const auto offset =
+                        static_cast<std::size_t>(channel) * fft_size * 2 + frame * 2;
+                    const auto expected_value =
+                        expected[sequence % kFlightDepth][channel * kFrames + frame];
+                    if (!std::isfinite(values[offset]) ||
+                        std::fabs(values[offset] - expected_value) > 1.0e-4f)
+                        record.oracle = false;
+                }
+            const auto token = output->token;
+            output.reset();
+            if (!plan.release_output({token}))
+                record.oracle = false;
+        }
+        if (record.sequence >= kWarmup)
+            result.records.push_back(record);
+    };
+
+    for (std::uint32_t sequence = 0; sequence < kWarmup + kTrials; ++sequence) {
+        if (sequence >= kFlightDepth)
+            settle(sequence - kFlightDepth);
+        const auto index = sequence % kFlightDepth;
+        auto write = plan.acquire_input(sequence + 1, 0);
+        if (!write) {
+            result.unavailable = true;
+            result.reason = "acquire_failed";
+            return result;
+        }
+        auto* values = reinterpret_cast<float*>(write->bytes.data());
+        for (std::uint32_t channel = 0; channel < kChannels; ++channel)
+            for (std::uint32_t frame = 0; frame < fft_size; ++frame) {
+                const float sample =
+                    frame < kFrames ? static_cast<float>((sequence % 97u) * 0.01 +
+                                                         (channel * kFrames + frame) * 0.003 - 0.2)
+                                    : 0.0f;
+                values[(static_cast<std::size_t>(channel) * fft_size + frame) * 2] = sample;
+                values[(static_cast<std::size_t>(channel) * fft_size + frame) * 2 + 1] = 0.0f;
+                if (frame < kFrames)
+                    expected[index][channel * kFrames + frame] = sample;
+            }
+        Record record{};
+        record.sequence = sequence;
+        record.encode_start_ns = now_ns();
+        record.encode_end_ns = now_ns();
+        record.commit_start_ns = now_ns();
+        if (!plan.submit({write->token, 0})) {
+            result.unavailable = true;
+            result.reason = "submit_failed";
+            return result;
+        }
+        record.commit_return_ns = now_ns();
+        pending[index] = record;
+    }
+    for (std::uint32_t i = 0; i < kFlightDepth; ++i)
+        settle(kWarmup + kTrials - kFlightDepth + i);
+    if (!plan.release()) {
+        result.unavailable = true;
+        result.reason = "release_failed";
+    }
+    return result;
+}
+#endif
+
 void emit(const Result& result, id<MTLDevice> device) {
     std::printf("{\"schema\":\"pulp.gpu-audio.native-metal-matched.v1\",\"status\":\"%s\",\"mode\":"
                 "\"%s\",\"device\":\"%s\",\"frames\":%u,\"channels\":%u,\"flight_depth\":%u,"
                 "\"trials\":%zu,\"reason\":\"%s\",\"cpu_timestamp_domain\":\"steady_clock_ns\","
-                "\"gpu_timestamp_domain\":\"Metal_host_seconds_converted_to_ns\",\"records\":[",
+                "\"gpu_timestamp_domain\":\"%s\",\"records\":[",
                 result.unavailable ? "unavailable" : "completed", result.mode,
                 device.name.UTF8String, kFrames, kChannels, kFlightDepth, result.records.size(),
-                result.reason.c_str());
+                result.reason.c_str(),
+                result.gpu_timestamps_available ? "Metal_host_seconds_converted_to_ns"
+                                                : "unavailable_for_Dawn_provider");
     for (std::size_t i = 0; i < result.records.size(); ++i) {
         if (i)
             std::printf(",");
@@ -416,6 +552,19 @@ int main() {
         for (const auto& record : ordinary.records)
             if (!record.oracle)
                 return 1;
-        return metal4_ok ? 0 : 1;
+        if (!metal4_ok)
+            return 1;
+#if PULP_HAS_DAWN_COMPARATOR
+        const auto dawn = run_dawn();
+        emit(dawn, device);
+        if (dawn.unavailable)
+            return 77;
+        if (!std::all_of(dawn.records.begin(), dawn.records.end(),
+                         [](const Record& record) { return record.oracle; }))
+            return 1;
+#else
+        return 77;
+#endif
+        return 0;
     }
 }
