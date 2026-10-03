@@ -229,6 +229,49 @@ struct InlineScript {
     std::string source;
 };
 
+// Every `<script ...>body</script>` in document order: the attribute text
+// and the body of each tag. Equivalent to iterating the ECMAScript regex
+//   <script\b([^>]*)>([\s\S]*?)</script>        (case-insensitive)
+// over the template: the attributes run to the first '>', the body to the
+// first case-insensitive `</script>` after it, and the scan resumes after
+// that. A hand scan for the same reason as extract_template_script_srcs --
+// libc++'s regex spent ~50 ms per pass over a 0.5 MB captured document, and
+// its lazy `[\s\S]*?` recurses per character of a script body.
+struct ScriptTag {
+    std::string attrs;
+    std::string body;
+};
+std::vector<ScriptTag> scan_script_tags(const std::string& t) {
+    std::vector<ScriptTag> tags;
+    size_t pos = 0;
+    while ((pos = t.find('<', pos)) != std::string::npos) {
+        const size_t tag = pos;
+        if (!ascii_ieq(t, tag + 1, "script")
+            || (tag + 7 < t.size() && is_regex_word_char(t[tag + 7]))) {
+            ++pos;
+            continue;
+        }
+        const size_t open_end = t.find('>', tag + 7);
+        if (open_end == std::string::npos) {
+            ++pos;
+            continue;
+        }
+        size_t close = open_end + 1;
+        while ((close = t.find('<', close)) != std::string::npos
+               && !ascii_ieq(t, close + 1, "/script>")) {
+            ++close;
+        }
+        if (close == std::string::npos) {
+            ++pos;
+            continue;
+        }
+        tags.push_back({t.substr(tag + 7, open_end - (tag + 7)),
+                        t.substr(open_end + 1, close - (open_end + 1))});
+        pos = close + 9;
+    }
+    return tags;
+}
+
 // Walk the template HTML and pull every inline `<script>...</script>` block
 // in document order. Tags that carry a `src=` attribute are skipped — those
 // are evaluated separately via the `javascript_indices` path. Bundler-only
@@ -236,9 +279,6 @@ struct InlineScript {
 // envelope, not executable JS).
 std::vector<InlineScript> extract_inline_template_scripts(const std::string& template_html) {
     std::vector<InlineScript> out;
-    static const std::regex tag_re(
-        R"RX(<script\b([^>]*)>([\s\S]*?)</script>)RX",
-        std::regex::icase);
     static const std::regex src_attr_re(
         R"RX(\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|\S+))RX",
         std::regex::icase);
@@ -246,11 +286,9 @@ std::vector<InlineScript> extract_inline_template_scripts(const std::string& tem
         R"RX(\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))RX",
         std::regex::icase);
 
-    auto begin = std::sregex_iterator(template_html.begin(), template_html.end(), tag_re);
-    auto end = std::sregex_iterator();
-    for (auto it = begin; it != end; ++it) {
-        std::string attrs = (*it)[1].str();
-        std::string body  = (*it)[2].str();
+    for (auto& tag : scan_script_tags(template_html)) {
+        std::string attrs = std::move(tag.attrs);
+        std::string body = std::move(tag.body);
 
         // Skip `<script src="...">` — the harness handles those via
         // javascript_indices.
