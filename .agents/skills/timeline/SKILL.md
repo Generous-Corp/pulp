@@ -4079,3 +4079,11 @@ never skips it. The graph-binding suite loads `PulpGain.clap` only through
 `PULP_TEST_CLAP_PATH`, which the top-level `CMakeLists.txt` sets together
 with the edge in examples builds, so it is `NONE` only when examples are off.
 Get a plugin's path from CMake, never from the working directory.
+
+A timeline test that opens checkout files declares them in the same manifest
+with `pulp_test_data(<suite> NO_DEFINE PATHS ...)`: the persistence,
+replay-golden, fixture-runner and document-fuzz suites read only
+`test/fixtures/timeline`. A new suite that reads the corpus, or a case that
+opens anything else in the tree, must be declared, or the suite reads as
+`data: undeclared` and is never skipped. NO_DEFINE keeps the suite's own
+`PULP_TIMELINE_FIXTURE_DIR` definition.
