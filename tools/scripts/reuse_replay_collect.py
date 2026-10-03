@@ -146,6 +146,10 @@ REPOSITORY = "Generous-Corp/pulp"
 WORKFLOW = "build.yml"
 QUEUE_BRANCH_RE = re.compile(r"^gh-readonly-queue/[^/]+/pr-(?P<pr>\d+)-(?P<base>[0-9a-f]{40})$")
 REUSE_RECORD_ARTIFACT = "reuse-record-macos"
+# The first merge-group and PR-head jobs that write a reuse record (the
+# per-target codemodel recording landed then); earlier jobs never had one.
+RECORDING_SINCE = "2026-10-01T07:46:19Z"
+RECORD_STEP_PREFIX = "Record per-test results for reuse replay"
 CTEST_JOB_NAMES = (re.compile(r"^macOS \(ARM64\)"), re.compile(r"^macos$"))
 
 
@@ -574,13 +578,37 @@ class Collector:
         files = self.diff_files(head["base_sha"], group["base_sha"])
         return (files, "bases") if files else (None, None)
 
-    def input_list_at(self, rev: str) -> set[str] | None:
+    def script_inputs_at(self, rev: str) -> dict | None:
+        """The checked-in script-input list at `rev`, or None when it cannot
+        be read. A run's checkout is a merge commit GitHub made, which the
+        local clone has usually never fetched (and the collector never
+        fetches), so a commit missing locally is read through the API."""
         res = self._git("show", f"{rev}:{SCRIPT_INPUTS_PATH}", check=False)
-        if res.returncode:
+        text = None if res.returncode else res.stdout
+        if text is None and self.gh is not None and re.fullmatch(r"[0-9a-f]{40}", rev):
+            def fetch() -> str | None:
+                url = f"{API}/repos/{self.gh.repository}/contents/{SCRIPT_INPUTS_PATH}?ref={rev}"
+                try:
+                    with self.gh._request(url, "application/vnd.github.raw+json") as resp:
+                        return resp.read().decode("utf-8")
+                except urllib.error.HTTPError as err:
+                    if err.code == 404:
+                        return None  # absent at that commit: cached
+                    raise
+            try:
+                text = self._cached(f"script-inputs/{rev}.json.gz", fetch)
+            except (urllib.error.URLError, RuntimeError, OSError, UnicodeDecodeError):
+                text = None  # a failed fetch is unread (its script tests run), and is not cached
+        if text is None:
             return None
         try:
-            doc = json.loads(res.stdout)
+            return json.loads(text)
         except json.JSONDecodeError:
+            return None
+
+    def input_list_at(self, rev: str) -> set[str] | None:
+        doc = self.script_inputs_at(rev)
+        if doc is None:
             return None
         return {i.rstrip("/") for entry in doc.get("tests", {}).values() for i in entry.get("inputs", [])}
 
@@ -605,6 +633,46 @@ class Collector:
                         and job.get("conclusion") in ("success", "failure")):
                     return job
         return None
+
+    def record_coverage(self, runs: Iterable[dict], since: str = RECORDING_SINCE) -> dict:
+        """Completed runs whose macOS suite job executed a test step (it
+        concluded success or failure) but that published no reuse record.
+        A cancelled or skipped job ran nothing, and a job whose runner was
+        lost (its later steps have no conclusion) never reached its
+        record step (its later steps have no conclusion); neither is
+        counted, the second is reported as `interrupted`. 0 is the expected reading; anything else is a
+        recording that went missing although the suite ran."""
+        executed, missing, interrupted = 0, [], []
+        for run in runs:
+            if run.get("status") != "completed" or run["created_at"] < since:
+                continue
+            job = self.ctest_job(self.jobs(run["id"]))
+            if job is None:
+                continue
+            steps = job.get("steps") or []
+            record_step = next((st for st in steps if str(st.get("name", "")).startswith(RECORD_STEP_PREFIX)), None)
+            lost = (record_step is not None and record_step.get("conclusion") is None
+                    and any(st.get("conclusion") is None for st in steps))
+            ran_tests = any(str(st.get("name", "")).startswith("Test") and st.get("conclusion") in ("success", "failure")
+                            for st in steps)
+            if lost or not ran_tests:
+                # The runner went away before the record step could run (its
+                # later steps carry no conclusion): no step was left to warn.
+                if lost:
+                    interrupted.append({"run_id": str(run["id"]), "job_id": job["id"], "runner": job.get("runner_name"),
+                                        "tests_ran": ran_tests})
+                continue
+            executed += 1
+            listing = self._cached(f"artifacts/{run['id']}.json.gz", lambda r=run: [
+                a.get("name") for a in self.gh.json(
+                    f"repos/{self.gh.repository}/actions/runs/{r['id']}/artifacts?per_page=100").get("artifacts", [])])
+            if not any(n == REUSE_RECORD_ARTIFACT or str(n).startswith(REUSE_RECORD_ARTIFACT + "-attempt-")
+                       for n in listing):
+                missing.append({"run_id": str(run["id"]), "event": run.get("event"), "job_id": job["id"],
+                                "job_conclusion": job.get("conclusion")})
+        return {"since": since, "executed_jobs": executed, "without_record": len(missing),
+                "runs_without_record": missing[:50], "interrupted_jobs": len(interrupted),
+                "interrupted": interrupted[:50]}
 
     def run_record(self, run: dict, kind: str, pr: int | None, head_sha: str | None) -> tuple[dict, list[dict]]:
         jobs = self.jobs(run["id"])
@@ -761,6 +829,8 @@ class Collector:
             "pairs_with_head_run": sum(1 for p in pairs if p["heads"]),
             "head_runs": sum(1 for r in runs.values() if r["run_kind"] == "pr_head"),
             "rejected_runs": sum(1 for r in runs.values() if r["rejected"]),
+            "record_coverage": self.record_coverage(groups + [r for r in heads_listing
+                                                              if since <= _parse_time(r["created_at"]) <= until]),
             "api_calls": self.gh.calls,
         }
         (self.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -1043,11 +1113,12 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                         "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only}
         if codemodel is not None:
             # The same counts over the executables the recorded build
-            # describes, where the variants can be compared exactly, and the
-            # set itself for the binary-hash control.
+            # describes, where the variants can be compared exactly, and for
+            # the binary-hash control every executable the variant rebuilds,
+            # including spawned tools and others no group test runs.
             out[variant]["described_total"] = len(counted & described)
             out[variant]["described_rebuilt"] = len(rebuilt_set & described)
-            out[variant]["rebuilt"] = sorted(rebuilt_set)
+            out[variant]["rebuilt"] = sorted(rebuilt_all)
     return out
 
 
@@ -1186,16 +1257,10 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
 
     def entries(sha: str) -> dict | None:
         if sha not in entries_cache:
-            for _ in range(3):
-                res = collector._git("show", f"{sha}:{SCRIPT_INPUTS_PATH}", check=False)
-                if not res.returncode:
-                    break
-            try:
-                entries_cache[sha] = None if res.returncode else json.loads(res.stdout).get("tests", {})
-            except json.JSONDecodeError:
-                entries_cache[sha] = None
+            doc = collector.script_inputs_at(sha)
+            entries_cache[sha] = None if doc is None else doc.get("tests", {})
             if entries_cache[sha] is None:
-                unread.append(f"{sha}: {res.stderr.strip()[:200]}")
+                unread.append(sha)
         return entries_cache[sha]
 
     build_real = os.path.realpath(graph_build_dir)
@@ -1259,11 +1324,13 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             v2 = (not legacy_rules and content_keyed(head_record) and content_keyed(group_record)
                   and group_record.get("declared_commit_bound") is not None)
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
+            spawned = executable_dependencies(group_record["targets"])
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
                 recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2,
-                spawned=executable_dependencies(group_record["targets"]),
-                spawnable=frozenset(set(link) - set(group_record["executables"].values())))
+                spawned=spawned, spawnable=frozenset(set(link) - set(group_record["executables"].values())))
+            test_exes = set(group_record["executables"].values())
+            spawned_by_tests = {d for e in test_exes for d in spawned.get(e, set())}
             with_v2 += int(v2)
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
@@ -1274,7 +1341,13 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     changed = {e for e in both if head_bins[e] != group_bins[e]}
                     recorded[variant]["binaries_compared"] = len(both)
                     recorded[variant]["binaries_changed"] = len(changed)
-                    recorded[variant]["unreached_changed_binaries"] = sorted(changed - set(recorded[variant]["rebuilt"]))
+                    unreached = sorted(changed - set(recorded[variant]["rebuilt"]))
+                    recorded[variant]["unreached_changed_binaries"] = unreached
+                    # Where to look, not a second gate: one a group test runs,
+                    # one a test spawns, or one neither reaches.
+                    recorded[variant]["unreached_kinds"] = {
+                        e: "backs_test" if e in test_exes else "spawnable" if e in spawned_by_tests else "neither"
+                        for e in unreached}
                     # The inverse: rebuilt although the bytes came out the
                     # same, the policy's over-approximation.
                     recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
