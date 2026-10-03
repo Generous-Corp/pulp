@@ -30,6 +30,9 @@
   },
   "pulp-test-authoring-capsule-hostile": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_authoring_capsule_hostile.cpp"
+   ],
    "inputs": [
     "core/authoring_capsule"
    ],
@@ -46,6 +49,13 @@
   },
   "pulp-test-browser-capture-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_browser_capture_backdrop_filter.cpp",
+    "test/test_browser_capture_ir.cpp",
+    "test/test_browser_capture_svg_render.cpp",
+    "test/test_browser_capture_text_metrics.cpp",
+    "test/test_browser_capture_tree.cpp"
+   ],
    "inputs": [
     "test/fixtures/browser-capture-*"
    ],
@@ -89,6 +99,9 @@
   },
   "pulp-test-cli-content-commands": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_content_commands.cpp"
+   ],
    "inputs": [
     "fixtures/packages/basic-content-pack"
    ],
@@ -106,6 +119,9 @@
   },
   "pulp-test-cli-create-shellout": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_create_shellout.cpp"
+   ],
    "inputs": [
     "fixtures/packages/gain-dsp-kit",
     "fixtures/packages/simple-plugin-template",
@@ -128,6 +144,9 @@
   },
   "pulp-test-cli-docs-command": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_docs_command.cpp"
+   ],
    "inputs": [
     "docs/status/authority-navigation.schema.json"
    ],
@@ -141,6 +160,9 @@
   },
   "pulp-test-cli-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import.cpp"
+   ],
    "inputs": [
     "tools/import/known-frameworks.json"
    ],
@@ -161,6 +183,9 @@
   },
   "pulp-test-cli-import-design": {
    "data": "undeclared",
+   "detected_sources": [
+    "test/test_cli_import_design.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -172,6 +197,9 @@
   },
   "pulp-test-cli-import-detect": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import_detect.cpp"
+   ],
    "inputs": [
     "compat.json",
     "test/fixtures/imports"
@@ -226,6 +254,9 @@
   },
   "pulp-test-cli-import-terms": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_import_terms.cpp"
+   ],
    "inputs": [
     "tools/import/known-frameworks.json",
     "tools/scripts/check_import_provenance.py"
@@ -259,6 +290,9 @@
   },
   "pulp-test-cli-kit-commands": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_kit_commands.cpp"
+   ],
    "inputs": [
     "fixtures/packages",
     "tools/kits/pulp-package.schema.json"
@@ -295,6 +329,9 @@
   },
   "pulp-test-cli-migration-index": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_migration_index.cpp"
+   ],
    "inputs": [
     "tools/scripts/build_migration_index.py"
    ],
@@ -312,6 +349,9 @@
   },
   "pulp-test-cli-package-analyzer-descriptors": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_package_analyzer_descriptors.cpp"
+   ],
    "inputs": [
     "tools/packages/registry.json"
    ],
@@ -338,6 +378,9 @@
   },
   "pulp-test-cli-project-command": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_project_command.cpp"
+   ],
    "inputs": [
     "CMakeLists.txt",
     "core/view/include/pulp/view/reload_autocaps.hpp",
@@ -418,6 +461,9 @@
   },
   "pulp-test-cli-skew-banner": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_skew_banner.cpp"
+   ],
    "inputs": [
     ".claude-plugin/plugin.json",
     "tools/scripts/cli_version_check.sh"
@@ -430,6 +476,9 @@
   },
   "pulp-test-cli-tartci-lease": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_tartci_lease.cpp"
+   ],
    "inputs": [
     "tools/ci/build_dir_lock.py"
    ],
@@ -479,6 +528,9 @@
   },
   "pulp-test-cli-upgrade-install": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cli_upgrade_install.cpp"
+   ],
    "inputs": [
     "tools/cli/cmd_upgrade.cpp",
     "tools/import-design/browser_capture"
@@ -585,6 +637,9 @@
   },
   "pulp-test-coreaudio-input-only": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_coreaudio_input_only.mm"
+   ],
    "inputs": [
     "core/audio/platform/mac/coreaudio_device.mm"
    ],
@@ -608,6 +663,9 @@
   },
   "pulp-test-cross-platform-audio-golden": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_cross_platform_audio_golden.cpp"
+   ],
    "inputs": [
     "test/fixtures/audio/cross_platform_signal_chain.wav"
    ],
@@ -633,6 +691,10 @@
   },
   "pulp-test-design-import": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_ir.cpp",
+    "test/test_recognition_resolver.cpp"
+   ],
    "inputs": [
     "test/fixtures/import-fidelity/assets/knob_ref.png",
     "test/fixtures/imports/claude/vite-assets.html",
@@ -648,6 +710,10 @@
   },
   "pulp-test-design-import-designmd": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_designmd.cpp",
+    "test/test_design_import_designmd_040.cpp"
+   ],
    "inputs": [
     "test/fixtures/imports/designmd/alpha"
    ],
@@ -660,6 +726,9 @@
   },
   "pulp-test-design-import-native-materializer": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_native_materializer.cpp"
+   ],
    "inputs": [
     "core/audio/include",
     "core/canvas/include",
@@ -682,6 +751,9 @@
   },
   "pulp-test-design-import-parity": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_parity.cpp"
+   ],
    "inputs": [
     "core/view/cmake/PulpViewSources.cmake",
     "core/view/include/pulp/view/design_ir.hpp",
@@ -695,6 +767,9 @@
   },
   "pulp-test-design-import-react-runtime": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_react_runtime.cpp"
+   ],
    "inputs": [
     "planning",
     "test/fixtures/figma",
@@ -711,6 +786,9 @@
   },
   "pulp-test-design-swift-codegen": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_swift_codegen.cpp"
+   ],
    "inputs": [
     "apple/Sources/PulpSwift"
    ],
@@ -722,6 +800,9 @@
   },
   "pulp-test-fixture-runner-cli": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_fixture_runner_cli.cpp"
+   ],
    "inputs": [
     "test/fixtures/timeline"
    ],
@@ -740,6 +821,9 @@
   },
   "pulp-test-forge-catalog-index": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_forge_catalog_index.cpp"
+   ],
    "inputs": [
     "core/host/include/pulp/host"
    ],
@@ -751,6 +835,9 @@
   },
   "pulp-test-group-app-host": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_forge_descriptor_audit.cpp"
+   ],
    "inputs": [
     "docs/status/forge-catalog.json"
    ],
@@ -767,6 +854,9 @@
   },
   "pulp-test-group-app-view": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_ios_foundation.cpp"
+   ],
    "inputs": [
     "templates/ios-auv3/HostApp/ContentView.swift"
    ],
@@ -778,6 +868,9 @@
   },
   "pulp-test-group-canvas": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_canvas_fonts.cpp"
+   ],
    "inputs": [
     "external/fonts/FunnelDisplay-VariableFont_wght.ttf",
     "external/fonts/Inter-Regular.ttf"
@@ -790,6 +883,9 @@
   },
   "pulp-test-group-canvas-text": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_font_woff2.cpp"
+   ],
    "inputs": [
     "external/fonts/Inter-Regular.ttf",
     "external/fonts/JetBrainsMono-Regular.ttf",
@@ -840,6 +936,9 @@
   },
   "pulp-test-group-design-import-bridge": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_design_import_anchors.cpp"
+   ],
    "inputs": [
     "test/fixtures/anchor_vectors.json"
    ],
@@ -876,6 +975,9 @@
   },
   "pulp-test-group-sampler-host-graph": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_baked_codec.cpp"
+   ],
    "inputs": [
     "test/fixtures/sample-region-compat/bake/legacy-v1.pulpbake"
    ],
@@ -887,6 +989,9 @@
   },
   "pulp-test-group-script-format": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_view_bridge.cpp"
+   ],
    "inputs": [
     "core/format/include/pulp/format/clap_entry.hpp",
     "core/format/src/aax_effect_gui.cpp",
@@ -904,6 +1009,9 @@
   },
   "pulp-test-group-script-view": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_threejs_resources.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -913,6 +1021,14 @@
   },
   "pulp-test-group-timeline": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_timeline_automation_persistence.cpp",
+    "test/test_timeline_device_placement_persistence.cpp",
+    "test/test_timeline_marker_persistence.cpp",
+    "test/test_timeline_note_modifier_persistence.cpp",
+    "test/test_timeline_persistence.cpp",
+    "test/test_timeline_session_persistence.cpp"
+   ],
    "inputs": [
     "test/fixtures/timeline"
    ],
@@ -937,6 +1053,9 @@
   },
   "pulp-test-group-timeline-playback": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_timeline_replay_golden.cpp"
+   ],
    "inputs": [
     "test/fixtures/timeline"
    ],
@@ -973,6 +1092,9 @@
   },
   "pulp-test-import-design-tool": {
    "data": "undeclared",
+   "detected_sources": [
+    "test/test_import_design_tool.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
@@ -993,6 +1115,9 @@
   },
   "pulp-test-import-object-coverage": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_import_object_coverage.cpp"
+   ],
    "inputs": [
     "compat.json"
    ],
@@ -1032,6 +1157,9 @@
   },
   "pulp-test-mac-platform-harness": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_mac_platform_harness.cpp"
+   ],
    "inputs": [
     "planning"
    ],
@@ -1044,6 +1172,9 @@
   },
   "pulp-test-mcp-server": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_mcp_server.cpp"
+   ],
    "inputs": [
     "CMakeLists.txt",
     "core/timeline/schema/timeline_mcp_tools.json",
@@ -1069,6 +1200,9 @@
   },
   "pulp-test-mcp-timeline-tools": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_mcp_timeline_sessions.cpp"
+   ],
    "inputs": [
     "test/fixtures/timeline/v1/minimal.json",
     "test/fixtures/timeline/v4/sequence-markers.json"
@@ -1082,6 +1216,9 @@
   },
   "pulp-test-modal-spec": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_modal_spec.cpp"
+   ],
    "inputs": [
     "examples/modal-specs"
    ],
@@ -1147,6 +1284,9 @@
   },
   "pulp-test-real-plugin-runner-cache": {
    "data": "declared",
+   "detected_sources": [
+    "test/integration/test_real_plugin_fixture.cpp"
+   ],
    "inputs": [
     "test/integration/real_plugins.toml"
    ],
@@ -1158,6 +1298,9 @@
   },
   "pulp-test-reload-library": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_reload_library.cpp"
+   ],
    "inputs": [],
    "kind": "compiled",
    "sources": [
@@ -1167,6 +1310,9 @@
   },
   "pulp-test-sample-region-sequencer": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_sample_region_sequencer.cpp"
+   ],
    "inputs": [
     "core/host/src/signal_graph.cpp",
     "core/host/src/timeline_automation_delivery.cpp",
@@ -1181,6 +1327,9 @@
   },
   "pulp-test-ship-tracing-guard": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_ship_tracing_guard.cpp"
+   ],
    "inputs": [
     "core/runtime/src/trace.cpp"
    ],
@@ -1204,6 +1353,9 @@
   },
   "pulp-test-template-ui-scripts": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_template_ui_scripts.cpp"
+   ],
    "inputs": [
     "tools/templates/*/ui/main.js"
    ],
@@ -1215,6 +1367,9 @@
   },
   "pulp-test-timeline-document-fuzz": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_timeline_document_fuzz.cpp"
+   ],
    "inputs": [
     "test/fixtures/timeline"
    ],
@@ -1252,6 +1407,9 @@
   },
   "pulp-test-widget-bridge-api-contracts": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_widget_bridge_api_contracts.cpp"
+   ],
    "inputs": [
     "core/view/src"
    ],
@@ -1263,6 +1421,9 @@
   },
   "pulp-test-widget-bridge-no-gpu-gates": {
    "data": "declared",
+   "detected_sources": [
+    "test/test_widget_bridge_no_gpu_gates.cpp"
+   ],
    "inputs": [
     "core/view/src/widget_bridge.cpp"
    ],

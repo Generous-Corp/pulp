@@ -542,7 +542,8 @@ class CompiledDataTests(unittest.TestCase):
             lst = json.loads((repo.root / sti.DEFAULT_LIST).read_text(encoding="utf-8"))
             self.assertEqual(lst["executables"]["pulp-test-a"], {
                 "kind": "compiled", "data": "declared", "inputs": ["test/fixtures/a"],
-                "sources": ["test/test_a.cpp"], "undeclared_sources": []})
+                "sources": ["test/test_a.cpp"], "detected_sources": ["test/test_a.cpp"],
+                "undeclared_sources": []})
             self.assertIn("alpha", lst["tests"])  # script entries unchanged, same file
             self.assertEqual(lst["executables_scanned_for"], ["data", "spawns"])
             # Every executable configure saw is listed, clean ones included
@@ -550,6 +551,21 @@ class CompiledDataTests(unittest.TestCase):
             # can be told apart from a never-scanned executable.
             self.assertEqual(lst["executables_scanned"], ["pulp-test-a", "pulp-test-b", "pulp-test-c", "pulp-test-d"])
             self.assertNotIn("pulp-test-d", lst["executables"])
+
+    def test_detected_sources_lists_only_what_a_signal_matched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            # pulp-test-d's source has no signal; declaring it must not make
+            # the scan look as if it detected a reader there.
+            (repo.build / "test" / "test-data" / "pulp-test-d.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "pulp-test-d", "kind": "compiled",
+                "sources": ["test/test_d.cpp"], "inputs": ["test/fixtures/a"]}), encoding="utf-8")
+            ex = sti.compiled_entries(repo.root, repo.build)
+            self.assertEqual(ex["pulp-test-d"]["data"], "declared")
+            self.assertEqual(ex["pulp-test-d"]["sources"], ["test/test_d.cpp"])
+            self.assertEqual(ex["pulp-test-d"]["detected_sources"], [])
+            self.assertEqual(ex["pulp-test-a"]["detected_sources"], ["test/test_a.cpp"])
+            self.assertEqual(ex["pulp-test-b"]["detected_sources"], ["test/test_b.cpp"])
 
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
