@@ -338,6 +338,14 @@ def inputs_for(test: dict, root: Path, build_dir: Path | None = None) -> dict | 
 TEST_DATA_DIR = Path("test") / "test-data"
 # Text in a compiled test source that means it opens files from the checkout.
 DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
+# Finding the checkout by walking up from the working directory, with no
+# definition at all: ctest runs a test in <build>/<dir>, so two levels up is
+# the checkout root. One level up is the build tree, where tests find binaries.
+WALK_UP_SIGNAL = "current_path()/../.."
+# Or from the test's own source file, which lives in the checkout.
+SOURCE_FILE_SIGNAL = "path(__FILE__)"
+SOURCE_FILE = re.compile(r"path\(\s*__FILE__\s*\)")
+WALK_UP = re.compile(r'current_path\(\)\s*/\s*(?:"\.\./\.\.|"\.\."\s*/\s*"\.\.")')
 
 # Calls that start or load another program or module. The class names are the repo's
 # own process API (core/platform/child_process.hpp,
@@ -385,6 +393,10 @@ def source_signals(root: Path, rel: str, defines: list[str]) -> list[str]:
     except OSError:
         return []
     hits = [sig for sig in DATA_SIGNALS if sig in text]
+    if WALK_UP.search(text):
+        hits.append(WALK_UP_SIGNAL)
+    if SOURCE_FILE.search(text):
+        hits.append(SOURCE_FILE_SIGNAL)
     for name in defines:
         if name not in hits and re.search(r"\b%s\b" % re.escape(name), text):
             hits.append(name)
@@ -430,6 +442,67 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
 # A string literal, and the file suffixes a built program or module carries.
 STRING_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 ARTIFACT_SUFFIX = re.compile(r"\.(?:exe|clap|vst3|component|so|dylib|bundle|app|dll)$", re.I)
+
+
+CATCH_INCLUDE = re.compile(r"^(.+)-[0-9a-f]+_include\.cmake$")
+# add_test(<name> "<program>" ...): the program is the first quoted argument
+# after the name, which CMake writes as a bracket or quoted argument.
+CTEST_COMMAND = re.compile(r'add_test\(\s*(?:\[(=*)\[.*?\]\1\]|"(?:[^"\\]|\\.)*"|[^\s()]+)\s+"((?:[^"\\]|\\.)*)"', re.S)
+CTEST_INCLUDE = re.compile(r'include\(\s*"([^"]+)"\s*\)')
+
+
+def ctest_programs(build_dir: Path) -> set[str] | None:
+    """The built programs ctest runs, by file name: the program of every
+    add_test whose program lies under the build directory, plus the target a
+    Catch2 discovery include is named after (its tests only exist once the
+    target is built). A built program a test only passes as an argument (to
+    a script, say) is not one: the test that runs it is scanned instead.
+    None when the build directory has no CTestTestfile."""
+    files = sorted(build_dir.rglob("CTestTestfile.cmake"))
+    if not files:
+        return None
+    build = os.path.realpath(build_dir)
+    names: set[str] = set()
+    for f in files:
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for m in CTEST_COMMAND.finditer(text):
+            prog = m.group(2)
+            if os.path.isabs(prog) and os.path.realpath(prog).startswith(build + os.sep):
+                names.add(re.sub(r"\.exe$", "", os.path.basename(prog), flags=re.I))
+        for inc in CTEST_INCLUDE.findall(text):
+            m = CATCH_INCLUDE.match(os.path.basename(inc))
+            if m:
+                names.add(m.group(1))
+    return names
+
+
+def test_executables(build_dir: Path | None) -> dict[str, dict] | None:
+    """executables.json's records for the executables this list scans: every
+    one under test/, and any other one ctest runs. Each is keyed by the
+    program name a ctest command carries, which is what a selector looks it
+    up by (pulp-cli is run as pulp-cpp), and keeps its target name under
+    `target`. None without the index."""
+    if build_dir is None:
+        return None
+    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json")
+    if index is None:
+        return None
+    artifacts = load_runtime_artifacts(build_dir) or {}
+    run = ctest_programs(build_dir)
+    out = {}
+    for target, rec in (index.get("executables") or {}).items():
+        program = str((artifacts.get(target) or {}).get("artifact") or target)
+        if run is not None and program in run:
+            name = program
+        elif rec.get("under_test", True) or run is None or target in run:
+            name = target
+        else:
+            continue
+        out[name] = dict(rec, target=target)
+    return out
 
 
 def load_runtime_artifacts(build_dir: Path | None) -> dict[str, dict] | None:
@@ -515,28 +588,30 @@ def spawn_state(root: Path, rec: dict, exe: str = "",
 def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
     """`kind: compiled` entries from the configure-time evidence, or None when
     the build directory carries none (a tree configured before the helper)."""
-    if build_dir is None:
-        return None
-    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json")
+    index = test_executables(build_dir)
     if index is None:
         return None
     out = {}
     artifacts = load_runtime_artifacts(build_dir)
-    for exe, rec in sorted((index.get("executables") or {}).items()):
-        decl = _read_json(build_dir / TEST_DATA_DIR / f"{exe}.inputs.json") or {}
+    for exe, rec in sorted(index.items()):
+        target = rec.get("target", exe)
+        decl = _read_json(build_dir / TEST_DATA_DIR / f"{target}.inputs.json") or {}
         declared_sources = set(decl.get("sources") or [])
         defines = list(rec.get("tree_defines") or [])
         reading = {src for src in rec.get("sources") or [] if source_signals(root, src, defines)}
         data_sources = reading | declared_sources
-        spawns, spawning, unmatched = spawn_state(root, rec, exe, artifacts)
-        if not data_sources and spawns is None:
+        spawns, spawning, unmatched = spawn_state(root, rec, target, artifacts)
+        if not data_sources and spawns is None and not decl.get("whole_checkout"):
             continue
-        undeclared = sorted(reading - declared_sources)
+        whole = bool(decl.get("whole_checkout"))
+        # WHOLE_CHECKOUT covers every read, so nothing it reads is undeclared.
+        undeclared = [] if whole else sorted(reading - declared_sources)
         entry = {"kind": "compiled",
-                 "data": ("undeclared" if undeclared else "declared") if data_sources else "none",
+                 "data": ("whole_checkout" if whole else
+                          ("undeclared" if undeclared else "declared") if data_sources else "none"),
                  "inputs": sorted(set(decl.get("inputs") or [])),
                  "sources": sorted(data_sources), "undeclared_sources": undeclared}
-        if data_sources:
+        if data_sources or whole:
             # Only the sources a signal matched, so a reader can tell a scan
             # that saw the declared readers from one that only echoes
             # pulp_test_data's SOURCES.
@@ -554,14 +629,14 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
 def data_summary(root: Path, build_dir: Path | None) -> dict | None:
     """The data-manifest proxy: executables with a declaration over those that
     read PULP_SOURCE_DIR, plus the wider undeclared count."""
-    index = _read_json(build_dir / TEST_DATA_DIR / "executables.json") if build_dir else None
+    index = test_executables(build_dir)
     entries = compiled_entries(root, build_dir)
     if index is None or entries is None:
         return None
-    psd = sorted(exe for exe, rec in (index.get("executables") or {}).items()
+    psd = sorted(exe for exe, rec in index.items()
                  if any("PULP_SOURCE_DIR" in source_signals(root, s, []) for s in rec.get("sources") or []))
     with_manifest = sorted(exe for exe in psd if entries.get(exe, {}).get("inputs"))
-    return {"executables": len(index.get("executables") or {}),
+    return {"executables": len(index),
             "reading_pulp_source_dir": len(psd), "reading_pulp_source_dir_with_manifest": len(with_manifest),
             "data_reading": sum(1 for e in entries.values() if e["data"] != "none"),
             "declared": sum(1 for e in entries.values() if e["data"] == "declared"),
@@ -612,8 +687,7 @@ def build_list(inventory: dict, root: Path, build_dir: Path | None = None) -> di
         doc["executables_scanned_for"] = list(EXECUTABLE_SCANS)
         # And which executables were scanned: a missing entry means "clean" only
         # for a name in this list; one that is not here was never scanned.
-        index = _read_json(build_dir / TEST_DATA_DIR / "executables.json") or {}
-        doc["executables_scanned"] = sorted(index.get("executables") or {})
+        doc["executables_scanned"] = sorted(test_executables(build_dir) or {})
     return doc
 
 

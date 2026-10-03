@@ -84,6 +84,8 @@ target_link_libraries(pulp-test-cli-import PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
 pulp_test_data(pulp-test-cli-import PATHS tools/import/known-frameworks.json)
+# The spawned pulp-cpp reads the shipped tool registry to find an importer.
+pulp_test_data(pulp-test-cli-import NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-import
     PROPERTIES LABELS "parser-import")
 
@@ -102,6 +104,8 @@ target_link_libraries(pulp-test-cli-import-emit PRIVATE
     Catch2::Catch2WithMain)
 target_compile_definitions(pulp-test-cli-import-emit PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# The spawned pulp-cpp reads the shipped tool registry to find an importer.
+pulp_test_data(pulp-test-cli-import-emit NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-import-emit
     PROPERTIES LABELS "parser-import")
 
@@ -176,6 +180,9 @@ target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catc
 target_compile_definitions(pulp-test-cli-shellout PRIVATE
     PULP_TEST_INSPECTOR_ENABLED=$<BOOL:${PULP_ENABLE_INSPECTOR}>)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
+# `pulp doctor` and `pulp status` walk the checkout, and `pulp docs` reads an
+# open-ended set of documents, all through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout WHOLE_CHECKOUT)
 
 add_executable(pulp-test-cli-overflow-shellout test_cli_overflow_shellout.cpp)
 target_link_libraries(pulp-test-cli-overflow-shellout PRIVATE
@@ -239,6 +246,8 @@ catch_discover_tests(pulp-test-cli-shellout-scan-projects)
 add_executable(pulp-test-cli-shellout-pr test_cli_shellout_pr.cpp)
 target_link_libraries(pulp-test-cli-shellout-pr PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-pr)
+# `pulp status` walks the checkout through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout-pr WHOLE_CHECKOUT)
 catch_discover_tests(pulp-test-cli-shellout-pr)
 
 # CLI lifecycle-command shell-out tests: pulp doctor / pulp dev /
@@ -255,6 +264,8 @@ else()
         PULP_TEST_CONTROL_HEALTH_ENABLED=0)
 endif()
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout-lifecycle)
+# `pulp doctor --versions` reads the plugin manifest through the spawned pulp-cpp.
+pulp_test_data(pulp-test-cli-shellout-lifecycle NO_DEFINE PATHS .claude-plugin/plugin.json)
 catch_discover_tests(pulp-test-cli-shellout-lifecycle)
 
 # `pulp tweaks diff` shell-out tests. Drives the built binary against

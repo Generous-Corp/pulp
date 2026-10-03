@@ -43,6 +43,9 @@ target_include_directories(pulp-test-cli-tool-registry PRIVATE
 target_link_libraries(pulp-test-cli-tool-registry PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
+# find_tool_registry_path() (tools/cli/tool_registry.cpp) locates the shipped
+# registry in the checkout for the real-registry case.
+pulp_test_data(pulp-test-cli-tool-registry NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-tool-registry)
 
 # Importer install mechanism: version-window enforcement, sha256
@@ -228,19 +231,8 @@ pulp_test_spawns(pulp-test-cli-update-check NONE)         # curl, behind an inje
 pulp_test_spawns(pulp-test-cli-update-mode NONE)          # curl, behind an injected fetcher
 pulp_test_spawns(pulp-test-cli-migration-index NONE)      # python3 on tools/scripts/build_migration_index.py
 
-# The WidgetBridge doctor check reads its generator inputs and generated outputs
-# (tools/cli/cli_doctor_helpers.cpp), and `project bump` from the checkout
-# probes the root's CMakeLists.txt and tools/shipyard.toml.
+# The WidgetBridge doctor case runs the doctor in process, and the doctor walks
+# the whole checkout; `project bump` from the checkout probes the root too.
 if(TARGET pulp-test-cli-project-command)
-    pulp_test_data(pulp-test-cli-project-command NO_DEFINE PATHS
-        tools/scripts/generate_widget_bridge_api.py
-        core/view/src/widget_bridge_api_manifest.tsv
-        core/view/include/pulp/view/reload_autocaps.hpp
-        core/view/include/pulp/view/reload_capabilities.hpp
-        packages/pulp-react/src/bridge-globals.generated.d.ts
-        packages/pulp-react/src/bridge-mock-functions.generated.ts
-        packages/pulp-react/src/bridge-mock-safe-functions.generated.ts
-        docs/reference/js-bridge.md
-        tools/shipyard.toml
-        CMakeLists.txt)
+    pulp_test_data(pulp-test-cli-project-command WHOLE_CHECKOUT)
 endif()

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-test-data-read-audit-gaps-watch",
+  "created_at": "2026-10-03T14:57:54Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-source-ingest"
+  ],
+  "rationale": "Only the compiled-test data declaration for pulp-test-design-import-designmd changes: it now also lists compat.json, which its detector tests read from the checkout, so the test selector re-runs it when that file changes. Test registration metadata only; no design-import, Chromium, rendering or packaging behavior or authority moves.",
+  "tests": [
+    "python3 tools/ci/test_affected_tests_shadow.py",
+    "python3 tools/scripts/test_pulp_test_data_cmake.py",
+    "python3 tools/scripts/test_script_test_inputs.py",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
