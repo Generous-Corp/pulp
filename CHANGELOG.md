@@ -9,6 +9,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      release's bullet block. See docs/guides/versioning.md § Release pipeline
      for the full end-to-end flow. -->
 
+<a id="v09010"></a>
+## [0.901.0] - 2026-10-03
+
+- release/version bump ([#9374](https://github.com/Generous-Corp/pulp/pull/9374))
+- fix/vellum preflight freeze check ([#9372](https://github.com/Generous-Corp/pulp/pull/9372))
+- fix/read audit proc paths ([#9371](https://github.com/Generous-Corp/pulp/pull/9371))
+- fix/windows kit shell quote ambiguity ([#9368](https://github.com/Generous-Corp/pulp/pull/9368))
+- feature/overlay wheel containment ([#9307](https://github.com/Generous-Corp/pulp/pull/9307))
+
 <a id="v09000"></a>
 ## [0.900.0] - 2026-10-03
 
@@ -9581,6 +9590,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.901.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.901.0
 [0.900.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.900.0
 [0.899.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.899.0
 [0.898.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.898.0
