@@ -98,6 +98,14 @@ RECORD_FIELDS = ("run_id", "run_attempt", "run_kind", "pr", "head_sha", "base_sh
 OUTCOMES = ("pass", "fail", "timeout", "skipped", "notrun")
 RUN_KINDS = {"pull_request": "pr_head", "merge_group": "merge_group", "push": "push",
              "workflow_dispatch": "dispatch"}
+# Environment that changes what a compile produces without changing the
+# compiler or the sources; part of the toolchain identity.
+# Toolchain fields a record must have found to be keyable; the SDK pair is
+# required on macOS as well.
+TOOLCHAIN_REQUIRED = ("compiler_id", "compiler_version", "compiler", "target")
+TOOLCHAIN_ENV = ("CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS", "SDKROOT", "DEVELOPER_DIR",
+                 "MACOSX_DEPLOYMENT_TARGET", "CCACHE_COMPILERCHECK", "CCACHE_NODEPEND",
+                 "CCACHE_SLOPPINESS", "PULP_OFFLINE_BUILD")
 SCRIPT_INPUTS_LIST = "test/ctest_script_inputs.json"
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/")
 
@@ -421,6 +429,80 @@ def _commit_parents(repo: Path, sha: str) -> tuple[str | None, list[str]]:
     return tree, parents
 
 
+def lane_context(source_root: Path | None, run_id: str | None) -> dict:
+    """Identity of a run outside GitHub Actions (the local mac lane): the
+    commit is the checkout's HEAD, which is the tree the lane validated."""
+    sha = _git(source_root, "rev-parse", "HEAD") if source_root else None
+    tree, parents = _commit_parents(source_root, sha) if source_root and sha else (None, [])
+    return {"run_id": run_id or None, "run_attempt": None, "run_kind": "lane", "pr": None,
+            "head_sha": sha, "base_sha": parents[0] if parents else None, "merge_tree": tree,
+            "merge_sha": sha, "event": "lane", "merge_group_head_ref": None}
+
+
+def _cmake_cache(build_dir: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    try:
+        text = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        m = re.match(r"^([A-Za-z0-9_]+):[A-Z_]+=(.*)$", line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def _cmake_compiler(build_dir: Path) -> dict[str, str]:
+    """CMAKE_CXX_COMPILER, _ID and _VERSION as CMake's compiler check recorded
+    them (CMakeFiles/<cmake version>/CMakeCXXCompiler.cmake; the cache holds
+    only the path). The newest file wins when CMake was upgraded in place."""
+    files = sorted((build_dir / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake"),
+                   key=lambda f: f.stat().st_mtime)
+    out: dict[str, str] = {}
+    if files:
+        text = files[-1].read_text(encoding="utf-8", errors="replace")
+        for key in ("CMAKE_CXX_COMPILER", "CMAKE_CXX_COMPILER_ID", "CMAKE_CXX_COMPILER_VERSION"):
+            m = re.search(rf'^set\({key} "([^"]*)"\)', text, re.M)
+            if m:
+                out[key] = m.group(1)
+    return out
+
+
+def _known(fields: dict) -> dict:
+    """The fields whose value was found. An unknown value is left out, never
+    written: a reader takes an absent key as unknown, and the literal string
+    can never be mistaken for a real version that two records share."""
+    return {k: v for k, v in fields.items() if v != "unknown"}
+
+
+def toolchain_identity(build_dir: Path | None, env: dict[str, str], image_fields: dict) -> dict | None:
+    """What a compile depends on besides its sources: the compiler CMake chose
+    (id, version, its own --version line, target triple), the SDK, the
+    deployment target, and the allow-listed environment. One function so the
+    gate and the local lane compute it identically. `complete` is false when
+    any part is unknown, and a reader keys nothing on an incomplete identity."""
+    if build_dir is None:
+        return None
+    cache = _cmake_cache(build_dir)
+    probed = _cmake_compiler(build_dir)
+    compiler = probed.get("CMAKE_CXX_COMPILER") or cache.get("CMAKE_CXX_COMPILER") or ""
+    fields = _known({
+        "compiler_id": probed.get("CMAKE_CXX_COMPILER_ID") or "unknown",
+        "compiler_version": probed.get("CMAKE_CXX_COMPILER_VERSION") or "unknown",
+        "compiler": _probe([compiler, "--version"]) if compiler else "unknown",
+        "target": _probe([compiler, "-print-target-triple"]) if compiler else "unknown",
+        "sdk_version": image_fields.get("sdk_version", "unknown"),
+        "sdk_build": image_fields.get("sdk_build", "unknown"),
+        "deployment_target": cache.get("CMAKE_OSX_DEPLOYMENT_TARGET") or "",
+        "env": {k: env.get(k, "unset") for k in TOOLCHAIN_ENV},
+    })
+    required = TOOLCHAIN_REQUIRED + (("sdk_version", "sdk_build") if image_fields.get("os") == "Darwin" else ())
+    missing = [k for k in required if k not in fields]
+    complete = not missing
+    digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+    return {"digest": digest, "complete": complete, "missing": missing, "fields": fields}
+
+
 def run_context(env: dict[str, str], source_root: Path | None) -> dict:
     event = env.get("GITHUB_EVENT_NAME", "")
     sha = env.get("GITHUB_SHA") or None
@@ -521,6 +603,7 @@ def runner_image(env: dict[str, str]) -> dict:
                     sources[key] = "sdk-files"
     else:
         fields.update({"os_version": platform.release(), "clang": _probe(["clang", "--version"], why)})
+    fields = _known(fields)
     digest = hashlib.sha256(json.dumps(fields, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return {"digest": digest, "fields": fields, "probe": {"failed": why, "sources": sources}}
 
@@ -634,9 +717,18 @@ def cmd_write(a: argparse.Namespace) -> int:
     source_root = Path(a.source_root).resolve() if a.source_root else None
     build_dir = Path(a.build_dir).resolve() if a.build_dir else None
     suites = [parse_suite(s) for s in a.suite]
-    ctx = run_context(env, source_root)
+    if a.run_kind == "lane" and not a.run_id:
+        print("reuse_record: --run-kind lane needs --run-id (a lane run has no Actions run id)", file=sys.stderr)
+        return 2
+    ctx = lane_context(source_root, a.run_id) if a.run_kind == "lane" else run_context(env, source_root)
     image = runner_image(env)
     problems: list[str] = []
+    toolchain = toolchain_identity(build_dir, env, image["fields"])
+    if toolchain is not None and not toolchain["complete"]:
+        problems.append(f"toolchain identity incomplete (no {', '.join(toolchain['missing'])}): "
+                        "no reuse key can match it")
+    if a.run_kind == "lane" and not ctx["merge_sha"]:
+        problems.append("lane run has no commit: --source-root is not a git checkout")
 
     not_before = float(a.not_before_epoch) if (a.not_before_epoch or "").isdigit() else None
     if suites and not_before is None:
@@ -801,7 +893,8 @@ def cmd_write(a: argparse.Namespace) -> int:
         "schema": SCHEMA, **ctx,
         "job": env.get("GITHUB_JOB") or None, "runner_name": env.get("RUNNER_NAME") or None,
         "runner_environment": env.get("RUNNER_ENVIRONMENT") or None,
-        "platform": platform_id(), "runner_image": image, "build_outcome": a.build_outcome,
+        "platform": platform_id(), "runner_image": image, "toolchain": toolchain,
+        "build_outcome": a.build_outcome,
         "steps": dict(c.split("=", 1) for c in a.context if "=" in c),
         "no_suite_reason": a.no_suite_reason, "suites": summary,
         "script_inputs_blob": script_inputs_blob,
@@ -850,6 +943,9 @@ def main(argv: list[str]) -> int:
     w.add_argument("--test-keys", help="test_receipts_shadow --keys-out file (per-test output keys)")
     w.add_argument("--not-before-epoch", help="ignore reports last written before this time (the job's start)")
     w.add_argument("--build-outcome", default=None)
+    w.add_argument("--run-kind", choices=("github", "lane"), default="github",
+                   help="lane: a run outside GitHub Actions; its commit is --source-root's HEAD")
+    w.add_argument("--run-id", help="lane run id; required with --run-kind lane")
     w.add_argument("--identity-scope", choices=("all", "ran"), default="all",
                    help="hash every registered test executable (default) or only those that ran")
     w.add_argument("--codemodel", action="store_true",

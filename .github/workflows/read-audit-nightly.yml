@@ -14,6 +14,9 @@ name: Test read audit (nightly)
 # undeclared read is not flagged the instrument is blind and the job fails
 # with no verdict.
 #
+# An undeclared read or listing fails the run (--fail-on-findings), so a
+# regression turns the nightly red; a probe never does.
+#
 # Linux only (strace), on a GitHub-hosted runner: it shares no host with the
 # required macOS gate and gates nothing. macOS-only tests are not covered;
 # the report names them. Test failures do not matter here, because a failing
@@ -114,7 +117,8 @@ jobs:
           status=0
           python3 tools/ci/read_audit.py run --build-dir "$PULP_BUILD_DIR" \
             --out read-audit.json --summary read-audit.md \
-            --jobs "$(( $(nproc) / 2 > 0 ? $(nproc) / 2 : 1 ))" ${ONLY:+--only "$ONLY"} || status=$?
+            --jobs "$(( $(nproc) / 2 > 0 ? $(nproc) / 2 : 1 ))" --fail-on-findings \
+            ${ONLY:+--only "$ONLY"} || status=$?
           [ -f read-audit.md ] && cat read-audit.md >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
