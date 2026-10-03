@@ -108,6 +108,7 @@
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/kit_policy.cpp",
     "tools/cli/local_sdk_install.cpp",
     "tools/cli/local_sdk_profile.cpp",
     "tools/cli/mac_runtime_validators.cpp",
@@ -159,6 +160,7 @@
     "tools/cli/importer_git_install.cpp",
     "tools/cli/importer_install.cpp",
     "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/kit_policy.cpp",
     "tools/cli/local_sdk_install.cpp",
     "tools/cli/mac_runtime_validators.cpp",
     "tools/cli/package_registry.cpp",
@@ -348,6 +350,7 @@
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/kit_policy.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "spawning_sources": [
@@ -615,6 +618,7 @@
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
     "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/kit_policy.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "spawning_sources": [
