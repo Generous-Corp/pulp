@@ -15,8 +15,8 @@
 #include <windows.h>
 #endif
 
-#include <pulp/runtime/model_registry.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/model_registry.hpp>
 
 namespace pulp::gpu_audio::detail {
 
@@ -404,15 +404,13 @@ inline bool verify_neural_installed_assets(std::span<const NeuralInstalledAsset>
         std::error_code ec;
         const auto actual_size = std::filesystem::file_size(asset.path, ec);
         if (ec || actual_size != asset.size_bytes) {
-            error = "neural installed asset byte count mismatch: " +
-                    std::string(asset.asset_id);
+            error = "neural installed asset byte count mismatch: " + std::string(asset.asset_id);
             return false;
         }
 
         const auto actual_hash = pulp::runtime::sha256_file_hex(asset.path, asset.size_bytes);
         if (!actual_hash || *actual_hash != asset.sha256) {
-            error = "neural installed asset SHA-256 mismatch: " +
-                    std::string(asset.asset_id);
+            error = "neural installed asset SHA-256 mismatch: " + std::string(asset.asset_id);
             return false;
         }
     }
@@ -429,8 +427,7 @@ inline bool verify_neural_manifest_artifact(const NeuralModelManifest& manifest,
                                      .path = artifact_path,
                                      .sha256 = manifest.artifact_sha256,
                                      .size_bytes = manifest.artifact_size_bytes};
-    return verify_neural_installed_assets(std::span<const NeuralInstalledAsset>(&asset, 1),
-                                          error);
+    return verify_neural_installed_assets(std::span<const NeuralInstalledAsset>(&asset, 1), error);
 }
 
 } // namespace pulp::gpu_audio::detail

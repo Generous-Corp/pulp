@@ -232,10 +232,10 @@ TEST_CASE("neural admission verifies every installed asset byte count and hash",
     REQUIRE(state_hash);
 
     const std::array assets{
-        NeuralInstalledAsset{.asset_id = "weights", .path = weights, .sha256 = *weights_hash,
-                             .size_bytes = 128},
-        NeuralInstalledAsset{.asset_id = "state", .path = state, .sha256 = *state_hash,
-                             .size_bytes = 5},
+        NeuralInstalledAsset{
+            .asset_id = "weights", .path = weights, .sha256 = *weights_hash, .size_bytes = 128},
+        NeuralInstalledAsset{
+            .asset_id = "state", .path = state, .sha256 = *state_hash, .size_bytes = 5},
     };
     std::string error;
     REQUIRE(verify_neural_installed_assets(assets, error));
@@ -272,8 +272,9 @@ TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
     const auto state_hash = pulp::runtime::sha256_file_hex(state, 5);
     REQUIRE(weights_hash);
     REQUIRE(state_hash);
-    std::ofstream(metadata) << R"({"model_id":"demo","backend":"tcn","checkpoint_ref":"weights.bin","resolved_checkpoint_path":")"
-                            << weights.generic_string() << R"("})";
+    std::ofstream(metadata)
+        << R"({"model_id":"demo","backend":"tcn","checkpoint_ref":"weights.bin","resolved_checkpoint_path":")"
+        << weights.generic_string() << R"("})";
 
     auto manifest = valid_manifest();
     manifest.model_id = "demo";
@@ -293,11 +294,12 @@ TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
         if (!read_neural_model_manifest(sidecar, loaded, error))
             return 12;
         const std::array assets{
-            NeuralInstalledAsset{.asset_id = "weights", .path = weights,
+            NeuralInstalledAsset{.asset_id = "weights",
+                                 .path = weights,
                                  .sha256 = loaded.artifact_sha256,
                                  .size_bytes = loaded.artifact_size_bytes},
-            NeuralInstalledAsset{.asset_id = "state", .path = state, .sha256 = *state_hash,
-                                 .size_bytes = 5},
+            NeuralInstalledAsset{
+                .asset_id = "state", .path = state, .sha256 = *state_hash, .size_bytes = 5},
         };
         if (!verify_neural_installed_assets(assets, error))
             return 13;
@@ -305,8 +307,10 @@ TEST_CASE("installed neural manifest reloads in a fresh process before prepare",
         pulp::gpu_audio::detail::MicroTcnModel<1, 2> model;
         pulp::gpu_audio::detail::NeuralProcessor processor(model);
         const auto context = pulp::gpu_audio::detail::StreamingPrepareContext{
-            .spec = &model.spec(), .artifact_id = loaded.artifact_id,
-            .artifact_hash = loaded.artifact_sha256, .max_frames = 64};
+            .spec = &model.spec(),
+            .artifact_id = loaded.artifact_id,
+            .artifact_hash = loaded.artifact_sha256,
+            .max_frames = 64};
         if (!processor.prepare(context) || !processor.publish())
             return 14;
         return 0;
