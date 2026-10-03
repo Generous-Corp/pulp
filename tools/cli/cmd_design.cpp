@@ -137,9 +137,8 @@ int cmd_design(const std::vector<std::string>& args) {
     if (rc != 0) return rc;
 
     const auto governed_build = root / "tools" / "ci" / "governed-build.sh";
-    std::string build_command = "bash " + shell_quote(governed_build)
-                              + " cmake --build " + shell_quote(build_dir)
-                              + " --target pulp-design-tool";
+    std::string build_command = "bash " + shell_quote(governed_build) + " cmake --build " +
+                                shell_quote(build_dir) + " --target pulp-design-tool";
     rc = run_with_spinner(build_command, "Building design tool");
     if (rc != 0) return rc;
 
