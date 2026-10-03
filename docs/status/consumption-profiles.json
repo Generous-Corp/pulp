@@ -415,6 +415,7 @@
       "pulp/host/detail/forge_effect_modulation_extended_catalog.hpp",
       "pulp/host/detail/forge_lofi_catalog_descriptor.hpp",
       "pulp/host/detail/forge_realization_identity.hpp",
+      "pulp/host/detail/forge_space_catalog_descriptor.hpp",
       "pulp/host/detail/vst3_connection.hpp",
       "pulp/host/detail/vst3_editor.hpp",
       "pulp/host/detail/vst3_state_sync.hpp",
