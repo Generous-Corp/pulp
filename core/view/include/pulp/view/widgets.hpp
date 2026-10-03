@@ -84,7 +84,7 @@ class Label : public View, public SelectableText {
             text_direction_ != canvas::TextDirection::top_to_bottom &&
             text_direction_ != canvas::TextDirection::bottom_to_top;
         const bool single_line_simple =
-            horizontal && !multi_line_ && !captured_wrap_fallback_ && !has_attributed_;
+            horizontal && !soft_wraps() && !captured_wrap_fallback_ && !has_attributed_;
         // Baseline alignment reads this Label's ASCENT, not its height, to
         // place its siblings: under YGAlignBaseline a row's cross-axis
         // positions derive from the max baseline of the participating items.
@@ -263,6 +263,23 @@ class Label : public View, public SelectableText {
         invalidate_layout();
     }
     bool multi_line() const { return multi_line_; }
+
+    /// Whether this Label soft-wraps once CSS `white-space` inheritance is
+    /// applied: it is multi-line AND no ancestor's `white-space: nowrap`
+    /// reaches it. `white-space` is an inherited property, so the text inside
+    /// `<div style="white-space: nowrap"><span>…</span></div>` stays on one
+    /// line. A Label whose own mode is `normal` -- the CSS initial value, which
+    /// the React and web-compat importers stamp on every text element they
+    /// create -- defers to its nearest ancestor that set a different mode:
+    /// `nowrap` there means one line here. A Label that set `nowrap`, `pre`,
+    /// `pre-wrap`, `pre-line` or `break-spaces` itself keeps its own mode.
+    /// The native tree cannot tell the importers' stamped `normal` from an
+    /// authored one, so an authored `normal` under a `nowrap` ancestor also
+    /// stays on one line.
+    bool soft_wraps() const { return multi_line_ && !inherits_nowrap(); }
+    /// True when this Label's own mode is `normal` and its nearest ancestor
+    /// with a non-`normal` mode is `nowrap`.
+    bool inherits_nowrap() const;
 
     /// CSS `line-clamp` / `-webkit-line-clamp`. Maximum number of visible
     /// text lines for a multi-line label; 0 disables clamping.
@@ -849,7 +866,7 @@ private:
     /// the attributed path; neither belongs here -- the cache check reads a
     /// laid-out width (measurement cannot depend on the layout it feeds) and
     /// attributed text is measured on its own branch.
-    bool paints_as_lines() const { return multi_line_ || captured_wrap_fallback_; }
+    bool paints_as_lines() const { return soft_wraps() || captured_wrap_fallback_; }
     float compute_intrinsic_height() const;
     float compute_measured_height(float available_width) const;
     mutable MeasureBasis measure_basis_;
