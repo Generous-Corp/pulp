@@ -222,7 +222,7 @@
     },
     {
       "path": "tools/cli/kit_commands.cpp",
-      "max_loc": 2336,
+      "max_loc": 2153,
       "note": "kit/package trust-boundary monolith; split per tools/cli/KIT_COMMANDS_MODULE_MAP.md (manifest validation, shared JSON accessors, archive-safety path checks, and validation-profile verification are extracted into focused modules)"
     },
     {
