@@ -690,6 +690,7 @@ EXPORTS = [
     capability(
         key="midi.note-delay",
         domain="midi",
+        contract_version={"major": 2, "minor": 0},
         summary=(
             "Bounded MIDI note delay on a tempo division or millisecond clock, with velocity decay "
             "and cumulative per-repeat transposition. The dry note passes through, so it is a send."
@@ -704,7 +705,8 @@ EXPORTS = [
         },
         state_model=(
             "A fixed scheduled-note queue plus a per-key armed-source table; an echo's length is "
-            "rolled back once the authored release reveals how long the source note was held."
+            "rolled back once the authored release reveals how long the source note was held, or "
+            "uses the authorable gate percentage when configured."
         ),
         seed_model="none; echo placement is deterministic",
         determinism={
@@ -725,7 +727,7 @@ EXPORTS = [
             include="pulp/midi/note_delay.hpp",
             qualified_name="pulp::midi::NoteDelay<>",
             target="Pulp::midi",
-            header_fingerprint="sha256:c3cdd5ca2c4b7d82efbb46f2740d42a4987796403cdb950ba2c96dc9bca3c731",
+            header_fingerprint="sha256:e4db558ca8edb6f16de46a2bd8258a35b49df4878a0952120276c1549a94f415",
         )],
         _link_probes=[{
             "role": "entrypoint",
