@@ -105,8 +105,14 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-create-shellout": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "fixtures/packages/gain-dsp-kit",
+    "fixtures/packages/simple-plugin-template",
+    "tools/packages/registry.json",
+    "tools/templates/gain",
+    "tools/templates/standalone"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli"
@@ -118,9 +124,7 @@
     "test/test_cli_create_shellout.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_cli_create_shellout.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-cli-docs-command": {
    "data": "declared",
@@ -655,15 +659,26 @@
    "undeclared_sources": []
   },
   "pulp-test-design-import-native-materializer": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "core/audio/include",
+    "core/canvas/include",
+    "core/events/include",
+    "core/host/include",
+    "core/midi/include",
+    "core/music/include/pulp/music/pitch.hpp",
+    "core/platform/include",
+    "core/runtime/include",
+    "core/signal/include",
+    "core/state/include",
+    "core/view/include",
+    "test/fixtures/import-fidelity/assets/fader_ref.png"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_design_import_native_materializer.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_design_import_native_materializer.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-design-import-parity": {
    "data": "declared",
@@ -1028,23 +1043,29 @@
    "undeclared_sources": []
   },
   "pulp-test-mcp-server": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "CMakeLists.txt",
+    "core/timeline/schema/timeline_mcp_tools.json",
+    "test/fixtures/gpu-ux",
+    "test/fixtures/timeline/v1/minimal.json",
+    "test/fixtures/timeline/v4/sequence-markers.json",
+    "tools/mcp/pulp_mcp.cpp"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli",
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
    "spawning_sources": [
     "test/test_mcp_server.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_mcp_server.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-mcp-timeline-tools": {
    "data": "declared",

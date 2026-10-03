@@ -163,6 +163,11 @@ pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,
     options.timeout_ms = pulp_test_cli::shellout_timeout_ms();
 
     ScopedEnvVar disable_update("PULP_UPDATE_CHECK_DISABLED", "1");
+    // A checkout without external/vst3sdk would otherwise run
+    // `./setup.sh --deps-only` from inside `pulp create`, which reads and writes
+    // the tree well beyond the fixtures these cases declare. None of them
+    // depends on the SDK formats being available.
+    ScopedEnvVar no_bootstrap("PULP_SKIP_DEPENDENCY_BOOTSTRAP", "1");
     auto binary = pulp_binary();
     auto result =
         pulp::platform::ChildProcess::run(native_path_string(binary), args, options);
