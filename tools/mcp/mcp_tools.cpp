@@ -22,10 +22,29 @@ std::string handle_build(const std::string& /*params_json*/) {
     std::string output;
 
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
-        output += exec("cmake -B " + shell_quote(build_dir.string()) + " -S " +
-                       shell_quote(root.string()) + " 2>&1");
+        const auto configure = exec_with_status(
+            "cmake -B " + shell_quote(build_dir.string()) + " -S " +
+            shell_quote(root.string()) + " 2>&1");
+        output += configure.output;
+        if (configure.failed()) {
+            output += "\n[configure exit status: " + std::to_string(configure.status) + "]\n";
+            return "{\"content\":[{\"type\":\"text\",\"text\":" +
+                   json_string(output) + "}]}";
+        }
     }
-    output += exec("cmake --build " + shell_quote(build_dir.string()) + " 2>&1");
+
+    // MCP invokes the same governor as shell and CLI build entry points. Keep
+    // the command's output and exit status visible to the caller; `exec()`
+    // would turn a failing build with diagnostic output into a successful
+    // handler response.
+    const auto governor = root / "tools" / "ci" / "governed-build.sh";
+    const auto build = "bash " + shell_quote(governor.string()) +
+                       " cmake --build " + shell_quote(build_dir.string()) + " 2>&1";
+    const auto result = exec_with_status(build);
+    output += result.output;
+    if (result.failed()) {
+        output += "\n[governed build exit status: " + std::to_string(result.status) + "]\n";
+    }
 
     return "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
 }
