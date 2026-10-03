@@ -1009,7 +1009,19 @@ refuses any record whose platform is not `darwin-*`. The runner image fields
 take the SDK version and build from `xcrun`, and from the SDK's own
 `SDKSettings.json` and `SystemVersion.plist` when `xcrun` cannot answer. The
 digest does not depend on which source answered, and `runner_image.probe`
-records why a probe failed. Outcomes
+records why a probe failed. `toolchain` (`toolchain_identity()`) is what a compile depends on
+besides its sources: the compiler CMake's check recorded (id, version, its
+`--version` line, `-print-target-triple`), the SDK version and build, the
+deployment target, and an allow-listed environment (`TOOLCHAIN_ENV`). It has
+a digest. A value no probe found is left out rather than written as
+"unknown", both here and in `runner_image.fields`, and readers take an
+absent key as unknown. `missing` names the required keys that were absent
+(the SDK pair is required on macOS), and `complete` is false whenever
+`missing` is non-empty, in which case the record warns. A run outside GitHub
+Actions (the local mac lane) passes `--run-kind lane --run-id <id>`. The id
+is required, and the commit, tree and parent come from `--source-root`'s
+HEAD, so the gate and the lane compute the same identity with the same
+code. Outcomes
 come from ctest's JUnit report and attempts from its `LastTest.log`, which the
 test step keeps as `LastTest.full.log` because any later ctest call in the
 build directory replaces it. An alias `macos` job that ran no suite uploads a
