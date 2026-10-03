@@ -19,6 +19,60 @@ historical GPU-probe acceptance test from a depth-2 checkout. Keep its bounded
 removing it produces a deterministic shallow-history failure unrelated to the
 source change.
 
+## Landing a Pulp PR fast — the checklist
+
+Every step below exists because skipping it cost a CI round trip (20-40 min)
+on a real PR. Do them in order.
+
+1. **Run `tools/scripts/gates.sh origin/main` before every push.** It runs the
+   offline gates CI runs, including the Vellum watch-event gate: a range that
+   touches a watched capability-family path without a committed event FAILS
+   here and prints the exact event JSON (or run
+   `python3 tools/scripts/vellum_watch_preflight.py --write-event --rationale "..."`).
+   Commit the event before re-running — the checker reads the commit range.
+2. **Know the required contexts, and only those.** They come from branch
+   protection, not from the check list on the PR page:
+
+   ```sh
+   shipyard landability --repo Generous-Corp/pulp      # prints "required contexts (branch_protection): ..."
+   shipyard landability --repo Generous-Corp/pulp --pr <N>   # was each gate actually requested for this PR?
+   ```
+
+   As of 2026-10-02: `macos`, `Enforce version & skill sync`, `Vellum freeze`,
+   `Vellum trusted freeze`, `Build + prove + (owner-gated) deploy`,
+   `drift-fast`. Everything else (Workflow lint, CodeQL, Linux, Windows,
+   coverage) is advisory — red there does not stop auto-merge.
+3. **Open with `shipyard pr` and leave auto-merge armed.** Before you start,
+   `shipyard ship-state list` shows whether someone is already landing it.
+4. **Read `mergeStateStatus` correctly:**
+
+   | State | Means | Do |
+   |---|---|---|
+   | `CLEAN` | mergeable, all checks green | nothing; the queue takes it |
+   | `UNSTABLE` | mergeable; a **non-required** check is failing or pending | nothing. Auto-merge still fires. Check whether that check is also red on `main` before "fixing" it on your branch |
+   | `BLOCKED` | a **required** context is missing, pending, or failing (or a review is owed) | find which required context; `shipyard landability --pr <N>` tells absent from unschedulable |
+   | `BEHIND` | base moved under `strict` | if auto-merge is armed the merge queue does the update itself — check the queue before touching it |
+   | `DIRTY` | real conflict | merge `origin/main` and resolve; never `--force` |
+
+5. **Do not merge `main` into a BEHIND branch the queue owns.** With
+   auto-merge armed, BEHIND usually means QUEUED, and a queued branch rejects
+   pushes (`GH006 ... Branches that are queued for merging cannot be
+   updated`). Read the queue first:
+
+   ```sh
+   ghapp api graphql -f query='{repository(owner:"Generous-Corp",name:"pulp"){mergeQueue(branch:"main"){entries(first:20){nodes{position state pullRequest{number}}}}}}'
+   ```
+
+   Every manual merge of `main` also restarts the PR-head `macos` run for
+   nothing: the merge group validates the combined tree anyway.
+6. **A red check that your diff cannot have caused is probably `main`.**
+   Reproduce it on `origin/main` (see "Is `main` itself broken?") before
+   debugging your branch.
+7. **Wait with one blocking command, then prove the merge by git ancestry:**
+   `shipyard wait pr <N> --state merged`, then
+   `git fetch origin main -q && git merge-base --is-ancestor <merge-sha> origin/main`.
+   A `wait` exit code is not merge proof.
+
 ## Focused builds are a dev-loop default, never a landing signal
 
 `pulp build`, `pulp dev`, `pulp loop`, and `pulp test` in a source checkout build
