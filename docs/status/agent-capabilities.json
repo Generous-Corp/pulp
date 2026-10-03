@@ -2,7 +2,7 @@
   "$schema": "agent-capabilities.schema.json",
   "schema": "pulp.agent-capabilities.v1",
   "schema_minor": 1,
-  "manifest_revision": 63,
+  "manifest_revision": 64,
   "required_features": [
     "capability-contract-version-v1",
     "coverage-state-v1",
@@ -1233,6 +1233,10 @@
     {
       "key": "midi.note-delay",
       "domain": "midi",
+      "contract_version": {
+        "major": 2,
+        "minor": 0
+      },
       "summary": "Bounded MIDI note delay on a tempo division or millisecond clock, with velocity decay and cumulative per-repeat transposition. The dry note passes through, so it is a send.",
       "rt_class": "audio",
       "lifecycle": {
@@ -1242,7 +1246,7 @@
         "reset": "audio with prepared output",
         "release": "none"
       },
-      "state_model": "A fixed scheduled-note queue plus a per-key armed-source table; an echo's length is rolled back once the authored release reveals how long the source note was held.",
+      "state_model": "A fixed scheduled-note queue plus a per-key armed-source table; an echo's length is rolled back once the authored release reveals how long the source note was held, or uses the authorable gate percentage when configured.",
       "seed_model": "none; echo placement is deterministic",
       "determinism": {
         "repeatability": "bit_exact",
@@ -1280,10 +1284,6 @@
           }
         }
       ],
-      "contract_version": {
-        "major": 1,
-        "minor": 0
-      },
       "status": "usable",
       "evolution": {
         "state": "active",
@@ -1292,7 +1292,7 @@
           "minor": 0
         }
       },
-      "contract_digest": "sha256:6872c5a4261f503a3a31ab930e8655690e007db4e4d7bf753882a40ffad885f8"
+      "contract_digest": "sha256:24c18c15bd983565f425124d15f62858be04a33a296943013b81043d7f515608"
     },
     {
       "key": "midi.note-length-shaping",

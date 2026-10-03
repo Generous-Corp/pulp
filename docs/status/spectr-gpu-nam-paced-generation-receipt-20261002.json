@@ -24,7 +24,13 @@
       "/Users/danielraffel/Library/Application Support/Pulp",
       "/Users/danielraffel/Code"
     ],
-    "artifact_extensions": [".mlxfn", ".safetensors", ".ckpt", ".tflite", ".onnx"],
+    "artifact_extensions": [
+      ".mlxfn",
+      ".safetensors",
+      ".ckpt",
+      ".tflite",
+      ".onnx"
+    ],
     "findings": [
       "no /Users/danielraffel/.pulp/magenta directory",
       "no /Users/danielraffel/.pulp/magenta/models directory",
@@ -32,7 +38,10 @@
       "test/test_model_download.cpp contains generated mrt2 fixture names only"
     ],
     "forge_catalog_rows_for_spectr_gpu_nam": 0,
-    "closure": "closed_without_catalog_promotion"
+    "closure": "closed_without_catalog_promotion",
+    "parent_head_kind": "historical_probe_head",
+    "rechecked_against_current_main": false,
+    "provenance_note": "The probe was recorded on the historical parent head above; it is retained as unavailable-artifact evidence and is not a current-main validation."
   },
   "minimum_next_experiment": {
     "paced_blocks": 100000,

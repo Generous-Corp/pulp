@@ -14,24 +14,25 @@
 //      / order / flexWrap value aliases translate to the canonical
 //      Yoga enum values.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/canvas/canvas.hpp>
-#include <pulp/view/asset_manager.hpp>
-#include <pulp/view/canvas_widget.hpp>
-#include <pulp/view/modal.hpp>
-#include <pulp/view/text_editor.hpp>
-#include <pulp/view/widget_bridge.hpp>
-#include <pulp/view/widgets.hpp>
-#include <pulp/view/theme.hpp>
-#include <pulp/view/ui_components.hpp>
-#include <pulp/view/window_host.hpp>
-#include <pulp/view/plugin_view_host.hpp>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
+#include <pulp/canvas/canvas.hpp>
+#include <pulp/view/asset_manager.hpp>
+#include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/modal.hpp>
+#include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/window_host.hpp>
 #include <thread>
 
 using namespace pulp::view;

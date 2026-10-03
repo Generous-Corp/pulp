@@ -58,6 +58,15 @@ target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-create-shellout)
+# `pulp create` reads the package kits and the built-in gain template (and
+# checks for a standalone variant of it), and the dependency-kit case copies
+# the package registry.
+pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
+    fixtures/packages/simple-plugin-template
+    fixtures/packages/gain-dsp-kit
+    tools/templates/gain
+    tools/templates/standalone
+    tools/packages/registry.json)
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import

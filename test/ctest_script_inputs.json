@@ -153,8 +153,14 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-create-shellout": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "fixtures/packages/gain-dsp-kit",
+    "fixtures/packages/simple-plugin-template",
+    "tools/packages/registry.json",
+    "tools/templates/gain",
+    "tools/templates/standalone"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli"
@@ -166,9 +172,7 @@
     "test/test_cli_create_shellout.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_cli_create_shellout.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-cli-designmd-subcommands": {
    "data": "none",
@@ -875,8 +879,21 @@
    "undeclared_sources": []
   },
   "pulp-test-design-import-native-materializer": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "core/audio/include",
+    "core/canvas/include",
+    "core/events/include",
+    "core/host/include",
+    "core/midi/include",
+    "core/music/include/pulp/music/pitch.hpp",
+    "core/platform/include",
+    "core/runtime/include",
+    "core/signal/include",
+    "core/state/include",
+    "core/view/include",
+    "test/fixtures/import-fidelity/assets/fader_ref.png"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
@@ -886,9 +903,7 @@
     "test/test_design_import_native_materializer.cpp"
    ],
    "spawns": "none",
-   "undeclared_sources": [
-    "test/test_design_import_native_materializer.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-design-import-parity": {
    "data": "declared",
@@ -936,8 +951,10 @@
    "undeclared_sources": []
   },
   "pulp-test-fixture-runner-cli": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-fixture-runner"
@@ -949,9 +966,7 @@
     "test/test_fixture_runner_cli.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_fixture_runner_cli.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-forge-catalog-index": {
    "data": "declared",
@@ -1127,36 +1142,39 @@
    "undeclared_sources": []
   },
   "pulp-test-group-timeline": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "sources": [
+    "test/test_timeline_asset_loop_info.cpp",
     "test/test_timeline_automation_persistence.cpp",
+    "test/test_timeline_command_persistence.cpp",
     "test/test_timeline_device_placement_persistence.cpp",
     "test/test_timeline_marker_persistence.cpp",
+    "test/test_timeline_midi_content.cpp",
     "test/test_timeline_note_modifier_persistence.cpp",
     "test/test_timeline_persistence.cpp",
-    "test/test_timeline_session_persistence.cpp"
+    "test/test_timeline_persistence_limits.cpp",
+    "test/test_timeline_persistence_registry.cpp",
+    "test/test_timeline_release_serialization.cpp",
+    "test/test_timeline_session_persistence.cpp",
+    "test/test_timeline_take_comp_persistence.cpp",
+    "test/test_timeline_tuning.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_timeline_automation_persistence.cpp",
-    "test/test_timeline_device_placement_persistence.cpp",
-    "test/test_timeline_marker_persistence.cpp",
-    "test/test_timeline_note_modifier_persistence.cpp",
-    "test/test_timeline_persistence.cpp",
-    "test/test_timeline_session_persistence.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-group-timeline-playback": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_timeline_replay_golden.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_timeline_replay_golden.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-host": {
    "data": "none",
@@ -1271,23 +1289,29 @@
    "undeclared_sources": []
   },
   "pulp-test-mcp-server": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "CMakeLists.txt",
+    "core/timeline/schema/timeline_mcp_tools.json",
+    "test/fixtures/gpu-ux",
+    "test/fixtures/timeline/v1/minimal.json",
+    "test/fixtures/timeline/v4/sequence-markers.json",
+    "tools/mcp/pulp_mcp.cpp"
+   ],
    "kind": "compiled",
    "runtime_targets": [
     "pulp-cli",
     "pulp-test-mcp-gpu-probe-fake-cli"
    ],
    "sources": [
+    "test/test_mcp_control_adapter.cpp",
     "test/test_mcp_server.cpp"
    ],
    "spawning_sources": [
     "test/test_mcp_server.cpp"
    ],
    "spawns": "declared",
-   "undeclared_sources": [
-    "test/test_mcp_server.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-mcp-timeline-tools": {
    "data": "declared",
@@ -1400,15 +1424,18 @@
    "undeclared_sources": []
   },
   "pulp-test-sample-region-sequencer": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "core/host/src/signal_graph.cpp",
+    "core/host/src/timeline_automation_delivery.cpp",
+    "docs/status/sequencer-exposure/rows/sample-region-sequencer-interoperability.json",
+    "examples/sample-region-allpass/README.md"
+   ],
    "kind": "compiled",
    "sources": [
     "test/test_sample_region_sequencer.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_sample_region_sequencer.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-ship-tracing-guard": {
    "data": "declared",
@@ -1419,6 +1446,18 @@
    "sources": [
     "test/test_ship_tracing_guard.cpp"
    ],
+   "undeclared_sources": []
+  },
+  "pulp-test-streaming-model-contract": {
+   "data": "none",
+   "inputs": [],
+   "kind": "compiled",
+   "runtime_targets": [],
+   "sources": [],
+   "spawning_sources": [
+    "test/test_streaming_model_contract.cpp"
+   ],
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-template-ui-scripts": {
@@ -1433,15 +1472,17 @@
    "undeclared_sources": []
   },
   "pulp-test-timeline-document-fuzz": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/timeline"
+   ],
    "kind": "compiled",
    "sources": [
+    "test/fuzz/timeline_document_corpus.cpp",
+    "test/fuzz/timeline_document_oracle.cpp",
     "test/test_timeline_document_fuzz.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_timeline_document_fuzz.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-timeline-graph-binding": {
    "data": "none",
@@ -1884,6 +1925,7 @@
   "pulp-test-music-pattern-development",
   "pulp-test-music-theory",
   "pulp-test-music-voicing",
+  "pulp-test-nam-tcn-adapter",
   "pulp-test-native-core-ffi",
   "pulp-test-native-core-processor",
   "pulp-test-native-metal-audio-comparator",
@@ -2015,6 +2057,8 @@
   "pulp-test-standalone-rt",
   "pulp-test-state",
   "pulp-test-step-grid-view",
+  "pulp-test-streaming-model-benchmark",
+  "pulp-test-streaming-model-contract",
   "pulp-test-super-convolver-clap-params",
   "pulp-test-super-convolver-dsp",
   "pulp-test-super-convolver-web-cpu",
@@ -3333,6 +3377,14 @@
    "entry": "test/test_figma_rest_export.py",
    "inputs": [
     "test/test_figma_rest_export.py"
+   ],
+   "kind": "python"
+  },
+  "find-pluginval-selftest": {
+   "entry": "tools/ci/test_find_pluginval.py",
+   "inputs": [
+    "tools/ci/test_find_pluginval.py",
+    "tools/cmake/PulpFindPluginval.cmake"
    ],
    "kind": "python"
   },

@@ -28,6 +28,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -116,6 +117,70 @@ fs::path write_asset_file(const fs::path& path) {
     REQUIRE(out.good());
 }
 
+// The checkout directories a generated source may include from. They are this
+// suite's declared data (test/cmake/design_import_native_codegen_tests.cmake),
+// so the compile must not reach any other part of the tree: the repository
+// root is deliberately not an include directory.
+[[maybe_unused]] std::vector<fs::path> materialized_include_roots() {
+    const fs::path root(PULP_REPO_ROOT);
+    std::vector<fs::path> roots;
+    for (const char* module : {"view", "canvas", "runtime", "platform", "events", "state", "audio",
+                               "midi", "signal", "host"}) {
+        roots.push_back(root / "core" / module / "include");
+    }
+    return roots;
+}
+
+// The checkout files a compile read that lie outside the include roots, from
+// the Make-style dependency file `-MD -MF` wrote.
+[[maybe_unused]] std::vector<std::string> checkout_reads_outside_roots(const fs::path& depfile) {
+    std::ifstream in(depfile);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::string joined;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == '\n') {
+            ++i;
+            continue;
+        }
+        joined.push_back(text[i]);
+    }
+    const auto colon = joined.find(": ");
+    std::vector<std::string> outside;
+    if (colon == std::string::npos)
+        return outside;
+    const auto root = fs::weakly_canonical(fs::path(PULP_REPO_ROOT)).generic_string() + "/";
+    std::vector<std::string> roots;
+    for (const auto& dir : materialized_include_roots())
+        roots.push_back(fs::weakly_canonical(dir).generic_string() + "/");
+    std::string current;
+    auto flush = [&] {
+        if (current.empty())
+            return;
+        const auto path = fs::weakly_canonical(fs::path(current)).generic_string();
+        current.clear();
+        if (path.rfind(root, 0) != 0)
+            return;
+        for (const auto& allowed : roots) {
+            if (path.rfind(allowed, 0) == 0)
+                return;
+        }
+        outside.push_back(path);
+    };
+    for (std::size_t i = colon + 2; i < joined.size(); ++i) {
+        const char c = joined[i];
+        if (c == '\\' && i + 1 < joined.size() && joined[i + 1] == ' ') {
+            current.push_back(' ');
+            ++i;
+        } else if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
+            flush();
+        } else {
+            current.push_back(c);
+        }
+    }
+    flush();
+    return outside;
+}
+
 [[maybe_unused]] bool compile_generated_source(const fs::path& source_path,
                                                const fs::path& output_path,
                                                std::string* diagnostics) {
@@ -125,20 +190,10 @@ fs::path write_asset_file(const fs::path& path) {
         return false;
     }
 
-    const fs::path root(PULP_REPO_ROOT);
-    std::vector<std::string> include_dirs = {
-        root.string(),
-        (root / "core" / "view" / "include").string(),
-        (root / "core" / "canvas" / "include").string(),
-        (root / "core" / "runtime" / "include").string(),
-        (root / "core" / "platform" / "include").string(),
-        (root / "core" / "events" / "include").string(),
-        (root / "core" / "state" / "include").string(),
-        (root / "core" / "audio" / "include").string(),
-        (root / "core" / "midi" / "include").string(),
-        (root / "core" / "signal" / "include").string(),
-        (root / "core" / "host" / "include").string(),
-    };
+    std::vector<std::string> include_dirs;
+    for (const auto& dir : materialized_include_roots())
+        include_dirs.push_back(dir.string());
+    const auto depfile = fs::path(output_path.string() + ".d");
 
     std::vector<std::string> args;
 #if defined(_WIN32)
@@ -180,6 +235,9 @@ fs::path write_asset_file(const fs::path& path) {
             args.push_back("-I");
             args.push_back(dir);
         }
+        args.push_back("-MD");
+        args.push_back("-MF");
+        args.push_back(depfile.string());
         args.push_back("-c");
         args.push_back(source_path.string());
         args.push_back("-o");
@@ -189,7 +247,23 @@ fs::path write_asset_file(const fs::path& path) {
     auto result = pulp::platform::exec(compiler.string(), args, 30000);
     if (diagnostics != nullptr)
         *diagnostics = result.stdout_output + result.stderr_output;
-    return !result.timed_out && result.exit_code == 0 && fs::exists(output_path);
+    if (result.timed_out || result.exit_code != 0 || !fs::exists(output_path))
+        return false;
+    // A compile that reached a checkout file outside the declared roots read
+    // data this suite does not declare, so it fails here rather than passing
+    // on an input a selector cannot see.
+    if (fs::exists(depfile)) {
+        const auto outside = checkout_reads_outside_roots(depfile);
+        if (!outside.empty()) {
+            if (diagnostics != nullptr) {
+                *diagnostics += "compile read checkout files outside the declared include roots:";
+                for (const auto& path : outside)
+                    *diagnostics += "\n  " + path;
+            }
+            return false;
+        }
+    }
+    return true;
 }
 
 const pulp::canvas::DrawCommand* first_meter_fill_rect(const pulp::canvas::RecordingCanvas& canvas) {
@@ -2616,6 +2690,44 @@ TEST_CASE("generated C++ attributed labels compile as standalone source",
     const bool compiled = compile_generated_source(source, object, &diagnostics);
     INFO(diagnostics);
     REQUIRE(compiled);
+#endif
+}
+
+TEST_CASE("generated-source compiles see only the declared include roots",
+          "[view][import][native-materializer][cpp-codegen]") {
+#if defined(_WIN32)
+    SKIP("freestanding generated-source compile is unsupported on the Windows CI toolchain");
+#else
+    TempDir tmp("pulp-native-materializer-include-roots");
+    std::string diagnostics;
+
+    // The repository root is not an include directory, so a header reachable
+    // only through it does not resolve.
+    const auto via_root = tmp.path / "via_root.cpp";
+    write_text(via_root, "#include <core/music/include/pulp/music/pitch.hpp>\n");
+    REQUIRE_FALSE(compile_generated_source(via_root, tmp.path / "via_root.o", &diagnostics));
+
+    // A compile that does reach a checkout file outside the roots (here by an
+    // absolute include, which -I cannot stop) is refused by its dependency file.
+    const auto outside = tmp.path / "outside.cpp";
+    write_text(outside, "#include \"" + (fs::path(PULP_REPO_ROOT) / "core" / "music" / "include" / "pulp" /
+                                          "music" / "pitch.hpp").generic_string() + "\"\n");
+    diagnostics.clear();
+    REQUIRE_FALSE(compile_generated_source(outside, tmp.path / "outside.o", &diagnostics));
+    INFO(diagnostics);
+    REQUIRE(diagnostics.find("outside the declared include roots") != std::string::npos);
+    REQUIRE(diagnostics.find("core/music/include/pulp/music/pitch.hpp") != std::string::npos);
+
+    // The same header copied out of the checkout compiles: the refusal above is
+    // the guard, not the header.
+    const auto copied = tmp.path / "pitch.hpp";
+    fs::copy_file(fs::path(PULP_REPO_ROOT) / "core" / "music" / "include" / "pulp" / "music" / "pitch.hpp",
+                  copied);
+    const auto inside = tmp.path / "inside.cpp";
+    write_text(inside, "#include \"" + copied.generic_string() + "\"\n");
+    diagnostics.clear();
+    INFO(diagnostics);
+    REQUIRE(compile_generated_source(inside, tmp.path / "inside.o", &diagnostics));
 #endif
 }
 

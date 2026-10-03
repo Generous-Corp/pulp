@@ -1,0 +1,73 @@
+{
+  "schema": "pulp.a1-governed-build-receipt/v1",
+  "commit": "48de18ab25557a608c292ca4f83b4f55a771735a",
+  "branch": "codex/a1-governed-build-20261003",
+  "base": "064b045cbba6aeab798f45b5e4f56abf176aef94",
+  "governed_build": {
+    "command": "pulp build --all",
+    "result": "passed",
+    "targets": 2627
+  },
+  "focused_targets": [
+    "pulp-scan-worker",
+    "pulp-control-broker",
+    "pulp-au-instrument-probe",
+    "pulp-au-effect-ab",
+    "pulp-runtime-pins",
+    "pulp-import-design"
+  ],
+  "staging_test": {
+    "command": "ctest --test-dir build -R ^cmake-installed-sdk-runtime-staging$ --output-on-failure",
+    "result": "passed",
+    "tests_passed": 1,
+    "elapsed_seconds": 79.42
+  },
+  "ci_follow_up": {
+    "linux_failure": {
+      "job": "Linux (x64) [github-hosted]",
+      "tests": [
+        "MCP build and test handlers quote project paths and filters",
+        "MCP package workflow preserves inspect plan approve apply gates"
+      ],
+      "cause": "fixture project omitted tools/ci/governed-build.sh; handler returned exit 127",
+      "classification": "fixed-by-fixture-wrapper",
+      "source_run": "37102334174",
+      "resolution": "removed production raw cmake fallback; both fixture projects now create tools/ci/governed-build.sh delegating to fake cmake"
+    },
+    "rerun": {
+      "command": "ctest --test-dir build -R 'MCP (build and test handlers quote project paths and filters|package workflow preserves inspect plan approve apply gates)' --output-on-failure",
+      "result": "passed",
+      "tests_passed": 2
+    },
+    "format": "passed",
+    "vellum_freeze": "passed",
+    "trusted_base_executor": "passed",
+    "focused_governance": {
+      "format_changed": "passed",
+      "build_parallelism_guard": "passed",
+      "governance_unit_tests": {
+        "command": "python3 -m unittest tools/ci/test_build_governance_paths.py tools/local-ci/test_desktop_video_matrix_commands_cli.py",
+        "result": "passed",
+        "tests_passed": 10
+      }
+    },
+    "gates": {
+      "command": "tools/scripts/gates.sh origin/main",
+      "result": "passed-with-one-not-checked",
+      "source_selftests_passed": 23,
+      "workflow_contracts_passed": 12,
+      "pr_fast_passed": 99,
+      "other_contracts_passed": 15,
+      "pre_existing_on_base": [
+        "scene3d-native-slice-handoff-contract",
+        "scene3d-native-slice-handoff-negative-contract",
+        "gpu-clean-agent-journey-selftest"
+      ],
+      "not_checked_locally": [
+        "tools/scripts/test_generated_version_bump_check.py"
+      ],
+      "diff_coverage": "not-run-locally"
+    }
+  },
+  "roadmap_changed": false
+}

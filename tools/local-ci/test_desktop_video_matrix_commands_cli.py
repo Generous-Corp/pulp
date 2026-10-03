@@ -113,7 +113,7 @@ class DesktopVideoMatrixCommandsTests(unittest.TestCase):
         self.assertEqual(
             standalone["prepare_command"],
             'cmake -S . -B build-desktop-automation -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DSKIA_DIR="$(pwd)/external/skia-build" && '
-            "cmake --build build-desktop-automation --target pulp-ui-preview -j$(sysctl -n hw.ncpu)",
+            "tools/ci/governed-build.sh cmake --build build-desktop-automation --target pulp-ui-preview",
         )
         self.assertIn("--prepare-command", standalone["command"])
         self.assertIn('-DSKIA_DIR="$(pwd)/external/skia-build"', standalone["command"])
