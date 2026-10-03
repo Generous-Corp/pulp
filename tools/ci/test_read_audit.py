@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -128,6 +129,26 @@ class DiffTests(unittest.TestCase):
                   '101   newfstatat(AT_FDCWD, "/w/repo/docs/x.md", {st_mode=S_IFREG}, 0) = 0\n'
                   '101   openat(AT_FDCWD, "/w/repo/docs/x.md", O_RDONLY) = 3\n')
         got = ra.checkout_accesses(t, Path(REPO), [Path(BUILD)], FILES, ra.tracked_dirs(FILES))
+        self.assertEqual(list(got), [("docs/x.md", "read")])
+
+
+class UnreadablePathTests(unittest.TestCase):
+    def test_pseudo_filesystems_and_refused_paths_are_skipped_not_fatal(self) -> None:
+        # Another process's /proc/<pid>/cwd raises EACCES on readlink, which
+        # os.path.realpath passes up; one such path once ended a whole run.
+        t = parse('100   clone(child_stack=NULL) = 101\n'
+                  '101   openat(AT_FDCWD, "/proc/1/cwd", O_RDONLY) = -1 EACCES (Permission denied)\n'
+                  '101   openat(AT_FDCWD, "/w/repo/docs/x.md", O_RDONLY) = 3\n'
+                  '101   openat(AT_FDCWD, "/w/repo/README.md", O_RDONLY) = 3\n')
+        real = ra.os.path.realpath
+
+        def refusing(path, *args, **kwargs):
+            if str(path).startswith("/proc/") or str(path).endswith("README.md"):
+                raise PermissionError(13, "Permission denied", path)
+            return real(path, *args, **kwargs)
+
+        with mock.patch.object(ra.os.path, "realpath", refusing):
+            got = ra.checkout_accesses(t, Path(REPO), [Path(BUILD)], FILES, ra.tracked_dirs(FILES))
         self.assertEqual(list(got), [("docs/x.md", "read")])
 
 

@@ -252,6 +252,18 @@ def covered_by(rel: str, inputs: list[str]) -> str | None:
     return None
 
 
+def _real(path: str) -> str | None:
+    """The resolved path, or None for a path that cannot be a checkout file:
+    a kernel pseudo-filesystem (another process's /proc/<pid>/cwd raises
+    EACCES on readlink) or one the resolver is refused."""
+    if path == "/proc" or path.startswith(("/proc/", "/sys/", "/dev/")):
+        return None
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return None
+
+
 def checkout_accesses(trace: Trace, root: Path, excluded: list[Path], files: set[str],
                       dirs: set[str]) -> dict[tuple[str, str], str]:
     """(relative path, kind) -> program for every access of a tracked path.
@@ -263,8 +275,8 @@ def checkout_accesses(trace: Trace, root: Path, excluded: list[Path], files: set
     for a in trace.accesses:
         if a.pid == trace.root_pid:
             continue
-        real = os.path.realpath(a.path)
-        if not (real == root_real or real.startswith(root_real + os.sep)):
+        real = _real(a.path)
+        if real is None or not (real == root_real or real.startswith(root_real + os.sep)):
             continue
         if any(real == s or real.startswith(s + os.sep) for s in skip):
             continue
@@ -418,7 +430,8 @@ def summarize(report: dict) -> str:
     c = report["control"]
     lines.append(f"Control: {'flagged its undeclared read' if c.get('ok') else 'FAILED: ' + str(c.get('reason'))}")
     lines += ["", f"- executables audited: {t['audited']} of {t['executables']} registered "
-                  f"({t['unobserved']} unobserved, {t['tests']} ctest registrations)",
+                  f"({t['unobserved']} unobserved, {t.get('errors', 0)} failed to audit, "
+                  f"{t['tests']} ctest registrations)",
               f"- findings: {t['findings']} undeclared checkout accesses in {t['executables_with_findings']} "
               f"executables ({t['finding_reads']} reads, {t['finding_listings']} listings, "
               f"{t['finding_probes']} probes)",
@@ -452,6 +465,8 @@ def cmd_run(a: argparse.Namespace) -> int:
     dirs = tracked_dirs(files)
     work = Path(tempfile.mkdtemp(prefix="read-audit-"))
     control = run_control(root, work, files, dirs)
+    print(f"read-audit: control {'flagged its undeclared read' if control['ok'] else 'FAILED'}: "
+          f"{json.dumps(control, sort_keys=True)}", flush=True)
     report: dict = {"schema": SCHEMA, "source_root": str(root), "build_dir": str(build_dir),
                     "commit": subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
                                              text=True).stdout.strip(),
@@ -466,8 +481,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:
         futures = {pool.submit(audit_group, g, build_dir, root, work, files, dirs, a.timeout, a.per_test_limit): g
                    for g in groups}
-        for fut in concurrent.futures.as_completed(futures):
-            report["executables"][futures[fut].executable] = fut.result()
+        for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
+            exe = futures[fut].executable
+            try:
+                rec = fut.result()
+            except Exception as exc:  # noqa: BLE001 - one executable must not lose the whole run
+                rec = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            report["executables"][exe] = rec
+            print(f"read-audit: [{done}/{len(groups)}] {exe}: {rec.get('status')} "
+                  f"{len(rec.get('findings') or [])} finding(s)", flush=True)
     registered = {g.executable for g in groups}
     recs = report["executables"].values()
     found = [f for r in recs for f in r.get("findings") or []]
@@ -477,6 +499,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         "executables": len(groups), "tests": sum(len(g.tests) for g in groups),
         "audited": sum(1 for r in recs if r.get("status") == "audited"),
         "unobserved": sum(1 for r in recs if r.get("status") == "unobserved"),
+        "errors": sum(1 for r in recs if r.get("status") == "error"),
         "findings": len(found), "executables_with_findings": sum(1 for r in recs if r.get("findings")),
         "finding_reads": sum(f["kind"] == "read" for f in found),
         "finding_listings": sum(f["kind"] == "listing" for f in found),
