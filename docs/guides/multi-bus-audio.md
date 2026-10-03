@@ -41,7 +41,7 @@ buses read silence rather than uninitialised memory. See
 | VST3   | `addAudioOutput` per declared bus (main + aux) | second input bus (`kAux`) | Full multi-in/out. |
 | CLAP   | one audio-output port per declared bus | second input port | Full multi-in/out. |
 | AU v2 **instrument** (`aumu`) | one AU **output element** per declared bus | n/a (no input) | Logic/Live/Cubase list each aux output and route it to its own channel. |
-| AU v2 **effect** (`aufx`/`aumf`) | single main output only | inactive Sidechain bus | AUEffectBase is `AUBase(ci,1,1)` and pulls only input element 0, so a declared sidechain surfaces as an *inactive* bus (`sidechain_input()` returns null gracefully). Live sidechain-audio into an AU effect is not delivered by the stock render path. |
+| AU v2 **effect** (`aufx`/`aumf`) | single main output only | second input **element** named "Side Chain" | A declared sidechain bus adds input element 1, so Logic offers its Side Chain pop-up. The adapter pulls element 1 before the main render and delivers it as the Sidechain bus; while the host leaves it unconnected `sidechain_input()` returns null. |
 | AU v3  | descriptor bus 0 + one input bus 1 today | input bus 1 | Additional aux outputs not yet surfaced. |
 
 Disconnected buses are always delivered inactive/silent **without reordering**
@@ -68,8 +68,10 @@ plugin) and confirm:
   bus; enable the aux outputs and confirm the channels appear in the mixer.
 - **Reaper** (VST3/CLAP): the FX shows N output pins; wire pins 3–16 to child
   tracks / hardware outs and confirm per-voice isolation. For an effect
-  sidechain, wire a second input pin and confirm the plugin receives it
-  (VST3/CLAP only — see the AU-effect caveat above).
+  sidechain, wire a second input pin and confirm the plugin receives it.
+- **Logic Pro** (AU effect sidechain): insert the effect on an audio track; the
+  plug-in header shows a *Side Chain* pop-up. Pick another track as the source
+  and confirm the plugin reacts to it (and stops reacting with *None*).
 
 Record the DAW + version and the pass/fail per bullet in the PR description; this
 checklist is a human step, not a CI gate.

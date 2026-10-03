@@ -62,6 +62,7 @@
 #include <pulp/view/ui_components.hpp>
 #include "window_host_mac_capture.h"  // mac_capture::encode_rgba_to_png
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATransaction.h>
 #import <CoreVideo/CVDisplayLink.h>
 #import <Metal/Metal.h>
 #endif
@@ -1549,6 +1550,14 @@ public:
     }
 
     void repaint() override {
+        if (in_idle_half_) {
+            // A repaint the idle work asks for (the document mount above all)
+            // waits for this tick's paint half. Marking the view now would let
+            // AppKit's own display pass, which runs before the main queue is
+            // drained again, draw it ahead of a host resize queued meanwhile.
+            display_deferred_to_paint_ = true;
+            return;
+        }
         @autoreleasepool {
             [view_ setNeedsDisplay:YES];
         }
@@ -1681,6 +1690,7 @@ public:
                 // host-automation listeners to the UI (bind_parameter widgets
                 // repaint themselves via request_repaint on change).
                 std::function<void()> idle = self->idle_cb_;
+                self->in_idle_half_ = true;
                 if (idle) idle();
                 // Idle work (store pump / scripted poll) can reentrantly close
                 // the editor → ~host sets alive=false and frees `self`. Re-check
@@ -1688,75 +1698,100 @@ public:
                 // shared state, so leaving it set after teardown is harmless
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
-                // Frame-tick focus reconciliation — the event-independent cadence.
-                // syncKeyFocus is only called on discrete key/mouse events, so a
-                // focus slot that clears WITHOUT a following event (a failed/rejected
-                // generation, a programmatic blur) would leave the editor NSView
-                // first responder, swallowing the DAW's Musical Typing letter keys
-                // until close/reopen. Running it every tick hands the keyboard back
-                // on the next vsync. Cheap + idempotent: syncKeyFocus only touches
-                // first responder on a transition (makeFirstResponder:nil when no
-                // pulp text field is focused and we still hold it; makeFirstResponder:
-                // self when one is focused and we don't), guarded so a steady state
-                // is a no-op. Runs after idle() so a focus change the JS pump made
-                // this frame is reflected immediately.
-                if (self->view_) [self->view_ syncKeyFocus];
-                // Consume the dirty flag AFTER the idle callback, so a repaint it
-                // requested lands in THIS frame; anything that dirties the view
-                // later (during the advance below) re-arms it for the next one.
-                const bool dirty =
-                    state->needs_repaint.exchange(false, std::memory_order_relaxed);
-                const auto tick = pulp::view::begin_host_frame(
-                    &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
-                    dirty);
-                // begin_host_frame() runs the FrameClock activity channel
-                // (clock.pump_activity) BEFORE `dirty` could reflect it. An
-                // activity probe can call request_repaint() from there — the Forge
-                // generation chrome rides that channel to drain build progress into
-                // the tree (its poll() is the one driver that provably ticks in an
-                // embedded editor). That dirty was sampled too late for `tick`, so
-                // fold it in here or the frame it dirtied would wait a whole vsync.
-                const bool dirtied_during_tick =
-                    state->needs_repaint.exchange(false, std::memory_order_relaxed);
-                // Publish the tree's liveness for the next vsync's gate.
-                state->continuous.store(tick.continuous, std::memory_order_relaxed);
-                if (tick.should_render || dirtied_during_tick) {
-                    if (tick.should_render)
-                        pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
-                    // The frame that moved content under a stationary pointer is
-                    // the only chance to update the cursor: AppKit re-asks on
-                    // pointer motion, never because the content moved.
-                    [self->view_ refreshHoverCursor];
-                    if (self->view_) {
-                        // An ANIMATING tree re-arms the dirty flag so the gate stays
-                        // open for the settling frame after the last animation one.
-                        // A dirty-ONLY frame must NOT re-mark here — that would feed
-                        // needs_repaint through -setNeedsDisplay: forever (an ungated
-                        // link with extra steps).
-                        if (tick.continuous) [self->view_ setNeedsDisplay:YES];
-                        // DRIVE the paint from the display-link tick — the CPU
-                        // analogue of the GPU host presenting from render_frame().
-                        // AppKit only services a pending -setNeedsDisplay: on its
-                        // OWN display pass, and Logic's OUT-OF-PROCESS AU host
-                        // (AUHostingServiceXPC) does not reliably run that pass for a
-                        // remote-hosted view: after the first paint, every later
-                        // request_repaint() marks the view dirty but it is never
-                        // drawn — progress freezes mid-generation, knob drags don't
-                        // move, and the tree only shows its real state on close +
-                        // reopen (a fresh view gets one initial paint). displayIfNeeded
-                        // flushes any pending needs-display region NOW, on the pump's
-                        // cadence, closing that gap. In-process hosts (REAPER,
-                        // standalone) are unaffected: the region was already going to
-                        // paint; this just paints it a few ms earlier on the same
-                        // frame. Safe when the view is windowless (AppKit no-ops) and
-                        // guarded by the alive checks above.
-                        [self->view_ displayIfNeeded];
+                self->in_idle_half_ = false;
+                // Paint in a later main-queue turn than the idle work, so host
+                // geometry queued behind it lands first (see the GPU host's
+                // display_link_callback). `queued` stays set across the hop.
+                // Repaints the idle work asked for were held back (repaint()),
+                // so AppKit's own display pass cannot draw them in between.
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    @autoreleasepool {
+                        if (!state->alive.load(std::memory_order_acquire)) {
+                            state->queued.store(false, std::memory_order_release);
+                            return;
+                        }
+                        self->paint_tick(frame_time);
                     }
-                }
-                state->queued.store(false, std::memory_order_release);
+                });
             }
         });
         return kCVReturnSuccess;
+    }
+
+    // The paint half of a render-link tick, one main-queue turn after its idle
+    // half. Releases the link's `queued` flag on every path.
+    void paint_tick(double frame_time) {
+        auto& link = *link_state_;
+        if (display_deferred_to_paint_) {
+            display_deferred_to_paint_ = false;
+            if (view_) [view_ setNeedsDisplay:YES];  // also arms link.needs_repaint
+        }
+        // Frame-tick focus reconciliation — the event-independent cadence.
+        // syncKeyFocus is only called on discrete key/mouse events, so a
+        // focus slot that clears WITHOUT a following event (a failed/rejected
+        // generation, a programmatic blur) would leave the editor NSView
+        // first responder, swallowing the DAW's Musical Typing letter keys
+        // until close/reopen. Running it every tick hands the keyboard back
+        // on the next vsync. Cheap + idempotent: syncKeyFocus only touches
+        // first responder on a transition (makeFirstResponder:nil when no
+        // pulp text field is focused and we still hold it; makeFirstResponder:
+        // self when one is focused and we don't), guarded so a steady state
+        // is a no-op. Runs after idle() so a focus change the JS pump made
+        // this frame is reflected immediately.
+        if (view_) [view_ syncKeyFocus];
+        // Consume the dirty flag AFTER the idle callback, so a repaint it
+        // requested lands in THIS frame; anything that dirties the view
+        // later (during the advance below) re-arms it for the next one.
+        const bool dirty =
+            link.needs_repaint.exchange(false, std::memory_order_relaxed);
+        const auto tick = pulp::view::begin_host_frame(
+            &root_, frame_clock_, frame_pump_, frame_time,
+            dirty);
+        // begin_host_frame() runs the FrameClock activity channel
+        // (clock.pump_activity) BEFORE `dirty` could reflect it. An
+        // activity probe can call request_repaint() from there — the Forge
+        // generation chrome rides that channel to drain build progress into
+        // the tree (its poll() is the one driver that provably ticks in an
+        // embedded editor). That dirty was sampled too late for `tick`, so
+        // fold it in here or the frame it dirtied would wait a whole vsync.
+        const bool dirtied_during_tick =
+            link.needs_repaint.exchange(false, std::memory_order_relaxed);
+        // Publish the tree's liveness for the next vsync's gate.
+        link.continuous.store(tick.continuous, std::memory_order_relaxed);
+        if (tick.should_render || dirtied_during_tick) {
+            if (tick.should_render)
+                pulp::view::advance_host_frame(&root_, frame_clock_, tick.dt);
+            // The frame that moved content under a stationary pointer is
+            // the only chance to update the cursor: AppKit re-asks on
+            // pointer motion, never because the content moved.
+            [view_ refreshHoverCursor];
+            if (view_) {
+                // An ANIMATING tree re-arms the dirty flag so the gate stays
+                // open for the settling frame after the last animation one.
+                // A dirty-ONLY frame must NOT re-mark here — that would feed
+                // needs_repaint through -setNeedsDisplay: forever (an ungated
+                // link with extra steps).
+                if (tick.continuous) [view_ setNeedsDisplay:YES];
+                // DRIVE the paint from the display-link tick — the CPU
+                // analogue of the GPU host presenting from render_frame().
+                // AppKit only services a pending -setNeedsDisplay: on its
+                // OWN display pass, and Logic's OUT-OF-PROCESS AU host
+                // (AUHostingServiceXPC) does not reliably run that pass for a
+                // remote-hosted view: after the first paint, every later
+                // request_repaint() marks the view dirty but it is never
+                // drawn — progress freezes mid-generation, knob drags don't
+                // move, and the tree only shows its real state on close +
+                // reopen (a fresh view gets one initial paint). displayIfNeeded
+                // flushes any pending needs-display region NOW, on the pump's
+                // cadence, closing that gap. In-process hosts (REAPER,
+                // standalone) are unaffected: the region was already going to
+                // paint; this just paints it a few ms earlier on the same
+                // frame. Safe when the view is windowless (AppKit no-ops) and
+                // guarded by the alive checks above.
+                [view_ displayIfNeeded];
+            }
+        }
+        link.queued.store(false, std::memory_order_release);
     }
 
     void set_size(uint32_t width, uint32_t height) override {
@@ -1892,6 +1927,10 @@ private:
         std::atomic<bool> has_idle_callback{false};
     };
     std::shared_ptr<FrameLink> link_state_ = std::make_shared<FrameLink>();
+    // True while the render link runs the idle callback; a repaint() requested
+    // then is held for that tick's paint half (display_deferred_to_paint_).
+    bool in_idle_half_ = false;
+    bool display_deferred_to_paint_ = false;
     // Design viewport: when (>0, >0) root paints at design size and the
     // canvas applies translate+scale to fit the host bounds. Mouse coords
     // are inverse-mapped via window_to_root_point().
@@ -2541,6 +2580,11 @@ private:
     float design_viewport_w_ = 0.0f;
     float design_viewport_h_ = 0.0f;
     float fixed_aspect_ratio_ = 0.0f;
+    // Layer geometry last committed ahead of a present
+    // (commit_layer_geometry_before_present). Zero until the first frame, so
+    // the first present commits the view's insertion too.
+    Size committed_size_{0, 0};
+    CGFloat committed_scale_ = 0.0;
 
     // FIRST-PAINT SIZE matters: the (width,height) this surface is created at
     // becomes the first painted frame's size. In an out-of-process plugin host
@@ -2600,6 +2644,28 @@ private:
                         "gpu=%ux%u\n", width, height, scale, phys_w, phys_h);
     }
 
+    // A resize changes the CAMetalLayer's bounds inside the implicit Core
+    // Animation transaction, which the run loop commits only when it is about
+    // to sleep. A main thread kept busy (the document mount, back-to-back frame
+    // ticks) can go many frames without sleeping, while a drawable reaches the
+    // window server as soon as it is presented. A frame drawn at the new size
+    // then lands in the layer's OLD committed bounds: the window server scales
+    // it into them and the host crops it — out of process (AUHostingService)
+    // the editor showed a full-size-looking layout cropped into its smaller
+    // window for a frame. Committing the geometry first makes every presented
+    // drawable match the bounds it is composited into. Only when the size or
+    // scale changed since the last commit; a steady frame costs a compare.
+    void commit_layer_geometry_before_present() {
+        const CGFloat scale = metal_view_.metalLayer.contentsScale;
+        if (size_.width == committed_size_.width && size_.height == committed_size_.height &&
+            scale == committed_scale_) {
+            return;
+        }
+        [CATransaction flush];
+        committed_size_ = size_;
+        committed_scale_ = scale;
+    }
+
     void paint_scene(canvas::Canvas& canvas) {
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
@@ -2646,6 +2712,7 @@ private:
                       uint32_t* capture_width = nullptr,
                       uint32_t* capture_height = nullptr) {
         if (!gpu_surface_ || !skia_surface_) return false;
+        commit_layer_geometry_before_present();
         if (!gpu_surface_->begin_frame()) return false;
 
         auto* canvas = skia_surface_->begin_frame();
@@ -2660,11 +2727,15 @@ private:
         // `scripted_ui_document_load` ends (trace-analysis, first-frame
         // recipe). `root_children` counts what the root holds: the mounted
         // document adds its tree, chrome a processor adds up front counts too.
+        // `width`/`height` are the logical size the frame is laid out at, which
+        // must equal the view's bounds and the host's size.
         PULP_TRACE_SCOPE_NAMED_ARGS("render", "plugin_editor_frame",
                                     "frame", static_cast<int64_t>(frame_ok_count_),
                                     "background_rgb", static_cast<int64_t>(background_rgb_),
                                     "root_children",
-                                    static_cast<int64_t>(root_.child_count()));
+                                    static_cast<int64_t>(root_.child_count()),
+                                    "width", static_cast<int64_t>(size_.width),
+                                    "height", static_cast<int64_t>(size_.height));
         if (frame_ok_count_++ == 0) {
             CGFloat scale = metal_view_.metalLayer.contentsScale;
             fprintf(stderr, "[plugin-gpu-host] first frame logical=%ux%u gpu=%ux%u scale=%.1f\n",
@@ -2846,48 +2917,74 @@ private:
                     // self member (parity with the CPU host's render_link_callback).
                     if (!alive->load(std::memory_order_acquire)) return;
 
-                    // Frame-tick focus reconciliation — the event-independent cadence
-                    // (see the identical note in MacPluginViewHost::render_link_callback).
-                    // Hands the DAW keyboard back the instant the pulp text-input slot
-                    // clears without a following key/mouse event (a failed/rejected
-                    // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
-                    // only touches first responder on a transition.
-                    if (self->metal_view_) [self->metal_view_ syncKeyFocus];
-
-                    const auto tick = pulp::view::begin_host_frame(
-                        &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
-                        self->needs_repaint_.load(std::memory_order_relaxed));
-                    // begin_host_frame() runs the FrameClock activity channel
-                    // (clock.pump_activity) AFTER the needs_repaint_ snapshot above.
-                    // An activity probe can dirty the tree from there — the Forge
-                    // generation chrome rides that channel to drain build progress
-                    // into the view (request_repaint → repaint() → needs_repaint_).
-                    // That set is too late for `tick`, so fold it in or the frame it
-                    // dirtied waits a whole vsync (mid-generation progress lags a
-                    // frame behind every state change). render_frame() below resets
-                    // the flag, so it is not double-counted next tick.
-                    const bool dirtied_during_tick =
-                        self->needs_repaint_.load(std::memory_order_relaxed);
-                    if (!tick.should_render && !dirtied_during_tick) {
-                        self->continuous_frames_.store(false, std::memory_order_relaxed);
-                        self->render_dispatch_queued_.store(false, std::memory_order_release);
-                        return;
-                    }
-                    if (tick.should_render)
-                        pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
-                    // The frame that moved content under a stationary pointer is
-                    // the only chance to update the cursor: AppKit re-asks on
-                    // pointer motion, never because the content moved.
-                    [self->metal_view_ refreshHoverCursor];
-                    if (tick.continuous) {
-                        self->needs_repaint_.store(true, std::memory_order_relaxed);
-                    }
-                    self->render_frame();
-                    self->render_dispatch_queued_.store(false, std::memory_order_release);
+                    // Paint in a LATER main-queue turn than the idle work. A
+                    // host delivers geometry on this thread: an out-of-process
+                    // AU host (AUHostingService) applies the size its window
+                    // negotiated by sending it here, and the message waits
+                    // behind whatever the idle pump is doing — typically the
+                    // view-first document mount, hundreds of ms. Painting in
+                    // the same turn presented the freshly mounted document at
+                    // the size the view had BEFORE that queued resize, and the
+                    // host showed it cropped into its smaller window until the
+                    // next frame. Re-queueing behind the pending work lets that
+                    // resize land first; the frame decision below then sees the
+                    // host-negotiated size. Costs one main-queue hop per frame.
+                    // render_dispatch_queued_ stays set across the hop, so the
+                    // link does not queue a second tick meanwhile.
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        @autoreleasepool {
+                            if (!alive->load(std::memory_order_acquire)) return;
+                            self->paint_tick(frame_time);
+                        }
+                    });
                 }
             });
         }
         return kCVReturnSuccess;
+    }
+
+    // The paint half of a display-link tick, one main-queue turn after its
+    // idle half (see display_link_callback). Releases render_dispatch_queued_
+    // on every path, so the link can queue the next tick.
+    void paint_tick(double frame_time) {
+        // Frame-tick focus reconciliation — the event-independent cadence
+        // (see the identical note in MacPluginViewHost::render_link_callback).
+        // Hands the DAW keyboard back the instant the pulp text-input slot
+        // clears without a following key/mouse event (a failed/rejected
+        // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
+        // only touches first responder on a transition.
+        if (metal_view_) [metal_view_ syncKeyFocus];
+
+        const auto tick = pulp::view::begin_host_frame(
+            &root_, frame_clock_, frame_pump_, frame_time,
+            needs_repaint_.load(std::memory_order_relaxed));
+        // begin_host_frame() runs the FrameClock activity channel
+        // (clock.pump_activity) AFTER the needs_repaint_ snapshot above.
+        // An activity probe can dirty the tree from there — the Forge
+        // generation chrome rides that channel to drain build progress
+        // into the view (request_repaint → repaint() → needs_repaint_).
+        // That set is too late for `tick`, so fold it in or the frame it
+        // dirtied waits a whole vsync (mid-generation progress lags a
+        // frame behind every state change). render_frame() below resets
+        // the flag, so it is not double-counted next tick.
+        const bool dirtied_during_tick =
+            needs_repaint_.load(std::memory_order_relaxed);
+        if (!tick.should_render && !dirtied_during_tick) {
+            continuous_frames_.store(false, std::memory_order_relaxed);
+            render_dispatch_queued_.store(false, std::memory_order_release);
+            return;
+        }
+        if (tick.should_render)
+            pulp::view::advance_host_frame(&root_, frame_clock_, tick.dt);
+        // The frame that moved content under a stationary pointer is
+        // the only chance to update the cursor: AppKit re-asks on
+        // pointer motion, never because the content moved.
+        [metal_view_ refreshHoverCursor];
+        if (tick.continuous) {
+            needs_repaint_.store(true, std::memory_order_relaxed);
+        }
+        render_frame();
+        render_dispatch_queued_.store(false, std::memory_order_release);
     }
 
     // Called when the native NSView frame changed (e.g. AU host resize).

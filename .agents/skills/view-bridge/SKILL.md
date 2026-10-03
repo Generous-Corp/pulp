@@ -182,10 +182,33 @@ yet" cannot pass as a dark background. What only this path shows:
   arrives the host's window shows through. The plug-in's backing-layer colour
   is what the remote layer shows first.
 - A host resize sent right after open is handled by the plug-in process's main
-  thread, which is busy mounting the document, so the document can present at
-  the old size and be shown cropped (plus host backdrop) until the resize is
-  processed. Blocking main-thread document work costs resize latency OOP, not
-  only time-to-content.
+  thread, which is busy mounting the document. Two framework rules keep the
+  editor at the host-negotiated size from its first document frame (both macOS
+  plug-in hosts, so AU v2, AU v3, VST3 and CLAP alike); don't undo either:
+  - **Paint one main-queue turn after the idle work.** Each display-link tick
+    runs the idle pump (which mounts the document), then re-queues its paint
+    half (`paint_tick`) on the main queue, so a resize queued during the mount
+    is applied before the frame is painted. Painting in the same turn presented
+    the mounted document at the pre-resize size, shown cropped into the
+    smaller window. The CPU host also holds a `repaint()` requested during the
+    idle work until its paint half: AppKit's own display pass runs before the
+    main queue drains again and would otherwise draw it first.
+  - **Commit layer geometry before presenting at a new size.** The GPU host
+    calls `[CATransaction flush]` before the first frame and before any frame
+    whose size or scale changed. A resize changes the CAMetalLayer's bounds in
+    the implicit transaction, which the run loop commits only when it sleeps;
+    a drawable presented before that commit is scaled into the old bounds and
+    cropped by the host (OOP: the full-size-looking layout, cropped).
+  Measured (Spectr 1.0.7 RC1, AUHostingService, minimum size 792x516, 9 cold
+  opens per variant): cropped frames 6 before, 0 after. Repro:
+  `test_plugin_view_host_first_frame_macos.mm` ("a host resize queued during
+  the mount lands before the next frame", both hosts) queues the resize from
+  another thread mid-mount and checks every painted frame's layout size against
+  the view and the container. The flush has no in-process observable; it is
+  covered by the out-of-process probe.
+- `-uiViewForAudioUnit:withSize:` is no size negotiation: AUHostingService
+  passed 800x600 on every open while its window was 792x516. The AU v2 view is
+  still created at the preferred size and follows the container afterwards.
 - Edge-anchored chrome can sit a pixel or two off and a black 1-px host edge
   can show for a frame while the remote content and the host converge on one
   size; classify that separately from an off-brand colour.

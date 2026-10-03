@@ -43,7 +43,12 @@ if(PULP_BUILD_TESTS)
     target_include_directories(pulp-sampler-test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/test/harness)
-    catch_discover_tests(pulp-sampler-test PROPERTIES TIMEOUT 30)
+    # test_pulp_sampler_heritage_render_clock.cpp is also compiled into
+    # pulp-test-sample-heritage-shipping-gates (test/cmake/sampler_runtime_tests.cmake),
+    # which registers some of its cases under their bare names on every
+    # configure. The prefix keeps this binary's copies distinct; ctest names
+    # are the key for test reports and reused results, so they must be unique.
+    catch_discover_tests(pulp-sampler-test TEST_PREFIX "pulp-sampler::" PROPERTIES TIMEOUT 30)
 
     if(TARGET pulp-test-cli-shellout)
         add_dependencies(pulp-test-cli-shellout

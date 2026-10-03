@@ -892,6 +892,31 @@ TEST_CASE("WaveNet recovery diagnostics latch the first reason and sequence",
     detail::WaveNetRealtimeTestAccess::request_recovery(h.node, Recovery::InputSaturated, 38);
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_reason(h.node) == Recovery::ProviderFailure);
     CHECK(detail::WaveNetRealtimeTestAccess::recovery_sequence(h.node) == 37);
+    CHECK(h.node.recovery_reason() == GpuAudioRecoveryReason::ProviderFailure);
+    CHECK(h.node.recovery_sequence() == 37);
+}
+
+TEST_CASE("WaveNet public recovery diagnostics preserve every recovery reason",
+          "[gpu_audio][wavenet][diagnostic]") {
+    using Recovery = detail::SharedIoRecoveryReason;
+    using PublicRecovery = GpuAudioRecoveryReason;
+    const std::array cases{
+        std::pair{Recovery::None, PublicRecovery::None},
+        std::pair{Recovery::SequenceGap, PublicRecovery::SequenceGap},
+        std::pair{Recovery::InputSaturated, PublicRecovery::InputSaturated},
+        std::pair{Recovery::ProviderFailure, PublicRecovery::ProviderFailure},
+        std::pair{Recovery::ProviderLost, PublicRecovery::ProviderLost},
+        std::pair{Recovery::OfflineFence, PublicRecovery::OfflineFence},
+        std::pair{Recovery::InvalidCallback, PublicRecovery::InvalidCallback},
+    };
+    for (const auto& [recovery, expected] : cases) {
+        Harness h;
+        if (recovery != Recovery::None)
+            detail::WaveNetRealtimeTestAccess::request_recovery(h.node, recovery, 91);
+        CHECK(h.node.recovery_reason() == expected);
+        CHECK(h.node.recovery_sequence() ==
+              (recovery == Recovery::None ? std::numeric_limits<std::uint64_t>::max() : 91));
+    }
 }
 
 TEST_CASE("WaveNet failed destructor release discloses unresolved physical ownership",

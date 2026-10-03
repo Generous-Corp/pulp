@@ -3,6 +3,7 @@
 #include <memory>
 #include <pulp/gpu_audio/gpu_audio_capability.hpp>
 #include <pulp/gpu_audio/gpu_audio_node.hpp>
+#include <pulp/gpu_audio/gpu_audio_status.hpp>
 #include <pulp/gpu_audio/gpu_wavenet.hpp>
 
 namespace pulp::gpu_audio {
@@ -62,6 +63,10 @@ class GpuWaveNetRealtimeNode : public GpuAudioNode {
     /// Diagnostic snapshot: true before preparation or after delivery was fenced.
     /// This is not a completion count or a guarantee about the next callback.
     bool fenced() const noexcept;
+    /// First latched recovery cause, if the shared-I/O path has fenced.
+    GpuAudioRecoveryReason recovery_reason() const noexcept;
+    /// Sequence associated with the first latched recovery cause, or UINT64_MAX.
+    std::uint64_t recovery_sequence() const noexcept;
     /// Not a legacy FIFO node. GpuAudioTransport rejects an unprepared instance.
     void process_block(const audio::BufferView<const float>&, audio::BufferView<float>&,
                        std::uint32_t) final;

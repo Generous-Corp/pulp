@@ -1050,6 +1050,25 @@
       ]
     },
     {
+      "name": "Sparkle",
+      "category": "ship",
+      "license": "MIT (bundled bsdiff BSD-2-Clause, sais-lite MIT and ed25519 zlib notices)",
+      "version": "2.10.0",
+      "source_kind": "release-asset",
+      "repository": "https://github.com/sparkle-project/Sparkle",
+      "upstream": {
+        "kind": "github_release",
+        "tag": "2.10.0"
+      },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Opt-in macOS app updater. pulp_add_sparkle() downloads the official Sparkle-2.10.0.tar.xz release asset (SHA-256 pinned in tools/cmake/PulpSparkle.cmake) into the consuming project's build tree and embeds Sparkle.framework only in the standalone .app that calls it. A default Pulp build never fetches it, the SDK never links it (the standalone host reaches it through the Objective-C runtime), and it never enters a plug-in bundle.",
+      "source_files": [
+        "tools/cmake/PulpSparkle.cmake",
+        "core/format/src/standalone_updater_mac.mm"
+      ]
+    },
+    {
       "name": "Surge Synth Team tuning-library",
       "category": "music-theory",
       "license": "MIT",

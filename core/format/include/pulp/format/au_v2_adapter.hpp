@@ -114,18 +114,47 @@ inline UInt32 build_channel_info(const PluginDescriptor& desc,
     return count;
 }
 
+/// AU input element that carries the side-chain bus of an AU v2 effect.
+inline constexpr AudioUnitElement kSidechainInputElement = 1;
+
+/// Element name a host shows for the side-chain input. Logic labels its
+/// "Side Chain" pop-up from the presence of this second input element.
+inline constexpr const char* kSidechainElementName = "Side Chain";
+
+/// True when an AU v2 effect built from `desc` exposes a second input element
+/// for side-chain audio: the descriptor declares a main input bus plus a second
+/// input bus with at least one channel. The Processor API exposes exactly one
+/// side-chain slot (input bus 1), so further input buses are not surfaced.
+inline bool effect_has_sidechain_element(const PluginDescriptor& desc) noexcept {
+    return desc.input_buses.size() > 1 && desc.input_buses[0].default_channels > 0 &&
+           desc.input_buses[1].default_channels > 0;
+}
+
+/// Number of AU input elements an AU v2 effect built from `desc` exposes:
+/// 2 with a side-chain bus (main + side chain), otherwise 1.
+inline UInt32 effect_input_element_count(const PluginDescriptor& desc) noexcept {
+    return effect_has_sidechain_element(desc) ? 2u : 1u;
+}
+
+/// Default channel count of the side-chain input element, clamped into the
+/// adapter's per-bus ceiling. 0 when the descriptor declares no side chain.
+inline UInt32 sidechain_element_default_channels(const PluginDescriptor& desc) noexcept {
+    if (!effect_has_sidechain_element(desc)) return 0;
+    const auto declared = desc.input_buses[1].default_channels;
+    const auto cap = static_cast<int>(boundary::kBoundaryMaxChannels);
+    return static_cast<UInt32>(declared > cap ? cap : declared);
+}
+
 /// Fill `ProcessBusBufferInfo` for an AU v2 EFFECT's input buses: the main input
 /// (index 0, role Main) plus — when the descriptor declares a second input bus —
 /// a Sidechain bus (index 1, role Sidechain).
 ///
-/// AUEffectBase is a single-input/single-output kernel model (`AUBase(ci, 1, 1)`,
-/// and `AUEffectBase::Render` pulls ONLY input element 0), so a Pulp AU effect
-/// cannot receive live sidechain audio through the stock render path. The
-/// sidechain view is therefore emitted INACTIVE: `Processor::sidechain_input()`
-/// returns `nullptr` gracefully (a disconnected bus delivering null without
-/// reordering the bus->buffer mapping) rather than exposing uninitialised memory
-/// or a bus the host would expect to feed. Live AU-effect sidechain delivery is a
-/// documented AU v2 limitation (the instrument/aumu path carries real multi-bus).
+/// The side-chain info is emitted INACTIVE. The adapter activates it for a block
+/// only after it has pulled audio from the side-chain input element (element 1,
+/// see `effect_has_sidechain_element`); while the host leaves that element
+/// unconnected the bus stays inactive and `Processor::sidechain_input()` returns
+/// `nullptr`, the same "not connected" contract the VST3, CLAP and AU v3
+/// adapters use. The bus->buffer mapping is identical either way.
 ///
 /// Pure / allocation-free and unit-testable without an `AudioComponentInstance`.
 /// Names view into `desc`, which must outlive the filled infos. The adapter sets
@@ -152,10 +181,42 @@ inline std::size_t build_input_bus_infos(const PluginDescriptor& desc,
         out[n].role = BusRole::Sidechain;
         out[n].declared_channels = desc.input_buses[1].default_channels;
         out[n].optional = true;
-        out[n].active = false;  // AUEffectBase does not pull a 2nd input element
+        out[n].active = false;  // adapter activates it once element 1 is pulled
         ++n;
     }
     return n;
+}
+
+/// Resolve the per-channel read pointers of a pulled side-chain buffer list for
+/// one render slice. `frame_offset` is the slice start within the pulled block
+/// (non-zero only while scheduled parameters split a render into slices) and
+/// `frames` the slice length. Writes up to `cap` pointers and returns the
+/// channel count, or 0 when the list is absent, malformed (wrong shape, null or
+/// undersized storage) or wider than `cap` — a malformed side chain is reported
+/// as "not connected" rather than handing the processor bad pointers.
+///
+/// Pure / allocation-free. Expects the non-interleaved Float32 layout the
+/// side-chain element's `ValidFormat` enforces (one channel per buffer).
+inline UInt32 resolve_sidechain_channels(const AudioBufferList* list,
+                                         UInt32 expected_channels,
+                                         UInt32 frame_offset,
+                                         UInt32 frames,
+                                         const float** out,
+                                         std::size_t cap) noexcept {
+    if (list == nullptr || expected_channels == 0 || expected_channels > cap) return 0;
+    if (list->mNumberBuffers != expected_channels) return 0;
+    const std::uint64_t needed_bytes =
+        (static_cast<std::uint64_t>(frame_offset) + frames) * sizeof(float);
+    for (UInt32 ch = 0; ch < expected_channels; ++ch) {
+        const AudioBuffer& buffer = list->mBuffers[ch];
+        if (buffer.mNumberChannels != 1 || buffer.mData == nullptr ||
+            buffer.mDataByteSize < needed_bytes)
+            return 0;
+    }
+    for (UInt32 ch = 0; ch < expected_channels; ++ch) {
+        out[ch] = static_cast<const float*>(list->mBuffers[ch].mData) + frame_offset;
+    }
+    return expected_channels;
 }
 
 class PulpAUEffect : public ausdk::AUMIDIEffectBase {
@@ -208,6 +269,31 @@ public:
 
     OSStatus Initialize() override;
     void Cleanup() override;
+
+    /// Adds the side-chain input element (element 1, named "Side Chain") when
+    /// the descriptor declares a side-chain bus. AUEffectBase constructs a
+    /// single input element; hosts discover a side-chain input purely from the
+    /// input scope's element count, so this is what makes Logic offer its
+    /// Side Chain pop-up.
+    void CreateExtendedElements() override;
+
+    /// Pulls the side-chain input element (when the host connected it or
+    /// installed a render callback on it), then runs the stock effect render,
+    /// which pulls the main input and calls ProcessBufferLists. The pulled
+    /// side-chain buffer list is only referenced for the duration of the call.
+    OSStatus Render(AudioUnitRenderActionFlags& ioActionFlags,
+                    const AudioTimeStamp& inTimeStamp, UInt32 nFrames) override;
+
+    /// Side-chain element formats must also fit the adapter's per-bus channel
+    /// ceiling; every other element keeps the stock AU format rules.
+    bool ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                     const AudioStreamBasicDescription& inNewFormat) override;
+
+    /// Keeps the side-chain element's sample rate in step with the main bus so
+    /// a host that only configures element 0 still initializes cleanly.
+    OSStatus ChangeStreamFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                                const AudioStreamBasicDescription& inPrevFormat,
+                                const AudioStreamBasicDescription& inNewFormat) override;
 
     OSStatus ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFlags,
                                 const AudioBufferList& inBuffer,
@@ -351,6 +437,19 @@ private:
     boundary::LatencyCompensatedBypass bypass_;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
+
+    // Side-chain input element state. `has_sidechain_element_` is fixed at
+    // construction from the descriptor. `sidechain_pulled_` points at input
+    // element 1's buffer list only while Render() is on the stack and only when
+    // that pull succeeded; null means "not connected" for the block.
+    // `slice_frame_offset_` is the start of the current scheduled-parameter
+    // slice within the pulled block (AUEffectBase advances only the main
+    // buffers between slices). Pointer storage is fixed-size so building the
+    // side-chain view never allocates on the audio thread.
+    bool has_sidechain_element_ = false;
+    const AudioBufferList* sidechain_pulled_ = nullptr;
+    UInt32 slice_frame_offset_ = 0;
+    std::array<const float*, boundary::kBoundaryMaxChannels> sidechain_ptrs_{};
 
     // Previous-block transport snapshot used to derive change flags on
     // `ProcessContext`. Default-constructed so the first process() call

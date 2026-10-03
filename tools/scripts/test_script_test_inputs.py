@@ -25,7 +25,11 @@ cmake-driven test. What must hold:
 - WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared;
 - every scanned executable is keyed by its artifact, whether or not it lives
   under test/, `executable_targets` maps a renamed one back to its target,
-  and two targets building one artifact refuse to be listed.
+  and two targets building one artifact refuse to be listed;
+- a build configured off the gate's profile (examples ON, a sanitizer, a
+  Debug build) cannot stand for the list's compiled entries: `--check`
+  still compares the script entries, then reports the compiled half
+  SKIPPED with the switch that differs, and `--write` refuses.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -589,6 +593,30 @@ class CompiledDataTests(unittest.TestCase):
             self.assertEqual(ex["pulp-test-a"]["detected_sources"], ["test/test_a.cpp"])
             self.assertEqual(ex["pulp-test-b"]["detected_sources"], ["test/test_b.cpp"])
 
+    def test_a_generated_source_in_an_in_checkout_build_dir_records_the_token(self) -> None:
+        # Two in-checkout build directories must write the same compiled entry
+        # for a configure-generated source, or every other configuration
+        # reports the entry stale.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            write(repo.root, "test/test_gen.cpp", 'auto p = fs::path(PULP_SOURCE_DIR) / "test/fixtures/a";\n')
+            seen = []
+            for name in ("build-gate", "build-linux"):
+                build = repo.root / name
+                ev = build / "test" / "test-data"
+                ev.mkdir(parents=True)
+                gen = f"{name}/tools/cli/generated/index.cpp"
+                (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+                    "pulp-gen": {"sources": ["test/test_gen.cpp", gen], "tree_defines": ["PULP_SOURCE_DIR"]}}}),
+                    encoding="utf-8")
+                (ev / "pulp-gen.inputs.json").write_text(json.dumps({
+                    "schema": "pulp-test-data-inputs/v1", "executable": "pulp-gen", "kind": "compiled",
+                    "whole_checkout": True, "sources": ["test/test_gen.cpp", gen], "inputs": []}), encoding="utf-8")
+                seen.append(sti.compiled_entries(repo.root, build)["pulp-gen"])
+            self.assertEqual(seen[0], seen[1])
+            self.assertIn("${CMAKE_BINARY_DIR}/tools/cli/generated/index.cpp", seen[0]["sources"])
+            self.assertFalse(any(s.startswith("build-") for s in seen[0]["sources"]))
+
     def test_reading_without_a_declaration_is_undeclared_and_a_quiet_source_gets_no_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp)); compiled_evidence(repo)
@@ -683,6 +711,47 @@ class CompiledDataTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+
+class GateProfileTests(unittest.TestCase):
+    run_tool = CompiledDataTests.run_tool
+
+    def cache(self, repo: Repo, **values: str) -> None:
+        lines = [f"{k}:STRING={v}" for k, v in values.items()]
+        (repo.build / "CMakeCache.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_a_gate_shaped_build_compares_the_compiled_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp)); compiled_evidence(repo)
+            self.cache(repo, PULP_BUILD_EXAMPLES="OFF", CMAKE_BUILD_TYPE="Release", PULP_SANITIZER="")
+            self.assertEqual(self.run_tool(repo, "--write").returncode, 0)
+            compiled_evidence(repo, declare_b=True)
+            proc = self.run_tool(repo, "--check", "--full")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+    def test_an_off_profile_build_skips_the_compiled_half_by_name(self) -> None:
+        for values, reason in ((dict(PULP_BUILD_EXAMPLES="ON"), "PULP_BUILD_EXAMPLES=ON"),
+                               (dict(PULP_SANITIZER="address", CMAKE_BUILD_TYPE="Debug"), "PULP_SANITIZER=address"),
+                               (dict(CMAKE_BUILD_TYPE="Debug"), "CMAKE_BUILD_TYPE=Debug")):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
+                repo = Repo(Path(tmp)); compiled_evidence(repo)
+                self.assertEqual(self.run_tool(repo, "--write").returncode, 0)   # no cache: the gate's
+                compiled_evidence(repo, declare_b=True)                         # a compiled entry moves
+                self.cache(repo, **values)
+                proc = self.run_tool(repo, "--check", "--full")
+                self.assertEqual(proc.returncode, sti.SKIP_EXIT, proc.stdout + proc.stderr)
+                self.assertIn("SKIPPED the compiled entries", proc.stdout)
+                self.assertIn(reason, proc.stdout)
+                self.assertNotIn("stale compiled entry", proc.stdout)
+                # Script entries still compare: a stale one fails as before.
+                write(repo.root, "tools/scripts/test_alpha.py", "import alpha_lib\nimport newmod\n")
+                write(repo.root, "tools/scripts/newmod.py", "")
+                self.assertEqual(self.run_tool(repo, "--check", "--full").returncode, 1)
+                # And the list is never written from such a build.
+                proc = self.run_tool(repo, "--write")
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn("refusing to write", proc.stderr)
 
 
 class ScanScopeTests(unittest.TestCase):

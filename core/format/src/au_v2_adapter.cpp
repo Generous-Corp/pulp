@@ -40,6 +40,7 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
             // names without a per-block copy (which would allocate on the audio
             // thread).
             descriptor_ = processor_->descriptor();
+            has_sidechain_element_ = effect_has_sidechain_element(descriptor_);
             // Discover the plug-in's bundled factory presets. Empty for a
             // plug-in that ships none, and for any build not loaded from a
             // bundle (a unit-test binary, a standalone host).
@@ -227,8 +228,10 @@ OSStatus PulpAUEffect::ProcessScheduledSlice(
     param_events_.sort();
 
     scheduled_slice_active_ = true;
+    slice_frame_offset_ = start_frame_in_buffer;
     const auto result = AUEffectBase::ProcessScheduledSlice(
         user_data, start_frame_in_buffer, slice_frames, total_buffer_frames);
+    slice_frame_offset_ = 0;
     scheduled_slice_active_ = false;
 
     // Leave StateStore at the value effective immediately after this slice so
@@ -437,6 +440,22 @@ OSStatus PulpAUEffect::Initialize()
     auto result = AUEffectBase::Initialize();
     if (result != noErr) return result;
 
+    // The side chain is delivered sample-for-sample against the main bus, so
+    // both must run at one rate. ChangeStreamFormat keeps them in step for a
+    // host that only configures element 0; reaching here with a mismatch means
+    // the host set the side-chain element to a different rate explicitly.
+    if (has_sidechain_element_ &&
+        Inputs().GetNumberOfElements() > kSidechainInputElement) {
+        const auto sidechain_rate =
+            Input(kSidechainInputElement).GetStreamFormat().mSampleRate;
+        if (sidechain_rate != Output(0).GetStreamFormat().mSampleRate) {
+            runtime::log_error("AU v2: side-chain sample rate {} Hz does not match "
+                               "the main bus rate {} Hz",
+                               sidechain_rate, Output(0).GetStreamFormat().mSampleRate);
+            return kAudioUnitErr_FormatNotSupported;
+        }
+    }
+
     if (processor_) {
         PrepareContext ctx;
         ctx.sample_rate = GetSampleRate();
@@ -516,6 +535,88 @@ void PulpAUEffect::Cleanup()
 {
     if (processor_) processor_->release();
     AUEffectBase::Cleanup();
+}
+
+void PulpAUEffect::CreateExtendedElements()
+{
+    AUMIDIEffectBase::CreateExtendedElements();
+    if (!has_sidechain_element_) return;
+
+    SetNumberOfElements(kAudioUnitScope_Input, effect_input_element_count(descriptor_));
+    auto& sidechain = Input(kSidechainInputElement);
+    // SetName retains, so release the create reference once it is stored.
+    if (CFStringRef name = CFStringCreateWithCString(kCFAllocatorDefault, kSidechainElementName,
+                                                     kCFStringEncodingUTF8)) {
+        sidechain.SetName(name);
+        CFRelease(name);
+    }
+    // Start from the main input's format (same rate and sample layout) at the
+    // side-chain bus's declared width; a host may renegotiate it before
+    // Initialize like any other element format.
+    auto format = Input(0).GetStreamFormat();
+    format.mChannelsPerFrame = sidechain_element_default_channels(descriptor_);
+    sidechain.SetStreamFormat(format);
+}
+
+bool PulpAUEffect::ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                               const AudioStreamBasicDescription& inNewFormat)
+{
+    if (!AUMIDIEffectBase::ValidFormat(inScope, inElement, inNewFormat)) return false;
+    if (inScope == kAudioUnitScope_Input && inElement == kSidechainInputElement) {
+        return inNewFormat.mChannelsPerFrame >= 1 &&
+               inNewFormat.mChannelsPerFrame <= boundary::kBoundaryMaxChannels;
+    }
+    return true;
+}
+
+OSStatus PulpAUEffect::ChangeStreamFormat(AudioUnitScope inScope, AudioUnitElement inElement,
+                                          const AudioStreamBasicDescription& inPrevFormat,
+                                          const AudioStreamBasicDescription& inNewFormat)
+{
+    const auto result =
+        AUMIDIEffectBase::ChangeStreamFormat(inScope, inElement, inPrevFormat, inNewFormat);
+    if (result != noErr) return result;
+
+    // A rate change on the main bus carries over to an unconnected side-chain
+    // element (a connected one takes its format from the connection).
+    const bool main_bus = inElement == 0 &&
+        (inScope == kAudioUnitScope_Input || inScope == kAudioUnitScope_Output);
+    if (main_bus && has_sidechain_element_ &&
+        inPrevFormat.mSampleRate != inNewFormat.mSampleRate &&
+        Inputs().GetNumberOfElements() > kSidechainInputElement) {
+        auto& sidechain = Input(kSidechainInputElement);
+        if (!sidechain.HasConnection()) {
+            auto format = sidechain.GetStreamFormat();
+            if (format.mSampleRate != inNewFormat.mSampleRate) {
+                format.mSampleRate = inNewFormat.mSampleRate;
+                sidechain.SetStreamFormat(format);
+                PropertyChanged(kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
+                                kSidechainInputElement);
+            }
+        }
+    }
+    return noErr;
+}
+
+OSStatus PulpAUEffect::Render(AudioUnitRenderActionFlags& ioActionFlags,
+                              const AudioTimeStamp& inTimeStamp, UInt32 nFrames)
+{
+    sidechain_pulled_ = nullptr;
+    if (has_sidechain_element_ && HasInput(kSidechainInputElement)) {
+        // The side chain's own silence/pre-render flags must not leak into the
+        // main render's action flags, so pull it with a private flag word. A
+        // failed pull (upstream error) leaves the side chain disconnected for
+        // this block instead of failing the whole render.
+        AudioUnitRenderActionFlags sidechain_flags = 0;
+        auto& sidechain = Input(kSidechainInputElement);
+        if (sidechain.PullInput(sidechain_flags, inTimeStamp, kSidechainInputElement,
+                                nFrames) == noErr) {
+            sidechain_pulled_ = &sidechain.GetBufferList();
+        }
+    }
+    const auto result = AUMIDIEffectBase::Render(ioActionFlags, inTimeStamp, nFrames);
+    sidechain_pulled_ = nullptr;
+    return result;
 }
 
 OSStatus PulpAUEffect::HandleMIDIEvent(UInt8 inStatus, UInt8 inChannel,
@@ -723,23 +824,42 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     processor_->set_param_events(&param_events_);
 
     // Input bus views: the main input (index 0), plus — when the descriptor
-    // declares a sidechain input bus — an INACTIVE Sidechain view (index 1).
-    // AUEffectBase pulls only the main input element, so the sidechain view stays
-    // inactive/null: Processor::sidechain_input() returns nullptr gracefully
-    // rather than exposing a bus the stock AU-effect render path cannot feed.
-    // For the common single-input effect this is exactly one Main view, so the
-    // bus->buffer mapping and behavior are unchanged. Bus names come from the
-    // cached descriptor (build_input_bus_infos), which owns the strings.
+    // declares a sidechain input bus — a Sidechain view (index 1). The side
+    // chain is active only when Render() pulled input element 1 this block (the
+    // host connected it or installed a render callback on it) and the pulled
+    // buffers are well-formed; otherwise it stays inactive and
+    // Processor::sidechain_input() returns nullptr, matching the VST3, CLAP and
+    // AU v3 adapters. During a scheduled-parameter slice the side-chain
+    // pointers advance by the slice offset, in step with the main buffers. For
+    // the common single-input effect this is exactly one Main view. Bus names
+    // come from the cached descriptor (build_input_bus_infos), which owns the
+    // strings.
     std::array<ProcessBusBufferInfo, 2> in_infos{};
     const std::size_t n_in =
         build_input_bus_infos(descriptor_, in_infos.data(), in_infos.size());
     in_infos[0].declared_channels = static_cast<int>(processor_in_channels);
     in_infos[0].active = input_view.num_channels() > 0;
+    UInt32 sidechain_channels = 0;
+    if (sidechain_pulled_ != nullptr) {
+        sidechain_channels = resolve_sidechain_channels(
+            sidechain_pulled_,
+            Input(kSidechainInputElement).GetStreamFormat().mChannelsPerFrame,
+            slice_frame_offset_, inFramesToProcess, sidechain_ptrs_.data(),
+            sidechain_ptrs_.size());
+    }
+    audio::BufferView<const float> sidechain_view(
+        sidechain_ptrs_.data(), sidechain_channels, inFramesToProcess);
     std::array<ProcessBusBufferView<const float>, 2> input_buses{};
     input_buses[0] = {.info = in_infos[0], .buffer = input_view};
-    for (std::size_t i = 1; i < n_in; ++i) {
-        input_buses[i] = {.info = in_infos[i],
-                          .buffer = audio::BufferView<const float>{}};
+    if (n_in > 1) {
+        if (sidechain_channels > 0) {
+            in_infos[1].declared_channels = static_cast<int>(sidechain_channels);
+            in_infos[1].active = true;
+            input_buses[1] = {.info = in_infos[1], .buffer = sidechain_view};
+        } else {
+            input_buses[1] = {.info = in_infos[1],
+                              .buffer = audio::BufferView<const float>{}};
+        }
     }
 
     std::array<ProcessBusBufferView<float>, 1> output_buses{{

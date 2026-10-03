@@ -416,6 +416,30 @@ auval -v aumu MySy Plup   # Instrument
 
 The type codes (`aufx`, `aumu`) and four-character codes are set in your AU's `Info.plist`, not in the Pulp code.
 
+### Multi-Bus / Sidechain
+
+An AU v2 effect (`aufx` or `aumf`) whose descriptor declares a second input bus
+with a positive channel count exposes a second AU input element, element 1,
+named "Side Chain". `kAudioUnitProperty_ElementCount` on the input scope reports
+2, and element 1 starts at the main bus's sample rate and sample layout with the
+side-chain bus's declared width (up to 8 channels, non-interleaved Float32). A
+host that only changes the main bus rate carries the side-chain element along;
+an explicit side-chain rate that differs from the main bus fails `Initialize()`
+with `kAudioUnitErr_FormatNotSupported`. Hosts discover a side-chain input from
+that element count, which is what makes Logic offer its Side Chain pop-up.
+
+Each render pulls element 1 (through the host's connection or render callback)
+before the stock effect render pulls the main input, then delivers it as the
+Sidechain bus in `ProcessBuffers` and through `Processor::sidechain_input()`.
+While the host leaves element 1 unconnected, or its pull fails, the side chain
+is reported as not connected (`sidechain_input()` returns `nullptr`), the same
+contract the VST3, CLAP, and AU v3 adapters use. Scheduled-parameter slices
+advance the side-chain pointers in step with the main buffers, and the pull uses
+the element's preallocated buffer, so the audio thread does not allocate.
+`kAudioUnitProperty_SupportedNumChannels` continues to describe only the main
+input/output pair. Instruments (`aumu`) take no audio input and expose one
+output element per declared output bus instead.
+
 ### Known Limitations
 
 - Effects do not emit parameter output changes back to the host.
@@ -896,7 +920,7 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | Param gestures | Yes (event-based) | Yes (`beginEdit`/`endEdit`) | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
 | MIDI in events | Yes (note events) | Yes (VST3 events) | Effects: `aumf` yes / `aufx` no, Instruments: yes | Yes (raw bytes) |
 | State format | Binary via stream | Binary via `IBStream` | Binary in `CFDictionary` | Binary in `fullState` |
-| Multi-bus declared | Yes | Yes | No | Main input + sidechain input |
+| Multi-bus declared | Yes | Yes | Effects: main input + side-chain input element; instruments: aux output elements | Main input + sidechain input |
 | Editor/UI param write-back | Yes | Yes | Yes (`AUEventListenerNotify`) | Yes (`AUParameterTree`) |
 | Render-thread param output | Yes | Yes | Not yet | Yes |
 | Latency reporting | Yes | Yes | Yes (seconds) | Yes (seconds) |

@@ -55,7 +55,10 @@ add_test(NAME script-test-inputs-drift
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/script_test_inputs.py"
         --repo-root "${CMAKE_SOURCE_DIR}" --build-dir "${CMAKE_BINARY_DIR}" --check)
-set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120)
+# Its compiled entries hold the gate's configure; on any other (examples ON,
+# a sanitizer, Debug) the check compares the script entries and then reports
+# the compiled half as skipped, with the reason, rather than passing.
+set_tests_properties(script-test-inputs-drift PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 add_test(NAME script-test-inputs-selftest
     COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_script_test_inputs.py")

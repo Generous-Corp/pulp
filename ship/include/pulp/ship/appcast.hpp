@@ -18,6 +18,25 @@ struct AppcastItem {
     uint64_t file_size = 0;        // In bytes
     std::string ed_signature;      // EdDSA signature (base64)
     std::string minimum_os;        // e.g., "12.0" for macOS Monterey
+
+    // Sparkle 2 enclosure installer kind. "package" marks a flat .pkg /
+    // .mpkg (Sparkle runs it with /usr/sbin/installer after an administrator
+    // prompt). Empty omits the attribute, which Sparkle treats as an archived
+    // app bundle. `pulp ship appcast` fills this in for a .pkg/.mpkg URL.
+    std::string installation_type;
+    // <sparkle:releaseNotesLink>: an HTML page Sparkle loads into the update
+    // dialog instead of <description>. Prefer inline `description` for assets
+    // hosted where the server sends `Content-Disposition: attachment`
+    // (GitHub release assets do), because the dialog's web view then has
+    // nothing to render.
+    std::string release_notes_link;
+    // <sparkle:fullReleaseNotesLink>: the "Version History" page Sparkle
+    // opens in the user's browser (for example the GitHub release page).
+    std::string full_release_notes_link;
+    // <sparkle:channel>: items on a named channel are offered only to apps
+    // whose updater delegate allows that channel. Empty = default channel,
+    // which every client sees.
+    std::string channel;
 };
 
 // An appcast feed (Sparkle-compatible XML)
@@ -33,6 +52,10 @@ struct Appcast {
     // Parse an appcast XML string
     static std::optional<Appcast> from_xml(const std::string& xml);
 };
+
+// The Sparkle installation type for an update artifact, judged from its file
+// name: "package" for .pkg / .mpkg (case-insensitive), empty otherwise.
+std::string sparkle_installation_type_for(const std::string& artifact_path);
 
 // ── Version comparison ───────────────────────────────────────────────────────
 

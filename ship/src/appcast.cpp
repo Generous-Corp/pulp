@@ -1,6 +1,7 @@
 #include <pulp/ship/appcast.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <cctype>
 #include <sstream>
 #include <cstring>
 #include <regex>
@@ -8,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace pulp::ship {
@@ -50,10 +52,22 @@ std::string Appcast::to_xml() const {
         if (!item.minimum_os.empty()) {
             xml << "      <sparkle:minimumSystemVersion>" << xml_escape(item.minimum_os) << "</sparkle:minimumSystemVersion>\n";
         }
+        if (!item.channel.empty()) {
+            xml << "      <sparkle:channel>" << xml_escape(item.channel) << "</sparkle:channel>\n";
+        }
+        if (!item.release_notes_link.empty()) {
+            xml << "      <sparkle:releaseNotesLink>" << xml_escape(item.release_notes_link) << "</sparkle:releaseNotesLink>\n";
+        }
+        if (!item.full_release_notes_link.empty()) {
+            xml << "      <sparkle:fullReleaseNotesLink>" << xml_escape(item.full_release_notes_link) << "</sparkle:fullReleaseNotesLink>\n";
+        }
         xml << "      <enclosure\n";
         xml << "        url=\"" << xml_escape(item.download_url) << "\"\n";
         xml << "        length=\"" << item.file_size << "\"\n";
         xml << "        type=\"application/octet-stream\"\n";
+        if (!item.installation_type.empty()) {
+            xml << "        sparkle:installationType=\"" << xml_escape(item.installation_type) << "\"\n";
+        }
         if (!item.ed_signature.empty()) {
             xml << "        sparkle:edSignature=\"" << item.ed_signature << "\"\n";
         }
@@ -68,6 +82,34 @@ std::string Appcast::to_xml() const {
 
 // ── Simple appcast XML parsing ───────────────────────────────────────────────
 
+// Reverse xml_escape (plus &apos;). Parsed values are stored unescaped so that
+// re-emitting a parsed feed -- `pulp ship appcast` appends to the existing
+// file -- does not turn `&amp;` into `&amp;amp;` on every release.
+static std::string xml_unescape(const std::string& s) {
+    if (s.find('&') == std::string::npos) return s;
+    static const std::pair<const char*, char> entities[] = {
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''},
+    };
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size();) {
+        bool matched = false;
+        if (s[i] == '&') {
+            for (const auto& [entity, ch] : entities) {
+                const auto n = std::strlen(entity);
+                if (s.compare(i, n, entity) == 0) {
+                    out += ch;
+                    i += n;
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if (!matched) out += s[i++];
+    }
+    return out;
+}
+
 static std::string extract_tag(const std::string& xml, const std::string& tag) {
     auto open = "<" + tag + ">";
     auto close = "</" + tag + ">";
@@ -76,7 +118,7 @@ static std::string extract_tag(const std::string& xml, const std::string& tag) {
     start += open.size();
     auto end = xml.find(close, start);
     if (end == std::string::npos) return {};
-    return xml.substr(start, end - start);
+    return xml_unescape(xml.substr(start, end - start));
 }
 
 static std::string extract_attr(const std::string& xml, const std::string& attr) {
@@ -85,7 +127,7 @@ static std::string extract_attr(const std::string& xml, const std::string& attr)
     pos += attr.size() + 2;
     auto end = xml.find('"', pos);
     if (end == std::string::npos) return {};
-    return xml.substr(pos, end - pos);
+    return xml_unescape(xml.substr(pos, end - pos));
 }
 
 std::optional<Appcast> Appcast::from_xml(const std::string& xml) {
@@ -114,6 +156,10 @@ std::optional<Appcast> Appcast::from_xml(const std::string& xml) {
         item.minimum_os = extract_tag(item_xml, "sparkle:minimumSystemVersion");
         item.download_url = extract_attr(item_xml, "url");
         item.ed_signature = extract_attr(item_xml, "sparkle:edSignature");
+        item.installation_type = extract_attr(item_xml, "sparkle:installationType");
+        item.channel = extract_tag(item_xml, "sparkle:channel");
+        item.release_notes_link = extract_tag(item_xml, "sparkle:releaseNotesLink");
+        item.full_release_notes_link = extract_tag(item_xml, "sparkle:fullReleaseNotesLink");
 
         auto length_str = extract_attr(item_xml, "length");
         if (!length_str.empty()) {
@@ -141,6 +187,20 @@ std::optional<Appcast> Appcast::from_xml(const std::string& xml) {
     }
 
     return feed;
+}
+
+std::string sparkle_installation_type_for(const std::string& artifact_path) {
+    auto lower = artifact_path;
+    // Ignore a query string or fragment on a URL-shaped path.
+    if (auto cut = lower.find_first_of("?#"); cut != std::string::npos)
+        lower.resize(cut);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    auto ends_with = [&](const char* suffix) {
+        const auto n = std::strlen(suffix);
+        return lower.size() >= n && lower.compare(lower.size() - n, n, suffix) == 0;
+    };
+    return (ends_with(".pkg") || ends_with(".mpkg")) ? "package" : std::string{};
 }
 
 // ── Version comparison ───────────────────────────────────────────────────────

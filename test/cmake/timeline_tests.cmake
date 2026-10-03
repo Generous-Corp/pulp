@@ -495,6 +495,9 @@ if(NOT TARGET pulp-fixture-runner)
 endif()
 add_test(NAME timeline-fixture-corpus
     COMMAND pulp-fixture-runner --corpus "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+# The runner reads the corpus it is handed; ctest runs it directly, so its own
+# entry carries the read for a selector that keys on the program.
+pulp_test_data(pulp-fixture-runner NO_DEFINE PATHS test/fixtures/timeline)
 
 # The corpus run above proves the runner passes on a good corpus. It cannot
 # prove the runner FAILS on a bad one, and a conformance gate that cannot go red

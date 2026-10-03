@@ -1109,6 +1109,15 @@ add_test(NAME cmake-control-shipping-fresh-stamp
 set_tests_properties(cmake-control-shipping-fresh-stamp PROPERTIES
     LABELS "cmake;control;ship" TIMEOUT 60)
 
+add_test(NAME cmake-pulp-add-sparkle
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_CURRENT_BINARY_DIR}/pulp-add-sparkle
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_sparkle.cmake)
+set_tests_properties(cmake-pulp-add-sparkle PROPERTIES
+    LABELS "cmake;ship" TIMEOUT 120
+    SKIP_REGULAR_EXPRESSION "SKIP: pulp_add_sparkle is macOS-only")
+
 add_test(NAME cmake-build-defaults
     COMMAND ${CMAKE_COMMAND}
         -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}

@@ -439,6 +439,12 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     pulp_add_test_suite(pulp-test-au-v2-busses GROUP pulp-test-group-fmt-au-v2
         LIBRARIES pulp::format pulp::midi ausdk)
 
+    # AU v2 effect side-chain input element — element count / name / format
+    # properties, and side-chain audio pulled through AUBase::DoRender with host
+    # render callbacks reaching the Processor's side-chain buffer.
+    pulp_add_test_suite(pulp-test-au-v2-sidechain GROUP pulp-test-group-fmt-au-v2
+        LIBRARIES pulp::format pulp::midi ausdk)
+
     # AU v2 continuous-parameter display — GetParameterInfo ValuesHaveStrings
     # flag + kAudioUnitProperty_ParameterStringFromValue / ...ValueFromString
     # round-tripping through ParamInfo::to_string / from_string. Instantiates a
