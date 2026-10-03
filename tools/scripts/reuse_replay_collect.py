@@ -36,6 +36,7 @@ REPO_ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "ci"))
 import link_members  # noqa: E402
+import object_deps  # noqa: E402
 from reuse_policy_replay import (  # noqa: E402
     FAIL_OUTCOMES, GREEN_CONCLUSIONS, MIN_SELECTED_PERCENT, PAIR_SCHEMA, RUN_SCHEMA,
     SCRIPT_INPUTS_PATH, TEST_SCHEMA, _parse_time, validate_run, write_jsonl,
@@ -401,7 +402,10 @@ class Collector:
         the job ran), the codemodel's `digest_schema` and `generated_headers`
         coverage, and `declared_commit_bound` (executables whose tests the
         record marks `commit_bound`, plus codemodel targets flagged so; None
-        when the job did not declare them). A part the run did not record is None."""
+        when the job did not declare them), and `deps` (object -> the
+        repo-relative sources and headers its compile read, a precompiled
+        header's own reads included, plus `members`: archive -> member name
+        -> objects). A part the run did not record is None."""
         def member(zf: zipfile.ZipFile, prefix: str) -> dict | None:
             name = next((n for n in zf.namelist() if Path(n).name.startswith(prefix)), None)
             return json.loads(zf.read(name)) if name else None
@@ -412,11 +416,13 @@ class Collector:
                         if a.get("name") == REUSE_RECORD_ARTIFACT and not a.get("expired")), None)
             if art is None:
                 return {"targets": None, "link": None, "executables": None, "binaries": None,
-                        "digest_schema": None, "generated_headers": None, "declared_commit_bound": None}
+                        "digest_schema": None, "generated_headers": None, "declared_commit_bound": None,
+                        "deps": None}
             with self.gh._request(art["archive_download_url"], "application/vnd.github+json") as resp:
                 blob = resp.read()
             with zipfile.ZipFile(io.BytesIO(blob)) as zf:
                 model, links, identity = member(zf, "codemodel-"), member(zf, "link-members-"), member(zf, "identity.json")
+                deps_doc = member(zf, "object-deps-")
                 tests = None
                 # Executables of tests the record marks commit_bound. A row
                 # with no verdict (null: the job had no codemodel) makes the
@@ -468,8 +474,8 @@ class Collector:
             return {"targets": targets, "link": link, "executables": tests, "binaries": binaries,
                     "digest_schema": None if model is None else model.get("schema"),
                     "generated_headers": None if model is None else model.get("generated_headers"),
-                    "declared_commit_bound": declared}
-        return self._cached(f"record-v5/{run_id}.json.gz", fetch)
+                    "declared_commit_bound": declared, "deps": recorded_deps(deps_doc)}
+        return self._cached(f"record-v6/{run_id}.json.gz", fetch)
 
     def codemodel_targets(self, run_id: str) -> dict[str, dict] | None:
         """The per-target codemodel digests a run recorded, or None."""
@@ -1312,6 +1318,36 @@ COMPILE_SUFFIXES = (".cpp", ".cc", ".cxx", ".c", ".mm", ".m")
 CODE_SUFFIXES = COMPILE_SUFFIXES + (".h", ".hh", ".hpp", ".hxx", ".inl", ".ipp", ".inc", ".def")
 
 
+def recorded_deps(doc: dict | None) -> dict | None:
+    """A job's object-deps record as the replay reads it: `objects` (object,
+    relative to the build dir -> the repo-relative files its compile read)
+    and `members` (archive -> member name -> objects), or None when the
+    record is missing or object_deps cannot vouch for it. A stale object is
+    left out (unknown). An object that included a precompiled header also
+    read whatever that header's own compile read (`<pch>.pch`)."""
+    if object_deps.unusable(doc) is not None:
+        return None
+    raw = object_deps.expand(doc)
+    stale = set(doc.get("stale") or [])
+
+    def reads(obj: str, seen: set[str]) -> set[str]:
+        out: set[str] = set()
+        for token in raw.get(obj) or []:
+            if token.startswith("<src>/"):
+                out.add(token[len("<src>/"):])
+            elif token.startswith("<build>/") and token not in seen:
+                for suffix in (".pch", ".gch"):
+                    if token + suffix in raw:
+                        seen.add(token)
+                        out |= reads(token + suffix, seen)
+        return out
+    objects = {o.removeprefix("<build>/"): sorted(reads(o, set())) for o in raw if o not in stale}
+    members = {a.removeprefix("<build>/"): {m: [o.removeprefix("<build>/") for o in objs]
+                                            for m, objs in names.items()}
+               for a, names in (doc.get("members") or {}).items()}
+    return {"objects": objects, "members": members}
+
+
 def object_source(obj: str) -> str | None:
     """The repo-relative source a CMake object path compiles, or None.
 
@@ -1357,22 +1393,37 @@ class GraphIndex:
 
 
 def recorded_rebuilt(link: dict[str, dict], drift: list[str], index: "GraphIndex",
-                     affected: set[str] | None = None) -> set[str]:
+                     affected: set[str] | None = None, deps: dict | None = None) -> set[str]:
     """Executables (relative to the build dir) a drift rebuilds, from one
-    job's recorded link members. Pure given `index`."""
+    job's recorded link members. With the job's own object deps
+    (recorded_deps), an object or member they place is reached exactly when
+    its source or a file its compile read drifted; anything they do not
+    place falls back to the Ninja graph. Pure given `index`."""
     affected = index.affected_sources(drift) if affected is None else affected
     header_drift = any(f.endswith(CODE_SUFFIXES) and not f.endswith(COMPILE_SUFFIXES) for f in drift)
     drifted = set(drift)
     drifted_objects = {os.path.basename(f) + ".o" for f in drift if f.endswith(COMPILE_SUFFIXES)}
+    reads = (deps or {}).get("objects") or {}
+    placed_members = (deps or {}).get("members") or {}
+
+    def object_hit(obj: str) -> bool | None:
+        if obj not in reads:
+            return None
+        return object_source(obj) in drifted or any(r in drifted for r in reads[obj])
+
     out: set[str] = set()
     for exe, rec in link.items():
         hit = False
         for obj in rec.get("objects") or []:
-            src = object_source(obj)
-            if src is not None and src in index.sources:
-                hit = src in affected
+            exact = object_hit(obj)
+            if exact is not None:
+                hit = exact
             else:
-                hit = src in drifted or header_drift
+                src = object_source(obj)
+                if src is not None and src in index.sources:
+                    hit = src in affected
+                else:
+                    hit = src in drifted or header_drift
             if hit:
                 break
         if not hit:
@@ -1381,9 +1432,14 @@ def recorded_rebuilt(link: dict[str, dict], drift: list[str], index: "GraphIndex
                     continue
                 known = index.archive_members.get(archive) or {}
                 for m in members:
-                    srcs = known.get(m)
-                    if (srcs & affected) if srcs else (m in drifted_objects or header_drift):
-                        hit = True
+                    objs = (placed_members.get(archive) or {}).get(m)
+                    exact = [object_hit(o) for o in objs] if objs else [None]
+                    if None not in exact:
+                        hit = any(exact)
+                    else:
+                        srcs = known.get(m)
+                        hit = bool(srcs & affected) if srcs else (m in drifted_objects or header_drift)
+                    if hit:
                         break
                 if hit:
                     break
@@ -1422,7 +1478,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     collector._git_lock, collector._commit_cache = threading.Lock(), {}
     collector.gh = gh
     entries_cache: dict[str, dict | None] = {}
-    with_codemodel = with_recorded = with_v2 = with_scan = 0
+    with_codemodel = with_recorded = with_v2 = with_scan = with_deps = 0
     index = GraphIndex(graph, graph_source_root, graph_build_dir) if gh is not None else None
 
     unread: list[str] = []
@@ -1515,7 +1571,8 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             mods_rekeyed, modules = codemodel_rekeyed(head_cm, group_record["targets"], ("MODULE_LIBRARY",),
                                                       link=link, link_edges_only=split)
             code_drift = any(f.endswith(CODE_SUFFIXES) for f in drift)
-            linked_rebuilt = recorded_rebuilt(link, drift, index)
+            linked_rebuilt = recorded_rebuilt(link, drift, index, deps=group_record.get("deps"))
+            with_deps += int(bool(group_record.get("deps")))
             rebuilt_modules = {m for m in modules if m in mods_rekeyed or (
                 m in linked_rebuilt if m in link else m in rebuilt if m in built else code_drift)}
             recorded = classify_source_keys(
@@ -1562,5 +1619,5 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
     # name the commits so a low number is traceable to its cause.
     return {"pairs_annotated": done, "pairs_with_codemodel": with_codemodel, "pairs_with_recorded_graph": with_recorded,
             "commit_bound_executables": sorted(commit_bound), "commit_bound_learned_from_pairs": learned_from,
-            "pairs_content_keyed": with_v2, "pairs_spawn_scanned": with_scan,
+            "pairs_content_keyed": with_v2, "pairs_spawn_scanned": with_scan, "pairs_with_object_deps": with_deps,
             "script_lists_unread": unread[:20], "script_lists_unread_count": len(unread)}

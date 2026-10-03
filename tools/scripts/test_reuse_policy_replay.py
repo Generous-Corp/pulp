@@ -872,6 +872,49 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/added_since.cpp"], self.index), {"test/group-c"})
         self.assertEqual(rrc.recorded_rebuilt(self.link, ["test/new_test.cpp"], self.index), {"test/group-b"})
 
+    def deps(self, stale=()):
+        """Recorded object deps for self.link: the executables' own objects
+        and the member b.cpp.o; added_since.cpp.o is not placed."""
+        objects = {"<build>/test/CMakeFiles/group-a.dir/t.cpp.o": ["<src>/test/t.cpp", "<src>/core/a.hpp",
+                                                                  "<build>/pch/cmake_pch.hxx"],
+                   "<build>/test/CMakeFiles/group-b.dir/new_test.cpp.o": ["<src>/test/new_test.cpp"],
+                   "<build>/pch/cmake_pch.hxx.pch": ["<src>/core/in_pch.hpp"],
+                   "<build>/core/CMakeFiles/liba.dir/b.cpp.o": ["<src>/core/b.cpp", "<src>/core/b.hpp"],
+                   "<build>/core/CMakeFiles/liba.dir/a.cpp.o": ["<src>/core/a.cpp"]}
+        headers = sorted({h for hs in objects.values() for h in hs})
+        return rrc.recorded_deps({"schema": "pulp-object-deps/v1", "headers": headers, "stale": list(stale),
+                                  "objects": {o: [headers.index(h) for h in hs] for o, hs in objects.items()},
+                                  "members": {"<build>/core/liba.a": {
+                                      "a.cpp.o": ["<build>/core/CMakeFiles/liba.dir/a.cpp.o"],
+                                      "b.cpp.o": ["<build>/core/CMakeFiles/liba.dir/b.cpp.o"]}}})
+
+    def test_recorded_deps_reach_exactly_the_objects_that_read_a_header(self):
+        deps = self.deps()
+        # a.hpp: only group-a's own object read it. Without deps every
+        # executable with an unplaced member (b, c) is reached too.
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/a.hpp"], self.index, deps=deps),
+                         {"test/group-a", "test/group-c"})       # c: added_since.cpp.o is not placed
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/b.hpp"], self.index, deps=deps),
+                         {"test/group-b", "test/group-c"})       # b pulled the member that read it
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/other.hpp"], self.index, deps=deps),
+                         {"test/group-c"})                       # nothing placed read it
+
+    def test_a_precompiled_header_passes_on_what_it_read(self):
+        self.assertEqual(rrc.recorded_rebuilt(self.link, ["core/in_pch.hpp"], self.index, deps=self.deps()),
+                         {"test/group-a", "test/group-c"})
+
+    def test_a_stale_or_unreadable_deps_record_falls_back(self):
+        # group-b's own object is placed and read no drifted file, so a
+        # header drift misses it; marked stale it falls back, and the graph
+        # never compiled its source, so any header drift reaches it.
+        self.assertNotIn("test/group-b", rrc.recorded_rebuilt(self.link, ["core/other.hpp"], self.index,
+                                                              deps=self.deps()))
+        stale = self.deps(stale=["<build>/test/CMakeFiles/group-b.dir/new_test.cpp.o"])
+        self.assertNotIn("test/CMakeFiles/group-b.dir/new_test.cpp.o", stale["objects"])
+        self.assertIn("test/group-b", rrc.recorded_rebuilt(self.link, ["core/other.hpp"], self.index, deps=stale))
+        self.assertIsNone(rrc.recorded_deps({"schema": "pulp-object-deps/v9", "objects": {"x": []}}))
+        self.assertIsNone(rrc.recorded_deps(None))
+
     def test_docs_and_pinned_archives_rebuild_nothing(self):
         self.assertEqual(rrc.recorded_rebuilt(self.link, ["docs/a.md", "tools/x.json"], self.index), set())
 
@@ -884,7 +927,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -927,7 +970,7 @@ class RecordedGraphTests(unittest.TestCase):
             rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
             rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
             rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
-            cache = corpus / "cache" / "record-v5"
+            cache = corpus / "cache" / "record-v6"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
                              ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
@@ -964,7 +1007,7 @@ class RecordedGraphTests(unittest.TestCase):
             link = dict(self.link)
             if recorded:
                 link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
-            cache = corpus / "cache" / "record-v5"
+            cache = corpus / "cache" / "record-v6"
             cache.mkdir(parents=True)
             for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
                              ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
@@ -991,7 +1034,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -1025,7 +1068,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v5"
+        cache = corpus / "cache" / "record-v6"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
