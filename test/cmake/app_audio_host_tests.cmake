@@ -669,6 +669,7 @@ catch_discover_tests(pulp-test-host TEST_SPEC "~[flaky]")
 # Focused. No CLAP fixture needed — these exercise pure graph
 # routing/topology, not plugin loading.
 add_executable(pulp-test-host-signal-graph test_host_signal_graph.cpp
+    test_host_signal_graph_prepared_edit.cpp
     test_custom_node_diagnostics.cpp)
 target_sources(pulp-test-host-signal-graph PRIVATE
     $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
