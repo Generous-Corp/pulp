@@ -5,6 +5,7 @@
 
 #include "../tools/cli/cli_fs_util.hpp"
 #include "../tools/cli/kit_commands.hpp"
+#include "../tools/cli/kit_profile_verification.hpp"
 
 #include <pulp/runtime/crypto.hpp>
 
@@ -16,8 +17,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -35,9 +36,8 @@ struct TempDir {
     TempDir() {
         static std::atomic<int> seq{0};
         path = fs::temp_directory_path() /
-               ("pulp-cli-kit-test-" +
-                std::to_string(reinterpret_cast<std::uintptr_t>(this)) + "-" +
-                std::to_string(seq.fetch_add(1)));
+               ("pulp-cli-kit-test-" + std::to_string(reinterpret_cast<std::uintptr_t>(this)) +
+                "-" + std::to_string(seq.fetch_add(1)));
         fs::create_directories(path);
     }
 
@@ -55,7 +55,8 @@ void write_file(const fs::path& path, const std::string& body) {
 
 bool has_issue(const KitValidationResult& result, const std::string& code) {
     for (const auto& issue : result.issues)
-        if (issue.code == code) return true;
+        if (issue.code == code)
+            return true;
     return false;
 }
 
@@ -69,13 +70,12 @@ fs::path repo_root() {
 
 std::string read_file(const fs::path& path) {
     std::ifstream f(path, std::ios::binary);
-    if (!f.is_open()) return {};
+    if (!f.is_open())
+        return {};
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
 
-std::string replace_all(std::string value,
-                        const std::string& from,
-                        const std::string& to) {
+std::string replace_all(std::string value, const std::string& from, const std::string& to) {
     std::size_t pos = 0;
     while ((pos = value.find(from, pos)) != std::string::npos) {
         value.replace(pos, from.size(), to);
@@ -86,7 +86,8 @@ std::string replace_all(std::string value,
 
 std::string read_zip_entry(const fs::path& zip_path, const std::string& entry) {
     mz_zip_archive zip{};
-    if (!mz_zip_reader_init_file(&zip, zip_path.string().c_str(), 0)) return {};
+    if (!mz_zip_reader_init_file(&zip, zip_path.string().c_str(), 0))
+        return {};
     size_t size = 0;
     void* data = mz_zip_reader_extract_file_to_heap(&zip, entry.c_str(), &size, 0);
     std::string out;
@@ -106,10 +107,13 @@ fs::path write_archive_with_optional_hash_manifest(const fs::path& archive,
     REQUIRE(mz_zip_writer_init_file(&zip, archive.string().c_str(), 0));
     std::error_code ec;
     std::vector<std::pair<std::string, std::string>> hashes;
-    for (fs::recursive_directory_iterator it(source_root, ec), end; !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
+    for (fs::recursive_directory_iterator it(source_root, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (!it->is_regular_file(ec))
+            continue;
         const auto rel = fs::relative(it->path(), source_root, ec).generic_string();
-        if (rel == "files.sha256.json") continue;
+        if (rel == "files.sha256.json")
+            continue;
         std::ifstream file(it->path(), std::ios::binary);
         std::string body((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         REQUIRE(mz_zip_writer_add_mem(&zip, rel.c_str(), body.data(), body.size(),
@@ -124,14 +128,12 @@ fs::path write_archive_with_optional_hash_manifest(const fs::path& archive,
             sha_manifest += "    \"" + hashes[i].first + "\": \"" + hashes[i].second + "\"";
         }
         sha_manifest += "\n  }\n}\n";
-        REQUIRE(mz_zip_writer_add_mem(&zip, "files.sha256.json",
-                                      sha_manifest.data(), sha_manifest.size(),
-                                      MZ_DEFAULT_COMPRESSION));
+        REQUIRE(mz_zip_writer_add_mem(&zip, "files.sha256.json", sha_manifest.data(),
+                                      sha_manifest.size(), MZ_DEFAULT_COMPRESSION));
     }
     if (add_unlisted_payload) {
         const std::string extra = "not declared in files.sha256.json";
-        REQUIRE(mz_zip_writer_add_mem(&zip, "extras/unlisted.txt",
-                                      extra.data(), extra.size(),
+        REQUIRE(mz_zip_writer_add_mem(&zip, "extras/unlisted.txt", extra.data(), extra.size(),
                                       MZ_DEFAULT_COMPRESSION));
     }
     REQUIRE(mz_zip_writer_finalize_archive(&zip));
@@ -150,8 +152,7 @@ std::string capture_stdout_for(const std::function<int()>& fn, int& exit_code) {
 std::string hex_encode(const std::vector<std::uint8_t>& bytes) {
     std::ostringstream out;
     for (const auto byte : bytes)
-        out << std::hex << std::setfill('0') << std::setw(2)
-            << static_cast<int>(byte);
+        out << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(byte);
     return out.str();
 }
 
@@ -163,24 +164,20 @@ fs::path write_registry_manifest(const fs::path& kit_root) {
         seed[i] = static_cast<std::uint8_t>(i + 1);
     auto keypair = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
     REQUIRE(keypair.has_value());
-    const auto message = std::string("pulp-registry-manifest-v1\n")
-        + "dev.pulp.fixtures.basic-ui-kit\n"
-        + "0.1.0\n"
-        + canonical_sha + "\n";
+    const auto message = std::string("pulp-registry-manifest-v1\n") +
+                         "dev.pulp.fixtures.basic-ui-kit\n" + "0.1.0\n" + canonical_sha + "\n";
     auto signature = pulp::runtime::ed25519_sign(
         keypair->private_key.data(), keypair->private_key.size(),
         reinterpret_cast<const std::uint8_t*>(message.data()), message.size());
     REQUIRE(signature.has_value());
 
     const auto path = kit_root / "registry" / "pulp-registry-manifest.json";
-    write_file(path, std::string("{\n")
-        + "  \"schema\": \"pulp-registry-manifest-v1\",\n"
-        + "  \"id\": \"dev.pulp.fixtures.basic-ui-kit\",\n"
-        + "  \"version\": \"0.1.0\",\n"
-        + "  \"canonicalManifestSha256\": \"" + canonical_sha + "\",\n"
-        + "  \"signerPublicKey\": \"" + hex_encode(keypair->public_key) + "\",\n"
-        + "  \"signature\": \"" + hex_encode(*signature) + "\"\n"
-        + "}\n");
+    write_file(path, std::string("{\n") + "  \"schema\": \"pulp-registry-manifest-v1\",\n" +
+                         "  \"id\": \"dev.pulp.fixtures.basic-ui-kit\",\n" +
+                         "  \"version\": \"0.1.0\",\n" + "  \"canonicalManifestSha256\": \"" +
+                         canonical_sha + "\",\n" + "  \"signerPublicKey\": \"" +
+                         hex_encode(keypair->public_key) + "\",\n" + "  \"signature\": \"" +
+                         hex_encode(*signature) + "\"\n" + "}\n");
     return path;
 }
 
@@ -189,16 +186,20 @@ std::string quote_for_shell(const fs::path& path) {
 #ifdef _WIN32
     std::string out = "\"";
     for (const char c : s) {
-        if (c == '"') out += "\\\"";
-        else out += c;
+        if (c == '"')
+            out += "\\\"";
+        else
+            out += c;
     }
     out += "\"";
     return out;
 #else
     std::string out = "'";
     for (const char c : s) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
+        if (c == '\'')
+            out += "'\\''";
+        else
+            out += c;
     }
     out += "'";
     return out;
@@ -252,15 +253,16 @@ void write_fake_screenshot_tool(const fs::path& project_root, const std::string&
 std::string collect_render_logs(const fs::path& project_root) {
     const auto root = project_root / ".pulp" / "kit-validation";
     std::error_code ec;
-    if (!fs::exists(root, ec)) return "(no kit-validation directory)";
+    if (!fs::exists(root, ec))
+        return "(no kit-validation directory)";
     std::string out;
     for (auto it = fs::recursive_directory_iterator(root, ec);
          !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (it->is_regular_file() && it->path().extension() == ".log") {
             std::ifstream in(it->path(), std::ios::binary);
             out += "--- " + it->path().string() + " ---\n";
-            out += std::string((std::istreambuf_iterator<char>(in)),
-                               std::istreambuf_iterator<char>());
+            out +=
+                std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
             out += "\n";
         }
     }
@@ -275,10 +277,9 @@ int run_success_command(const std::string& cmd) {
     return std::system(cmd.c_str());
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("pulp kit validates metadata-only kit fixture manifests",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validates metadata-only kit fixture manifests", "[cli][kit]") {
     const auto root = repo_root();
     for (const auto& rel : {
              "fixtures/packages/gain-dsp-kit",
@@ -297,8 +298,7 @@ TEST_CASE("pulp kit validates metadata-only kit fixture manifests",
     }
 }
 
-TEST_CASE("pulp kit rejects incompatible requires.pulp constraints",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects incompatible requires.pulp constraints", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -343,13 +343,11 @@ TEST_CASE("pulp kit rejects incompatible requires.pulp constraints",
 
     auto result = validate_manifest_path(kit.path);
     REQUIRE_FALSE(result.ok());
-    REQUIRE(std::any_of(result.issues.begin(), result.issues.end(), [](const auto& issue) {
-        return issue.code == "sdk-incompatible";
-    }));
+    REQUIRE(std::any_of(result.issues.begin(), result.issues.end(),
+                        [](const auto& issue) { return issue.code == "sdk-incompatible"; }));
 }
 
-TEST_CASE("pulp kit rejects incompatible requires.cpp constraints",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects incompatible requires.cpp constraints", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -393,8 +391,7 @@ TEST_CASE("pulp kit rejects incompatible requires.cpp constraints",
     REQUIRE(has_issue(result, "cpp-incompatible"));
 }
 
-TEST_CASE("pulp kit rejects malformed requires.cpp constraints",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects malformed requires.cpp constraints", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -438,8 +435,7 @@ TEST_CASE("pulp kit rejects malformed requires.cpp constraints",
     REQUIRE(has_issue(result, "invalid-cpp-requirement"));
 }
 
-TEST_CASE("pulp kit rejects fractional requires.cpp constraints",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects fractional requires.cpp constraints", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -483,8 +479,7 @@ TEST_CASE("pulp kit rejects fractional requires.cpp constraints",
     REQUIRE(has_issue(result, "invalid-cpp-requirement"));
 }
 
-TEST_CASE("pulp kit rejects unknown Pulp module dependencies",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects unknown Pulp module dependencies", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -528,8 +523,7 @@ TEST_CASE("pulp kit rejects unknown Pulp module dependencies",
     REQUIRE(has_issue(result, "unknown-pulp-module-dependency"));
 }
 
-TEST_CASE("pulp kit rejects manifest array entries that violate the schema",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects manifest array entries that violate the schema", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -581,8 +575,7 @@ TEST_CASE("pulp kit rejects manifest array entries that violate the schema",
     REQUIRE(has_issue(result, "invalid-dependency-package"));
 }
 
-TEST_CASE("pulp kit rejects malformed Pulp module dependencies",
-          "[cli][kit]") {
+TEST_CASE("pulp kit rejects malformed Pulp module dependencies", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -626,22 +619,26 @@ TEST_CASE("pulp kit rejects malformed Pulp module dependencies",
     REQUIRE(has_issue(result, "invalid-pulp-module-dependency"));
 }
 
-TEST_CASE("pulp kit search separates local kit and content lanes",
-          "[cli][kit]") {
+TEST_CASE("pulp kit search separates local kit and content lanes", "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
 
     int exit_code = 0;
-    const auto kits = capture_stdout_for([&] {
-        return cmd_kit({"search", "basic", "--root", root.string(), "--lane", "kit", "--json"});
-    }, exit_code);
+    const auto kits = capture_stdout_for(
+        [&] {
+            return cmd_kit({"search", "basic", "--root", root.string(), "--lane", "kit", "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(kits.find(R"("lane":"kit")") != std::string::npos);
     REQUIRE(kits.find("dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
     REQUIRE(kits.find(R"("lane":"content")") == std::string::npos);
 
-    const auto content = capture_stdout_for([&] {
-        return cmd_kit({"search", "basic", "--root", root.string(), "--lane", "content", "--json"});
-    }, exit_code);
+    const auto content = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"search", "basic", "--root", root.string(), "--lane", "content", "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(content.find(R"("lane":"content")") != std::string::npos);
     REQUIRE(content.find("dev.pulp.fixtures.basic-content-pack") != std::string::npos);
@@ -655,25 +652,29 @@ TEST_CASE("pulp kit search discovers verified local kit and content archives",
     const auto kit_archive = search_root.path / "basic-ui-kit.pulpkit";
     const auto content_archive = search_root.path / "basic-content-pack.pulpcontent";
 
-    REQUIRE(cmd_kit({"pack", (root / "basic-ui-kit").string(),
-                     "--output", kit_archive.string(), "--json"}) == 0);
-    REQUIRE(cmd_kit({"pack", (root / "basic-content-pack").string(),
-                     "--output", content_archive.string(), "--json"}) == 0);
+    REQUIRE(cmd_kit({"pack", (root / "basic-ui-kit").string(), "--output", kit_archive.string(),
+                     "--json"}) == 0);
+    REQUIRE(cmd_kit({"pack", (root / "basic-content-pack").string(), "--output",
+                     content_archive.string(), "--json"}) == 0);
 
     int exit_code = 0;
-    const auto kits = capture_stdout_for([&] {
-        return cmd_kit({"search", "basic", "--root", search_root.path.string(),
-                        "--lane", "kit", "--json"});
-    }, exit_code);
+    const auto kits = capture_stdout_for(
+        [&] {
+            return cmd_kit({"search", "basic", "--root", search_root.path.string(), "--lane", "kit",
+                            "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(kits.find("dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
     REQUIRE(kits.find(kit_archive.filename().string()) != std::string::npos);
     REQUIRE(kits.find("dev.pulp.fixtures.basic-content-pack") == std::string::npos);
 
-    const auto content = capture_stdout_for([&] {
-        return cmd_kit({"search", "basic", "--root", search_root.path.string(),
-                        "--lane", "content", "--json"});
-    }, exit_code);
+    const auto content = capture_stdout_for(
+        [&] {
+            return cmd_kit({"search", "basic", "--root", search_root.path.string(), "--lane",
+                            "content", "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(content.find("dev.pulp.fixtures.basic-content-pack") != std::string::npos);
     REQUIRE(content.find(content_archive.filename().string()) != std::string::npos);
@@ -693,16 +694,18 @@ TEST_CASE("pulp kit metadata can inspect content archives but cannot plan, apply
     REQUIRE(cmd_kit({"pack", fixture.string(), "--output", archive.string(), "--json"}) == 0);
 
     int exit_code = -1;
-    const auto inspect = capture_stdout_for([&] {
-        return cmd_kit({"inspect", archive.string(), "--json"});
-    }, exit_code);
+    const auto inspect = capture_stdout_for(
+        [&] { return cmd_kit({"inspect", archive.string(), "--json"}); }, exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(inspect.find("dev.pulp.fixtures.basic-content-pack") != std::string::npos);
     REQUIRE(inspect.find(R"("kind":["content-pack"])") != std::string::npos);
 
-    const auto plan = capture_stdout_for([&] {
-        return cmd_kit({"plan", fixture.string(), "--project", project.path.string(), "--json"});
-    }, exit_code);
+    const auto plan = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"plan", fixture.string(), "--project", project.path.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(plan.find(R"("code":"content-pack-wrong-lane")") != std::string::npos);
     REQUIRE(plan.find(R"("actions":[])") != std::string::npos);
@@ -711,35 +714,35 @@ TEST_CASE("pulp kit metadata can inspect content archives but cannot plan, apply
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
 
-    const auto publish = capture_stdout_for([&] {
-        return cmd_kit({"publish", archive.string(), "--dry-run", "--json"});
-    }, exit_code);
+    const auto publish = capture_stdout_for(
+        [&] { return cmd_kit({"publish", archive.string(), "--dry-run", "--json"}); }, exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(publish.find(R"("code":"content-pack-wrong-lane")") != std::string::npos);
     REQUIRE(publish.find(R"("publishing_enabled":false)") != std::string::npos);
 }
 
-TEST_CASE("pulp kit search filters local manifests by package kind",
-          "[cli][kit]") {
+TEST_CASE("pulp kit search filters local manifests by package kind", "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
 
     int exit_code = 0;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"search", "*", "--root", root.string(), "--kind", "content-pack", "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"search", "*", "--root", root.string(), "--kind", "content-pack", "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find("dev.pulp.fixtures.basic-content-pack") != std::string::npos);
     REQUIRE(output.find("dev.pulp.fixtures.basic-ui-kit") == std::string::npos);
 }
 
-TEST_CASE("pulp kit search rejects invalid lane filters before scanning",
-          "[cli][kit]") {
+TEST_CASE("pulp kit search rejects invalid lane filters before scanning", "[cli][kit]") {
     const auto root = repo_root() / "fixtures/packages";
-    REQUIRE(cmd_kit({"search", "basic", "--root", root.string(), "--lane", "dependency", "--json"}) == 2);
+    REQUIRE(cmd_kit({"search", "basic", "--root", root.string(), "--lane", "dependency",
+                     "--json"}) == 2);
 }
 
-TEST_CASE("pulp kit validation accepts template generated-project golden diffs",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation accepts template generated-project golden diffs", "[cli][kit]") {
     const auto root = repo_root();
     const auto fixture = root / "fixtures/packages/simple-plugin-template";
 
@@ -811,8 +814,7 @@ TEST_CASE("pulp package JSON Schema carries kind-specific review evidence rules"
     REQUIRE(schema.find(R"("required": ["reports"])") != std::string::npos);
 }
 
-TEST_CASE("pulp kit validation accepts UI screenshot evidence paths",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation accepts UI screenshot evidence paths", "[cli][kit]") {
     const auto root = repo_root();
     const auto fixture = root / "fixtures/packages/basic-ui-kit";
 
@@ -823,19 +825,18 @@ TEST_CASE("pulp kit validation accepts UI screenshot evidence paths",
     REQUIRE(fs::exists(fixture / "validation" / "reports" / "basic-ui-kit-screenshot.json"));
 
     const auto profile = read_file(fixture / "validation" / "screenshots" / "basic-ui-kit.json");
-    const auto report = read_file(fixture / "validation" / "reports" / "basic-ui-kit-screenshot.json");
+    const auto report =
+        read_file(fixture / "validation" / "reports" / "basic-ui-kit-screenshot.json");
     REQUIRE(profile.find(R"("kind": "pulp-screenshot-profile")") != std::string::npos);
     REQUIRE(profile.find(R"("executeDuringInspect": false)") != std::string::npos);
     REQUIRE(report.find(R"("renderer": "pulp")") != std::string::npos);
 }
 
-TEST_CASE("pulp kit init scaffolds structured authoring provenance",
-          "[cli][kit]") {
+TEST_CASE("pulp kit init scaffolds structured authoring provenance", "[cli][kit]") {
     TempDir kit;
 
-    REQUIRE(cmd_kit({"init", "--kind", "source",
-                     "--id", "dev.pulp.tests.initialized-kit",
-                     "--dir", kit.path.string()}) == 0);
+    REQUIRE(cmd_kit({"init", "--kind", "source", "--id", "dev.pulp.tests.initialized-kit", "--dir",
+                     kit.path.string()}) == 0);
 
     const auto manifest = read_file(kit.path / "pulp.package.json");
     REQUIRE(manifest.find(R"("createdBy": {)") != std::string::npos);
@@ -848,16 +849,14 @@ TEST_CASE("pulp kit init scaffolds structured authoring provenance",
     REQUIRE(result.ok());
 }
 
-TEST_CASE("pulp kit validation verifies hashed evidence objects",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation verifies hashed evidence objects", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
-    write_file(kit.path / "validation" / "reports" / "smoke.json",
-               "{\"status\":\"pass\"}\n");
+    write_file(kit.path / "validation" / "reports" / "smoke.json", "{\"status\":\"pass\"}\n");
     const auto report_sha =
-        "sha256-" + pulp::runtime::sha256_hex(
-            read_file(kit.path / "validation" / "reports" / "smoke.json"));
+        "sha256-" +
+        pulp::runtime::sha256_hex(read_file(kit.path / "validation" / "reports" / "smoke.json"));
     write_file(kit.path / "pulp.package.json", std::string(R"JSON({
   "schema": "pulp-package-v1",
   "id": "dev.pulp.tests.hashed-evidence-kit",
@@ -914,8 +913,7 @@ TEST_CASE("pulp kit validation verifies hashed evidence objects",
     REQUIRE_FALSE(has_issue(result, "evidence-digest-mismatch"));
 }
 
-TEST_CASE("pulp kit validation requires a per-asset license inventory",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation requires a per-asset license inventory", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -959,13 +957,11 @@ TEST_CASE("pulp kit validation requires a per-asset license inventory",
     REQUIRE(has_issue(result, "missing-license-inventory"));
 }
 
-TEST_CASE("pulp kit validation rejects mismatched evidence digests",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation rejects mismatched evidence digests", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "src" / "gain.cpp", "// gain\n");
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
-    write_file(kit.path / "validation" / "reports" / "smoke.json",
-               "{\"status\":\"pass\"}\n");
+    write_file(kit.path / "validation" / "reports" / "smoke.json", "{\"status\":\"pass\"}\n");
     write_file(kit.path / "pulp.package.json", R"JSON({
   "schema": "pulp-package-v1",
   "id": "dev.pulp.tests.bad-evidence-kit",
@@ -1015,8 +1011,7 @@ TEST_CASE("pulp kit validation rejects mismatched evidence digests",
     REQUIRE(has_issue(result, "evidence-digest-mismatch"));
 }
 
-TEST_CASE("pulp kit validation rejects missing UI screenshot evidence paths",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation rejects missing UI screenshot evidence paths", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "ui" / "index.js", "export const fixtureName = 'Missing Evidence';\n");
     write_file(kit.path / "ui" / "tokens.json", "{}\n");
@@ -1068,8 +1063,7 @@ TEST_CASE("pulp kit validation rejects missing UI screenshot evidence paths",
     REQUIRE(has_issue(result, "missing-path"));
 }
 
-TEST_CASE("pulp kit validation rejects UI kits with no screenshot evidence",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation rejects UI kits with no screenshot evidence", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "ui" / "index.js", "export const fixtureName = 'No Evidence';\n");
     write_file(kit.path / "ui" / "tokens.json", "{}\n");
@@ -1120,53 +1114,62 @@ TEST_CASE("pulp kit validation rejects UI kits with no screenshot evidence",
 TEST_CASE("pulp kit verify evaluates Pulp screenshot profile reports after plan review",
           "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerify)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerify)\n");
 
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", fixture.string(), "--project", project.path.string(), "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"verify", fixture.string(), "--project", project.path.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"ui-kit-cmake-include")") != std::string::npos);
-    REQUIRE(output.find("\"path\":\"include(cmake/pulp-kits.cmake OPTIONAL)\"") != std::string::npos);
+    REQUIRE(output.find("\"path\":\"include(cmake/pulp-kits.cmake OPTIONAL)\"") !=
+            std::string::npos);
     REQUIRE(output.find(R"("kind":"ui-kit-cmake-target")") != std::string::npos);
-    REQUIRE(output.find(R"("path":"pulp_kit_dev_pulp_fixtures_basic_ui_kit")") != std::string::npos);
+    REQUIRE(output.find(R"("path":"pulp_kit_dev_pulp_fixtures_basic_ui_kit")") !=
+            std::string::npos);
     REQUIRE(output.find(R"("kind":"ui-kit-helper-call")") != std::string::npos);
-    REQUIRE(output.find("pulp_use_kit_ui(<plugin-target> pulp_kit_dev_pulp_fixtures_basic_ui_kit SCRIPT pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js TOKENS pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json)") != std::string::npos);
+    REQUIRE(output.find("pulp_use_kit_ui(<plugin-target> pulp_kit_dev_pulp_fixtures_basic_ui_kit "
+                        "SCRIPT pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js TOKENS "
+                        "pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json)") !=
+            std::string::npos);
     REQUIRE(output.find(R"("kind":"ui-kit-asset-root")") != std::string::npos);
-    REQUIRE(output.find(R"("path":"pulp-kits/dev.pulp.fixtures.basic-ui-kit/assets/")") != std::string::npos);
+    REQUIRE(output.find(R"("path":"pulp-kits/dev.pulp.fixtures.basic-ui-kit/assets/")") !=
+            std::string::npos);
 }
 
-TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after review",
-          "[cli][kit]") {
+TEST_CASE("pulp kit verify can explicitly execute screenshot profiles after review", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyRender)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyRender)\n");
     write_fake_screenshot_tool(project.path, "fake png bytes");
 
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", fixture.string(),
-                        "--project", project.path.string(),
-                        "--execute-screenshots",
-                        "--screenshot-backend", "skia",
-                        "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit({"verify", fixture.string(), "--project", project.path.string(),
+                            "--execute-screenshots", "--screenshot-backend", "skia", "--json"});
+        },
+        exit_code);
     INFO(output);
     INFO("render-logs:\n" + collect_render_logs(project.path));
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"rendered-screenshot")") != std::string::npos);
     REQUIRE(output.find(R"("kind":"render-log")") != std::string::npos);
     REQUIRE(fs::exists(project.path / ".pulp" / "kit-validation" /
-                       "validation-screenshots-basic-ui-kit-json" /
-                       "basic-ui-kit-default.png"));
+                       "validation-screenshots-basic-ui-kit-json" / "basic-ui-kit-default.png"));
 }
 
 TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot baselines",
           "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualDiff)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualDiff)\n");
     write_fake_screenshot_tool(project.path, "fake png bytes");
 
     TempDir kit;
@@ -1245,27 +1248,26 @@ TEST_CASE("pulp kit verify writes visual diff reports for explicit screenshot ba
 })JSON");
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", kit.path.string(),
-                        "--project", project.path.string(),
-                        "--execute-screenshots",
-                        "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit({"verify", kit.path.string(), "--project", project.path.string(),
+                            "--execute-screenshots", "--json"});
+        },
+        exit_code);
     INFO(output);
     INFO("render-logs:\n" + collect_render_logs(project.path));
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"visual-diff-report")") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
-                        "validation-screenshots-visual-json" /
-                        "visual.visual-diff.json";
+                        "validation-screenshots-visual-json" / "visual.visual-diff.json";
     REQUIRE(fs::exists(report));
     REQUIRE(read_file(report).find(R"("status": "pass")") != std::string::npos);
 }
 
-TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatch",
-          "[cli][kit]") {
+TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatch", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualMismatch)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualMismatch)\n");
     write_fake_screenshot_tool(project.path, "actual bytes");
 
     TempDir kit;
@@ -1343,27 +1345,26 @@ TEST_CASE("pulp kit verify fails explicit screenshot baselines on visual mismatc
 })JSON");
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", kit.path.string(),
-                        "--project", project.path.string(),
-                        "--execute-screenshots",
-                        "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit({"verify", kit.path.string(), "--project", project.path.string(),
+                            "--execute-screenshots", "--json"});
+        },
+        exit_code);
     INFO(output);
     INFO("render-logs:\n" + collect_render_logs(project.path));
     REQUIRE(exit_code == 1);
     REQUIRE(output.find("screenshot-visual-diff-mismatch") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
-                        "validation-screenshots-visual-json" /
-                        "visual.visual-diff.json";
+                        "validation-screenshots-visual-json" / "visual.visual-diff.json";
     REQUIRE(fs::exists(report));
     REQUIRE(read_file(report).find(R"("status": "fail")") != std::string::npos);
 }
 
-TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
-          "[cli][kit]") {
+TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualTolerance)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyVisualTolerance)\n");
     write_fake_screenshot_tool(project.path, "actual bytes");
 
     TempDir kit;
@@ -1442,19 +1443,18 @@ TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
 })JSON");
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", kit.path.string(),
-                        "--project", project.path.string(),
-                        "--execute-screenshots",
-                        "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit({"verify", kit.path.string(), "--project", project.path.string(),
+                            "--execute-screenshots", "--json"});
+        },
+        exit_code);
     INFO(output);
     INFO("render-logs:\n" + collect_render_logs(project.path));
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("kind":"visual-diff-report")") != std::string::npos);
     const auto report = project.path / ".pulp" / "kit-validation" /
-                        "validation-screenshots-visual-json" /
-                        "visual.visual-diff.json";
+                        "validation-screenshots-visual-json" / "visual.visual-diff.json";
     REQUIRE(fs::exists(report));
     const auto report_text = read_file(report);
     REQUIRE(report_text.find(R"("status": "pass")") != std::string::npos);
@@ -1465,7 +1465,8 @@ TEST_CASE("pulp kit verify allows visual diffs within declared byte tolerance",
 TEST_CASE("pulp kit verify rejects negative visual diff tolerance without screenshot execution",
           "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBadVisualTolerance)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBadVisualTolerance)\n");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Bad visual tolerance kit\n");
@@ -1543,19 +1544,20 @@ TEST_CASE("pulp kit verify rejects negative visual diff tolerance without screen
 })JSON");
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", kit.path.string(),
-                        "--project", project.path.string(),
-                        "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"verify", kit.path.string(), "--project", project.path.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find("invalid-screenshot-visual-tolerance") != std::string::npos);
 }
 
-TEST_CASE("pulp kit verify rejects mismatched screenshot profile reports",
-          "[cli][kit]") {
+TEST_CASE("pulp kit verify rejects mismatched screenshot profile reports", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBad)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitVerifyBad)\n");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Bad screenshot report kit\n");
@@ -1628,11 +1630,11 @@ TEST_CASE("pulp kit verify rejects mismatched screenshot profile reports",
   }
 })JSON");
 
-    REQUIRE(cmd_kit({"verify", kit.path.string(), "--project", project.path.string(), "--json"}) == 1);
+    REQUIRE(cmd_kit({"verify", kit.path.string(), "--project", project.path.string(), "--json"}) ==
+            1);
 }
 
-TEST_CASE("pulp kit validates graph, node-pack, and native-component fixtures",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validates graph, node-pack, and native-component fixtures", "[cli][kit]") {
     const auto root = repo_root();
     for (const auto& rel : {
              "fixtures/packages/level-graph-node-kit",
@@ -1649,27 +1651,42 @@ TEST_CASE("pulp kit validates graph, node-pack, and native-component fixtures",
     }
 }
 
-TEST_CASE("pulp kit verify checks graph, node-pack, and native profiles",
-          "[cli][kit]") {
+TEST_CASE("pulp kit verify checks graph, node-pack, and native profiles", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4Verify)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4Verify)\n");
     const auto root = repo_root();
 
-    REQUIRE(cmd_kit({"verify",
-                     (root / "fixtures/packages/level-graph-node-kit").string(),
+    REQUIRE(cmd_kit({"verify", (root / "fixtures/packages/level-graph-node-kit").string(),
                      "--project", project.path.string(), "--json"}) == 0);
-    REQUIRE(cmd_kit({"verify",
-                     (root / "fixtures/packages/signed-node-pack-kit").string(),
+    REQUIRE(cmd_kit({"verify", (root / "fixtures/packages/signed-node-pack-kit").string(),
                      "--project", project.path.string(), "--json"}) == 0);
-    REQUIRE(cmd_kit({"verify",
-                     (root / "fixtures/packages/native-component-kit").string(),
+    REQUIRE(cmd_kit({"verify", (root / "fixtures/packages/native-component-kit").string(),
                      "--project", project.path.string(), "--json"}) == 0);
 }
 
-TEST_CASE("pulp kit verify rejects executable node-pack inspect profiles",
-          "[cli][kit]") {
+TEST_CASE("kit profile verification module returns structured fixture receipts",
+          "[cli][kit][verification]") {
+    const auto root = repo_root();
+    const auto kit_root = root / "fixtures/packages/level-graph-node-kit";
+    const auto manifest_path = kit_root / "pulp.package.json";
+    const auto manifest = JsonParser{read_file(manifest_path)}.parse();
+
+    KitVerifyOptions options;
+    const auto profiles = verify_profiles(manifest_path, manifest, {}, options);
+
+    REQUIRE(profiles.size() == 1);
+    REQUIRE(profiles.front().kind == "signal-graph-state-validation");
+    REQUIRE(profiles.front().status == "pass");
+    REQUIRE(profile_ok(profiles.front()));
+    REQUIRE(profile_results_json(profiles).find("signal-graph-state-validation") !=
+            std::string::npos);
+}
+
+TEST_CASE("pulp kit verify rejects executable node-pack inspect profiles", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitBadNodeVerify)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitBadNodeVerify)\n");
 
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Bad node pack\n");
@@ -1737,16 +1754,17 @@ TEST_CASE("pulp kit verify rejects executable node-pack inspect profiles",
 })JSON");
 
     int exit_code = 0;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"verify", kit.path.string(),
-                        "--project", project.path.string(), "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"verify", kit.path.string(), "--project", project.path.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find("node-pack-executes-during-inspect") != std::string::npos);
 }
 
-TEST_CASE("pulp kit validation rejects dynamic-native kits on iOS and AUv3",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation rejects dynamic-native kits on iOS and AUv3", "[cli][kit]") {
     TempDir kit;
     write_file(kit.path / "AGENTS.md", "# Unsupported native kit\n");
     write_file(kit.path / "validation" / "node-pack-smoke.json", "{}\n");
@@ -1908,8 +1926,7 @@ TEST_CASE("pulp kit validation rejects incomplete realtime contracts for graph k
     REQUIRE(has_issue(result, "invalid-rt-contract"));
 }
 
-TEST_CASE("pulp kit validation reports actionable manifest errors",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation reports actionable manifest errors", "[cli][kit]") {
     TempDir tmp;
     write_file(tmp.path / "pulp.package.json", R"JSON({
   "schema": "pulp-package-v1",
@@ -1952,8 +1969,7 @@ TEST_CASE("pulp kit validation reports actionable manifest errors",
     REQUIRE(has_issue(result, "agent-auto-apply"));
 }
 
-TEST_CASE("pulp kit validation checks sample-bank export paths",
-          "[cli][kit][content]") {
+TEST_CASE("pulp kit validation checks sample-bank export paths", "[cli][kit][content]") {
     TempDir tmp;
     write_file(tmp.path / "pulp.package.json", R"JSON({
   "schema": "pulp-package-v1",
@@ -1973,8 +1989,7 @@ TEST_CASE("pulp kit validation checks sample-bank export paths",
     REQUIRE(has_issue(result, "missing-path"));
 }
 
-TEST_CASE("pulp kit validation rejects ids unsafe as project path components",
-          "[cli][kit]") {
+TEST_CASE("pulp kit validation rejects ids unsafe as project path components", "[cli][kit]") {
     TempDir tmp;
     write_file(tmp.path / "ui" / "main.js", "export function setup() {}\n");
     write_file(tmp.path / "licenses" / "LICENSE.txt", "MIT\n");
@@ -2017,8 +2032,7 @@ TEST_CASE("pulp kit validation rejects ids unsafe as project path components",
     REQUIRE(has_issue(result, "invalid-id"));
 }
 
-TEST_CASE("pulp kit inspect JSON summarizes without executing package files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit inspect JSON summarizes without executing package files", "[cli][kit]") {
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     auto result = validate_manifest_path(fixture);
     auto json = validation_result_json(result);
@@ -2028,10 +2042,10 @@ TEST_CASE("pulp kit inspect JSON summarizes without executing package files",
     REQUIRE(json.find("ui.controls.basic") != std::string::npos);
 }
 
-TEST_CASE("pulp kit plan previews project mutations without writing files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit plan previews project mutations without writing files", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPlan)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitPlan)\n");
 
     TempDir kit;
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -2079,7 +2093,8 @@ TEST_CASE("pulp kit plan previews project mutations without writing files",
 
     const auto before_lock_exists = fs::exists(project.path / ".pulp" / "kits.lock.json");
     const auto before_cmake_exists = fs::exists(project.path / "cmake" / "pulp-kits.cmake");
-    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) == 0);
+    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) ==
+            0);
     REQUIRE(fs::exists(project.path / ".pulp" / "kits.lock.json") == before_lock_exists);
     REQUIRE(fs::exists(project.path / "cmake" / "pulp-kits.cmake") == before_cmake_exists);
 }
@@ -2092,7 +2107,8 @@ TEST_CASE("pulp kit rejects preview alias to preserve plan/apply trust wording",
 TEST_CASE("pulp kit plan resolves dependency packages only through curated registry",
           "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPlanDeps)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitPlanDeps)\n");
     write_file(project.path / "tools" / "packages" / "registry.json", R"JSON({
   "registry_version": 1,
   "packages": {}
@@ -2142,7 +2158,8 @@ TEST_CASE("pulp kit plan resolves dependency packages only through curated regis
   }
 })JSON");
 
-    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) == 1);
+    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) ==
+            1);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
 }
@@ -2150,7 +2167,8 @@ TEST_CASE("pulp kit plan resolves dependency packages only through curated regis
 TEST_CASE("pulp kit rejects unsafe CMake target metadata before generated files",
           "[cli][kit][security]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitUnsafeTarget)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitUnsafeTarget)\n");
 
     TempDir kit;
     write_file(kit.path / "validation" / "smoke.json", "{}\n");
@@ -2196,18 +2214,20 @@ TEST_CASE("pulp kit rejects unsafe CMake target metadata before generated files"
   }
 })JSON");
 
-    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) == 1);
+    REQUIRE(cmd_kit({"plan", kit.path.string(), "--project", project.path.string(), "--json"}) ==
+            1);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
-    REQUIRE(cmd_kit({"apply", kit.path.string(), "--project", project.path.string(), "--yes"}) == 1);
+    REQUIRE(cmd_kit({"apply", kit.path.string(), "--project", project.path.string(), "--yes"}) ==
+            1);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
 }
 
-TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI files", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitApply)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitApply)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string()}) == 2);
@@ -2216,9 +2236,12 @@ TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI file
     REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string(), "--yes"}) == 0);
     REQUIRE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
-    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
-    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "tokens.json"));
-    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "assets" / ".gitkeep"));
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                       "index.js"));
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                       "tokens.json"));
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "assets" /
+                       ".gitkeep"));
 
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
     const auto manifest_sha =
@@ -2227,21 +2250,27 @@ TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI file
     REQUIRE(lock.find(R"("manifest_sha256": ")" + manifest_sha + R"(")") != std::string::npos);
     REQUIRE(lock.find("cmake/pulp-kits.cmake") != std::string::npos);
     REQUIRE(lock.find("pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js") != std::string::npos);
-    REQUIRE(lock.find(R"("ui_scripts": ["pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("design_tokens": ["pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json"])")
-            != std::string::npos);
+    REQUIRE(
+        lock.find(R"("ui_scripts": ["pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("design_tokens": ["pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json"])") !=
+        std::string::npos);
     REQUIRE(lock.find("pulp-kits/dev.pulp.fixtures.basic-ui-kit/assets") != std::string::npos);
 
     const auto cmake = read_file(project.path / "cmake" / "pulp-kits.cmake");
     REQUIRE(cmake.find("BEGIN_PULP_KIT dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
-    REQUIRE(cmake.find("add_library(pulp_kit_dev_pulp_fixtures_basic_ui_kit INTERFACE)") != std::string::npos);
-    REQUIRE(cmake.find("PULP_UI_SCRIPTS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PULP_DESIGN_TOKENS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PULP_ASSETS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/assets")
-            != std::string::npos);
+    REQUIRE(cmake.find("add_library(pulp_kit_dev_pulp_fixtures_basic_ui_kit INTERFACE)") !=
+            std::string::npos);
+    REQUIRE(
+        cmake.find("PULP_UI_SCRIPTS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/index.js\"") !=
+        std::string::npos);
+    REQUIRE(cmake.find(
+                "PULP_DESIGN_TOKENS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/ui/tokens.json\"") !=
+            std::string::npos);
+    REQUIRE(cmake.find("PULP_ASSETS \"pulp-kits/dev.pulp.fixtures.basic-ui-kit/assets") !=
+            std::string::npos);
     REQUIRE(read_file(project.path / "CMakeLists.txt")
                 .find("include(cmake/pulp-kits.cmake OPTIONAL)") != std::string::npos);
 
@@ -2249,8 +2278,8 @@ TEST_CASE("pulp kit apply writes owned lock, CMake include, and declared UI file
     const auto cmakelists = read_file(project.path / "CMakeLists.txt");
     const auto include_pos = cmakelists.find("include(cmake/pulp-kits.cmake OPTIONAL)");
     REQUIRE(include_pos != std::string::npos);
-    REQUIRE(cmakelists.find("include(cmake/pulp-kits.cmake OPTIONAL)", include_pos + 1)
-            == std::string::npos);
+    REQUIRE(cmakelists.find("include(cmake/pulp-kits.cmake OPTIONAL)", include_pos + 1) ==
+            std::string::npos);
 }
 
 TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned files",
@@ -2258,17 +2287,16 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
     TempDir project;
     TempDir first_pack;
     TempDir second_pack;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitReplace)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitReplace)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     std::error_code ec;
     fs::copy(fixture, first_pack.path / "basic-ui-kit",
-             fs::copy_options::recursive | fs::copy_options::overwrite_existing,
-             ec);
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     REQUIRE_FALSE(ec);
     fs::copy(fixture, second_pack.path / "basic-ui-kit",
-             fs::copy_options::recursive | fs::copy_options::overwrite_existing,
-             ec);
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     REQUIRE_FALSE(ec);
     write_file(first_pack.path / "basic-ui-kit" / "legacy" / "old.txt", "old export\n");
     auto manifest = read_file(first_pack.path / "basic-ui-kit" / "pulp.package.json");
@@ -2278,13 +2306,15 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
     manifest.replace(pos, assets.size(), R"("assets": ["assets/", "legacy/"])");
     write_file(first_pack.path / "basic-ui-kit" / "pulp.package.json", manifest);
 
-    REQUIRE(cmd_kit({"apply", (first_pack.path / "basic-ui-kit").string(),
-                     "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "legacy" / "old.txt"));
+    REQUIRE(cmd_kit({"apply", (first_pack.path / "basic-ui-kit").string(), "--project",
+                     project.path.string(), "--yes"}) == 0);
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "legacy" /
+                       "old.txt"));
 
-    REQUIRE(cmd_kit({"apply", (second_pack.path / "basic-ui-kit").string(),
-                     "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "legacy" / "old.txt"));
+    REQUIRE(cmd_kit({"apply", (second_pack.path / "basic-ui-kit").string(), "--project",
+                     project.path.string(), "--yes"}) == 0);
+    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" /
+                             "legacy" / "old.txt"));
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
     REQUIRE(lock.find("legacy/old.txt") == std::string::npos);
 }
@@ -2292,7 +2322,8 @@ TEST_CASE("pulp kit apply replaces same-id kit roots without leaving stale owned
 TEST_CASE("pulp kit apply rolls back copied files when ownership lock cannot be written",
           "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRollback)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitRollback)\n");
     write_file(project.path / ".pulp", "not a directory\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
@@ -2300,7 +2331,8 @@ TEST_CASE("pulp kit apply rolls back copied files when ownership lock cannot be 
     REQUIRE(fs::exists(project.path / ".pulp"));
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
-    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
+    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                             "index.js"));
     REQUIRE(read_file(project.path / "CMakeLists.txt")
                 .find("include(cmake/pulp-kits.cmake OPTIONAL)") == std::string::npos);
 }
@@ -2309,13 +2341,12 @@ TEST_CASE("pulp kit apply rejects symlinks inside exported directories before co
           "[cli][kit]") {
     TempDir project;
     TempDir kit_copy;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitSymlinkReject)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitSymlinkReject)\n");
 
     std::error_code ec;
-    fs::copy(repo_root() / "fixtures/packages/basic-ui-kit",
-             kit_copy.path / "basic-ui-kit",
-             fs::copy_options::recursive,
-             ec);
+    fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", kit_copy.path / "basic-ui-kit",
+             fs::copy_options::recursive, ec);
     REQUIRE_FALSE(ec);
 
     const auto outside = kit_copy.path / "outside.txt";
@@ -2325,32 +2356,36 @@ TEST_CASE("pulp kit apply rejects symlinks inside exported directories before co
         SKIP("symlink creation unavailable on this platform");
     }
 
-    REQUIRE(cmd_kit({"apply", (kit_copy.path / "basic-ui-kit").string(),
-                     "--project", project.path.string(), "--yes"}) == 1);
+    REQUIRE(cmd_kit({"apply", (kit_copy.path / "basic-ui-kit").string(), "--project",
+                     project.path.string(), "--yes"}) == 1);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
-    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "assets" / "outside-link.txt"));
-    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
+    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" /
+                             "assets" / "outside-link.txt"));
+    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                             "index.js"));
 }
 
-TEST_CASE("pulp kit remove deletes only lock-recorded owned files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit remove deletes only lock-recorded owned files", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRemove)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitRemove)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string(), "--yes"}) == 0);
     write_file(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "USER.txt",
                "not owned by lock\n");
 
-    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
-                     "--project", project.path.string()}) == 2);
+    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit", "--project",
+                     project.path.string()}) == 2);
     REQUIRE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
 
     int remove_rc = 0;
-    const auto remove_out = capture_stdout_for([&] {
-        return cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
-                        "--project", project.path.string(), "--yes"});
-    }, remove_rc);
+    const auto remove_out = capture_stdout_for(
+        [&] {
+            return cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit", "--project",
+                            project.path.string(), "--yes"});
+        },
+        remove_rc);
     REQUIRE(remove_rc == 0);
     // The OK line names what was removed (parity with `tool uninstall`).
     REQUIRE(remove_out.find("Removed kit dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
@@ -2358,7 +2393,8 @@ TEST_CASE("pulp kit remove deletes only lock-recorded owned files",
     REQUIRE(remove_out.find("file") != std::string::npos);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
     REQUIRE_FALSE(fs::exists(project.path / "cmake" / "pulp-kits.cmake"));
-    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
+    REQUIRE_FALSE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                             "index.js"));
     REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "USER.txt"));
     REQUIRE(read_file(project.path / "CMakeLists.txt")
                 .find("include(cmake/pulp-kits.cmake OPTIONAL)") == std::string::npos);
@@ -2375,31 +2411,32 @@ TEST_CASE("pulp kit apply builds, tests, and removes cleanly from a CMake projec
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(run_success_command("cmake -S " + quote_for_shell(project.path)
-                                + " -B " + quote_for_shell(project.path / "build")
-                                + " -DCMAKE_BUILD_TYPE=Release") == 0);
-    REQUIRE(run_success_command("cmake --build " + quote_for_shell(project.path / "build")
-                                + " --config Release") == 0);
-    REQUIRE(run_success_command("ctest --test-dir " + quote_for_shell(project.path / "build")
-                                + " -C Release --output-on-failure") == 0);
+    REQUIRE(run_success_command("cmake -S " + quote_for_shell(project.path) + " -B " +
+                                quote_for_shell(project.path / "build") +
+                                " -DCMAKE_BUILD_TYPE=Release") == 0);
+    REQUIRE(run_success_command("cmake --build " + quote_for_shell(project.path / "build") +
+                                " --config Release") == 0);
+    REQUIRE(run_success_command("ctest --test-dir " + quote_for_shell(project.path / "build") +
+                                " -C Release --output-on-failure") == 0);
 
-    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
-                     "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(run_success_command("cmake -S " + quote_for_shell(project.path)
-                                + " -B " + quote_for_shell(project.path / "build-after-remove")
-                                + " -DCMAKE_BUILD_TYPE=Release") == 0);
-    REQUIRE(run_success_command("cmake --build "
-                                + quote_for_shell(project.path / "build-after-remove")
-                                + " --config Release") == 0);
-    REQUIRE(run_success_command("ctest --test-dir "
-                                + quote_for_shell(project.path / "build-after-remove")
-                                + " -C Release --output-on-failure") == 0);
+    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit", "--project", project.path.string(),
+                     "--yes"}) == 0);
+    REQUIRE(run_success_command("cmake -S " + quote_for_shell(project.path) + " -B " +
+                                quote_for_shell(project.path / "build-after-remove") +
+                                " -DCMAKE_BUILD_TYPE=Release") == 0);
+    REQUIRE(run_success_command("cmake --build " +
+                                quote_for_shell(project.path / "build-after-remove") +
+                                " --config Release") == 0);
+    REQUIRE(run_success_command("ctest --test-dir " +
+                                quote_for_shell(project.path / "build-after-remove") +
+                                " -C Release --output-on-failure") == 0);
 }
 
 TEST_CASE("pulp kit remove rejects tampered lock paths outside the kit-owned tree",
           "[cli][kit][security]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitRemoveTamper)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitRemoveTamper)\n");
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
     REQUIRE(cmd_kit({"apply", fixture.string(), "--project", project.path.string(), "--yes"}) == 0);
@@ -2411,81 +2448,91 @@ TEST_CASE("pulp kit remove rejects tampered lock paths outside the kit-owned tre
     lock.insert(pos + std::string(marker).size(), R"("CMakeLists.txt", )");
     write_file(lock_path, lock);
 
-    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit",
-                     "--project", project.path.string(), "--yes"}) == 1);
+    REQUIRE(cmd_kit({"remove", "dev.pulp.fixtures.basic-ui-kit", "--project", project.path.string(),
+                     "--yes"}) == 1);
     REQUIRE(fs::exists(project.path / "CMakeLists.txt"));
-    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                       "index.js"));
     REQUIRE(fs::exists(lock_path));
 }
 
-TEST_CASE("pulp kit apply copies graph, node-pack, and native exports",
-          "[cli][kit]") {
+TEST_CASE("pulp kit apply copies graph, node-pack, and native exports", "[cli][kit]") {
     TempDir project;
-    write_file(project.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4)\n");
+    write_file(project.path / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\nproject(KitPhase4)\n");
     const auto root = repo_root();
 
-    REQUIRE(cmd_kit({"apply",
-                     (root / "fixtures/packages/level-graph-node-kit").string(),
+    REQUIRE(cmd_kit({"apply", (root / "fixtures/packages/level-graph-node-kit").string(),
                      "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(cmd_kit({"apply",
-                     (root / "fixtures/packages/signed-node-pack-kit").string(),
+    REQUIRE(cmd_kit({"apply", (root / "fixtures/packages/signed-node-pack-kit").string(),
                      "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(cmd_kit({"apply",
-                     (root / "fixtures/packages/native-component-kit").string(),
+    REQUIRE(cmd_kit({"apply", (root / "fixtures/packages/native-component-kit").string(),
                      "--project", project.path.string(), "--yes"}) == 0);
 
-    const auto graph_root =
-        project.path / "pulp-kits" / "dev.pulp.fixtures.level-graph-node-kit";
+    const auto graph_root = project.path / "pulp-kits" / "dev.pulp.fixtures.level-graph-node-kit";
     REQUIRE(fs::exists(graph_root / "src" / "level_node.cpp"));
     REQUIRE(fs::exists(graph_root / "fixtures" / "level-graph.json"));
     REQUIRE(fs::exists(graph_root / "fixtures" / "level-state.json"));
 
-    const auto node_root =
-        project.path / "pulp-kits" / "dev.pulp.fixtures.signed-node-pack-kit";
+    const auto node_root = project.path / "pulp-kits" / "dev.pulp.fixtures.signed-node-pack-kit";
     REQUIRE(fs::exists(node_root / "node-pack" / "manifest.json"));
 
-    const auto native_root =
-        project.path / "pulp-kits" / "dev.pulp.fixtures.native-component-kit";
+    const auto native_root = project.path / "pulp-kits" / "dev.pulp.fixtures.native-component-kit";
     REQUIRE(fs::exists(native_root / "include" / "gain_core.h"));
     REQUIRE(fs::exists(native_root / "src" / "gain_core.cpp"));
 
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
-    REQUIRE(lock.find(R"("source_files": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/src/level_node.cpp"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("node_pack_manifests": ["pulp-kits/dev.pulp.fixtures.signed-node-pack-kit/node-pack/manifest.json"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("native_component_headers": ["pulp-kits/dev.pulp.fixtures.native-component-kit/include/gain_core.h"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("native_component_sources": ["pulp-kits/dev.pulp.fixtures.native-component-kit/src/gain_core.cpp"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("graph_fixtures": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-graph.json"])")
-            != std::string::npos);
-    REQUIRE(lock.find(R"("state_fixtures": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-state.json"])")
-            != std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("source_files": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/src/level_node.cpp"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("node_pack_manifests": ["pulp-kits/dev.pulp.fixtures.signed-node-pack-kit/node-pack/manifest.json"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("native_component_headers": ["pulp-kits/dev.pulp.fixtures.native-component-kit/include/gain_core.h"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("native_component_sources": ["pulp-kits/dev.pulp.fixtures.native-component-kit/src/gain_core.cpp"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("graph_fixtures": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-graph.json"])") !=
+        std::string::npos);
+    REQUIRE(
+        lock.find(
+            R"("state_fixtures": ["pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-state.json"])") !=
+        std::string::npos);
 
     const auto cmake = read_file(project.path / "cmake" / "pulp-kits.cmake");
     REQUIRE(cmake.find("PROPERTY PULP_SOURCE_FILES "
-                       "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/src/level_node.cpp\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PROPERTY PULP_GRAPH_FIXTURES "
-                       "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-graph.json\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PROPERTY PULP_STATE_FIXTURES "
-                       "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-state.json\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PROPERTY PULP_NODE_PACK_MANIFESTS "
-                       "\"pulp-kits/dev.pulp.fixtures.signed-node-pack-kit/node-pack/manifest.json\"")
-            != std::string::npos);
-    REQUIRE(cmake.find("PROPERTY PULP_NATIVE_COMPONENT_HEADERS "
-                       "\"pulp-kits/dev.pulp.fixtures.native-component-kit/include/gain_core.h\"")
-            != std::string::npos);
+                       "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/src/level_node.cpp\"") !=
+            std::string::npos);
+    REQUIRE(cmake.find(
+                "PROPERTY PULP_GRAPH_FIXTURES "
+                "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-graph.json\"") !=
+            std::string::npos);
+    REQUIRE(cmake.find(
+                "PROPERTY PULP_STATE_FIXTURES "
+                "\"pulp-kits/dev.pulp.fixtures.level-graph-node-kit/fixtures/level-state.json\"") !=
+            std::string::npos);
+    REQUIRE(cmake.find(
+                "PROPERTY PULP_NODE_PACK_MANIFESTS "
+                "\"pulp-kits/dev.pulp.fixtures.signed-node-pack-kit/node-pack/manifest.json\"") !=
+            std::string::npos);
+    REQUIRE(
+        cmake.find("PROPERTY PULP_NATIVE_COMPONENT_HEADERS "
+                   "\"pulp-kits/dev.pulp.fixtures.native-component-kit/include/gain_core.h\"") !=
+        std::string::npos);
     REQUIRE(cmake.find("PROPERTY PULP_NATIVE_COMPONENT_SOURCES "
-                       "\"pulp-kits/dev.pulp.fixtures.native-component-kit/src/gain_core.cpp\"")
-            != std::string::npos);
+                       "\"pulp-kits/dev.pulp.fixtures.native-component-kit/src/gain_core.cpp\"") !=
+            std::string::npos);
 }
 
-TEST_CASE("pulp kit pack writes archive with SHA-256 manifest",
-          "[cli][kit]") {
+TEST_CASE("pulp kit pack writes archive with SHA-256 manifest", "[cli][kit]") {
     TempDir tmp;
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
     const auto out = tmp.path / "basic-ui-kit.pulpkit";
@@ -2510,8 +2557,7 @@ TEST_CASE("pulp kit pack rejects symlinks before writing archive payloads",
 
     std::error_code ec;
     fs::copy(fixture, kit_copy.path / "basic-ui-kit",
-             fs::copy_options::recursive | fs::copy_options::overwrite_existing,
-             ec);
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     REQUIRE_FALSE(ec);
     const auto outside = kit_copy.path / "outside-secret.txt";
     write_file(outside, "outside secret\n");
@@ -2520,8 +2566,8 @@ TEST_CASE("pulp kit pack rejects symlinks before writing archive payloads",
         SKIP("symlink creation unavailable on this platform");
     }
 
-    REQUIRE(cmd_kit({"pack", (kit_copy.path / "basic-ui-kit").string(),
-                     "--output", out.string(), "--json"}) == 1);
+    REQUIRE(cmd_kit({"pack", (kit_copy.path / "basic-ui-kit").string(), "--output", out.string(),
+                     "--json"}) == 1);
     REQUIRE_FALSE(fs::exists(out));
 }
 
@@ -2537,29 +2583,30 @@ TEST_CASE("pulp kit accepts packed pulpkit archives for validate, plan, and appl
     REQUIRE(cmd_kit({"pack", fixture.string(), "--output", archive.string(), "--json"}) == 0);
 
     int exit_code = -1;
-    auto output = capture_stdout_for([&] {
-        return cmd_kit({"validate", archive.string(), "--json"});
-    }, exit_code);
+    auto output = capture_stdout_for(
+        [&] { return cmd_kit({"validate", archive.string(), "--json"}); }, exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("ok":true)") != std::string::npos);
     REQUIRE(output.find("dev.pulp.fixtures.basic-ui-kit") != std::string::npos);
 
-    output = capture_stdout_for([&] {
-        return cmd_kit({"plan", archive.string(), "--project", project.path.string(), "--json"});
-    }, exit_code);
+    output = capture_stdout_for(
+        [&] {
+            return cmd_kit(
+                {"plan", archive.string(), "--project", project.path.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("copy-ui-script")") != std::string::npos);
     REQUIRE_FALSE(fs::exists(project.path / ".pulp" / "kits.lock.json"));
 
-    output = capture_stdout_for([&] {
-        return cmd_kit({"publish", archive.string(), "--dry-run", "--json"});
-    }, exit_code);
+    output = capture_stdout_for(
+        [&] { return cmd_kit({"publish", archive.string(), "--dry-run", "--json"}); }, exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("publishing_enabled":false)") != std::string::npos);
 
     REQUIRE(cmd_kit({"apply", archive.string(), "--project", project.path.string(), "--yes"}) == 0);
-    REQUIRE(fs::exists(project.path / "pulp-kits" /
-                       "dev.pulp.fixtures.basic-ui-kit" / "ui" / "index.js"));
+    REQUIRE(fs::exists(project.path / "pulp-kits" / "dev.pulp.fixtures.basic-ui-kit" / "ui" /
+                       "index.js"));
     const auto lock = read_file(project.path / ".pulp" / "kits.lock.json");
     REQUIRE(lock.find(archive.generic_string()) != std::string::npos);
 }
@@ -2575,9 +2622,8 @@ TEST_CASE("pulp kit rejects pulpkit archives without hash manifests",
         tmp.path / "missing-hashes.pulpkit", fixture, false, false);
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"validate", archive.string(), "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] { return cmd_kit({"validate", archive.string(), "--json"}); }, exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find(R"("code":"sha256")") != std::string::npos);
     REQUIRE(output.find("missing files.sha256.json") != std::string::npos);
@@ -2598,9 +2644,8 @@ TEST_CASE("pulp kit rejects pulpkit archives with unlisted payload files",
         tmp.path / "unlisted-payload.pulpkit", fixture, true, true);
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"validate", archive.string(), "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] { return cmd_kit({"validate", archive.string(), "--json"}); }, exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find(R"("code":"sha256")") != std::string::npos);
     REQUIRE(output.find("unlisted archived file `extras/unlisted.txt`") != std::string::npos);
@@ -2621,17 +2666,18 @@ TEST_CASE("pulp kit publish dry-run enforces publish policy without remote mutat
     REQUIRE(cmd_kit({"publish", fixture.string()}) == 2);
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"publish", fixture.string(), "--dry-run",
-                        "--registry-manifest", registry_manifest.string(), "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] {
+            return cmd_kit({"publish", fixture.string(), "--dry-run", "--registry-manifest",
+                            registry_manifest.string(), "--json"});
+        },
+        exit_code);
     REQUIRE(exit_code == 0);
     REQUIRE(output.find(R"("notice-compatibility")") != std::string::npos);
     REQUIRE(output.find(R"("publish-ready")") != std::string::npos);
 }
 
-TEST_CASE("pulp kit publish dry-run rejects mismatched signed registry manifests",
-          "[cli][kit]") {
+TEST_CASE("pulp kit publish dry-run rejects mismatched signed registry manifests", "[cli][kit]") {
     TempDir tmp;
     const auto fixture = tmp.path / "basic-ui-kit";
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
@@ -2639,12 +2685,11 @@ TEST_CASE("pulp kit publish dry-run rejects mismatched signed registry manifests
     const auto registry_manifest = write_registry_manifest(fixture);
     write_file(fixture / "pulp.package.json", read_file(fixture / "pulp.package.json") + "\n");
 
-    REQUIRE(cmd_kit({"publish", fixture.string(), "--dry-run",
-                     "--registry-manifest", registry_manifest.string(), "--json"}) == 1);
+    REQUIRE(cmd_kit({"publish", fixture.string(), "--dry-run", "--registry-manifest",
+                     registry_manifest.string(), "--json"}) == 1);
 }
 
-TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files", "[cli][kit]") {
     TempDir tmp;
     const auto fixture = tmp.path / "basic-ui-kit";
     fs::copy(repo_root() / "fixtures/packages/basic-ui-kit", fixture,
@@ -2660,9 +2705,8 @@ TEST_CASE("pulp kit publish dry-run requires NOTICE-compatible license files",
     write_file(fixture / "pulp.package.json", manifest);
 
     int exit_code = -1;
-    const auto output = capture_stdout_for([&] {
-        return cmd_kit({"publish", fixture.string(), "--dry-run", "--json"});
-    }, exit_code);
+    const auto output = capture_stdout_for(
+        [&] { return cmd_kit({"publish", fixture.string(), "--dry-run", "--json"}); }, exit_code);
     REQUIRE(exit_code == 1);
     REQUIRE(output.find(R"("code":"missing-notice-compatibility")") != std::string::npos);
     REQUIRE(output.find(R"("publish-ready")") == std::string::npos);
@@ -2765,12 +2809,12 @@ TEST_CASE("pulp kit publish dry-run rejects structured agent provenance without 
     REQUIRE(cmd_kit({"publish", kit.path.string(), "--dry-run", "--json"}) == 1);
 }
 
-TEST_CASE("pulp kit apply rejects non-project roots before writing files",
-          "[cli][kit]") {
+TEST_CASE("pulp kit apply rejects non-project roots before writing files", "[cli][kit]") {
     TempDir not_project;
     const auto fixture = repo_root() / "fixtures/packages/basic-ui-kit";
 
-    REQUIRE(cmd_kit({"apply", fixture.string(), "--project", not_project.path.string(), "--yes"}) == 1);
+    REQUIRE(cmd_kit({"apply", fixture.string(), "--project", not_project.path.string(), "--yes"}) ==
+            1);
     REQUIRE_FALSE(fs::exists(not_project.path / ".pulp"));
     REQUIRE_FALSE(fs::exists(not_project.path / "cmake"));
     REQUIRE_FALSE(fs::exists(not_project.path / "pulp-kits"));
