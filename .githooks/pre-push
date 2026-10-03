@@ -49,6 +49,33 @@ if ! PREPUSH_UPDATE_RECORDS="$(cat)"; then
     exit 1
 fi
 
+# Resolve the configured interpreter before any advisory helper runs. GUI
+# environments may omit Homebrew from PATH, while PYTHON may be a command name
+# (for example PYTHON=python3.12) rather than an absolute path.
+if [ -n "${PYTHON:-}" ]; then
+    if [[ "${PYTHON}" == */* ]]; then
+        PULP_PYTHON="${PYTHON}"
+    else
+        PULP_PYTHON="$(command -v "${PYTHON}" 2>/dev/null || true)"
+    fi
+else
+    for _python_candidate in \
+        "$(command -v python3 2>/dev/null || true)" \
+        /opt/homebrew/bin/python3 \
+        /usr/local/bin/python3 \
+        /usr/bin/python3; do
+        if [ -n "${_python_candidate}" ] && [ -x "${_python_candidate}" ]; then
+            PULP_PYTHON="${_python_candidate}"
+            break
+        fi
+    done
+fi
+if [ -z "${PULP_PYTHON:-}" ] || [ ! -x "${PULP_PYTHON}" ]; then
+    echo "[pre-push] required Python interpreter is unavailable; checked PYTHON, PATH, and standard macOS locations." >&2
+    echo "[pre-push] set PYTHON=/absolute/path/to/python3 and retry." >&2
+    exit 2
+fi
+
 # ── Main-refresh push telemetry + policy ───────────────────────────────────
 # A local `git merge origin/main && git push` moves the PR head, which cancels
 # the in-flight required `macos` gate, and it never reaches Shipyard's
@@ -63,7 +90,7 @@ fi
 REFRESH_PUSH_CHECK="$ROOT/tools/scripts/refresh_push_check.py"
 if [ -f "$REFRESH_PUSH_CHECK" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
-        "${PYTHON:-python3}" "$REFRESH_PUSH_CHECK" --root "$ROOT" --remote-url "${2:-}"
+        "$PULP_PYTHON" "$REFRESH_PUSH_CHECK" --root "$ROOT" --remote-url "${2:-}"
     _refresh_rc=$?
     if [ "$_refresh_rc" = "1" ]; then
         if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ] || [ "${PULP_DISABLE_PREPUSH_GATES:-0}" = "1" ]; then
@@ -89,7 +116,7 @@ fi
 QUEUE_REBASE_HINT="$ROOT/tools/scripts/prepush_queue_rebase_hint.py"
 if [ -f "$QUEUE_REBASE_HINT" ]; then
     printf '%s\n' "$PREPUSH_UPDATE_RECORDS" | \
-        "${PYTHON:-python3}" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
+        "$PULP_PYTHON" "$QUEUE_REBASE_HINT" --root "$ROOT" --remote-url "${2:-}" || true
 fi
 
 if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
@@ -126,7 +153,7 @@ source "$ROOT/.githooks/lib/gate-output.sh"
 # only reaches an agent that chooses to read it; a push reaches everyone.
 PR_BATCH_ADVISOR="$ROOT/tools/scripts/pr_batch_advisor.py"
 if [ -f "$PR_BATCH_ADVISOR" ] && [ "${PULP_SKIP_PR_BATCH_ADVICE:-0}" != "1" ]; then
-    run_gate_captured python3 "$PR_BATCH_ADVISOR" || true
+    run_gate_captured "$PULP_PYTHON" "$PR_BATCH_ADVISOR" || true
 fi
 
 # ── Shipyard-drift detection (pulp #1406) ──────────────────────────────────
@@ -176,7 +203,7 @@ if [ "${SHIPYARD_PR_RUNNING:-0}" != "1" ] && [ "${PULP_VIA_SHIPYARD:-0}" != "1" 
     echo "" >&2
 fi
 
-PYTHON="${PYTHON:-python3}"
+PYTHON="${PULP_PYTHON}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
 SPML="$ROOT/tools/scripts/skill_path_map_lint.py"
