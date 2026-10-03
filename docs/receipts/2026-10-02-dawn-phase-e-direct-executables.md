@@ -1,5 +1,16 @@
 # Dawn Phase E direct executable receipt (2026-10-02)
 
+> **Historical receipt.** This direct-executable record supersedes the older
+> `NOT_BUILT` claims in
+> [`2026-10-02-dawn-generalized-convolution-proof.md`](2026-10-02-dawn-generalized-convolution-proof.md).
+> It remains the private lifecycle evidence boundary; the later WaveNet depth
+> capability correction is linked from
+> [`2026-10-02-dawn-wavenet-depth-comparison.md`](2026-10-02-dawn-wavenet-depth-comparison.md)
+> and landed in commits
+> [`794d54f8d4`](https://github.com/Generous-Corp/pulp/commit/794d54f8d417ef76c5b7f66e281286beb68a0b45)
+> and
+> [`9f37814c22`](https://github.com/Generous-Corp/pulp/commit/9f37814c225902c6f273c189e439e1ad712e221c).
+
 > **Historical boundary note:** the earlier aggregate `NOT_BUILT` and
 > “adapter absent” wording is superseded by the direct executable results in
 > this receipt. The live adapter probe and hardware submission remain outside
