@@ -7236,9 +7236,22 @@ metadata. What Pulp now does by default, and what the document must not undo:
   second idle tick (`view-bridge`, "Editor open").
 - **One evaluation** — the first load has no probe realm. Before this, every
   open compiled, imported, mounted and settled the document twice.
-- **Bytecode reuse** — the runtime bundle, preludes and import payloads
-  compile once per process (`engine`, "Whole scripts reuse compiled
-  bytecode"); a warm reopen reads bytecode in ~2 ms instead of parsing.
+- **Bytecode reuse** — the runtime bundle, preludes, import payloads and the
+  document's inline scripts (2 KB and up) compile once per process
+  (`engine`, "Whole scripts reuse compiled bytecode"); a warm reopen reads
+  bytecode in ~2 ms instead of parsing.
+- **One verification per document per process** — `__pulpRuntimeImport__`
+  with `materialized-browser` goes through
+  `parse_materialized_browser_document_shared()`: the JSON parse, base64
+  decode and SHA-256 check of every asset (~130 ms on Spectr) run on the
+  first open, and a reopen with byte-identical input reuses the immutable
+  bundle. Keyed by the exact input bytes, rejected documents never kept,
+  `PULP_RUNTIME_IMPORT_CACHE=0` turns reuse off (use it as the "before" arm
+  of an A/B in one binary). `materialized_document_cache_stats().verifies`
+  is the count to gate on: 1 after N opens of one document. **A document
+  that differs per open defeats it** — do not stamp build times, nonces or
+  per-instance ids into the captured HTML or assets; pass per-instance state
+  through a native message after import.
 - **Batched host callbacks** (@pulp/react runtime revision 3) — a rAF or timer
   callback's `setState`s commit once. A vendored `runtime.js` older than that
   never installs `__pulpBatchUpdates__`; `pulp_check_vendored_react_runtime()`

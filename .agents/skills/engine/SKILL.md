@@ -134,15 +134,16 @@ When adding a new Canvas2D method, audit:
 
 `JsEngine::evaluate_script()` / `ScriptEngine::evaluate_script()` evaluate a
 whole script (a bundle, a prelude, a runtime-import payload) with
-`evaluate()`'s exact result and error semantics. On QuickJS a script of 32 KB
+`evaluate()`'s exact result and error semantics. On QuickJS a script of 2 KB
 or more is compiled once per process (`JS_EVAL_FLAG_COMPILE_ONLY` +
 `JS_WriteObject`), and every later realm evaluating byte-identical source
 deserializes the bytecode (`JS_ReadObject` + `JS_EvalFunction`) instead of
-parsing. WidgetBridge routes preludes, `load_script()` and runtime-import
-payloads through it, so a reopened plug-in editor or a second instance skips
-parsing its 1–2 MB UI bundle.
+parsing. WidgetBridge routes preludes, `load_script()`, runtime-import
+payloads and a document's inline `<script>` blocks through it, so a reopened
+plug-in editor or a second instance skips parsing its 1–2 MB UI bundle and
+every inline script of a few KB.
 
-- Keyed by the full source text (no hash collisions), bounded (16 scripts /
+- Keyed by the full source text (no hash collisions), bounded (64 scripts /
   96 MB), in memory only. **Never persist QuickJS bytecode to disk or load it
   from anywhere else**: QuickJS does not validate bytecode, so only bytes this
   process produced are read back.
@@ -151,7 +152,13 @@ parsing its 1–2 MB UI bundle.
 - `script_bytecode_cache_stats()` (compiles / hits / bypassed) lets a test or
   an editor-open budget assert reuse by count.
 - Use `evaluate()` for expressions whose value you read and for per-frame
-  traffic; small scripts bypass the cache anyway.
+  traffic. **Only whole, repeatable scripts belong in `evaluate_script()`**:
+  the 2 KB floor assumes it never sees per-frame or generated-per-call source,
+  and a caller that builds a unique string each call (a JSON payload spliced
+  into code) would churn the 64-entry cache and evict the UI bundle.
+- A warm open that still shows `script_compile` under
+  `runtime_import_inline_eval` means an inline script differs per open (a
+  timestamp or nonce baked into the document), not that the cache is off.
 - JSC and V8 inherit the default (`evaluate_script` → `evaluate`).
 
 ## Commands
