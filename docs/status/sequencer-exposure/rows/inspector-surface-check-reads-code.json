@@ -1,0 +1,48 @@
+{
+  "id": "inspector-surface-check-reads-code",
+  "title": "The Inspector surface check reads code, not comments, through the shared gate stripper",
+  "classification": "ci_test_only",
+  "delivery_state": "pending",
+  "claim_id": "10e2e957-bc09-4721-adc8-5a973412ba56",
+  "owned_paths": [
+    "tools/scripts/test_inspector_truth_check.py",
+    "docs/status/sequencer-exposure/rows/inspector-surface-check-reads-code.json"
+  ],
+  "evidence": [
+    {
+      "path": "tools/scripts/test_inspector_truth_check.py",
+      "needles": [
+        "def test_reads_code_not_comments(self) -> None:"
+      ]
+    },
+    {
+      "path": "tools/scripts/inspector_truth_check.py",
+      "needles": [
+        "from gate_common import strip_c_comments",
+        "help_text = strip_c_comments(inspect_source)"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "not_applicable",
+      "rationale": "A repository check script and its test only: no header, target, or installed artifact changes."
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "No CLI verb, flag, handler, or document shape changes; the check that pins the reduced inspect surface keeps its verdicts."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "No MCP tool definition, schema entry, or handler changes."
+    },
+    "live_product_control": {
+      "disposition": "not_applicable",
+      "rationale": "No capability, operation, executor binding, grant, or profile policy changes."
+    },
+    "design_time_agent_manifest": {
+      "disposition": "not_applicable",
+      "rationale": "docs/status/agent-capabilities.json is unchanged; the check's comment handling is CI tooling, not a design-time capability."
+    }
+  }
+}

@@ -89,6 +89,18 @@ class GlobToRegexTests(unittest.TestCase):
         self.assertFalse(gc.matches_any("a/b.cpp", []))
 
 
+class StripCCommentsTests(unittest.TestCase):
+    def test_removes_block_and_line_comments_and_keeps_code(self) -> None:
+        src = "int a; /* fork()\n spans */ int b; // popen(cmd)\nint c;\n"
+        self.assertEqual(gc.strip_c_comments(src), "int a;  int b; \nint c;\n")
+
+    def test_the_first_opener_wins(self) -> None:
+        # A `//` inside a block does not swallow the code after the block...
+        self.assertEqual(gc.strip_c_comments("/* see // note */ run();"), " run();")
+        # ...and a `/*` inside a line comment opens no block.
+        self.assertEqual(gc.strip_c_comments("// was /* here\nkeep(); /* x */\n"), "\nkeep(); \n")
+
+
 class StripMetaTests(unittest.TestCase):
     def test_strips_underscore_and_schema_keys(self) -> None:
         self.assertEqual(

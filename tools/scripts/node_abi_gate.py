@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from gate_common import resolve_git_comparison  # noqa: E402
+from gate_common import resolve_git_comparison, strip_c_comments  # noqa: E402
 
 
 SURFACES = (
@@ -69,11 +69,6 @@ def git_show(base: str, rel_path: str) -> str | None:
     if result.returncode != 0:
         return None
     return result.stdout
-
-
-def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    return re.sub(r"//.*", "", text)
 
 
 def class_body(text: str, class_name: str) -> str:
@@ -193,7 +188,7 @@ def _canonical_virtual_signature(raw_decl: str) -> tuple[str, str]:
 
 
 def virtual_order(text: str, class_name: str) -> list[VirtualDecl]:
-    body = class_body(strip_comments(text), class_name)
+    body = class_body(strip_c_comments(text), class_name)
     decls: list[VirtualDecl] = []
     for match in re.finditer(r"\bvirtual\b(?P<decl>.*?)(?:;|{)", body, re.DOTALL):
         raw_decl = match.group("decl").strip()
