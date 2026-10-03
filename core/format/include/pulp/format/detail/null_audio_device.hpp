@@ -19,6 +19,7 @@
 #include <pulp/audio/device.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -34,6 +35,10 @@ using audio::DeviceInfo;
 
 /// Device id and system name the null device reports.
 inline constexpr const char* kNullAudioDeviceId = "null";
+
+/// How late the null device's render thread may wake and still deliver every
+/// owed period back to back. A later wake drops the periods it spans.
+std::chrono::nanoseconds null_device_max_late(double sample_rate, int buffer_size) noexcept;
 
 class NullAudioDevice final : public AudioDevice {
 public:
@@ -55,6 +60,11 @@ public:
 
     /// Blocks delivered to the callback since start().
     std::uint64_t blocks_rendered() const { return blocks_.load(std::memory_order_relaxed); }
+    /// Periods skipped since start() because the render thread woke too late to
+    /// deliver them. Rendered plus dropped periods track the wall clock.
+    std::uint64_t periods_dropped() const {
+        return periods_dropped_.load(std::memory_order_relaxed);
+    }
 
 private:
     void run();
@@ -65,6 +75,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> blocks_{0};
     std::atomic<std::uint64_t> xruns_{0};
+    std::atomic<std::uint64_t> periods_dropped_{0};
     std::thread thread_;
     std::vector<std::vector<float>> input_;
     std::vector<std::vector<float>> output_;

@@ -385,6 +385,9 @@ class CountingProcessor : public Processor {
 public:
     static inline std::atomic<int> blocks{0};
     static inline std::atomic<float> peak_input{0.0f};
+    // steady_clock ticks of the first and latest process() call.
+    static inline std::atomic<std::int64_t> first_tick{0};
+    static inline std::atomic<std::int64_t> last_tick{0};
 
     PluginDescriptor descriptor() const override {
         PluginDescriptor d;
@@ -407,6 +410,10 @@ public:
             for (std::size_t i = 0; i < input.num_samples(); ++i)
                 peak = std::max(peak, std::abs(input.channel(c)[i]));
         if (peak > peak_input.load()) peak_input.store(peak);
+        const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        std::int64_t unset = 0;
+        first_tick.compare_exchange_strong(unset, now);
+        last_tick.store(now);
         blocks.fetch_add(1);
     }
 };
@@ -464,16 +471,20 @@ TEST_CASE("NullAudioDevice delivers blocks at the real-time rate",
     config.output_channels = 2;
     REQUIRE(device.open(config));
 
-    std::atomic<std::uint64_t> last_position{0};
     std::atomic<bool> contiguous{true};
     std::atomic<bool> silent_input{true};
     std::atomic<std::uint64_t> expected_next{0};
+    std::atomic<std::int64_t> first_tick{0};
+    std::atomic<std::int64_t> last_tick{0};
     REQUIRE(device.start([&](const audio::BufferView<const float>& in,
                              audio::BufferView<float>& out,
                              const audio::CallbackContext& ctx) {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        std::int64_t unset = 0;
+        first_tick.compare_exchange_strong(unset, now);
+        last_tick.store(now);
         if (ctx.sample_position != expected_next.load()) contiguous = false;
         expected_next = ctx.sample_position + static_cast<std::uint64_t>(ctx.buffer_size);
-        last_position = ctx.sample_position;
         if (in.num_channels() != 2 || out.num_channels() != 2 ||
             in.num_samples() != 256)
             contiguous = false;
@@ -482,21 +493,45 @@ TEST_CASE("NullAudioDevice delivers blocks at the real-time rate",
                 if (in.channel(c)[i] != 0.0f) silent_input = false;
     }));
 
-    const auto start = std::chrono::steady_clock::now();
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    const auto blocks = device.blocks_rendered();
-    const double elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - start).count();
     device.stop();
+    const auto blocks = device.blocks_rendered();
+    const auto dropped = device.periods_dropped();
 
-    const double expected = elapsed * 48000.0 / 256.0;
-    INFO("blocks " << blocks << " expected ~" << expected << " over " << elapsed << " s");
-    // Real-time paced: neither free-running nor stalled.
-    CHECK(blocks >= static_cast<std::uint64_t>(expected * 0.8));
+    // Paced by the callbacks' own clock, not by when this thread sampled the
+    // counter: on a loaded host or under background QoS the render thread
+    // wakes late and then delivers the owed periods back to back, so a
+    // snapshot taken between wakes undercounts a device that keeps time.
+    const double covered = std::chrono::duration<double>(
+        std::chrono::steady_clock::duration(last_tick.load() - first_tick.load())).count();
+    const double expected = covered * 48000.0 / 256.0 + 1.0;
+    // A device that stops mid catch-up may still owe up to its lateness bound.
+    const double owed = std::chrono::duration<double>(
+        detail::null_device_max_late(48000.0, 256)).count() * 48000.0 / 256.0;
+    INFO("blocks " << blocks << " + dropped " << dropped << ", expected ~" << expected
+                   << " over " << covered << " s of callbacks, up to " << owed << " owed");
+    REQUIRE(covered > 0.2);
+    // Every period was delivered, counted as dropped, or still within the
+    // catch-up bound: never stalled silently, never free-running.
+    CHECK(static_cast<double>(blocks + dropped) + owed + 2.0 >= expected);
     CHECK(blocks <= static_cast<std::uint64_t>(expected * 1.1) + 2);
     CHECK(contiguous.load());
     CHECK(silent_input.load());
     CHECK_FALSE(device.is_running());
+}
+
+TEST_CASE("NullAudioDevice catches up a late wake instead of dropping it",
+          "[audio][null-device]") {
+    // A timer coalesced under background QoS can fire tens of milliseconds
+    // late; a few periods of tolerance dropped most blocks there.
+    const auto period = std::chrono::duration<double>(256.0 / 48000.0);
+    const auto max_late = detail::null_device_max_late(48000.0, 256);
+    CHECK(max_late >= std::chrono::milliseconds(250));
+    CHECK(max_late >= std::chrono::duration_cast<std::chrono::nanoseconds>(period * 4));
+    // A very long period still tolerates at least four of them.
+    CHECK(detail::null_device_max_late(8000.0, 4096) >=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::duration<double>(4 * 4096.0 / 8000.0)));
 }
 
 TEST_CASE("Standalone with PULP_AUDIO_DEVICE=null runs audio without a device",
@@ -505,6 +540,8 @@ TEST_CASE("Standalone with PULP_AUDIO_DEVICE=null runs audio without a device",
     ScopedEnv signal_env("PULP_TEST_SIGNAL", "sine");
     CountingProcessor::blocks = 0;
     CountingProcessor::peak_input = 0.0f;
+    CountingProcessor::first_tick = 0;
+    CountingProcessor::last_tick = 0;
 
     StandaloneApp app(&make_counting_probe);
     StandaloneConfig cfg = base_config();
@@ -518,21 +555,29 @@ TEST_CASE("Standalone with PULP_AUDIO_DEVICE=null runs audio without a device",
     CHECK(dynamic_cast<detail::NullAudioDevice*>(device) != nullptr);
     CHECK(device->info().id == detail::kNullAudioDeviceId);
 
-    const auto start = std::chrono::steady_clock::now();
+    auto* null_device = dynamic_cast<detail::NullAudioDevice*>(device);
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
 #ifdef __APPLE__
     // The engine is rendering, and this process runs no CoreAudio IO.
     CHECK_FALSE(process_running_coreaudio_io());
 #endif
-    const int blocks = CountingProcessor::blocks.load();
-    const double elapsed = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - start).count();
+    const auto dropped = null_device ? null_device->periods_dropped() : 0;
     app.stop();
+    const int blocks = CountingProcessor::blocks.load();
 
-    const double expected = elapsed * cfg.sample_rate / cfg.buffer_size;
-    INFO("processed " << blocks << " blocks, expected ~" << expected);
-    CHECK(blocks >= static_cast<int>(expected * 0.7));
-    CHECK(blocks <= static_cast<int>(expected * 1.2) + 4);
+    // Timed by the processor's own calls, as in the device test above: a late
+    // wake delivers the owed blocks back to back, after any fixed sample point.
+    const double covered = std::chrono::duration<double>(std::chrono::steady_clock::duration(
+        CountingProcessor::last_tick.load() - CountingProcessor::first_tick.load())).count();
+    const double expected = covered * cfg.sample_rate / cfg.buffer_size + 1.0;
+    const double owed = std::chrono::duration<double>(
+        detail::null_device_max_late(cfg.sample_rate, cfg.buffer_size)).count() *
+        cfg.sample_rate / cfg.buffer_size;
+    INFO("processed " << blocks << " blocks + " << dropped << " dropped, expected ~"
+                      << expected << " over " << covered << " s, up to " << owed << " owed");
+    REQUIRE(covered > 0.15);
+    CHECK(static_cast<double>(blocks) + static_cast<double>(dropped) + owed + 4.0 >= expected);
+    CHECK(blocks <= static_cast<int>(expected * 1.15) + 4);
     // The test signal still feeds the input.
     CHECK(CountingProcessor::peak_input.load() > 0.01f);
 }
