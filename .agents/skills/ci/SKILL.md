@@ -7604,9 +7604,22 @@ What it does:
   `queued_max_minutes` inputs to override the thresholds for manual runs.
 - Runs on `ubuntu-latest` — it only calls the GitHub API, no build.
   `permissions: actions: write` (required to cancel runs) + `contents: read`.
-- Pages through `actions/runs?status=in_progress` and `?status=queued`
-  via `gh api --paginate` and cancels anything past the threshold via
-  the `runs/<id>/cancel` API.
+- Logic lives in `tools/scripts/stale_run_reaper.py` (tested by
+  `test_stale_run_reaper.py`, run in workflow-lint). It pages through
+  `actions/runs?status=in_progress` and `?status=queued` and cancels
+  anything past the threshold via `runs/<id>/cancel`.
+- **A refused cancel escalates to `runs/<id>/force-cancel`**, unless the
+  run's head is still the head of an open PR (force-cancel also skips
+  `always()` cleanup). A plain cancel answers 409 for a run whose jobs
+  were never assigned; the old shell loop read every refusal as "likely
+  already completed", so 13 runs sat `queued` for up to 45 days while it
+  logged that line every 30 minutes (measured 2026-10-02).
+- **GitHub-side phantoms:** a run that refuses cancel AND force-cancel
+  with `Cannot cancel a workflow run that has not been queued yet` has
+  zero jobs, and `DELETE` is refused too (403, App and personal token
+  alike). It holds no runner and no concurrency group. The summary lists
+  these in their own table and never counts them as cancelled; only
+  GitHub Support can remove one. Do not burn calls retrying them by hand.
 - **Age basis:** `in_progress` runs are aged from `run_started_at`
   (execution start), **not** `created_at`. `created_at` also counts
   queue time, so during a deep backlog a healthy run that queued for
