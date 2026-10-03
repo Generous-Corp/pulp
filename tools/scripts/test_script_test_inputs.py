@@ -440,7 +440,9 @@ def named_program_evidence(repo: Repo) -> None:
     """Spawners whose code names programs this tree builds. `pulp-cli` builds
     pulp-cpp; the broker runs the host; one plugin builds as AU and CLAP under
     one artifact name."""
-    write(repo.root, "test/test_direct.cpp", 'ChildProcess::run(dir / "pulp-cpp.exe", {});\n')
+    # A name inside a comment is history, not a program the test runs.
+    write(repo.root, "test/test_direct.cpp",
+          'ChildProcess::run(dir / "pulp-cpp.exe", {});\n// it once also ran "helper-tool"\n')
     write(repo.root, "test/test_missing.cpp", 'ChildProcess::run(dir / "helper-tool", {});\n')
     write(repo.root, "test/test_through.cpp", 'ChildProcess::run(broker, {"--host", dir + "/control-host"});\n')
     write(repo.root, "test/test_fake.cpp", 'auto fake = dir / "pulp-screenshot";\nauto r = popen(cmd, "r");\n')

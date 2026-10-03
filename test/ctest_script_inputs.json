@@ -2687,6 +2687,7 @@
     "tools/cli/cmd_build.cpp",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_affected_targets.py"
    ],
@@ -3108,6 +3109,7 @@
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/changed_surface_script_families.py",
     "tools/scripts/dsp_capability_registry.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generate_widget_bridge_api.py",
     "tools/scripts/run_changed_surface_tests.py",
     "tools/scripts/script_test_inputs.py",
@@ -3125,6 +3127,7 @@
     "test/support",
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_changed_surface_registration_projection.py"
    ],
@@ -3140,6 +3143,7 @@
     "tools/scripts",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/changed_surface_script_families.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -3170,6 +3174,7 @@
     "tools/scripts/classify_changes.py",
     "tools/scripts/docs_noise_lint.py",
     "tools/scripts/fixtures/wide_non_native_replay.json",
+    "tools/scripts/gate_common.py",
     "tools/scripts/generated_version_bump_check.py",
     "tools/scripts/resolve_classify_base.py",
     "tools/scripts/script_test_inputs.py",
@@ -3714,6 +3719,7 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/ctest_inventory_parity.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -5429,6 +5435,7 @@
     "tools/mcp",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/test_inspector_truth_check.py"
    ],
@@ -5814,6 +5821,7 @@
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
     "tools/scripts/consumption_census.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/gate_python_imports_check.py",
     "tools/scripts/gpu_audio_provider_identity.py",
     "tools/scripts/json_schema_lite.py",
@@ -7125,6 +7133,7 @@
     "tools/cmake/PulpTestData.cmake",
     "tools/scripts/changed_surface_inventory.py",
     "tools/scripts/classify_changes.py",
+    "tools/scripts/gate_common.py",
     "tools/scripts/protected_merge_receipt.py",
     "tools/scripts/script_test_inputs.py"
    ],
@@ -7263,6 +7272,7 @@
     "test/fixtures",
     "test/support",
     "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py"
    ],
    "kind": "python"
@@ -7279,6 +7289,7 @@
     "test/fixtures",
     "test/support",
     "tools/cmake/PulpTestData.cmake",
+    "tools/scripts/gate_common.py",
     "tools/scripts/script_test_inputs.py",
     "tools/scripts/test_script_test_inputs.py"
    ],
@@ -7339,6 +7350,7 @@
     "tools/cmake/PulpUtils.cmake",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/sequencer_control_skill_check.py"
    ],
@@ -7370,6 +7382,7 @@
     "tools/cmake/PulpUtils.cmake",
     "tools/mcp/CMakeLists.txt",
     "tools/mcp/pulp_mcp.cpp",
+    "tools/scripts/gate_common.py",
     "tools/scripts/inspector_truth_check.py",
     "tools/scripts/sequencer_control_skill_check.py",
     "tools/scripts/test_sequencer_control_skill_check.py"

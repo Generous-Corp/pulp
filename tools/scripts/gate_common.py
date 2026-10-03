@@ -19,6 +19,9 @@ copies:
   or more *segments*, ``*`` stays single-segment, slash boundaries are
   preserved around ``**`` so zero-segment matches don't collapse
   (``tools/cli/**/*.cpp`` does not match ``tools/clicmd.cpp``).
+* ``strip_c_comments`` removes ``/* ... */`` blocks and ``//`` line
+  comments from C, C++ or JS source before a gate scans it for code, so
+  prose in a comment is never read as a call or a symbol.
 * ``strip_meta`` drops top-level keys starting with ``_`` and the
   ``$schema`` key — used to keep in-memory config tidy without forcing
   schema-aware callers.
@@ -434,6 +437,19 @@ def version_bump_skip_reason(trailers: dict[str, list[str]]) -> str | None:
 
 
 # ── Config helpers ──────────────────────────────────────────────────────
+
+
+# One left-to-right pass, as the compiler reads it: whichever opener comes
+# first wins, so a `/*` inside a `//` comment opens nothing.
+_C_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+
+
+def strip_c_comments(text: str) -> str:
+    """Remove C/C++/JS comments: ``/* ... */`` blocks and ``//`` to the end
+    of the line. String literals are not modelled, so ``//`` or ``/*``
+    inside one is removed as a comment too; callers scanning for code
+    accept that over-removal."""
+    return _C_COMMENT.sub("", text)
 
 
 def strip_meta(data):
