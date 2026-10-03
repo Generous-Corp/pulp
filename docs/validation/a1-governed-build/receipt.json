@@ -1,6 +1,6 @@
 {
   "schema": "pulp.a1-governed-build-receipt/v1",
-  "commit": "48de18ab25",
+  "commit": "48de18ab25557a608c292ca4f83b4f55a771735a",
   "branch": "codex/a1-governed-build-20261003",
   "base": "064b045cbba6aeab798f45b5e4f56abf176aef94",
   "governed_build": {
@@ -50,6 +50,23 @@
         "result": "passed",
         "tests_passed": 10
       }
+    },
+    "gates": {
+      "command": "tools/scripts/gates.sh origin/main",
+      "result": "passed-with-one-not-checked",
+      "source_selftests_passed": 23,
+      "workflow_contracts_passed": 12,
+      "pr_fast_passed": 99,
+      "other_contracts_passed": 15,
+      "pre_existing_on_base": [
+        "scene3d-native-slice-handoff-contract",
+        "scene3d-native-slice-handoff-negative-contract",
+        "gpu-clean-agent-journey-selftest"
+      ],
+      "not_checked_locally": [
+        "tools/scripts/test_generated_version_bump_check.py"
+      ],
+      "diff_coverage": "not-run-locally"
     }
   },
   "roadmap_changed": false
