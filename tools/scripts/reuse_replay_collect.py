@@ -1363,15 +1363,18 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                   and group_record.get("declared_commit_bound") is not None)
             bound = frozenset(group_record["declared_commit_bound"]) if v2 else commit_bound_set
             spawns = SpawnIndex(group_record["targets"])
-            # Modules have no recorded link, so a module is rebuilt when its
-            # codemodel entry moved, when the Ninja graph's build of it is
-            # reached, or (unknown to that graph) when any code drifted.
+            # A module is rebuilt when its codemodel entry moved, or when the
+            # drift reaches its recorded link members; a record from before
+            # modules were recorded leaves the Ninja graph's build of it, and
+            # (unknown to that graph) any code drift.
             mods_rekeyed, modules = codemodel_rekeyed(head_cm, group_record["targets"], ("MODULE_LIBRARY",))
             code_drift = any(f.endswith(CODE_SUFFIXES) for f in drift)
-            rebuilt_modules = {m for m in modules if m in mods_rekeyed or (m in rebuilt if m in built else code_drift)}
+            linked_rebuilt = recorded_rebuilt(link, drift, index)
+            rebuilt_modules = {m for m in modules if m in mods_rekeyed or (
+                m in linked_rebuilt if m in link else m in rebuilt if m in built else code_drift)}
             recorded = classify_source_keys(
                 drift, test_ids, recorded_map, head_entries, group_entries,
-                recorded_rebuilt(link, drift, index), set(link), codemodel, bound, generated_keyed=v2,
+                linked_rebuilt, set(link), codemodel, bound, generated_keyed=v2,
                 spawns=spawns, spawnable=frozenset(set(link) - set(group_record["executables"].values())),
                 spawn_scan=spawn_scan_of(doc_at(group["checkout_sha"])),
                 modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))

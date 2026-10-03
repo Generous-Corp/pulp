@@ -787,6 +787,36 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(next(rpr.read_jsonl(Path(self.tmp) / "ctl-spawned" / "pairs.jsonl"))["source_key"][
             "cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-c": "spawnable"})
 
+    def test_a_recorded_module_is_rebuilt_only_by_drift_its_link_reaches(self):
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b")}
+        targets["plug"] = {"digest": "m", "type": "MODULE_LIBRARY", "artifacts": ["<build>/test/plug.so"],
+                           "dependencies": []}
+
+        def rebuilt_programs(drift, recorded, label):
+            corpus = Path(self.tmp) / f"mod-{label}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            link = dict(self.link)
+            if recorded:
+                link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
+            cache = corpus / "cache" / "record-v4"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
+                             ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "spawnable_rebuilt"]
+        self.assertIn("test/plug.so", rebuilt_programs(("core/b.cpp",), True, "member"))
+        self.assertNotIn("test/plug.so", rebuilt_programs(("test/t.cpp",), True, "elsewhere"))
+        # Control: the same drift with the module's link unrecorded fails closed.
+        self.assertIn("test/plug.so", rebuilt_programs(("test/t.cpp",), False, "unrecorded"))
+
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
         corpus = Path(self.tmp) / "learn"
