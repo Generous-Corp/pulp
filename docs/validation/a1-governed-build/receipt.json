@@ -1,6 +1,6 @@
 {
   "schema": "pulp.a1-governed-build-receipt/v1",
-  "commit": "eb42aed3afff3698255d57737c669fef5b790a34",
+  "commit": "bcf183e9f13c1d93659a6badbc116005930d328b",
   "branch": "codex/a1-governed-build-20261003",
   "base": "064b045cbba6aeab798f45b5e4f56abf176aef94",
   "governed_build": {
@@ -21,6 +21,26 @@
     "result": "passed",
     "tests_passed": 1,
     "elapsed_seconds": 79.42
+  },
+  "ci_follow_up": {
+    "linux_failure": {
+      "job": "Linux (x64) [github-hosted]",
+      "tests": [
+        "MCP build and test handlers quote project paths and filters",
+        "MCP package workflow preserves inspect plan approve apply gates"
+      ],
+      "cause": "fixture project omitted tools/ci/governed-build.sh; handler returned exit 127",
+      "classification": "branch-owned",
+      "source_run": "37102334174"
+    },
+    "rerun": {
+      "command": "ctest --test-dir build -R 'MCP (build and test handlers quote project paths and filters|package workflow preserves inspect plan approve apply gates)' --output-on-failure",
+      "result": "passed",
+      "tests_passed": 2
+    },
+    "format": "passed",
+    "vellum_freeze": "passed",
+    "trusted_base_executor": "passed"
   },
   "roadmap_changed": false
 }
