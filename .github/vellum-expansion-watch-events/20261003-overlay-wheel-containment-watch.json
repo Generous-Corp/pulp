@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-overlay-wheel-containment-watch",
+  "created_at": "2026-10-03T00:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "render-assets-and-backends"
+  ],
+  "rationale": "Crosses the render-assets-and-backends family through the broad core/view/** selector (overlay_dismissal, pointer_dispatch, the widget-bridge wheel payload and the web-compat element-event bubble). The Pulp-owned change contains passive pointer input at open overlays: a wheel, magnify or rotate outside every shown overlay is dropped while any interactive overlay (menu, dropdown, submenu) is open, behind the new OverlayDismissalPolicy::passive_input_outside_overlay_blocked knob (default on; off restores the modal-only rule), and a wheel that resolves inside an overlay stops at that overlay's root natively and in the DOM bubble (PassivePointerRoute::overlay, __pulpWheelBoundary in the wheel payload) instead of chaining to ancestor handlers outside it. Paint, layout, asset, renderer, canvas, Skia, Dawn and authority behavior are unchanged. Regressions are confined to test/test_overlay_routing.cpp and test/test_widget_bridge_wave2_cheap.cpp. No accepted expansion boundary moves and no Vellum implementation is changed. Registered watch-only so the family's coverage stays explicit about this input-routing change.",
+  "tests": [
+    "build/test/pulp-test-group-design-import-widgets [overlay]",
+    "build/test/pulp-test-group-view-widgets [overlay]",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <PR base> --head HEAD"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}
