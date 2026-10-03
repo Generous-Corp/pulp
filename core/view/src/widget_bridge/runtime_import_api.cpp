@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -105,10 +106,13 @@ void WidgetBridge::install_runtime_import_handlers() {
                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
                 std::optional<ClaudeBundle> bundle;
+                // A captured document is decoded and verified once per
+                // process; a reopened editor reuses that immutable bundle.
+                std::shared_ptr<const ClaudeBundle> materialized;
                 if (source_lc == "materialized-browser") {
                     PULP_TRACE_SCOPE_NAMED("js", "runtime_import_parse");
-                    bundle = parse_materialized_browser_document(html);
-                    if (!bundle) {
+                    materialized = parse_materialized_browser_document_shared(html);
+                    if (!materialized) {
                         set_err("__pulpRuntimeImport__: invalid materialized browser document");
                         return choc::value::Value();
                     }
@@ -159,7 +163,7 @@ void WidgetBridge::install_runtime_import_handlers() {
                     if (!bundle) bundle = parse_pencil_react(html);
                     if (!bundle) bundle = parse_claude_bundle(html);
                 }
-                if (!bundle) {
+                if (!bundle && !materialized) {
                     set_err("__pulpRuntimeImport__: no claude bundle envelope (got '"
                             + src_label + "')");
                     return choc::value::Value();
@@ -172,7 +176,7 @@ void WidgetBridge::install_runtime_import_handlers() {
                 // inline script eval. It deliberately skips buildDom +
                 // walkDomJson because reconciliation is owned by the JS-side
                 // ReactDOM capture shim.
-                evaluate_claude_bundle_in_live_engine(*bundle);
+                evaluate_claude_bundle_in_live_engine(materialized ? *materialized : *bundle);
                 // The shared pipeline writes per-payload eval failures to
                 // `__pulpPayloadErr_<idx>__` and Babel-transform failures to
                 // `__pulpEvalErr__`, but JS callers read

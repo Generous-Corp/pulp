@@ -299,12 +299,13 @@ void reset_js_engine_creation_stats_for_tests();
 
 /// Process-wide reuse of compiled script bytecode (QuickJS backend).
 ///
-/// The first realm that evaluates a large script (a bundled UI runtime, a big
-/// prelude) compiles it and keeps the bytecode; every later realm in the same
-/// process that evaluates byte-identical source reads the bytecode back instead
-/// of parsing again. Keyed by the full source text, so a hit is never a
-/// different script. Process-local and in-memory only: bytecode is never
-/// written to disk, because QuickJS does not validate untrusted bytecode.
+/// The first realm that evaluates a whole script of a few KB or more (a
+/// bundled UI runtime, a prelude, a document's inline script) compiles it and
+/// keeps the bytecode; every later realm in the same process that evaluates
+/// byte-identical source reads the bytecode back instead of parsing again.
+/// Keyed by the full source text, so a hit is never a different script.
+/// Process-local and in-memory only: bytecode is never written to disk,
+/// because QuickJS does not validate untrusted bytecode.
 /// `PULP_JS_BYTECODE_CACHE=0` disables it.
 struct ScriptBytecodeCacheStats {
     std::uint64_t compiles = 0;   ///< scripts compiled and stored

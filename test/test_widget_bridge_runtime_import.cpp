@@ -12,6 +12,8 @@
 //   3. Be idempotent on repeat install.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/design_sources.hpp>
+#include <pulp/view/js_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
 using namespace pulp::view;
@@ -509,4 +511,108 @@ TEST_CASE("__pulpRuntimeImport__ clears all transient error globals before each 
         .getWithDefault<std::string>("");
     REQUIRE(import_after.find("stale-import-err") == std::string::npos);
     REQUIRE(import_after.find("no claude bundle envelope") != std::string::npos);
+}
+
+namespace {
+// A materialized document with one verified asset and one inline script past
+// the bytecode-cache threshold. `tag` makes a byte-distinct document.
+std::string reopen_sidecar(const std::string& tag) {
+    std::string pad(3000, 'x');
+    return R"JSON({
+      "schema":"pulp-materialized-browser-document-v1",
+      "version":1,
+      "html":"<html><body><script src=\"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82\"></script><script>globalThis.__inlineRuns = (globalThis.__inlineRuns || 0) + 1; /* )JSON" + tag + pad + R"JSON( */</script></body></html>",
+      "assets":[{
+        "id":"pulp-materialized-asset-93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82",
+        "mime_type":"text/javascript",
+        "byte_length":20,
+        "data_base64":"Z2xvYmFsVGhpcy5va1RydWU9MTs=",
+        "sha256":"93a17c7b5a173be2da95f76cb62a26ae30c0e13ce230acd243be63023258bf82"
+      }]
+    })JSON";
+}
+
+// Import `sidecar` into a fresh QuickJS realm, as a reopened editor does.
+// Returns the bytecode-cache counters across the import call alone.
+struct ImportDelta { std::uint64_t compiles = 0; std::uint64_t hits = 0; };
+ImportDelta import_in_fresh_realm(const std::string& sidecar) {
+    ScriptEngine engine(JsEngineType::quickjs);
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.install_runtime_import_handlers();
+    const auto before = script_bytecode_cache_stats();
+    engine.evaluate("__pulpRuntimeImport__('" + js_single_quoted(sidecar) +
+                    "','materialized-browser');");
+    const auto after = script_bytecode_cache_stats();
+    REQUIRE(engine.evaluate("String(globalThis.__pulpRuntimeImportErr__ || '')")
+                .getWithDefault<std::string>("").empty());
+    CHECK(engine.evaluate("globalThis.okTrue === 1").getWithDefault(false));
+    CHECK(engine.evaluate("globalThis.__inlineRuns").getWithDefault<int>(0) == 1);
+    return {after.compiles - before.compiles, after.hits - before.hits};
+}
+} // namespace
+
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ verifies a document once per process",
+          "[view][bridge][runtime-import][materialized-browser][editor-open]") {
+    // Every editor open imports the same captured document into a new realm.
+    // The decode + SHA-256 verification runs on the first open only; each
+    // reopen reuses the verified bundle and the inline script's bytecode.
+    clear_materialized_document_cache();
+    clear_script_bytecode_cache();
+    const auto doc = reopen_sidecar("a");
+
+    const auto first = import_in_fresh_realm(doc);
+    CHECK(first.compiles == 1);  // the inline script
+    auto stats = materialized_document_cache_stats();
+    CHECK(stats.verifies == 1);
+    CHECK(stats.hits == 0);
+
+    const auto second = import_in_fresh_realm(doc);
+    CHECK(second.compiles == 0);
+    CHECK(second.hits == 1);
+    stats = materialized_document_cache_stats();
+    CHECK(stats.verifies == 1);
+    CHECK(stats.hits == 1);
+    CHECK(stats.entries == 1);
+
+    // Control: a byte-distinct document is verified on its own, never a hit.
+    import_in_fresh_realm(reopen_sidecar("b"));
+    stats = materialized_document_cache_stats();
+    CHECK(stats.verifies == 2);
+    CHECK(stats.hits == 1);
+    CHECK(stats.entries == 2);
+
+    clear_materialized_document_cache();
+    clear_script_bytecode_cache();
+}
+
+TEST_CASE("WidgetBridge __pulpRuntimeImport__ never keeps a rejected document",
+          "[view][bridge][runtime-import][materialized-browser][editor-open]") {
+    clear_materialized_document_cache();
+    auto doc = reopen_sidecar("a");
+    // Corrupt the payload so its SHA-256 no longer matches.
+    const auto at = doc.find("Z2xvYmFsVGhpcy5va1RydWU9MTs=");
+    REQUIRE(at != std::string::npos);
+    doc.replace(at, 4, "Y2xv");
+
+    for (int open = 0; open < 2; ++open) {
+        ScriptEngine engine(JsEngineType::quickjs);
+        View root;
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+        bridge.install_runtime_import_handlers();
+        engine.evaluate("__pulpRuntimeImport__('" + js_single_quoted(doc) +
+                        "','materialized-browser');");
+        CHECK(engine.evaluate("String(globalThis.__pulpRuntimeImportErr__ || '')")
+                  .getWithDefault<std::string>("")
+                  .find("invalid materialized browser document") != std::string::npos);
+        CHECK_FALSE(engine.evaluate("globalThis.okTrue === 1").getWithDefault(false));
+    }
+    const auto stats = materialized_document_cache_stats();
+    CHECK(stats.verifies == 2);
+    CHECK(stats.rejected == 2);
+    CHECK(stats.hits == 0);
+    CHECK(stats.entries == 0);
+    clear_materialized_document_cache();
 }
