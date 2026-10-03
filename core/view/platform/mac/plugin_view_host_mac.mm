@@ -2175,7 +2175,7 @@ private:
     layer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
                                     self.bounds.size.height * scale);
 
-    // pulp #1382 — opaque + seeded background, mirroring the standalone
+    // Opaque + seeded background, mirroring the standalone
     // PulpMetalView, so there is no clear/undefined composite while the foreign
     // host reparents and relayers the view. The seed is the editor's own
     // background (-setBackgroundRGB: recolours it as soon as the host knows
