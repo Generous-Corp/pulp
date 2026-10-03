@@ -15,8 +15,8 @@
     "no_named_forge_consumer"
   ],
   "local_probe": {
-    "checked_at": "2026-10-02",
-    "rechecked_parent_head": "8b10d5ada01466d39de2d519811e7c74bc5b0340",
+    "checked_at": "2026-10-03",
+    "rechecked_parent_head": "5ea08fd82495687c8e23c85de1a7d4ff429809a8",
     "status": "unavailable",
     "checked_paths": [
       "/Users/danielraffel/.pulp/magenta",
@@ -33,6 +33,19 @@
     ],
     "forge_catalog_rows_for_spectr_gpu_nam": 0,
     "closure": "closed_without_catalog_promotion"
+  },
+  "metadata_audit": {
+    "origin_main": "5ea08fd82495687c8e23c85de1a7d4ff429809a8",
+    "prior_receipt_parent_was_stale": "8b10d5ada01466d39de2d519811e7c74bc5b0340",
+    "gpu_nam_consumer_checkout": {
+      "path": "/Users/danielraffel/Code/pulp-gpu-nam",
+      "revision": "014f24325a7f4211ee5052993badd9c90151b414",
+      "role": "external_cpu_oracle_and_plugin_source; not_a_forge_registration"
+    },
+    "magenta_artifact_available": false,
+    "forge_catalog_rows": 0,
+    "sustained_magenta_generation_claimed": false,
+    "synthetic_mlx_100000_blocks_is_product_evidence": false
   },
   "minimum_next_experiment": {
     "paced_blocks": 100000,
