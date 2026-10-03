@@ -502,7 +502,8 @@ alone cannot tell a correct background from a framework default.
 1. **Trace**: the macOS plug-in GPU host emits one `plugin_editor_frame`
    (`render`) span per presented frame with args `frame` (restarts at 0 for
    each host, so every open begins at a frame-0 span), `background_rgb` (the
-   colour painted under the tree) and `root_children`. Pair them with
+   colour painted under the tree), `root_children`, and `width`/`height` (the
+   logical size the frame was laid out at). Pair them with
    `scripted_ui_document_load`:
 
 ```sql
@@ -550,6 +551,23 @@ from opens o join docs d using (n) order by o.n;
    minimum host sizes, and on a build without the declaration as the negative
    control. A traced SDK draws a `TRACING` badge in the editor's corner: expect
    those pixels in the classes; gate on an untraced build.
+   **Geometry is part of the gate.** A frame laid out at a size other than the
+   host's — the preferred-size layout cropped into a minimum-size window, or a
+   new-size drawable scaled into the layer's old bounds — fails like an
+   off-brand colour: every presented frame's layout size must equal the view's
+   bounds and the host's size. It shows only when the host size differs from
+   the preferred size, so the minimum-size run is the one that can catch it,
+   and out of process (AUHostingService) is where it happened. In a trace,
+   the first `plugin_editor_frame` after `scripted_ui_document_load` ends must
+   carry the host's `width`/`height`, not the preferred size, when the host
+   resized during the mount. In the host-window read-back, check the image's
+   own size first: a capture whose dimensions differ from the requested host
+   size is the host's window still converging (seen at the preferred size with
+   and without the plug-in's fix), not the plug-in's frame; report it as its
+   own class. The in-tree repro is
+   `test_plugin_view_host_first_frame_macos.mm` ("a host resize queued during
+   the mount lands before the next frame"); the rules it pins are in the
+   `view-bridge` skill.
 4. **Keep the display awake** for any off-screen probe:
    `caffeinate -u -d -i <probe>`. A sleeping display stops the display link,
    so every variant presents zero frames and the run reads as a broken build.
