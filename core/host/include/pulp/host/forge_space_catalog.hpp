@@ -1,13 +1,13 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
 #include <pulp/host/custom_node_diagnostics.hpp>
 #include <pulp/host/forge_param_descriptor.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/signal/nonlin_ambience.hpp>
 #include <pulp/signal/speaker_cabinet.hpp>
 #include <pulp/signal/zero_latency_convolver.hpp>
-#include <cstdint>
-#include <memory>
 #include <vector>
 
 #if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
@@ -18,6 +18,8 @@
 #endif
 
 namespace pulp::host::space {
+// Canonical descriptor keys owned by this family: "convolution_reverb",
+// "nonlin_ambience", and "speaker_cabinet".
 namespace convolution {
 inline constexpr const char* kTypeId = "space.convolution_reverb";
 inline constexpr state::ParamID kIrGainDb = 1;
@@ -28,7 +30,10 @@ inline constexpr state::ParamID kWidthPercent = 5;
 inline constexpr state::ParamID kLowcutHz = 6;
 inline constexpr state::ParamID kHighcutHz = 7;
 using Engine = signal::ZeroLatencyConvolver;
-struct ImpulseResponse { std::vector<std::vector<float>> channels; double sample_rate = 48000.0; };
+struct ImpulseResponse {
+    std::vector<std::vector<float>> channels;
+    double sample_rate = 48000.0;
+};
 bool valid_impulse_response(const ImpulseResponse&);
 struct IrPolicy {
     signal::IrNormalizeMode normalize = signal::IrNormalizeMode::energy;
@@ -37,7 +42,8 @@ struct IrPolicy {
     int resample_taps_per_phase = Engine::kResampTapsPerPhaseDefault;
     bool true_stereo = false;
 };
-float convolution_reverb_worst_case_gain(const ImpulseResponse&, const IrPolicy&, double sample_rate, int max_block);
+float convolution_reverb_worst_case_gain(const ImpulseResponse&, const IrPolicy&,
+                                         double sample_rate, int max_block);
 CustomNodeType make_convolution_reverb_node(ImpulseResponse, IrPolicy = {});
 CustomNodeType catalog_probe_node();
 ForgeNodeDescriptor descriptor();
@@ -52,7 +58,8 @@ struct GpuConvolutionDiagnostics {
     GpuDiagnosticCounterUnit delivery_counter_unit = GpuDiagnosticCounterUnit::TransportQuantum;
 };
 CustomNodeDiagnosticsDescriptor gpu_convolution_diagnostics();
-CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse, IrPolicy = {}, gpu_audio::GpuConvolverTraceConfig = {});
+CustomNodeType make_gpu_convolution_reverb_node(ImpulseResponse, IrPolicy = {},
+                                                gpu_audio::GpuConvolverTraceConfig = {});
 ForgeNodeDescriptor descriptor_with_gpu();
 #endif
 } // namespace convolution
@@ -86,7 +93,8 @@ inline constexpr float kAttackPctMin = 5.0f;
 inline constexpr float kAttackPctMax = 98.0f;
 inline constexpr float kOutputGainDbMax = 24.0f;
 float nonlin_ambience_worst_case_gain();
-CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefaultSeed, double max_length_ms = cal::kMaxLengthMs);
+CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefaultSeed,
+                                         double max_length_ms = cal::kMaxLengthMs);
 ForgeNodeDescriptor descriptor();
 } // namespace nonlin_ambience
 
