@@ -95,9 +95,12 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
 
     ParametricEqConfigureStatus configure(std::span<const Band> bands,
                                           std::size_t transition_samples = 0) noexcept {
-        if (!prepared()) return ParametricEqConfigureStatus::not_prepared;
-        if (transitioning()) return ParametricEqConfigureStatus::transition_in_progress;
-        if (bands.size() > capacity_) return ParametricEqConfigureStatus::over_capacity;
+        if (!prepared())
+            return ParametricEqConfigureStatus::not_prepared;
+        if (transitioning())
+            return ParametricEqConfigureStatus::transition_in_progress;
+        if (bands.size() > capacity_)
+            return ParametricEqConfigureStatus::over_capacity;
         if (transition_samples == std::numeric_limits<std::size_t>::max())
             return ParametricEqConfigureStatus::invalid_transition;
 
@@ -109,7 +112,8 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
         const SampleType ceiling = supported_frequency_ceiling_hz();
         for (std::size_t i = 0; i < bands.size(); ++i) {
             const Band band = bands[i];
-            if (band.solo && !band.enabled) return ParametricEqConfigureStatus::invalid_solo;
+            if (band.solo && !band.enabled)
+                return ParametricEqConfigureStatus::invalid_solo;
             if (!(std::isfinite(band.frequency_hz) && std::isfinite(band.gain_db) &&
                   std::isfinite(band.q)))
                 return ParametricEqConfigureStatus::non_finite;
@@ -125,10 +129,12 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
             previous_frequency = band.frequency_hz;
         }
         for (const Band band : bands) {
-            if (!band.enabled || (has_solo && !band.solo)) continue;
+            if (!band.enabled || (has_solo && !band.solo))
+                continue;
             selected[selected_count] = band;
             candidate[selected_count] = design_band(band);
-            if (!finite(candidate[selected_count])) return ParametricEqConfigureStatus::non_finite;
+            if (!finite(candidate[selected_count]))
+                return ParametricEqConfigureStatus::non_finite;
             if (!biquad_is_stable(candidate[selected_count]))
                 return ParametricEqConfigureStatus::unstable;
             ++selected_count;
@@ -163,13 +169,15 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
     }
 
     SampleType process(SampleType input) noexcept {
-        if (!prepared()) return input;
+        if (!prepared())
+            return input;
         const SampleType from = cascades_[active_index_].process(input);
-        if (!transitioning()) return std::isfinite(from) ? from : SampleType{};
+        if (!transitioning())
+            return std::isfinite(from) ? from : SampleType{};
         const SampleType to = cascades_[1 - active_index_].process(input);
         const std::size_t completed = transition_total_ - transition_remaining_ + 1;
-        const SampleType mix = static_cast<SampleType>(completed) /
-                               static_cast<SampleType>(transition_total_);
+        const SampleType mix =
+            static_cast<SampleType>(completed) / static_cast<SampleType>(transition_total_);
         const SampleType output = transition_remaining_ == 1 ? to : std::lerp(from, to, mix);
         if (--transition_remaining_ == 0) {
             active_index_ = 1 - active_index_;
@@ -181,8 +189,10 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
     }
 
     bool process_block(SampleType* samples, std::size_t frames) noexcept {
-        if (samples == nullptr && frames != 0) return false;
-        for (std::size_t i = 0; i < frames; ++i) samples[i] = process(samples[i]);
+        if (samples == nullptr && frames != 0)
+            return false;
+        for (std::size_t i = 0; i < frames; ++i)
+            samples[i] = process(samples[i]);
         return true;
     }
 
@@ -197,12 +207,24 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
         transition_total_ = transition_remaining_ = 0;
     }
 
-    bool prepared() const noexcept { return capacity_ != 0; }
-    bool transitioning() const noexcept { return transition_remaining_ != 0; }
-    std::size_t capacity() const noexcept { return capacity_; }
-    std::size_t band_count() const noexcept { return requested_count_; }
-    SampleType sample_rate() const noexcept { return sample_rate_; }
-    static constexpr std::size_t storage_capacity() noexcept { return MaxBands; }
+    bool prepared() const noexcept {
+        return capacity_ != 0;
+    }
+    bool transitioning() const noexcept {
+        return transition_remaining_ != 0;
+    }
+    std::size_t capacity() const noexcept {
+        return capacity_;
+    }
+    std::size_t band_count() const noexcept {
+        return requested_count_;
+    }
+    SampleType sample_rate() const noexcept {
+        return sample_rate_;
+    }
+    static constexpr std::size_t storage_capacity() noexcept {
+        return MaxBands;
+    }
     Band band(std::size_t index) const noexcept {
         return index < requested_count_ ? requested_bands_[index] : Band{};
     }
@@ -215,16 +237,17 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
         if (!prepared() || !std::isfinite(frequency_hz) || frequency_hz < 0.0 ||
             frequency_hz > static_cast<double>(sample_rate_) * 0.5)
             return std::numeric_limits<double>::quiet_NaN();
-        return cascade_magnitude(std::span<const Coefficients>(
-                                     requested_coefficients_.data(), requested_count_),
-                                 angular_frequency(frequency_hz, static_cast<double>(sample_rate_)));
+        return cascade_magnitude(
+            std::span<const Coefficients>(requested_coefficients_.data(), requested_count_),
+            angular_frequency(frequency_hz, static_cast<double>(sample_rate_)));
     }
     float magnitude_db(double frequency_hz) const noexcept {
         return magnitude_to_db(magnitude(frequency_hz));
     }
     void response_curve_db(double min_hz, double max_hz, std::span<float> out) const noexcept {
-        response_curve_db(std::span<const Coefficients>(requested_coefficients_.data(), requested_count_),
-                          min_hz, max_hz, static_cast<double>(sample_rate_), out);
+        response_curve_db(
+            std::span<const Coefficients>(requested_coefficients_.data(), requested_count_), min_hz,
+            max_hz, static_cast<double>(sample_rate_), out);
     }
 
   private:
@@ -237,11 +260,10 @@ template <typename SampleType = float, std::size_t MaxBands = 31> class Parametr
     }
     static Coefficients design_band(const Band& band, SampleType sample_rate) noexcept {
         BiquadT<double> designer;
-        const auto type = band.type == ParametricEqBandType::low_shelf
-                              ? BiquadT<double>::Type::low_shelf
-                              : band.type == ParametricEqBandType::high_shelf
-                                    ? BiquadT<double>::Type::high_shelf
-                                    : BiquadT<double>::Type::peaking;
+        const auto type =
+            band.type == ParametricEqBandType::low_shelf    ? BiquadT<double>::Type::low_shelf
+            : band.type == ParametricEqBandType::high_shelf ? BiquadT<double>::Type::high_shelf
+                                                            : BiquadT<double>::Type::peaking;
         designer.set_coefficients(type, static_cast<double>(band.frequency_hz),
                                   static_cast<double>(band.q), static_cast<double>(sample_rate),
                                   static_cast<double>(band.gain_db));
