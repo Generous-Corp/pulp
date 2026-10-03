@@ -66,13 +66,18 @@ CATALOG_GLOBS = (
 
 # `k<Name>TypeId = "<value>"`, however the constant is spelled.
 TYPE_ID_RE = re.compile(r'(k[A-Za-z0-9_]*TypeId)\s*=\s*"([^"]+)"')
-FACTORY_RE = re.compile(r"^inline CustomNodeType (make_[a-z0-9_]+)\(", re.M)
+FACTORY_RE = re.compile(
+    r"^(?:inline\s+)?CustomNodeType (make_[a-z0-9_]+)\([^;]*\)\s*\{", re.M
+)
 # Enclosing-scope detection must consider EVERY inline definition, not just the
 # factories. Several catalogs declare their baked params inside a helper
 # (`declare_params(CustomNodeType&, Mode)`) that sits above the factory, so a
 # "nearest factory above" heuristic silently attributes those params to the
 # PREVIOUS factory — or drops them, making a twelve-param node read as empty.
-ANY_FN_RE = re.compile(r"^inline [\w:<>,\s&*]+?\b([a-z_][\w]*)\s*\(", re.M)
+ANY_FN_RE = re.compile(
+    r"^(?:inline\s+)?[\w:<>,\s&*]+?\b([a-z_][\w]*)\s*\([^;]*\)\s*\{", re.M
+)
+CONTROL_FLOW_NAMES = {"if", "for", "while", "switch", "catch"}
 
 # The catalogs declare baked params three different ways, and a reader that
 # knows only the first silently reports zero params for nodes that have twelve.
@@ -120,7 +125,28 @@ def catalog_files(root: pathlib.Path) -> list[pathlib.Path]:
     seen: list[pathlib.Path] = []
     for pattern in CATALOG_GLOBS:
         seen.extend(sorted(root.glob(pattern)))
-    return seen
+    # A family that has moved its factories into an out-of-line source keeps a
+    # lightweight descriptor header beside the public catalog header.  That
+    # declaration-only header is not a second DSP catalog; the source belongs
+    # to the public header's registry row below.  Keep older detail catalogs
+    # (which have no matching source) unchanged.
+    filtered = []
+    for path in seen:
+        if path.name.endswith("_catalog_descriptor.hpp"):
+            family = path.name.removesuffix("_descriptor.hpp") + ".cpp"
+            if (root / "core" / "host" / "src" / family).exists():
+                continue
+        filtered.append(path)
+    return filtered
+
+
+def catalog_source(root: pathlib.Path, header: pathlib.Path) -> str:
+    """Return header text plus its matching out-of-line implementation."""
+    source_name = header.name.removesuffix(".hpp") + ".cpp"
+    source = root / "core" / "host" / "src" / source_name
+    if not source.exists():
+        return header.read_text()
+    return header.read_text() + "\n\n" + source.read_text()
 
 
 def sample_region_rows(root: pathlib.Path) -> list[dict]:
@@ -148,7 +174,7 @@ def sample_region_rows(root: pathlib.Path) -> list[dict]:
 def extract(root: pathlib.Path) -> dict:
     catalogs = []
     for path in catalog_files(root):
-        src = path.read_text()
+        src = catalog_source(root, path)
         rel = path.relative_to(root).as_posix()
 
         type_ids = [
@@ -164,7 +190,11 @@ def extract(root: pathlib.Path) -> dict:
         )
         computed: set[str] = set()
         factory_names = {name for _, name in factories}
-        scopes = [(m.start(), m.group(1)) for m in ANY_FN_RE.finditer(src)]
+        scopes = [
+            (m.start(), m.group(1))
+            for m in ANY_FN_RE.finditer(src)
+            if m.group(1) not in CONTROL_FLOW_NAMES
+        ]
         for start, name in factories:
             if not any(s == start for s, _ in scopes):
                 scopes.append((start, name))

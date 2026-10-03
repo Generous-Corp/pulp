@@ -57,5 +57,49 @@
   },
   "roadmap_changed": false,
   "excluded_worktree": "/Users/danielraffel/Code/pulp-dsp-next-20261001",
-  "status": "green"
+  "status": "green",
+  "projection_equivalence": {
+    "pre_pilot_source": "5ea08fd824",
+    "pre_pilot_snapshot": "docs/status/dsp-capabilities.json at 5ea08fd824",
+    "current_snapshot": "docs/status/dsp-capabilities.json",
+    "semantic_equivalent": true,
+    "byte_equivalent": true,
+    "bytes": 104049,
+    "pre_pilot_sha256": "83793dfc7db043e9c6849c782f6f36447523903b3c51ea3d5dd86e685be71b0d",
+    "current_sha256": "83793dfc7db043e9c6849c782f6f36447523903b3c51ea3d5dd86e685be71b0d",
+    "counts": {
+      "catalogs": 31,
+      "type_ids": 115,
+      "factories": 77,
+      "baked_params": 400
+    },
+    "dynamics": {
+      "header": "core/host/include/pulp/host/forge_dynamics_catalog.hpp",
+      "factories": 5,
+      "baked_params": 40,
+      "factory_param_counts": {
+        "make_feedforward_compressor_node": 11,
+        "make_node": 2,
+        "make_vca_compressor_node": 9,
+        "make_fet_compressor_node": 8,
+        "make_diode_bridge_compressor_node": 10
+      }
+    },
+    "generator_mapping": "catalog_source appends core/host/src/<catalog>.cpp; matching forge_dynamics_catalog_descriptor.hpp is excluded from catalog enumeration",
+    "proof": "cmp pre-pilot snapshot vs regenerated current snapshot returned 0"
+  },
+  "validation_follow_up": {
+    "focused_registry_regression": "passed",
+    "ctest": "4/4 passed (cli-dsp-capabilities-check,json,write,dynamics-regression)",
+    "forge_export_check": "passed",
+    "forge_descriptor_coverage": "passed (89 canonical families, 20 indexed packs, 89 registrations)",
+    "consumption_census": "passed (targets=72)",
+    "pre_push_gates": {
+      "command": "tools/scripts/gates.sh origin/main",
+      "result": "failed_on_existing_a2t_source_binding_contract",
+      "branch_owned_failure": false,
+      "evidence": "gpu-first-visible-acceptance-selftest and gpu-dpr-runner-selftest reject modified tools/cli/CMakeLists.txt as A2T source blob drift; 3 gpu-trace-overhead acceptance tests error on the same binding; all DSP/Forge gates passed",
+      "not_checked": "tools/scripts/test_generated_version_bump_check.py"
+    }
+  }
 }

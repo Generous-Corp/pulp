@@ -770,6 +770,14 @@ if(PULP_BUILD_TESTS)
             "-DFIXTURE_ROOT=${CMAKE_BINARY_DIR}/test-tmp/cli-dsp-capabilities-write"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/test_dsp_capabilities_write.cmake")
 
+    # The dynamics catalog moved its factory bodies out of the public header.
+    # Keep a focused regression on source mapping, descriptor exclusion, and
+    # the exact dynamics factory/parameter surface.
+    add_test(NAME cli-dsp-capabilities-dynamics-regression
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_dsp_capability_registry.py"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
     # Exercise the `pulp minos` dispatch (cmd_minos.cpp): usage banner,
     # help alias, unknown-subcommand error, the measure->script handoff
     # (measure the CLI binary itself, which always exists), and the
