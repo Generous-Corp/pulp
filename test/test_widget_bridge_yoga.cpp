@@ -599,3 +599,101 @@ TEST_CASE("setSubpixelLayout preserves fractional solved geometry pass-wide",
     const float ring_cx = ring.x + ring.width / 2;
     REQUIRE_THAT(body_cx, WithinAbs(ring_cx, 0.005f));
 }
+
+// ── Absolutely positioned auto-width boxes shrink to fit their text ─────────
+//
+// A tooltip-shaped box -- `position: absolute`, a `left`, padding, a border,
+// no width -- holding one `<span>` of text must take the text's width plus its
+// padding and border, as a browser lays it out (shrink-to-fit, CSS 2.2
+// §10.3.7). @pulp/react lowers the span to a Label with `white-space: normal`
+// (CSS's initial value) while the `nowrap` sits on the div. `white-space` is
+// inherited, so the span stays on one line; natively the Label ignored its
+// ancestor and soft-wrapped inside the room its containing block offered,
+// collapsing the box (in Spectr's header, to padding + border alone, with the
+// text painting outside it). The bridge calls below are the ones @pulp/react
+// makes for
+//   <div style={{position:'absolute', left, top, whiteSpace:'nowrap',
+//                padding:'6px 9px', border:'1px solid ...'}}><span>text</span></div>
+TEST_CASE("an absolutely positioned auto-width box shrink-fits the nowrap text it inherits",
+          "[view][bridge][css][layout][absolute]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 800, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"js(
+        createRow('row', '');
+        setFlex('row', 'width', 800); setFlex('row', 'height', 40);
+        createPanel('knob', 'row');
+        setFlex('knob', 'width', 30); setFlex('knob', 'height', 30);
+        // Narrower than the tip's own left offset, as a header cluster is.
+        createPanel('cluster', 'row');
+        setPosition('cluster', 'relative');
+        setFlex('cluster', 'width', 60); setFlex('cluster', 'height', 30);
+        createPanel('tip', 'cluster');
+        setPosition('tip', 'absolute');
+        setLeft('tip', 80); setTop('tip', 32);
+        setWhiteSpace('tip', 'nowrap');
+        setFlex('tip', 'padding_top', 6); setFlex('tip', 'padding_bottom', 6);
+        setFlex('tip', 'padding_left', 9); setFlex('tip', 'padding_right', 9);
+        setBorder('tip', 'rgba(255,255,255,0.12)', 1, 4);
+        createLabel('tip-text', 'Intensity: how strong the effect is. 0% is flat.', 'tip');
+        setWhiteSpace('tip-text', 'normal');
+        setFontSize('tip-text', 10);
+    )js");
+    root.layout_children();
+    auto* tip = bridge.widget("tip");
+    auto* text = dynamic_cast<Label*>(bridge.widget("tip-text"));
+    REQUIRE(tip != nullptr);
+    REQUIRE(text != nullptr);
+    const float natural = text->max_content_width();
+    INFO("tip " << tip->bounds().width << "x" << tip->bounds().height
+         << " text " << text->bounds().width << " natural " << natural);
+    // Control: the text has a real natural width, so a zero box is a defect,
+    // not an empty string.
+    REQUIRE(natural > 100.0f);
+    // The text lays out on one line at its natural width...
+    CHECK(text->bounds().width == Catch::Approx(natural).margin(1.0f));
+    // ...and the box wraps it: text + 2 x 9 padding + 2 x 1 border.
+    CHECK(tip->bounds().width == Catch::Approx(natural + 20.0f).margin(1.0f));
+    CHECK(tip->bounds().x == Catch::Approx(80.0f).margin(0.5f));
+}
+
+TEST_CASE("white-space nowrap reaches descendant text, and a Label's own mode wins",
+          "[view][bridge][css][layout][white-space]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 400});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"js(
+        createCol('box', '');
+        setFlex('box', 'width', 80);
+        createLabel('inherits', 'one two three four five six seven', 'box');
+        setWhiteSpace('inherits', 'normal');
+        createLabel('own', 'one two three four five six seven', 'box');
+        setWhiteSpace('own', 'pre-wrap');
+    )js");
+    auto* inherits = dynamic_cast<Label*>(bridge.widget("inherits"));
+    auto* own = dynamic_cast<Label*>(bridge.widget("own"));
+    REQUIRE(inherits != nullptr);
+    REQUIRE(own != nullptr);
+    root.layout_children();
+    // Control: with no nowrap anywhere both wrap inside 80 px.
+    CHECK(inherits->soft_wraps());
+    const float wrapped_height = inherits->bounds().height;
+    CHECK(wrapped_height > inherits->intrinsic_height() * 1.5f);
+    // nowrap on the container: the Label that kept CSS's initial value
+    // follows it onto one line; the one that set pre-wrap itself still wraps.
+    bridge.load_script("setWhiteSpace('box', 'nowrap');");
+    root.layout_children();
+    CHECK_FALSE(inherits->soft_wraps());
+    CHECK(inherits->bounds().height < wrapped_height);
+    CHECK(own->soft_wraps());
+    // And back: normal on the container restores wrapping.
+    bridge.load_script("setWhiteSpace('box', 'normal');");
+    root.layout_children();
+    CHECK(inherits->soft_wraps());
+    CHECK(inherits->bounds().height == Catch::Approx(wrapped_height));
+}

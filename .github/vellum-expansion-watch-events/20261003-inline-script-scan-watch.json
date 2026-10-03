@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-inline-script-scan-watch",
+  "created_at": "2026-10-03T04:30:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "design-ir-contract",
+    "render-assets-and-backends"
+  ],
+  "rationale": "Record an editor-open performance change that crosses these families' selectors. core/view/src/claude_bundle.cpp finds inline template <script> blocks with a string scan instead of a lazy std::regex; tag and close matching stay case-insensitive, `\\b` after `script` is kept, and a body still ends at the first close. A 300,000-case differential fuzz against the regex found no mismatch. No importer lowering, DesignIR shape, capture path, renderer selection, asset format, fixture or threshold changes. Registered as watch-only so the families' coverage stays honest. No authority moves and no Vellum artifact changes.",
+  "tests": [
+    "vellum-expansion-watch",
+    "pulp-test-group-view-widgets WidgetBridge __pulpRuntimeImport__ finds inline scripts by the tag rules"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

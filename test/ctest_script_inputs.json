@@ -5,7 +5,9 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-trusted-host-e2e-fixture"
+    "pulp-cli",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
@@ -97,6 +99,7 @@
     "tools/cli/content_commands.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "undeclared_sources": []
@@ -265,6 +268,7 @@
     "tools/cli/cli_fs_util.cpp",
     "tools/cli/kit_commands.cpp",
     "tools/cli/kit_manifest_validation.cpp",
+    "tools/cli/kit_profile_verification.cpp",
     "tools/cli/package_registry.cpp"
    ],
    "spawning_sources": [
@@ -329,12 +333,40 @@
    "undeclared_sources": []
   },
   "pulp-test-cli-project-command": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "CMakeLists.txt",
+    "core/view/include/pulp/view/reload_autocaps.hpp",
+    "core/view/include/pulp/view/reload_capabilities.hpp",
+    "core/view/src/widget_bridge_api_manifest.tsv",
+    "docs/reference/js-bridge.md",
+    "packages/pulp-react/src/bridge-globals.generated.d.ts",
+    "packages/pulp-react/src/bridge-mock-functions.generated.ts",
+    "packages/pulp-react/src/bridge-mock-safe-functions.generated.ts",
+    "tools/scripts/generate_widget_bridge_api.py",
+    "tools/shipyard.toml"
+   ],
    "kind": "compiled",
    "runtime_targets": [],
    "sources": [
-    "test/test_cli_project_command.cpp"
+    "test/test_cli_project_command.cpp",
+    "tools/cli/cli_common.cpp",
+    "tools/cli/cli_delegate.cpp",
+    "tools/cli/cli_doctor_helpers.cpp",
+    "tools/cli/cli_sdk.cpp",
+    "tools/cli/fetchcontent_cache.cpp",
+    "tools/cli/focused_build.cpp",
+    "tools/cli/local_sdk_install.cpp",
+    "tools/cli/local_sdk_profile.cpp",
+    "tools/cli/migration_runtime.cpp",
+    "tools/cli/package_registry.cpp",
+    "tools/cli/project_bump.cpp",
+    "tools/cli/projects_registry.cpp",
+    "tools/cli/shell_quote.cpp",
+    "tools/cli/shell_redirect.cpp",
+    "tools/cli/tartci_lease.cpp",
+    "tools/cli/update_check.cpp",
+    "tools/cli/version_diag.cpp"
    ],
    "spawning_sources": [
     "tools/cli/cli_common.cpp",
@@ -347,9 +379,7 @@
     "tools/cli/update_check.cpp"
    ],
    "spawns": "none",
-   "undeclared_sources": [
-    "test/test_cli_project_command.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-cli-shellout": {
    "data": "none",
@@ -472,9 +502,13 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
+    "pulp-cli",
     "pulp-control-broker",
     "pulp-control-broker-crash-fixture",
-    "pulp-control-trusted-host-e2e-fixture"
+    "pulp-control-installed-host-e2e-fixture",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-control-trusted-host-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
@@ -489,7 +523,10 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-enrollment-host-fixture"
+    "pulp-control-enrollment-host-fixture",
+    "pulp-control-installed-host-e2e-fixture",
+    "pulp-control-trusted-host-e2e-fixture",
+    "pulp-control-trusted-host-fixture"
    ],
    "sources": [],
    "spawning_sources": [
@@ -503,7 +540,9 @@
    "inputs": [],
    "kind": "compiled",
    "runtime_targets": [
-    "pulp-control-gpu-health-standalone-product-fixture"
+    "pulp-cli",
+    "pulp-control-gpu-health-standalone-product-fixture",
+    "pulp-mcp"
    ],
    "sources": [],
    "spawning_sources": [
@@ -1008,15 +1047,17 @@
    ]
   },
   "pulp-test-mcp-timeline-tools": {
-   "data": "undeclared",
-   "inputs": [],
+   "data": "declared",
+   "inputs": [
+    "test/fixtures/timeline/v1/minimal.json",
+    "test/fixtures/timeline/v4/sequence-markers.json"
+   ],
    "kind": "compiled",
    "sources": [
-    "test/test_mcp_timeline_sessions.cpp"
+    "test/test_mcp_timeline_sessions.cpp",
+    "test/test_mcp_timeline_tools.cpp"
    ],
-   "undeclared_sources": [
-    "test/test_mcp_timeline_sessions.cpp"
-   ]
+   "undeclared_sources": []
   },
   "pulp-test-modal-spec": {
    "data": "declared",
@@ -6924,6 +6965,8 @@
     ".githooks/pre-push",
     ".github/vellum-expansion-watch-events",
     "tools/scripts/gates.sh",
+    "tools/scripts/generate_vellum_ownership_projection.py",
+    "tools/scripts/pulp_tooling_disposition.py",
     "tools/scripts/test_vellum_watch_preflight.py"
    ],
    "kind": "python"

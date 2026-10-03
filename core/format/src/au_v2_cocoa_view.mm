@@ -276,9 +276,7 @@ bool pulp_resize_logic_auv2_editor(NSView* editor_view,
     const uint32_t h = bridge->size_hints().preferred_height;
 
     const auto gpu = format::decide_gpu_host(*bridge);
-    view::PluginViewHost::Options opts;
-    opts.size = {w, h};
-    opts.use_gpu = gpu.use_gpu;
+    const auto opts = format::editor_host_options(*bridge, gpu, {w, h});
 
     auto host = view::PluginViewHost::create(*bridge->view(), opts);
     if (!host) {

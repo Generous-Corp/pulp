@@ -121,9 +121,7 @@ private:
 
         const auto plan = plan_editor_size(bridge_->size_hints());
         const auto gpu = decide_gpu_host(*bridge_);
-        view::PluginViewHost::Options opts;
-        opts.size = {plan.width, plan.height};
-        opts.use_gpu = gpu.use_gpu;
+        const auto opts = editor_host_options(*bridge_, gpu, {plan.width, plan.height});
 
         host_ = view::PluginViewHost::create(*bridge_->view(), opts);
         if (!host_) {

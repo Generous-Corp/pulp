@@ -121,7 +121,12 @@ void BridgeRegistrars::register_widget_style_interaction_api(WidgetBridge& self)
         else if (ws == "pre-line")      mode = M::pre_line;
         else if (ws == "break-spaces")  mode = M::break_spaces;
         // Unknown keyword falls back to normal (per CSS forward-compat).
+        const bool changed = v->white_space_mode() != mode;
         v->set_white_space_mode(mode);
+        // `white-space` is inherited: a descendant Label whose own mode is
+        // `normal` follows this one (Label::soft_wraps), so a change here can
+        // re-measure text anywhere below.
+        if (changed) v->invalidate_layout();
         // Label.multi_line is TRUE for all modes except `nowrap`. Originally `pre`
         // mapped to multi_line=false to match the CSS spec's
         // "no-soft-wrap" semantic, but Pulp's Label only emits hard

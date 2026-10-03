@@ -190,3 +190,7 @@ if(APPLE AND NOT IOS AND NOT PULP_IOS AND PULP_ENABLE_GPU AND
             LABELS "inspect\;control\;gpu\;standalone\;product\;commit-bound")
 endif()
 endif()
+
+# The broker checks the code identity of the CLI and MCP clients it trusts
+# (inspect/src/control_broker_daemon.cpp).
+pulp_test_spawns(pulp-test-control-gpu-health-standalone-product pulp-cli pulp-mcp)

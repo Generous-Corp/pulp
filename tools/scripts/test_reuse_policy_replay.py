@@ -24,6 +24,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.error
 import sys
 import tempfile
 import unittest
@@ -679,6 +680,7 @@ class RecordedGraphTests(unittest.TestCase):
         keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
         self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
         self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_changed_binaries"], ["test/group-b"])
+        self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-b": "backs_test"})
         self.assertEqual(keys["cmake-codemodel-recorded"]["binaries_compared"], 3)
         self.assertEqual(keys["cmake-codemodel-recorded"]["rebuilt_identical_binaries"], 1)
         p2 = dict(pair(drift=("test/t.cpp",)), source_key=keys, source_key_head_run_id="p1")
@@ -687,6 +689,41 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual((result["unreached_changed_binaries"], result["verdict"]), (1, "UNSAFE: changed binaries not rebuilt"))
         self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
                           keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
+
+    def test_the_binary_control_covers_rebuilt_executables_no_test_runs(self):
+        """A changed binary no group test runs (a spawned tool, a bench) is
+        checked against everything the variant rebuilds, not only the
+        executables behind the group's tests."""
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b", "group-c")}
+
+        def unreached(drift, run_id):
+            corpus = Path(self.tmp) / f"ctl-{run_id}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            cache = corpus / "cache" / "record-v4"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
+                             ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
+                                     "binaries": {"test/group-c": "3x"}})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "unreached_changed_binaries"]
+        self.assertEqual(unreached(("core/added_since.cpp",), "reached"), [])        # rebuilt, no test runs it
+        self.assertEqual(unreached(("test/t.cpp",), "missed"), ["test/group-c"])     # changed and not rebuilt
+        kinds = next(rpr.read_jsonl(Path(self.tmp) / "ctl-missed" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"]
+        self.assertEqual(kinds, {"test/group-c": "neither"})
+        # The same miss labelled by what reaches it: a test spawning it, or a test running it.
+        targets["group-a"]["dependencies"] = ["group-c"]
+        unreached(("test/t.cpp",), "spawned")
+        self.assertEqual(next(rpr.read_jsonl(Path(self.tmp) / "ctl-spawned" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-c": "spawnable"})
 
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
@@ -857,6 +894,89 @@ class SourceKeyPolicyTests(unittest.TestCase):
         c = rpr.Corpus([group(), head()], [pair()], tests={"g1": [t("a", "fail", 2)]})
         result = rpr.score(c, "source-key")
         self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
+
+
+class RecordCoverageTests(unittest.TestCase):
+    def test_executed_jobs_without_a_record_are_named_and_cancelled_ones_are_not(self):
+        rec = "Record per-test results for reuse replay (macOS)"
+        ran = [{"name": "Build", "conclusion": "success"}, {"name": "Test (non-Windows)", "conclusion": "failure"},
+               {"name": rec, "conclusion": "success"}]
+        lost = [{"name": "Build", "conclusion": None}, {"name": "Test (non-Windows)", "conclusion": None},
+                {"name": rec, "conclusion": None}]
+        lost_after_tests = [{"name": "Build", "conclusion": "success"},
+                            {"name": "Test fast deterministic tier (pull request head)", "conclusion": "success"},
+                            {"name": "Test (non-Windows)", "conclusion": None}, {"name": rec, "conclusion": None}]
+        jobs = {
+            1: [{"id": 11, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            2: [{"id": 12, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": ran}],
+            3: [{"id": 13, "name": "macos", "runner_name": None, "conclusion": "cancelled", "steps": []}],
+            4: [{"id": 14, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            5: [{"id": 15, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            6: [{"id": 16, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": lost}],
+            7: [{"id": 17, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure",
+                 "steps": lost_after_tests}],
+        }
+        artifacts = {1: ["reuse-record-macos"], 2: ["ctest-logs-macos"], 3: [], 4: ["reuse-record-macos-attempt-2"],
+                     5: [], 6: [], 7: []}
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.jobs = lambda run_id: jobs[run_id]
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.side_effect = lambda path: {"artifacts": [{"name": n} for n in artifacts[int(path.split("/runs/")[1].split("/")[0])]]}
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            runs = [{"id": i, "status": "completed", "event": "pull_request", "created_at": "2026-10-02T12:00:00Z"}
+                    for i in (1, 2, 3, 4, 6, 7)]
+            runs.append({"id": 5, "status": "completed", "event": "merge_group", "created_at": "2026-09-30T12:00:00Z"})
+            cov = c.record_coverage(runs)
+        self.assertEqual((cov["executed_jobs"], cov["without_record"]), (3, 1))  # run 5 predates recording
+        self.assertEqual([m["run_id"] for m in cov["runs_without_record"]], ["2"])
+        # runner lost before the record step, whether or not a test step ran first
+        self.assertEqual([m["run_id"] for m in cov["interrupted"]], ["6", "7"])
+
+
+class ScriptInputsTests(unittest.TestCase):
+    def test_a_checkout_missing_locally_is_read_through_the_api(self):
+        doc = {"tests": {"t": {"inputs": ["tools/x/"]}}}
+        calls = []
+
+        def request(url, accept):
+            calls.append(url)
+            if "ref=" + "b" * 40 in url:
+                raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.read.return_value = json.dumps(doc).encode()
+            return resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertEqual(c.input_list_at("a" * 40), {"tools/x"})
+            self.assertEqual(c.script_inputs_at("a" * 40), doc)  # cached, no second request
+            self.assertIsNone(c.script_inputs_at("b" * 40))       # absent at that commit
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all("test/ctest_script_inputs.json" in u for u in calls))
+            c.gh = None
+            self.assertIsNone(c.script_inputs_at("c" * 40))       # offline: unread, not guessed
+
+    def test_a_failed_fetch_is_unread_and_retried_next_time(self):
+        attempts = []
+
+        def request(url, accept):
+            attempts.append(url)
+            raise urllib.error.HTTPError(url, 502, "bad gateway", {}, None)
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertIsNone(c.script_inputs_at("d" * 40))
+            self.assertIsNone(c.input_list_at("d" * 40))
+            self.assertEqual(len(attempts), 2)                    # the failure was not cached
+            self.assertFalse((Path(tmp) / "script-inputs" / f"{'d' * 40}.json.gz").exists())
 
 
 class GraftTests(unittest.TestCase):
