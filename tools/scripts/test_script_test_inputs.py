@@ -458,8 +458,8 @@ class SpawnScanTests(unittest.TestCase):
         self.assertLessEqual(starters, set(sti.SPAWN_CLASSES))
 
     def test_every_listed_loader_still_exists_in_core_host(self) -> None:
-        host = "\n".join(p.read_text(encoding="utf-8")
-                         for p in (HERE.parents[1] / "core/host/include/pulp/host").glob("*.hpp"))
+        host = "\n".join((HERE.parents[1] / "core/host/include/pulp/host" / name).read_text(encoding="utf-8")
+                         for name in ("plugin_slot.hpp", "scanner.hpp", "dl_shim.hpp"))
         for api in sti.LOAD_APIS:
             name = re.sub(r"\\s\*\\\($", "", api).split("::")[-1]
             self.assertRegex(host, r"\b%s\s*\(" % re.escape(name), api)
