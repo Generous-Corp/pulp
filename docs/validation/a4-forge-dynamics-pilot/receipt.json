@@ -1,0 +1,61 @@
+{
+  "schema": "pulp.a4-forge-dynamics-pilot-receipt/v1",
+  "commit": "8d12d467718f5973066e69ce0daea7f6f0c9b0e8",
+  "branch": "codex/forge-dynamics-pilot",
+  "base": "b91ad1d7e67b909d3cc8cfae50344c0f941cbb1d",
+  "family": "dynamics",
+  "scope": "Forge dynamics catalog header-to-source pilot",
+  "governed_build": {
+    "command": "pulp build --all",
+    "result": "passed",
+    "targets": 2735
+  },
+  "focused_tests": [
+    {
+      "target": "pulp-test-forge-dynamics-catalog",
+      "result": "passed",
+      "assertions": 1677,
+      "cases": 12
+    },
+    {
+      "target": "pulp-test-forge-dynamics-lineage-catalog",
+      "result": "passed",
+      "assertions": 1931,
+      "cases": 33
+    },
+    {
+      "test": "cmake-forge-catalog-install",
+      "result": "passed"
+    }
+  ],
+  "installed_sdk_staging": {
+    "command": "ctest --test-dir build -R ^cmake-installed-sdk-runtime-staging$ --output-on-failure",
+    "result": "passed",
+    "tests_passed": 1,
+    "tests_total": 1,
+    "test_number": 21462,
+    "elapsed_seconds": 59.02
+  },
+  "export": {
+    "command": "./build/pulp forge catalog export --json",
+    "result": "passed",
+    "bytes": 415732,
+    "sha256": "350567a6c9ca5a6b981f0efe8354207479f3341765871d7af4a821fc094c3e46",
+    "check": "passed",
+    "descriptor_coverage": {
+      "canonical_families": 89,
+      "indexed_packs": 20,
+      "export_registrations": 89
+    }
+  },
+  "include_measurements": {
+    "public_header_include_trace_lines": 1423,
+    "public_header_preprocessed_bytes": 3979062,
+    "baseline_include_trace_lines": 1454,
+    "baseline_preprocessed_bytes": 4151756,
+    "result": "improved"
+  },
+  "roadmap_changed": false,
+  "excluded_worktree": "/Users/danielraffel/Code/pulp-dsp-next-20261001",
+  "status": "green"
+}
