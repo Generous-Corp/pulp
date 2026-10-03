@@ -948,7 +948,7 @@ must not silently cancel its independent compatibility `mousedown`. Level 1
 
 A wheel that resolved inside an open overlay is contained there: the bridge
 adds `__pulpWheelBoundary: "<overlay element id>"` to the wheel payload,
-`__dispatch__` copies it to `ev._pulpBoundaryId`, and `_dispatchEvent` drops
+`_makeEvent` copies it to `ev._pulpBoundaryId`, and `_dispatchEvent` drops
 every path element above that element from BOTH phases, except `__root__` (the
 React-DOM delegate, which dispatches by fiber tree and would otherwise lose the
 tick inside the overlay too). The native half stops at the overlay root in

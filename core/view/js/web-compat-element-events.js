@@ -420,6 +420,11 @@ function _makeEvent(type, target, data) {
     // DOM event and the native event payload.
     ev.nativeEvent = ev;
 
+    // A native wheel that resolved inside an open overlay names that
+    // overlay's element; _dispatchEvent stops the bubble there.
+    if (typeof d.__pulpWheelBoundary === "string")
+        ev._pulpBoundaryId = d.__pulpWheelBoundary;
+
     // Position fields
     ev.clientX = d.clientX || 0;
     ev.clientY = d.clientY || 0;
