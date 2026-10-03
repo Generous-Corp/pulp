@@ -462,6 +462,18 @@ GROUP BY name;   -- 3 opens of one document: runtime_import_verify n = 1
 
 Fingerprints and what they mean:
 
+- **A slow COLD factory (view-creation call) whose span has no children**
+  while warm is fast: first-time app-side work in the plug-in's
+  `create_view()`, not Pulp. Check the gate first — zero `script_compile` /
+  `script_execute` / `js_native` / `scripted_ui_*` slices inside the factory
+  span, against a non-zero count elsewhere in the same trace — then bracket
+  the editor-create steps with temporary spans. A once-per-process sweep of
+  the temp directory is a known case: the per-user `$TMPDIR` holds tens of
+  thousands of entries on a developer Mac, and a `remove_all` of stranded
+  packages adds to it. Running the same binary with `TMPDIR=` an empty
+  directory is a one-variable A/B for it. Move such work onto a thread the
+  plug-in image joins on unload, or after the view is returned.
+
 - **Two copies of the whole load per open** (compile → import → settle,
   twice): a probe realm evaluated the document. Fixed in Pulp for first
   loads; if you see it, the session is being *reloaded*, not loaded.
