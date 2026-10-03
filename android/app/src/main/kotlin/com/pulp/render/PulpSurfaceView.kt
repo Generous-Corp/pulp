@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
 import android.provider.OpenableColumns
 import android.util.Log
 import android.view.DragEvent
@@ -13,6 +15,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.content.FileProvider
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.pulp.PulpApplication
@@ -31,13 +34,6 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     init {
         holder.addCallback(this)
-        // Pass real display density to C++ before surface is created
-        if (PulpApplication.nativeLoaded) {
-            val density = resources.displayMetrics.density
-            Log.i(TAG, "Setting display density: $density")
-            nativeSetDisplayDensity(density)
-        }
-
         // TalkBack: route accessibility queries into the C++ view
         // hierarchy via PulpAccessibilityDelegate's JNI bridge (#87).
         isFocusable = true
@@ -49,13 +45,15 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val density = resources.displayMetrics.density
             // Convert px insets to dp for the C++ view system
+            safeAreaInsets = floatArrayOf(
+                bars.top / density, bars.bottom / density,
+                bars.left / density, bars.right / density
+            )
             if (PulpApplication.nativeLoaded) {
-                nativeSetSafeAreaInsets(
-                    bars.top / density,
-                    bars.bottom / density,
-                    bars.left / density,
-                    bars.right / density
-                )
+                val safe = safeAreaInsets
+                renderHandler?.post {
+                    nativeSetSafeAreaInsets(safe[0], safe[1], safe[2], safe[3])
+                }
                 Log.i(TAG, "Safe area insets (dp): top=${bars.top/density} bottom=${bars.bottom/density}")
             }
             insets
@@ -69,7 +67,9 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     // ── Surface Lifecycle ─────────────────────────────────────────────────
 
-    private var renderThread: Thread? = null
+    private var renderThread: HandlerThread? = null
+    private var renderHandler: Handler? = null
+    @Volatile private var safeAreaInsets = FloatArray(4)
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         Log.i(TAG, "surfaceCreated — launching GPU init on render thread")
@@ -78,54 +78,72 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             // Dawn shader compilation takes 10-15 seconds on the emulator.
             // The render thread becomes the owner of the GPU context and
             // AChoreographer render loop.
-            initComplete = false
-            renderThread = Thread({
+            val thread = HandlerThread("PulpRenderThread").also { it.start() }
+            val handler = Handler(thread.looper)
+            renderThread = thread
+            renderHandler = handler
+            val surface = holder.surface
+            val density = resources.displayMetrics.density
+            val safe = safeAreaInsets
+            handler.post {
                 Log.i(TAG, "Render thread started")
-                android.os.Looper.prepare()  // AChoreographer needs a Looper
-                renderLooper = android.os.Looper.myLooper()
-                nativeOnSurfaceCreated(holder.surface)
+                nativeSetDisplayDensity(density)
+                nativeSetSafeAreaInsets(safe[0], safe[1], safe[2], safe[3])
+                nativeOnSurfaceCreated(surface)
                 recordGpuAdapterIdentity()
-                initComplete = true
-                Log.i(TAG, "Dawn init complete, entering Looper for choreographer callbacks")
-                android.os.Looper.loop()     // Blocks — processes AChoreographer callbacks
-                Log.i(TAG, "Render thread Looper exited")
-            }, "PulpRenderThread").also { it.start() }
+                Log.i(TAG, "Dawn init complete, servicing choreographer callbacks")
+            }
         }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
         Log.i(TAG, "surfaceChanged: ${width}x${height} format=$format")
         if (PulpApplication.nativeLoaded) {
-            nativeOnSurfaceResized(width, height)
+            renderHandler?.post { nativeOnSurfaceResized(width, height) }
         }
     }
 
-    @Volatile private var renderLooper: android.os.Looper? = null
-    @Volatile private var initComplete = false
-
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        Log.i(TAG, "surfaceDestroyed (initComplete=$initComplete)")
-        if (!initComplete) {
-            // Dawn is still initializing on the render thread.
-            // Don't block — just let the render thread finish and discover
-            // the surface is gone on its next frame attempt.
-            Log.i(TAG, "surfaceDestroyed during init — not blocking")
-            return
-        }
-        if (PulpApplication.nativeLoaded) {
-            nativeOnSurfaceDestroyed()
-        }
-        renderLooper?.quitSafely()
-        renderThread?.let { thread ->
+        Log.i(TAG, "surfaceDestroyed — waiting for render-thread teardown")
+        val thread = renderThread ?: return
+        val handler = renderHandler ?: return
+        renderHandler = null
+        // The destroy command follows any in-progress initialization, resize,
+        // or input dispatch on the same Looper as Choreographer. Do not return
+        // while that owner can still use SurfaceHolder's native window.
+        val stopped = CountDownLatch(1)
+        val destroyOnOwner = Runnable {
             try {
-                thread.join(5000)
-            } catch (e: InterruptedException) {
-                Log.w(TAG, "Interrupted waiting for render thread")
+                nativeOnSurfaceDestroyed()
+            } finally {
+                thread.quit()
+                stopped.countDown()
             }
-            renderThread = null
-            renderLooper = null
         }
-        initComplete = false
+        if (!handler.post(destroyOnOwner)) {
+            // A render Looper can disappear after an uncaught native exception.
+            // There can be no queued Choreographer callback once its Looper is
+            // gone, so finish the native barrier directly instead of throwing
+            // from SurfaceHolder.Callback on the UI thread.
+            try {
+                nativeOnSurfaceDestroyed()
+            } finally {
+                thread.quitSafely()
+                stopped.countDown()
+            }
+        }
+        var interrupted = false
+        while (true) {
+            try {
+                stopped.await()
+                thread.join()
+                break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+        renderThread = null
         Log.i(TAG, "surfaceDestroyed: render thread stopped")
     }
 
@@ -133,38 +151,28 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!PulpApplication.nativeLoaded) return super.onTouchEvent(event)
+        val handler = renderHandler ?: return true
+        // Android recycles MotionEvent after this call. Only immutable copied
+        // pointer values may cross to the owner of the C++ view/script tree.
+        val action = event.actionMasked
+        val first = if (action == MotionEvent.ACTION_MOVE ||
+            action == MotionEvent.ACTION_CANCEL) 0 else event.actionIndex
+        val last = if (action == MotionEvent.ACTION_MOVE ||
+            action == MotionEvent.ACTION_CANCEL) event.pointerCount else first + 1
 
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                val idx = event.actionIndex
-                nativeOnTouchDown(
-                    event.getPointerId(idx),
-                    event.getX(idx), event.getY(idx),
-                    event.getPressure(idx)
-                )
-            }
-            MotionEvent.ACTION_MOVE -> {
-                for (i in 0 until event.pointerCount) {
-                    nativeOnTouchMove(
-                        event.getPointerId(i),
-                        event.getX(i), event.getY(i),
-                        event.getPressure(i)
-                    )
-                }
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                val idx = event.actionIndex
-                nativeOnTouchUp(
-                    event.getPointerId(idx),
-                    event.getX(idx), event.getY(idx)
-                )
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                for (i in 0 until event.pointerCount) {
-                    nativeOnTouchCancel(
-                        event.getPointerId(i),
-                        event.getX(i), event.getY(i)
-                    )
+        for (i in first until last) {
+            val id = event.getPointerId(i)
+            val x = event.getX(i)
+            val y = event.getY(i)
+            val pressure = event.getPressure(i)
+            handler.post {
+                when (action) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
+                        nativeOnTouchDown(id, x, y, pressure)
+                    MotionEvent.ACTION_MOVE -> nativeOnTouchMove(id, x, y, pressure)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP ->
+                        nativeOnTouchUp(id, x, y)
+                    MotionEvent.ACTION_CANCEL -> nativeOnTouchCancel(id, x, y)
                 }
             }
         }
@@ -200,8 +208,10 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
                 resolveUriToCacheFile(uri)?.let { paths.add(it) }
             }
             if (paths.isEmpty()) return false
-            nativeOnDrop(paths.toTypedArray(), event.x, event.y)
-            return true
+            val droppedPaths = paths.toTypedArray()
+            val x = event.x
+            val y = event.y
+            return renderHandler?.post { nativeOnDrop(droppedPaths, x, y) } ?: false
         } finally {
             perms?.release()
         }
@@ -317,10 +327,10 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     // Safe area insets (dp) — status bar, nav bar, notch
     private external fun nativeSetSafeAreaInsets(top: Float, bottom: Float, left: Float, right: Float)
 
-    // Surface lifecycle — called on main thread
+    // Surface lifecycle — called on the same render Looper as Choreographer
     private external fun nativeOnSurfaceCreated(surface: Surface)
     private external fun nativeOnSurfaceResized(width: Int, height: Int)
-    private external fun nativeOnSurfaceDestroyed()  // blocks until render thread stops
+    private external fun nativeOnSurfaceDestroyed()
 
     // Adapter identity — valid only after nativeOnSurfaceCreated has initialized
     // Dawn; null before that and after the surface is destroyed
