@@ -2460,6 +2460,12 @@ int cmd_ship(const std::vector<std::string>& args) {
         return print_ship_help();
 
     auto root = find_project_root();
+    // An appcast describes artifacts that already exist, so given an explicit
+    // --output it needs neither a Pulp source tree nor a build directory. That
+    // lets an SDK consumer (whose repo has no core/) publish its update feed.
+    if (sub == "appcast" && root.empty() &&
+        std::find(args.begin(), args.end(), "--output") != args.end())
+        return ship_appcast(args, fs::current_path(), {});
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;

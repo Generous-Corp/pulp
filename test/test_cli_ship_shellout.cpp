@@ -313,6 +313,31 @@ TEST_CASE_METHOD(ShipShelloutFixture,
 }
 
 TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast with --output works outside a Pulp project",
+                 "[cli][shellout][ship][appcast]") {
+    if (!binary_exists()) {
+        SKIP("pulp binary not built");
+    }
+    auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = fs::temp_directory_path() / ("pulp-appcast-consumer-" + std::to_string(unique));
+    fs::create_directories(dir);
+    auto feed = dir / "appcast.xml";
+    auto r = run_pulp_in(dir,
+        {"ship", "appcast", "--url", "https://example.com/App-1.0.0.pkg",
+         "--version", "1.0.0", "--output", feed.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO(r.stdout_output << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(contains(read_text_file(feed), "sparkle:installationType=\"package\""));
+
+    // Without --output it still refuses, rather than writing into a guessed root.
+    auto bare = run_pulp_in(dir,
+        {"ship", "appcast", "--url", "https://example.com/App-1.0.0.pkg"});
+    REQUIRE(bare.exit_code != 0);
+    fs::remove_all(dir);
+}
+
+TEST_CASE_METHOD(ShipShelloutFixture,
                  "pulp ship notarize outside a project errors cleanly",
                  "[cli][shellout][ship]") {
     if (!binary_exists()) {
