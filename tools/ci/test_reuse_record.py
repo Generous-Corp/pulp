@@ -244,6 +244,16 @@ class RunnerImageTests(unittest.TestCase):
 
             self.assertEqual(via(True), via(False))
 
+    def test_a_value_no_probe_found_is_left_out_not_written_as_unknown(self) -> None:
+        def probe(cmd, why=None):
+            return "unknown" if cmd[0] in ("xcrun", "clang") else "/nonexistent" if cmd[0] == "xcode-select" else "x"
+        with mock.patch.object(rr.platform, "system", return_value="Darwin"), \
+                mock.patch.object(rr, "_probe", side_effect=probe):
+            image = rr.runner_image({})
+        self.assertNotIn("unknown", json.dumps(image["fields"]))
+        self.assertFalse({"sdk_version", "sdk_build", "clang"} & set(image["fields"]))
+        self.assertEqual(image["fields"]["arch"], rr.platform.machine())
+
     def test_a_missing_sdk_stays_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(rr.sdk_from_files(tmp), ("unknown", "unknown"))
@@ -262,6 +272,100 @@ class RunnerImageTests(unittest.TestCase):
             job = json.loads((Path(tmp) / "job.json").read_text())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(job["platform"], rr.platform_id())
+
+
+class ToolchainTests(unittest.TestCase):
+    def fake_build(self, tmp: str, version: str = "21.0.0.1") -> Path:
+        build = Path(tmp) / "build"
+        (build / "CMakeFiles" / "4.3.3").mkdir(parents=True)
+        cc = Path(tmp) / "fake-c++"
+        cc.write_text('#!/bin/sh\ncase "$1" in --version) echo "Fake clang %s";; '
+                      '-print-target-triple) echo arm64-apple-darwin25;; esac\n' % version)
+        cc.chmod(0o755)
+        (build / "CMakeFiles" / "4.3.3" / "CMakeCXXCompiler.cmake").write_text(
+            f'set(CMAKE_CXX_COMPILER "{cc}")\nset(CMAKE_CXX_COMPILER_ID "AppleClang")\n'
+            f'set(CMAKE_CXX_COMPILER_VERSION "{version}")\n')
+        (build / "CMakeCache.txt").write_text("CMAKE_OSX_DEPLOYMENT_TARGET:STRING=13.4\n")
+        return build
+
+    def test_the_identity_names_the_compiler_cmake_chose(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            t = rr.toolchain_identity(self.fake_build(tmp), {}, {"os": "Darwin", "sdk_version": "26.4",
+                                                                  "sdk_build": "25E241"})
+        f = t["fields"]
+        self.assertTrue(t["complete"])
+        self.assertEqual((f["compiler_id"], f["compiler_version"], f["compiler"], f["target"], f["deployment_target"]),
+                         ("AppleClang", "21.0.0.1", "Fake clang 21.0.0.1", "arm64-apple-darwin25", "13.4"))
+
+    def test_a_compiler_env_or_sdk_change_moves_the_digest(self) -> None:
+        image = {"os": "Darwin", "sdk_version": "26.4", "sdk_build": "25E241"}
+        with tempfile.TemporaryDirectory() as tmp:
+            base = rr.toolchain_identity(self.fake_build(tmp), {}, image)["digest"]
+            same = rr.toolchain_identity(Path(tmp) / "build", {"UNRELATED": "x"}, image)["digest"]
+            env = rr.toolchain_identity(Path(tmp) / "build", {"CXXFLAGS": "-O0"}, image)["digest"]
+            sdk = rr.toolchain_identity(Path(tmp) / "build", {}, {**image, "sdk_build": "25E246"})["digest"]
+        with tempfile.TemporaryDirectory() as tmp:
+            newer = rr.toolchain_identity(self.fake_build(tmp, "21.0.0.2"), {}, image)["digest"]
+        self.assertEqual(base, same)
+        self.assertEqual(len({base, env, sdk, newer}), 4)
+
+    def test_an_unprobed_compiler_or_unknown_sdk_is_incomplete_and_never_written(self) -> None:
+        darwin = {"os": "Darwin", "sdk_version": "26.4", "sdk_build": "x"}
+        with tempfile.TemporaryDirectory() as tmp:
+            t = rr.toolchain_identity(Path(tmp), {}, darwin)
+            self.assertEqual((t["complete"], t["missing"]),
+                             (False, ["compiler_id", "compiler_version", "compiler", "target"]))
+            # The SDK probe failed: the image has no SDK keys at all.
+            t = rr.toolchain_identity(self.fake_build(tmp), {}, {"os": "Darwin"})
+            self.assertEqual((t["complete"], t["missing"]), (False, ["sdk_version", "sdk_build"]))
+            self.assertNotIn("unknown", json.dumps(t))
+            # Off macOS there is no SDK to require.
+            self.assertTrue(rr.toolchain_identity(Path(tmp) / "build", {}, {"os": "Linux"})["complete"])
+        self.assertIsNone(rr.toolchain_identity(None, {}, {}))
+
+    def test_an_incomplete_identity_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "build").mkdir()
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
+                                   "--build-dir", f"{tmp}/build", "--identity-scope", "ran"],
+                                  capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "GITHUB_EVENT_NAME": "push"})
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertFalse(job["toolchain"]["complete"])
+        self.assertIn("::warning title=reuse-record incomplete::toolchain identity incomplete", proc.stdout)
+
+
+class LaneTests(unittest.TestCase):
+    def test_a_lane_run_takes_its_commit_from_the_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            git = lambda *a: subprocess.run(["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", *a],
+                                            check=True, capture_output=True, text=True).stdout.strip()
+            git("init", "-q")
+            (Path(tmp) / "a").write_text("1")
+            git("add", "a")
+            git("commit", "-q", "-m", "one")
+            first = git("rev-parse", "HEAD")
+            (Path(tmp) / "a").write_text("2")
+            git("commit", "-q", "-am", "two")
+            head, tree = git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
+                                   "--source-root", tmp, "--run-kind", "lane", "--run-id", "r7",
+                                   "--identity-scope", "ran"],
+                                  capture_output=True, text=True, timeout=60, env=env)
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((job["run_kind"], job["run_id"], job["merge_sha"], job["head_sha"], job["merge_tree"],
+                          job["base_sha"]), ("lane", "r7", head, head, tree, first))
+
+    def test_a_lane_run_without_an_id_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
+                                   "--run-kind", "lane"], capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "SHIPYARD_RUN_ID": "ignored"})
+            wrote = (Path(tmp) / "out" / "job.json").exists()
+        self.assertEqual((proc.returncode, wrote), (2, False))
+        self.assertIn("--run-kind lane needs --run-id", proc.stderr)
 
 
 class ClosureTests(unittest.TestCase):
@@ -369,7 +473,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(list(identity["executables"]), ["<build>/t"])
         note = next(l for l in proc.stdout.splitlines() if l.startswith(f"::notice title={rr.TITLE}::"))
         self.assertEqual(json.loads(note.split("::", 2)[2])["tests"], 8)
-        self.assertNotIn("::warning", proc.stdout)
+        # The fixture's build directory was never configured, so only the
+        # toolchain warning may appear.
+        self.assertEqual([l for l in proc.stdout.splitlines()
+                          if "::warning" in l and "toolchain identity incomplete" not in l], [])
 
 
     def run_write(self, tmp: str, *extra: str) -> subprocess.CompletedProcess:
@@ -402,7 +509,10 @@ class CliTests(unittest.TestCase):
             job = json.loads((Path(tmp) / "out" / "job.json").read_text())
             lines = (Path(tmp) / "out" / "tests.jsonl").read_text()
         self.assertEqual((proc.returncode, job["no_suite_reason"], lines), (0, "no suite: alias", ""))
-        self.assertNotIn("::warning", proc.stdout)
+        # The fixture's build directory was never configured, so only the
+        # toolchain warning may appear.
+        self.assertEqual([l for l in proc.stdout.splitlines()
+                          if "::warning" in l and "toolchain identity incomplete" not in l], [])
 
 
     def test_link_members_are_written_beside_the_identity(self) -> None:
@@ -426,7 +536,10 @@ class CliTests(unittest.TestCase):
                           job["link_members"]["whole_archives"]), (1, 1, ["<build>/lib/libx.a"]))
         self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o", "two.o"]})
         self.assertEqual(doc["executables"]["<build>/m.so"]["kind"], "module")
-        self.assertNotIn("::warning", proc.stdout)
+        # The fixture's build directory was never configured, so only the
+        # toolchain warning may appear.
+        self.assertEqual([l for l in proc.stdout.splitlines()
+                          if "::warning" in l and "toolchain identity incomplete" not in l], [])
 
     def test_object_deps_are_recorded_and_a_missing_ninja_log_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
