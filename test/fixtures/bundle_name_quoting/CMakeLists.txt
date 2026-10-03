@@ -59,8 +59,7 @@ set_tests_properties(cmake-bundle-name-quoting PROPERTIES
 # the host's own deactivation. Labeled `validation`, so it stays off the
 # required gate; it runs wherever pluginval is installed.
 if(TARGET PulpBundleNameQuoting_VST3)
-    find_program(PULP_PLUGINVAL_EXECUTABLE pluginval
-        HINTS /Applications/pluginval.app/Contents/MacOS)
+    _pulp_find_pluginval(PULP_PLUGINVAL_EXECUTABLE)
     if(PULP_PLUGINVAL_EXECUTABLE)
         add_test(NAME pluginval-bundle-name-quoting-VST3
             COMMAND "${PULP_PLUGINVAL_EXECUTABLE}" --strictness-level 5

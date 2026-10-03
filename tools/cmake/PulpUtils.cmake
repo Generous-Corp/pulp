@@ -47,6 +47,7 @@ if(NOT _PULP_FORMAT_TARGET)
         "Use add_subdirectory(Pulp) or find_package(Pulp) before including it.")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/PulpFindPluginval.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpMidiTuning.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpPluginMetadata.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/PulpBuildInfo.cmake")
