@@ -2509,6 +2509,53 @@ free on a silent editor can dominate a frame with loud, dense audio. Cap the
 number of glowing elements or reuse one cached gradient, and judge the cost
 with real audio running, never on an idle editor.
 
+### 7. Hydrate before the first render; never setState for initial data after mount
+
+The editor open is a commit budget too. Every piece of initial state that
+arrives AFTER the first render -- a mount effect that requests state, a
+`.then(setX)` on a native reply, a hydrate delivered in an animation frame, a
+passive effect that hands that hydrate on, a native `load_script` that flips a
+flag -- is another commit, and in a materialized import each one re-applies
+the captured document. Host-callback batching (`__pulpBatchUpdates__` around
+rAF/timer callbacks and one native message's listeners) merges updates inside
+ONE callback; it cannot merge a promise job with a later frame or a passive
+effect, and Pulp deliberately does not batch the microtask queue: @pulp/react
+renders a LegacyRoot, code may read the tree right after a `setState` in a
+`.then`, and wrapping the engine's job drain would re-enter it from script.
+So the fix belongs in the app:
+
+- **Read initial state synchronously and render with it.** A native dispatch
+  that returns its answer (an `EditorBridge` handler called through the
+  realm's dispatcher) can be read in a `useState` initializer. Read each
+  read-only verb ONCE per realm and hand every component the same answer, so
+  the whole first render agrees on one state.
+- **Reconcile instead of re-hydrating.** After listeners subscribe, re-read
+  once and hydrate only if the processor moved between the first render and
+  the subscription; nothing published in that window is lost and the common
+  case commits nothing.
+- **Arm "do not echo" guards from the seed.** A publication effect that sends
+  the editor's state back to the processor must treat the seeded state as
+  already published, or the mount writes the processor's own state back.
+- **Late mounts go in a layout effect, not a passive one.** Something that
+  must be created after the first render (to keep generated native ids
+  stable, say) can `setState` in `useLayoutEffect`: a LegacyRoot flushes that
+  inside the mount, before the first present, instead of as a commit of its
+  own. The same holds for state whose first render would change the tree's
+  node order -- hand it over in the layout pass and the first render's ids
+  stay what they were.
+- **Same-value setters are not free when the value is a new object.**
+  `setSelection(new Set())` on mount commits; `setSelection(s => s.size ? new
+  Set() : s)` does not.
+
+Gate it by count: keep a commit counter in the runtime's `resetAfterCommit`
+(commits, re-applies, the count at the end of the mount) and assert, after the
+editor settles, that commits after the mount stay at 0-1 and only the mount's
+first commit re-applies the whole document. Wall time is for tracking. Worked
+example (Spectr, AU v2, M5 Max): six post-mount commits (two from one
+promise-driven modulation read, build info, the rAF hydrate, a passive effect,
+a tracing badge) became zero; ~250 ms of a warm open, and a non-default
+session (48 bands, a boosted band) mounts showing it.
+
 ## Present pacing on macOS: Mailbox is Fifo, and acquire waits on drawables
 
 `PluginViewHost::PresentPolicy::nonblocking` prefers Mailbox, then Immediate.
