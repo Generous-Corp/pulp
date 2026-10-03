@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import struct
 import subprocess
@@ -359,6 +360,39 @@ class CliTests(unittest.TestCase):
         self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o", "two.o"]})
         self.assertEqual(doc["executables"]["<build>/m.so"]["kind"], "module")
         self.assertNotIn("::warning", proc.stdout)
+
+    def test_object_deps_are_recorded_and_a_missing_ninja_log_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            build.mkdir()
+            proc = self.run_write(tmp, "--build-dir", str(build), "--source-root", tmp, "--object-deps",
+                                  "--identity-scope", "ran")
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIsNone(job["object_deps"])
+        self.assertIn("::warning title=reuse-record incomplete::object deps unavailable: "
+                      "the build has no Ninja dependency log", proc.stdout)
+
+    @unittest.skipUnless(shutil.which("ninja"), "needs ninja")
+    def test_object_deps_from_a_ninja_log_land_beside_the_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, build = Path(tmp) / "src", Path(tmp) / "build"
+            src.mkdir()
+            build.mkdir()
+            (src / "a.cpp").write_text("int a() { return 1; }\n")
+            (build / "build.ninja").write_text(
+                "rule cc\n  command = c++ -MD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\n"
+                f"build a.o: cc {src / 'a.cpp'}\n")
+            subprocess.run(["ninja", "-C", str(build)], check=True, capture_output=True)
+            proc = self.run_write(tmp, "--build-dir", str(build), "--source-root", str(src), "--object-deps",
+                                  "--identity-scope", "ran")
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+            doc = json.loads((Path(tmp) / "out" / job["object_deps"]["file"]).read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(job["object_deps"]["objects"], 1)
+        self.assertEqual(doc["objects"], {"<build>/a.o": [0]})
+        self.assertEqual(doc["headers"], ["<src>/a.cpp"])
+        self.assertNotIn("object deps", proc.stdout)
 
     def test_a_shared_library_link_is_counted_and_warns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

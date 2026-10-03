@@ -5681,6 +5681,14 @@
    ],
    "kind": "python"
   },
+  "object-deps-selftest": {
+   "entry": "tools/ci/test_object_deps.py",
+   "inputs": [
+    "tools/ci/object_deps.py",
+    "tools/ci/test_object_deps.py"
+   ],
+   "kind": "python"
+  },
   "odr-macro-gated-headers": {
    "entry": "tools/scripts/test_odr_macro_gated_headers.py",
    "inputs": [
@@ -7131,6 +7139,7 @@
     "test/support",
     "tools/ci/codemodel_digest.py",
     "tools/ci/link_members.py",
+    "tools/ci/object_deps.py",
     "tools/ci/reuse_record.py",
     "tools/ci/test_codemodel_digest.py",
     "tools/ci/test_reuse_record.py",

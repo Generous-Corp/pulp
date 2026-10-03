@@ -32,6 +32,10 @@ in the neutral record the replay harness reads:
                      per executable, the archive members its link pulled and
                      which archives it loads whole (tools/ci/link_members.py),
                      when the build recorded them (--link-members)
+    object-deps-<sha>.json
+                     per object file, the in-tree headers Ninja recorded it
+                     including, and which objects each archive member comes
+                     from (tools/ci/object_deps.py), with --object-deps
     registrations-<sha>.json
                      the configuration-neutral ctest registration multiset
                      (changed_surface_inventory.project_registrations), with
@@ -697,6 +701,28 @@ def cmd_write(a: argparse.Namespace) -> int:
         except Exception as exc:  # noqa: BLE001 - results are still worth writing
             problems.append(f"link members unavailable: {exc}")
 
+    object_deps = None
+    if a.object_deps and build_dir:
+        import object_deps as od
+
+        try:
+            if not a.source_root:
+                raise od.Unavailable("--object-deps needs --source-root to write <src> paths")
+            doc = od.collect(build_dir, Path(a.source_root).resolve())
+            name = f"object-deps-{ctx['merge_sha'] or 'unknown'}.json"
+            (out / name).write_text(json.dumps(doc, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            object_deps = {"file": name, "objects": len(doc["objects"]), "headers": len(doc["headers"]),
+                           "stale": len(doc["stale"]), "archives": len(doc["members"]),
+                           "bytes": (out / name).stat().st_size}
+            reason = od.unusable(doc)
+            if reason:
+                problems.append(f"object deps not usable for reuse: {reason}")
+            elif doc["stale"]:
+                problems.append(f"object deps: {len(doc['stale'])} object(s) STALE in the Ninja log; "
+                                "their headers are unknown")
+        except Exception as exc:  # noqa: BLE001 - results are still worth writing
+            problems.append(f"object deps unavailable: {exc}")
+
     registration_projection = None
     if a.inventory and build_dir:
         import changed_surface_inventory as csi
@@ -731,12 +757,14 @@ def cmd_write(a: argparse.Namespace) -> int:
                      "unresolved_executables": identity["unresolved_executables"],
                      "output_keys": sum(1 for r in records if r["output_key"])},
         "link_members": link_members,
+        "object_deps": object_deps,
         "codemodel": codemodel,
         "registration_projection": registration_projection,
         "problems": problems,
     }
     job["bytes"] = {"tests_jsonl": tests_path.stat().st_size, "identity_json": identity_path.stat().st_size,
                     "link_members": link_members["bytes"] if link_members else 0,
+                    "object_deps": object_deps["bytes"] if object_deps else 0,
                     "codemodel": codemodel["bytes"] if codemodel else 0,
                     "registration_projection": registration_projection["bytes"] if registration_projection else 0}
     job["seconds"] = round(time.monotonic() - t0, 1)
@@ -776,6 +804,8 @@ def main(argv: list[str]) -> int:
     w.add_argument("--inventory", action="store_true",
                    help="also write the configuration-neutral ctest registration projection "
                         "(changed_surface_inventory.project_registrations)")
+    w.add_argument("--object-deps", action="store_true",
+                   help="record each object's in-tree headers (tools/ci/object_deps.py) into object-deps-<sha>.json")
     w.add_argument("--link-members", action="store_true",
                    help="collect <build>/link-members (tools/ci/link_members.py) into link-members-<sha>.json")
     w.add_argument("--context", action="append", default=[],

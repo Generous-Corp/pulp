@@ -1029,7 +1029,15 @@ set on archives the link line force-loads (`-force_load`, `-all_load`,
 `-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
 calls `link_members.unusable()` first and treats an unknown schema, a `shared`
 link (its content reaches the binaries that load it without changing their
-maps) or an unrecorded link as no record at all, and the record job warns. `codemodel-<sha>.json`
+maps) or an unrecorded link as no record at all, and the record job warns. `object-deps-<sha>.json`
+(`tools/ci/object_deps.py`, `--object-deps`) holds, per object file, the
+in-tree headers Ninja recorded it including (`ninja -t deps`, as `<src>/` and
+`<build>/` paths, headers under `<build>/_deps` left out), and which objects
+each static archive member comes from. A changed header then reaches exactly
+the objects that included it in the build that ran. A build with no Ninja
+log writes no file and warns. An object Ninja marks STALE is listed in
+`stale` with no headers, and a reader treats it, or any object the file does
+not list, as changed. `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
