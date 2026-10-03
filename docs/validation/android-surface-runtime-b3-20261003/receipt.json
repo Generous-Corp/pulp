@@ -268,5 +268,39 @@
     },
     "comparison_to_existing_gpu_slope": "Existing GPU run: native PSS 30396 to 92480 KB over five cycles (+62084 KB, +12416.8 KB/cycle), total PSS 140295 to 189970 KB (+49675 KB). This allow-no-gpu-capable control: native PSS 43365 to 104901 KB (+61536 KB, +12307.2 KB/cycle), total PSS 140746 to 202382 KB (+61636 KB). The same approximately 12 MB native slope persists with zero Graphics PSS.",
     "classification": "The control reproduces the native-memory retention after five completed SurfaceView destroy/create cycles. Teardown markers are complete, and no B3-owned lifecycle retention is isolated. Preserve BLOCKED and escalate the repeated 4718592-byte allocation pattern to the common Dawn/Skia or emulator Vulkan-driver owner."
+  },
+  "perfetto_heapprofd_allocation_owner_attempt": {
+    "device": "emulator-5554",
+    "package": "com.pulp.app",
+    "package_pid_observed": 14450,
+    "service_probe": {
+      "command": "adb -s emulator-5554 shell service list | grep -i -E 'heapprofd|perfetto|traced'",
+      "result": "No android.heapprofd service exposed; no perfetto service listed."
+    },
+    "binary_probe": {
+      "command": "adb -s emulator-5554 shell 'command -v perfetto; command -v heapprofd || true; ls -l /system/bin/perfetto /system/bin/heapprofd 2>/dev/null || true'",
+      "result": "/system/bin/perfetto exists; /system/bin/heapprofd is absent."
+    },
+    "perfetto_query": {
+      "command": "adb -s emulator-5554 shell 'cmd perfetto --query'",
+      "result": "Can't find service: perfetto"
+    },
+    "tracing_process_probe": {
+      "command": "adb -s emulator-5554 shell ps -A | grep -i -E 'perfetto|heapprofd|traced'",
+      "result": "traced and traced_probes processes exist; no heapprofd process."
+    },
+    "package_profile_probe": {
+      "command": "adb -s emulator-5554 shell dumpsys package com.pulp.app | grep -i -E 'profile|debuggable'",
+      "result": "Package flags include DEBUGGABLE; no explicit profileable field was exposed."
+    },
+    "trace": {
+      "attempted": false,
+      "reason": "The emulator has no accessible android.heapprofd or Perfetto service for native allocation tracing.",
+      "allocation_stacks_produced": false,
+      "trace_path": null,
+      "trace_sha256": null,
+      "repeated_4718592_byte_class_owner": "unattributed"
+    },
+    "classification": "Fail-closed infrastructure limitation, not evidence of a B3 fix or ownership. Preserve BLOCKED and require a profileable emulator with an exposed heapprofd/Perfetto service for the allocation-owner discriminator."
   }
 }
