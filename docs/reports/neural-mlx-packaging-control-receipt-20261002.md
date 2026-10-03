@@ -2,7 +2,9 @@
 
 Date: 2026-10-02
 Work package: D (MLX Apple Silicon provider)
-Related receipt: `docs/reports/neural-mlx-execution-receipt-20261002.md`
+Related landed receipt: `docs/reports/neural-mlx-execution-receipt-20261002.md`
+The worker-seam design receipt remains feature-lineage-only; see the provenance
+audit in `docs/reports/neural-mlx-provenance-audit-20261003.md`.
 Status: design and evidence requirements only; no measurements claimed
 
 ## Gate comparison
