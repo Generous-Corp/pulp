@@ -23,6 +23,25 @@ class DesktopVideoMatrixCommandsTests(unittest.TestCase):
     def print_line(self, line: str):
         self.printed.append(line)
 
+    def test_governed_build_command_preserves_target_and_passthrough_args(self):
+        self.assertEqual(
+            self.mod.governed_build_command("build-video-nogpu", "PulpSynth_CLAP"),
+            "tools/ci/governed-build.sh cmake --build build-video-nogpu --target PulpSynth_CLAP",
+        )
+        self.assertEqual(
+            self.mod.governed_build_command(
+                "build-ios-sim-video-proof",
+                "PulpSineSynth_HostApp_Embed",
+                "--config",
+                "Release",
+                "--",
+                "-sdk",
+                "iphonesimulator",
+            ),
+            "tools/ci/governed-build.sh cmake --build build-ios-sim-video-proof "
+            "--target PulpSineSynth_HostApp_Embed --config Release -- -sdk iphonesimulator",
+        )
+
     def desktop_config(self):
         return {
             "desktop_automation": {
