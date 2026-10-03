@@ -86,6 +86,12 @@ POLICIES
                  each runs, and the members each link pulled come from the
                  group job's own reuse record, so executable names never go
                  stale; the Ninja graph only maps headers to sources.
+  source-key-manifest-data-recorded
+                 source-key-codemodel-recorded, except a runtime-surface
+                 drift re-runs a compiled test only through its executable's
+                 data manifest entry: its declared inputs, any drift for
+                 undeclared reads or an unscanned executable, none for a
+                 scanned executable that reads nothing.
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
@@ -465,6 +471,8 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 1a strict, executables and rebuilds from the group job's recorded link members"),
     Policy("source-key-codemodel-recorded", _source_key("cmake-codemodel-recorded"), True,
            "source-key-codemodel on the recorded graph (link members, recorded test executables)"),
+    Policy("source-key-manifest-data-recorded", _source_key("manifest-data-recorded"), True,
+           "source-key-codemodel-recorded with the data rule scoped by each executable's data manifest"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
     Policy("suite-source-key", None, True,

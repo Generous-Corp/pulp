@@ -610,6 +610,33 @@ class CodemodelTests(unittest.TestCase):
             self.assertEqual(out["cmake-codemodel"]["spawn_undeclared_tests"], 1, state)
             self.assertEqual(out["per-entry"]["run"], [], state)            # not a strict variant
 
+    @staticmethod
+    def data_scan(scanned, **entries):
+        return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
+                                  "executables": dict(entries)}, "data")
+
+    def test_the_data_manifest_scopes_the_data_rule_per_executable(self):
+        drift = ["tools/scripts/foo.py"]   # runtime surface, not a declared input of either test
+        scan = self.data_scan(["a", "b", "tool"], a={"data": "declared", "inputs": ["test/fixtures/a"]})
+
+        def run(scan, drift=drift):
+            return rrc.classify_source_keys(drift, ["ta", "tb"], self.MAP, {}, {}, set(), self.EXES | {"test/tool"},
+                                            (set(), {"test/a", "test/b", "test/tool"}), data_scan=scan)
+        out = run(scan)
+        self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"])      # the broad rule: every compiled test
+        self.assertEqual(out["manifest-data"]["run"], [])
+        self.assertTrue(out["manifest-data"]["data_scanned"])
+        self.assertEqual(run(scan, ["test/fixtures/a/x.json"])["manifest-data"]["run"], ["ta"])  # a declared input
+        undeclared = self.data_scan(["a", "b"], b={"data": "undeclared", "inputs": []})
+        self.assertEqual(run(undeclared)["manifest-data"]["run"], ["tb"])  # undeclared reads: any surface drift
+        self.assertEqual(run(self.data_scan(["a"]))["manifest-data"]["run"], ["tb"])  # b not scanned
+        self.assertEqual(run(None)["manifest-data"]["run"], ["ta", "tb"])  # no scan: the broad rule
+        older = rrc.spawn_scan_of({"executables_scanned_for": ["spawns"], "executables_scanned": ["a", "b"]}, "data")
+        self.assertIsNone(older)
+        odd = self.data_scan(["a", "b"], a={"data": "partly"})
+        self.assertEqual(run(odd)["manifest-data"]["run"], ["ta"])         # an unknown state fails closed
+        self.assertEqual(run(scan, ["docs/a.md"])["manifest-data"]["run"], [])
+
     def test_a_rebuilt_module_triggers_the_fallback_and_reaches_its_loader(self):
         scan = self.scan(["a", "tool"])
         out = self.scanned(set(), scan, modules={"test/mod.so"}, rebuilt_modules={"test/mod.so"})

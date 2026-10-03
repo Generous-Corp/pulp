@@ -1001,14 +1001,43 @@ def codemodel_rekeyed(head: dict[str, dict], group: dict[str, dict],
     return exes(changed), exes(group)
 
 
-def spawn_scan_of(doc: dict | None) -> dict | None:
-    """The spawn scan a checked-in script-input list carries: per-executable
-    entries plus the set of executables the scan covered, or None when that
-    list did not scan for spawns (an older tree, or an unreadable list)."""
-    if not doc or "spawns" not in (doc.get("executables_scanned_for") or []) \
+def spawn_scan_of(doc: dict | None, kind: str = "spawns") -> dict | None:
+    """The `kind` scan (spawns or data) a checked-in script-input list
+    carries: per-executable entries plus the set of executables the scan
+    covered, or None when that list did not scan for it (an older tree, or
+    an unreadable list)."""
+    if not doc or kind not in (doc.get("executables_scanned_for") or []) \
             or not isinstance(doc.get("executables_scanned"), list):
         return None
     return {"entries": dict(doc.get("executables") or {}), "scanned": frozenset(doc["executables_scanned"])}
+
+
+def _scan_entry(executable: str, scan: dict) -> tuple[dict | None, bool]:
+    name = os.path.basename(executable)
+    name = name[:-4] if name.endswith(".exe") else name
+    return scan["entries"].get(name), name in scan["scanned"]
+
+
+def data_hit(executable: str, scan: dict | None, drift: list[str], data: list[str]) -> bool:
+    """Whether a drift reaches what one test executable reads from the
+    checkout, by its data manifest entry.
+
+    `data` is the drift's runtime-surface files. With no data scan, or an
+    executable the scan did not cover, any of them counts. An entry whose
+    reads are all declared is hit only through its declared inputs; one
+    with undeclared reads (or any other state) by any runtime-surface file;
+    `data: none`, or no entry for a scanned executable, by none."""
+    if scan is None:
+        return bool(data)
+    entry, scanned = _scan_entry(executable, scan)
+    if entry is None:
+        return bool(data) and not scanned
+    state = entry.get("data")
+    if state == "none":
+        return False
+    if state == "declared":
+        return _declared_hit(entry.get("inputs") or [], drift)
+    return bool(data)
 
 
 def spawn_status(executable: str, scan: dict | None) -> str:
@@ -1021,11 +1050,9 @@ def spawn_status(executable: str, scan: dict | None) -> str:
     the scan covered that executable; otherwise nothing is known about it."""
     if scan is None:
         return "unknown"
-    name = os.path.basename(executable)
-    name = name[:-4] if name.endswith(".exe") else name
-    entry = scan["entries"].get(name)
+    entry, scanned = _scan_entry(executable, scan)
     if entry is None:
-        return "clean" if name in scan["scanned"] else "unknown"
+        return "clean" if scanned else "unknown"
     return "clean" if entry.get("spawns") in (None, "declared", "none") else "undeclared"
 
 
@@ -1038,6 +1065,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                          spawns=None,
                          spawnable: frozenset[str] = frozenset(),
                          spawn_scan: dict | None = None,
+                         data_scan: dict | None = None,
                          modules: frozenset[str] = frozenset(),
                          rebuilt_modules: frozenset[str] = frozenset()) -> dict[str, dict]:
     """Per variant: the tests that must run and the share of executables rebuilt.
@@ -1076,10 +1104,14 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
     # project(VERSION) reaches generated headers) re-keys everything; with
     # them the digests re-key exactly the consumers.
     stamped = bool(CONFIGURE_STAMP_PATHS & set(drift)) and not generated_keyed
-    variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel",) if codemodel is not None else ())
+    variants = SOURCE_KEY_VARIANTS + (("cmake-codemodel", "manifest-data") if codemodel is not None else ())
     for variant in variants:
-        exact_cmake = variant == "cmake-codemodel"
-        strict = variant in ("strict-data", "cmake-codemodel")
+        # manifest-data is cmake-codemodel with the data rule scoped to each
+        # executable's data manifest entry instead of every compiled test.
+        exact_cmake = variant in ("cmake-codemodel", "manifest-data")
+        strict = variant in ("strict-data", "cmake-codemodel", "manifest-data")
+        reads = (lambda exes: any(data_hit(e, data_scan, drift, data) for e in exes)) \
+            if variant == "manifest-data" else (lambda exes: bool(data))
         # Every executable this variant rebuilds, before narrowing to the
         # ones the group's tests run: a spawned tool counts too.
         if exact_cmake:
@@ -1112,7 +1144,7 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
             if strict and (always_run.search(name) or environment_bound(mapped)):
                 run.append(name)
             elif exes:
-                keyed = (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or data))
+                keyed = (not set(exes) <= all_executables or (strict and (cmake_hit(exes) or reads(exes)))
                          or set(exes) & rebuilt or drift_set & set(mapped.get("sources") or []) or spawn_hit(exes))
                 statuses = {spawn_status(e, spawn_scan) for e in exes} if strict else set()
                 undeclared = "undeclared" in statuses
@@ -1143,7 +1175,8 @@ def classify_source_keys(drift: list[str], group_tests: list[str], test_map: dic
                         # now and under the rule before the spawn scan.
                         "spawnable_fallback": spawn_all, "fallback_only_tests": fallback_only,
                         "fallback_only_tests_legacy": fallback_only_legacy,
-                        "spawn_scanned": spawn_scan is not None, "spawn_undeclared_tests": spawn_undeclared}
+                        "spawn_scanned": spawn_scan is not None, "spawn_undeclared_tests": spawn_undeclared,
+                        "data_scanned": data_scan is not None}
         if codemodel is not None:
             # The same counts over the executables the recorded build
             # describes, where the variants can be compared exactly, and for
@@ -1377,6 +1410,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                 linked_rebuilt, set(link), codemodel, bound, generated_keyed=v2,
                 spawns=spawns, spawnable=frozenset(set(link) - set(group_record["executables"].values())),
                 spawn_scan=spawn_scan_of(doc_at(group["checkout_sha"])),
+                data_scan=spawn_scan_of(doc_at(group["checkout_sha"]), "data"),
                 modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))
             test_exes = set(group_record["executables"].values())
             spawned_by_tests = {d for e in test_exes for d in spawns.closure(e)}
@@ -1385,7 +1419,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
             # The executable-level control: every executable whose recorded
             # bytes differ between the head and group jobs must be rebuilt.
             head_bins, group_bins = head_record["binaries"], group_record["binaries"]
-            for variant in ("strict-data", "cmake-codemodel"):
+            for variant in ("strict-data", "cmake-codemodel", "manifest-data"):
                 if head_bins is not None and group_bins is not None:
                     both = (set(head_bins) & set(group_bins) & set(link))
                     changed = {e for e in both if head_bins[e] != group_bins[e]}
@@ -1403,6 +1437,7 @@ def annotate_source_keys(corpus_dir: Path, repo: Path, graph, graph_source_root:
                     recorded[variant]["rebuilt_identical_binaries"] = len((both - changed) & set(recorded[variant]["rebuilt"]))
             pair["source_key"]["strict-data-recorded"] = recorded["strict-data"]
             pair["source_key"]["cmake-codemodel-recorded"] = recorded["cmake-codemodel"]
+            pair["source_key"]["manifest-data-recorded"] = recorded["manifest-data"]
             with_recorded += 1
         pair["source_key_head_run_id"] = head_row["run_id"]
         done += 1
