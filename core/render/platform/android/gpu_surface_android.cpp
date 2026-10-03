@@ -18,18 +18,11 @@
 #include "../../../../core/audio/platform/android/demo_synth.hpp"
 #include "synth_ui.js.h"
 #include <android/native_window.h>
-#include <android/native_window_jni.h>
-#include <android/choreographer.h>
-#include <android/looper.h>
 #include <android/log.h>
 #include <stdexcept>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
 #include <memory>
 #include <chrono>
 #include <cmath>
-#include <thread>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
@@ -38,13 +31,13 @@
 
 namespace pulp::render {
 
-// ── Android GPU Surface Manager ───────────────────────────────────────────
-// Manages the lifecycle of Dawn/Vulkan rendering on Android.
-// Bridges ANativeWindow from Kotlin SurfaceView to GpuSurface.
+// ── Android GPU Surface demo bridge ───────────────────────────────────────
+// SurfaceRuntime (surface_runtime_android.cpp) owns the thread-affine Dawn /
+// Skia / ANativeWindow lifecycle. This translation unit keeps the demo's view,
+// script, synth, touch, and paint boundary that the runtime calls per frame.
 
 static void android_render_frame(float dt = 1.0f);
-static std::unique_ptr<GpuSurface> g_gpu_surface;
-static std::unique_ptr<SkiaSurface> g_skia_surface;
+static void reset_demo_view_hierarchy();
 static std::unique_ptr<view::View> g_root_view;
 
 // JS scripted UI (QuickJS via CHOC)
@@ -67,30 +60,10 @@ view::View* g_captured_view = nullptr;
 static std::chrono::steady_clock::time_point g_last_tap_time{};
 static float g_last_tap_x = 0, g_last_tap_y = 0;
 
-// Choreographer continuous render loop
-static AChoreographer* g_choreographer = nullptr;
-static std::atomic<bool> g_render_loop_running{false};
-static int64_t g_last_frame_nanos = 0;
-
-static void on_vsync(long frame_time_nanos, void* data);
-
-static void start_render_loop() {
-    g_choreographer = AChoreographer_getInstance();
-    if (!g_choreographer) {
-        PULP_LOGW("AChoreographer not available — touch-only repaints");
-        return;
-    }
-    g_render_loop_running.store(true);
-    g_last_frame_nanos = 0;
-    AChoreographer_postFrameCallback(g_choreographer, on_vsync, nullptr);
-    PULP_LOGI("AChoreographer render loop started");
-}
-
-static void stop_render_loop() {
-    g_render_loop_running.store(false);
-    g_choreographer = nullptr;
-    PULP_LOGI("AChoreographer render loop stopped");
-}
+// SurfaceRuntime owns ANativeWindow, Dawn/Skia, Choreographer scheduling, and
+// frame teardown synchronization. The callback keeps the demo hierarchy and
+// synth state behind this narrow boundary for the follow-up relocation slice.
+static SurfaceRuntime g_surface_runtime{android_render_frame};
 
 void android_set_display_density(float density) {
     g_display_density = density;
@@ -104,9 +77,16 @@ void android_set_safe_area_insets(float top, float bottom, float left, float rig
     g_safe_right = right;
     PULP_LOGI("Safe area insets (dp): top=%.1f bottom=%.1f left=%.1f right=%.1f",
               top, bottom, left, right);
-    // Force hierarchy recreation on next frame to pick up new insets
-    g_root_view.reset();
-    g_captured_view = nullptr;
+    // Insets and frame callbacks share the render Looper. Keep the tree alive:
+    // WidgetBridge holds references to the root and each scripted widget.
+    if (g_root_view) {
+        constexpr float content_pad = 12.0f;
+        g_root_view->flex().padding_top = std::max(content_pad, top + 4.0f);
+        g_root_view->flex().padding_bottom = std::max(content_pad, bottom + 4.0f);
+        g_root_view->flex().padding_left = std::max(content_pad, left);
+        g_root_view->flex().padding_right = std::max(content_pad, right);
+        g_root_view->layout_children();
+    }
 }
 
 // Helper: create a row of knobs in a panel container
@@ -183,6 +163,18 @@ struct WidgetRefs {
     view::Fader* master = nullptr;
 };
 static WidgetRefs g_widgets;
+
+static void reset_demo_view_hierarchy() {
+    g_captured_view = nullptr;
+    g_widgets = {};
+    g_sections = {};
+    // The bridge destructor uses its ScriptEngine and root references. Retire
+    // it before either owner, including partially constructed JS fallback UI.
+    g_widget_bridge.reset();
+    g_script_engine.reset();
+    g_root_view.reset();
+    g_using_js_ui = false;
+}
 
 // Sync widget values → synth params (called each frame, lock-free)
 static void sync_ui_to_synth() {
@@ -278,17 +270,11 @@ static bool create_js_ui(float dp_w, float dp_h) {
         return true;
     } catch (const std::exception& e) {
         PULP_LOGW("JS UI failed: %s — falling back to C++ UI", e.what());
-        g_script_engine.reset();
-        g_widget_bridge.reset();
-        g_root_view.reset();
-        g_using_js_ui = false;
+        reset_demo_view_hierarchy();
         return false;
     } catch (...) {
         PULP_LOGW("JS UI failed (unknown exception) — falling back to C++ UI");
-        g_script_engine.reset();
-        g_widget_bridge.reset();
-        g_root_view.reset();
-        g_using_js_ui = false;
+        reset_demo_view_hierarchy();
         return false;
     }
 }
@@ -745,90 +731,44 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     canvas.set_text_align(canvas::TextAlign::left);
 }
 
-static ANativeWindow* g_native_window = nullptr;
-static std::mutex g_surface_mutex;
-static std::condition_variable g_surface_cv;
-static bool g_render_stopped = true;
-static bool g_surface_valid = false;
-
 void android_surface_created(ANativeWindow* window) {
+    if (!window) {
+        PULP_LOGE("Android GPU surface: ANativeWindow received null");
+        return;
+    }
     PULP_LOGI("Android GPU surface: ANativeWindow received (%dx%d)",
               ANativeWindow_getWidth(window), ANativeWindow_getHeight(window));
-
-    g_native_window = window;
-    ANativeWindow_acquire(g_native_window);
 
     // Start audio immediately — user hears sound while GPU initializes
     if (!demo::synth_is_playing()) {
         demo::synth_start();
     }
 
-    // Dawn initialization is slow (10-15s on emulator, ~2s on device).
-    // Runs on main thread because AChoreographer requires the thread's Looper,
-    // and Dawn/Skia contexts must be used from the thread that created them.
-    // The Kotlin Activity disables the ANR timeout during this phase.
-    g_gpu_surface = GpuSurface::create_dawn();
-    if (!g_gpu_surface) {
-        PULP_LOGE("Android GPU surface: failed to create Dawn GpuSurface");
-        return;
-    }
-
-    GpuSurface::Config config;
-    config.width = static_cast<uint32_t>(ANativeWindow_getWidth(window));
-    config.height = static_cast<uint32_t>(ANativeWindow_getHeight(window));
-    config.native_surface_handle = g_native_window;
-    config.vsync = true;
-
-    if (g_gpu_surface->initialize(config)) {
-        PULP_LOGI("Android GPU surface: Dawn initialized (%ux%u)",
-                  config.width, config.height);
-
-        auto info = g_gpu_surface->adapter_info();
-        PULP_LOGI("Android GPU surface: adapter=%s backend=%s",
-                  info.name.c_str(), info.backend.c_str());
-
-        SkiaSurface::Config skia_config;
-        skia_config.width = config.width;
-        skia_config.height = config.height;
-        skia_config.scale_factor = g_display_density;
-
-        g_skia_surface = SkiaSurface::create(*g_gpu_surface, skia_config);
-        if (g_skia_surface && g_skia_surface->is_available()) {
-            PULP_LOGI("Android GPU surface: Skia Graphite context created");
-        } else {
-            PULP_LOGW("Android GPU surface: Skia Graphite failed — Dawn-only mode");
-        }
-
-        {
-            std::lock_guard lock(g_surface_mutex);
-            g_surface_valid = true;
-            g_render_stopped = false;
-        }
-
-        android_render_frame();
-        start_render_loop();
-    } else {
-        PULP_LOGW("Android GPU surface: Dawn initialization failed — no GPU rendering");
-        g_gpu_surface.reset();
-    }
+    // Dawn initialization is slow (10-15s on emulator, ~2s on device). It
+    // stays on the Android render/UI thread because both AChoreographer and
+    // Dawn/Skia contexts are thread-affine.
+    g_surface_runtime.surface_created(window, g_display_density);
+    // The runtime starts the Choreographer loop; its first callback performs
+    // the initial frame on the owning render thread.
 }
 
 void android_surface_resized(int width, int height) {
-    if (g_gpu_surface && g_gpu_surface->is_initialized()) {
-        g_gpu_surface->resize(static_cast<uint32_t>(width),
-                               static_cast<uint32_t>(height));
-        PULP_LOGI("Android GPU surface: resized to %dx%d", width, height);
+    g_surface_runtime.surface_resized(width, height);
 
-        // Recreate view hierarchy at new size
-        g_root_view.reset();
-        g_captured_view = nullptr;
-
-        android_render_frame();
-    }
+    // The Choreographer callback will render the resized frame on its owning
+    // thread. Do not render synchronously here: SurfaceView.surfaceChanged
+    // runs on Android's UI thread and would race the bridge pump.
 }
 
 void android_render_frame(float dt) {
-    if (!g_gpu_surface || !g_gpu_surface->is_initialized()) return;
+    if (!g_surface_runtime.begin_frame()) return;
+    struct FrameGuard {
+        SurfaceRuntime& runtime;
+        ~FrameGuard() { runtime.end_frame(); }
+    } frame_guard{g_surface_runtime};
+
+    auto* gpu_surface = g_surface_runtime.gpu_surface();
+    auto* skia_surface = g_surface_runtime.skia_surface();
 
     // Pump the bridge each vsync so JS rAF / setTimeout /
     // async-result queues get drained without depending on a touch event
@@ -851,67 +791,54 @@ void android_render_frame(float dt) {
         g_widget_bridge->service_frame_callbacks();
     }
 
-    if (g_gpu_surface->begin_frame()) {
-        if (g_skia_surface && g_skia_surface->is_available()) {
-            auto* canvas = g_skia_surface->begin_frame();
-            if (canvas) {
-                float w = static_cast<float>(g_gpu_surface->width());
-                float h = static_cast<float>(g_gpu_surface->height());
+    if (skia_surface && skia_surface->is_available()) {
+        auto* canvas = skia_surface->begin_frame();
+        if (canvas) {
+            float w = static_cast<float>(gpu_surface->width());
+            float h = static_cast<float>(gpu_surface->height());
 
-                // Create view hierarchy on first render
-                if (!g_root_view) {
-                    create_demo_view_hierarchy(w, h);
+            // Create view hierarchy on first render
+            if (!g_root_view) {
+                create_demo_view_hierarchy(w, h);
+            } else {
+                // SurfaceView callbacks run on Android's UI thread; resize
+                // the view tree here on the same thread as the bridge pump.
+                const auto bounds = g_root_view->bounds();
+                const float dp_w = w / g_display_density;
+                const float dp_h = h / g_display_density;
+                if (bounds.width != dp_w || bounds.height != dp_h) {
+                    g_root_view->set_bounds({0, 0, dp_w, dp_h});
+                    g_root_view->layout_children();
                 }
-
-                // Sync widget values → synth parameters (lock-free)
-                sync_ui_to_synth();
-
-                // Log audio peak every ~60 frames for CLI debugging
-                static int frame_count = 0;
-                if (++frame_count % 60 == 0) {
-                    float peak = demo::synth_peak_level();
-                    if (peak > 0.0001f) {
-                        float db = 20.0f * std::log10(peak);
-                        PULP_LOGI("Audio peak: %.3f (%.1f dB)", peak, db);
-                    }
-                }
-
-                // Advance animations with real dt from choreographer,
-                // or 1.0f to snap to completion on touch-only repaints
-                g_root_view->advance_gesture_recognizers();
-                advance_view_animations(g_root_view.get(), dt);
-
-                // SkiaSurface applies display density scaling internally
-                g_root_view->paint_all(*canvas);
-
-                // Draw section labels directly on canvas (workaround for
-                // Label widget text not rendering under nested Graphite clips)
-                draw_section_labels(*canvas);
-
-                g_skia_surface->end_frame();
             }
+
+            // Sync widget values → synth parameters (lock-free)
+            sync_ui_to_synth();
+
+            // Log audio peak every ~60 frames for CLI debugging
+            static int frame_count = 0;
+            if (++frame_count % 60 == 0) {
+                float peak = demo::synth_peak_level();
+                if (peak > 0.0001f) {
+                    float db = 20.0f * std::log10(peak);
+                    PULP_LOGI("Audio peak: %.3f (%.1f dB)", peak, db);
+                }
+            }
+
+            // Advance animations with real dt from choreographer,
+            // or 1.0f to snap to completion on touch-only repaints
+            g_root_view->advance_gesture_recognizers();
+            advance_view_animations(g_root_view.get(), dt);
+
+            // SkiaSurface applies display density scaling internally
+            g_root_view->paint_all(*canvas);
+
+            // Draw section labels directly on canvas (workaround for
+            // Label widget text not rendering under nested Graphite clips)
+            draw_section_labels(*canvas);
+
+            skia_surface->end_frame();
         }
-        g_gpu_surface->end_frame();
-    }
-}
-
-// AChoreographer VSYNC callback — drives the continuous render loop
-static void on_vsync(long frame_time_nanos, void* /*data*/) {
-    if (!g_render_loop_running.load()) return;
-
-    // Calculate dt from previous frame
-    float dt = 0.016f;  // default ~60fps
-    if (g_last_frame_nanos > 0) {
-        dt = static_cast<float>(frame_time_nanos - g_last_frame_nanos) / 1e9f;
-        dt = std::clamp(dt, 0.001f, 0.1f);  // clamp to 10fps..1000fps
-    }
-    g_last_frame_nanos = frame_time_nanos;
-
-    android_render_frame(dt);
-
-    // Request next frame
-    if (g_render_loop_running.load() && g_choreographer) {
-        AChoreographer_postFrameCallback(g_choreographer, on_vsync, nullptr);
     }
 }
 
@@ -1054,78 +981,30 @@ void android_on_drop(const std::vector<std::string>& paths, float px_x, float px
 }
 
 void android_surface_destroyed() {
-    PULP_LOGI("Android GPU surface: destroying — stopping render loop...");
     // Don't stop the synth here — surface gets destroyed/recreated during
     // Activity lifecycle transitions. Synth is stopped in nativeOnShutdown.
-    stop_render_loop();
-
-    {
-        std::lock_guard lock(g_surface_mutex);
-        g_surface_valid = false;
-    }
-
-    // Wait for render to confirm stop (condition_variable, not spin)
-    {
-        std::unique_lock lock(g_surface_mutex);
-        g_surface_cv.wait(lock, [] { return g_render_stopped; });
-    }
-
-    g_captured_view = nullptr;
-    g_widget_bridge.reset();
-    g_script_engine.reset();
-    g_root_view.reset();
-    g_using_js_ui = false;
-    g_gpu_surface.reset();
-
-    if (g_native_window) {
-        ANativeWindow_release(g_native_window);
-        g_native_window = nullptr;
-    }
-
+    // SurfaceRuntime stops Choreographer, marks the owner invalid, waits for
+    // active frames, then releases Skia, Dawn, and ANativeWindow.
+    g_surface_runtime.surface_destroyed();
+    reset_demo_view_hierarchy();
     PULP_LOGI("Android GPU surface: destroyed");
 }
 
 // Called by the render loop each frame
 bool android_gpu_begin_frame() {
-    std::lock_guard lock(g_surface_mutex);
-    if (!g_surface_valid || !g_gpu_surface) return false;
-    return g_gpu_surface->begin_frame();
+    return g_surface_runtime.begin_frame();
 }
 
 void android_gpu_end_frame() {
-    if (g_gpu_surface) g_gpu_surface->end_frame();
-}
-
-void android_gpu_signal_render_stopped() {
-    {
-        std::lock_guard lock(g_surface_mutex);
-        g_render_stopped = true;
-    }
-    g_surface_cv.notify_one();
+    g_surface_runtime.end_frame();
 }
 
 GpuSurface* android_gpu_surface() {
-    return g_gpu_surface.get();
+    return g_surface_runtime.gpu_surface();
 }
 
 AndroidGpuAdapterIdentity android_gpu_adapter_identity() {
-    // g_gpu_surface is reset on the destroy path, so read it under the same
-    // mutex the frame hooks use rather than racing teardown.
-    std::lock_guard lock(g_surface_mutex);
-    AndroidGpuAdapterIdentity identity;
-    if (!g_gpu_surface || !g_gpu_surface->is_initialized()) return identity;
-
-    const auto info = g_gpu_surface->adapter_info();
-    if (!info.available) return identity;
-
-    identity.available = true;
-    identity.name = info.name;
-    identity.vendor = info.vendor;
-    // AdapterInfo carries no numeric driver version: neither Pulp's struct nor
-    // Dawn's wgpu::AdapterInfo has one. The description string is the only
-    // driver-build detail the adapter reports, so it is what the policy matches.
-    identity.driver = info.description;
-    return identity;
+    return g_surface_runtime.adapter_identity();
 }
 
 } // namespace pulp::render
