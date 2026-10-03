@@ -31,7 +31,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-INSTALL_SH = REPO_ROOT / "tools" / "install-shipyard.sh"
+INSTALL_SH = REPO_ROOT / "tools/install-shipyard.sh"
 
 
 # Binaries the upstream installer expects to find in place when
