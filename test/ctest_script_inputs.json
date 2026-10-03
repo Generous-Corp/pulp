@@ -1478,7 +1478,7 @@
    "spawning_sources": [
     "test/test_neural_model_manifest.cpp"
    ],
-   "spawns": "undeclared",
+   "spawns": "none",
    "undeclared_sources": []
   },
   "pulp-test-group-core-platform": {

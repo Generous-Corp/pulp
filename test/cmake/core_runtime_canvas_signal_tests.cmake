@@ -1055,3 +1055,4 @@ pulp_test_spawns(pulp-test-group-core-events NONE)        # constructs ChildProc
 pulp_test_spawns(pulp-test-group-core-platform NONE)      # dlopen of the system libdbus
 pulp_test_spawns(pulp-test-group-core-runtime-http NONE)  # /bin/echo, /bin/sh, /bin/pwd, powershell
 pulp_test_spawns(pulp-test-streaming-model-contract NONE) # fork without exec
+pulp_test_spawns(pulp-test-group-core-gpu-audio-private NONE) # fork without exec
