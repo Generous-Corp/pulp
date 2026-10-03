@@ -89,9 +89,17 @@ public:
         // Create the child as a child of the root for now; reparented to the
         // DAW's editor window in attach_to_parent(). CopyFromParent matches the
         // parent's visual/depth/colormap.
+        // The window background is what X shows before the first frame, so it
+        // is the editor's own background. On a 24/32-bit TrueColor default
+        // visual a pixel value IS 0xRRGGBB; anything else keeps black rather
+        // than guess a colormap entry.
+        const unsigned long background_pixel =
+            DefaultDepth(display_, screen_) >= 24
+                ? static_cast<unsigned long>(options_.background_rgb & 0xFFFFFFu)
+                : BlackPixel(display_, screen_);
         child_ = XCreateSimpleWindow(
             display_, root_win, 0, 0, size_.width, size_.height, 0,
-            BlackPixel(display_, screen_), BlackPixel(display_, screen_));
+            BlackPixel(display_, screen_), background_pixel);
         if (!child_) {
             runtime::log_warn("X11PluginViewHost: XCreateSimpleWindow failed");
             return;
@@ -871,6 +879,7 @@ private:
         g.design_width = design_viewport_w_;
         g.design_height = design_viewport_h_;
         g.design_top_align = design_top_align_;
+        g.background_rgb = options_.background_rgb;
         return g;
     }
 
