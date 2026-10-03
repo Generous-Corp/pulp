@@ -444,5 +444,32 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(output.read_text())["state"], "inactive")
 
 
+    def test_cli_resolves_a_short_head_but_verify_stays_strict(self) -> None:
+        temporary, repo = self.git_repo()
+        del temporary
+        base = run(repo, "git", "rev-parse", "HEAD").stdout.strip()
+        (repo / "docs.txt").write_text("unwatched\n", encoding="utf-8")
+        head = self.commit(repo, "change docs")
+        output = repo / "report.json"
+        for base_arg, head_arg in ((base[:10], head[:10]), ("HEAD~1", "HEAD")):
+            with mock.patch("sys.stdout"):
+                code = watch.main(["--repo", str(repo), "--base", base_arg,
+                                   "--head", head_arg, "--output", str(output)])
+            report = json.loads(output.read_text())
+            self.assertEqual(code, 0, report)
+            self.assertEqual(report["status"], "pass", report)
+        # verify() is the trusted contract and still demands full SHAs.
+        report = watch.verify(repo, base[:10], head[:10])
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("expected full commit SHA", report["errors"][0])
+        # An unresolvable ref is passed through and still refused.
+        with mock.patch("sys.stdout"):
+            code = watch.main(["--repo", str(repo), "--base", "no-such-ref",
+                               "--head", head, "--output", str(output)])
+        self.assertEqual(code, 1)
+        self.assertIn("expected full commit SHA",
+                      json.loads(output.read_text())["errors"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

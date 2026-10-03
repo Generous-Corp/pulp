@@ -22,7 +22,8 @@
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
 #   - vellum-watch (a range touching a watched capability-family path owes a
-#     committed watch event; prints the exact event JSON to add)
+#     committed watch event, and one touching a transferred-slice path owes a
+#     committed change event; prints the exact event JSON to add)
 #   - gpu-handoff-pin (a pinned gpu-vellum-handoff path changed without the
 #     ledger being refreshed in the same range)
 #   - gpu-ledger-sentinel (the pulp-gpu-ledger merge driver resolved a ledger
@@ -214,13 +215,17 @@ fi
 # the authority — a local refusal can only stop what CI would also refuse.
 # `--inventories` also runs the freeze job's inventory verifiers (cut manifest,
 # ownership projection, tooling disposition) and prints the regenerate command
-# for a stale one (exit 11).
+# for a stale one (exit 11). It also runs the job's change-event checker,
+# `vellum_freeze_check.py`: a touched path in a transferred slice of
+# `.github/vellum-ownership.json` owes a `.github/vellum-change-events/` event,
+# and the script prints that JSON (or writes it with `--write-change-event
+# --rationale "..."`) — exit 12.
 if [ -f "$VELLUM_HINT" ]; then
     echo "" >&2
     echo "▸ vellum watch-event coverage (merge-base $BASE..HEAD)" >&2
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
         fail=1
     fi
 fi

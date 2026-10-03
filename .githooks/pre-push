@@ -427,10 +427,13 @@ fi
 # CI run stays the authority; this can only refuse what CI would also refuse.
 # `--inventories` also verifies the freeze job's cut manifest, ownership
 # projection and tooling disposition, printing the regenerate command (exit 11).
+# It also runs the job's change-event checker (`vellum_freeze_check.py`): a
+# touched transferred-slice path owes a `.github/vellum-change-events/` event,
+# whose JSON it prints or writes with `--write-change-event` (exit 12).
 if [ -f "$VELLUM_HINT" ]; then
     "$PYTHON" "$VELLUM_HINT" --repo "$ROOT" --base "$BASE" --enforce --inventories
     vellum_rc=$?
-    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ]; then
+    if [ "$vellum_rc" -eq 10 ] || [ "$vellum_rc" -eq 11 ] || [ "$vellum_rc" -eq 12 ]; then
         fail=1
     fi
 fi
