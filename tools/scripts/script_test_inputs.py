@@ -536,6 +536,11 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
                  "data": ("undeclared" if undeclared else "declared") if data_sources else "none",
                  "inputs": sorted(set(decl.get("inputs") or [])),
                  "sources": sorted(data_sources), "undeclared_sources": undeclared}
+        if data_sources:
+            # Only the sources a signal matched, so a reader can tell a scan
+            # that saw the declared readers from one that only echoes
+            # pulp_test_data's SOURCES.
+            entry["detected_sources"] = sorted(reading)
         if spawns is not None:
             entry["spawns"] = spawns
             entry["spawning_sources"] = spawning
