@@ -499,7 +499,20 @@ pulp::platform::ProcessResult run(const std::filesystem::path& binary,
     options.timeout_ms = 20'000;
     std::vector<std::string> env{"TMPDIR=" + runtime.string()};
     env.insert(env.end(), args.begin(), args.end());
-    return pulp::platform::ChildProcess::run("/usr/bin/env", env, options);
+    auto result = pulp::platform::ChildProcess::run("/usr/bin/env", env, options);
+    // Callers assert only the exit code, so a failed call would otherwise
+    // report "1 == 0" and nothing about why. Unscoped info attaches to the
+    // next assertion, which is the caller's check.
+    if (result.exit_code != 0) {
+        std::string command;
+        for (std::size_t i = 1; i < args.size() && i < 6; ++i)
+            command += (i > 1 ? " " : "") + args[i];
+        UNSCOPED_INFO("CLI `" << command << "` exited " << result.exit_code
+                              << (result.timed_out ? " (timed out)" : "")
+                              << "\nstdout: " << result.stdout_output.substr(0, 2048)
+                              << "\nstderr: " << result.stderr_output.substr(0, 2048));
+    }
+    return result;
 }
 
 std::string cli_failure_diagnostics(const pulp::platform::ProcessResult& result,
