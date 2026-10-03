@@ -701,3 +701,7 @@ if("${_pulp_core_only_links}" MATCHES "pulp(::|-)format-view"
         "${_pulp_core_only_links}")
 endif()
 unset(_pulp_core_only_links)
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-nsis-installer NONE)           # makensis
