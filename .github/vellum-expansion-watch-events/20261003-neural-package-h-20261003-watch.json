@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-neural-package-h-20261003-watch",
+  "created_at": "2026-10-03T18:45:04Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Package H adds private test-only portable realtime probe counters for manually exercising allocation, lock, blocking, stale-result, and aliasing controls with clean and planted cases. The counters are not wired into production streaming models, backends, or callback paths; this watch event makes no claim of production-path instrumentation or coverage. Focused tests: pulp build --target pulp-test-streaming-model-contract; ./build/test/pulp-test-streaming-model-contract --reporter compact (93 assertions, 19 cases); ctest --test-dir build -R '^streaming model contract classifies callback and worker methods$' --output-on-failure. No design-import, rendering, packaging, or authority move occurs.",
+  "tests": [
+    "ctest --test-dir build -R pulp-test-streaming-model-contract",
+    "python3 tools/scripts/vellum_expansion_watch_check.py --base <merge-base origin/main HEAD> --head <HEAD>",
+    "vellum-expansion-watch"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

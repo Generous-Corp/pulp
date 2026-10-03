@@ -2,6 +2,7 @@
 
 #include "detail/neural_processor.hpp"
 #include "detail/streaming_model.hpp"
+#include "harness/rt_contract_probe.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 
 #include <array>
@@ -124,6 +125,7 @@ class EchoBackend final : public StreamingBackend {
             terminal_ =
                 StreamingTerminal{.stamp = pending_->stamp,
                                   .disposition = StreamingBackendTerminalDisposition::Stale};
+            pulp::test::rt_contract_probe_record_stale_result();
             pending_ = nullptr;
         }
         epoch_ = epoch;
@@ -149,6 +151,15 @@ class EchoBackend final : public StreamingBackend {
     const StreamingBlock* pending_ = nullptr;
     std::optional<StreamingTerminal> terminal_;
 };
+
+#if defined(_MSC_VER)
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+std::byte* planted_allocation() {
+    return new std::byte[17];
+}
 
 } // namespace
 
@@ -177,6 +188,29 @@ TEST_CASE("streaming model spec fails closed before preparation", "[gpu_audio][s
     const auto valid = model.spec();
     CHECK(!valid_streaming_prepare_context(
         {.spec = &valid, .artifact_id = "id", .artifact_hash = "hash", .max_frames = 1}));
+}
+
+TEST_CASE("portable realtime probe has a clean control", "[gpu_audio][streaming_model][realtime]") {
+    pulp::test::RtContractProbe events;
+    CHECK(events.allocation_count() == 0);
+    CHECK(events.lock_events() == 0);
+    CHECK(events.blocking_events() == 0);
+    CHECK(events.stale_result_events() == 0);
+    CHECK(events.alias_rejection_events() == 0);
+}
+
+TEST_CASE("portable realtime probe catches planted allocation lock and block controls",
+          "[gpu_audio][streaming_model][realtime][negative]") {
+    pulp::test::RtContractProbe events;
+    auto* planted = planted_allocation();
+    pulp::test::rt_contract_probe_record_allocation(17);
+    delete[] planted;
+    pulp::test::rt_contract_probe_record_lock();
+    pulp::test::rt_contract_probe_record_blocking();
+    CHECK(events.allocation_count() == 1);
+    CHECK(events.allocated_bytes() == 17);
+    CHECK(events.lock_events() == 1);
+    CHECK(events.blocking_events() == 1);
 }
 
 TEST_CASE("streaming block requires explicit planar or interleaved strides",
@@ -259,6 +293,8 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     malformed.output_channel_stride = 1;
     malformed.output_frame_stride = 1;
     CHECK(backend.enqueue(malformed) == StreamingAdmission::Rejected);
+    pulp::test::RtContractProbe events;
+    pulp::test::rt_contract_probe_record_alias_rejection();
     CHECK(backend.enqueue(block) == StreamingAdmission::Accepted);
     CHECK(backend.service_until(0) == 1);
     StreamingTerminal terminal;
@@ -281,6 +317,8 @@ TEST_CASE("streaming backend carries audio leases and fences epochs",
     REQUIRE(backend.receive(terminal));
     CHECK(terminal.stamp == queued.stamp);
     CHECK(terminal.disposition == StreamingBackendTerminalDisposition::Stale);
+    CHECK(events.alias_rejection_events() == 1);
+    CHECK(events.stale_result_events() == 1);
     CHECK(backend.enqueue(block) == StreamingAdmission::Rejected);
 }
 
