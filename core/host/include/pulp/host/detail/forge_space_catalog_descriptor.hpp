@@ -5,7 +5,7 @@ ForgeNodeDescriptor descriptor();
 #if defined(PULP_HOST_ENABLE_GPU_CONVOLUTION)
 ForgeNodeDescriptor descriptor_with_gpu();
 #endif
-}
+} // namespace pulp::host::space::convolution
 namespace pulp::host::space::nonlin_ambience {
 ForgeNodeDescriptor descriptor();
 }
