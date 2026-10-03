@@ -24,6 +24,10 @@ What must hold:
 - a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
   and so does a NONE on an executable that has one, or a pulp_test_spawns()
   edge that does not reach the written index;
+- WHOLE_CHECKOUT records an executable whose verdict can depend on any file
+  in the checkout, and refuses paths beside it;
+- every executable in the tree is indexed, flagged `under_test` when it is
+  defined under test/, so a test program defined beside its tool is seen;
 - NOT_RUN records a reviewed name the test does not run and refuses an edge
   to the same target; runtime-targets.json indexes every built program by
   its artifact name with its own runtime targets.
@@ -71,9 +75,9 @@ def write(root: Path, rel: str, text: str) -> None:
 
 @unittest.skipUnless(shutil.which("cmake") and shutil.which("make"), "cmake or make not on PATH")
 class PulpTestDataCMakeTests(unittest.TestCase):
-    def project(self, tmp: Path, extra: str = "") -> Path:
+    def project(self, tmp: Path, extra: str = "", root_extra: str = "") -> Path:
         src = tmp / "src"
-        write(src, "CMakeLists.txt", ROOT_LISTS)
+        write(src, "CMakeLists.txt", ROOT_LISTS + root_extra)
         write(src, "test/CMakeLists.txt", TEST_LISTS.format(module=MODULE.as_posix(), extra=extra))
         for name in ("solo", "g1", "g2", "q"):
             write(src, f"test/{name}.c", "int main(void) { return 0; }\n")
@@ -98,7 +102,8 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             out = build / "test" / "test-data"
             solo = json.loads((out / "solo.inputs.json").read_text(encoding="utf-8"))
             self.assertEqual(solo, {"schema": "pulp-test-data-inputs/v1", "executable": "solo", "kind": "compiled",
-                                    "sources": ["test/solo.c"], "inputs": ["fixtures/solo.json"]})
+                                    "sources": ["test/solo.c"], "inputs": ["fixtures/solo.json"],
+                                    "whole_checkout": False})
             group = json.loads((out / "group.inputs.json").read_text(encoding="utf-8"))
             self.assertEqual((group["sources"], group["inputs"]), (["test/g1.c"], ["fixtures/*.json"]))
             self.assertFalse((out / "quiet.inputs.json").exists())
@@ -116,6 +121,29 @@ class PulpTestDataCMakeTests(unittest.TestCase):
             self.assertEqual(len(g1), 2, group_flags)
             self.assertIn("PULP_SOURCE_DIR=", g1[1].splitlines()[0])
             self.assertNotIn("g2.c.o_DEFINES", group_flags)  # the neighbour gets no definition
+
+    def test_whole_checkout_is_recorded_and_takes_no_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet WHOLE_CHECKOUT)")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            quiet = json.loads((build / "test" / "test-data" / "quiet.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual((quiet["whole_checkout"], quiet["inputs"]), (True, []))
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet WHOLE_CHECKOUT PATHS fixtures)")
+            self.assertIn("WHOLE_CHECKOUT already covers every path", self.configure(src2, Path(t) / "build2").stderr)
+
+    def test_an_executable_outside_test_is_indexed_and_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), root_extra="add_executable(tool tool.c)\n")
+            write(src, "tool.c", "int main(void) { return 0; }\n")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            index = json.loads((build / "test" / "test-data" / "executables.json").read_text(encoding="utf-8"))
+            ex = index["executables"]
+            self.assertEqual((ex["tool"]["under_test"], ex["tool"]["sources"]), (False, ["tool.c"]))
+            self.assertTrue(ex["solo"]["under_test"])
 
     def test_a_path_that_matches_nothing_fails_configure(self) -> None:
         with tempfile.TemporaryDirectory() as t:

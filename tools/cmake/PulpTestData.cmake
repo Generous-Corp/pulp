@@ -16,6 +16,13 @@
 #     [ABSENT <path> ...]                      # probed for, expected missing
 # )
 #
+# pulp_test_data(<suite-or-executable> WHOLE_CHECKOUT)
+#
+# records an executable whose verdict can depend on any file in the checkout:
+# one that walks the tree (`pulp doctor`, `pulp status`) or reads an open-ended
+# set of documents. No path list can describe it, so it is recorded as
+# `data: whole_checkout`, which a selector must never skip. It defines nothing.
+#
 # It defines <macro> as the checkout root for the declaring sources (the
 # COMPILE_DEFINITIONS PULP_SOURCE_DIR=... it replaces) and records the paths.
 # NO_DEFINE records the paths and leaves the target's own definitions alone,
@@ -105,15 +112,19 @@ function(_pulp_test_data_json_list out)
 endfunction()
 
 function(pulp_test_data NAME)
-    cmake_parse_arguments(D "NONE;NO_DEFINE" "DEFINE" "PATHS;SOURCES;ABSENT" ${ARGN})
+    cmake_parse_arguments(D "NONE;NO_DEFINE;WHOLE_CHECKOUT" "DEFINE" "PATHS;SOURCES;ABSENT" ${ARGN})
     if(D_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "pulp_test_data(${NAME}): unparsed arguments: ${D_UNPARSED_ARGUMENTS}")
     endif()
     if(D_NONE AND D_PATHS)
         message(FATAL_ERROR "pulp_test_data(${NAME}): NONE and PATHS are exclusive")
     endif()
-    if(NOT D_PATHS AND NOT D_NONE AND NOT D_ABSENT)
-        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS (or NONE or ABSENT) is required")
+    if(D_WHOLE_CHECKOUT AND (D_PATHS OR D_NONE OR D_ABSENT OR D_DEFINE OR D_SOURCES))
+        message(FATAL_ERROR "pulp_test_data(${NAME}): WHOLE_CHECKOUT already covers every path; "
+                            "it takes no PATHS, NONE, ABSENT, DEFINE or SOURCES")
+    endif()
+    if(NOT D_PATHS AND NOT D_NONE AND NOT D_ABSENT AND NOT D_WHOLE_CHECKOUT)
+        message(FATAL_ERROR "pulp_test_data(${NAME}): PATHS (or NONE, ABSENT or WHOLE_CHECKOUT) is required")
     endif()
     if(D_NO_DEFINE AND D_DEFINE)
         message(FATAL_ERROR "pulp_test_data(${NAME}): DEFINE and NO_DEFINE are exclusive")
@@ -191,7 +202,7 @@ function(pulp_test_data NAME)
     # A grouped member's definition goes on its own sources, so the macro
     # never leaks into its neighbours' translation units; a standalone
     # executable takes it target-wide, as its COMPILE_DEFINITIONS did.
-    if(D_NO_DEFINE OR D_NONE)
+    if(D_NO_DEFINE OR D_NONE OR D_WHOLE_CHECKOUT)
         # The target keeps its own definitions.
     elseif(_exe STREQUAL NAME AND NOT D_SOURCES)
         target_compile_definitions(${_exe} PRIVATE "${D_DEFINE}=\"${CMAKE_SOURCE_DIR}\"")
@@ -209,6 +220,9 @@ function(pulp_test_data NAME)
     endforeach()
     set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_SOURCES_${_exe} ${_rel_sources})
     set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_PATHS_${_exe} ${D_PATHS} ${_absent})
+    if(D_WHOLE_CHECKOUT)
+        set_property(GLOBAL PROPERTY PULP_TEST_DATA_WHOLE_CHECKOUT_${_exe} TRUE)
+    endif()
     get_property(_declared GLOBAL PROPERTY PULP_TEST_DATA_EXECUTABLES)
     if(NOT _exe IN_LIST _declared)
         set_property(GLOBAL APPEND PROPERTY PULP_TEST_DATA_EXECUTABLES ${_exe})
@@ -285,7 +299,12 @@ function(_pulp_test_data_finalize)
     file(MAKE_DIRECTORY "${PULP_TEST_DATA_DIR}")
     set(_spawn_errors "")
     get_property(_spawns_none GLOBAL PROPERTY PULP_TEST_SPAWNS_NONE)
-    _pulp_test_data_collect_targets("${CMAKE_SOURCE_DIR}/test" _targets)
+    # Every executable in the tree, not only those under test/: a test target
+    # defined beside its tool (tools/cli) or a program ctest runs directly
+    # (pulp-cpp, pulp-fixture-runner) reads the checkout just the same.
+    # `under_test` tells script_test_inputs.py which ones to scan
+    # unconditionally; it scans the rest only when a ctest runs them.
+    _pulp_test_data_collect_targets("${CMAKE_SOURCE_DIR}" _targets)
     list(SORT _targets)
     set(_rows "")
     foreach(_t IN LISTS _targets)
@@ -293,6 +312,11 @@ function(_pulp_test_data_finalize)
         get_target_property(_imported ${_t} IMPORTED)
         if(NOT _type STREQUAL "EXECUTABLE" OR _imported)
             continue()
+        endif()
+        get_target_property(_tdir ${_t} SOURCE_DIR)
+        set(_under_test false)
+        if(_tdir STREQUAL "${CMAKE_SOURCE_DIR}/test" OR _tdir MATCHES "^${CMAKE_SOURCE_DIR}/test/")
+            set(_under_test true)
         endif()
         get_target_property(_srcs ${_t} SOURCES)
         get_target_property(_dir ${_t} SOURCE_DIR)
@@ -368,7 +392,7 @@ function(_pulp_test_data_finalize)
                            "it is recorded as spawns: undeclared")
         endif()
         _pulp_test_data_json_list(_jabsent ${_absent})
-        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}, \"named_not_run\": ${_jnotrun}, \"absent_spawns\": ${_jabsent}}")
+        list(APPEND _rows "  \"${_t}\": {\"sources\": ${_jsrc}, \"tree_defines\": ${_jdef}, \"runtime_targets\": ${_jrun}, \"spawns_none\": ${_jnone}, \"named_not_run\": ${_jnotrun}, \"absent_spawns\": ${_jabsent}, \"under_test\": ${_under_test}}")
     endforeach()
     if(_spawn_errors)
         list(JOIN _spawn_errors "\n  " _spawn_text)
@@ -422,10 +446,16 @@ function(_pulp_test_data_finalize)
         list(SORT _p)
         _pulp_test_data_json_list(_js ${_s})
         _pulp_test_data_json_list(_jp ${_p})
+        get_property(_whole GLOBAL PROPERTY PULP_TEST_DATA_WHOLE_CHECKOUT_${_exe})
+        if(_whole)
+            set(_jwhole true)
+        else()
+            set(_jwhole false)
+        endif()
         set(_out "${PULP_TEST_DATA_DIR}/${_exe}.inputs.json")
         list(REMOVE_ITEM _stale "${_out}")
         file(CONFIGURE OUTPUT "${_out}"
-            CONTENT "{\"schema\": \"pulp-test-data-inputs/v1\", \"executable\": \"${_exe}\", \"kind\": \"compiled\", \"sources\": ${_js}, \"inputs\": ${_jp}}\n"
+            CONTENT "{\"schema\": \"pulp-test-data-inputs/v1\", \"executable\": \"${_exe}\", \"kind\": \"compiled\", \"sources\": ${_js}, \"inputs\": ${_jp}, \"whole_checkout\": ${_jwhole}}\n"
             @ONLY)
     endforeach()
     if(_stale)

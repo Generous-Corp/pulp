@@ -743,6 +743,9 @@ if(PULP_BUILD_TESTS AND APPLE AND NOT IOS AND NOT PULP_IOS
         VERBATIM)
     catch_discover_tests(pulp-test-control-phase15-aggregate-e2e
         PROPERTIES LABELS "inspect;control;e2e;phase15;aggregate;cli;mcp")
+    # Its broker is a copy of itself, and the fixture names are manifest data.
+    pulp_test_spawns(pulp-test-control-phase15-aggregate-e2e NOT_RUN
+        pulp-control-broker pulp-control-trusted-host-fixture pulp-control-installed-host-e2e-fixture)
 endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────

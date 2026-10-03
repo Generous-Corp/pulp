@@ -554,6 +554,8 @@ catch_discover_tests(pulp-test-cli-audio-validate)
 add_executable(pulp-test-cli-audio-compare test_cli_audio_compare.cpp)
 target_link_libraries(pulp-test-cli-audio-compare PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-audio-compare)
+# The spawned pulp-cpp reads the shipped tool registry to resolve the tool.
+pulp_test_data(pulp-test-cli-audio-compare NO_DEFINE PATHS tools/packages/tool-registry.json)
 catch_discover_tests(pulp-test-cli-audio-compare)
 
 add_executable(pulp-test-cli-audio-latency test_cli_audio_latency.cpp)
@@ -915,6 +917,8 @@ catch_discover_tests(pulp-test-web-demos)
 # AI Designer: design tool layout/parity tests
 pulp_add_test_suite(pulp-test-design-tool-layout GROUP pulp-test-group-app-view
     LIBRARIES pulp::view pulp::state)
+# It finds the design tool's modules from its own source file's location.
+pulp_test_data(pulp-test-design-tool-layout NO_DEFINE PATHS examples/design-tool/*.js)
 
 add_executable(pulp-test-design-debug-contracts test_design_debug_contracts.cpp)
 target_link_libraries(pulp-test-design-debug-contracts PRIVATE

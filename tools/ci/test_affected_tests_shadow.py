@@ -236,6 +236,30 @@ class AffectedSetTests(unittest.TestCase):
         self.assertEqual(r["compiled_data_undeclared"], 1, r)
         self.assertEqual(self.compiled(["docs/guide.md"], {})["selected"], 0)
 
+    def test_a_whole_checkout_reader_is_never_skipped(self) -> None:
+        whole = {"pulp-test-b": {"kind": "compiled", "data": "whole_checkout", "inputs": []}}
+        r = self.compiled(["docs/guide.md"], whole)                         # nothing any graph reads
+        self.assertEqual((r["selected"], r["compiled_whole_checkout"], r["compiled_data_undeclared"]), (1, 1, 0), r)
+        self.assertEqual(self.compiled(["docs/guide.md"], {})["selected"], 0)
+
+    def test_a_data_state_this_reader_does_not_know_is_never_skipped(self) -> None:
+        # A newer list may carry a state this selector predates; it must fail closed.
+        future = {"pulp-test-b": {"kind": "compiled", "data": "some_future_state", "inputs": []}}
+        r = self.compiled(["docs/guide.md"], future)
+        self.assertEqual((r["selected"], r["compiled_data_undeclared"]), (1, 1), r)
+
+    def test_a_directory_on_the_command_line_is_read_through(self) -> None:
+        corpus = self.fx.src / "test" / "fixtures" / "corpus"
+        corpus.mkdir(parents=True)
+        (corpus / "case.json").write_text("{}\n", encoding="utf-8")
+        self.fx.inventory["tests"].append(
+            {"name": "corpus-run", "command": [f"{self.fx.build}/test/pulp-test-b", "--corpus", str(corpus)],
+             "properties": []})
+        # Reported as failed, it lands outside the selection exactly when skipped.
+        skipped = lambda changed: "corpus-run" in self.fx.compute(changed, ["corpus-run"])["failed_outside_names"]
+        self.assertFalse(skipped(["test/fixtures/corpus/case.json"]))   # a file inside it
+        self.assertTrue(skipped(["test/fixtures/corpusx/case.json"]))   # a sibling prefix
+
     def test_an_undeclared_spawner_is_never_skipped(self) -> None:
         undeclared = {"pulp-test-b": {"kind": "compiled", "data": "none", "inputs": [], "spawns": "undeclared"}}
         r = self.compiled(["docs/guide.md"], undeclared)                    # nothing any graph reads

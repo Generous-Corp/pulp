@@ -167,6 +167,11 @@ target_include_directories(pulp-cli PRIVATE
 # target name (`pulp-cli`) does NOT change, only the file basename, so
 # all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
+if(PULP_BUILD_TESTS)
+    # ctest runs pulp-cpp directly (cli-doctor, cli-status, ...), and the
+    # doctor and status walk the checkout.
+    pulp_test_data(pulp-cli WHOLE_CHECKOUT)
+endif()
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE
     pulp::runtime pulp::tool-audio pulp::audio-analysis
@@ -330,6 +335,8 @@ if(PULP_BUILD_TESTS)
     target_compile_features(pulp-test-cli-gpu-artifact-publication PRIVATE cxx_std_20)
     target_link_libraries(pulp-test-cli-gpu-artifact-publication PRIVATE
         Catch2::Catch2WithMain)
+    pulp_test_data(pulp-test-cli-gpu-artifact-publication NO_DEFINE PATHS
+        tools/cli/gpu_artifact_publication.cpp)
     add_test(NAME pulp-test-cli-gpu-artifact-publication
         COMMAND pulp-test-cli-gpu-artifact-publication)
     set_tests_properties(pulp-test-cli-gpu-artifact-publication PROPERTIES
@@ -353,6 +360,9 @@ if(PULP_BUILD_TESTS)
     target_link_libraries(pulp-test-cli-swap-pack PRIVATE
         pulp::format pulp::view pulp::runtime Catch2::Catch2WithMain)
     add_dependencies(pulp-test-cli-swap-pack pulp-cli)
+    # Runs pulp-cpp with the checkout as its project directory, where it
+    # finds the project by the root CMakeLists.txt.
+    pulp_test_data(pulp-test-cli-swap-pack NO_DEFINE PATHS CMakeLists.txt)
     add_test(NAME pulp-test-cli-swap-pack COMMAND pulp-test-cli-swap-pack)
 
     add_executable(pulp-test-cli-bake ${CMAKE_SOURCE_DIR}/test/test_cli_bake.cpp)
@@ -363,6 +373,9 @@ if(PULP_BUILD_TESTS)
     target_link_libraries(pulp-test-cli-bake PRIVATE
         pulp::host pulp::format pulp::runtime Catch2::Catch2WithMain)
     add_dependencies(pulp-test-cli-bake pulp-cli)
+    # Runs pulp-cpp with the checkout as its project directory, where it
+    # finds the project by the root CMakeLists.txt.
+    pulp_test_data(pulp-test-cli-bake NO_DEFINE PATHS CMakeLists.txt)
     add_test(NAME pulp-test-cli-bake COMMAND pulp-test-cli-bake)
 
     if(PULP_ENABLE_PROJECT_PACKAGE)

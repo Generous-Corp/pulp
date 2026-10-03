@@ -167,7 +167,7 @@ add_executable(pulp-test-design-import-designmd
     ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp)
 pulp_test_data(pulp-test-design-import-designmd NO_DEFINE
     SOURCES test_design_import_designmd.cpp test_design_import_designmd_040.cpp
-    PATHS test/fixtures/imports/designmd/alpha)
+    PATHS test/fixtures/imports/designmd/alpha compat.json)
 target_include_directories(pulp-test-design-import-designmd PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/import-design

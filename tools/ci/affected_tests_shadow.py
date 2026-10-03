@@ -36,7 +36,10 @@ input the graph cannot see:
   `data: undeclared` reads the checkout without a declaration and is always
   affected, and so is one marked `spawns: undeclared` (it starts a process
   with no spawn edge and no reviewed `pulp_test_spawns(NONE)`, so what it runs
-  is unknown);
+  is unknown); one marked `data: whole_checkout` (it walks the tree) is
+  always affected too;
+- a compiled test is affected when a directory its command line names
+  contains a changed file (`--corpus <checkout>/test/fixtures/timeline`);
 - a changed file that no edge reads and that is not under a known non-input
   prefix (`docs/`, `.agents/`, `planning`, `*.md`) re-selects every test;
 - a compiled test is also affected when a program it runs or loads at run
@@ -274,13 +277,19 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
     spawned_selected = 0
     selected = []
     declared = undeclared = sel_declared = sel_undeclared = 0
-    data_undeclared = sel_data_declared = spawns_undeclared = 0
+    data_undeclared = sel_data_declared = spawns_undeclared = data_whole = 0
     for t in tests:
         name = t.get("name", "")
         binary = is_binary_test(t, build_dir)
         data = compiled_data.get(executable_name(t)) if binary else None
+        if data and data.get("data") == "whole_checkout":
+            # Its verdict can depend on any file in the checkout.
+            data_whole += 1
+            selected.append(name)
+            continue
         if data and data.get("data") not in ("declared", "none"):
-            # Reads the checkout without a declaration: never skippable.
+            # Reads the checkout without a declaration (or names a state this
+            # reader does not know): never skippable.
             data_undeclared += 1
             selected.append(name)
             continue
@@ -298,7 +307,9 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             selected.append(name)
             continue
         ins = test_inputs(t, build_dir, source_root)
-        if ins & aff:
+        # A directory named on the command line is read through: any change
+        # beneath it is a change to that input.
+        if ins & aff or any(c.startswith(i + os.sep) for i in ins for c in changed_abs):
             selected.append(name)
         elif binary and _spawned(t, build_real, spawns) & aff:
             selected.append(name)
@@ -322,7 +333,8 @@ def compute(build_dir: Path, source_root: Path, edges, deps, inventory: dict, ch
             "failed_outside_selection": len(outside), "failed_outside_names": outside[:50],
             "script_declared": declared, "script_undeclared": undeclared,
             "script_selected_declared": sel_declared, "script_selected_undeclared": sel_undeclared,
-            "compiled_data_undeclared": data_undeclared, "compiled_selected_by_data": sel_data_declared,
+            "compiled_data_undeclared": data_undeclared, "compiled_whole_checkout": data_whole,
+            "compiled_selected_by_data": sel_data_declared,
             "compiled_selected_by_spawn": spawned_selected, "compiled_spawns_undeclared": spawns_undeclared,
             **flags}
 

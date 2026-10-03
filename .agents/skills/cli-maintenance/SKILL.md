@@ -314,6 +314,24 @@ project root's `build/tools/cli`, so those tests stage `PULP_CLI_BINARY`
 there through `CliProjectRoot` (test/mcp_server_test_support.hpp) rather than
 running whatever sits in the checkout's `build/`.
 
+### A shell-out test's data includes what the spawned CLI reads
+
+A test selector reuses a test's result when none of its inputs changed, and
+for a shell-out suite the inputs include every checkout file the spawned
+`pulp-cpp` opens: the tool registry (`tools/packages/tool-registry.json`),
+`.claude-plugin/plugin.json`, `tools/shipyard.toml`. Those sit under paths a
+selector treats as non-build input (`tools/`, `docs/`, `.claude*`), so an
+undeclared read there is a test the selector can wrongly skip. Declare them
+next to the suite with `pulp_test_data(<suite> NO_DEFINE PATHS ...)`. A command
+that walks the checkout (`pulp doctor`, `pulp status`, `pulp docs`) cannot be
+described by a path list: declare its suite `pulp_test_data(<suite>
+WHOLE_CHECKOUT)`, which is never skipped. `pulp-cli` itself carries
+WHOLE_CHECKOUT because ctest runs `pulp-cpp` directly (`cli-doctor`,
+`cli-status`, ...). A test target defined in `tools/cli/CMakeLists.txt` is
+scanned like one under `test/` once ctest runs it, so a new one that reads the
+checkout needs its declaration there, after the target. The nightly read
+audit (`tools/ci/read_audit.py`) is what finds a read nobody declared.
+
 ### The C++ lease path is interactive unless told otherwise
 
 `TartciAgentBuildLease::acquire` (`tools/cli/tartci_lease.cpp`; `pulp build

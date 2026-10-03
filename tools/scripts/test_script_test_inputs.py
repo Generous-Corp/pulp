@@ -15,7 +15,14 @@ cmake-driven test. What must hold:
 - an unreadable inventory exits 2;
 - compiled executables fold into the same list from configure evidence: a
   declared fixture is listed, an undeclared reader is `data: undeclared`,
-  and `--check` fails on a NEW undeclared source against the base list.
+  and `--check` fails on a NEW undeclared source against the base list;
+- a source that finds the checkout by walking two levels up from its working
+  directory or from its own `__FILE__` reads it, and one level up (the build
+  tree) does not;
+- the scan covers an executable defined outside test/ when ctest runs it
+  (as a command or through a Catch2 discovery include), keyed by the program
+  name ctest runs, and not one a test only passes as an argument;
+- WHOLE_CHECKOUT reads as `data: whole_checkout`, never undeclared.
 
 Run:
     python3 tools/scripts/test_script_test_inputs.py
@@ -673,6 +680,69 @@ class CompiledDataTests(unittest.TestCase):
             proc = self.run_tool(repo, "--check", "--full")
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("stale compiled entry: pulp-test-b", proc.stdout)
+
+
+class ScanScopeTests(unittest.TestCase):
+    def test_walking_up_to_the_checkout_is_a_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root, "test/two.cpp", 'auto r = fs::current_path() / ".." / "..";\n')
+            write(root, "test/joined.cpp", 'auto r = std::filesystem::current_path() / "../..";\n')
+            write(root, "test/file.cpp", "auto r = fs::path(__FILE__).parent_path().parent_path();\n")
+            write(root, "test/build.cpp", 'auto b = fs::current_path() / ".." / "tools";\n')
+            write(root, "test/log.cpp", 'log(__FILE__, __LINE__);\n')
+            self.assertEqual(sti.source_signals(root, "test/two.cpp", []), [sti.WALK_UP_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/joined.cpp", []), [sti.WALK_UP_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/file.cpp", []), [sti.SOURCE_FILE_SIGNAL])
+            self.assertEqual(sti.source_signals(root, "test/build.cpp", []), [])  # the build tree
+            self.assertEqual(sti.source_signals(root, "test/log.cpp", []), [])
+
+    def scope_build(self, tmp: Path) -> tuple[Path, Path]:
+        root, build = tmp / "repo", tmp / "build"
+        write(root, "test/t.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/run.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/disc.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/arg.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        write(root, "tools/cli/idle.cpp", "auto p = fs::path(PULP_SOURCE_DIR);\n")
+        ev = build / "test" / "test-data"
+        ev.mkdir(parents=True)
+        rec = lambda src, under: {"sources": [src], "tree_defines": ["PULP_SOURCE_DIR"], "under_test": under}
+        (ev / "executables.json").write_text(json.dumps({"schema": "pulp-test-executables/v1", "executables": {
+            "in-test": rec("test/t.cpp", True), "cli-target": rec("tools/cli/run.cpp", False),
+            "discovered": rec("tools/cli/disc.cpp", False), "arg-only": rec("tools/cli/arg.cpp", False),
+            "idle": rec("tools/cli/idle.cpp", False)}}), encoding="utf-8")
+        (ev / "runtime-targets.json").write_text(json.dumps({"schema": "pulp-runtime-targets/v1", "artifacts": {
+            "cli-target": {"artifact": "cli-run", "runtime_targets": []}}}), encoding="utf-8")
+        b = str(build)
+        write(build, "CTestTestfile.cmake",
+              f'add_test([=[direct]=] "{b}/tools/cli/cli-run" "doctor")\n'
+              f'add_test([=[script]=] "/usr/bin/python3" "{root}/check.py" "--binary" "{b}/tools/cli/arg-only")\n'
+              f'include("{b}/tools/cli/discovered-1a2b3c4_include.cmake")\n')
+        return root, build
+
+    def test_an_executable_ctest_runs_outside_test_is_scanned_by_its_program_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, build = self.scope_build(Path(tmp))
+            ex = sti.compiled_entries(root, build)
+            # Run by ctest under its artifact name; found through a discovery
+            # include; an argument to a script is not run by ctest; unused.
+            self.assertEqual(sorted(ex), ["cli-run", "discovered", "in-test"])
+            self.assertEqual(ex["cli-run"]["data"], "undeclared")
+            self.assertEqual(sorted(sti.test_executables(build)), ["cli-run", "discovered", "in-test"])
+            # Without a CTestTestfile nothing can be ruled out, so all are scanned.
+            (build / "CTestTestfile.cmake").unlink()
+            self.assertEqual(sorted(sti.compiled_entries(root, build)),
+                             ["arg-only", "cli-target", "discovered", "idle", "in-test"])
+
+    def test_a_declaration_on_a_renamed_program_is_read_by_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root, build = self.scope_build(Path(tmp))
+            (build / "test" / "test-data" / "cli-target.inputs.json").write_text(json.dumps({
+                "schema": "pulp-test-data-inputs/v1", "executable": "cli-target", "kind": "compiled",
+                "sources": ["tools/cli/run.cpp"], "inputs": [], "whole_checkout": True}), encoding="utf-8")
+            entry = sti.compiled_entries(root, build)["cli-run"]
+            self.assertEqual((entry["data"], entry["undeclared_sources"]), ("whole_checkout", []))
+            self.assertEqual(entry["detected_sources"], ["tools/cli/run.cpp"])
 
 
 if __name__ == "__main__":
