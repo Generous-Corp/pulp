@@ -25,7 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_SRC="$PULP_ROOT/external/skia-src"
 SKIA_OUTPUT="$PULP_ROOT/external/skia-build"
-SKIA_BRANCH="${SKIA_BRANCH:-chrome/m144}"
+SKIA_BRANCH="${SKIA_BRANCH:-chrome/m153}"
 
 # ── ABI selection ────────────────────────────────────────────────────────
 ABI_ARG="${1:-arm64}"
