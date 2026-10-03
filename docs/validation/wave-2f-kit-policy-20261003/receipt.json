@@ -65,12 +65,17 @@
       "pulp-test-cli-content-commands",
       "pulp-test-cli-kit-commands"
     ],
-    "stale_entry_note": "These three compiled entries are stale in the diff-scoped input report; the check still accepted 387 declared tests in sync for this change."
+    "stale_entry_note": "Initial diff-scoped report listed stale compiled entries pulp-cpp, pulp-test-cli-content-commands, and pulp-test-cli-kit-commands; mandated --write regeneration removed the drift and the final gate reported 387 declared tests in sync."
   },
   "gates": {
     "command": "tools/scripts/gates.sh origin/main",
-    "result": "pending",
-    "note": "Final governed gate to be run after this receipt is committed."
+    "result": "pass_with_not_checked",
+    "exit_code": 0,
+    "notes": [
+      "all locally applicable gates passed",
+      "workflow-lint tools/scripts/test_generated_version_bump_check.py was not checked locally; 35 clone/worktree fixtures are deferred to CI workflow-lint",
+      "source-selftests reported 3 pre-existing origin/main failures: scene3d-native-slice-handoff-contract, scene3d-native-slice-handoff-negative-contract, gpu-clean-agent-journey-selftest"
+    ]
   },
   "artifacts": [
     "tools/cli/kit_policy.cpp",
