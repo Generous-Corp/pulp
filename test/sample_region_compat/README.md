@@ -29,6 +29,51 @@ full-tree build is what proves that, not this receipt. The compatibility gate
 records each as a reviewed source-layout change while continuing to protect the
 C ABI and the virtual-method prefix, both of which are unchanged.
 
+## Adding a member to `CustomNodeType`
+
+Size is not the axis. The audio thread never reads `CustomNodeType` — callbacks
+are copied into the compiled graph at prepare, and the registry is only read at
+register/prepare/compile — so struct size and cache behaviour do not decide
+anything, and there is no byte ceiling worth stating. Append-last is free and is
+proved by a real consumer (`old_installed_sdk_consumer.cpp`), so positional-init
+compatibility does not decide it either.
+
+The one question that decides it, first yes wins:
+
+1. **Must this contract be stable bytes — hashed, proven, serialized, compared
+   for identity, or handed across a bake or the C ABI?** Then it is a **sibling
+   descriptor**, registered beside the type the way `SampleKernelDescriptor` is
+   (`register_custom_node_type(type, sample_kernel)`). That is why that one is a
+   sibling: a `std::function` cannot be hashed, proven or serialized, so it could
+   never have lived there. Never make something a sibling merely to avoid adding
+   a line to this receipt.
+2. **Otherwise — a `std::function` or metadata consumed only through the registry
+   at register/prepare/compile?** Then it is a **field, appended last**, plus one
+   sentence in the receipt above.
+
+A field that opens a new execution lane (as transport, baked-param and events
+each did) costs four edits, and this is the real cost — not the bytes:
+
+- the callback member itself, appended after the historical callbacks
+- a rule in `CustomNodeType::is_valid_registration()` for the combinations it
+  must refuse
+- the `same_function` equality block in `signal_graph.cpp`, which compares every
+  callback; omit one and a re-registration that changed it silently no-ops
+- the compile-time capture into the compiled graph, and the matching dispatch in
+  BOTH the routed binding and the reference walk
+
+Miss any one and the failure is silent rather than loud.
+
+**When this guidance stops being true.** (a) If any executor path starts reading
+`CustomNodeType` on the audio thread instead of capturing at compile, size
+becomes a real axis — today `git grep custom_node_types_ core/host/src` shows
+only register/prepare/compile reads. (b) If `CustomNodeType` itself is ever
+hashed or serialized, question 1 flips for every member and the whole struct
+becomes a bytes contract. (c) If `old_installed_sdk_consumer.cpp` is retired,
+append-last stops being required, though it stays harmless. (d) If
+`same_function` is replaced by generated or reflective equality, drop that
+checklist item.
+
 Run the complete positive and deliberate-perturbation matrix with:
 
 ```sh

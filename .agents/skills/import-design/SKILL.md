@@ -7061,6 +7061,42 @@ match is deliberately never cached. The one exception is
 signal is not a function of the registry, so a runtime that installs one keeps
 the unconditional refresh.
 
+**Captured-state resolution is ONE registry pass.** Resolution asks one
+selector per atlas state, and every state that is not open is a miss that used
+to scan and match-test the whole registry: states x nodes match tests per
+commit (~4,000 and 17-25 ms on an 11-state, ~400-node plug-in editor -- the
+largest per-commit cost left after the scoped re-apply).
+`__pulpFindMaterializedElements__(queries)` answers the whole list with
+exactly what `__pulpFindMaterializedElement__` returns for each query: the
+browser fast path and the per-epoch miss cache per query, then one registry
+walk in which a node is match-tested against a query only when it carries every
+attribute the query's target names (read once per node per attribute), and
+each query keeps the first node in registry order that passes its full test.
+Only a plain compound is prefiltered -- `:not([x])` names an attribute a match
+does not require. Same answers, 24 match tests, ~5 ms. A vendored runtime
+that predates it can transplant the batch into its own
+`resolveCapturedStateFromAtlas`; web-compat's `Element.matches()` also
+memoizes its selector parse now (`engine`, "Gotchas").
+
+**Count commits, not milliseconds.** The editor-open gate that holds is a
+commit count: keep `{commits, reapplies, full_reapplies, mount_commits}` in
+`resetAfterCommit`, record `mount_commits` right after the root render
+returns (a LegacyRoot flushes layout-effect updates inside it), and assert
+the commits after the mount (target 0-1) and that only the mount re-applies
+the whole document. An opt-in per-commit log of `new Error().stack` names each
+commit's cause -- a promise job, a scheduler timer (passive effects), a frame
+callback, an eval'd native script -- which is what to fix. The app-side rules
+(hydrate before the first render, reconcile instead of re-hydrating, late
+mounts in a layout effect) are `view-bridge` checklist item 7. Worked example
+(Spectr): 8 commits / 140 ms of re-apply per open became 2 commits, both
+inside the mount / 28 ms.
+
+**Keep whole-subtree walks linear.** A walk that asks "children of X" by
+filtering the whole registry per element (`values.filter(c => c.parentElement
+=== x)`) is O(subtree x registry): one settings-panel ScrollView upgrade made
+866 such filters, 61 ms of a 96 ms first responsive pass. Index the registry
+by parent once per walk and re-check the live edge on lookup.
+
 **Path resolution is memoized per pass, never across passes.** The path index
 carries a children memo (each node's registry-filtered children, computed once)
 and a binding→node memo, shared by the dynamic-layout scan and the layout,
@@ -7200,9 +7236,22 @@ metadata. What Pulp now does by default, and what the document must not undo:
   second idle tick (`view-bridge`, "Editor open").
 - **One evaluation** — the first load has no probe realm. Before this, every
   open compiled, imported, mounted and settled the document twice.
-- **Bytecode reuse** — the runtime bundle, preludes and import payloads
-  compile once per process (`engine`, "Whole scripts reuse compiled
-  bytecode"); a warm reopen reads bytecode in ~2 ms instead of parsing.
+- **Bytecode reuse** — the runtime bundle, preludes, import payloads and the
+  document's inline scripts (2 KB and up) compile once per process
+  (`engine`, "Whole scripts reuse compiled bytecode"); a warm reopen reads
+  bytecode in ~2 ms instead of parsing.
+- **One verification per document per process** — `__pulpRuntimeImport__`
+  with `materialized-browser` goes through
+  `parse_materialized_browser_document_shared()`: the JSON parse, base64
+  decode and SHA-256 check of every asset (~130 ms on Spectr) run on the
+  first open, and a reopen with byte-identical input reuses the immutable
+  bundle. Keyed by the exact input bytes, rejected documents never kept,
+  `PULP_RUNTIME_IMPORT_CACHE=0` turns reuse off (use it as the "before" arm
+  of an A/B in one binary). `materialized_document_cache_stats().verifies`
+  is the count to gate on: 1 after N opens of one document. **A document
+  that differs per open defeats it** — do not stamp build times, nonces or
+  per-instance ids into the captured HTML or assets; pass per-instance state
+  through a native message after import.
 - **Batched host callbacks** (@pulp/react runtime revision 3) — a rAF or timer
   callback's `setState`s commit once. A vendored `runtime.js` older than that
   never installs `__pulpBatchUpdates__`; `pulp_check_vendored_react_runtime()`

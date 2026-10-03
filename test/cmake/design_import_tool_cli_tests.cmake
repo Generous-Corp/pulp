@@ -243,6 +243,13 @@ catch_discover_tests(pulp-test-cli-import-design
     PROPERTIES
         ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}"
         LABELS "parser-import")
+# It reads three import fixture sets; the CLI and import tool it drives read
+# nothing else from the checkout on these cases (no --detect-only, so no
+# compat.json), and the suite runs them against an isolated PULP_HOME.
+pulp_test_data(pulp-test-cli-import-design NO_DEFINE PATHS
+    test/fixtures/imports/claude/2024.10
+    test/fixtures/imports/figma-plugin
+    test/fixtures/imports/designmd/alpha)
 
 # `pulp design {lint,diff,compile,lint-adherence}` must reject partial
 # DESIGN.md parse results before analyzing or emitting artifacts.
@@ -293,6 +300,13 @@ if(PULP_HAS_SKIA)
         PULP_IMPORT_DESIGN_TEST_HAS_SKIA=1)
 endif()
 add_dependencies(pulp-test-import-design-tool pulp-import-design)
+# The tool's scripts (the .fig decoder, the REST exporter, the staged browser
+# capture) and the .fig fixture. The browser-capture registration below also
+# depends on Chrome and system fonts, which no declaration can name; it holds
+# the browser resource lock, so a selector treats it as environment-bound.
+pulp_test_data(pulp-test-import-design-tool NO_DEFINE
+    SOURCES test_import_design_tool.cpp
+    PATHS tools/import-design test/fixtures/imports/fig/synthetic.fig)
 if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "~[network]~[browser]"
@@ -420,3 +434,6 @@ if(Python3_Interpreter_FOUND)
         LABELS "parser-import;import"
         TIMEOUT 60)
 endif()
+
+# pulp-svg-probe appears only in the import tool's expected output text.
+pulp_test_spawns(pulp-test-import-design-tool NOT_RUN pulp-svg-probe)

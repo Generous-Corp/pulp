@@ -984,6 +984,20 @@ right after `PluginViewHost::create()` succeeds, so the JS-side
 real Dawn instance. Without it the JS GPU bridge falls through to mocks
 and any embedded WebGPU content (Three.js, raw WebGPU) renders black.
 
+The iOS GPU host fills each frame (and its letterbox bars) with
+`Options::background_rgb`, so an iOS AUv3 opens on the plug-in's declared
+background like the desktop hosts. The CPU `IOSPluginViewHost` fallback still
+paints the framework default and keeps a black UIView background — a gap, not
+a contract; nothing on iOS compiles this in CI, so check it on a simulator
+build when touching it. Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in").
+
 See the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge"
 section for the cross-platform contract and
 `planning/2026-05-29-ios-d3b-threejs-webgpu-program.md` § Slice 1 for

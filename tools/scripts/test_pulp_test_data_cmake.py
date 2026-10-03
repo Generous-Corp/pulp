@@ -13,6 +13,8 @@ What must hold:
   build tree even when it lives inside the checkout;
 - a path that matches nothing fails the configure; a glob that matches passes;
 - a stale `<exe>.inputs.json` from an earlier configure is removed;
+- ABSENT records `!<path>` for a path the test probes and expects missing,
+  refusing one that exists or is a glob;
 - NO_DEFINE records paths without touching the target's definitions, NONE
   records a reviewed source with no paths, and SOURCES narrows a declaration
   to some of an executable's sources (and refuses one that is not its own);
@@ -21,7 +23,10 @@ What must hold:
   it; `runtime_targets` lists the edge, and `spawns_none` a reviewed NONE;
 - a `$<TARGET_FILE:x>` definition without an edge to x fails the configure,
   and so does a NONE on an executable that has one, or a pulp_test_spawns()
-  edge that does not reach the written index.
+  edge that does not reach the written index;
+- NOT_RUN records a reviewed name the test does not run and refuses an edge
+  to the same target; runtime-targets.json indexes every built program by
+  its artifact name with its own runtime targets.
 
 Run:
     python3 tools/scripts/test_pulp_test_data_cmake.py
@@ -143,6 +148,21 @@ class PulpTestDataCMakeTests(unittest.TestCase):
                 flags = (build / "test" / "CMakeFiles" / f"{target}.dir" / "flags.make").read_text(encoding="utf-8")
                 self.assertNotIn("PULP_SOURCE_DIR", flags, target)
 
+    def test_absent_paths_are_recorded_and_must_not_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as t:
+            src = self.project(Path(t), extra="pulp_test_data(quiet ABSENT pulp.toml fixtures/missing.lock)")
+            build = Path(t) / "build"
+            proc = self.configure(src, build)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            quiet = json.loads((build / "test" / "test-data" / "quiet.inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual(quiet["inputs"], ["!fixtures/missing.lock", "!pulp.toml"])
+            # A path that exists is a read, not an absence.
+            src2 = self.project(Path(t) / "b", extra="pulp_test_data(quiet ABSENT fixtures/solo.json)")
+            self.assertIn("ABSENT 'fixtures/solo.json' exists in the checkout",
+                          self.configure(src2, Path(t) / "build2").stderr)
+            src3 = self.project(Path(t) / "c", extra="pulp_test_data(quiet ABSENT fixtures/*.toml)")
+            self.assertIn("must be a plain path", self.configure(src3, Path(t) / "build3").stderr)
+
     def test_sources_must_belong_to_the_executable(self) -> None:
         with tempfile.TemporaryDirectory() as t:
             src = self.project(Path(t), extra="pulp_test_data(quiet SOURCES solo.c PATHS fixtures)")
@@ -193,7 +213,12 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         proc.stderr = " ".join(proc.stderr.split())
         index_path = build / "test" / "test-data" / "executables.json"
         index = json.loads(index_path.read_text(encoding="utf-8"))["executables"] if index_path.exists() else {}
+        self.build = build
         return proc, index
+
+    def artifacts(self) -> dict:
+        path = self.build / "test" / "test-data" / "runtime-targets.json"
+        return json.loads(path.read_text(encoding="utf-8"))["artifacts"]
 
     def test_a_deferred_edge_reaches_a_tool_defined_later(self) -> None:
         proc, index = self.configure(
@@ -205,13 +230,19 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         self.assertEqual(index["plain"]["runtime_targets"], [])
         self.assertEqual((index["spawner"]["spawns_none"], index["plain"]["spawns_none"]), (False, False))
 
-    def test_a_test_this_configuration_does_not_build_is_skipped(self) -> None:
+    def test_a_missing_test_is_skipped_and_a_missing_tool_is_recorded(self) -> None:
         # A platform-specific suite may be absent; its declaration must not
         # break the configure of every other platform.
         proc, index = self.configure("pulp_test_spawns(not-built-here tool)\npulp_test_spawns(spawner absent-tool)\n")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("not-built-here", index)
-        self.assertEqual(index["spawner"]["runtime_targets"], [])
+        # The test is built but its tool is not: no edge, and the tool is named
+        # so the scan keeps the test undeclared on this configuration.
+        self.assertEqual((index["spawner"]["runtime_targets"], index["spawner"]["absent_spawns"]),
+                         ([], ["absent-tool"]))
+        self.assertIn("pulp_test_spawns: spawner runs absent-tool, which this configuration does not build",
+                      proc.stdout)
+        self.assertEqual(index["plain"]["absent_spawns"], [])
 
     def test_a_target_file_definition_needs_an_edge(self) -> None:
         defs = 'target_compile_definitions(spawner PRIVATE TOOL="$<TARGET_FILE:tool>")\n'
@@ -233,6 +264,22 @@ class PulpTestSpawnsCMakeTests(unittest.TestCase):
         proc, _ = self.configure("pulp_test_spawns(spawner NONE)\npulp_test_spawns(spawner tool)\n")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("spawner is declared pulp_test_spawns(NONE) but depends on tool", proc.stderr)
+
+    def test_not_run_is_recorded_and_refuses_an_edge(self) -> None:
+        proc, index = self.configure("pulp_test_spawns(plain NOT_RUN tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((index["plain"]["named_not_run"], index["plain"]["runtime_targets"]), (["tool"], []))
+        proc, _ = self.configure("pulp_test_spawns(spawner tool)\npulp_test_spawns(spawner NOT_RUN tool)\n")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("spawner declares tool NOT_RUN but depends on it", proc.stderr)
+
+    def test_every_built_program_is_indexed_by_its_artifact_name(self) -> None:
+        proc, _ = self.configure("set_target_properties(spawner PROPERTIES OUTPUT_NAME spawner-bin)\n"
+                                 "pulp_test_spawns(spawner tool)\n")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        artifacts = self.artifacts()
+        self.assertEqual(artifacts["spawner"], {"artifact": "spawner-bin", "runtime_targets": ["tool"]})
+        self.assertEqual(artifacts["tool"], {"artifact": "tool", "runtime_targets": []})
 
     def test_a_declared_edge_must_reach_the_index(self) -> None:
         # A utility target is not something a test runs, so its edge cannot be

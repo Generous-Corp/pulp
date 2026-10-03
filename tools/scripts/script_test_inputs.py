@@ -348,12 +348,16 @@ DATA_SIGNALS = ("PULP_SOURCE_DIR", "test/fixtures")
 # program this repo builds is what its spawn edges, or a reviewed
 # pulp_test_spawns(NONE), say.
 SPAWN_CLASSES = ("ChildProcess", "ChildProcessManager", "ConnectedChildProcess")
-# The repo's plugin and module loaders (core/host): PluginSlot::load, the CLAP
-# bundle scanner, and the dlopen shim. PluginSlot alone is an interface that
+# And its free functions that run a program.
+SPAWN_FUNCTIONS = ("exec",)
+# The repo's plugin and module loaders (core/host): PluginSlot::load, the
+# scanner calls that open bundles from disk, and the dlopen shim. PluginSlot alone is an interface that
 # tests implement in memory, so only its loader counts.
-LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"dl_open\s*\(")
+LOAD_APIS = (r"PluginSlot::load\s*\(", r"scan_clap_bundle\s*\(", r"scan_vst3_bundle\s*\(",
+             r"scan_lv2_bundle\s*\(", r"scan_directory\s*\(", r"scan_audio_units\s*\(", r"dl_open\s*\(")
 SPAWN_SIGNAL = re.compile(
     r"\b(?:%s)\b" % "|".join(SPAWN_CLASSES)
+    + r"|(?<![\w.>])(?:%s)\s*\(" % "|".join(SPAWN_FUNCTIONS)
     + r"|\bposix_spawnp?\s*\(|\bpopen\s*\(|(?:\bstd::|(?<![\w.>:]))system\s*\(|\bexec[lv]p?e?\s*\("
     + r"|\bfork\s*\(|\bNSTask\b|\bCreateProcess[AW]?\s*\("
     # Loading a module or plugin bundle at run time is the same edge as running
@@ -423,17 +427,89 @@ def spawning_sources(root: Path, sources: list[str]) -> list[str]:
     return sorted(hits)
 
 
-def spawn_state(root: Path, rec: dict) -> tuple[str | None, list[str]]:
-    """(`declared` | `none` | `undeclared` | None, the spawning files) for one
-    executables.json record. None: nothing in it starts a process."""
+# A string literal, and the file suffixes a built program or module carries.
+STRING_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+ARTIFACT_SUFFIX = re.compile(r"\.(?:exe|clap|vst3|component|so|dylib|bundle|app|dll)$", re.I)
+
+
+def load_runtime_artifacts(build_dir: Path | None) -> dict[str, dict] | None:
+    """Every program or module the tree builds: target -> {artifact, runtime_targets}."""
+    if build_dir is None:
+        return None
+    doc = _read_json(build_dir / TEST_DATA_DIR / "runtime-targets.json")
+    return None if doc is None else dict(doc.get("artifacts") or {})
+
+
+def named_programs(root: Path, sources: list[str], artifacts: dict[str, dict]) -> dict[str, list[str]]:
+    """Targets whose artifact file name appears as a path component of a string
+    literal in `sources` or the test/ headers they include, with where."""
+    by_name: dict[str, set[str]] = {}
+    for target, rec in artifacts.items():
+        by_name.setdefault(str(rec.get("artifact") or target).lower(), set()).add(target)
+    found: dict[str, list[str]] = {}
+    for src in sources:
+        for f in _test_include_closure(root, src):
+            try:
+                text = COMMENT.sub("", (root / f).read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            for literal in STRING_LITERAL.finditer(text):
+                for part in re.split(r"[/\\]", literal.group(1)):
+                    for target in by_name.get(ARTIFACT_SUFFIX.sub("", part).lower(), ()):
+                        line = text.count("\n", 0, literal.start()) + 1
+                        found.setdefault(target, []).append(f"{f}:{line}")
+    return found
+
+
+def runtime_closure(direct: list[str], artifacts: dict[str, dict]) -> set[str]:
+    """`direct` and every program or module those depend on in turn."""
+    seen, stack = set(), list(direct)
+    while stack:
+        target = stack.pop()
+        if target in seen:
+            continue
+        seen.add(target)
+        stack.extend((artifacts.get(target) or {}).get("runtime_targets") or [])
+    return seen
+
+
+def spawn_state(root: Path, rec: dict, exe: str = "",
+                artifacts: dict[str, dict] | None = None) -> tuple[str | None, list[str], list[str]]:
+    """(`declared` | `none` | `undeclared` | None, the spawning files, the
+    programs it names without an edge) for one executables.json record. None:
+    nothing in it starts a process; `artifacts` None (no runtime-targets
+    index) leaves every spawner undeclared.
+
+    An edge or a reviewed NONE is not enough on its own: every program this
+    tree builds that the code names (a path component of a string literal,
+    such as "pulp-cpp") must be reached by an edge, directly or through
+    another program it runs, or be reviewed as named but not run. One that is
+    not leaves the executable `undeclared`."""
     spawning = spawning_sources(root, list(rec.get("sources") or []))
+    if rec.get("absent_spawns"):
+        # It declares a program this configuration does not build.
+        return "undeclared", spawning, sorted(rec["absent_spawns"])
     if not spawning:
-        return None, []
+        return None, [], []
     if rec.get("runtime_targets"):
-        return "declared", spawning
-    if rec.get("spawns_none"):
-        return "none", spawning
-    return "undeclared", spawning
+        state = "declared"
+    elif rec.get("spawns_none"):
+        state = "none"
+    else:
+        return "undeclared", spawning, []
+    if artifacts is None:
+        # Without the index of what the tree builds, the names cannot be checked.
+        return "undeclared", spawning, []
+    named = named_programs(root, list(rec.get("sources") or []), artifacts)
+    covered = runtime_closure(list(rec.get("runtime_targets") or []), artifacts)
+    covered |= set(rec.get("named_not_run") or []) | {exe}
+    # Targets that share an artifact name (one plugin's AU, VST3 and CLAP
+    # builds) are one name in the code; an edge to any of them answers it.
+    by_artifact: dict[str, set[str]] = {}
+    for target in named:
+        by_artifact.setdefault(str(artifacts[target].get("artifact") or target).lower(), set()).add(target)
+    unmatched = sorted(t for group in by_artifact.values() if not group & covered for t in group)
+    return ("undeclared" if unmatched else state), spawning, unmatched
 
 
 def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
@@ -445,13 +521,14 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
     if index is None:
         return None
     out = {}
+    artifacts = load_runtime_artifacts(build_dir)
     for exe, rec in sorted((index.get("executables") or {}).items()):
         decl = _read_json(build_dir / TEST_DATA_DIR / f"{exe}.inputs.json") or {}
         declared_sources = set(decl.get("sources") or [])
         defines = list(rec.get("tree_defines") or [])
         reading = {src for src in rec.get("sources") or [] if source_signals(root, src, defines)}
         data_sources = reading | declared_sources
-        spawns, spawning = spawn_state(root, rec)
+        spawns, spawning, unmatched = spawn_state(root, rec, exe, artifacts)
         if not data_sources and spawns is None:
             continue
         undeclared = sorted(reading - declared_sources)
@@ -463,6 +540,8 @@ def compiled_entries(root: Path, build_dir: Path | None) -> dict | None:
             entry["spawns"] = spawns
             entry["spawning_sources"] = spawning
             entry["runtime_targets"] = sorted(rec.get("runtime_targets") or [])
+            if unmatched:
+                entry["unmatched_programs"] = unmatched
         out[exe] = entry
     return out
 

@@ -173,6 +173,21 @@ def main() -> int:
                 )
                 return 1
 
+    # The project Codex SessionStart sync is advisory. A hook runner can have
+    # a deliberately restricted PATH, so a bare `python3` must never turn a
+    # missing interpreter into the UI's opaque exit-127 failure.
+    codex_sync = [
+        str(hook["command"])
+        for hook in configured_hooks(ROOT / ".codex/hooks.json")
+        if "claude_md_sync.py" in str(hook.get("command", ""))
+    ]
+    if len(codex_sync) != 1 or "command -v python3" not in codex_sync[0] or "|| true" not in codex_sync[0]:
+        print(
+            "FAIL: Codex claude_md_sync hook must resolve python3 and remain advisory",
+            file=sys.stderr,
+        )
+        return 1
+
     with tempfile.TemporaryDirectory(prefix="pulp-agent-hook-paths-") as temp:
         superproject, nested_cwd = make_nested_submodule_fixture(Path(temp))
         resolved = subprocess.run(

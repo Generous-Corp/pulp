@@ -617,6 +617,16 @@ class HeadReachesStepTests(unittest.TestCase):
                     qba.head_reaches_step(step, changes), ".github/workflows/build.yml"
                 )
 
+    def test_the_install_script_and_its_lock_reach_the_install_step(self) -> None:
+        step = "Install visual-analysis Python dependencies"
+        for path in qba.INSTALL_INPUT_FILES:
+            with self.subTest(path=path):
+                self.assertEqual(qba.head_reaches_step(step, [qba.ChangedFile(path=path)]), path)
+        # Control: the same paths reach no unrelated non-content step.
+        self.assertIsNone(qba.head_reaches_step(
+            "Upload exact GPU-audio SDK (macOS ARM64)",
+            [qba.ChangedFile(path=qba.INSTALL_INPUT_FILES[0])]))
+
     def test_a_composite_action_change_reaches_the_step_it_defines(self) -> None:
         changes = [qba.ChangedFile(path=".github/actions/install-linux-build-deps/action.yml")]
         self.assertIsNotNone(qba.head_reaches_step("Install Linux dependencies", changes))

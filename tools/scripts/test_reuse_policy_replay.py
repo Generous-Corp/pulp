@@ -24,6 +24,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.error
 import sys
 import tempfile
 import unittest
@@ -35,7 +36,8 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import reuse_policy_replay as rpr  # noqa: E402
-import reuse_replay_collect as rrc  # noqa: E402
+import reuse_replay_collect as rrc
+from spawn_closure import SpawnIndex  # noqa: E402
 
 SCENARIOS = HERE / "fixtures" / "reuse_policy_replay"
 TOOL = HERE / "reuse_policy_replay.py"
@@ -116,6 +118,12 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(result["false_skip_rows"][0]["test_id"], "skills-doc-sync")
         self.assertEqual(result["flake_skips"], 0)
         self.assertEqual(result["verdict"], "UNSAFE: false skips")
+
+    def test_the_report_states_how_many_failures_the_window_could_catch(self):
+        result = rpr.score(corpus([t("a", "fail", 2), t("b", "timeout"), t("c"), t("d", "pass", 2)]), "none")
+        self.assertEqual(result["failing_group_tests"], 2)   # a flake that passed on retry is not one
+        self.assertIn("held 2 failing tests", rpr.render(result))
+        self.assertIn("cannot see data reads", rpr.render(result))
 
     def test_a_run_stopped_on_a_failure_is_scored(self):
         stopped = rpr.Corpus([group(ctest={"ran": True, "complete": False, "failed": 1}), head()], [pair()],
@@ -525,10 +533,9 @@ class CodemodelTests(unittest.TestCase):
     def test_a_rebuilt_spawned_executable_reruns_the_test_that_depends_on_it(self):
         # tb's executable depends (add_dependencies) on the tool test/tool;
         # only the tool's source drifted.
-        spawned = {"test/b": {"test/tool"}}
         out = rrc.classify_source_keys(["tools/x/tool.cpp"], ["ta", "tb"], self.MAP, {}, {}, {"test/tool"},
                                        self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
-                                       spawned=spawned)
+                                       spawns=self.spawns(b=["tool"]))
         for variant in ("strict-data", "cmake-codemodel"):
             self.assertEqual(out[variant]["run"], ["tb"], variant)
             self.assertEqual(out[variant]["executables_rebuilt"], 0, variant)  # the tests' own binaries stay
@@ -558,11 +565,161 @@ class CodemodelTests(unittest.TestCase):
                                          spawnable=frozenset({"test/tool"}))
         self.assertEqual(quiet["cmake-codemodel"]["run"], [])
 
-    def test_executable_dependencies_follow_targets_transitively(self):
-        targets = {"t": {"type": "EXECUTABLE", "artifacts": ["<build>/test/t"], "dependencies": ["lib"]},
-                   "lib": {"type": "STATIC_LIBRARY", "artifacts": ["<build>/libl.a"], "dependencies": ["tool"]},
-                   "tool": {"type": "EXECUTABLE", "artifacts": ["<build>/tools/tool"], "dependencies": []}}
-        self.assertEqual(rrc.executable_dependencies(targets), {"test/t": {"tools/tool"}, "tools/tool": set()})
+    @staticmethod
+    def spawns(**deps):
+        """A SpawnIndex over test executables a, b and tools test/tool and
+        module test/mod.so, with the given add_dependencies edges."""
+        targets = {n: {"type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": deps.get(n, [])}
+                   for n in ("a", "b", "tool")}
+        targets["mod"] = {"type": "MODULE_LIBRARY", "artifacts": ["<build>/test/mod.so"], "dependencies": []}
+        return SpawnIndex(targets)
+
+    def scanned(self, rebuilt, scan, modules=frozenset(), rebuilt_modules=frozenset(), drift=("tools/x/tool.cpp",)):
+        return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt),
+                                        self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                        spawns=self.spawns(), spawnable=frozenset({"test/tool"}), spawn_scan=scan,
+                                        modules=frozenset(modules), rebuilt_modules=frozenset(rebuilt_modules))
+
+    @staticmethod
+    def scan(scanned, **entries):
+        return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
+                                  "executables": dict(entries)})
+
+    def test_a_scanned_clean_executable_skips_the_spawnable_fallback(self):
+        out = self.scanned({"test/tool"}, self.scan(["a", "b", "tool"]))
+        for variant in ("strict-data", "cmake-codemodel"):
+            self.assertEqual(out[variant]["run"], [], variant)
+            self.assertEqual((out[variant]["fallback_only_tests"], out[variant]["fallback_only_tests_legacy"]), (0, 2))
+            self.assertTrue(out[variant]["spawn_scanned"])
+
+    def test_an_executable_the_scan_did_not_cover_keeps_the_fallback(self):
+        out = self.scanned({"test/tool"}, self.scan(["a", "tool"]))       # b added after the scan
+        self.assertEqual(out["cmake-codemodel"]["run"], ["tb"])
+        self.assertEqual(out["cmake-codemodel"]["fallback_only_tests"], 1)
+        quiet = self.scanned(set(), self.scan(["a", "tool"]), drift=("docs/a.md",))
+        self.assertEqual(quiet["cmake-codemodel"]["run"], [])             # nothing it could reach was rebuilt
+
+    def test_no_scan_or_an_older_list_keeps_the_fallback_for_every_test(self):
+        for scan in (None, rrc.spawn_scan_of({"executables": {}}),
+                     rrc.spawn_scan_of({"executables_scanned_for": ["data"], "executables_scanned": ["a", "b"]})):
+            out = self.scanned({"test/tool"}, scan)
+            self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"], scan)
+            self.assertFalse(out["cmake-codemodel"]["spawn_scanned"])
+
+    def test_spawn_states_declared_and_none_are_clean_anything_else_always_runs(self):
+        names = ["a", "b", "tool"]
+        clean = self.scanned({"test/tool"}, self.scan(names, a={"spawns": "declared"}, b={"spawns": "none"}))
+        self.assertEqual(clean["cmake-codemodel"]["run"], [])
+        for state in ("undeclared", "untracked", "maybe"):
+            out = self.scanned(set(), self.scan(names, b={"spawns": state}), drift=("docs/a.md",))
+            self.assertEqual(out["cmake-codemodel"]["run"], ["tb"], state)  # nothing rebuilt, still runs
+            self.assertEqual(out["cmake-codemodel"]["spawn_undeclared_tests"], 1, state)
+            self.assertEqual(out["per-entry"]["run"], [], state)            # not a strict variant
+
+    @staticmethod
+    def data_scan(scanned, **entries):
+        """A data scan that detected its declared readers (a known reader `k`
+        always rides along so a scan with no other declared entry still
+        proves it saw something)."""
+        entries = {"k": {"data": "declared", "inputs": ["test/fixtures/k"], "detected_sources": ["test/k.cpp"]},
+                   **{n: {"detected_sources": ["test/x.cpp"], **e} for n, e in entries.items()}}
+        return rrc.spawn_scan_of({"executables_scanned_for": ["data", "spawns"], "executables_scanned": list(scanned),
+                                  "executables": entries}, "data")
+
+    def test_a_data_scan_that_cannot_show_it_saw_its_readers_is_not_trusted(self):
+        def doc(*detected):
+            return {"executables_scanned_for": ["data"], "executables_scanned": ["a", "b"],
+                    "executables": {f"r{i}": {"data": "declared", "inputs": ["x"], "detected_sources": d}
+                                    for i, d in enumerate(detected)}}
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(["s"]) , "data"))
+        self.assertIsNone(rrc.spawn_scan_of(doc(*[[]] * 3), "data"))            # blind: nothing detected
+        self.assertIsNone(rrc.spawn_scan_of(doc(*[["s"]] * 5, []), "data"))     # 5 of 6 is below the share
+        self.assertIsNotNone(rrc.spawn_scan_of(doc(*[["s"]] * 6, []), "data"))  # 6 of 7 meets it
+        legacy = doc(["s"])
+        del legacy["executables"]["r0"]["detected_sources"]
+        self.assertIsNone(rrc.spawn_scan_of(legacy, "data"))                    # the list cannot show it
+        self.assertIsNone(rrc.spawn_scan_of({**doc(), "executables": {}}, "data"))  # no known reader at all
+        self.assertIsNotNone(rrc.spawn_scan_of({**doc(), "executables": {}, "executables_scanned_for": ["spawns"]},
+                                               "spawns"))                       # the spawn scan is not gated
+
+    def test_the_data_manifest_scopes_the_data_rule_per_executable(self):
+        drift = ["tools/scripts/foo.py"]   # runtime surface, not a declared input of either test
+        scan = self.data_scan(["a", "b", "tool"], a={"data": "declared", "inputs": ["test/fixtures/a"]})
+
+        def run(scan, drift=drift):
+            return rrc.classify_source_keys(drift, ["ta", "tb"], self.MAP, {}, {}, set(), self.EXES | {"test/tool"},
+                                            (set(), {"test/a", "test/b", "test/tool"}), data_scan=scan)
+        out = run(scan)
+        self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"])      # the broad rule: every compiled test
+        self.assertEqual(out["manifest-data"]["run"], [])
+        self.assertTrue(out["manifest-data"]["data_scanned"])
+        self.assertEqual(run(scan, ["test/fixtures/a/x.json"])["manifest-data"]["run"], ["ta"])  # a declared input
+        undeclared = self.data_scan(["a", "b"], b={"data": "undeclared", "inputs": []})
+        self.assertEqual(run(undeclared)["manifest-data"]["run"], ["tb"])  # undeclared reads: any surface drift
+        self.assertEqual(run(self.data_scan(["a"]))["manifest-data"]["run"], ["tb"])  # b not scanned
+        self.assertEqual(run(None)["manifest-data"]["run"], ["ta", "tb"])  # no scan: the broad rule
+        older = rrc.spawn_scan_of({"executables_scanned_for": ["spawns"], "executables_scanned": ["a", "b"]}, "data")
+        self.assertIsNone(older)
+        odd = self.data_scan(["a", "b"], a={"data": "partly"})
+        self.assertEqual(run(odd)["manifest-data"]["run"], ["ta"])         # an unknown state fails closed
+        self.assertEqual(run(scan, ["docs/a.md"])["manifest-data"]["run"], [])
+
+    def outputs(self, drift, hashed, changed, rebuilt=frozenset(), **kw):
+        return rrc.classify_source_keys(list(drift), ["ta", "tb"], self.MAP, {}, {}, set(rebuilt), self.EXES | {"test/tool"},
+                                        (set(), {"test/a", "test/b", "test/tool"}),
+                                        outputs=(frozenset(hashed), frozenset(changed)), **kw)
+
+    def test_output_key_rebuilds_only_executables_whose_bytes_changed(self):
+        hashed = {"test/a", "test/b", "test/tool"}
+        out = self.outputs(["CMakeLists.txt"], hashed, {"test/b"})   # a version stamp re-keys everything
+        self.assertEqual(out["cmake-codemodel"]["run"], ["ta", "tb"])
+        self.assertEqual(out["output-key"]["run"], ["tb"])
+        self.assertEqual(self.outputs(["CMakeLists.txt"], hashed, set())["output-key"]["run"], [])
+        # Commit-bound by the learned list, yet the bytes came out the same.
+        bound = self.outputs(["docs/a.md"], hashed, set(), commit_bound=frozenset({"test/a"}))
+        self.assertEqual((bound["cmake-codemodel"]["run"], bound["output-key"]["run"]), (["ta"], []))
+
+    def test_output_key_keeps_the_source_key_where_no_hash_was_recorded(self):
+        out = self.outputs(["CMakeLists.txt"], {"test/b"}, set())
+        self.assertEqual(out["output-key"]["run"], ["ta"])            # a has no hash: the stamp still reaches it
+        source_only = self.outputs(["test/test_a.cpp"], {"test/b"}, set(), rebuilt={"test/a", "test/b"})
+        self.assertEqual(source_only["output-key"]["run"], ["ta"])    # a: its source reached it; b: same bytes
+        none = rrc.classify_source_keys(["CMakeLists.txt"], ["ta"], self.MAP, {}, {}, set(), self.EXES,
+                                        (set(), {"test/a"}))
+        self.assertNotIn("output-key", none)                          # no hashes: no variant
+
+    def test_output_key_reruns_a_test_whose_spawned_tool_changed_bytes(self):
+        out = self.outputs(["docs/a.md"], {"test/a", "test/b", "test/tool"}, {"test/tool"},
+                           spawns=self.spawns(b=["tool"]), spawnable=frozenset({"test/tool"}),
+                           spawn_scan=self.scan(["a", "b", "tool"]))
+        self.assertEqual(out["output-key"]["run"], ["tb"])
+        self.assertEqual(out["output-key"]["executables_rebuilt"], 0)  # the tests' own binaries are unchanged
+
+    def test_recorded_outputs_compare_only_executables_both_jobs_hashed(self):
+        self.assertEqual(rrc.recorded_outputs({"a": "1", "b": "2", "c": "3"}, {"a": "1", "b": "9"}, ["a", "b", "c", "d"]),
+                         (frozenset({"a", "b"}), frozenset({"b"})))
+        self.assertIsNone(rrc.recorded_outputs(None, {"a": "1"}, ["a"]))
+
+    def test_a_rebuilt_module_triggers_the_fallback_and_reaches_its_loader(self):
+        scan = self.scan(["a", "tool"])
+        out = self.scanned(set(), scan, modules={"test/mod.so"}, rebuilt_modules={"test/mod.so"})
+        self.assertEqual(out["cmake-codemodel"]["run"], ["tb"])           # b unscanned: a module may reach it
+        self.assertEqual(out["cmake-codemodel"]["spawnable_rebuilt"], ["test/mod.so"])
+        idle = self.scanned(set(), scan, modules={"test/mod.so"})
+        self.assertEqual(idle["cmake-codemodel"]["run"], [])
+        loader = rrc.classify_source_keys(["docs/a.md"], ["ta", "tb"], self.MAP, {}, {}, set(),
+                                          self.EXES | {"test/tool"}, (set(), {"test/a", "test/b", "test/tool"}),
+                                          spawns=self.spawns(a=["mod"]), spawn_scan=self.scan(["a", "b", "tool"]),
+                                          modules=frozenset({"test/mod.so"}),
+                                          rebuilt_modules=frozenset({"test/mod.so"}))
+        self.assertEqual(loader["cmake-codemodel"]["run"], ["ta"])          # its closure holds the module
+        widened = self.scanned(set(), self.scan(["a", "tool"]), modules={"test/mod.so"},
+                               drift=("CMakeLists.txt", "cmake/x.cmake"))
+        self.assertIn("test/mod.so", widened["strict-data"]["spawnable_rebuilt"])  # a CMake change rebuilds all
+
+    def test_an_absent_input_is_hit_by_its_creation(self):
+        self.assertTrue(rrc._declared_hit(["!pulp.toml"], ["pulp.toml"]))
+        self.assertFalse(rrc._declared_hit(["!pulp.toml"], ["docs/pulp.toml.md"]))
 
     def test_no_codemodel_writes_no_variant(self):
         out = rrc.classify_source_keys([], ["ta"], self.MAP, {}, {}, set(), self.EXES)
@@ -659,7 +816,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         # group-a is rebuilt but its bytes came out the same (over-approximation);
         # group-b's bytes changed but nothing in the drift reaches it: the
@@ -679,6 +836,7 @@ class RecordedGraphTests(unittest.TestCase):
         keys = next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]
         self.assertEqual(keys["cmake-codemodel-recorded"]["run"], ["ta"])  # t.cpp drifted: group-a only
         self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_changed_binaries"], ["test/group-b"])
+        self.assertEqual(keys["cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-b": "backs_test"})
         self.assertEqual(keys["cmake-codemodel-recorded"]["binaries_compared"], 3)
         self.assertEqual(keys["cmake-codemodel-recorded"]["rebuilt_identical_binaries"], 1)
         p2 = dict(pair(drift=("test/t.cpp",)), source_key=keys, source_key_head_run_id="p1")
@@ -687,6 +845,71 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual((result["unreached_changed_binaries"], result["verdict"]), (1, "UNSAFE: changed binaries not rebuilt"))
         self.assertEqual((keys["cmake-codemodel-recorded"]["executables_rebuilt"],
                           keys["cmake-codemodel-recorded"]["executables_total"]), (1, 2))  # only executables the tests run
+
+    def test_the_binary_control_covers_rebuilt_executables_no_test_runs(self):
+        """A changed binary no group test runs (a spawned tool, a bench) is
+        checked against everything the variant rebuilds, not only the
+        executables behind the group's tests."""
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b", "group-c")}
+
+        def unreached(drift, run_id):
+            corpus = Path(self.tmp) / f"ctl-{run_id}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            cache = corpus / "cache" / "record-v5"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": {"test/group-c": "3"}}),
+                             ("g1", {"link": self.link, "executables": {"ta": "test/group-a"},
+                                     "binaries": {"test/group-c": "3x"}})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "unreached_changed_binaries"]
+        self.assertEqual(unreached(("core/added_since.cpp",), "reached"), [])        # rebuilt, no test runs it
+        self.assertEqual(unreached(("test/t.cpp",), "missed"), ["test/group-c"])     # changed and not rebuilt
+        kinds = next(rpr.read_jsonl(Path(self.tmp) / "ctl-missed" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"]
+        self.assertEqual(kinds, {"test/group-c": "neither"})
+        # The same miss labelled by what reaches it: a test spawning it, or a test running it.
+        targets["group-a"]["dependencies"] = ["group-c"]
+        unreached(("test/t.cpp",), "spawned")
+        self.assertEqual(next(rpr.read_jsonl(Path(self.tmp) / "ctl-spawned" / "pairs.jsonl"))["source_key"][
+            "cmake-codemodel-recorded"]["unreached_kinds"], {"test/group-c": "spawnable"})
+
+    def test_a_recorded_module_is_rebuilt_only_by_drift_its_link_reaches(self):
+        import gzip
+        targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
+                   for n in ("group-a", "group-b")}
+        targets["plug"] = {"digest": "m", "type": "MODULE_LIBRARY", "artifacts": ["<build>/test/plug.so"],
+                           "dependencies": []}
+
+        def rebuilt_programs(drift, recorded, label):
+            corpus = Path(self.tmp) / f"mod-{label}"
+            rpr.write_jsonl(corpus / "runs.jsonl", [group(), head()])
+            rpr.write_jsonl(corpus / "pairs.jsonl", [pair(drift=drift)])
+            rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta")])
+            link = dict(self.link)
+            if recorded:
+                link["test/plug.so"] = {"objects": [], "members": {"core/liba.a": ["b.cpp.o"]}}
+            cache = corpus / "cache" / "record-v5"
+            cache.mkdir(parents=True)
+            for rid, rec in (("p1", {"link": None, "executables": None, "binaries": None}),
+                             ("g1", {"link": link, "executables": {"ta": "test/group-a"}, "binaries": None})):
+                with gzip.open(cache / f"{rid}.json.gz", "wt") as fh:
+                    json.dump({"targets": targets, **rec}, fh)
+            rrc.annotate_source_keys(corpus, Path(self.tmp), self.index.graph, Path(self.root), Path(self.build),
+                                     {}, None, mock.Mock())
+            return next(rpr.read_jsonl(corpus / "pairs.jsonl"))["source_key"]["cmake-codemodel-recorded"][
+                "spawnable_rebuilt"]
+        self.assertIn("test/plug.so", rebuilt_programs(("core/b.cpp",), True, "member"))
+        self.assertNotIn("test/plug.so", rebuilt_programs(("test/t.cpp",), True, "elsewhere"))
+        # Control: the same drift with the module's link unrecorded fails closed.
+        self.assertIn("test/plug.so", rebuilt_programs(("test/t.cpp",), False, "unrecorded"))
 
     def test_commit_bound_executables_are_learned_from_same_tree_pairs(self):
         import gzip
@@ -700,7 +923,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g2.jsonl.gz", [t("ta"), t("tb")])
         targets = {"x": {"digest": "d", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-a"], "dependencies": []},
                    "y": {"digest": "e", "type": "EXECUTABLE", "artifacts": ["<build>/test/group-b"], "dependencies": []}}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         recs = {"p1": {"binaries": {"test/group-a": "1", "test/group-b": "2"}, "link": None, "executables": None},
                 "g1": {"binaries": {"test/group-a": "1", "test/group-b": "2-stamped"}, "link": self.link,
@@ -734,7 +957,7 @@ class RecordedGraphTests(unittest.TestCase):
         rpr.write_jsonl(corpus / "tests" / "g1.jsonl.gz", [t("ta"), t("tb"), t("tc")])
         targets = {n: {"digest": "d", "type": "EXECUTABLE", "artifacts": [f"<build>/test/{n}"], "dependencies": []}
                    for n in ("group-a", "group-b", "group-c")}
-        cache = corpus / "cache" / "record-v4"
+        cache = corpus / "cache" / "record-v5"
         cache.mkdir(parents=True)
         common = {"targets": targets, "binaries": None, "generated_headers": headers}
         recs = {"p1": {**common, "link": None, "executables": None, "digest_schema": head_schema,
@@ -813,6 +1036,7 @@ class RecordedGraphTests(unittest.TestCase):
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             zf.writestr("link-members-abc.json", json.dumps({
+                "schema": "pulp-link-members/v1",
                 "members": {"<build>/core/liba.a": ["a.cpp.o", "b.cpp.o"]},
                 "executables": {"<build>/test/x": {"objects": ["<build>/test/CMakeFiles/x.dir/t.cpp.o"],
                                                    "archives": {"<build>/core/liba.a": {"members": [1], "whole": False}}},
@@ -832,6 +1056,22 @@ class RecordedGraphTests(unittest.TestCase):
         self.assertEqual(rec["executables"], {"t1": "test/x"})
         self.assertEqual(rec["link"]["test/x"], {"objects": ["test/CMakeFiles/x.dir/t.cpp.o"], "members": {"core/liba.a": ["b.cpp.o"]}})
         self.assertEqual(rec["link"]["test/y"]["members"], {"core/liba.a": ["a.cpp.o", "b.cpp.o"]})
+
+    def test_a_link_record_the_reader_cannot_vouch_for_is_no_record(self):
+        # An unknown schema, a kind the replay does not model (a shared library
+        # changes what loads without changing the loader's map) or an
+        # unrecorded link all read as "no link record", so every executable
+        # falls back to the blunt rules instead of trusting part of the map.
+        def links(schema="pulp-link-members/v3", kind="module", **extra):
+            return json.dumps({"schema": schema, "members": {}, "unreadable": 0, **extra,
+                               "executables": {"<build>/p.so": {"kind": kind, "objects": ["<build>/p.o"],
+                                                                "archives": {}}}})
+        # Held for the whole test: record_from keys its cache on id(files).
+        files = [{"link-members-a.json": doc} for doc in (
+            links(), links("pulp-link-members/v4"), links(None), links(kind="shared"), links(unrecorded=1))]
+        self.assertEqual(self.record_from(files[0])["link"], {"p.so": {"objects": ["p.o"], "members": {}}})
+        for f in files[1:]:
+            self.assertIsNone(self.record_from(f)["link"], f)
 
 
 class SourceKeyPolicyTests(unittest.TestCase):
@@ -859,6 +1099,89 @@ class SourceKeyPolicyTests(unittest.TestCase):
         self.assertEqual((result["evaluable_pairs"], result["false_skips"]), (0, 0))
 
 
+class RecordCoverageTests(unittest.TestCase):
+    def test_executed_jobs_without_a_record_are_named_and_cancelled_ones_are_not(self):
+        rec = "Record per-test results for reuse replay (macOS)"
+        ran = [{"name": "Build", "conclusion": "success"}, {"name": "Test (non-Windows)", "conclusion": "failure"},
+               {"name": rec, "conclusion": "success"}]
+        lost = [{"name": "Build", "conclusion": None}, {"name": "Test (non-Windows)", "conclusion": None},
+                {"name": rec, "conclusion": None}]
+        lost_after_tests = [{"name": "Build", "conclusion": "success"},
+                            {"name": "Test fast deterministic tier (pull request head)", "conclusion": "success"},
+                            {"name": "Test (non-Windows)", "conclusion": None}, {"name": rec, "conclusion": None}]
+        jobs = {
+            1: [{"id": 11, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            2: [{"id": 12, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": ran}],
+            3: [{"id": 13, "name": "macos", "runner_name": None, "conclusion": "cancelled", "steps": []}],
+            4: [{"id": 14, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            5: [{"id": 15, "name": "macos", "runner_name": "gate-vm", "conclusion": "success", "steps": ran}],
+            6: [{"id": 16, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure", "steps": lost}],
+            7: [{"id": 17, "name": "macos", "runner_name": "gate-vm", "conclusion": "failure",
+                 "steps": lost_after_tests}],
+        }
+        artifacts = {1: ["reuse-record-macos"], 2: ["ctest-logs-macos"], 3: [], 4: ["reuse-record-macos-attempt-2"],
+                     5: [], 6: [], 7: []}
+        c = rrc.Collector.__new__(rrc.Collector)
+        c.jobs = lambda run_id: jobs[run_id]
+        gh = mock.Mock()
+        gh.repository = "o/r"
+        gh.json.side_effect = lambda path: {"artifacts": [{"name": n} for n in artifacts[int(path.split("/runs/")[1].split("/")[0])]]}
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            runs = [{"id": i, "status": "completed", "event": "pull_request", "created_at": "2026-10-02T12:00:00Z"}
+                    for i in (1, 2, 3, 4, 6, 7)]
+            runs.append({"id": 5, "status": "completed", "event": "merge_group", "created_at": "2026-09-30T12:00:00Z"})
+            cov = c.record_coverage(runs)
+        self.assertEqual((cov["executed_jobs"], cov["without_record"]), (3, 1))  # run 5 predates recording
+        self.assertEqual([m["run_id"] for m in cov["runs_without_record"]], ["2"])
+        # runner lost before the record step, whether or not a test step ran first
+        self.assertEqual([m["run_id"] for m in cov["interrupted"]], ["6", "7"])
+
+
+class ScriptInputsTests(unittest.TestCase):
+    def test_a_checkout_missing_locally_is_read_through_the_api(self):
+        doc = {"tests": {"t": {"inputs": ["tools/x/"]}}}
+        calls = []
+
+        def request(url, accept):
+            calls.append(url)
+            if "ref=" + "b" * 40 in url:
+                raise urllib.error.HTTPError(url, 404, "nf", {}, None)
+            resp = mock.MagicMock()
+            resp.__enter__.return_value.read.return_value = json.dumps(doc).encode()
+            return resp
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertEqual(c.input_list_at("a" * 40), {"tools/x"})
+            self.assertEqual(c.script_inputs_at("a" * 40), doc)  # cached, no second request
+            self.assertIsNone(c.script_inputs_at("b" * 40))       # absent at that commit
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all("test/ctest_script_inputs.json" in u for u in calls))
+            c.gh = None
+            self.assertIsNone(c.script_inputs_at("c" * 40))       # offline: unread, not guessed
+
+    def test_a_failed_fetch_is_unread_and_retried_next_time(self):
+        attempts = []
+
+        def request(url, accept):
+            attempts.append(url)
+            raise urllib.error.HTTPError(url, 502, "bad gateway", {}, None)
+        c = rrc.Collector.__new__(rrc.Collector)
+        c._git = lambda *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal: bad object")
+        gh = mock.Mock()
+        gh.repository, gh._request = "o/r", request
+        with tempfile.TemporaryDirectory() as tmp:
+            c.cache, c.gh = Path(tmp), gh
+            self.assertIsNone(c.script_inputs_at("d" * 40))
+            self.assertIsNone(c.input_list_at("d" * 40))
+            self.assertEqual(len(attempts), 2)                    # the failure was not cached
+            self.assertFalse((Path(tmp) / "script-inputs" / f"{'d' * 40}.json.gz").exists())
+
+
 class GraftTests(unittest.TestCase):
     def test_parents_are_read_through_shallow_grafts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -872,7 +1195,12 @@ class GraftTests(unittest.TestCase):
             head_sha, parent_sha = subprocess.run(git + ["rev-parse", "HEAD", "HEAD~1"], check=True,
                                                   capture_output=True, text=True).stdout.split()
             (repo / ".git" / "shallow").write_text(head_sha + "\n")
-            grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True)
+            # The control is plain git, so an ambient GIT_SHALLOW_FILE (the
+            # collector's own override, often exported while replaying) must
+            # not reach it.
+            plain = {k: v for k, v in os.environ.items() if k != "GIT_SHALLOW_FILE"}
+            grafted = subprocess.run(git + ["log", "-1", "--format=%P", head_sha], capture_output=True, text=True,
+                                     env=plain)
             self.assertEqual(grafted.stdout.strip(), "", "control: the graft hides the parent from plain git")
             c = rrc.Collector.__new__(rrc.Collector)
             c.repo, c.cache = repo, Path(tmp) / "cache"

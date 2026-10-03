@@ -93,6 +93,24 @@ inline GpuHostDecision decide_gpu_host(const ViewBridge& bridge) {
     return d;
 }
 
+/// The editor-host options every format adapter builds its PluginViewHost
+/// from: the size the adapter negotiated, the GPU decision above, and the
+/// plug-in's own background (`ViewBridge::editor_background_rgb()`).
+///
+/// One definition so a new host option reaches every format at once. The
+/// background is the case that motivated it: a host that skipped it would
+/// open that format's editor on the framework default colour while the
+/// others opened on the plug-in's own.
+inline view::PluginViewHost::Options editor_host_options(
+    const ViewBridge& bridge, const GpuHostDecision& gpu,
+    view::PluginViewHost::Size size) {
+    view::PluginViewHost::Options opts;
+    opts.size = size;
+    opts.use_gpu = gpu.use_gpu;
+    opts.background_rgb = bridge.editor_background_rgb();
+    return opts;
+}
+
 /// Scream-guard (runtime): after the host's surface state is DECIDED, verify
 /// the GPU path actually took. If GPU was expected (requested + Skia compiled
 /// in) but the host has no surface, log LOUDLY — the same

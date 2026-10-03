@@ -744,8 +744,9 @@ function recordMaterializedSelectorAttributes(selector) {
   for (const match of selector.matchAll(/\\[\\s*([A-Za-z0-9_:-]+)/g))
     materializedSelectorAttributes.add(match[1]);
 }
-g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
-  if (typeof selector !== 'string' || selector.length === 0) return null;
+// The browser document's own answer, when it has one inside the ancestor.
+// Records the selector's attributes first (see above).
+function materializedFindBrowserNode(selector, ancestor) {
   recordMaterializedSelectorAttributes(selector);
   recordMaterializedSelectorAttributes(ancestor);
   if (g.document && typeof g.document.querySelector === 'function') {
@@ -754,44 +755,133 @@ g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
       return browserNode;
     }
   }
+  return null;
+}
+// true when this epoch already proved a miss; otherwise the key to retain a
+// miss under, or '' when misses cannot be retained.
+function materializedFindCachedMiss(selector, ancestor) {
   const epoch = g.__pulpMaterializedTreeEpoch__;
-  const cacheable = typeof epoch === 'number';
-  let missKey = '';
-  if (cacheable) {
-    if (epoch !== materializedFindMissEpoch) {
-      materializedFindMisses.clear();
-      materializedFindMissEpoch = epoch;
-    }
-    missKey = materializedFindMissKey(selector, ancestor);
-    if (materializedFindMisses.has(missKey)) return null;
+  if (typeof epoch !== 'number') return '';
+  if (epoch !== materializedFindMissEpoch) {
+    materializedFindMisses.clear();
+    materializedFindMissEpoch = epoch;
   }
-  let targetSelector = selector.trim();
+  const missKey = materializedFindMissKey(selector, ancestor);
+  return materializedFindMisses.has(missKey) ? true : missKey;
+}
+// A selector split into the node it names, its direct parent and the
+// ancestor it must sit under.
+function materializedFindPlan(selector, ancestor) {
+  let target = selector.trim();
   let effectiveAncestor = ancestor || '';
-  let directParentSelector = '';
-  const directParts = targetSelector.split(/\\s*>\\s*/).filter(Boolean);
+  let directParent = '';
+  const directParts = target.split(/\\s*>\\s*/).filter(Boolean);
   if (directParts.length > 1) {
-    targetSelector = directParts.pop();
-    directParentSelector = directParts.pop();
+    target = directParts.pop();
+    directParent = directParts.pop();
     if (!effectiveAncestor && directParts.length > 0) {
       effectiveAncestor = directParts.join(' > ');
     }
   }
   if (!effectiveAncestor) {
-    const split = materializedLastDescendantSplit(targetSelector);
+    const split = materializedLastDescendantSplit(target);
     if (split > 0) {
-      effectiveAncestor = targetSelector.slice(0, split).trim();
-      targetSelector = targetSelector.slice(split + 1).trim();
+      effectiveAncestor = target.slice(0, split).trim();
+      target = target.slice(split + 1).trim();
     }
   }
+  return { target: target, directParent: directParent,
+    ancestor: effectiveAncestor };
+}
+function materializedFindPlanMatches(plan, node) {
+  const parent = node && (node.parentElement || node._parentElement || null);
+  return materializedMatches(node, plan.target) &&
+    (!plan.directParent || materializedMatches(parent, plan.directParent)) &&
+    (!plan.ancestor || !!materializedClosest(
+      plan.directParent ? parent : node, plan.ancestor));
+}
+g.__pulpFindMaterializedElement__ = function (selector, ancestor) {
+  if (typeof selector !== 'string' || selector.length === 0) return null;
+  const browserNode = materializedFindBrowserNode(selector, ancestor);
+  if (browserNode) return browserNode;
+  const missKey = materializedFindCachedMiss(selector, ancestor);
+  if (missKey === true) return null;
+  const plan = materializedFindPlan(selector, ancestor);
   for (const node of materializedDomRegistryValues()) {
-    const parent = node && (node.parentElement || node._parentElement || null);
-    if (materializedMatches(node, targetSelector) &&
-        (!directParentSelector || materializedMatches(parent, directParentSelector)) &&
-        (!effectiveAncestor || materializedClosest(
-          directParentSelector ? parent : node, effectiveAncestor))) return node;
+    if (materializedFindPlanMatches(plan, node)) return node;
   }
-  if (cacheable) materializedFindMisses.add(missKey);
+  if (missKey) materializedFindMisses.add(missKey);
   return null;
+};
+// Several lookups against one unchanged registry, answered in ONE pass. Each
+// result is exactly what __pulpFindMaterializedElement__ returns for that
+// (selector, ancestor): the browser fast path and the miss cache are asked
+// per query first, then the rest share one registry walk in which every
+// query keeps the first node, in registry order, that passes its full test.
+// Captured-state resolution asks one selector per state on every React
+// commit, and each state that is not open was a miss that match-tested the
+// whole registry; batched, a node is match-tested against a query only when
+// it carries every attribute the query's target names, read once per node
+// per attribute.
+function materializedSelectorRequiredAttributes(selector) {
+  // A pseudo-class or a selector list can name an attribute a match does not
+  // require (:not([x])), so only a plain compound is prefiltered.
+  if (/[:,]/.test(selector)) return [];
+  return Array.from(new Set(materializedParseSelector(selector).attributes
+    .map(function (attribute) { return attribute.name; })));
+}
+g.__pulpFindMaterializedElements__ = function (queries) {
+  const results = new Array(queries.length).fill(null);
+  const stats = g.__pulpMaterializedFindBatchStats__ ||
+    (g.__pulpMaterializedFindBatchStats__ =
+      { passes: 0, matchTests: 0, attributeReads: 0 });
+  const pending = [];
+  queries.forEach(function (query, index) {
+    if (!query || typeof query.selector !== 'string' ||
+        query.selector.length === 0) return;
+    const browserNode = materializedFindBrowserNode(query.selector, query.ancestor);
+    if (browserNode) {
+      results[index] = browserNode;
+      return;
+    }
+    const missKey = materializedFindCachedMiss(query.selector, query.ancestor);
+    if (missKey === true) return;
+    const plan = materializedFindPlan(query.selector, query.ancestor);
+    pending.push({ index: index, plan: plan, missKey: missKey, found: false,
+      required: materializedSelectorRequiredAttributes(plan.target) });
+  });
+  if (pending.length === 0) return results;
+  stats.passes += 1;
+  let open = pending.length;
+  const presence = new Map();
+  for (const node of materializedDomRegistryValues()) {
+    if (open === 0) break;
+    presence.clear();
+    const has = function (name) {
+      let present = presence.get(name);
+      if (present === undefined) {
+        stats.attributeReads += 1;
+        present = !node || typeof node.getAttribute !== 'function' ||
+          node.getAttribute(name) !== null ||
+          (typeof node.hasAttribute === 'function' && node.hasAttribute(name));
+        presence.set(name, present);
+      }
+      return present;
+    };
+    for (const query of pending) {
+      if (query.found || !query.required.every(has)) continue;
+      stats.matchTests += 1;
+      if (materializedFindPlanMatches(query.plan, node)) {
+        query.found = true;
+        results[query.index] = node;
+        --open;
+      }
+    }
+  }
+  for (const query of pending) {
+    if (!query.found && query.missKey) materializedFindMisses.add(query.missKey);
+  }
+  return results;
 };
 g.__pulpActivateMaterializedElement__ = function (selector, eventName, eventData) {
   const node = g.__pulpFindMaterializedElement__(selector);
@@ -1093,10 +1183,13 @@ function driveRequestedCapturedState() {
 }
 if (requestedCapturedState) requestAnimationFrame(driveRequestedCapturedState);
 function resolveCapturedStateFromAtlas() {
+  // Every state's lookup in one registry pass; the answer is the last state
+  // in atlas order whose selector matches, as before.
+  const matches = g.__pulpFindMaterializedElements__(capturedStates.map(
+    state => state.match ? { selector: state.match.selector,
+      ancestor: state.match.ancestor } : null));
   for (let index = capturedStates.length - 1; index >= 0; --index) {
-    const state = capturedStates[index];
-    if (state.match && g.__pulpFindMaterializedElement__(
-        state.match.selector, state.match.ancestor)) return state.id;
+    if (matches[index]) return capturedStates[index].id;
   }
   return '';
 }

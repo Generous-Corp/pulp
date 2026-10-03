@@ -282,7 +282,7 @@ TEST_CASE("AAX model builds a stable parameter packet for stereo effects", "[aax
     auto result = pulp::format::aax::build_plugin_definition(make_stereo_effect, codes);
     REQUIRE(result.ok);
     REQUIRE(result.definition.parameters.size() == 2);
-    REQUIRE(result.definition.packet_float_count == 3);
+    REQUIRE(result.definition.packet_float_count == 4);
     REQUIRE(result.definition.components.size() == 1);
     REQUIRE(result.definition.components[0].main_input_channels == 2);
     REQUIRE(result.definition.components[0].main_output_channels == 2);
@@ -542,7 +542,7 @@ TEST_CASE("AAX model carries descriptor and parameter metadata into definitions"
     REQUIRE(result.definition.supports_midi_output);
     REQUIRE(result.definition.uses_transport);
     REQUIRE(result.definition.latency_samples == 128);
-    REQUIRE(result.definition.packet_float_count == 3);
+    REQUIRE(result.definition.packet_float_count == 4);
     REQUIRE(result.definition.parameters.size() == 2);
     REQUIRE(result.definition.parameters[0].id == 7);
     REQUIRE(result.definition.parameters[0].aax_id == "p00000007");
@@ -643,8 +643,9 @@ TEST_CASE("AAX model preserves linear, log, and enum parameter tapers", "[aax][m
 }
 
 // AAX audit topic: master bypass. AAX reserves packet slot 0 for the host
-// master-bypass control, so the parameter packet is always plugin-params + 1 —
-// even for a plugin with no automatable parameters. A regression that stopped
+// master-bypass control and the last slot for the host render mode, so the
+// parameter packet is always plugin-params + 2 — even for a plugin with no
+// automatable parameters. A regression that stopped
 // reserving the slot would misalign every parameter index in the packet.
 TEST_CASE("AAX model reserves a master-bypass packet slot regardless of parameter count", "[aax][model]") {
     auto codes = valid_codes();
@@ -655,7 +656,7 @@ TEST_CASE("AAX model reserves a master-bypass packet slot regardless of paramete
     auto none = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
     REQUIRE(none.ok);
     REQUIRE(none.definition.parameters.empty());
-    REQUIRE(none.definition.packet_float_count == 1u);
+    REQUIRE(none.definition.packet_float_count == 2u);
 
     // Three parameters: bypass slot + three params.
     ConfigurableProcessor::configure(
@@ -668,7 +669,39 @@ TEST_CASE("AAX model reserves a master-bypass packet slot regardless of paramete
     auto three = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
     REQUIRE(three.ok);
     REQUIRE(three.definition.parameters.size() == 3);
-    REQUIRE(three.definition.packet_float_count == 4u);
+    REQUIRE(three.definition.packet_float_count == 5u);
+}
+
+// AAX audit topic: offline rendering. An AudioSuite instance renders offline;
+// the data model publishes that in the render-mode slot and the algorithm must
+// decode it into ProcessMode::Offline, while an Insert stays realtime.
+TEST_CASE("AAX model round-trips the render mode through the parameter packet", "[aax][model][offline]") {
+    auto codes = valid_codes();
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}}),
+        {
+            {.id = 1, .name = "A", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+            {.id = 2, .name = "B", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}},
+        });
+    auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(result.ok);
+    const auto& definition = result.definition;
+    const auto slot = pulp::format::aax::render_mode_packet_slot(definition);
+    REQUIRE(slot == 3u);
+    REQUIRE(slot == definition.packet_float_count - 1u);
+
+    // Parameter values that look "on" must not leak into the render mode.
+    std::vector<float> packet(definition.packet_float_count, 1.0f);
+    packet[slot] = pulp::format::aax::render_mode_packet_value(false);
+    REQUIRE(pulp::format::aax::process_mode_from_packet(definition, packet.data()) ==
+            pulp::format::ProcessMode::Realtime);
+
+    packet[slot] = pulp::format::aax::render_mode_packet_value(true);
+    REQUIRE(pulp::format::aax::process_mode_from_packet(definition, packet.data()) ==
+            pulp::format::ProcessMode::Offline);
+
+    REQUIRE(pulp::format::aax::process_mode_from_packet(definition, nullptr) ==
+            pulp::format::ProcessMode::Realtime);
 }
 
 // AAX audit topic: parameter IDs. Bindings must keep declaration order and give

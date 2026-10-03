@@ -344,6 +344,9 @@ class CliTests(unittest.TestCase):
             (build / "link-members" / "t.objects").write_text(
                 f"# Cwd: {build}\n# Path: {build}/t\n# Object files:\n[  1] m.o\n[  2] lib/libx.a(one.o)\n# Sections:\n")
             (build / "link-members" / "t.args").write_text("c++\n-Wl,-force_load,lib/libx.a\n")
+            (build / "link-members" / "m.objects").write_text(
+                f"# Cwd: {build}\n# Path: {build}/m.so\n# Object files:\n[  1] p.o\n[  2] lib/libx.a(two.o)\n# Sections:\n")
+            (build / "link-members" / "m.args").write_text("c++\n-bundle\n")
             env = {**os.environ, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": "abc"}
             proc = subprocess.run([sys.executable, str(HERE / "reuse_record.py"), "write", "--out-dir", f"{tmp}/out",
                                    "--build-dir", str(build), "--link-members", "--identity-scope", "ran"],
@@ -351,10 +354,27 @@ class CliTests(unittest.TestCase):
             job = json.loads((Path(tmp) / "out" / "job.json").read_text())
             doc = json.loads((Path(tmp) / "out" / "link-members-abc.json").read_text())
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual((job["link_members"]["executables"], job["link_members"]["whole_archives"]),
-                         (1, ["<build>/lib/libx.a"]))
-        self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o"]})
+        self.assertEqual((job["link_members"]["executables"], job["link_members"]["modules"],
+                          job["link_members"]["whole_archives"]), (1, 1, ["<build>/lib/libx.a"]))
+        self.assertEqual(doc["members"], {"<build>/lib/libx.a": ["one.o", "two.o"]})
+        self.assertEqual(doc["executables"]["<build>/m.so"]["kind"], "module")
         self.assertNotIn("::warning", proc.stdout)
+
+    def test_a_shared_library_link_is_counted_and_warns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            build = Path(tmp) / "build"
+            (build / "link-members").mkdir(parents=True)
+            (build / "link-members" / "t.objects").write_text(
+                f"# Cwd: {build}\n# Path: {build}/t\n# Object files:\n[  1] m.o\n# Sections:\n")
+            (build / "link-members" / "s.objects").write_text(
+                f"# Cwd: {build}\n# Path: {build}/libs.dylib\n# Object files:\n[  1] s.o\n# Sections:\n")
+            (build / "link-members" / "s.args").write_text("c++\n-dynamiclib\n")
+            proc = self.run_write(tmp, "--build-dir", str(build), "--link-members", "--identity-scope", "ran")
+            job = json.loads((Path(tmp) / "out" / "job.json").read_text())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual((job["link_members"]["executables"], job["link_members"]["shared"]), (1, 1))
+        self.assertIn("::warning title=reuse-record incomplete::link members not usable for reuse: "
+                      "links of kind shared are not modelled", proc.stdout)
 
     def test_requested_link_members_that_the_build_did_not_record_warn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -449,6 +449,16 @@ native-core processors forward it as `playhead_frames`, so leaving it at the
 default 0 makes CLAP-only playhead-sensitive processors think every block
 starts at the song origin.
 
+### Render mode (`clap.render`)
+
+The adapter offers `CLAP_EXT_RENDER` from `clap_get_extension()`:
+`has_hard_realtime_requirement()` returns false (a Pulp processor can always
+render offline) and `set()` stores the mode in `PulpClapPlugin::render_offline`
+(atomic — hosts may switch while active). `clap_phase_build_context()` maps it to
+`ProcessMode::Offline` + `RenderSpeedHint::FasterThanRealtime`. `set()` refuses
+any value other than `CLAP_RENDER_REALTIME` / `CLAP_RENDER_OFFLINE` and keeps the
+current mode. Test: `test_clap_midi_events.cpp` `[clap][render][offline]`.
+
 ### Editor
 
 Gated on `PULP_CLAP_GUI`; for desktop CLAP, both the shared
@@ -494,6 +504,15 @@ auto-selects the GPU `PluginViewHost`, wires the per-vsync editor idle pump
 on a silent CPU fallback. CLAP's `gui_set_size` already resizes the bridge +
 host, so no extra resize seam is needed (unlike AU v2). Full contract: the
 `view-bridge` skill's "GPU view host auto-selection" section.
+
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in").
 
 ### ARA companion factory
 

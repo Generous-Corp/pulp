@@ -767,3 +767,10 @@ pulp_test_spawns(pulp-test-timeline-journal NONE)
 if(NOT PULP_BUILD_EXAMPLES)
     pulp_test_spawns(pulp-test-timeline-graph-binding NONE)
 endif()
+
+# Runtime data: these read the timeline fixture corpus and nothing else from
+# the checkout (PULP_TIMELINE_FIXTURE_DIR / PULP_TIMELINE_CORPUS_DIR).
+pulp_test_data(pulp-test-timeline-persistence NO_DEFINE PATHS test/fixtures/timeline)
+pulp_test_data(pulp-test-timeline-replay-golden NO_DEFINE PATHS test/fixtures/timeline)
+pulp_test_data(pulp-test-fixture-runner-cli NO_DEFINE PATHS test/fixtures/timeline)
+pulp_test_data(pulp-test-timeline-document-fuzz NO_DEFINE PATHS test/fixtures/timeline)

@@ -1,0 +1,98 @@
+{
+  "id": "e127-note-delay-authorable-echo-length",
+  "title": "Note delay exposes an authorable echo gate",
+  "classification": "public_sdk",
+  "delivery_state": "pending",
+  "claim_id": "168c887a-ffc5-4b82-865f-cdd99eea72ba",
+  "owned_paths": [
+    "core/midi/include/pulp/midi/note_delay.hpp",
+    "test/test_midi_performance_kernels.cpp",
+    "docs/guides/midi-fx.md",
+    "docs/status/sequencer-exposure/rows/e127-note-delay-authorable-echo-length.json"
+  ],
+  "evidence": [
+    {
+      "path": "core/midi/include/pulp/midi/note_delay.hpp",
+      "needles": [
+        "gate_percent",
+        "repeat_gate",
+        "kArmedEnd"
+      ]
+    },
+    {
+      "path": "test/test_midi_performance_kernels.cpp",
+      "needles": [
+        "note delay accepts an authorable echo gate",
+        "note delay rolls an armed echo back to the authored length",
+        "note delay is invariant under block partition"
+      ]
+    },
+    {
+      "path": "docs/guides/midi-fx.md",
+      "needles": [
+        "authorable",
+        "gate"
+      ]
+    }
+  ],
+  "surfaces": {
+    "installed_sdk": {
+      "disposition": "exposed",
+      "rationale": "The public NoteDelaySpec now exposes a bounded gate_percent control while zero preserves source-held lifecycle behavior.",
+      "evidence": [
+        {
+          "kind": "sdk_header",
+          "path": "core/midi/include/pulp/midi/note_delay.hpp",
+          "needles": [
+            "struct NoteDelaySpec",
+            "gate_percent",
+            "repeat_gate"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "in_process",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    },
+    "offline_timeline_cli": {
+      "disposition": "not_applicable",
+      "rationale": "The MIDI kernel does not add a timeline command or node schema."
+    },
+    "offline_timeline_mcp": {
+      "disposition": "not_applicable",
+      "rationale": "The MIDI kernel does not add an MCP operation or response shape."
+    },
+    "live_product_control": {
+      "disposition": "gap",
+      "rationale": "No exact live product executor is shipped for midi.note-delay.authorable-echo-length@1; callers must receive typed UnsupportedSurface until a product control transaction exists.",
+      "owner": "midi-product-control-closure",
+      "dependencies": [
+        "live-midi-control-registry",
+        "product-midi-executor"
+      ]
+    },
+    "design_time_agent_manifest": {
+      "disposition": "exposed",
+      "rationale": "The canonical midi.note-delay capability binding and public-surface ledger are regenerated from the updated header fingerprint.",
+      "evidence": [
+        {
+          "kind": "capability_definition",
+          "path": "docs/status/agent-capabilities.json",
+          "needles": [
+            "\"key\": \"midi.note-delay\"",
+            "gate percentage"
+          ]
+        }
+      ],
+      "authority": {
+        "admission": "descriptor",
+        "writer_profile": null,
+        "bounds": null,
+        "refusal_codes": []
+      }
+    }
+  }
+}

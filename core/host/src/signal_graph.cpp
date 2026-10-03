@@ -736,8 +736,14 @@ bool SignalGraph::register_custom_node_type(CustomNodeType type) {
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type,
                                             SampleKernelDescriptor sample_kernel) {
+    // A scalar-paired type must not declare the event lane. A region MEMBER is
+    // quotiented out of the executable topology and an ANCHOR has its event
+    // binding dropped at compile, so either way the callback would be registered
+    // and then never invoked — the same silent MIDI-less degradation that
+    // `lowerable && consumes_events()` is refused for. Refuse it here too, where
+    // it is still visible to the registrant.
     if (!type.is_valid_registration() || !sample_kernel.is_valid_registration() ||
-        !scalar_identity_matches(type, sample_kernel)) {
+        type.consumes_events() || !scalar_identity_matches(type, sample_kernel)) {
         return false;
     }
     if (type.default_name.empty())
@@ -2783,9 +2789,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                            int frames) noexcept { prepared->process(out, in, frames); };
             cg->custom_latency_samples[n.id] = 0;
             // A region anchor's processor IS the prepared region, which has no
-            // event plane. Drop any event binding its registered type resolved
-            // above, so the region cannot be entered through the event lane.
+            // event plane and no transport plane. Drop both bindings its
+            // registered type may have resolved above, so the region cannot be
+            // entered through either lane. The transport entry matters because
+            // the routed binding tries transport BEFORE the plain callback while
+            // the reference walk has no transport branch at all, so leaving one
+            // here would run the transport callback on one path and the region on
+            // the other.
             cg->custom_event_processors.erase(n.id);
+            cg->custom_transport_processors.erase(n.id);
             n.transport_sensitive = true;
         }
         // Before sample-region quotienting, compile_ resolved this flag directly

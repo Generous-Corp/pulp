@@ -1,9 +1,8 @@
 // cmd_dev.cpp — pulp dev: unified development loop
 // Combines build --watch + test + validate + process supervision in one command.
 
+#include "build_plan.hpp"
 #include "cli_common.hpp"
-#include "focused_build.hpp"
-#include "tartci_lease.hpp"
 
 #include <iostream>
 
@@ -35,29 +34,41 @@ int cmd_dev(const std::vector<std::string>& args) {
             std::cout << "pulp dev — unified development loop\n\n";
             std::cout << "Usage: pulp dev [options] [-- launch-args...]\n\n";
             std::cout << "Watches source files for changes and rebuilds automatically.\n";
-            std::cout << "Optionally runs tests, validates plugins, and manages a launched app.\n\n";
+            std::cout
+                << "Optionally runs tests, validates plugins, and manages a launched app.\n\n";
             std::cout << "Options:\n";
             std::cout << "  --test, -t             Run tests after each successful build\n";
             std::cout << "  --test-filter=PATTERN  Run only tests matching PATTERN\n";
-            std::cout << "  --validate             Run quick plugin validation (dlopen) after build\n";
-            std::cout << "  --run TARGET           Launch TARGET from build dir, relaunch on rebuild\n";
-            std::cout << "  --hot-dsp              With --run: keep the app alive across rebuilds so its\n";
-            std::cout << "                         ReloadableShell hot-swaps the rebuilt logic live (no relaunch)\n";
-            std::cout << "  --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n";
+            std::cout
+                << "  --validate             Run quick plugin validation (dlopen) after build\n";
+            std::cout
+                << "  --run TARGET           Launch TARGET from build dir, relaunch on rebuild\n";
+            std::cout << "  --hot-dsp              With --run: keep the app alive across rebuilds "
+                         "so its\n";
+            std::cout << "                         ReloadableShell hot-swaps the rebuilt logic "
+                         "live (no relaunch)\n";
+            std::cout
+                << "  --design SCRIPT        Launch design tool with SCRIPT, relaunch on rebuild\n";
             std::cout << "  --target T             Pass --target T to cmake --build\n";
-            std::cout << "  --all                  Build every target and run every test (default: only\n"
-                         "                         those affected by the working diff)\n";
-            std::cout << "  --examples             Configure the source checkout with example projects\n";
-            std::cout << "  --allow-unsupported-sdk  Bypass the CLI-vs-project SDK guard (unsupported)\n";
+            std::cout
+                << "  --all                  Build every target and run every test (default: only\n"
+                   "                         those affected by the working diff)\n";
+            std::cout
+                << "  --examples             Configure the source checkout with example projects\n";
+            std::cout
+                << "  --allow-unsupported-sdk  Bypass the CLI-vs-project SDK guard (unsupported)\n";
             std::cout << "  -- args...             Arguments passed to the launched app\n\n";
             std::cout << "Examples:\n";
             std::cout << "  pulp dev                          # Watch and rebuild\n";
             std::cout << "  pulp dev --test                   # Watch, rebuild, test\n";
             std::cout << "  pulp dev --test --validate        # Watch, rebuild, test, validate\n";
             std::cout << "  pulp dev --run pulp-gain-standalone  # Watch, rebuild, relaunch app\n";
-            std::cout << "  pulp dev --hot-dsp --run pulp-hot-reload-demo-standalone  # Watch, rebuild, live DSP hot-swap\n";
-            std::cout << "  pulp dev --design ui.js           # Watch, rebuild design tool, relaunch\n";
-            std::cout << "  pulp dev --test-filter=Knob       # Watch, rebuild, run Knob tests only\n";
+            std::cout << "  pulp dev --hot-dsp --run pulp-hot-reload-demo-standalone  # Watch, "
+                         "rebuild, live DSP hot-swap\n";
+            std::cout
+                << "  pulp dev --design ui.js           # Watch, rebuild design tool, relaunch\n";
+            std::cout
+                << "  pulp dev --test-filter=Knob       # Watch, rebuild, run Knob tests only\n";
             return 0;
         }
 
@@ -110,7 +121,10 @@ int cmd_dev(const std::vector<std::string>& args) {
                 platform_executable(build_dir / "examples" / "design-tool" / "pulp-design-tool"),
             };
             for (const auto& c : candidates) {
-                if (fs::exists(c)) { launch_target = c.string(); break; }
+                if (fs::exists(c)) {
+                    launch_target = c.string();
+                    break;
+                }
             }
             if (launch_target.empty()) {
                 // Will be found after first build
@@ -129,9 +143,7 @@ int cmd_dev(const std::vector<std::string>& args) {
         }
     }
 
-    if (!enforce_project_cli_compatibility(project_root,
-                                           "pulp dev",
-                                           allow_unsupported_sdk)) {
+    if (!enforce_project_cli_compatibility(project_root, "pulp dev", allow_unsupported_sdk)) {
         return 1;
     }
     if (hot_dsp && launch_target.empty()) {
@@ -139,81 +151,23 @@ int cmd_dev(const std::vector<std::string>& args) {
         return 2;
     }
 
-    auto lease = TartciAgentBuildLease::acquire({
-        project_root,
-        "pulp-dev",
-        true,
-    });
-    if (!lease.ok()) {
-        std::cerr << "pulp dev: " << lease.error() << "\n";
-        return lease.exit_code();
+    BuildPlan plan(
+        {project_root, build_dir, standalone_mode, examples, build_all, build_args, "pulp dev"});
+    if (!plan.ok()) {
+        std::cerr << "pulp dev: " << plan.error() << "\n";
+        return plan.exit_code();
     }
-    ScopedBuildParallelEnv build_env(lease.jobs(), lease.active());
-    auto capped_build = cap_cmake_build_parallel_args(build_args, lease.jobs());
+    int rc = plan.ensure_configured(allow_unsupported_sdk);
+    if (rc != 0)
+        return rc;
 
-    // A build dir an older CLI configured (Makefiles, Debug, examples ON)
-    // moves aside here so the bootstrap below reconfigures it.
-    migrate_slow_build_dir(build_dir, !standalone_mode, examples);
-
-    // Ensure configured
-    if (!fs::exists(build_dir / "CMakeCache.txt")
-        || (!standalone_mode
-            && !source_checkout_dependencies_enabled(project_root, build_dir / "CMakeCache.txt"))
-        || (examples && !standalone_mode && build_dir_has_examples_off(build_dir))) {
-        std::cout << "Project not configured. Building first...\n";
-        std::vector<std::string> bootstrap_args;
-        if (allow_unsupported_sdk) {
-            bootstrap_args.push_back("--allow-unsupported-sdk");
-        }
-        if (examples) bootstrap_args.push_back("--examples");
-        // The bootstrap build focuses like this command would; an explicit
-        // target or --all here means the bootstrap builds everything.
-        if (build_all || build_args_name_target(build_args)) bootstrap_args.push_back("--all");
-        int rc = cmd_build(bootstrap_args);
-        if (rc != 0) return rc;
-    }
-
-
-    // Focused build: select the targets the working diff affects. The
-    // selector reads the CMake file-API codemodel, which only a configure
-    // that finds the query already in place produces.
-    const bool focus = focused_build_applicable(project_root, standalone_mode, build_args, build_all);
-    if (focus) {
-        int crc = ensure_codemodel_reply(project_root, build_dir, !standalone_mode, examples);
-        if (crc != 0) return crc;
-    }
-    const auto selection = select_for_rebuild(project_root, build_dir, focus, "");
-
-    // Initial build
-    std::string build_cmd = "cmake --build " + build_dir.string();
-    for (auto& arg : capped_build.args) build_cmd += " " + arg;
-    build_cmd = focused_build_command(build_cmd, selection);
-    int rc = focused_nothing_to_build(selection) ? 0 : run_with_spinner(
-        apply_build_dir_lock(
-            apply_agent_build_watchdog(apply_agent_build_qos(build_cmd, lease.qos(), lease.floor()),
-                                       lease.jobs(),
-                                       lease.active()),
-            project_root, build_dir),
-        "Building");
+    rc = plan.select_and_build();
     if (rc != 0) {
         std::cerr << "Initial build failed.\n";
         // Continue anyway — the watch loop will retry
     }
 
     // Enter the watch loop
-    WatchOptions opts;
-    opts.root = project_root;
-    opts.build_dir = build_dir;
-    opts.build_args = capped_build.args;
-    opts.run_tests = run_tests;
-    opts.test_filter = test_filter;
-    opts.run_validate = run_validate;
-    opts.focus = focus;
-    opts.launch_target = launch_target;
-    opts.launch_args = launch_args;
-    opts.hot_dsp = hot_dsp;
-    opts.build_jobs = capped_build.jobs;
-    opts.build_qos = lease.qos();
-    opts.build_watchdog = lease.active();
-    return watch_loop(opts);
+    return watch_loop(plan.watch_options(run_tests, test_filter, run_validate, launch_target,
+                                         launch_args, hot_dsp));
 }

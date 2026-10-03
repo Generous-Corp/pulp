@@ -96,6 +96,93 @@ TEST_CASE("Selector: JS parser matches compound selectors", "[events][selector]"
     REQUIRE(rejected.getWithDefault<bool>(true) == false);
 }
 
+TEST_CASE("Selector: one selector tested against many elements is parsed once",
+          "[events][selector]") {
+    // A scan that tests one selector against every element -- what
+    // Element.matches()/closest() do per element in a registry search or
+    // captured-state resolution on each React commit -- must cost one parse,
+    // not one per element. Counted through the tokenizer's own regex,
+    // so the number follows the selector vocabulary and not the element count.
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __parseCountEls = [];
+        for (var i = 0; i < 200; i++) {
+            var el = document.createElement("div");
+            if (i === 199) el.setAttribute("data-spectrum-open", "true");
+            __parseCountEls.push(el);
+        }
+        var __parseCountExec = RegExp.prototype.exec;
+        var __parseCountCalls = 0;
+        RegExp.prototype.exec = function() {
+            __parseCountCalls++;
+            return __parseCountExec.apply(this, arguments);
+        };
+        var __parseCountHits = 0;
+        var __parseScan = function(n) {
+            for (var j = 0; j < n; j++)
+                if (_matchesSelector(__parseCountEls[j],
+                        _parseSelector("div[data-spectrum-open='true']")))
+                    __parseCountHits++;
+        };
+        __parseScan(1);
+        var __parseCountAfterOne = __parseCountCalls;
+        __parseScan(200);
+        RegExp.prototype.exec = __parseCountExec;
+    )JS");
+    // Control: the counter saw the first parse.
+    REQUIRE(env.engine.evaluate("__parseCountAfterOne")
+                .getWithDefault<int64_t>(0) > 0);
+    // 200 more matches() of the same selector tokenised nothing again.
+    REQUIRE(env.engine.evaluate("__parseCountCalls - __parseCountAfterOne")
+                .getWithDefault<int64_t>(-1) == 0);
+    REQUIRE(env.engine.evaluate("__parseCountHits").getWithDefault<int64_t>(0) == 1);
+}
+
+TEST_CASE("Selector: a memoized parse is the same record and matches the same elements",
+          "[events][selector]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __memoParent = document.createElement("section");
+        __memoParent.className = "rack";
+        var __memoChild = document.createElement("span");
+        __memoChild.className = "value";
+        __memoChild.setAttribute("data-k", "a b");
+        __memoParent._children.push(__memoChild);
+        __memoChild._parentElement = __memoParent;
+        var __memoSelectors = ["section.rack span.value", "section.rack > span",
+            "span[data-k~='b']", "span:not(.value)", "div", ""];
+        var __memoFirst = __memoSelectors.map(function(s) {
+            return _matchesSelector(__memoChild, _parseSelectorUncached(s)); });
+        var __memoSecond = __memoSelectors.map(function(s) {
+            return _matchesSelector(__memoChild, _parseSelector(s)); });
+        var __memoThird = __memoSelectors.map(function(s) {
+            return _matchesSelector(__memoChild, _parseSelector(s)); });
+    )JS");
+    REQUIRE(env.engine.evaluate(
+        "_parseSelector('section.rack span.value') === _parseSelector('section.rack span.value')")
+            .getWithDefault<bool>(false));
+    REQUIRE(env.engine.evaluate("JSON.stringify(__memoFirst)")
+                .getWithDefault<std::string>("") == "[true,true,true,false,false,true]");
+    // The memoized record answers exactly as a fresh parse does, on first
+    // use and when served from the cache.
+    REQUIRE(env.engine.evaluate("JSON.stringify(__memoSecond) === JSON.stringify(__memoFirst)")
+                .getWithDefault<bool>(false));
+    REQUIRE(env.engine.evaluate("JSON.stringify(__memoThird) === JSON.stringify(__memoFirst)")
+                .getWithDefault<bool>(false));
+}
+
+TEST_CASE("Selector: the parse cache is bounded", "[events][selector]") {
+    // Distinct generated selectors must not grow it without limit.
+    TestEnvironment env;
+    env.eval(R"JS(
+        for (var i = 0; i < 2000; i++) _parseSelector("div.c" + i);
+    )JS");
+    REQUIRE(env.engine.evaluate("_selectorParseCache.size")
+                .getWithDefault<int64_t>(1 << 20) <= 512);
+    REQUIRE(env.engine.evaluate("_selectorParseCache.size")
+                .getWithDefault<int64_t>(0) > 0);
+}
+
 TEST_CASE("Selector: JS parser distinguishes child and descendant combinators", "[events][selector]") {
     TestEnvironment env;
     env.eval(R"JS(

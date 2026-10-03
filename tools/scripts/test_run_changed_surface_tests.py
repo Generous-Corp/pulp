@@ -9,6 +9,7 @@ import copy
 import hashlib
 import json
 import stat
+import os
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,8 @@ def fixture(name: str, executable: str = "/repo/build/bin/tests") -> dict:
         "name": name,
         "command": [executable, name],
         "properties": [{"name": "WORKING_DIRECTORY", "value": "/repo/build"}],
+        # Every add_test registration carries a backtrace; discovered cases do not.
+        "backtrace": 0,
     }
 
 
@@ -49,7 +52,8 @@ def policy() -> dict:
 
 def base_of(tests: list[dict], source_root: Path, build_dir: Path) -> dict:
     """The base projection a tree with exactly these registrations would record."""
-    return inventory.project_registrations({"tests": tests}, source_root, build_dir)
+    return inventory.project_registrations({"tests": tests}, source_root, build_dir,
+                                           shape="configure")
 
 
 def selection_receipt(
@@ -601,9 +605,10 @@ class ChangedSurfaceExecutionTest(unittest.TestCase):
         tests = [fixture("smoke"), fixture("core"), fixture("neighbor")]
         base = base_of(tests, source, build)
         drifted = copy.deepcopy(tests)
-        # A build-tree program is not compared (an unbuilt base lists none);
-        # its arguments and properties are.
-        drifted[1]["command"].append("--changed")
+        # A build-tree program and its arguments are not compared: ctest lists
+        # an unbuilt one as a bare empty command, so a configure-only base
+        # carries neither. Its name and properties are compared.
+        drifted[1]["properties"] = [*drifted[1]["properties"], {"name": "TIMEOUT", "value": 9}]
         with self.assertRaisesRegex(runner.SelectionExecutionError, "differ from the protected base"):
             runner.validate_selection(
                 selected_names=["smoke", "core"],
@@ -1132,7 +1137,7 @@ class BaseInventoryTest(unittest.TestCase):
         built = [fixture("smoke"), fixture("core"), fixture("neighbor")]
         unbuilt = copy.deepcopy(built)
         for test in unbuilt:
-            test["command"][0] = ""  # a configure-only tree lists no program yet
+            test["command"] = [""]  # a configure-only tree lists no program yet
         base = base_of(unbuilt, source, build)
         self.assertFalse(base["recordable"])
         runner.validate_registrations_match_base({"tests": built}, source, build, base)
@@ -1391,6 +1396,72 @@ class BaseInventoryTest(unittest.TestCase):
         with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
             runner.validate_registrations_match_base({"tests": cold}, source, build, base)
 
+    @staticmethod
+    def cold_and_built_trees() -> tuple[list[dict], list[dict]]:
+        """One add_test registration and one Catch2 executable, before and after
+        the build: unbuilt, ctest lists a bare empty command and the discovery
+        placeholder; built, the program's path and each discovered case, which
+        carries no backtrace."""
+        cold = [fixture("smoke"), {**fixture("unit_tests_NOT_BUILT-abc1234"), "command": []}]
+        cold[0]["command"] = [""]
+        cold[1].pop("backtrace")
+        built = [fixture("smoke")]
+        for case in ("adds", "clamps", "rounds"):
+            discovered = fixture(case, "/repo/build/bin/unit_tests")
+            discovered.pop("backtrace")
+            built.append(discovered)
+        return cold, built
+
+    def test_an_unknown_projection_shape_refuses_rather_than_listing(self) -> None:
+        # A misspelt shape must not fall back to the listing shape: a built
+        # tree compared in listing shape refuses every bounded run after its
+        # full build, which is the failure the configure shape exists to end.
+        cold, _ = self.cold_and_built_trees()
+        with self.assertRaisesRegex(ValueError, "unknown projection shape 'confgure'"):
+            inventory.project_registrations({"tests": cold}, Path("/repo"), Path("/repo/build"),
+                                            shape="confgure")
+
+    def test_a_placeholder_and_its_discovered_cases_fold_to_one_row(self) -> None:
+        source, build = Path("/repo"), Path("/repo/build")
+        cold, built = self.cold_and_built_trees()
+        shaped = [inventory.project_registrations({"tests": tree}, source, build, shape="configure")
+                  for tree in (cold, built)]
+        self.assertEqual(inventory.projection_differences(*shaped), [])
+        self.assertIn({"row": {"executable": "unit_tests", "kind": "discovered"}, "count": 1},
+                      shaped[1]["rows"])
+        # The listing shape keeps every case, which is why it cannot compare them.
+        listed = inventory.project_registrations({"tests": built}, source, build)
+        self.assertEqual(listed["row_count"], 4)
+
+    def test_a_built_tree_matches_its_own_prebuild_snapshot(self) -> None:
+        source, build = Path("/repo"), Path("/repo/build")
+        cold, built = self.cold_and_built_trees()
+        snapshot = inventory.project_registrations({"tests": cold}, source, build, shape="configure")
+        runner.validate_registrations_match_base(
+            {"tests": built}, source, build, snapshot, reference_label=runner.PREBUILD_SNAPSHOT)
+
+    def test_a_registration_added_during_the_build_refuses_by_name(self) -> None:
+        # A CMake re-run mid-build (a glob or generated input changed) can
+        # register a test the pre-build check never saw.
+        source, build = Path("/repo"), Path("/repo/build")
+        cold, built = self.cold_and_built_trees()
+        snapshot = inventory.project_registrations({"tests": cold}, source, build, shape="configure")
+        with self.assertRaisesRegex(
+                runner.SelectionExecutionError,
+                r"differ from this tree before the build; .*only in this tree: .*\"name\":\"late\""):
+            runner.validate_registrations_match_base(
+                {"tests": [*built, fixture("late")]}, source, build, snapshot,
+                reference_label=runner.PREBUILD_SNAPSHOT)
+
+    def test_a_built_tree_still_missing_a_command_refuses_against_its_snapshot(self) -> None:
+        source, build = Path("/repo"), Path("/repo/build")
+        cold, built = self.cold_and_built_trees()
+        snapshot = inventory.project_registrations({"tests": cold}, source, build, shape="configure")
+        built[0]["command"] = [""]
+        with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build; require full suite: smoke$"):
+            runner.validate_registrations_match_base(
+                {"tests": built}, source, build, snapshot, reference_label=runner.PREBUILD_SNAPSHOT)
+
     def test_a_registration_left_without_a_command_after_the_build_refuses(self) -> None:
         source, build = Path("/repo"), Path("/repo/build")
         tests = [fixture("smoke"), fixture("core")]
@@ -1399,7 +1470,8 @@ class BaseInventoryTest(unittest.TestCase):
         hollow[1]["command"] = [""]
         with self.assertRaisesRegex(runner.SelectionExecutionError, "no command after the build"):
             runner.validate_registrations_match_base({"tests": hollow}, source, build, base)
-        self.assertEqual(inventory.name_only_rows(base_of(hollow, source, build)), 1)
+        listed = inventory.project_registrations({"tests": hollow}, source, build)
+        self.assertEqual(inventory.name_only_rows(listed), 1)
 
     def test_unavailable_base_falls_back_to_the_full_suite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1428,6 +1500,119 @@ class BaseInventoryTest(unittest.TestCase):
             self.assertTrue(args._changed_surface_fallback_safe)
             execute.assert_not_called()
 
+
+
+class SelectedLegPipelineTest(unittest.TestCase):
+    """Every gate of the selected leg, in the lane's order, across the three
+    states a cold lane checkout passes through: configured only, selected
+    targets built, everything built. Only process and ctest I/O is faked; every
+    check runs as the lane runs it, so a gap between states fails here rather
+    than in a proof run."""
+
+    PLACEHOLDER = "unit_tests_NOT_BUILT-abc1234"
+
+    def tree(self, build: Path) -> dict[str, list[dict]]:
+        tool = str(build / "bin" / "tool")
+        direct = [fixture("smoke", tool), fixture("core", tool), fixture("neighbor", tool)]
+        for test in direct:
+            test["properties"] = [{"name": "WORKING_DIRECTORY", "value": str(build)}]
+        # Catch2's discovery placeholder, with the generated include file that
+        # proves it, until the full build writes the real case list.
+        cases = build / "unit_tests-abc1234_tests.cmake"
+        (build / "unit_tests-abc1234_include.cmake").write_text(
+            f'if(EXISTS "{cases}")\n  include("{cases}")\nelse()\n'
+            f"  add_test({self.PLACEHOLDER} {self.PLACEHOLDER})\nendif()\n", encoding="utf-8")
+        placeholder = {"name": self.PLACEHOLDER,
+                       "properties": [{"name": "WORKING_DIRECTORY", "value": str(build)}]}
+        # A validator this host resolved to a path that does not exist.
+        validator = {"name": "pluginval-Example-VST3", "properties": [
+            {"name": "LABELS", "value": ["validation", "vst3"]},
+            {"name": "WORKING_DIRECTORY", "value": str(build)}]}
+        discovered = []
+        for case in ("adds", "clamps"):
+            test = {"name": case, "command": [str(build / "bin" / "unit_tests"), case],
+                    "properties": [{"name": "WORKING_DIRECTORY", "value": str(build)}]}
+            discovered.append(test)
+        return {"cold": [*direct, placeholder, validator],
+                "built": [*direct, *discovered, validator]}
+
+    def run_pipeline(self, late_registration: bool = False) -> tuple[int, list[str], dict]:
+        with tempfile.TemporaryDirectory() as directory:
+            build = Path(directory).resolve()
+            states = self.tree(build)
+            if late_registration:
+                states["built"].append(fixture("late", str(build / "bin" / "tool")))
+                states["built"][-1]["properties"] = [
+                    {"name": "WORKING_DIRECTORY", "value": str(build)}]
+            source = runner.REPO_ROOT
+            base = inventory.project_registrations(
+                {"tests": states["cold"]}, source, build, shape="configure")
+            current = {"state": "cold"}
+            steps: list[str] = []
+
+            def listing(_build_dir, selected_file=None):
+                tests = states[current["state"]]
+                if selected_file is None:
+                    return {"tests": tests}
+                names = set(Path(selected_file).read_text().split())
+                return [test for test in tests if test["name"] in names]
+
+            real_run = subprocess.run
+
+            def execute(argv, **kwargs):
+                text = " ".join(map(str, argv))
+                if argv[0] in ("git", "ctest") and "--test-dir" not in argv:
+                    return real_run(argv, **kwargs)  # read-only tool queries
+                if "build-dir-sentinel" in text:
+                    return subprocess.CompletedProcess(argv, 0)
+                if "--build" in argv:
+                    step = "selected build" if "--target" in argv else "full build"
+                    if step == "full build":
+                        current["state"] = "built"
+                else:
+                    step = "selected tests" if "--tests-from-file" in text else "full tests"
+                steps.append(step)
+                return subprocess.CompletedProcess(argv, 0)
+
+            receipt = selection_receipt(["smoke", "core"], ["tool"])
+            (build / "config.toml").write_text("# mocked\n", encoding="utf-8")
+            args = mock.Mock(config=build / "config.toml", selection_receipt_b64="e",
+                             selection_receipt_sha256="0" * 64, target="mac")
+            results = build / "results"
+            with (
+                mock.patch.dict(os.environ, {"SHIPYARD_CHANGED_SURFACE_COMPARE_FULL": "1",
+                                             "SHIPYARD_CHANGED_SURFACE_RESULT_DIR": str(results)}),
+                mock.patch.object(runner, "decode_selection_receipt", return_value=(
+                    ["smoke", "core"], b"smoke\ncore\n", ["tool"], b"tool\n", receipt)),
+                mock.patch.object(runner, "validate_receipt_identity"),
+                mock.patch.object(runner, "require_ctest_version"),
+                mock.patch.object(runner, "load_policy", return_value=policy()),
+                mock.patch.object(runner.inventory, "source_root_for_build", return_value=source),
+                mock.patch.object(runner, "validate_build_configuration"),
+                mock.patch.object(runner, "base_projection", return_value=base),
+                mock.patch.object(runner, "validate_build_target_projection"),
+                mock.patch.object(runner, "ctest_payload", side_effect=lambda b: listing(b)),
+                mock.patch.object(runner, "ctest_json", side_effect=listing),
+                mock.patch.object(runner.subprocess, "run", side_effect=execute),
+            ):
+                code = runner.run_locked(args, build)
+            receipts = sorted(results.glob("*.json")) if results.is_dir() else []
+            receipt_doc = json.loads(receipts[-1].read_text()) if receipts else {}
+            return code, steps, receipt_doc
+
+    def test_a_cold_tree_runs_every_gate_and_executes_the_bounded_plan(self) -> None:
+        code, steps, result = self.run_pipeline()
+        self.assertEqual(code, 0)
+        self.assertEqual(steps, ["selected build", "selected tests", "full build", "full tests"])
+        self.assertEqual(result.get("comparison_verdict"), "matched_pass", result)
+        self.assertIs(result.get("graduation_eligible"), True)
+        self.assertEqual(result.get("selected_returncode"), 0)
+        self.assertEqual(result.get("prebuild_unbuilt_placeholder_count"), 1)
+
+    def test_a_registration_added_by_the_build_refuses_against_the_prebuild_snapshot(self) -> None:
+        with self.assertRaisesRegex(runner.SelectionExecutionError,
+                                    "differ from this tree before the build; .*late"):
+            self.run_pipeline(late_registration=True)
 
 if __name__ == "__main__":
     unittest.main()

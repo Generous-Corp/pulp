@@ -112,6 +112,10 @@ public:
                              bool& outWritable) override;
     OSStatus GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
                          AudioUnitElement inElement, void* outData) override;
+    // Accepts the host's kAudioUnitProperty_OfflineRender write.
+    OSStatus SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                         AudioUnitElement inElement, const void* inData,
+                         UInt32 inDataSize) override;
 
     OSStatus Initialize() override;
     void Cleanup() override;
@@ -205,6 +209,10 @@ private:
     // `ProcessContext`. Default-constructed so the first Render() call
     // after Initialize() reports no changes.
     detail::PlayheadSnapshot playhead_prev_{};
+
+    // Host offline-render intent (kAudioUnitProperty_OfflineRender), written by
+    // the host before a faster-than-realtime bounce and read each render block.
+    OfflineRenderProperty offline_render_;
 };
 
 } // namespace pulp::format::au

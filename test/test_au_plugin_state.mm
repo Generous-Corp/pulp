@@ -1955,6 +1955,234 @@ TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext"
     }
 }
 
+// ── Offline rendering ────────────────────────────────────────────────────────
+//
+// A host bouncing faster than realtime (Logic's bounce, REAPER's render) tells
+// the plug-in so: AU v2 through kAudioUnitProperty_OfflineRender, AU v3 through
+// AUAudioUnit.renderingOffline. A processor that does work on a worker thread
+// relies on ProcessContext::is_offline() to wait for it instead of adopting a
+// late result, so every adapter must surface the host's flag on each block.
+
+namespace {
+
+OSStatus set_auv2_offline(ausdk::AUBase& unit, UInt32 value) {
+    return unit.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                    kAudioUnitScope_Global, 0, &value,
+                                    sizeof(value));
+}
+
+UInt32 get_auv2_offline(ausdk::AUBase& unit) {
+    UInt32 value = 0xFFFF;
+    REQUIRE(unit.DispatchGetProperty(kAudioUnitProperty_OfflineRender,
+                                     kAudioUnitScope_Global, 0, &value) == noErr);
+    return value;
+}
+
+} // namespace
+
+TEST_CASE("AU v2 effect reports host offline rendering through ProcessContext",
+          "[au][auv2][offline]") {
+    ScopedFactoryRegistration registration(create_effect_processor);
+
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                          kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    pulp::format::au::PulpAUEffect effect(nullptr);
+    auto* processor = g_last_effect_processor;
+    REQUIRE(processor != nullptr);
+    effect.CreateElements();
+    REQUIRE(effect.Input(0).SetStreamFormat(format) == noErr);
+    REQUIRE(effect.Output(0).SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                       kAudioUnitScope_Global, 0,
+                                       &max_frames, sizeof(max_frames)) == noErr);
+    REQUIRE(effect.DoInitialize() == noErr);
+
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(effect.DispatchGetPropertyInfo(kAudioUnitProperty_OfflineRender,
+                                           kAudioUnitScope_Global, 0, size,
+                                           writable) == noErr);
+    REQUIRE(size == sizeof(UInt32));
+    REQUIRE(writable);
+    REQUIRE(get_auv2_offline(effect) == 0);
+
+    float in_l[kFrames] = {};
+    float in_r[kFrames] = {};
+    float out_l[kFrames] = {};
+    float out_r[kFrames] = {};
+    struct StereoBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[1];
+    };
+    auto render = [&] {
+        StereoBufferList input{};
+        input.list.mNumberBuffers = 2;
+        input.list.mBuffers[0] = {1, kFrames * sizeof(float), in_l};
+        input.list.mBuffers[1] = {1, kFrames * sizeof(float), in_r};
+        StereoBufferList output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0] = {1, kFrames * sizeof(float), out_l};
+        output.list.mBuffers[1] = {1, kFrames * sizeof(float), out_r};
+        AudioUnitRenderActionFlags flags = 0;
+        REQUIRE(effect.ProcessBufferLists(flags, input.list, output.list,
+                                          kFrames) == noErr);
+        return processor->last_context;
+    };
+
+    const auto live = render();
+    REQUIRE(live.process_mode == pulp::format::ProcessMode::Realtime);
+    REQUIRE(live.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
+
+    REQUIRE(set_auv2_offline(effect, 1) == noErr);
+    REQUIRE(get_auv2_offline(effect) == 1);
+    const auto bounce = render();
+    REQUIRE(bounce.is_offline());
+    REQUIRE(bounce.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+    REQUIRE(bounce.allows_offline_quality_work());
+
+    REQUIRE(set_auv2_offline(effect, 0) == noErr);
+    REQUIRE(get_auv2_offline(effect) == 0);
+    REQUIRE(render().is_realtime());
+
+    // Only global scope carries the property, and a short payload is rejected
+    // rather than read past its end.
+    UInt32 one = 1;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                       kAudioUnitScope_Input, 0, &one,
+                                       sizeof(one)) == kAudioUnitErr_InvalidScope);
+    const std::uint8_t short_payload = 1;
+    REQUIRE(effect.DispatchSetProperty(kAudioUnitProperty_OfflineRender,
+                                       kAudioUnitScope_Global, 0, &short_payload,
+                                       sizeof(short_payload)) ==
+            kAudioUnitErr_InvalidPropertyValue);
+    REQUIRE(get_auv2_offline(effect) == 0);
+
+    effect.DoCleanup();
+}
+
+TEST_CASE("AU v2 instrument reports host offline rendering through ProcessContext",
+          "[au][auv2][instrument][offline]") {
+    ScopedFactoryRegistration registration(create_instrument_processor);
+
+    constexpr UInt32 kFrames = 64;
+    AudioStreamBasicDescription format{};
+    format.mSampleRate = 48000.0;
+    format.mFormatID = kAudioFormatLinearPCM;
+    format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                          kAudioFormatFlagIsNonInterleaved;
+    format.mBytesPerPacket = sizeof(float);
+    format.mFramesPerPacket = 1;
+    format.mBytesPerFrame = sizeof(float);
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel = 32;
+
+    pulp::format::au::PulpAUInstrument instrument(nullptr);
+    auto* processor = g_last_instrument_processor;
+    REQUIRE(processor != nullptr);
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(format) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(kAudioUnitProperty_MaximumFramesPerSlice,
+                                           kAudioUnitScope_Global, 0, &max_frames,
+                                           sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->last_context.is_realtime());
+
+    REQUIRE(set_auv2_offline(instrument, 1) == noErr);
+    REQUIRE(get_auv2_offline(instrument) == 1);
+    timestamp.mSampleTime += kFrames;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->last_context.is_offline());
+    REQUIRE(processor->last_context.render_speed_hint ==
+            pulp::format::RenderSpeedHint::FasterThanRealtime);
+
+    REQUIRE(set_auv2_offline(instrument, 0) == noErr);
+    timestamp.mSampleTime += kFrames;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    REQUIRE(processor->last_context.is_realtime());
+
+    instrument.DoCleanup();
+}
+
+TEST_CASE("AU v3 reports renderingOffline through ProcessContext",
+          "[au][auv3][offline]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TOff';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+
+        NSError* allocate_error = nil;
+        REQUIRE([unit allocateRenderResourcesAndReturnError:&allocate_error]);
+        REQUIRE(allocate_error == nil);
+
+        constexpr UInt32 kFrames = 8;
+        float left[kFrames] = {};
+        float right[kFrames] = {};
+        struct StereoBufferList {
+            AudioBufferList list;
+            AudioBuffer extra[1];
+        } output{};
+        output.list.mNumberBuffers = 2;
+        output.list.mBuffers[0] = {1, kFrames * sizeof(float), left};
+        output.list.mBuffers[1] = {1, kFrames * sizeof(float), right};
+
+        AUInternalRenderBlock block = [unit internalRenderBlock];
+        REQUIRE(block != nil);
+        auto render = [&] {
+            AudioUnitRenderActionFlags flags = 0;
+            AudioTimeStamp timestamp{};
+            REQUIRE(block(&flags, &timestamp, kFrames, 0, &output.list,
+                          nullptr, nil) == noErr);
+            return processor->last_context;
+        };
+
+        REQUIRE(render().is_realtime());
+
+        unit.renderingOffline = YES;
+        const auto bounce = render();
+        REQUIRE(bounce.is_offline());
+        REQUIRE(bounce.render_speed_hint ==
+                pulp::format::RenderSpeedHint::FasterThanRealtime);
+
+        unit.renderingOffline = NO;
+        REQUIRE(render().is_realtime());
+
+        [unit deallocateRenderResources];
+        [unit release];
+    }
+}
+
 TEST_CASE("AU v3 render block rejects frame counts above maximumFramesToRender",
           "[au][auv3][render][bounds]") {
     @autoreleasepool {

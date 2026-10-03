@@ -33,6 +33,14 @@ HEAVY = "core/a/include/pulp/a/heavy.hpp"
 UMBRELLA = "core/a/include/pulp/a/umbrella.hpp"
 
 
+QUIET_GIT_CONFIG = (
+    ("maintenance.auto", "false"),
+    ("gc.auto", "0"),
+    ("core.fsmonitor", "false"),
+    ("commit.gpgsign", "false"),
+)
+
+
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True
@@ -53,6 +61,13 @@ class FixtureRepo:
         git(root, "init", "-q", "-b", "main")
         git(root, "config", "user.email", "t@example.com")
         git(root, "config", "user.name", "t")
+        # Every `git commit` spawns `git maintenance run --auto --detach`,
+        # which can still be writing under .git while TemporaryDirectory
+        # removes the tree ("Directory not empty: '.git'"). Nothing here may
+        # outlive the git command that started it, or depend on the host's
+        # signing setup.
+        for key, value in QUIET_GIT_CONFIG:
+            git(root, "config", key, value)
         write(root, HEAVY, "#pragma once\nstruct Heavy {};\n")
         write(root, UMBRELLA, "#pragma once\n#include <vector>\nstruct Umbrella {};\n")
         for i in range(30):
@@ -116,6 +131,25 @@ class IncludeGraphTests(unittest.TestCase):
         files = ["h1.hpp", "h2.hpp", "a.cpp", "b.mm"]
         graph = hfg.IncludeGraph(files, {"h2.hpp": ["h1.hpp"], "a.cpp": ["h2.hpp"], "b.mm": ["h1.hpp"]})
         self.assertEqual(graph.translation_units("h1.hpp"), {"a.cpp", "b.mm"})
+
+
+class FixtureRepoTests(unittest.TestCase):
+    def test_a_fixture_commit_leaves_no_background_git_behind(self) -> None:
+        # A merge-group run failed in cleanup: a detached auto-maintenance
+        # started by a fixture commit was still writing under .git.
+        with tempfile.TemporaryDirectory() as raw:
+            (Path(raw) / "repo").mkdir()
+            repo = FixtureRepo(Path(raw) / "repo")
+            trace = Path(raw) / "trace.json"
+            write(repo.root, "extra.txt", "x\n")
+            git(repo.root, "add", ".")
+            subprocess.run(["git", "-C", str(repo.root), "commit", "-q", "-m", "extra"],
+                           check=True, capture_output=True,
+                           env=dict(os.environ, GIT_TRACE2_EVENT=str(trace)))
+            spawned = trace.read_text(encoding="utf-8")
+            self.assertIn('"commit"', spawned, "the trace did not record the commit")
+            self.assertNotIn('"maintenance"', spawned)
+            self.assertNotIn("ssh-keygen", spawned)
 
 
 class GuardEndToEndTests(unittest.TestCase):

@@ -102,9 +102,14 @@ class SharedIoStampedBridge {
     }
     Callback begin_callback(std::span<const float> samples, std::uint64_t sequence,
                             std::uint64_t callback_start_ns = 0) noexcept;
-    void request_recovery(SharedIoRecoveryReason reason) noexcept;
+    void
+    request_recovery(SharedIoRecoveryReason reason,
+                     std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept;
     SharedIoRecoveryReason recovery_reason() const noexcept {
         return recovery_reason_.load(std::memory_order_acquire);
+    }
+    std::uint64_t recovery_sequence() const noexcept {
+        return recovery_sequence_.load(std::memory_order_acquire);
     }
     bool complete_callback_delivery(const Callback&, SharedIoDeliveryDisposition,
                                     std::uint64_t callback_end_ns = 0,
@@ -176,6 +181,7 @@ class SharedIoStampedBridge {
     Delivery observed_delivery_ = Delivery::Invalid;
     std::atomic<unsigned> admission_gate_{0}; // open bit 1, worker reservation bit 2
     std::atomic<SharedIoRecoveryReason> recovery_reason_{SharedIoRecoveryReason::None};
+    std::atomic<std::uint64_t> recovery_sequence_{std::numeric_limits<std::uint64_t>::max()};
     bool trace_output_eligible_ = false; // callback only
     std::atomic<std::uint64_t> delivery_epoch_{0};
     std::uint64_t last_epoch_ = 0;    // worker only

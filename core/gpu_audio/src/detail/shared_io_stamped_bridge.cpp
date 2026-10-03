@@ -80,15 +80,15 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint6
     if (!prepared_)
         return {};
     if (callback_open_ || delivery_pending_ || samples.size() != sample_count_) {
-        request_recovery(SharedIoRecoveryReason::InvalidCallback);
+        request_recovery(SharedIoRecoveryReason::InvalidCallback, sequence);
         return {};
     }
     if (sequence < next_sequence_) {
-        request_recovery(SharedIoRecoveryReason::InvalidCallback);
+        request_recovery(SharedIoRecoveryReason::InvalidCallback, sequence);
         return {};
     }
     if (sequence > next_sequence_)
-        request_recovery(SharedIoRecoveryReason::SequenceGap);
+        request_recovery(SharedIoRecoveryReason::SequenceGap, sequence);
     next_sequence_ = sequence;
     if (next_sequence_ >= kSequenceLimit)
         return {{}, Admission::SequenceExhausted};
@@ -112,7 +112,7 @@ SharedIoStampedBridge::begin_callback(std::span<const float> samples, std::uint6
     if (result != Publication::Published) {
         if (trace_telemetry_)
             trace_telemetry_->record_input_drop();
-        request_recovery(SharedIoRecoveryReason::InputSaturated);
+        request_recovery(SharedIoRecoveryReason::InputSaturated, current_.sequence);
     }
     return {current_, result == Publication::Published ? Admission::Accepted : Admission::Full};
 }
@@ -342,12 +342,14 @@ bool SharedIoStampedBridge::complete_callback_delivery(const Callback& callback,
     return true;
 }
 
-void SharedIoStampedBridge::request_recovery(SharedIoRecoveryReason reason) noexcept {
+void SharedIoStampedBridge::request_recovery(SharedIoRecoveryReason reason,
+                                             std::uint64_t sequence) noexcept {
     if (reason == SharedIoRecoveryReason::None)
         return;
     suspend_delivery();
     auto expected = SharedIoRecoveryReason::None;
-    (void)recovery_reason_.compare_exchange_strong(expected, reason, std::memory_order_acq_rel);
+    if (recovery_reason_.compare_exchange_strong(expected, reason, std::memory_order_acq_rel))
+        recovery_sequence_.store(sequence, std::memory_order_release);
 }
 
 void SharedIoStampedBridge::suspend_delivery() noexcept {
@@ -366,6 +368,7 @@ bool SharedIoStampedBridge::activate_epoch(std::uint64_t epoch) noexcept {
     ingress_.read.store(ingress_.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
     egress_.read.store(egress_.write.load(std::memory_order_relaxed), std::memory_order_relaxed);
     recovery_reason_.store(SharedIoRecoveryReason::None, std::memory_order_release);
+    recovery_sequence_.store(std::numeric_limits<std::uint64_t>::max(), std::memory_order_release);
     last_epoch_ = epoch;
     epoch_first_sequence_ = next_sequence_;
     finalized_.reset();

@@ -659,6 +659,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME reuse-policy-replay-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/scripts/test_reuse_policy_replay.py")
         set_tests_properties(reuse-policy-replay-selftest PROPERTIES TIMEOUT 120)
+        # Shadow-plan ranking over every PR head, and the advisory workflow
+        # that records those plans without gating or executing anything.
+        add_test(NAME changed-surface-shadow-plans-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_changed_surface_shadow_plans.py")
+        set_tests_properties(changed-surface-shadow-plans-selftest PROPERTIES TIMEOUT 120)
         # Cross-VM test-binary identity measurement (per-binary receipt reuse
         # precondition), annotated by merge-group macos jobs after the build.
         add_test(NAME binary-identity-shadow-selftest COMMAND ${Python3_EXECUTABLE}
@@ -684,6 +689,11 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME link-members-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_link_members.py")
         set_tests_properties(link-members-selftest PROPERTIES TIMEOUT 120)
+        # Test read audit: strace log parsing, path resolution and the diff of
+        # measured checkout reads against pulp_test_data declarations.
+        add_test(NAME read-audit-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_read_audit.py")
+        set_tests_properties(read-audit-selftest PROPERTIES TIMEOUT 120)
         # Per-target codemodel digests in the reuse record: relocation
         # stability and which part moves with which change.
         add_test(NAME codemodel-digest-selftest COMMAND ${Python3_EXECUTABLE}
@@ -693,6 +703,10 @@ if(Python3_Interpreter_FOUND)
         # identity carry the `commit-bound` label a reuse policy keys on.
         add_test(NAME commit-bound-labels-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_commit_bound_labels.py")
+        # pluginval lookup survives CMake's doubled app-bundle path.
+        add_test(NAME find-pluginval-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/ci/test_find_pluginval.py")
+        set_tests_properties(find-pluginval-selftest PROPERTIES TIMEOUT 120)
         # The commit-bound helpers label catch-discovered tests and write the
         # declarations the reuse record reads (configures a small project).
         add_test(NAME commit-bound-cmake-selftest COMMAND ${Python3_EXECUTABLE}

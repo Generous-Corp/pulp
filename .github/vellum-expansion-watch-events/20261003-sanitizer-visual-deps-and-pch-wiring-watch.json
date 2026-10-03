@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "authority-expansion-watch-change",
+  "event_id": "20261003-sanitizer-visual-deps-and-pch-wiring-watch",
+  "created_at": "2026-10-03T09:00:00Z",
+  "acceptance_id": "full-design-import-render-v1-pulp-watch",
+  "acceptance_sha256": "1535d76e34dfc80eda55247c1b0d47b9f47b3e58a08b6f1ab4b749692e6056fd",
+  "capability_families": [
+    "visual-proof-harness"
+  ],
+  "rationale": "Record that the visual-analysis Python install moves from an inline build.yml step into tools/ci/install_visual_python_deps.sh, which build.yml and the four sanitizer jobs now call, so visual-python-deps-present is answerable in every job that runs ctest. The installed set (tools/motion/visual/requirements.lock), its hash pinning, the configured-interpreter resolution, the wheelhouse path and the retries are unchanged byte for byte; the step test now runs the script and pins which jobs call it. pch_wiring_check also reads the Makefile generator's per-object PCH options. No visual harness fixture, golden, threshold, capture path, renderer, importer or Vellum-owned source changes, and no authority moves.",
+  "tests": [
+    "vellum-expansion-watch",
+    "visual-python-deps-present",
+    "test-pch-wiring"
+  ],
+  "disposition": "watch-only-no-authority",
+  "authority_effect": "none"
+}

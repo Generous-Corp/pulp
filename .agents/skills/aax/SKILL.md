@@ -361,6 +361,17 @@ adapter-side code that instantiates a throwaway processor to read metadata must
 do the same; `[aax][model][latency]` in `test_aax_model.cpp` covers it SDK-free
 with a processor whose latency is a parameter default.
 
+### The editor opens on the plug-in's own background
+
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in").
+
 ### The editor's GPU surface is a SUBSCRIPTION, not a one-shot read
 
 `aax_effect_gui.cpp` must not sample `host_->gpu_surface()` once and hand
@@ -382,6 +393,17 @@ if (!host_->try_attach_to_parent(parent)) { gpu_surface_binding_.reset(); ... }
 Reset the subscription in `teardown()` before `bridge_->close()` — the
 observer writes into the session that call destroys. Full contract:
 the `view-bridge` skill's "GpuSurface plumbing into WidgetBridge".
+
+### Offline render is visible only for AudioSuite instances
+
+AAX gives an Insert no offline-bounce signal, so a Pro Tools bounce of an insert
+still reports `ProcessMode::Realtime`. An AudioSuite instance does render
+offline: `GenerateCoefficients()` asks `AAX_IController::GetIsAudioSuite()` and
+writes the answer into the **last** parameter-packet slot
+(`render_mode_packet_slot()`, after bypass at 0 and the parameters at 1..N), and
+the algorithm decodes it with `process_mode_from_packet()`. The packet is
+therefore `parameters + 2` floats; a change to the packet layout must keep the
+render-mode slot last and update `test_aax_model.cpp`.
 
 ## Review Checklist
 

@@ -919,7 +919,25 @@ edge after every tool directory has been read. An inline
 `if(TARGET <tool>)` in `test/cmake` is evaluated too early and creates no
 edge. An executable whose sources call a process API with no such edge and no
 reviewed `pulp_test_spawns(<test> NONE)` is `spawns: undeclared`, and the
-shadow selects it on every change.
+shadow selects it on every change. So is one whose code names a built
+program (a string such as `"pulp-cpp"`) that no edge reaches and no reviewed
+`pulp_test_spawns(<test> NOT_RUN <target>)` covers, and one whose declared
+tool this configuration does not build.
+
+The declarations come from a static scan, so a nightly **read audit**
+(`.github/workflows/read-audit-nightly.yml`, `tools/ci/read_audit.py`)
+measures them. On a GitHub-hosted Linux runner it builds the tree, runs every
+compiled test executable's ctest registrations under `strace -f`, and diffs
+the tracked checkout files they open, list or probe against the executable's
+declared inputs. It uses the selector's own prefix-or-glob match, and CMake
+files count as covered because a CMake change already reruns everything. Each
+undeclared access is reported with its executable, its test and the program
+that made it. Before the tests, a control program goes through the same
+ctest and strace path. It reads one undeclared and one declared tracked
+file, and the run fails with no verdict unless only the undeclared one is
+flagged. The report names what it cannot see: macOS-only executables, targets
+that did not build, script-driven tests, and relative paths whose directory
+was unknown.
 
 After the full ctest run, a merge-group `macos` job also annotates the
 **affected-test set in shadow mode** (`pulp-affected-tests-shadow/v1`, from
@@ -996,12 +1014,18 @@ the head issued no receipt (annotation field `source: reuse-record`). The
 macOS gate also configures with `-DPULP_RECORD_LINK_MAPS=ON`
 (`tools/cmake/PulpLinkMaps.cmake`): every link runs through
 `tools/ci/link-members-launcher.sh`, which adds `-Wl,-map`, returns the
-linker's status, and for an executable keeps only the map's object list and
-the link arguments under `<build>/link-members/` (the map, megabytes of
-symbol table, is deleted). The linked bytes are identical with and without
-it. `link-members-<sha>.json` in the record then lists, per executable, the
-archive members its link pulled, with `whole` set on archives the link line
-force-loads (`-force_load`, `-all_load`, `-ObjC`). `codemodel-<sha>.json`
+linker's status, and for an executable, a loadable module (a `-bundle`
+link: plug-in bundles, LV2 binaries, reload probes) or a shared library keeps
+only the map's object list and the link arguments under `<build>/link-members/`
+(the map, megabytes of symbol table, is deleted). The linked bytes are
+identical with and without it. `link-members-<sha>.json` in the record then
+lists, per link (each entry's `kind`: `executable`, `module` or `shared`;
+schema `pulp-link-members/v3`), the archive members it pulled, with `whole`
+set on archives the link line force-loads (`-force_load`, `-all_load`,
+`-ObjC`); partial links (`-r`) are only counted, as `unrecorded`. Every reader
+calls `link_members.unusable()` first and treats an unknown schema, a `shared`
+link (its content reaches the binaries that load it without changing their
+maps) or an unrecorded link as no record at all, and the record job warns. `codemodel-<sha>.json`
 (`tools/ci/codemodel_digest.py`) holds, per CMake target, digests of its
 source list, compile groups, link line and the ctest registrations that run
 its artifact, read from the file-API codemodel reply the configure step
@@ -6902,7 +6926,11 @@ validates it.
 
 `build.yml`'s `Install visual-analysis Python dependencies` step installs the
 declared set (`tools/motion/visual/requirements.txt`) so the non-skippable
-`visual-python-deps-present` ctest stays answerable. It used to pass
+`visual-python-deps-present` ctest stays answerable. The step body lives in
+`tools/ci/install_visual_python_deps.sh <build-dir>`, which every job that runs
+a broad ctest calls after configuring, the sanitizer jobs included; those once
+ran ctest without it, so the check failed in every ASan, TSan, UBSan and RTSan
+run. It used to pass
 `--upgrade`, which asks PyPI for a newer wheel *even when the requirement is
 already met* — turning "pypi.org is reachable from this VM" into a precondition
 of the **required** `macos` check.

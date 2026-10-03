@@ -21,10 +21,12 @@ PluginDescriptor/format metadata, not a parallel `PRODUCES_MIDI` CMake flag.
 get_filename_component(_repo_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(_metadata "${_repo_root}/tools/cmake/PulpPluginMetadata.cmake")
 set(_utils "${_repo_root}/tools/cmake/PulpUtils.cmake")
+set(_reload "${_repo_root}/tools/cmake/PulpReload.cmake")
+set(_install "${_repo_root}/tools/cmake/PulpInstall.cmake")
 set(_reference "${_repo_root}/docs/reference/cmake.md")
 set(_status "${_repo_root}/docs/status/cmake-functions.yaml")
 
-foreach(_path IN LISTS _metadata _utils _reference _status)
+foreach(_path IN LISTS _metadata _utils _reload _install _reference _status)
     if(NOT EXISTS "${_path}")
         message(FATAL_ERROR "Required file missing: ${_path}")
     endif()
@@ -130,6 +132,8 @@ if(_fail)
 endif()
 
 file(READ "${_utils}" _utils_text)
+file(READ "${_reload}" _reload_text)
+file(READ "${_install}" _install_text)
 if(NOT _utils_text MATCHES "PulpPluginMetadata\\.cmake")
     message(FATAL_ERROR "PulpUtils.cmake must include PulpPluginMetadata.cmake")
 endif()
@@ -155,7 +159,7 @@ foreach(_utils_reload_marker IN ITEMS
         "function\\(pulp_add_reload_logic"
         "function\\(pulp_reload_host"
         "function\\(pulp_reload_host_ui")
-    if(NOT _utils_text MATCHES "${_utils_reload_marker}")
+    if(NOT _utils_text MATCHES "${_utils_reload_marker}" AND NOT _reload_text MATCHES "${_utils_reload_marker}" AND NOT _install_text MATCHES "${_utils_reload_marker}")
         message(FATAL_ERROR
             "PulpUtils.cmake must preserve hot-reload/reload-host surface: "
             "missing ${_utils_reload_marker}")

@@ -148,6 +148,8 @@ OSStatus PulpAUMidiProcessor::GetPropertyInfo(AudioUnitPropertyID inID,
                                               UInt32& outDataSize,
                                               bool& outWritable)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.property_info(inScope, outDataSize, outWritable);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_property_info(store_, inScope, outDataSize,
                                                   outWritable);
@@ -206,6 +208,8 @@ OSStatus PulpAUMidiProcessor::GetProperty(AudioUnitPropertyID inID,
                                           AudioUnitElement inElement,
                                           void* outData)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.get(inScope, outData);
     if (inID == kAudioUnitProperty_ParameterClumpName)
         return fill_parameter_clump_name(store_, inScope, outData);
     if (inID == kAudioUnitProperty_SupportsMPE)
@@ -254,6 +258,8 @@ OSStatus PulpAUMidiProcessor::SetProperty(AudioUnitPropertyID inID,
                                           AudioUnitElement inElement,
                                           const void* inData, UInt32 inDataSize)
 {
+    if (inID == kAudioUnitProperty_OfflineRender)
+        return offline_render_.set(inScope, inData, inDataSize);
     if (inID == kAudioUnitProperty_MIDIOutputCallback) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         return midi_output_callback_.publish(inData, inDataSize);
@@ -399,7 +405,7 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
     } else {
         ProcessContext ctx = make_render_process_context(
             GetOutput(0)->GetStreamFormat().mSampleRate,
-            static_cast<int>(inNumberFrames));
+            static_cast<int>(inNumberFrames), offline_render_.offline());
         apply_host_callbacks_to_process_context(ctx, *this, playhead_prev_);
 
         param_events_.clear();

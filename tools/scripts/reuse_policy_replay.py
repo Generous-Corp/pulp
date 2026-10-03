@@ -86,6 +86,18 @@ POLICIES
                  each runs, and the members each link pulled come from the
                  group job's own reuse record, so executable names never go
                  stale; the Ninja graph only maps headers to sources.
+  source-key-manifest-data-recorded
+                 source-key-codemodel-recorded, except a runtime-surface
+                 drift re-runs a compiled test only through its executable's
+                 data manifest entry: its declared inputs, any drift for
+                 undeclared reads or an unscanned executable, none for a
+                 scanned executable that reads nothing.
+  output-key-recorded
+                 tier 2 estimate: source-key-manifest-data-recorded, except
+                 an executable both jobs recorded a hash for is rebuilt only
+                 when its bytes differ (early cutoff); the rest keep the
+                 source key. It needs the group's build, so it saves test
+                 time, not build time.
   source-key-list-level
                  control: a list edit re-runs every declared script test; it
                  must read lower than per-entry.
@@ -465,6 +477,10 @@ POLICIES: dict[str, Policy] = {p.name: p for p in (
            "tier 1a strict, executables and rebuilds from the group job's recorded link members"),
     Policy("source-key-codemodel-recorded", _source_key("cmake-codemodel-recorded"), True,
            "source-key-codemodel on the recorded graph (link members, recorded test executables)"),
+    Policy("source-key-manifest-data-recorded", _source_key("manifest-data-recorded"), True,
+           "source-key-codemodel-recorded with the data rule scoped by each executable's data manifest"),
+    Policy("output-key-recorded", _source_key("output-key-recorded"), True,
+           "tier 2 estimate: source-key-manifest-data-recorded with recorded output hashes deciding rebuilds"),
     Policy("source-key-list-level", _source_key("list-level"), False,
            "control: any change to the script-input list re-runs every declared script test"),
     Policy("suite-source-key", None, True,
@@ -530,7 +546,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
     false_skips: list[dict] = []
     flake_skips: list[dict] = []
     build_failures_skipped: list[dict] = []
-    evaluable = scored = skipped_groups = 0
+    evaluable = scored = skipped_groups = failing_tests = 0
     skipped_seconds = total_seconds = 0.0
     replay_vs_observed = {"both_reuse": 0, "replay_only": 0, "observed_only": 0, "neither": 0}
     rejected_runs = sum(1 for r in corpus.runs.values() if validate_run(r))
@@ -560,6 +576,7 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
             benefits.append(0.0)
             continue
         evaluable += 1
+        failing_tests += sum(1 for t in tests if t.get("outcome") in FAIL_OUTCOMES)
         if decision.skip_all:
             skipped_groups += 1
         if decision.fallback is not None:
@@ -613,6 +630,9 @@ def score(corpus: Corpus, policy_name: str, opts: dict | None = None) -> dict:
         "rebuilt_identical_binaries": rebuilt_identical,
         "spawnable_fallback_pairs": fallback_pairs,
         "fallback_only_rerun_pairs": fallback_only_pairs,
+        # The false-skip count can only catch a failure that happened: the
+        # number of failing tests the evaluable groups held bounds its power.
+        "failing_group_tests": failing_tests,
         "skipped_test_seconds": round(skipped_seconds, 3),
         "group_test_seconds": round(total_seconds, 3),
         "false_skips": len(false_skips),
@@ -683,6 +703,8 @@ def render(result: dict) -> str:
         f"p75 {_fmt(result['benefit_p75'], True)})  p90 {_fmt(result['benefit_p90'], True)}  "
         f"pooled {_fmt(result['benefit_pooled'], True)} "
         f"({result['skipped_test_seconds']:.0f} of {result['group_test_seconds']:.0f} test-seconds)",
+        f"  power: the evaluable groups held {result['failing_group_tests']} failing tests, so the false-skip "
+        f"count below can catch at most that many; the binary control cannot see data reads",
         f"  build skipped (executables not rebuilt) median {_fmt(result['build_skipped_median'], True)} "
         f"pooled {_fmt(result['build_skipped_pooled'], True)}",
         f"  binary control: {result['unreached_changed_binaries']} changed binaries not rebuilt "
@@ -753,6 +775,10 @@ def main(argv: list[str]) -> int:
         gh = rrc.GitHub(a.repository, a.token, reserve=a.rate_reserve)
         manifest = rrc.Collector(gh, a.out, a.repo, a.workers).collect(since, until)
         print(json.dumps(manifest, indent=2))
+        cov = manifest.get("record_coverage") or {}
+        print(f"collect: record coverage: {cov.get('without_record')} of {cov.get('executed_jobs')} executed macOS jobs "
+              f"since {cov.get('since')} published no reuse record (expected 0); "
+              f"{cov.get('interrupted_jobs')} jobs lost their runner before the record step", file=sys.stderr)
         if manifest["merge_groups"] == 0 or manifest["pairs_with_head_run"] == 0:
             print("collect: CONTROL FAILED: no merge groups or no PR-head pairs in the window; "
                   "the instrument is broken, not the history", file=sys.stderr)

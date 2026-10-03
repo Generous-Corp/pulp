@@ -384,13 +384,15 @@ static std::string_view logging_level_name(choc::javascript::LoggingLevel level)
 
 namespace {
 
-// Scripts below this size are cheap to parse and are the per-frame expression
-// traffic (dispatches, flushes); caching them would only add a lookup.
-constexpr std::size_t kMinCacheableScriptBytes = 32 * 1024;
-// A handful of distinct large scripts per process (a UI runtime per loaded
-// plug-in build plus the bridge preludes). Bounded so an app that evaluates
-// many distinct large scripts cannot grow this without limit.
-constexpr std::size_t kMaxCachedScripts = 16;
+// evaluate_script() is only called for whole scripts (bridge preludes, bundle
+// payloads, a document's inline <script> blocks); per-frame expression traffic
+// goes through evaluate(). Below this size a compile costs about what the
+// lookup and bytecode read do, so it is not worth an entry.
+constexpr std::size_t kMinCacheableScriptBytes = 2 * 1024;
+// The distinct whole scripts of a few loaded UI builds: preludes, a runtime
+// per plug-in build, and each document's inline scripts. Bounded so an app
+// that evaluates many distinct scripts cannot grow this without limit.
+constexpr std::size_t kMaxCachedScripts = 64;
 constexpr std::size_t kMaxCachedBytes = 96u * 1024u * 1024u;
 
 class ScriptBytecodeCache {

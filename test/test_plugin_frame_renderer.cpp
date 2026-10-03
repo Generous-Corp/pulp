@@ -434,6 +434,31 @@ TEST_CASE("the raster path paints the editor background, not black",
     REQUIRE(pixels[3] == 255);
 }
 
+TEST_CASE("before the document mounts, every pixel is the declared background",
+          "[plugin-frame][raster][first-frame]") {
+    // A view-first editor's first frames paint an empty root. With a declared
+    // background they must be that colour edge to edge, letterbox bars
+    // included, so a host never shows a framework default before the plug-in.
+    View root;  // the document is still pending: no children
+    FrameGeometry g;
+    g.width = 64.0f;
+    g.height = 40.0f;
+    g.design_width = 32.0f;  // letterboxed: bars on both sides
+    g.design_height = 32.0f;
+    g.background_rgb = 0x05070A;
+
+    std::uint32_t w = 0, h = 0;
+    const auto pixels = raster_plugin_scene_rgba(root, g, &w, &h);
+    REQUIRE(pixels.size() == static_cast<std::size_t>(w) * h * 4u);
+    std::size_t off = 0;
+    for (std::size_t i = 0; i < pixels.size(); i += 4) {
+        if (pixels[i] != 0x05 || pixels[i + 1] != 0x07 || pixels[i + 2] != 0x0A ||
+            pixels[i + 3] != 255)
+            ++off;
+    }
+    CHECK(off == 0);
+}
+
 TEST_CASE("a zero-scale geometry still rasters one pixel",
           "[plugin-frame][raster][wah-6]") {
     View root;

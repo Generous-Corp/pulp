@@ -66,7 +66,10 @@ struct PluginDefinition {
     bool uses_transport = true;
     bool supports_sidechain = false;
     int latency_samples = 0;
-    std::size_t packet_float_count = 1; // slot 0 is reserved for AAX master bypass
+    // Packet layout: slot 0 is the AAX master bypass, slots 1..N are the
+    // plugin parameters in declaration order, and the last slot is the host
+    // render mode (see render_mode_packet_slot()).
+    std::size_t packet_float_count = 2;
 };
 
 struct DefinitionResult {
@@ -81,6 +84,19 @@ std::string parameter_id_string(state::ParamID id);
 uint32_t derive_native_plugin_id(uint32_t base_id, std::size_t variant_index);
 
 DefinitionResult build_plugin_definition(ProcessorFactory factory, const PluginCodes& codes);
+
+/// Index of the parameter-packet slot that carries the host render mode. The
+/// data model writes 1.0 there for an AudioSuite (offline, file-based) instance
+/// and 0.0 for a realtime Insert; the algorithm reads it back each block.
+std::size_t render_mode_packet_slot(const PluginDefinition& definition) noexcept;
+
+/// The render mode the data model publishes for an instance.
+float render_mode_packet_value(bool offline) noexcept;
+
+/// The ProcessMode a block runs under, decoded from the parameter packet.
+/// A null or short packet reads as realtime.
+ProcessMode process_mode_from_packet(const PluginDefinition& definition,
+                                     const float* packet) noexcept;
 
 int stem_channel_count(StemKind stem);
 const char* stem_signature(StemKind stem);

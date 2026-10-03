@@ -136,8 +136,10 @@ int cmd_design(const std::vector<std::string>& args) {
     int rc = ensure_repo_build_configured(root, build_dir, /*examples=*/true);
     if (rc != 0) return rc;
 
-    rc = run_with_spinner("cmake --build " + shell_quote(build_dir) + " --target pulp-design-tool",
-                          "Building design tool");
+    const auto governed_build = root / "tools" / "ci" / "governed-build.sh";
+    std::string build_command = "bash " + shell_quote(governed_build) + " cmake --build " +
+                                shell_quote(build_dir) + " --target pulp-design-tool";
+    rc = run_with_spinner(build_command, "Building design tool");
     if (rc != 0) return rc;
 
     std::vector<fs::path> candidates = {

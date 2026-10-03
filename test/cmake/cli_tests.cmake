@@ -58,6 +58,17 @@ target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-cli-create-shellout)
+# `pulp create` reads the package kits and the built-in gain template (and
+# checks for a standalone variant of it), and the dependency-kit case copies
+# the package registry.
+pulp_test_data(pulp-test-cli-create-shellout NO_DEFINE PATHS
+    fixtures/packages/simple-plugin-template
+    fixtures/packages/gain-dsp-kit
+    tools/templates/gain
+    tools/templates/standalone
+    tools/packages/registry.json
+    # The package dependency root is found by a packages.lock.json probe.
+    ABSENT packages.lock.json)
 
 # CLI import substrate tests — detection engine, JSON-over-stdio SPI runner,
 # install-hint path, and the vendor-agnostic source guard. Links the import
@@ -612,3 +623,14 @@ endif()
 pulp_test_spawns(pulp-test-cli-validator-discovery NONE)  # `<validator> --version` and `command -v` on system paths
 pulp_test_spawns(pulp-test-cli-mac-runtime-validators NONE) # plutil and auval, behind an injected runner
 pulp_test_spawns(pulp-test-cli-package-commands NONE)     # links the registry's runner but never runs a tool
+
+# Reviewed process API calls: each of these starts only system tools or a
+# fork of itself, never a target this tree builds (tools/cmake/PulpTestData.cmake).
+pulp_test_spawns(pulp-test-cli-skew-banner NONE)          # bash on a temp driver, with a temp `pulp` shim
+# It sources the version-check helper from the checkout, found by walking up
+# from its working directory.
+if(TARGET pulp-test-cli-skew-banner)
+    pulp_test_data(pulp-test-cli-skew-banner NO_DEFINE PATHS tools/scripts/cli_version_check.sh)
+endif()
+# The lifecycle case stages a fake broker script at the real broker's name.
+pulp_test_spawns(pulp-test-cli-shellout-lifecycle NOT_RUN pulp-control-broker)

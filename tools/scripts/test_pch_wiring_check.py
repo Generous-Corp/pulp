@@ -207,6 +207,41 @@ class PchWiringCheckTest(unittest.TestCase):
         problems = pwc.check(self.build, True, EXPECT)
         self.assertTrue(any("SDL3-static=none" in p for p in problems), problems)
 
+    def test_makefiles_per_object_pch_options_are_read(self) -> None:
+        # The Makefile generator does not put a target's PCH flags in its
+        # CXX_FLAGS: it writes them per object as a `# PCH options:` comment
+        # in flags.make. Reading only CXX_FLAGS reported every consumer of a
+        # correctly wired Makefiles tree as "flags name no PCH".
+        self._write("Unix Makefiles", "", LEDGER_ON)
+
+        def flags(target: str, sub: str, std: str, objects: dict[str, str], d: str = "") -> None:
+            d_ = self.build / sub / "CMakeFiles" / f"{target}.dir"
+            d_.mkdir(parents=True, exist_ok=True)
+            text = f"CXX_DEFINES = {d}\nCXX_FLAGS = -O3 -std=gnu++{std}\n"
+            for obj, options in objects.items():
+                text += f"# PCH options: {sub}/CMakeFiles/{target}.dir/{obj}_OPTIONS = {options}\n"
+            (d_ / "flags.make").write_text(text)
+
+        def use(pch: str) -> str:
+            return ";".join(_use(pch).split())
+
+        emit = "-Winvalid-pch;-Xclang;-emit-pch;-Xclang;-include;-Xclang;/b/x/cmake_pch.hxx;-x;c++-header"
+        flags("pulp-test-pch-cxx20", ".", "20", {"cmake_pch.hxx.pch": emit, "stub.cpp.o": use(PCH20)})
+        flags("pulp-test-pch-cxx23", ".", "23", {"cmake_pch.hxx.pch": emit, "stub.cpp.o": use(PCH23)})
+        (self.build / "CMakeFiles" / "pulp-test-pch-cxx20.dir" / "build.make").write_text(
+            f"\t{CCACHE_ISOLATED} /usr/bin/c++ $(CXX_FLAGS) -Xclang -emit-pch -o x/cmake_pch.hxx.pch -c x.cxx\n")
+        flags("pulp-test-biquad", "test", "20", {"biquad.cpp.o": use(PCH20)}, "-DFIXTURE=1")
+        flags("pulp-test-headless", "test", "23", {"headless.cpp.o": use(PCH23)})
+        flags("pulp-test-signal-no-exceptions", "test", "20", {})
+        sdl = self.build / "_deps/sdl3-build/CMakeFiles/SDL3-static.dir"
+        sdl.mkdir(parents=True, exist_ok=True)
+        (sdl / "flags.make").write_text("C_FLAGS = -O3 -std=gnu11\nC_DEFINES = \n")
+        self.assertEqual(pwc.check(self.build, True, EXPECT), [])
+        # A consumer whose objects carry no PCH options is still caught.
+        flags("pulp-test-biquad", "test", "20", {}, "-DFIXTURE=1")
+        problems = pwc.check(self.build, True, EXPECT)
+        self.assertTrue(any("pulp-test-biquad" in p and "no PCH" in p for p in problems), problems)
+
     def test_missing_ledger_is_an_error(self) -> None:
         (self.build / "CMakeCache.txt").write_text("CMAKE_GENERATOR:INTERNAL=Ninja\n")
         (self.build / "build.ninja").write_text(ninja_tree())

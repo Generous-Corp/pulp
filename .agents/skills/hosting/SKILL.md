@@ -2319,6 +2319,16 @@ only pins `Legacy`/`RoutedSerial` when some connection carries a delay.
   drops after the callback returns, per node, exactly as for `plugin_binding`.
 * A sample-region anchor drops any event binding — its processor is the prepared
   region.
+* **Adding another callback to `CustomNodeType`?** The field-vs-sibling rule and
+  the four edits a new execution lane costs are in
+  `test/sample_region_compat/README.md` under "Adding a member to
+  `CustomNodeType`". Size is not the axis; whether the contract must be stable
+  bytes is.
+* A scalar-paired (sample-region) type may NOT declare the event lane —
+  `register_custom_node_type(type, sample_kernel)` refuses it. A region member is
+  quotiented out of the executable topology and an anchor has its event and
+  transport bindings dropped at compile, so the callback would register and then
+  never run.
 * There are TWO binder sites. `SignalGraph`'s compile-time binder is the one the
   ordinary prepared graph uses; the `live_custom_*` binder in
   `signal_graph_executor_routing.cpp` serves a different rebuild path. Wiring

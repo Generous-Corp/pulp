@@ -1,0 +1,72 @@
+name: Changed-surface shadow plan (advisory)
+
+permissions:
+  contents: read
+
+# Records Shipyard's changed-surface plan for every pull-request head, so the
+# reasons a plan selects the full suite can be ranked across all PRs rather
+# than only the few an operator ships through the opt-in mac lane.
+#
+# The record is shadow-only (`origin: shadow_plan_step`): it never selects,
+# skips or executes a test, and a planner failure is itself recorded as
+# `planner_error`. Nothing here is a required context, the planning step is
+# continue-on-error, and the job builds nothing: one plan is a git diff plus a
+# policy read at the base. tools/scripts/changed_surface_shadow_plans.py reads
+# the uploaded records and ranks them.
+#
+# The planner binds the exact PR head, so this job checks out the head commit,
+# not the refs/pull/N/merge ref other workflows use. Full history is fetched
+# without blobs; git fetches the few the plan reads on demand.
+#
+# Not on merge_group: a merge group has no pull-request head to plan.
+
+on:
+  pull_request:
+    branches: [main, 'develop/**']
+
+concurrency:
+  group: changed-surface-shadow-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  shadow-plan:
+    name: changed-surface shadow plan (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          lfs: false
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Install pinned Shipyard
+        continue-on-error: true
+        shell: bash
+        run: |
+          ./tools/install-shipyard.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Record shadow plan
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Outside the checkout, which the planner requires to be clean.
+          RECORD_DIR: ${{ runner.temp }}/changed-surface-shadow-plan
+        run: |
+          mkdir -p "$RECORD_DIR"
+          shipyard changed-surface-plan --record "$RECORD_DIR" \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --target mac
+
+      - name: Upload shadow plan record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-surface-shadow-plan
+          path: ${{ runner.temp }}/changed-surface-shadow-plan
+          if-no-files-found: warn
+          retention-days: 90

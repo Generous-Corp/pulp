@@ -440,6 +440,22 @@ packet-list builders. The instrument adapter (`PulpAUInstrument`) does not yet
 deliver its local `midi_out` — only the effect path is wired, and it does NOT
 half-advertise the property.
 
+### Offline render (`kAudioUnitProperty_OfflineRender`)
+
+A host bouncing faster than realtime (Logic's bounce, REAPER's render) writes
+`kAudioUnitProperty_OfflineRender` (global scope, `UInt32`, read/write) before
+the render and clears it after. **`AUBase` does not implement this property**:
+without an override the write fails with `kAudioUnitErr_InvalidProperty` and
+every block reports realtime, so a worker-backed processor adopts late results
+in a bounce and the export diverges from playback. All three adapters route it
+through `OfflineRenderProperty` (`au_v2_common.hpp`, an atomic written on the
+host's property thread and acquire-read in render) and pass the value to
+`make_render_process_context(sr, n, offline)`, which sets
+`ProcessMode::Offline` + `RenderSpeedHint::FasterThanRealtime`. The instrument
+had no `SetProperty` override before; it needs one for this. Tests:
+`test_au_plugin_state.mm` (`[auv2][offline]`, effect and instrument) and
+`test_au_v2_midi_processor.cpp` (`[midi-processor][offline]`).
+
 ### Multi-bus output — instruments carry it, effects can't (SDK wall)
 
 The genuine AU v2 multi-bus vehicle is the **instrument** (`aumu` /
@@ -707,6 +723,17 @@ because AU v2 has **no host size callback** — the DAW resizes the returned
 NSView directly, so native frame changes are forwarded to `bridge->resize()`
 through that seam. Full contract: the `view-bridge` skill's "GPU view host
 auto-selection" section.
+
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in"). AU v2 matters most here: Logic composites the
+returned NSView's layer the moment `uiViewForAudioUnit:` returns, before any
+frame, so the seeded layer colour is literally the first thing users see.
 
 ### The Cocoa view MUST pin the design viewport, or a Logic resize CLIPS
 

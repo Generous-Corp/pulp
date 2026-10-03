@@ -962,8 +962,12 @@ static pulp::format::ProcessContext clap_phase_build_context(
     pulp::format::ProcessContext ctx;
     ctx.sample_rate = self->sample_rate;
     ctx.num_samples = static_cast<int>(num_samples);
-    ctx.process_mode = pulp::format::ProcessMode::Realtime;
-    ctx.render_speed_hint = pulp::format::RenderSpeedHint::Realtime;
+    const bool offline = self->render_offline.load(std::memory_order_acquire);
+    ctx.process_mode = offline ? pulp::format::ProcessMode::Offline
+                               : pulp::format::ProcessMode::Realtime;
+    ctx.render_speed_hint = offline
+        ? pulp::format::RenderSpeedHint::FasterThanRealtime
+        : pulp::format::RenderSpeedHint::Realtime;
     ctx.reset_requested = self->reset_requested;
     const auto transport =
         decode_clap_transport(process->transport, ctx.sample_rate);
@@ -2048,11 +2052,33 @@ static const clap_plugin_preset_load_t s_preset_load = {
     .from_location = preset_from_location
 };
 
+// `clap.render`: the host announces realtime vs offline rendering. Pulp
+// processors never require hard realtime, so a host may always render offline.
+static bool render_has_hard_realtime_requirement(const clap_plugin_t*) {
+    return false;
+}
+
+static bool render_set(const clap_plugin_t* plugin, clap_plugin_render_mode mode) {
+    auto* self = get_self(plugin);
+    if (!self) return false;
+    if (mode != CLAP_RENDER_REALTIME && mode != CLAP_RENDER_OFFLINE) return false;
+    self->render_offline.store(mode == CLAP_RENDER_OFFLINE,
+                               std::memory_order_release);
+    return true;
+}
+
+static const clap_plugin_render_t s_render = {
+    .has_hard_realtime_requirement = render_has_hard_realtime_requirement,
+    .set = render_set,
+};
+
 const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
     if (!plugin) return nullptr;
     if (!id) return nullptr;
     auto* self = get_self(plugin);
     if (!self) return nullptr;
+
+    if (std::strcmp(id, CLAP_EXT_RENDER) == 0) return &s_render;
 
     // Only expose preset-load if the plugin has a PresetManager
     if (self->preset_manager) {

@@ -2,9 +2,9 @@ if(NOT DEFINED PULP_SOURCE_DIR)
     message(FATAL_ERROR "PULP_SOURCE_DIR is required")
 endif()
 
-set(_utils "${PULP_SOURCE_DIR}/tools/cmake/PulpUtils.cmake")
+set(_utils "${PULP_SOURCE_DIR}/tools/cmake/PulpInstall.cmake")
 if(NOT EXISTS "${_utils}")
-    message(FATAL_ERROR "PulpUtils.cmake not found: ${_utils}")
+    message(FATAL_ERROR "PulpInstall.cmake not found: ${_utils}")
 endif()
 
 file(READ "${_utils}" _utils_content)

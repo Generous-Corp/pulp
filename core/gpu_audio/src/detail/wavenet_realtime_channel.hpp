@@ -16,9 +16,14 @@ class WaveNetRealtimeChannel {
     virtual bool release() noexcept = 0;
 };
 struct WaveNetRealtimeTestAccess {
-    static void request_recovery(GpuWaveNetRealtimeNode&, SharedIoRecoveryReason) noexcept;
+    static void
+    request_recovery(GpuWaveNetRealtimeNode&, SharedIoRecoveryReason,
+                     std::uint64_t sequence = std::numeric_limits<std::uint64_t>::max()) noexcept;
+    static SharedIoRecoveryReason recovery_reason(const GpuWaveNetRealtimeNode&) noexcept;
+    static std::uint64_t recovery_sequence(const GpuWaveNetRealtimeNode&) noexcept;
     static void observe_trace(GpuWaveNetRealtimeNode&, SharedIoTraceDrainObserver) noexcept;
     static SharedIoTraceStats trace_stats(const GpuWaveNetRealtimeNode&) noexcept;
+    static SharedIoTelemetrySnapshot telemetry(const GpuWaveNetRealtimeNode&) noexcept;
     static SharedIoTraceRecord last_terminal(const GpuWaveNetRealtimeNode&) noexcept;
     static std::uint64_t trace_engine(const GpuWaveNetRealtimeNode&) noexcept;
     static bool prepare(GpuWaveNetRealtimeNode&,
