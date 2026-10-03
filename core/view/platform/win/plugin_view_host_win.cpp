@@ -754,6 +754,7 @@ private:
         g.design_width = design_viewport_w_;
         g.design_height = design_viewport_h_;
         g.design_top_align = design_top_align_;
+        g.background_rgb = options_.background_rgb;
         return g;
     }
 

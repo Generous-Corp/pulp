@@ -1,0 +1,53 @@
+{
+  "schema": "pulp.b5-cli-kit-buildplan-validation-receipt.v1",
+  "status": "pass",
+  "validated_commit": "9b95d3570d1702ef359f403411e137caa550b819",
+  "base": "origin/main",
+  "scope": [
+    "shared BuildPlan orchestration for pulp dev and pulp loop",
+    "extracted kit validation-profile verification module",
+    "focused module-level kit profile receipt test",
+    "hotspot ceiling ratchet and generated test-input metadata"
+  ],
+  "build": {
+    "command": "tools/ci/governed-build.sh cmake --build build --target pulp-cpp pulp-test-cli-kit-commands pulp-test-cli-content-commands",
+    "configuration": "Release",
+    "cache": "build/CMakeCache.txt:CMAKE_BUILD_TYPE=Release",
+    "result": "pass"
+  },
+  "tests": [
+    {
+      "command": "./build/test/pulp-test-cli-kit-commands",
+      "result": "pass",
+      "assertions": 404,
+      "cases": 70
+    },
+    {
+      "command": "./build/test/pulp-test-cli-content-commands",
+      "result": "pass",
+      "assertions": 137,
+      "cases": 19
+    },
+    {
+      "command": "./build/test/pulp-test-cli-kit-commands '[verification]'",
+      "result": "pass",
+      "assertions": 5,
+      "cases": 1
+    }
+  ],
+  "gates": {
+    "command": "tools/scripts/gates.sh origin/main",
+    "result": "pass",
+    "notes": [
+      "all applicable gates passed",
+      "scene3d-native-slice-handoff-contract and scene3d-native-slice-handoff-negative-contract were pre-existing failures on origin/main"
+    ]
+  },
+  "artifacts": [
+    "tools/cli/build_plan.cpp",
+    "tools/cli/build_plan.hpp",
+    "tools/cli/kit_profile_verification.cpp",
+    "tools/cli/kit_profile_verification.hpp",
+    "docs/validation/b5-cli-kit-buildplan-20261003/receipt.json"
+  ]
+}

@@ -53,6 +53,7 @@ add_executable(pulp-cli
     atomic_text_file.cpp
     cli_common.cpp
     focused_build.cpp
+    build_plan.cpp
     cli_delegate.cpp
     shell_quote.cpp
     shell_redirect.cpp
@@ -119,6 +120,7 @@ add_executable(pulp-cli
     content_commands.cpp
     kit_commands.cpp
     kit_manifest_validation.cpp
+    kit_profile_verification.cpp
     cmd_pr.cpp
     cmd_control.cpp
     ${_pulp_inspect_command_source}

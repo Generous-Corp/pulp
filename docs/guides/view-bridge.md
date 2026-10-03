@@ -38,6 +38,10 @@ class Processor {
   virtual void on_view_opened(view::View&);
   virtual void on_view_closed(view::View&);
   virtual void on_view_resized(view::View&, uint32_t w, uint32_t h);
+
+  /// The colour (0xRRGGBB) the host shows before the editor's document has
+  /// drawn. Default nullopt: the root theme's bg.primary, else the SDK default.
+  virtual std::optional<std::uint32_t> editor_background() const;
 };
 ```
 
@@ -62,6 +66,7 @@ public:
   bool is_open() const;
   view::View* view();
   const ViewSize& size_hints() const;
+  std::uint32_t editor_background_rgb() const;  // resolved in open()
   uint32_t width() const;
   uint32_t height() const;
 
@@ -92,6 +97,22 @@ std::unique_ptr<view::View> MyPlugin::create_view() {
     return root;
 }
 ```
+
+### Opening on the editor's own background
+
+A plug-in host shows the editor before its scripted document has drawn: the
+view's backing layer, then frames over an empty tree, then the UI. Declare the
+colour those show so the editor opens looking like itself:
+
+```cpp
+std::optional<std::uint32_t> MyPlugin::editor_background() const {
+    return 0x05070A;  // the page background of the editor's own design
+}
+```
+
+Format adapters pass it to the host through `editor_host_options()`; every
+macOS, Windows, Linux and iOS plug-in host paints it on the backing layer,
+under the tree, and in any letterbox bars around a pinned design viewport.
 
 ### Reacting to lifecycle
 

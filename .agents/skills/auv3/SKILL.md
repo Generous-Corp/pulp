@@ -1295,6 +1295,17 @@ The AUv3 editor now also auto-selects the GPU host via the shared
 `decide_gpu_host()` helper (Options overload) — see the `view-bridge`
 skill's "GPU view host auto-selection" section.
 
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in"). Both view controllers keep the bridge-less preview/fallback
+path on default Options; only the bridged path goes through the helper, and it
+passes the controller's real host size back in as `size`.
+
 ### Headless automation must not create fallback AUv3 UI
 
 When `PULP_DISABLE_PLUGIN_EDITOR`, `PULP_HEADLESS`, `PULP_TEST_MODE`,

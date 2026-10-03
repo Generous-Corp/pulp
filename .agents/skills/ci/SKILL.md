@@ -1262,43 +1262,72 @@ line and let the push through, putting the blind spot back one layer out from
 the script that just closed it. Map every non-zero code a gate can return, and
 when you add an outcome to a gate, add its arm to the hook in the same change.
 
-### The Vellum watch-event hint is ADVISORY, and that is load-bearing
+### The Vellum watch-event gate fails locally, and prints the event to add
 
 `gates.sh` and `.githooks/pre-push` both run
-`tools/scripts/vellum_watch_preflight.py`, which prints — and never blocks — a
-warning when the pushed range owes a `.github/vellum-expansion-watch-events/*.json`
-file that it does not carry. Three pull requests discovered that requirement the
-expensive way in one evening, each by failing the required `Vellum freeze`
-check after a push.
+`tools/scripts/vellum_watch_preflight.py --enforce`. When the pushed range owes
+a `.github/vellum-expansion-watch-events/*.json` file it does not carry, both
+FAIL (the hook's failure is demotable with `PULP_DISABLE_PREPUSH_GATES=1`, like
+every primary gate) and the script prints the exact event JSON that satisfies
+the checker: the missing families, the acceptance id and sha256, suggested
+covering tests derived from the test files the range touches, and the
+watch-only/no-authority disposition. Write it in one step instead with:
+
+```bash
+python3 tools/scripts/vellum_watch_preflight.py --write-event \
+  --rationale "what changed, and that no authority moves"
+git add .github/vellum-expansion-watch-events/ && git commit -m "ci: record a Vellum watch event"
+```
+
+`--write-event` refuses a missing, short, or `<placeholder>` rationale, and
+writes nothing when no event is owed. It used to be an advisory hint; advisory
+output did not stop #9143, #9275 and #9283 each going red on both required
+Vellum checks on 2026-10-02, a CI round trip apiece.
 
 The trigger is **changed paths, not intent**: the checker globs the changed-file
 list against pinned capability-family selectors and reads nothing of the diff,
 so a one-line `#include` under `test/test_browser_capture*`, or an ordinary edit
-under `tools/import-design/**`, owes a hand-authored event.
+under `tools/import-design/**`, owes a hand-authored event. Coverage is compared
+for **equality**: an event that claims a family the range does not touch fails
+too, and the gate names the over-claimed family.
 
-**Do not promote this to a blocking gate, and do not move the authoritative
-check local.** `.github/workflows/vellum-trusted-gate.yml` runs the checker from
-a *trusted root* rather than from the pull request's copy, and
-`.github/CODEOWNERS` locks the events directory, the checker and the checker's
-test. A local gate would execute the branch's own copy of a script that exists
-precisely so the branch's copy is not trusted. Two required contexts
-(`Vellum freeze`, `Vellum trusted freeze`) stay the authority; this only moves
-discovery earlier.
-
-Two things the hint must keep doing, both asserted by
+**The authoritative check stays in CI, from a trusted root.**
+`.github/workflows/vellum-trusted-gate.yml` runs the checker from a trusted root
+rather than the pull request's copy, and `.github/CODEOWNERS` locks the events
+directory, the checker and its test. A local refusal does not weaken that: it
+can only stop a push the required checks would also refuse, and it never
+accepts anything on CI's behalf. The real risk of a local copy is a FALSE red,
+so three properties are load-bearing, all asserted by
 `tools/scripts/test_vellum_watch_preflight.py`:
 
 - **It compares against the MERGE-BASE, never `origin/main`'s tip.** Using the
   tip manufactures `watch events are append-only` on any branch that is merely
-  stale — a false red on a required gate's surface, which is worse than the
-  friction being fixed.
-- **Neither call site may set `fail`.** The test resolves the `$VELLUM_HINT`
-  variable rather than grepping for the filename, because the literal path
-  appears only in the assignment: a scan for the filename finds no invocation
-  line at all and passes whatever the call sites do.
+  stale.
+- **Only exit 10 (event owed) blocks.** Exit 20 (no checker, no acceptance, no
+  resolvable range, any internal error) never does. The test resolves the
+  `$VELLUM_HINT` variable rather than grepping for the filename, because the
+  literal path appears only in the assignment.
+- **Events are read from the HEAD COMMIT, not the working tree.** An event you
+  wrote but did not commit covers nothing, exactly as in CI.
 
-Its exit codes (0 nothing owed · 10 event owed · 20 no verdict) are
-informational; both callers discard them with `|| true`.
+**It also verifies the freeze job's inventories** (`--inventories`): the
+`Vellum freeze` job's "Verify extraction and tooling inventories" step runs
+`generate_vellum_cut_manifest.py --verify`,
+`generate_vellum_ownership_projection.py --verify` and
+`pulp_tooling_disposition.py`, and a stale one fails the required check. A new
+CLI flag or command is enough to stale `docs/status/pulp-tooling-disposition.json`
+(#9283's Sparkle appcast options did). The gate runs the same three and prints
+the regenerate command (`python3 tools/scripts/pulp_tooling_disposition.py
+--write`, and so on) for whichever is stale.
+
+**Reading that step's log:** the line `vellum-ownership-projection: error:
+ownership projection is stale` used to be printed by a *passing* negative
+control in `test_generate_vellum_ownership_projection.py`, so it appeared in
+every log and pointed at the wrong file. The test now captures it. The real
+failure is the last tool line before `Process completed with exit code 1`.
+
+Exit codes: 0 nothing owed · 10 event owed · 11 inventory stale · 20 no
+verdict · 2 `--write-event` refused. Both callers block on 10 and 11 only.
 
 ### `gates.sh` and the pre-push hook are two lists, not one
 
@@ -2070,6 +2099,20 @@ tools/mcp), and "declared" means one edge, not all of them, so read what a
 test runs before marking it. The MCP audio tests now stage this build's CLI
 under a temp project root (`CliProjectRoot`) and assert text only a real run
 prints.
+
+One edge is not enough. Configure writes
+`<build>/test/test-data/runtime-targets.json` (every program or module the
+tree builds, by artifact file name, with its own runtime targets). The scan
+checks every string-literal path component in a spawning test's code that
+names one of those artifacts (`"pulp-cpp"`): it must be reached by an edge,
+directly or through a program the test runs, or be reviewed with
+`pulp_test_spawns(<test> NOT_RUN <target>...)` (named but never run, e.g. a
+fake staged at the real tool's name). Otherwise the test is `spawns:
+undeclared` with `unmatched_programs`. A built test whose declared tool this
+configuration does not build is recorded as `absent_spawns`, named in the
+configure output, and stays undeclared there; Linux and Windows build fewer
+tools than macOS, so the same test can be declared on one and undeclared on
+another.
 
 ## Script tests declare inputs in `test/ctest_script_inputs.json`
 
@@ -7311,6 +7354,18 @@ entry on one side only counts), or the run refuses with `inventory:
 base_provisioning_mismatch: <entry> base=... head=...`, so the next provisioning
 gap names itself rather than reading as drift. The receipt records the compared
 `base_inventory_environment` and `base_inventory_linked_externals`.
+
+Registrations are compared in configure shape: a discovered Catch2 case (ctest
+lists it with no backtrace) folds to its executable's row like the
+`*_NOT_BUILT-*` placeholder, and a build-tree program lists no command, as an
+unbuilt one does. A configure-only base cannot represent a built tree, so after
+the full build the tree is compared with its own pre-build snapshot (catching a
+CMake re-run mid-build), never with the base. A registration the authoritative
+filter excludes (`validation`, `slow`, ...) is never proven or required to have
+a command: on m3 the examples' `find_program(PLUGINVAL pluginval)` resolves to a
+doubled path that does not exist, so those tests list no command at all.
+`SelectedLegPipelineTest` drives every gate through the cold, selected-built and
+fully built states; add a state there before a proof run finds it.
 
 The ordinary and changed-surface build-and-test stages share
 `tools/ci/build_dir_lock.py` for canonical build-directory serialization. The

@@ -708,6 +708,17 @@ NSView directly, so native frame changes are forwarded to `bridge->resize()`
 through that seam. Full contract: the `view-bridge` skill's "GPU view host
 auto-selection" section.
 
+Build the host's `PluginViewHost::Options` with
+`editor_host_options(bridge, gpu, size)` (`gpu_host_select.hpp`), never field
+by field: it carries the plug-in's declared background
+(`ViewBridge::editor_background_rgb()`), which the host paints on its backing
+layer and under the empty tree until the view-first document mounts. A
+hand-built Options silently drops it and this format opens on the framework
+navy while the others open on the plug-in's colour (`view-bridge`, "The first
+frame must already look like the plug-in"). AU v2 matters most here: Logic composites the
+returned NSView's layer the moment `uiViewForAudioUnit:` returns, before any
+frame, so the seeded layer colour is literally the first thing users see.
+
 ### The Cocoa view MUST pin the design viewport, or a Logic resize CLIPS
 
 AU v2 has no size negotiation (no `checkSizeConstraint` / `gui_adjust_size`) —

@@ -718,8 +718,8 @@
           "repo": "Generous-Corp/pulp",
           "path": "test/cmake/gpu_health_tests.cmake",
           "state": "pulp-owned-retained",
-          "revision": "3dd54bfe9aef6dff0d1bb62717b2efb974b1b85e",
-          "object_id": "fe0f5ed9f61f3e055cd7a8ebc19d6c204bdc75d4",
+          "revision": "fbdfb447497dbd95f4f8498b931f5c4aa71a7175",
+          "object_id": "f5a5f6812b71b18f5f415da8f23c945053030f44",
           "object_type": "blob"
         },
         {
@@ -2735,8 +2735,8 @@
           "repo": "Generous-Corp/pulp",
           "path": ".agents/skills/pulp-vellum-change-routing/SKILL.md",
           "state": "pulp-owned-retained",
-          "revision": "b3569fd948d54ea850dbc8b29c1f5f08f4e1d949",
-          "object_id": "d6ecc53fa22b0cedcbdd671086f3f77b1908e724",
+          "revision": "d7da76a4484a7fa38066e071009256280c431ff7",
+          "object_id": "e592b71bb1648414856ee23ba7ccd4bbb6f6aff2",
           "object_type": "blob"
         },
         {

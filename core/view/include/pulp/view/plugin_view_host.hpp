@@ -31,6 +31,11 @@ using NativeViewHandle = void*; // HWND
 using NativeViewHandle = void*; // X11 Window or nullptr
 #endif
 
+/// The background a plug-in editor host paints when the plug-in has not
+/// declared its own (`Processor::editor_background()`): RGB 30,30,46, which is
+/// also `Theme::dark()`'s `bg.primary`. See `PluginViewHost::Options::background_rgb`.
+inline constexpr std::uint32_t kEditorHostClearRgb = 0x1E1E2E;
+
 // Hosts a View tree inside a DAW plugin window
 // Creates a platform-native child view that paints the widget hierarchy
 class PluginViewHost {
@@ -87,6 +92,15 @@ public:
         /// decision, not a side effect of the adapter happening to advertise a
         /// feature.
         bool enable_gpu_timing = false;
+
+        /// The editor's own background, 0xRRGGBB. The host paints it wherever
+        /// the view tree does not: the native layer before the first frame,
+        /// every frame before the editor's document has mounted, and the
+        /// letterbox bars around a pinned design viewport. Format adapters fill
+        /// it from `ViewBridge::editor_background_rgb()`, so the first thing a
+        /// DAW shows is the plug-in's own colour rather than a framework
+        /// default.
+        std::uint32_t background_rgb = kEditorHostClearRgb;
     };
 
     // Create a plugin view host for the given view tree.

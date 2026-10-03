@@ -616,9 +616,8 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
     const auto& hints = p->bridge->size_hints();
     const auto gpu = decide_gpu_host(*p->bridge);
-    view::PluginViewHost::Options opts;
-    opts.size = {hints.preferred_width, hints.preferred_height};
-    opts.use_gpu = gpu.use_gpu;
+    const auto opts = editor_host_options(
+        *p->bridge, gpu, {hints.preferred_width, hints.preferred_height});
 
     p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
