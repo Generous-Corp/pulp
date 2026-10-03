@@ -152,7 +152,6 @@ paths = [
   "tools/scripts/test_host_pump_lint.py",
   "tools/scripts/test_host_quirks_staleness.py",
   "tools/scripts/test_hotspot_size_guard.py",
-  "tools/scripts/test_install_shipyard_queue_repair.py",
   "tools/scripts/test_ios_gate_skip_contract.py",
   "tools/scripts/test_iwyu_annotate.py",
   "tools/scripts/test_iwyu_annotate_extra.py",
@@ -2278,6 +2277,33 @@ tests = [
   "gpu-first-visible-role-producers-selftest",
   "gpu-handoff-provenance-selftest",
   "install-sha256sums-current",
+  "prepush-refresh-push",
+  "reuse-policy-replay-selftest",
+]
+build_targets = ["pulp-cli"]
+supported_build_types = [
+  "debug",
+  "release",
+]
+risk_class = "low"
+
+[[families]]
+name = "script-readers-45a48828cdc9"
+paths = ["tools/scripts/test_install_shipyard_queue_repair.py"]
+tests = [
+  "build-parallelism-guard",
+  "changed-surface-policy-selftest",
+  "changed-surface-script-families-drift",
+  "changed-surface-script-families-selftest",
+  "changed-surface-shadow-plans-selftest",
+  "gpu-audio-provider-identity-selftest",
+  "gpu-dpr-runner-selftest",
+  "gpu-first-visible-acceptance-selftest",
+  "gpu-first-visible-campaign-selftest",
+  "gpu-first-visible-external-adapter-selftest",
+  "gpu-first-visible-role-producers-selftest",
+  "gpu-handoff-provenance-selftest",
+  "install-shipyard-queue-repair",
   "prepush-refresh-push",
   "reuse-policy-replay-selftest",
 ]

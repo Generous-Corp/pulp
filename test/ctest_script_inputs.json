@@ -5475,6 +5475,14 @@
    ],
    "kind": "python"
   },
+  "install-shipyard-queue-repair": {
+   "entry": "tools/scripts/test_install_shipyard_queue_repair.py",
+   "inputs": [
+    "tools/install-shipyard.sh",
+    "tools/scripts/test_install_shipyard_queue_repair.py"
+   ],
+   "kind": "python"
+  },
   "interchange-capability-emit-selftest": {
    "entry": "core/interchange/tools/test_capability_emit.py",
    "inputs": [

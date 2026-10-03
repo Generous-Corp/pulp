@@ -955,6 +955,19 @@ if(UNIX)
     set_tests_properties(install-sh-platform-detect
         PROPERTIES TIMEOUT 30
         LABELS "tooling")
+
+    # tools/install-shipyard.sh repairs a truncated Shipyard queue.json before
+    # delegating to the pinned tag's upstream install.sh, and leaves a healthy
+    # one alone. Offline: a stub `curl` serves a stand-in installer and the
+    # binaries the real one would reuse are pre-placed in a temporary HOME.
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME install-shipyard-queue-repair
+            COMMAND ${Python3_EXECUTABLE}
+                "${CMAKE_SOURCE_DIR}/tools/scripts/test_install_shipyard_queue_repair.py")
+        set_tests_properties(install-shipyard-queue-repair
+            PROPERTIES TIMEOUT 60
+            LABELS "tooling")
+    endif()
 endif()
 
 # Window-only capture invariants: spectr-roundtrip.sh must not
