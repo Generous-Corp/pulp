@@ -19,26 +19,33 @@ TEST_CASE("ParametricEq validates and applies a bounded band cascade", "[signal]
     REQUIRE(eq.band_count() == 2);
     CHECK(std::isfinite(eq.magnitude(1000.0)));
     CHECK(eq.magnitude_db(1000.0) > 3.0f);
-    CHECK(eq.magnitude(1000.0) == Approx(std::pow(10.0, eq.magnitude_db(1000.0) / 20.0)).epsilon(1e-5));
+    CHECK(eq.magnitude(1000.0) ==
+          Approx(std::pow(10.0, eq.magnitude_db(1000.0) / 20.0)).epsilon(1e-5));
 }
 
-TEST_CASE("ParametricEq rejects invalid configuration without changing output", "[signal][parametric-eq][negative]") {
+TEST_CASE("ParametricEq rejects invalid configuration without changing output",
+          "[signal][parametric-eq][negative]") {
     ParametricEq eq;
     REQUIRE(eq.prepare(48000.0f, 2) == ParametricEqPrepareStatus::prepared);
-    const std::array valid{ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 3.0f, 1.0f, true, false}};
+    const std::array valid{
+        ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 3.0f, 1.0f, true, false}};
     REQUIRE(eq.configure(valid) == ParametricEqConfigureStatus::configured);
     const auto before = eq.magnitude(1000.0);
 
-    const std::array invalid{ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 3.0f, 1.0f, true, false},
-                             ParametricEqBand{ParametricEqBandType::peaking, 900.0f, 0.0f, 1.0f, true, false}};
-    CHECK(eq.configure(invalid) == ParametricEqConfigureStatus::frequencies_not_strictly_increasing);
+    const std::array invalid{
+        ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 3.0f, 1.0f, true, false},
+        ParametricEqBand{ParametricEqBandType::peaking, 900.0f, 0.0f, 1.0f, true, false}};
+    CHECK(eq.configure(invalid) ==
+          ParametricEqConfigureStatus::frequencies_not_strictly_increasing);
     CHECK(eq.magnitude(1000.0) == before);
 }
 
-TEST_CASE("ParametricEq default and disabled bands are identity", "[signal][parametric-eq][parity]") {
+TEST_CASE("ParametricEq default and disabled bands are identity",
+          "[signal][parametric-eq][parity]") {
     ParametricEq eq;
     REQUIRE(eq.prepare(48000.0f) == ParametricEqPrepareStatus::prepared);
-    const std::array bypass{ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 0.0f, 1.0f, false, false}};
+    const std::array bypass{
+        ParametricEqBand{ParametricEqBandType::peaking, 1000.0f, 0.0f, 1.0f, false, false}};
     REQUIRE(eq.configure(bypass) == ParametricEqConfigureStatus::configured);
     CHECK(eq.magnitude(440.0) == Approx(1.0).margin(1e-6));
     CHECK(eq.process(0.75f) == Approx(0.75f).margin(1e-6));
